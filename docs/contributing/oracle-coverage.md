@@ -668,6 +668,139 @@ ownership topology. Their
 [review record](oracle-reviews/issue-1589-live-electric-opfs.md) preserves the
 RED and GREEN host observations.
 
+The [issue #2085 review record](oracle-reviews/issue-2085-leader-close-red.md)
+preserves the baseline RED result and the subsequent repair audit. The source
+Collection law keeps an applied receipt pending after an indeterminate RPC. The
+replacement leader checks its exact transaction ID under the writer lock; an
+existing ID acknowledges the commit, while an absent ID permits application
+only against an unchanged durable anchor. The Collection and a dependent live
+query stay in one sync run. Direct mutating RPCs retain the #1845
+`IndeterminateCommitError` contract. An absent ID after an intervening write,
+reset, or pruning remains indeterminate because applying it could regress a
+newer row or opaque source cursor.
+
+The persisted wrapper owner in
+`packages/db-sqlite-persistence-core/tests/persisted-oracle.test.ts` checks
+before/after durability, pending receipts, mounted live-query rows, queued
+hydration, later work, known durability failures, and an unchanged
+reconciliation reload. Its orphan row-metadata case fails on a shortcut that
+skips needed cleanup. Sparse-array, extra-array-property, and nested-prototype
+histories require a changed durable value to reload even when ordinary deep
+equality would skip it. A controlled term-jump history recovers a missed row;
+a position-only certification history shows that observing a durable version
+does not publish its rows. Reset continuations rebase the publicly applied row
+version, reject a delayed pre-reset notification in both orders relative to a
+newer election, and recover a row committed between the reset reload and the
+later position-only read. A controlled same-term reset continuation checks two
+new-epoch commits separated by a delayed old-epoch notice. The commit envelope
+has no reset epoch, so the wrapper rereads durable rows for all three ambiguous
+notices; a no-fence mutant publishes the old row. This establishes public-row
+safety and its three-reload work cost, not a bounded-work promise. The built-in
+coordinator currently has no `collection:reset` sender; a real-host same-term
+reset needs a Browser/OPFS receiving witness. A future epoch-aware fast path
+needs the persisted wrapper owner to distinguish old and new same-term notices
+at each public cut before that real-host receiving witness. The controlled
+wrapper compares public rows after each held cut; removing the old-term fence
+or treating the later position read
+as published rows fails those assertions. The SQLite adapter owner checks exact
+IDs, row versions, reset epochs, pruning,
+unchanged anchors, same-key peer writes, cursor metadata, durable no-write term
+reservation, and the exact-ID index plan against real SQLite transactions. The
+Browser coordinator owner checks writer-lock stream advancement, changed
+routes, and invalid wire anchors. It delays a former owner's captured heartbeat
+past a no-write Web Lock takeover and checks both the new owner and a passive
+follower retain the newer route after the delayed heartbeat. Distinct durable
+terms protect the later routed source write. The Electron IPC bridge runs the
+SQLite adapter contract through its renderer and main-process handlers,
+including exact-ID reconciliation and protocol-v4 term reservation. Its
+resolved-adapter witness checks that reconciliation carries each Collection's
+mode and schema version, and its absent-capability witness checks that an
+unknown result leaves durable state unchanged. The real-process witness runs
+the renderer adapter in Vitest and sends its envelope to an Electron main
+process. It does not execute the adapter inside an Electron renderer or check
+concurrent requests from multiple renderers. A reconciliation IPC reply delayed
+until after main applies is an untested transport history owned by the Electron
+receiving contract. The Chromium/OPFS host owner runs idle, before-durable,
+after-durable, peer-before-reconciliation, notification-before-lost-answer,
+and cold-successor histories across real tabs, Web Locks, BroadcastChannel,
+workers, and SQLite.
+It observes durable rows, cursor, and exact applied transaction IDs, public
+source/live-query rows, receipt settlement, one sync run, and passive-tab event
+counts. The peer history holds
+reconciliation before the writer lock until the peer write is durable. Removing
+the reconciliation reload marker leaves the passive source and live query
+without the original row at that public checkpoint. The real Electric receiver
+in `packages/browser-db-sqlite-persistence/e2e/electric-leader-close.opfs.spec.ts`
+streams a PostgreSQL row through the installed SDK, closes the first writer
+after SQLite applies that source transaction, and checks the surviving
+Collection, mounted live query, durable rows, exact applied ID, resume marker,
+and later PostgreSQL row. The original Electric applied receipt fulfills in
+one sync run. The crossing row's transaction and first durable snapshot agree
+on resume offset, handle, and shape ID. It supplies the SDK handoff for this one
+after-durable history.
+
+The wrapper's controlled term jump and the real OPFS cold-successor election
+are separate evidence cells. The persisted wrapper now has a controlled
+same-key peer-write continuation:
+X is durable at version 1, Y advances storage to version 2, exact-ID
+reconciliation acknowledges X's original position, the source receipt fulfills,
+and the wrapper's owned resume evidence fails closed against version 2. A
+temporary latest-position response makes that evidence assertion fail. The
+real SQLite exact-ID decision and this wrapper receiving history still have
+separate drivers; one real-adapter wrapper join remains with the persisted
+SQLite receiving owner. A single real-host history combining a missed
+original notice, an empty reserved term, and a passive follower's later public
+rows remains with the Chromium/OPFS owner. The controlled nested-prototype
+replacement reaches source and mounted live-query cuts; real SQLite
+serialization of that nested class in the same wrapper history remains with
+the Node SQLite receiving owner. The reset continuation uses a controlled
+snapshot with the same version-zero premise that the real SQLite adapter's
+schema-reset oracle proves. A combined real-adapter wrapper reset and later
+notification remains with the persisted SQLite receiving owner.
+
+The persisted wrapper owner also holds an on-demand resume certification across
+a newer, sequence-zero term while the row version and reset epoch stay fixed.
+It rejects the old exact-generation guard at key-set evidence. The Electric
+held-snapshot owner joins the real SQLite term reservation with the persisted
+wrapper and mocked Electric stream: the source retains its cursor and reaches
+ready with the original durable rows. Neighboring committed-write and schema-
+reset histories reject inheritance of the old baseline. The real Chromium/OPFS
+reopen history still owns the host election and restart schedule; this local
+join does not prove that schedule passes in CI.
+
+A bounded TLA+ design grammar and exact TLC receipts live in
+`review-evidence/issue-2085-tla/`. It explores one X, one same-key peer Y,
+one reset, delayed/lost notices, position-only observation, and ledger pruning;
+it checks the reference laws and kills wrong-design mutants but does not
+execute a production path. A separate challenge shows that an old commit
+notice can publish an old row after durable reset *before* a passive peer
+receives any reset signal. The built-in coordinator has no reset sender, so
+this is an unresolved proposed cross-tab reset law, not a confirmed current
+receiving failure. A future sender needs a Browser/OPFS witness for that
+pre-signal order.
+
+This bounded owner assumes tabs run the same protocol version and one `txId`
+identifies one immutable payload. The Electric receiver does not cover
+before-durable loss, queued hydration, two Electric providers contending in
+both tabs, seven concurrent Collections, or a closing leader's active SQLite
+call; those need receiving schedules owned by
+the Browser Electric, hydration, and OPFS page-lifecycle suites. Arbitrary
+concurrent writes, physical crash durability, other browsers, and
+cross-version tabs are outside the established host evidence. These limits do
+not authorize a late apply after an intervening durable write.
+
+The persisted wrapper owner now also checks the no-`pullSince` row-version-gap
+fallback at every Collection change callback: a durable baseline, a missed
+commit, and a later notice may expose only the baseline or the complete durable
+replacement. The old truncate fallback exposed an empty intermediate snapshot.
+The Electric recovery owner drives ordinary peer notifications only after its
+adapter commits matching rows, metadata, and a contiguous row version; its
+bounded peer/stream histories retain exact public-row and publication-marker
+checks. The previous fixture announced version 101 while its durable position
+remained zero, so the new gap detector treated an ordinary notification as a
+missed history. These controlled owners do not prove real Electric delivery of
+a lost-notice gap; the Browser Electric/OPFS receiver owns that schedule.
+
 The [live Electric hydration-straddle oracle](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/electric-hydration-straddle.opfs.spec.ts)
 owns one #1754 host history: an on-demand Collection has an initial durable row;
 an OPFS subset hydration is held after its local read; a PostgreSQL update

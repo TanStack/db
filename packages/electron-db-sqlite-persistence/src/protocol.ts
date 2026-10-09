@@ -1,13 +1,15 @@
 import type { LoadSubsetOptions } from '@tanstack/db'
 import type {
+  CommittedTxAnchor,
   PersistedCollectionMode,
   PersistedIndexSpec,
   PersistedKeySetEvidence,
   PersistedTx,
+  ReconciledCommittedTx,
   SQLitePullSinceResult,
 } from '@tanstack/db-sqlite-persistence-core'
 
-export const ELECTRON_PERSISTENCE_PROTOCOL_VERSION = 2 as const
+export const ELECTRON_PERSISTENCE_PROTOCOL_VERSION = 4 as const
 export const DEFAULT_ELECTRON_PERSISTENCE_CHANNEL = `tanstack-db:sqlite-persistence`
 
 export type ElectronPersistedRow = Record<string, unknown>
@@ -24,10 +26,12 @@ export type ElectronPersistenceMethod =
   | `loadCollectionMetadata`
   | `scanRows`
   | `applyCommittedTx`
+  | `reconcileCommittedTx`
   | `ensureIndex`
   | `markIndexRemoved`
   | `pullSince`
   | `getStreamPosition`
+  | `reserveLeadershipTerm`
 
 export type ElectronPersistencePayloadMap = {
   loadSubset: {
@@ -49,6 +53,10 @@ export type ElectronPersistencePayloadMap = {
   applyCommittedTx: {
     tx: PersistedTx<ElectronPersistedRow, ElectronPersistedKey>
   }
+  reconcileCommittedTx: {
+    tx: PersistedTx<ElectronPersistedRow, ElectronPersistedKey>
+    anchor: CommittedTxAnchor
+  }
   ensureIndex: {
     signature: string
     spec: PersistedIndexSpec
@@ -60,6 +68,7 @@ export type ElectronPersistencePayloadMap = {
     fromRowVersion: number
   }
   getStreamPosition: {}
+  reserveLeadershipTerm: { observedTerm: number }
 }
 
 export type ElectronPersistenceResultMap = {
@@ -84,10 +93,16 @@ export type ElectronPersistenceResultMap = {
     metadata?: unknown
   }>
   applyCommittedTx: null
+  reconcileCommittedTx: ReconciledCommittedTx
   ensureIndex: null
   markIndexRemoved: null
   pullSince: SQLitePullSinceResult<ElectronPersistedKey>
   getStreamPosition: {
+    latestTerm: number
+    latestSeq: number
+    latestRowVersion: number
+  }
+  reserveLeadershipTerm: {
     latestTerm: number
     latestSeq: number
     latestRowVersion: number
@@ -98,7 +113,8 @@ export type ElectronSerializedError = {
   name: string
   message: string
   stack?: string
-  code?: string
+  code?: string | number
+  path?: string | ReadonlyArray<string | number>
 }
 
 export type ElectronPersistenceRequestByMethod = {
