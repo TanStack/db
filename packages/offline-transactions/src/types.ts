@@ -104,8 +104,8 @@ export interface OfflineConfig {
   /**
    * Override retry decisions for errors from a named mutation function. Return
    * undefined to use the default decision. NonRetriableError always stops retry.
-   * A throw or invalid return fails the outbox row, rejects its waiters with the
-   * hook failure, and stops new admission before terminal outbox cleanup.
+   * A throw or invalid return fails only that outbox row and rejects its
+   * waiters with the hook failure. Queued work runs after terminal cleanup.
    * The default policy still supplies the delay and configured jitter.
    */
   shouldRetry?: (error: Error, retryCount: number) => boolean | undefined

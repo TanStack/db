@@ -219,14 +219,16 @@ Return `true` to retry, `false` to stop, or `undefined` to use the
 default decision. For example, return `true` for a recoverable 401 and
 `undefined` otherwise. `NonRetriableError` always stops without calling the
 hook. The default backoff and configured jitter still determine retry timing.
-If the hook throws or returns another value, the affected waiting promises
-reject with the hook failure. The executor stops new admission immediately,
-records a terminal rejection, and removes the outbox row. Already durable
-queued work remains pending and retained for restart. A fresh executor does
-not replay the failed row.
+If the hook throws or returns another value, the executor records a terminal
+rejection for that row, removes it from the outbox, and rejects its waiting
+promises with the hook failure. Other queued rows continue after the failed
+row's deletion is acknowledged. New commits may join the queue during cleanup,
+but cannot run ahead of that deletion. A fresh executor does not replay the
+failed row.
 If marker storage or deletion fails, the caller still receives the hook error
-while the executor stops with the storage error. A saved terminal marker skips
-the named mutation function after restart; an unmarked row can replay.
+while the executor stops with the storage error and retains queued work. A
+saved terminal marker skips the named mutation function after restart; an
+unmarked row can replay.
 To decide from an HTTP status, throw an error carrying `response.status` in
 the named mutation function and inspect its numeric status in `shouldRetry`.
 

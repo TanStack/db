@@ -105,14 +105,14 @@ custom fields.
 `NonRetriableError` always stops without calling the hook. Retry delays and
 configured jitter remain unchanged. A retried offline transaction keeps its
 FIFO position. If the hook throws or returns another value, the executor
-stops new admission immediately, records a terminal rejection, removes the
-outbox row, and rejects the affected transaction's `when('settled')` promise
-with the hook failure. Already durable queued work remains pending and retained
-for restart. A fresh executor can process newly admitted work without replaying
-the failed row. If writing the terminal marker or deleting the row fails, the
-caller still rejects with the hook failure while the executor stops with the
-storage error. A saved marker prevents a provider call on restart; an unmarked
-row can replay.
+records a terminal rejection, removes only that outbox row, and rejects its
+`when('settled')` promise with the hook failure. Once deletion is acknowledged,
+queued transactions continue in creation order. New commits may join the queue
+during cleanup, but cannot run ahead of the failed row's deletion. A fresh
+executor does not replay the failed row. If writing the terminal marker or
+deleting the row fails, the caller still rejects with the hook failure while
+the executor stops with the storage error and retains queued work. A saved
+marker prevents a provider call on restart; an unmarked row can replay.
 
 If an outbox phase write or deletion fails after `mutationFn` settles, the
 executor stops processing queued work, and its batch promise rejects with the

@@ -1205,27 +1205,32 @@ for this oracle repair. Keep these scenarios and decisions with that owner:
 - **A10 R5/R9:** manual removal/clear outside the active-provider witnesses and
   broader restored optimistic lifetimes remain open. The settlement owner checks
   the optional retry decision across 401, ordinary, and permanent errors;
-  explicit, delegated, and absent answers;
-  FIFO peers; a later failure; and rejection of the public `commit()` promise for
-  throwing or invalid hooks. A hook fault records a terminal rejection, removes
-  the failed outbox row, halts the executor with a queued FIFO peer held, and
-  releases its active slot. The public admission witness holds the terminal
-  marker read, marker write, or deletion after a thrown or invalid hook. At each
-  cut, a new `commit()` rejects without a durable row, while a peer durable
-  before the fault remains pending with no terminal phase. An outbox write begun
-  before the hook fault and settled afterward remains outside this admission
-  witness. The retained peer's eventual replay also needs a fresh-executor
-  witness. An offline executor restart over the same storage processes newly
-  admitted work without replaying that row. If deletion fails after the terminal
-  marker is written, restart removes the marked row without calling the named
-  mutation function again or restoring its optimistic state. The settlement owner also
+  explicit, delegated, and absent answers; FIFO peers; a later failure; and
+  rejection of public `commit()` for throwing or invalid hooks. A hook fault
+  records a terminal rejection for only the failed row. The executor removes
+  that row, rejects its caller with the hook failure, and continues queued work
+  after acknowledged deletion. The public admission witness holds the terminal
+  marker read, write, or deletion after a thrown or invalid hook: a new commit
+  durably joins the queue at each cut but cannot run before head cleanup.
+  The started-write witness crosses write acknowledgement before, during, or
+  after the hook fault, including a row visible before acknowledgement and a
+  write rejected before storage changes. It checks both public promises,
+  outbox IDs, Collection rows, and same-executor peer progress. A visible but
+  unacknowledged peer cannot run even after the head is removed. The controlled
+  adapter does not cover a write that changes storage and then rejects its
+  acknowledgement; fresh executor startup before a held write acknowledges
+  remains outside this witness.
+  Failed terminal marker or deletion storage still stops the executor: the
+  head caller receives the hook error, the batch receives the storage error,
+  and queued peers stay durable and unrun. If deletion fails after the terminal
+  marker is written, restart removes the marked row without another named
+  mutation function call or optimistic restoration. The settlement owner also
   checks terminal named mutation function rejection with failed deletion, a
-  halted executor with queued peers held,
-  and offline executor restart without a second named mutation function call
-  or optimistic restore. The executor does not automatically retry a failed
-  phase write or deletion. A failed terminal marker write followed by a crash
-  remains an unmarked outbox replay window. Broader offline retry and recovery
-  policy remains with RFC #1659.
+  halted executor with queued peers held, and offline executor restart without
+  a second named mutation function call or optimistic restore. The executor
+  does not automatically retry a failed phase write or deletion. A failed
+  terminal marker write followed by a crash remains an unmarked outbox replay
+  window. Broader offline retry and recovery policy remains with RFC #1659.
 - **A10 R11/R12 and earlier R8:** metadata/native-value domain, old readers of
   new wire records, and unreadable/unknown-version outbox recovery. New readers
   accepting old records does not prove reverse compatibility. Do not delete

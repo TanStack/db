@@ -92,20 +92,18 @@ import type {
  * the named mutation function Error, and lets the queued peer run. The controlled
  * provider and storage do not establish real timer accuracy or server idempotency.
  * A throwing hook or a result outside `true`, `false`, and `undefined` is a
- * configuration failure. The executor records a terminal rejection and removes
- * the outbox row before rejecting public `commit()` with that failure and
- * dropping its optimistic state. The executor then stops and releases its
- * active slot. A fresh executor has no failed row to
- * restore or replay, but can process newly admitted work. This law assumes the
- * storage adapter acknowledges the terminal marker and deletion. If deletion
- * fails after the marker write, restart removes the marked row without another
- * named mutation function call or optimistic restoration. A queued FIFO peer
- * remains durable but unrun when the current executor stops.
- * A hook fault closes new admission before terminal outbox cleanup. Work
- * already durable before the fault remains pending and retained for restart.
- * A commit begun after the fault rejects without adding an outbox row,
- * even while the terminal marker read, write, or deletion is held. This law
- * does not decide an outbox write begun before the fault that settles afterward.
+ * row-local retry decision failure. The executor records a terminal rejection,
+ * removes that row, rejects its public `commit()` with the hook failure, and
+ * drops its optimistic state. A queued FIFO peer then runs in the same executor.
+ * A commit begun during terminal cleanup may durably join the queue, but its
+ * provider waits for the failed head's acknowledged deletion. A write begun
+ * before the hook fault may also acknowledge afterward and join that queue.
+ * A write rejected before storing its row rejects only its own caller.
+ * These controlled histories require terminal marker and deletion success.
+ * A failed terminal storage operation remains an executor failure; after a
+ * persisted rejection marker, restart removes the failed row without another
+ * named mutation function call or optimistic restoration. They do not cover an
+ * adapter that stores a row before rejecting its write acknowledgement.
  * Public manual removal may acknowledge deletion while a named mutation
  * function call is held. Once that call fulfills, both success conditions have
  * occurred. The caller promise and local persistence promise must settle
@@ -1232,16 +1230,15 @@ it.each([`throw`, `invalid`] as const)(
   },
 )
 
-// This admission model uses only the action's relation to the hook fault. A
-// pre-fault durable peer remains replayable; a post-fault call cannot become
-// durable. It does not copy the executor's cleanup or scheduling machinery.
-function expectedHookFaultAdmission(alreadyDurable: boolean): {
-  durable: boolean
-  outcome: `pending` | `rejected`
+// The model treats an acknowledged peer write as queued work. The hook fault
+// belongs to the head row; a peer admitted before or during terminal cleanup
+// stays pending until the head's deletion acknowledges and its provider runs.
+// This relation does not copy the executor's queue or cleanup machinery.
+function expectedHookFaultPeerAtHeldCleanup(): {
+  durable: true
+  outcome: `pending`
 } {
-  return alreadyDurable
-    ? { durable: true, outcome: `pending` }
-    : { durable: false, outcome: `rejected` }
+  return { durable: true, outcome: `pending` }
 }
 
 function observedFaultAdmissionOutcome(value: unknown) {
@@ -1252,10 +1249,9 @@ function observedFaultAdmissionOutcome(value: unknown) {
 // Legal history: the FIFO head enters its named mutation function, one peer
 // becomes durable, then the hook throws or returns an invalid result. Storage
 // holds the terminal marker read, write, or deletion while a second public commit
-// attempts admission. The held cut compares settlement, exact outbox contents,
-// provider calls, and optimistic rows.
-// No storage write fails. An in-flight pre-fault admission crossing the fault
-// needs a separate policy; this history waits for its pre-fault write first.
+// joins the queue. The held cut compares settlement, exact outbox contents,
+// provider calls, and optimistic rows. After deletion, both peers must run in
+// FIFO order in this executor. No storage write fails in this history.
 it.each([
   [`throw`, `marker`],
   [`throw`, `read`],
@@ -1264,7 +1260,7 @@ it.each([
   [`invalid`, `read`],
   [`invalid`, `deletion`],
 ] as const)(
-  `rejects post-fault admission during %s hook failure and %s cleanup`,
+  `admits queued work during %s hook failure and %s cleanup`,
   async (failureKind, heldStep) => {
     const providerError = new Error(`HTTP 401 Unauthorized`)
     const hookError = new Error(`retry decision failed`)
@@ -1327,11 +1323,12 @@ it.each([
       },
       mutationFn: async ({ transaction }) => {
         providerCalls.push(transaction.id)
-        if (transaction.id !== headId)
-          throw new Error(`peer ran after retry decision failure`)
-        providerEntered.resolve()
-        await releaseProvider.promise
-        throw providerError
+        if (transaction.id === headId) {
+          providerEntered.resolve()
+          await releaseProvider.promise
+          throw providerError
+        }
+        env.applyMutations(transaction.mutations)
       },
     })
     const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
@@ -1394,16 +1391,18 @@ it.each([
         `post-fault admission or rejection`,
       )
 
-      const before = expectedHookFaultAdmission(true)
-      const after = expectedHookFaultAdmission(false)
+      const before = expectedHookFaultPeerAtHeldCleanup()
+      const after = expectedHookFaultPeerAtHeldCleanup()
       const outboxAtHeldCleanup = await env.executor.peekOutbox()
       const durableIds = new Set(outboxAtHeldCleanup.map(({ id }) => id))
-      // The race rejects an unexpected durable admission at this exact cut;
+      // The race rejects an early admission refusal at this exact cut;
       // waiting for final cleanup alone would hide the transient violation.
-      expect(firstObservation).toBe(`settled`)
+      expect(firstObservation).toBe(`durable`)
       expect(durableIds.has(preFault.id)).toBe(before.durable)
       expect(durableIds.has(postFault.id)).toBe(after.durable)
-      expect([...durableIds].sort()).toEqual([head.id, preFault.id].sort())
+      expect([...durableIds].sort()).toEqual(
+        [head.id, preFault.id, postFault.id].sort(),
+      )
       expect(observedFaultAdmissionOutcome(outcomes.get(preFault.id))).toBe(
         before.outcome,
       )
@@ -1419,6 +1418,7 @@ it.each([
       ).toBeUndefined()
       expect(providerCalls).toEqual([head.id])
       expect(env.collection.toArray.map(({ id }) => id).sort()).toEqual([
+        `after-fault`,
         `before-fault`,
         `head`,
       ])
@@ -1427,14 +1427,16 @@ it.each([
       await atOracleCheckpoint(head.commit, `failed head settled`)
       if (failureKind === `throw`) expect(outcomes.get(head.id)).toBe(hookError)
       else expect(outcomes.get(head.id)).toBeInstanceOf(TypeError)
-      expect(outcomes.get(preFault.id)).toBe(`pending`)
-      expect(observedFaultAdmissionOutcome(outcomes.get(postFault.id))).toBe(
-        `rejected`,
-      )
-      const outboxAfterCleanup = await env.executor.peekOutbox()
-      expect(outboxAfterCleanup.map(({ id }) => id)).toEqual([preFault.id])
-      expect(outboxAfterCleanup[0]?.outboxPhase).toBeUndefined()
-      expect(providerCalls).toEqual([head.id])
+      await atOracleCheckpoint(preFault.commit, `pre-fault peer settled`)
+      await atOracleCheckpoint(postFault.commit, `post-fault peer settled`)
+      expect(outcomes.get(preFault.id)).toBe(`fulfilled`)
+      expect(outcomes.get(postFault.id)).toBe(`fulfilled`)
+      expect(await env.executor.peekOutbox()).toEqual([])
+      expect(providerCalls).toEqual([head.id, preFault.id, postFault.id])
+      expect(env.collection.toArray.map(({ id }) => id).sort()).toEqual([
+        `after-fault`,
+        `before-fault`,
+      ])
     } catch (error) {
       hasPrimaryFailure = true
       throw error
@@ -1459,20 +1461,368 @@ it.each([
   },
 )
 
-// A hook failure removes only the head. The queued peer stays durable, but the
-// faulty executor refuses another batch instead of silently continuing.
-it(`stops queued work after shouldRetry throws`, async () => {
+// A storage row may be visible before its write acknowledges. The independent
+// model keeps visibility, acknowledgement, and provider eligibility separate:
+// the peer cannot run before both its write and the failed head's deletion
+// acknowledge. It does not copy the executor's queue or cleanup machinery.
+type StartedWriteCut =
+  | { stored: false; acknowledgement: `held` }
+  | { stored: true; acknowledgement: `held` | `fulfilled` }
+  | { stored: false; acknowledgement: `rejected` }
+
+function expectedStartedPeer(
+  cut: StartedWriteCut,
+  headRemoved: boolean,
+): {
+  visible: boolean
+  caller: `pending` | `rejected`
+  providerEligible: boolean
+} {
+  return {
+    visible: cut.stored,
+    caller: cut.acknowledgement === `rejected` ? `rejected` : `pending`,
+    providerEligible: cut.acknowledgement === `fulfilled` && headRemoved,
+  }
+}
+
+// Legal grammar: the head provider is held while a peer starts a public commit.
+// The peer write acknowledges before the fault, remains held before storage, or
+// becomes visible before its acknowledgement. A held write may acknowledge
+// during the head's terminal marker or after head deletion; one write rejects
+// before changing storage. Throwing and invalid hooks cross every write cut.
+// The driver compares both public promises, Collection rows, exact outbox IDs,
+// and provider calls before and after the two acknowledgements. A successful
+// peer must finish in this executor; this is not a fresh-executor replay law.
+it.each([
+  [`throw`, `durable-before`],
+  [`throw`, `late-during-marker`],
+  [`throw`, `visible-before-ack`],
+  [`throw`, `visible-across-cleanup`],
+  [`throw`, `late-after-cleanup`],
+  [`throw`, `failure-before-store`],
+  [`invalid`, `durable-before`],
+  [`invalid`, `late-during-marker`],
+  [`invalid`, `visible-before-ack`],
+  [`invalid`, `visible-across-cleanup`],
+  [`invalid`, `late-after-cleanup`],
+  [`invalid`, `failure-before-store`],
+] as const)(
+  `settles a started peer across %s hook failure and %s write`,
+  async (failureKind, peerWriteCase) => {
+    const providerError = new Error(`HTTP 401 Unauthorized`)
+    const hookError = new Error(`retry decision failed`)
+    const storageError = new Error(`peer outbox write failed`)
+    const providerEntered = gate()
+    const releaseProvider = gate()
+    const peerWriteEntered = gate()
+    const peerRowStored = gate()
+    const releasePeerWrite = gate()
+    const peerWriteSettled = gate()
+    const hookEntered = gate()
+    const terminalMarkerEntered = gate()
+    const releaseTerminalMarker = gate()
+    const peerProviderEntered = gate()
+    const releasePeerProvider = gate()
+    const providerCalls: Array<string> = []
+    let headId = ``
+    let peerId = ``
+    let holdPeerWrite = peerWriteCase !== `durable-before`
+
+    class ControlledStorage extends FakeStorageAdapter {
+      override async set(key: string, value: string): Promise<void> {
+        if (
+          key === `tx:${headId}` &&
+          (JSON.parse(value) as { outboxPhase?: string }).outboxPhase ===
+            `rejection-pending`
+        ) {
+          terminalMarkerEntered.resolve()
+          await releaseTerminalMarker.promise
+        }
+        if (key === `tx:${peerId}`) {
+          peerWriteEntered.resolve()
+          if (
+            (peerWriteCase === `visible-before-ack` ||
+              peerWriteCase === `visible-across-cleanup`) &&
+            holdPeerWrite
+          ) {
+            await super.set(key, value)
+            peerRowStored.resolve()
+            await releasePeerWrite.promise
+            holdPeerWrite = false
+            peerWriteSettled.resolve()
+            return
+          }
+          if (holdPeerWrite) {
+            await releasePeerWrite.promise
+            holdPeerWrite = false
+            if (peerWriteCase === `failure-before-store`) {
+              peerWriteSettled.resolve()
+              throw storageError
+            }
+          }
+        }
+        await super.set(key, value)
+        if (key === `tx:${peerId}`) {
+          peerRowStored.resolve()
+          peerWriteSettled.resolve()
+        }
+      }
+    }
+
+    const storage = new ControlledStorage()
+    const env = createTestOfflineEnvironment({
+      storage,
+      config: {
+        shouldRetry: (): boolean | undefined => {
+          hookEntered.resolve()
+          if (failureKind === `throw`) throw hookError
+          return null as unknown as boolean | undefined
+        },
+      },
+      mutationFn: async ({ transaction }) => {
+        providerCalls.push(transaction.id)
+        if (transaction.id === headId) {
+          providerEntered.resolve()
+          await releaseProvider.promise
+          throw providerError
+        }
+        peerProviderEntered.resolve()
+        await releasePeerProvider.promise
+        env.applyMutations(transaction.mutations)
+      },
+    })
+    const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    const errorLog = vi.spyOn(console, `error`).mockImplementation(() => {})
+    const observed: Array<Promise<void>> = []
+    const outcomes = new Map<string, { commit: unknown; persisted: unknown }>()
+    let hasPrimaryFailure = false
+
+    function createObservedTransaction(rowId: string, updatedAt: number) {
+      const tx = env.executor.createOfflineTransaction({
+        mutationFnName: env.mutationFnName,
+        autoCommit: false,
+      })
+      const transaction = tx.mutate(() =>
+        env.collection.insert({
+          id: rowId,
+          value: rowId,
+          completed: false,
+          updatedAt: new Date(updatedAt),
+        }),
+      )
+      const outcome = {
+        commit: `pending` as unknown,
+        persisted: `pending` as unknown,
+      }
+      outcomes.set(tx.id, outcome)
+      const commit = tx.commit().then(
+        () => {
+          outcome.commit = `fulfilled`
+        },
+        (error: unknown) => {
+          outcome.commit = error
+        },
+      )
+      const persisted = transaction.isPersisted.promise.then(
+        () => {
+          outcome.persisted = `fulfilled`
+        },
+        (error: unknown) => {
+          outcome.persisted = error
+        },
+      )
+      observed.push(commit, persisted)
+      return { id: tx.id, commit, persisted, outcome }
+    }
+
+    try {
+      await env.waitForLeader()
+      const head = createObservedTransaction(`head`, 0)
+      headId = head.id
+      await atOracleCheckpoint(providerEntered.promise, `head provider entered`)
+
+      const peer = createObservedTransaction(`peer`, 1)
+      peerId = peer.id
+      await atOracleCheckpoint(peerWriteEntered.promise, `peer write started`)
+      if (peerWriteCase === `durable-before`)
+        await atOracleCheckpoint(
+          peerWriteSettled.promise,
+          `peer durable before fault`,
+        )
+      if (
+        peerWriteCase === `visible-before-ack` ||
+        peerWriteCase === `visible-across-cleanup`
+      )
+        await atOracleCheckpoint(
+          peerRowStored.promise,
+          `peer visible before ack`,
+        )
+
+      releaseProvider.resolve()
+      await atOracleCheckpoint(hookEntered.promise, `retry hook failed`)
+      await atOracleCheckpoint(
+        terminalMarkerEntered.promise,
+        `terminal marker held`,
+      )
+      const atFault = expectedStartedPeer(
+        peerWriteCase === `durable-before`
+          ? { stored: true, acknowledgement: `fulfilled` }
+          : peerWriteCase === `visible-before-ack` ||
+              peerWriteCase === `visible-across-cleanup`
+            ? { stored: true, acknowledgement: `held` }
+            : { stored: false, acknowledgement: `held` },
+        false,
+      )
+      expect(head.outcome.commit).toBe(`pending`)
+      expect(peer.outcome.commit).toBe(atFault.caller)
+      expect(peer.outcome.persisted).toBe(atFault.caller)
+      expect(providerCalls).toEqual([head.id])
+      expect(atFault.providerEligible).toBe(false)
+      expect((await env.executor.peekOutbox()).map(({ id }) => id)).toEqual(
+        atFault.visible ? [head.id, peer.id] : [head.id],
+      )
+      expect(env.collection.toArray.map(({ id }) => id)).toEqual([
+        `head`,
+        `peer`,
+      ])
+
+      const writeAfterCleanup =
+        peerWriteCase === `late-after-cleanup` ||
+        peerWriteCase === `visible-across-cleanup`
+      if (!writeAfterCleanup) {
+        releasePeerWrite.resolve()
+        await atOracleCheckpoint(peerWriteSettled.promise, `peer write settled`)
+      }
+      const afterWrite = expectedStartedPeer(
+        peerWriteCase === `failure-before-store`
+          ? { stored: false, acknowledgement: `rejected` }
+          : writeAfterCleanup
+            ? peerWriteCase === `visible-across-cleanup`
+              ? { stored: true, acknowledgement: `held` }
+              : { stored: false, acknowledgement: `held` }
+            : { stored: true, acknowledgement: `fulfilled` },
+        false,
+      )
+      if (peerWriteCase === `failure-before-store`) {
+        await atOracleCheckpoint(peer.commit, `failed peer commit settled`)
+        await atOracleCheckpoint(
+          peer.persisted,
+          `failed peer persistence settled`,
+        )
+        expect(peer.outcome.commit).toBe(storageError)
+        expect(peer.outcome.persisted).toBe(storageError)
+      } else {
+        await turn()
+        expect(peer.outcome.commit).toBe(afterWrite.caller)
+        expect(peer.outcome.persisted).toBe(afterWrite.caller)
+      }
+      expect(afterWrite.providerEligible).toBe(false)
+      expect(providerCalls).toEqual([head.id])
+      expect((await env.executor.peekOutbox()).map(({ id }) => id)).toEqual(
+        afterWrite.visible ? [head.id, peer.id] : [head.id],
+      )
+
+      releaseTerminalMarker.resolve()
+      await atOracleCheckpoint(head.commit, `failed head settled`)
+      await atOracleCheckpoint(
+        head.persisted,
+        `failed head persistence settled`,
+      )
+      if (failureKind === `throw`) {
+        expect(head.outcome.commit).toBe(hookError)
+        expect(head.outcome.persisted).toBe(hookError)
+      } else {
+        expect(head.outcome.commit).toBeInstanceOf(TypeError)
+        expect(head.outcome.persisted).toBeInstanceOf(TypeError)
+      }
+
+      if (writeAfterCleanup) {
+        // A visible row without write acknowledgement cannot run even after
+        // the failed head is removed.
+        expect(providerCalls).toEqual([head.id])
+        expect(peer.outcome.commit).toBe(`pending`)
+        expect(peer.outcome.persisted).toBe(`pending`)
+        expect((await env.executor.peekOutbox()).map(({ id }) => id)).toEqual(
+          peerWriteCase === `visible-across-cleanup` ? [peer.id] : [],
+        )
+        releasePeerWrite.resolve()
+        await atOracleCheckpoint(
+          peerWriteSettled.promise,
+          `late peer write settled`,
+        )
+      }
+
+      if (peerWriteCase === `failure-before-store`) {
+        expect(providerCalls).toEqual([head.id])
+        expect(await env.executor.peekOutbox()).toEqual([])
+        expect(env.collection.toArray).toEqual([])
+      } else {
+        const firstPeerEvent = await atOracleCheckpoint(
+          Promise.race([
+            peerProviderEntered.promise.then(() => `provider` as const),
+            peer.commit.then(() => `settled` as const),
+          ]),
+          `peer provider or early settlement`,
+        )
+        expect(firstPeerEvent).toBe(`provider`)
+        expect(peer.outcome.commit).toBe(`pending`)
+        expect(peer.outcome.persisted).toBe(`pending`)
+        expect(providerCalls).toEqual([head.id, peer.id])
+        expect((await env.executor.peekOutbox()).map(({ id }) => id)).toEqual([
+          peer.id,
+        ])
+        releasePeerProvider.resolve()
+        await atOracleCheckpoint(peer.commit, `peer commit settled`)
+        await atOracleCheckpoint(peer.persisted, `peer persistence settled`)
+        expect(peer.outcome.commit).toBe(`fulfilled`)
+        expect(peer.outcome.persisted).toBe(`fulfilled`)
+        expect(providerCalls).toEqual([head.id, peer.id])
+        expect(await env.executor.peekOutbox()).toEqual([])
+        expect(env.collection.toArray.map(({ id }) => id)).toEqual([`peer`])
+      }
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releaseProvider.resolve()
+      releasePeerWrite.resolve()
+      releaseTerminalMarker.resolve()
+      releasePeerProvider.resolve()
+      const cleanupError = new Error(`started-peer oracle cleanup`)
+      for (const [id, outcome] of outcomes)
+        if (outcome.commit === `pending` || outcome.persisted === `pending`)
+          env.executor.rejectTransaction(id, cleanupError)
+      await cleanupOfflineOracle(
+        [
+          () => Promise.all(observed),
+          () => env.executor.dispose(),
+          () => env.collection.cleanup(),
+          () => warning.mockRestore(),
+          () => errorLog.mockRestore(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  },
+)
+
+// A hook failure removes only the head. The already queued peer then runs in
+// the same batch, and a later batch remains available for new work.
+it(`continues queued work after shouldRetry throws`, async () => {
   const providerError = new Error(`HTTP 401 Unauthorized`)
   const hookError = new Error(`retry decision failed`)
   const outbox = new OutboxManager(new FakeStorageAdapter(), {})
   const scheduler = new KeyScheduler()
   const rejections: Array<Error> = []
+  const resolutions: Array<string> = []
   let peerCalls = 0
   const signaler: TransactionSignaler = {
     isOfflineEnabled: true,
     isOnline: () => true,
-    resolveTransaction: () => {
-      throw new Error(`failed head cannot resolve`)
+    resolveTransaction: (id) => {
+      if (id === `hook-failure-head`)
+        throw new Error(`failed head cannot resolve`)
+      resolutions.push(id)
     },
     rejectTransaction: (_id, error) => rejections.push(error),
     registerRestorationTransaction: () => {},
@@ -1518,14 +1868,16 @@ it(`stops queued work after shouldRetry throws`, async () => {
     await outbox.add(head)
     await outbox.add(peer)
     scheduler.schedule(peer)
-    await expect(executor.execute(head)).rejects.toBe(hookError)
+    await expect(executor.execute(head)).resolves.toBeUndefined()
     expect(rejections).toEqual([hookError])
     expect(await outbox.get(head.id)).toBeNull()
-    expect(await outbox.get(peer.id)).toMatchObject({ id: peer.id })
-    expect(scheduler.getPendingCount()).toBe(1)
-    expect(peerCalls).toBe(0)
-    await expect(executor.executeAll()).rejects.toBe(hookError)
-    expect(peerCalls).toBe(0)
+    expect(await outbox.get(peer.id)).toBeNull()
+    expect(scheduler.getPendingCount()).toBe(0)
+    expect(peerCalls).toBe(1)
+    expect(resolutions).toEqual([peer.id])
+    await expect(executor.executeAll()).resolves.toBeUndefined()
+    expect(peerCalls).toBe(1)
+    expect(resolutions).toEqual([peer.id])
   } finally {
     executor.pause()
     warning.mockRestore()
@@ -2699,91 +3051,128 @@ it.each([`provider`, `hook`] as const)(
   checkTerminalFailureWithFailedDeletion,
 )
 
-it(`stops the executor batch when terminal deletion fails`, async () => {
-  const providerError = new NonRetriableError(`provider rejected`)
-  const storageError = new Error(`delete rejected`)
-  const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
-  class Storage extends FakeStorageAdapter {
-    failDeletes = true
-    override async delete(key: string): Promise<void> {
-      if (this.failDeletes) throw storageError
-      await super.delete(key)
-    }
-  }
-  const storage = new Storage()
-  const outbox = new OutboxManager(storage, {})
-  const scheduler = new KeyScheduler()
-  const rejections: Array<Error> = []
-  const resolutions: Array<string> = []
-  let peerCalls = 0
-  const signaler: TransactionSignaler = {
-    isOfflineEnabled: true,
-    isOnline: () => true,
-    resolveTransaction: (id) => resolutions.push(id),
-    rejectTransaction: (_id, error) => rejections.push(error),
-    registerRestorationTransaction: () => {},
-  }
-  const executor = new TransactionExecutor(
-    scheduler,
-    outbox,
-    {
-      collections: {},
-      mutationFns: {
-        syncData: () => Promise.reject(providerError),
-        peer: () => {
-          peerCalls++
-          return Promise.resolve()
-        },
-      },
-      jitter: false,
-    },
-    signaler,
-  )
-  const transaction: OfflineTransaction = {
-    id: `terminal-delete-failure`,
-    mutationFnName: `syncData`,
-    mutations: [],
-    keys: [],
-    idempotencyKey: `terminal-delete-failure`,
-    createdAt: new Date(0),
-    retryCount: 0,
-    nextAttemptAt: 0,
-    version: 1,
-  }
-  const peer: OfflineTransaction = {
-    ...transaction,
-    id: `terminal-delete-peer`,
-    mutationFnName: `peer`,
-    idempotencyKey: `terminal-delete-peer`,
-    createdAt: new Date(1),
-  }
-  await outbox.add(transaction)
-  await outbox.add(peer)
-  scheduler.schedule(peer)
-  try {
-    await expect(executor.execute(transaction)).rejects.toBe(storageError)
-    expect(rejections).toEqual([providerError])
-    expect(resolutions).toEqual([])
-    expect(peerCalls).toBe(0)
-    expect(scheduler.getPendingCount()).toBe(2)
-    expect((await outbox.get(transaction.id))?.outboxPhase).toBe(
-      `rejection-pending`,
-    )
+// The row-local hook law ends when terminal storage fails. A failed marker or
+// deletion leaves the head's durable ownership unresolved, so the executor
+// must stop before the queued peer runs. The failed head keeps the hook error;
+// the batch reports the storage error. Provider-failure deletion is an adjacent
+// control that preserves the established storage-stop boundary.
+it.each([
+  [`provider`, `deletion`],
+  [`hook`, `marker`],
+  [`hook`, `deletion`],
+] as const)(
+  `stops queued work after %s terminal failure and failed %s`,
+  async (failureKind, failedStep) => {
+    const providerError =
+      failureKind === `provider`
+        ? new NonRetriableError(`provider rejected`)
+        : new Error(`HTTP 401 Unauthorized`)
+    const hookError = new Error(`retry decision failed`)
+    const callerError = failureKind === `hook` ? hookError : providerError
+    const storageError = new Error(`${failedStep} rejected`)
+    const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    class Storage extends FakeStorageAdapter {
+      failCleanup = true
 
-    storage.failDeletes = false
-    executor.resetRetryDelays()
-    await expect(executor.executeAll()).rejects.toBe(storageError)
-    expect(peerCalls).toBe(0)
-    expect(resolutions).toEqual([])
-    expect(scheduler.getPendingCount()).toBe(2)
-    expect((await outbox.get(transaction.id))?.outboxPhase).toBe(
-      `rejection-pending`,
+      override async set(key: string, value: string): Promise<void> {
+        if (
+          this.failCleanup &&
+          failedStep === `marker` &&
+          key === `tx:terminal-cleanup-head` &&
+          (JSON.parse(value) as { outboxPhase?: string }).outboxPhase ===
+            `rejection-pending`
+        )
+          throw storageError
+        await super.set(key, value)
+      }
+
+      override async delete(key: string): Promise<void> {
+        if (this.failCleanup && failedStep === `deletion`) throw storageError
+        await super.delete(key)
+      }
+    }
+    const storage = new Storage()
+    const outbox = new OutboxManager(storage, {})
+    const scheduler = new KeyScheduler()
+    const rejections: Array<{ id: string; error: Error }> = []
+    const resolutions: Array<string> = []
+    let peerCalls = 0
+    const signaler: TransactionSignaler = {
+      isOfflineEnabled: true,
+      isOnline: () => true,
+      resolveTransaction: (id) => resolutions.push(id),
+      rejectTransaction: (id, error) => rejections.push({ id, error }),
+      registerRestorationTransaction: () => {},
+    }
+    const executor = new TransactionExecutor(
+      scheduler,
+      outbox,
+      {
+        collections: {},
+        mutationFns: {
+          syncData: () => Promise.reject(providerError),
+          peer: () => {
+            peerCalls++
+            return Promise.resolve()
+          },
+        },
+        ...(failureKind === `hook`
+          ? {
+              shouldRetry: () => {
+                throw hookError
+              },
+            }
+          : {}),
+        jitter: false,
+      },
+      signaler,
     )
-  } finally {
-    executor.pause()
-    warning.mockRestore()
-  }
-})
+    const transaction: OfflineTransaction = {
+      id: `terminal-cleanup-head`,
+      mutationFnName: `syncData`,
+      mutations: [],
+      keys: [],
+      idempotencyKey: `terminal-cleanup-head`,
+      createdAt: new Date(0),
+      retryCount: 0,
+      nextAttemptAt: 0,
+      version: 1,
+    }
+    const peer: OfflineTransaction = {
+      ...transaction,
+      id: `terminal-cleanup-peer`,
+      mutationFnName: `peer`,
+      idempotencyKey: `terminal-cleanup-peer`,
+      createdAt: new Date(1),
+    }
+    await outbox.add(transaction)
+    await outbox.add(peer)
+    scheduler.schedule(peer)
+    try {
+      await expect(executor.execute(transaction)).rejects.toBe(storageError)
+      expect(rejections).toEqual([{ id: transaction.id, error: callerError }])
+      expect(resolutions).toEqual([])
+      expect(peerCalls).toBe(0)
+      expect(scheduler.getPendingCount()).toBe(2)
+      expect((await outbox.get(transaction.id))?.outboxPhase).toBe(
+        failedStep === `deletion` ? `rejection-pending` : undefined,
+      )
+      expect(await outbox.get(peer.id)).toMatchObject({ id: peer.id })
+
+      storage.failCleanup = false
+      executor.resetRetryDelays()
+      await expect(executor.executeAll()).rejects.toBe(storageError)
+      await expect(executor.execute(peer)).rejects.toBe(storageError)
+      expect(peerCalls).toBe(0)
+      expect(resolutions).toEqual([])
+      expect(scheduler.getPendingCount()).toBe(2)
+      expect(await outbox.get(peer.id)).toMatchObject({ id: peer.id })
+    } finally {
+      executor.pause()
+      warning.mockRestore()
+    }
+  },
+)
 
 it(`stops after failed deletion without rerunning the provider`, async () => {
   const storageError = new Error(`delete rejected`)

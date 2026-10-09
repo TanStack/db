@@ -230,10 +230,6 @@ export class TransactionExecutor {
         span.setAttribute(`shouldRetry`, shouldRetry)
 
         if (!shouldRetry) {
-          if (hookFailure) {
-            this.fatalError = hookFailure
-            this.clearRetryTimer()
-          }
           const terminalError = hookFailure ?? error
           const rejectionPending: OfflineTransaction = {
             ...transaction,
@@ -260,9 +256,13 @@ export class TransactionExecutor {
             throw storageError
           }
 
-          span.setAttribute(`result`, `permanent_failure`)
+          if (hookFailure) {
+            span.recordException(hookFailure)
+            span.setAttribute(`result`, `retry_decision_failure`)
+          } else {
+            span.setAttribute(`result`, `permanent_failure`)
+          }
           this.offlineExecutor.rejectTransaction(transaction.id, terminalError)
-          if (hookFailure) throw hookFailure
           return
         }
 

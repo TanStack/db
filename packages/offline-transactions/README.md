@@ -187,14 +187,15 @@ before another attempt.
 
 `NonRetriableError` always stops retry without calling the hook. The default
 policy still determines backoff and the `jitter` option. A hook that throws or
-returns another value stops new admission immediately, then records a terminal
-rejection, removes the outbox row, and rejects the affected waiting promises
-with the hook failure. Already durable queued work remains pending and retained
-for restart. A fresh executor does not replay the failed row.
+returns another value records a terminal rejection for that row, removes it
+from the outbox, and rejects its waiting promises with the hook failure. Once
+the deletion is acknowledged, queued rows continue in creation order. New
+commits may join the queue during cleanup, but cannot run ahead of the failed
+row's deletion. A fresh executor does not replay the failed row.
 If terminal marker storage or deletion fails, the caller still rejects with
-the hook failure and the executor batch rejects with the storage error. A
-marked row skips the named mutation function after restart; an unmarked row
-may replay.
+the hook failure and the executor batch rejects with the storage error. The
+executor then stops with queued work retained. A marked row skips the named
+mutation function after restart; an unmarked row may replay.
 
 ### OfflineExecutor
 
