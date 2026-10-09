@@ -167,3 +167,51 @@ lazy-target paths, cancellation, and real-provider request handling retain
 the owners and limits in the coverage map. The no-includes metadata lookup
 count remains an unquantified performance observation; no throughput law or
 repair is claimed for it.
+
+## Outer filter ownership and captured projection pushdown
+
+The semantic repair head is `8c34efa2c20de1cc521bb6f0ed643771dbdbe9a3`.
+ARCHITECTURE.md §Identity and law 1 supplies both expectations: a filter
+belongs to its lexical source, and a captured parent field keeps that binding
+through a child QueryRef. The primary alias oracle adds two independent
+plain-Map models. One checks parent and child rows through a joined QueryRef or
+direct include, with shadowed or renamed child aliases, eager or on-demand
+sources, and child IDs equal to or different from the outer filter literal.
+The other checks that a projected parent rank controls a child QueryRef after
+preload, a child-rank write, and a parent-rank write. Both compare public rows;
+the on-demand cases also check which child source rows were admitted.
+
+At the original production head `7486c5360`, six of the ten new cases failed
+at the initial public-row comparison: four lost a child whose ID differed
+from the outer filter literal, and two evaluated a captured parent rank as
+the child's rank. The neighboring child-ID-1 cases passed. The repair converts
+each query scope's alias-keyed filter to its SourceId before merging child
+compilation results. It also retains a parent-dependent predicate outside a
+child QueryRef rather than pushing it into the child source. At the semantic
+repair head, all ten new cases, the 268-case generated scope oracle, and the
+56-case optimizer oracle pass. The full query runtime suite passes 4,476 tests;
+the DB test TypeScript check, targeted lint, and formatting checks pass.
+
+Oracle-guide audit: ORC-001 uses the architecture law and names the finite
+scope in each opening comment. ORC-002 uses plain source-role maps rather than
+compiler metadata. ORC-003 places the law, model, grammar, public driver,
+observations, and checkpoint beside their code. ORC-004 and ORC-007 do not
+apply to these finite enumerations; the existing generated scope campaigns
+retain their own controls and replay. ORC-005 observes complete selected rows
+and, for on-demand sources, admitted source rows after preload. ORC-006 is the
+six assertion failures at the intended checkpoint on the original head.
+ORC-008 retains parent and child rank because the two legal writes distinguish
+their effects; the model has no planner or provider state. ORC-009 maps plain
+Map entries to source Collection rows and their selected public result.
+ORC-010 uses `withHistoryCleanup` to retain the primary assertion failure
+while releasing Collections. ORC-011 uses alias renaming as a second
+metamorphic formulation beside the source-role model. ORC-012 is this
+exact-head record and the updated coverage map. ORC-013 is distinguished by
+child ID 1 versus 2 and by parent rank A beside child rank Z, then the
+independent rank writes. ORC-014 makes no real-provider or browser claim: the
+on-demand sync adapters are finite controlled fixtures.
+
+These witnesses cover those two predicate paths and checkpoints. They do not
+claim that all optimizer rewrites, nested joins, or temporal demand histories
+preserve lexical bindings; the alias-scope row in the coverage map retains
+those cells.
