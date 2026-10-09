@@ -55,6 +55,10 @@ const executor = startOfflineExecutor({
       if (response.status === 422) {
         throw new NonRetriableError('The server rejected this todo')
       }
+      // This todo API treats these responses as permanent.
+      if ([404, 405, 409, 410].includes(response.status)) {
+        throw new NonRetriableError(`Todo request rejected: ${response.status}`)
+      }
       if (!response.ok) throw new HttpError(response.status)
 
       // Wait for a server read or sync observation here if your app needs it.
@@ -102,6 +106,9 @@ The hook receives the named mutation function's `Error` and a retry count of
 `0` on the first failure. The same `Error` instance is passed through; a
 rejection with a non-`Error` value is converted to an `Error` and may lose
 custom fields.
+The hook is synchronous and shared by all named mutation functions. An async
+hook returns a Promise, which fails its outbox row. Put function-specific
+context on the thrown error when retry rules differ between functions.
 `NonRetriableError` always stops without calling the hook. Retry delays and
 configured jitter remain unchanged. A retried offline transaction keeps its
 FIFO position. If the hook throws or returns another value, the executor
@@ -252,6 +259,13 @@ import { AsyncStorageAdapter } from './AsyncStorageAdapter'
 type Todo = { id: string; title: string; completed: boolean }
 const apiUrl = 'https://api.example.com/todos' // Replace with your server URL.
 
+class HttpError extends Error {
+  constructor(readonly status: number) {
+    super(`HTTP ${status}`)
+    this.name = 'HttpError'
+  }
+}
+
 const database = open({ name: 'todos.sqlite', location: 'default' })
 const persistence = createReactNativeSQLitePersistence({ database })
 const queryClient = new QueryClient()
@@ -294,7 +308,11 @@ const executor = startOfflineExecutor({
       if (response.status === 422) {
         throw new NonRetriableError('The server rejected this todo')
       }
-      if (!response.ok) throw new Error('Could not save the todo')
+      // This todo API treats these responses as permanent.
+      if ([404, 405, 409, 410].includes(response.status)) {
+        throw new NonRetriableError(`Todo request rejected: ${response.status}`)
+      }
+      if (!response.ok) throw new HttpError(response.status)
       await todos.utils.refetch()
     },
   },

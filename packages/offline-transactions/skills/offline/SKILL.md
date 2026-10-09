@@ -219,6 +219,9 @@ Return `true` to retry, `false` to stop, or `undefined` to use the
 default decision. For example, return `true` for a recoverable 401 and
 `undefined` otherwise. `NonRetriableError` always stops without calling the
 hook. The default backoff and configured jitter still determine retry timing.
+The hook is synchronous and shared by all named mutation functions. An async
+hook returns a Promise, which fails its outbox row. Put function-specific
+context on the thrown error when retry rules differ between functions.
 If the hook throws or returns another value, the executor records a terminal
 rejection for that row, removes it from the outbox, and rejects its waiting
 promises with the hook failure. Other queued rows continue after the failed
@@ -396,6 +399,10 @@ mutationFns: {
     if (res.status === 409) {
       throw new NonRetriableError('Duplicate detected')
     }
+    // This todo API also treats these responses as permanent.
+    if ([404, 405, 410].includes(res.status)) {
+      throw new NonRetriableError(`Todo endpoint rejected: ${res.status}`)
+    }
     if (!res.ok) throw new HttpError(res.status)
   },
 }
@@ -403,8 +410,10 @@ mutationFns: {
 
 Classify failures according to whether the app can recover. The default policy
 stops when an error message contains 400, 401, 403, or 422; it can retry other
-errors indefinitely. Use `shouldRetry` when a 401 can recover after credentials
-refresh, and use `NonRetriableError` for known permanent failures.
+errors indefinitely. This example marks 404, 405, and 410 as permanent for the
+todo API while leaving 408 and 429 available for retry. Use `shouldRetry` when
+a 401 can recover after credentials refresh, and use `NonRetriableError` for
+known permanent failures.
 
 See also: db-core/mutations-optimistic/SKILL.md — for the underlying mutation primitives.
 

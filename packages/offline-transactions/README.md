@@ -149,11 +149,19 @@ passed through; a rejection with a non-`Error` value is converted to an `Error`
 and may lose custom fields. Return `true` to retry, `false` to remove the
 offline transaction from the outbox and reject its
 waiting promises with that error, or `undefined` to use the default
-decision. For example, this allows a 401 retry while keeping the default
-decision for other errors. The named mutation function must throw an error
-that retains the HTTP response status:
+decision. The hook is synchronous and shared by all named mutation functions.
+An async hook returns a Promise, which fails its outbox row. Put any
+function-specific context needed by the hook on the thrown error. For example,
+this allows a 401 retry while keeping the default decision for other errors.
+The named mutation function must throw an error that retains the HTTP response
+status:
 
 ```typescript
+import {
+  NonRetriableError,
+  startOfflineExecutor,
+} from '@tanstack/offline-transactions'
+
 class HttpError extends Error {
   constructor(readonly status: number) {
     super(`HTTP ${status}`)
@@ -173,6 +181,11 @@ const offline = startOfflineExecutor({
         },
         body: JSON.stringify(transaction.mutations),
       })
+      // This todo API treats these responses as permanent. Classify other
+      // statuses according to the server contract.
+      if ([404, 405, 409, 410, 422].includes(response.status)) {
+        throw new NonRetriableError(`Todo request rejected: ${response.status}`)
+      }
       if (!response.ok) throw new HttpError(response.status)
     },
   },

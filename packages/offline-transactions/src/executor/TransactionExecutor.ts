@@ -13,6 +13,10 @@ import type {
 
 const HANDLED_EXECUTION_ERROR = Symbol(`HandledExecutionError`)
 
+function toError(value: unknown): Error {
+  return value instanceof Error ? value : new Error(String(value))
+}
+
 export class TransactionExecutor {
   private scheduler: KeyScheduler
   private outbox: OutboxManager
@@ -107,8 +111,7 @@ export class TransactionExecutor {
             try {
               await this.runMutationFn(transaction)
             } catch (error) {
-              const err =
-                error instanceof Error ? error : new Error(String(error))
+              const err = toError(error)
 
               span.setAttribute(`result`, `error`)
 
@@ -210,21 +213,21 @@ export class TransactionExecutor {
           let decision: boolean | undefined
           try {
             decision = this.config.shouldRetry?.(error, transaction.retryCount)
-            if (decision !== undefined && typeof decision !== `boolean`)
+            if (decision !== undefined && typeof decision !== `boolean`) {
               throw new TypeError(
                 `OfflineConfig.shouldRetry must return true, false, or undefined`,
               )
+            }
           } catch (hookError) {
-            hookFailure =
-              hookError instanceof Error
-                ? hookError
-                : new Error(String(hookError))
+            hookFailure = toError(hookError)
           }
-          shouldRetry = hookFailure
-            ? false
-            : decision === undefined
-              ? this.retryPolicy.shouldRetry(error, transaction.retryCount)
-              : decision
+          if (hookFailure) {
+            shouldRetry = false
+          } else {
+            shouldRetry =
+              decision ??
+              this.retryPolicy.shouldRetry(error, transaction.retryCount)
+          }
         }
 
         span.setAttribute(`shouldRetry`, shouldRetry)
@@ -240,10 +243,20 @@ export class TransactionExecutor {
               stack: terminalError.stack,
             },
           }
-          console.warn(
-            `Transaction ${transaction.id} failed permanently:`,
-            terminalError,
-          )
+          if (hookFailure) {
+            span.recordException(hookFailure)
+            console.warn(
+              `Retry decision failed for transaction ${transaction.id}:`,
+              hookFailure,
+              `Named mutation function error:`,
+              error,
+            )
+          } else {
+            console.warn(
+              `Transaction ${transaction.id} failed permanently:`,
+              error,
+            )
+          }
           try {
             await this.removeSettledTransaction(rejectionPending, true)
           } catch (storageError) {
@@ -256,12 +269,10 @@ export class TransactionExecutor {
             throw storageError
           }
 
-          if (hookFailure) {
-            span.recordException(hookFailure)
-            span.setAttribute(`result`, `retry_decision_failure`)
-          } else {
-            span.setAttribute(`result`, `permanent_failure`)
-          }
+          span.setAttribute(
+            `result`,
+            hookFailure ? `retry_decision_failure` : `permanent_failure`,
+          )
           this.offlineExecutor.rejectTransaction(transaction.id, terminalError)
           return
         }
@@ -316,8 +327,7 @@ export class TransactionExecutor {
       await this.outbox.remove(transaction.id)
       this.scheduler.markCompleted(transaction)
     } catch (error) {
-      const storageError =
-        error instanceof Error ? error : new Error(String(error))
+      const storageError = toError(error)
       this.fatalError = storageError
       this.scheduler.markFailed(transaction)
       this.clearRetryTimer()
