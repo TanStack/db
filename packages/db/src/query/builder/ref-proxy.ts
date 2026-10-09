@@ -8,6 +8,11 @@ import type { PublishedVirtualRowProps } from '../../virtual-props.js'
 
 export { isRefProxy } from './ref-proxy-identity.js'
 
+// A captured proxy and a local proxy can be spread into the same select
+// object. Their temporary keys must stay distinct until buildNestedSelect
+// gives them deterministic per-object positions.
+let nextSpreadSentinelId = 0
+
 export interface RefProxy<T = any> {
   /** @internal */
   readonly __refProxy: true
@@ -15,6 +20,8 @@ export interface RefProxy<T = any> {
   readonly __path: Array<string>
   /** @internal */
   readonly __sourceAlias?: string
+  /** @internal */
+  readonly __bindingId?: string
   /** @internal */
   readonly __type: T
 }
@@ -87,6 +94,7 @@ export function createSingleRowRefProxy<
         if (prop === `__refProxy`) return true
         if (prop === `__path`) return path
         if (prop === `__sourceAlias`) return undefined
+        if (prop === `__bindingId`) return undefined
         if (prop === `__type`) return undefined // Type is only for TypeScript inference
         if (prop === REF_PROXY_BRAND) return true
         if (typeof prop === `symbol`) return Reflect.get(target, prop, receiver)
@@ -100,6 +108,7 @@ export function createSingleRowRefProxy<
           prop === `__refProxy` ||
           prop === `__path` ||
           prop === `__sourceAlias` ||
+          prop === `__bindingId` ||
           prop === `__type`
         )
           return true
@@ -115,6 +124,7 @@ export function createSingleRowRefProxy<
           prop === `__refProxy` ||
           prop === `__path` ||
           prop === `__sourceAlias` ||
+          prop === `__bindingId` ||
           prop === `__type`
         ) {
           return { enumerable: false, configurable: true }
@@ -136,10 +146,10 @@ export function createSingleRowRefProxy<
  */
 export function createRefProxy<T extends Record<string, any>>(
   aliases: Array<string>,
+  bindings?: ReadonlyMap<string, string>,
 ): RefProxy<T> & T {
   // Each path has one proxy, cached by its parent under the property name.
   const aliasProxies = new Map<string, any>()
-  let accessId = 0 // Monotonic counter to record evaluation order
 
   function createProxy(path: Array<string>): any {
     let children: Map<string, any> | undefined
@@ -148,10 +158,14 @@ export function createRefProxy<T extends Record<string, any>>(
         if (prop === `__refProxy`) return true
         if (prop === `__path`) return path
         if (prop === `__sourceAlias`) return path[0]
+        if (prop === `__bindingId`) return bindings?.get(path[0] ?? ``)
         if (prop === `__type`) return undefined // Type is only for TypeScript inference
         // Answers with the path so toExpression reads it in one trap.
         if (prop === REF_PROXY_BRAND) return path
         if (typeof prop === `symbol`) return Reflect.get(target, prop, receiver)
+        if (Object.prototype.hasOwnProperty.call(target, prop)) {
+          return Reflect.get(target, prop, receiver)
+        }
 
         children ??= new Map()
         let child = children.get(prop)
@@ -167,6 +181,7 @@ export function createRefProxy<T extends Record<string, any>>(
           prop === `__refProxy` ||
           prop === `__path` ||
           prop === `__sourceAlias` ||
+          prop === `__bindingId` ||
           prop === `__type`
         )
           return true
@@ -174,13 +189,13 @@ export function createRefProxy<T extends Record<string, any>>(
       },
 
       ownKeys(target) {
-        const id = ++accessId
+        const id = ++nextSpreadSentinelId
         const sentinelKey = `__SPREAD_SENTINEL__${path.join(`.`)}__${id}`
         if (!Object.prototype.hasOwnProperty.call(target, sentinelKey)) {
           Object.defineProperty(target, sentinelKey, {
             enumerable: true,
             configurable: true,
-            value: true,
+            value: new PropRef(path, path[0], bindings?.get(path[0] ?? ``)),
           })
         }
         return Reflect.ownKeys(target)
@@ -191,6 +206,7 @@ export function createRefProxy<T extends Record<string, any>>(
           prop === `__refProxy` ||
           prop === `__path` ||
           prop === `__sourceAlias` ||
+          prop === `__bindingId` ||
           prop === `__type`
         ) {
           return { enumerable: false, configurable: true }
@@ -207,6 +223,7 @@ export function createRefProxy<T extends Record<string, any>>(
       if (prop === `__refProxy`) return true
       if (prop === `__path`) return []
       if (prop === `__sourceAlias`) return undefined
+      if (prop === `__bindingId`) return undefined
       if (prop === `__type`) return undefined // Type is only for TypeScript inference
       if (prop === REF_PROXY_BRAND) return true
       if (typeof prop === `symbol`) return Reflect.get(target, prop, receiver)
@@ -229,6 +246,7 @@ export function createRefProxy<T extends Record<string, any>>(
         prop === `__refProxy` ||
         prop === `__path` ||
         prop === `__sourceAlias` ||
+        prop === `__bindingId` ||
         prop === `__type`
       )
         return true
@@ -237,7 +255,14 @@ export function createRefProxy<T extends Record<string, any>>(
     },
 
     ownKeys(_target) {
-      return [...aliases, `__refProxy`, `__path`, `__sourceAlias`, `__type`]
+      return [
+        ...aliases,
+        `__refProxy`,
+        `__path`,
+        `__sourceAlias`,
+        `__bindingId`,
+        `__type`,
+      ]
     },
 
     getOwnPropertyDescriptor(target, prop) {
@@ -245,6 +270,7 @@ export function createRefProxy<T extends Record<string, any>>(
         prop === `__refProxy` ||
         prop === `__path` ||
         prop === `__sourceAlias` ||
+        prop === `__bindingId` ||
         prop === `__type`
       ) {
         return { enumerable: false, configurable: true }
@@ -270,9 +296,10 @@ export function createRefProxy<T extends Record<string, any>>(
  */
 export function createRefProxyWithSelected<T extends Record<string, any>>(
   aliases: Array<string>,
+  bindings?: ReadonlyMap<string, string>,
 ): RefProxy<T> &
   T & { $selected: SingleRowRefProxy<any, string | number, true> } {
-  const baseProxy = createRefProxy(aliases)
+  const baseProxy = createRefProxy(aliases, bindings)
 
   // Create a proxy for $selected that prefixes all paths with '$selected'
   const cache = new Map<string, any>()
@@ -288,6 +315,7 @@ export function createRefProxyWithSelected<T extends Record<string, any>>(
         if (prop === `__refProxy`) return true
         if (prop === `__path`) return [`$selected`, ...path]
         if (prop === `__sourceAlias`) return `$selected`
+        if (prop === `__bindingId`) return undefined
         if (prop === `__type`) return undefined
         if (prop === REF_PROXY_BRAND) return true
         if (typeof prop === `symbol`) return Reflect.get(target, prop, receiver)
@@ -301,6 +329,7 @@ export function createRefProxyWithSelected<T extends Record<string, any>>(
           prop === `__refProxy` ||
           prop === `__path` ||
           prop === `__sourceAlias` ||
+          prop === `__bindingId` ||
           prop === `__type`
         )
           return true
@@ -316,6 +345,7 @@ export function createRefProxyWithSelected<T extends Record<string, any>>(
           prop === `__refProxy` ||
           prop === `__path` ||
           prop === `__sourceAlias` ||
+          prop === `__bindingId` ||
           prop === `__type`
         ) {
           return { enumerable: false, configurable: true }
@@ -384,8 +414,8 @@ export function toExpression(value: any): BasicExpression<any> {
   if (brand !== undefined) {
     // An alias-qualified ref proxy answers the brand with its path.
     return Array.isArray(brand)
-      ? new PropRef(brand, brand[0])
-      : new PropRef(value.__path, value.__sourceAlias)
+      ? new PropRef(brand, brand[0], value.__bindingId)
+      : new PropRef(value.__path, value.__sourceAlias, value.__bindingId)
   }
   // toArray(), concat(toArray()), and materialize() must be used as direct
   // select fields, not inside expressions
