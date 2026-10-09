@@ -1050,7 +1050,7 @@ export function compileQuery(
       pipeline,
       query.groupBy,
       valueIdentity,
-      new Set(collectScopeAliases(query)),
+      new Set(getAllSources(query).map((source) => source.alias)),
       query.having,
       query.select,
       query.fnHaving,
@@ -1064,7 +1064,7 @@ export function compileQuery(
       pipeline,
       [], // Empty group by means single group
       valueIdentity,
-      new Set(collectScopeAliases(query)),
+      new Set(getAllSources(query).map((source) => source.alias)),
       query.having,
       query.select,
       query.fnHaving,
