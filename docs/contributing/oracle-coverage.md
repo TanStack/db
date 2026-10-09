@@ -1775,12 +1775,20 @@ empty then fresh subset in the private generation, its reset marker, the
 recovering claim's storage ID, and a later claim of the unchanged head. A
 mutant that uses the expired claim's remembered storage ID advances the head
 and fails at that comparison. The controlled source supplies the recovery
-decision; the Electric owner still needs a receiving history in which its own
-invalid-resume classification reaches this same held expiry cut. The
-persistence owner also needs an intermediate receiving checkpoint between
-storage rotation and public truncate, where a demand or old callback may
-arrive. The grammar combines those actions and cannot establish that gap.
-It does not model physical garbage collection.
+decision. The Electric resume-race owner now supplies an incompatible stored
+shape identity, reaches Electric's own scoped-recovery decision, expires its
+claim before SQLite's rotation transaction, and checks that a warm peer keeps
+its rows and resume metadata while the recovering run gets private storage.
+This witness failed before Electric stopped writing a reset marker into the
+shared generation. A second real-SQLite witness holds rotation after the
+storage transaction but before public truncate. It delivers a retired Electric
+callback and starts a distinct demand in that interval. The replacement
+session refetches the active empty subset and applies fresh rows for both
+explicit demands. Only those rows reach public and durable state. A deliberate
+wrong row in the rotated storage fails the held private-cache assertion. The
+grammar combines those actions; these fixed receiving cuts supply the missing
+implementation evidence.
+It does not model physical garbage collection or arbitrary callback schedules.
 The separate [receipt-settlement grammar](../../review-evidence/cache-receipt-tla/README.md)
 checks the accepted-versus-visible distinction during scoped recovery with a
 persisting optimistic transaction. It is bounded model evidence; the
@@ -1925,6 +1933,14 @@ read across row loss or a committed replacement. Unknown and missing key-set
 evidence start changes-only without publishing the cached rows; a row-1 demand
 then applies only its source snapshot. This is a fixed Node SQLite receiving
 witness, not a generated-history claim or a native Expo result.
+Its two cache-generation receiving histories use Electric's real resume
+classifier and wrapper with real SQLite. An incompatible stored shape reaches
+private rotation after claim expiry without overwriting a warm peer's resume
+metadata. A later active-session claim expiry holds the boundary after SQLite
+rotation and before public truncate; a retired callback cannot write there,
+and a demand started in that interval settles after its replacement subset
+applies. The ShapeStream callback schedule is controlled. An installed-SDK HTTP delivery
+at this exact intermediate cut and native-host execution are not established.
 
 Applied-settlement owner: `packages/electric-db-collection/tests/electric-oracle.property.test.ts`.
 Held optimistic application distinguishes readiness from subset completion for

@@ -111,3 +111,74 @@ public and durable rows and metadata at settlement. Electric's upstream
 classification, the interval between storage rotation and public truncate,
 native hosts, and arbitrary overlapping recoveries are outside this receiving
 witness.
+
+## Electric and SQLite receiving completion
+
+The follow-up source begins at Git `5627eadf810b1e507f809ced17e3b7bccfac215c`.
+The Electric resume-race owner now supplies the upstream decision that the
+controlled SQLite source omitted. A stored resume record belongs to a warm
+peer's shape, while a second Electric Collection requests a different shape.
+Electric itself chooses scoped recovery. The driver holds rotation before its
+SQLite transaction, expires only the recovering claim, and checks that the
+warm peer's public and durable row and resume metadata survive. It then starts
+a demand while rotation has completed but public truncate has not, and
+requires a fresh subset row in private storage after settlement. With the
+original production branch, the test failed **at the pre-rotation warm
+metadata assertion**: Electric had already written a reset marker to the
+shared generation. The fix leaves that marker for the rotated generation.
+
+A neighboring real-SQLite test starts with an active Electric provider
+session, then expires its cache claim. It holds rotation after the SQLite
+transaction but before public truncate, delivers a retired callback, and
+starts a distinct demand at that held cut. The old public snapshot remains
+until truncate; the new private storage remains empty. The replacement session
+refetches the already-active empty subset, then serves the pre-rotation demand
+and the demand started in the gap with separate applied rows. Both demands
+remain pending at the held cut, and the gap demand remains pending until its
+own snapshot is delivered. Only the two fresh rows appear in the public
+Collection and private SQLite snapshot. The test also sends the retired
+callback after replacement subscription and checks it is ignored. A temporary
+mutant that skipped old session cleanup **survived** this witness because the wrapper's scoped
+recovery guard and Electric's lifecycle fence independently excluded those
+callbacks. That survivor limits attribution to either individual guard; it
+does not negate the observed cross-boundary outcome. The existing descriptor
+oracle and `fault-late-fetch.cfg` challenge stale-session admission on their
+separate abstractions. A broader lifecycle-guard mutant was rejected by
+automatic approval review and was not run.
+
+A wrong-result control wrote retired row 9 directly into the rotated claim
+after the held callback. The test failed at its private SQLite snapshot
+comparison: expected `[]`, observed row 9. The control was removed. This
+calibrates that storage observation, not the relative necessity of each
+production fence. In the incompatible-resume witness, the source snapshot
+promise stayed pending for an additional event-loop turn after request launch;
+the recovering demand remained pending and its row was absent from public and
+durable state until delivery.
+
+The repaired branch passed the two receiving tests and the five focused
+Electric and SQLite test files: 886 passed, one TODO. Electric typecheck,
+changed-file lint, formatting, and diff checks passed. The wrong-result
+control's assertion failure is separate from that GREEN result.
+
+| Guide requirement | Outcome for the Electric and SQLite receiving witnesses                                                                                                                                                    |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ORC-001           | The law is per-run cache-claim authority and source-applied demand settlement; the comments limit provider framing to controlled callbacks.                                                                |
+| ORC-002           | Expected warm/private rows and metadata follow from per-run claim ownership and source snapshots, not Electric's classifier or SQLite's head branch.                                                       |
+| ORC-003           | Adjacent prose states the laws, two schedules, real entry paths, public/durable observations, and checkpoints.                                                                                             |
+| ORC-004           | Not triggered: these are fixed schedules, not generated-history claims.                                                                                                                                    |
+| ORC-005           | Electric's actual startup classifier and later provider-session restart, the persisted wrapper, and real SQLite execute at both gated rotation cuts.                                                       |
+| ORC-006           | Original code failed warm metadata; injected row 9 failed private-storage assertion. Old-cleanup mutant survived because another guard excluded the callback.                                              |
+| ORC-007           | Not triggered: no important generated property was added.                                                                                                                                                  |
+| ORC-008           | Not triggered: the tests add no stateful reference model. The TLA grammar's combined rotation/truncate remains a declared abstraction.                                                                     |
+| ORC-009           | Tests use the glossary's sync run, provider session, persisted cache claim/generation, public snapshot, and applied settlement terms.                                                                      |
+| ORC-010           | Gates and snapshot waits are released in cleanup; timeout-bounded cleanup failures are retained beside the primary checkpoint.                                                                             |
+| ORC-011           | The controlled SQLite peer test and the Electric-classifier test independently reach the same private-head consequence; the later expiry test reaches the intermediate cut.                                |
+| ORC-012           | This addendum records all applicable requirements, RED/GREEN evidence, the surviving mutant, and the controlled-provider limit.                                                                            |
+| ORC-013           | Live-claim head rotation remains the neighboring opposite-ownership witness; these tests cross expiry before rotation and after an active session.                                                         |
+| ORC-014           | ShapeStream callbacks are controlled. The installed-SDK delivery owner covers late HTTP responses across managed rotation, but this exact intermediate cut is not an installed-SDK or native-host receipt. |
+
+The named gaps from the earlier addendum are closed at Electric's classifier
+and the real-SQLite post-rotation boundary. The bounded model remains an
+atomic projection. Live Electric service framing, installed-SDK delivery at
+this exact held cut, native SQLite hosts, and arbitrary schedules remain
+outside these fixed witnesses.

@@ -2122,8 +2122,12 @@ function createElectricSync<T extends Row<unknown>>(
       }
     }
 
+    // Scoped recovery writes its reset marker into the rotated generation.
+    // Writing it before rotation could alter a warm peer's current cache if
+    // this run's claim expires before SQLite decides rotation ownership.
     if (
       requiresFreshSourceEvidence &&
+      !scopedRecovery &&
       (malformedPersistedResume ||
         hasIncompatiblePersistedResume ||
         persistedResumeState?.kind === `resume`)
