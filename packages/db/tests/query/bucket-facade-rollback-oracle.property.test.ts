@@ -69,7 +69,12 @@ import type { BucketRow } from '../../src/query/live/materialized-pipeline.js'
  * operations, the step may insert an optimistic row into a held facade
  * through a user transaction that stays pending until cleanup. The model
  * keeps only synced rows, so the comparison sets those optimistic rows aside
- * and checks that each stays visible while its facade is held.
+ * and checks that each stays visible while its facade is held. A step may
+ * also hold one shown facade's sync commits behind a persisting user
+ * transaction during the flush, and settle it before the comparison. The
+ * flush's writes and a rollback's restoring writes then land only when the
+ * transaction settles, so every law is checked after they land. The settled
+ * transaction's own row and its events are set aside.
  *
  * The driver runs the real adapter over a D2 graph. After each flush it
  * compares the set of facades the adapter holds with the model's buckets,
@@ -82,7 +87,10 @@ import type { BucketRow } from '../../src/query/live/materialized-pipeline.js'
  * The work counter wraps the iteration, `forEach`, `get` and `has` methods of
  * each facade's stored rows during the flush and records which facades the
  * flush read. A pinned case covers nested facades across two edges: the child
- * edge commits, then the parent edge throws.
+ * edge commits, then the parent edge throws. Pinned cases also cover a
+ * facade subscriber that throws during publication, which must not hold back
+ * another facade's events, and a restore that throws, which must still close
+ * every facade's deferred events.
  *
  * Limits:
  * - Facade indexes and the root commit inside a live query are covered by
@@ -95,8 +103,10 @@ import type { BucketRow } from '../../src/query/live/materialized-pipeline.js'
  *   (the `local` step field) and the oracle requires the flush to keep them
  *   visible while the facade is held. Retirement retracts every key the facade
  *   still shows through an ordinary facade write, so a failed flush restores
- *   it. Held commits and synced rows left at retirement have pinned witnesses
- *   only.
+ *   it. Synced rows left at retirement have pinned witnesses only. Held
+ *   commits are in the grammar (the `hold` step field), with one hold per
+ *   step that settles before the comparison. A hold that stays open across
+ *   several flushes is not generated.
  * - After a failed flush, each facade the flush created must report
  *   `status === 'cleaned-up'`. The model does not otherwise follow facades
  *   after the adapter drops them.
@@ -317,6 +327,10 @@ class Driver {
   private readonly localIds = new Map<object, Set<number>>()
   private readonly localTransactions: Array<Transaction> = []
   private nextLocalId = 100
+  // Rows of a persisting user transaction that holds a facade's sync commits.
+  // The transaction settles without a sync write, so its row then leaves.
+  readonly heldIds = new Set<number>()
+  private nextHeldId = 1000
 
   constructor() {
     this.adapter = new BucketFacadeAdapter(
@@ -407,6 +421,34 @@ class Driver {
     const ids = this.localIds.get(facade) ?? new Set()
     ids.add(id)
     this.localIds.set(facade, ids)
+  }
+
+  /**
+   * Start a persisting user transaction on a shown facade. While it persists,
+   * the facade holds every sync commit, including the adapter's flush and
+   * rollback writes. Returns a function that settles it.
+   */
+  hold(bucket: BucketKey): (() => Promise<void>) | undefined {
+    const facade = this.entry(bucket)?.collection
+    if (!facade) return undefined
+    const id = this.nextHeldId++
+    this.heldIds.add(id)
+    let settle!: () => void
+    const transaction = createTransaction({
+      autoCommit: false,
+      mutationFn: () =>
+        new Promise<void>((resolve) => {
+          settle = resolve
+        }),
+    })
+    transaction.mutate(() => {
+      facade.insert({ id, v: 0, $key: id } as unknown as Row)
+    })
+    const committed = transaction.commit()
+    return async () => {
+      settle()
+      await committed
+    }
   }
 
   /** Count events and stored-row reads for every facade that exists now. */
@@ -608,7 +650,9 @@ function checkEvents(
   for (const bucket of BUCKETS) {
     const facade = facadesBefore.get(bucket)
     if (!facade) continue
-    const messages = changes.get(facade) ?? []
+    const messages = (changes.get(facade) ?? []).filter(
+      (message) => !driver.heldIds.has(message.key),
+    )
     const touched = touchedIds(bucket, previous, ops)
     const named = messages.map((message) => message.key)
     expect(
@@ -658,13 +702,14 @@ async function runHistory(
     outcome: Outcome
     throwPick: number
     local?: number
+    hold?: number
   }>,
 ): Promise<void> {
   const driver = new Driver()
   let published: Model = new Map()
   let pending: Array<Op> = []
   await withCleanup(
-    () => {
+    async () => {
       for (const [index, step] of steps.entries()) {
         const label = `step ${index}`
         // A user transaction may first add an optimistic row to a shown facade.
@@ -673,6 +718,14 @@ async function runHistory(
         if (localBucket && published.has(localBucket)) {
           driver.addLocal(localBucket)
         }
+        // A persisting user transaction may hold one shown facade's sync
+        // commits through the flush. It settles before the comparison.
+        const holdBucket =
+          step.hold === undefined ? undefined : BUCKETS[step.hold]
+        const settle =
+          holdBucket && published.has(holdBucket)
+            ? driver.hold(holdBucket)
+            : undefined
         const ops = legalize(applyOps(published, pending), step.choices)
         driver.send(ops)
         pending = [...pending, ...ops]
@@ -749,6 +802,10 @@ async function runHistory(
           ).toBe(0)
         }
 
+        // The held commits land when the transaction settles. Every law below
+        // is checked after that, so a write the flush held cannot hide.
+        await settle?.()
+
         const layoutsAfter = driver.layoutCounts()
         if (outcome === `publish`) {
           const next = applyOps(published, pending)
@@ -790,11 +847,22 @@ async function runHistory(
           )
         }
         driver.check(published, `${label} (${outcome})`)
+        // Settling the hold publishes only its own row's events.
+        for (const messages of driver.takeChanges().values()) {
+          expect(
+            messages
+              .map((message) => message.key)
+              .filter((key) => !driver.heldIds.has(key)),
+            `${label}: events after ${outcome}`,
+          ).toEqual([])
+        }
         const after = driver.eventCounts()
         for (const [facade, count] of before) {
-          expect(after.get(facade), `${label}: events after ${outcome}`).toBe(
-            count,
-          )
+          // The hold's own row adds events when the transaction settles.
+          if (!settle)
+            expect(after.get(facade), `${label}: events after ${outcome}`).toBe(
+              count,
+            )
           expect(
             layoutsAfter.get(facade),
             `${label}: layout revision after ${outcome}`,
@@ -826,6 +894,11 @@ const step = fc.record({
   throwPick: fc.nat(3),
   // About two steps in five add an optimistic row to a facade first.
   local: fc
+    .integer({ min: -3, max: BUCKETS.length - 1 })
+    .map((bucket) => (bucket < 0 ? undefined : bucket)),
+  // About two steps in five hold a facade's sync commits behind a persisting
+  // transaction during the flush.
+  hold: fc
     .integer({ min: -3, max: BUCKETS.length - 1 })
     .map((bucket) => (bucket < 0 ? undefined : bucket)),
 })
@@ -1282,5 +1355,103 @@ describe(`bucket facade rollback`, () => {
         throwPick: 0,
       },
     ])
+  })
+
+  // A throwing subscriber of one facade must not keep another facade's
+  // deferral open. Each facade publishes, then the first error is rethrown.
+  it(`publishes every facade when one facade's subscriber throws`, async () => {
+    const driver = new Driver()
+    await withCleanup(
+      () => {
+        driver.send([
+          { type: `activate`, bucket: `b0` },
+          { type: `activate`, bucket: `b1` },
+          { type: `insert`, bucket: `b0`, id: 1, v: 1, rank: 1 },
+          { type: `insert`, bucket: `b1`, id: 1, v: 1, rank: 1 },
+        ])
+        driver.adapter.flush().publish()
+        const subscriberError = new Error(`subscriber failure`)
+        const throwing = driver.entry(`b0`)!.collection.subscribeChanges(() => {
+          throw subscriberError
+        })
+        const keys: Array<number> = []
+        driver
+          .entry(`b1`)!
+          .collection.subscribeChanges((changes) =>
+            keys.push(...changes.map((change) => change.key)),
+          )
+        driver.send([
+          { type: `insert`, bucket: `b0`, id: 2, v: 1, rank: 2 },
+          { type: `insert`, bucket: `b1`, id: 2, v: 1, rank: 2 },
+        ])
+        expect(() => driver.adapter.flush().publish()).toThrow(subscriberError)
+        expect(keys).toEqual([2])
+        throwing.unsubscribe()
+        driver.send([{ type: `insert`, bucket: `b1`, id: 3, v: 1, rank: 3 }])
+        driver.adapter.flush().publish()
+        expect(keys).toEqual([2, 3])
+      },
+      () => driver.cleanup(),
+    )
+  })
+
+  // A failed flush whose restore also throws still discards every deferral,
+  // so the facade publishes the next successful flush.
+  it(`keeps publishing a facade after its restore throws`, async () => {
+    const driver = new Driver()
+    await withCleanup(
+      () => {
+        driver.send([
+          { type: `activate`, bucket: `b0` },
+          { type: `insert`, bucket: `b0`, id: 1, v: 1, rank: 1 },
+        ])
+        driver.adapter.flush().publish()
+        const entry = driver.entry(`b0`)!
+        const keys: Array<number> = []
+        entry.collection.subscribeChanges((changes) =>
+          keys.push(...changes.map((change) => change.key)),
+        )
+        driver.send([{ type: `insert`, bucket: `b0`, id: 2, v: 1, rank: 2 }])
+        const publication = driver.adapter.flush()
+        publication.prepare()
+        // The restore's commit throws.
+        injectFailure(entry.sync!, `commit`)
+        expect(() => publication.rollback()).toThrow(
+          `injected facade write failure`,
+        )
+        driver.send([{ type: `insert`, bucket: `b0`, id: 3, v: 1, rank: 3 }])
+        driver.adapter.flush().publish()
+        expect(keys).toContain(3)
+      },
+      () => driver.cleanup(),
+    )
+  })
+
+  // A flush with no facade changes copies no bookkeeping, so a root-only
+  // write does no work proportional to the number of buckets.
+  it(`copies nothing for a flush without facade changes`, async () => {
+    const driver = new Driver()
+    await withCleanup(
+      () => {
+        driver.send([
+          { type: `activate`, bucket: `b0` },
+          { type: `insert`, bucket: `b0`, id: 1, v: 1, rank: 1 },
+        ])
+        driver.adapter.flush().publish()
+        const adapter = driver.adapter as unknown as { snapshot: () => unknown }
+        let snapshots = 0
+        const snapshot = adapter.snapshot
+        adapter.snapshot = () => {
+          snapshots++
+          return snapshot.call(driver.adapter)
+        }
+        const publication = driver.adapter.flush()
+        publication.prepare()
+        publication.rollback()
+        driver.adapter.flush().publish()
+        expect(snapshots).toBe(0)
+      },
+      () => driver.cleanup(),
+    )
   })
 })
