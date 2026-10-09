@@ -88,6 +88,9 @@ void transaction.when('settled').catch((error) => console.error(error))
 `onMutate` must be synchronous. It applies the optimistic change before the executor writes the outbox entry. If that write fails, the transaction fails. A visible optimistic change alone does not prove durable storage.
 
 When `isOfflineEnabled` is true, the executor calls the named `mutationFn` after it records the transaction. A temporary error leaves the entry available for retry. `NonRetriableError` marks a permanent failure and rolls back optimistic state.
+The todo examples assume 404, 405, 409, 410, and 422 are permanent for their
+server. Change that classification to match your server contract. Responses
+such as 408 and 429 can be recoverable.
 
 Set `shouldRetry(error, retryCount)` on the executor config to change the
 retry decision after a named mutation function rejects. Return `true` to retry,
