@@ -157,7 +157,7 @@ the shadowed/renamed cases and by `[1]` versus an unrestricted `[1, 2]`
 request with an applicable index. ORC-014 makes no real-provider claim: the
 request witness uses a controlled finite adapter.
 
-With the candidate repairs, all 98 DB query suites pass (4,079 tests),
+At repair commit `d1126e7c4`, all 98 DB query suites pass (4,079 tests),
 including the generated scope oracle's fixed and random campaigns. The DB
 TypeScript, ESLint, and Prettier checks pass with the worktree's pinned
 dependencies linked.
