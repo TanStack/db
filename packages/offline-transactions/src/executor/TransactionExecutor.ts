@@ -214,6 +214,8 @@ export class TransactionExecutor {
           try {
             decision = this.config.shouldRetry?.(error, transaction.retryCount)
             if (decision !== undefined && typeof decision !== `boolean`) {
+              // An async hook is invalid, but its rejection must stay row-local.
+              void Promise.resolve(decision).catch(() => {})
               throw new TypeError(
                 `OfflineConfig.shouldRetry must return true, false, or undefined`,
               )
