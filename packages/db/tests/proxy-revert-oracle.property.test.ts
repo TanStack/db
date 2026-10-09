@@ -6,12 +6,14 @@ import { createChangeProxy, withChangeTracking } from '../src/proxy'
  * # Which draft writes count as changes, and which count as reverts?
  *
  * A draft records the changes a callback makes to a row. A write that makes a
- * value structurally equal to its original again is a revert, and a fully
- * reverted draft reports no change. `getChanges()` returns:
- *
- * - `{}` when every value equals its original;
- * - otherwise each own enumerable string key whose final value differs from
- *   its original, with that final value, and each deleted key as `undefined`.
+ * value structurally equal to its original again is a revert. `getChanges()`
+ * reports each own enumerable string key whose final value differs from its
+ * original, with that final value, and each deleted key as `undefined`. It
+ * may also report a key the callback wrote whose final value equals its
+ * original, with that value. A missed change (a false negative) breaks the
+ * row; an extra report of an equal value (a false positive) only repeats the
+ * stored value, so the law permits it. A direct write back to the original
+ * value still reports nothing.
  *
  * "Equal" here is draft equality, which is stricter than `deepEquals`:
  *
@@ -35,7 +37,8 @@ import { createChangeProxy, withChangeTracking } from '../src/proxy'
  * (its `set`, `deleteProperty`, and `get` traps, and the array iterator), and
  * the check reads `getChanges()` and the draft.
  *
- * - `getChanges()` equals the model's changes.
+ * - `getChanges()` reports every change in the model, with its final value.
+ *   Any other key it reports is one the history wrote, with its final value.
  * - Reading the draft gives the model's final value.
  * - The original row is unchanged.
  *
@@ -43,7 +46,9 @@ import { createChangeProxy, withChangeTracking } from '../src/proxy'
  * `getChanges` implementation comments in `src/proxy.ts` and the revert
  * examples in `tests/proxy-oracle.test.ts`, as of `18abceee`. Rules 7 to 9 are design
  * decisions recorded in
- * `docs/contributing/oracle-reviews/code-weight-draft-proxy.md`.
+ * `docs/contributing/oracle-reviews/code-weight-draft-proxy.md`. The
+ * false-positive permission is a maintainer decision (2026-10-09), recorded in
+ * `docs/contributing/oracle-reviews/proxy-revert-replaced-object.md`.
  *
  * Limits:
  * - The main histories write by assignment, delete, nested property write,
@@ -713,9 +718,11 @@ function expectHistory({ original, ops }: History): void {
   const before = realizeRoot(original)
   const { proxy, getChanges } = createChangeProxy(row)
   let state: Root = { ...original }
+  const written = new Set<string>()
   for (const generated of ops) {
     const op = resolve(state, original, generated)
     if (op === undefined || !applicable(state, original, op)) continue
+    written.add(op.field)
     if (op.op === `revert`) {
       if (original[op.field] === undefined) delete proxy[op.field]
       else
@@ -730,9 +737,21 @@ function expectHistory({ original, ops }: History): void {
     original: Object.fromEntries(FIELDS.map((f) => [f, canon(original[f])])),
     ops,
   })
-  expect(Object.keys(changes).sort(), `changed keys, ${context}`).toEqual(
-    [...expected.keys()].sort(),
-  )
+  for (const field of expected.keys())
+    expect(field in changes, `change of ${field} reported, ${context}`).toBe(
+      true,
+    )
+  // An extra report is permitted only for a written key, with its final value.
+  for (const field of Object.keys(changes)) {
+    if (expected.has(field)) continue
+    expect(written.has(field), `unwritten ${field} reported, ${context}`).toBe(
+      true,
+    )
+    expect(
+      readSpec(changes[field], state[field]),
+      `extra report of ${field}, ${context}`,
+    ).toBe(encode(state[field]))
+  }
   for (const [field, spec] of expected) {
     if (spec === undefined)
       expect(changes[field], `deleted ${field}, ${context}`).toBeUndefined()
@@ -970,7 +989,7 @@ describe(`draft revert oracle`, () => {
       },
     ],
     [
-      `a replaced object restored to its original by a nested write is not a change`,
+      `a replaced object restored to its original by a nested write reports at most its original value`,
       {
         original: { f: { k: `obj`, a: 0 } },
         ops: [
@@ -980,7 +999,7 @@ describe(`draft revert oracle`, () => {
       },
     ],
     [
-      `a replaced object restored with its symbol key kept is not a change`,
+      `a replaced object restored with its symbol key kept reports at most its original value`,
       {
         original: {
           f: { k: `obj`, a: 0, sym: 1 },
@@ -1179,18 +1198,14 @@ describe(`draft revert oracle`, () => {
 //
 // The histories above write only through assignment and delete, so they
 // cannot reach a key whose value a native mutator changed. A native mutator
-// (`push`, `pop`, `reverse`) counts as a change without a revert check: when it
-// leaves the value equal to the original, `getChanges()` may report the key or
-// omit it. That permission belongs to the native write itself. It ends when
-// an assignment replaces the value the mutator changed, and a mutator called
-// through a handle the callback has since replaced changes nothing in the row.
+// (`push`, `pop`, `reverse`) counts as a change without a revert check, so
+// when the value ends equal to the original, `getChanges()` may still report
+// it, as for any written key. A mutator called through a handle the callback
+// has since replaced changes nothing in the row.
 //
 // Model: plain JavaScript values. A row is `{ x, f: { arr, g: { a } } }`. Each
-// step runs on a native copy, and the model tracks the native sites that
-// still hold a native write: `f.arr` after a mutator on the attached array,
-// cleared when `f.arr` is assigned a different value. A retained handle is the
-// array object it was taken from; once `f.arr` holds another array, the handle
-// is detached. An assignment of a value equal to the current one changes
+// step runs on a native copy. A retained handle is the array object it was
+// taken from; once `f.arr` holds another array, the handle is detached. An assignment of a value equal to the current one changes
 // nothing, as the set trap documents: the draft keeps its array, so the handle
 // and any native write stay attached. Native JavaScript would detach the
 // handle there; that difference is an open question, not a law of this block.
@@ -1198,8 +1213,7 @@ describe(`draft revert oracle`, () => {
 // Law, checked after the last step:
 // - `x` is reported exactly when it differs from the original.
 // - `f` is reported, with its final value, when it differs from the original.
-//   When it equals the original, `f` may be reported only while a native site
-//   under it is live.
+//   When it equals the original, `f` may be reported, with its final value.
 // - Reading the draft gives the model's final row.
 
 type NativeRow = { x: number; f: { arr: Array<number>; g: { a?: number } } }
@@ -1249,36 +1263,28 @@ const cloneRow = (row: NativeRow): NativeRow => ({
 const sameRowPart = (left: unknown, right: unknown) =>
   JSON.stringify(left) === JSON.stringify(right)
 
-function nativeModel(history: NativeHistory): {
-  final: NativeRow
-  nativeLive: boolean
-} {
+function nativeModel(history: NativeHistory): NativeRow {
   const row = cloneRow(history.original)
   let handle: Array<number> | undefined
-  let nativeLive = false
   for (const action of history.ops) {
     switch (action.op) {
       case `push`:
         row.f.arr.push(action.v)
-        nativeLive = true
         break
       case `pop`:
         row.f.arr.pop()
-        nativeLive = true
         break
       case `reverse`:
         row.f.arr.reverse()
-        nativeLive = true
         break
       case `assignArr`:
       case `restoreArr`: {
         const next =
           action.op === `assignArr` ? action.items : history.original.f.arr
         // An assignment of an equal value is a no-op: the draft keeps its
-        // array, so a retained handle and a native write stay attached.
+        // array, so a retained handle stays attached.
         if (sameRowPart(next, row.f.arr)) break
         row.f.arr = [...next]
-        nativeLive = false
         break
       }
       case `replaceG`:
@@ -1293,14 +1299,13 @@ function nativeModel(history: NativeHistory): {
       case `pushHandle`:
         if (handle === undefined) break
         handle.push(action.v)
-        if (handle === row.f.arr) nativeLive = true
         break
       case `setX`:
         row.x = action.v
         break
     }
   }
-  return { final: row, nativeLive }
+  return row
 }
 
 function driveNative(history: NativeHistory): {
@@ -1353,7 +1358,7 @@ function driveNative(history: NativeHistory): {
 }
 
 function expectNativeHistory(history: NativeHistory): void {
-  const { final, nativeLive } = nativeModel(history)
+  const final = nativeModel(history)
   const { changes, read } = driveNative(history)
   const context = JSON.stringify(history)
   expect(read, `draft reads the final row, ${context}`).toEqual(final)
@@ -1361,16 +1366,9 @@ function expectNativeHistory(history: NativeHistory): void {
   expect(`x` in changes, `x reported, ${context}`).toBe(xChanged)
   if (xChanged) expect(changes.x, `x value, ${context}`).toBe(final.x)
   const fChanged = !sameRowPart(final.f, history.original.f)
-  if (fChanged) {
-    expect(changes.f, `f value, ${context}`).toEqual(final.f)
-  } else if (!nativeLive) {
-    expect(`f` in changes, `f equals its original, ${context}`).toBe(false)
-  } else if (`f` in changes) {
-    // A live native write may report the key, with its final value.
-    expect(changes.f, `f value under a native write, ${context}`).toEqual(
-      final.f,
-    )
-  }
+  expect(`f` in changes || !fChanged, `f reported, ${context}`).toBe(true)
+  // An equal f may be reported, with its final value.
+  if (`f` in changes) expect(changes.f, `f value, ${context}`).toEqual(final.f)
   expect(Object.keys(changes).sort(), `only x and f, ${context}`).toEqual(
     Object.keys(changes)
       .filter((key) => key === `x` || key === `f`)
@@ -1424,7 +1422,7 @@ describe(`draft revert oracle: native mutators mixed with assignments`, () => {
 
   it.each<[string, NativeHistory]>([
     [
-      `a native write that an assignment then restores leaves no change`,
+      `a native write that an assignment then restores reports at most its original value`,
       {
         original: { x: 0, f: { arr: [1], g: { a: 0 } } },
         ops: [
@@ -1449,7 +1447,7 @@ describe(`draft revert oracle: native mutators mixed with assignments`, () => {
       },
     ],
     [
-      `restoring the last native write drops the mark on every ancestor`,
+      `restoring the last native write reports at most the original value`,
       {
         original: { x: 0, f: { arr: [0], g: { a: 0 } } },
         ops: [
@@ -1463,8 +1461,8 @@ describe(`draft revert oracle: native mutators mixed with assignments`, () => {
   ])(`%s`, (_name, history) => expectNativeHistory(history))
 
   // The generated row nests the native site two levels deep. One level more
-  // checks that the mark is dropped on every ancestor, not only the nearest.
-  it(`restoring a native write three levels deep leaves no change`, () => {
+  // checks that a report three levels up still carries the final value.
+  it(`restoring a native write three levels deep reports at most the original value`, () => {
     const row = { f: { h: { arr: [0] }, g: { a: 0 } } }
     const changes = withChangeTracking(structuredClone(row), (draft) => {
       draft.f.h.arr.pop()
@@ -1472,6 +1470,82 @@ describe(`draft revert oracle: native mutators mixed with assignments`, () => {
       draft.f.h.arr = [0]
       draft.f.g.a = 0
     })
-    expect(changes).toEqual({})
+    expect(Object.keys(changes).every((key) => key === `f`)).toBe(true)
+    if (`f` in changes) expect(changes.f).toEqual(row.f)
   })
+
+  // A native write through any handle that reaches the row's value is a
+  // change, and a missed change is the error that matters. These handles share
+  // their parent's value: a Map or Set value, a typed-array view, and a value
+  // read through a frozen draft.
+  it.each<[string, Record<string, unknown>, (draft: any) => void, string]>([
+    [
+      `a Map value`,
+      { m: new Map([[`k`, [1]]]) },
+      (draft) => draft.m.get(`k`).push(2),
+      `m`,
+    ],
+    [
+      `a Map value from iteration`,
+      { m: new Map([[`k`, [1]]]) },
+      (draft) => {
+        for (const value of draft.m.values()) value.push(2)
+      },
+      `m`,
+    ],
+    [
+      `a Set value from iteration`,
+      { s: new Set([[1]]) },
+      (draft) => {
+        for (const value of draft.s) value.push(2)
+      },
+      `s`,
+    ],
+    [
+      `a typed-array view`,
+      { t: new Float64Array([1, 2, 3]) },
+      (draft) => draft.t.subarray(1).fill(9),
+      `t`,
+    ],
+    [
+      `a value read through a frozen draft`,
+      { f: { arr: [1] } },
+      (draft) => Object.freeze(draft).f.arr.push(2),
+      `f`,
+    ],
+  ])(`reports a native write through %s`, (_name, row, write, key) => {
+    const changes = withChangeTracking(row, write)
+    expect(key in changes).toBe(true)
+  })
+
+  // A nested revert inside a Map or Set value must not hide another write to
+  // the same container.
+  it.each<[string, Record<string, unknown>, (draft: any) => void, string]>([
+    [
+      `a Map`,
+      { m: new Map<string, unknown>([[`k`, { a: 0 }]]) },
+      (draft) => {
+        draft.m.set(`j`, 1)
+        draft.m.get(`k`).a = 1
+        draft.m.get(`k`).a = 0
+      },
+      `m`,
+    ],
+    [
+      `a Set`,
+      { s: new Set<unknown>([{ a: 0 }]) },
+      (draft) => {
+        draft.s.add(1)
+        for (const value of draft.s) if (typeof value === `object`) value.a = 1
+        for (const value of draft.s) if (typeof value === `object`) value.a = 0
+      },
+      `s`,
+    ],
+  ])(
+    `a nested revert in %s keeps its other write`,
+    (_name, row, write, key) => {
+      const changes = withChangeTracking(row, write)
+      expect(key in changes).toBe(true)
+    },
+  )
 })

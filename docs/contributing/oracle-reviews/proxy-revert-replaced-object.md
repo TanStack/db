@@ -137,3 +137,58 @@ Open, recorded rather than decided:
   the mark with a sign-aware value check would also stop `push` then `pop`
   from reporting an equal array, and would make `draft.x = -0` over `0` a
   change. That is a law change, not part of this fix.
+
+## Follow-up review: false negatives from the native mark (2026-10-09)
+
+Reviewed head `c5880a308`. The review had eight findings, with runs against
+this branch and `origin/main`.
+
+**Decision.** A false positive (reporting a key whose value equals its
+original) only repeats the stored value; the UI does not change. A false
+negative loses a write. When correctness and code size trade off, this owner
+leans toward false positives (maintainer decision, 2026-10-09).
+
+**What the probes showed.** On `c5880a308`, six probes reported nothing
+where `main` reports the key: a `[-0, 0]` typed array reversed through a
+`Map.get` value, Map and Set iteration values, a `subarray` view, a frozen
+draft, and a sibling revert after the reverse. Every one reorders signed
+zeros, which draft-equality rule 1 calls equal, so none is a change under the
+stated law. Each still shows a native write that the native mark did not
+follow. With ordinary values, the branch reports these writes.
+
+**Change.** The production fix is withdrawn. `src/proxy.ts` matches `main`
+again, so `getChanges()` reports every assigned key, including a replaced
+object restored through nested writes. That is a permitted false positive.
+The laws now require every changed key and permit an extra report only for a
+written key, with its final value:
+
+- the generated and pinned histories check `reported ⊇ changed`, and that
+  each extra key was written and reports its final value;
+- the native block permits `f` whenever it equals its original;
+- pinned witnesses require a real native write through a Map value, Map and
+  Set iteration values, a typed-array view and a frozen draft to be reported,
+  and a nested revert inside a Map or Set to keep the container's other write.
+
+The frozen-key read test that this branch added is removed; on `main` such a
+read reports the key, which the row law permits.
+
+| Mutant on `main`'s proxy | Result |
+| --- | --- |
+| Report an assigned key only when it differs under draft equality | 14 proxy tests fail |
+| Revert check by JSON, so Maps and Sets look equal | 4 proxy tests fail |
+| Any Map or Set write counts as a revert | Equivalent: the parent re-checks the key by value |
+
+| Finding | Verdict | Action |
+| --- | --- | --- |
+| 1. Handles that share a value lose the native mark | Confirmed mechanism; no change under rule 1 | The mark is removed with the fix. Witnesses use real writes. |
+| 2. A frozen draft loses later native writes | Same as 1 | Same |
+| 3. An element assignment erases a parent `reverse()` | Not reproduced with ordinary values | Removed with the fix |
+| 4. A sibling revert cancels a native change | Same as 1 (signed zeros). `main` reports `{}` there too, which rule 1 permits | Same |
+| 5. Stale native marks on ancestors | Mechanism of the fix | Removed with the fix |
+| 6. A same-value `defineProperty` clears the mark | Mechanism of the fix | Removed with the fix |
+| 7. Every assigned key is deep-compared | Cost of the fix | Removed with the fix |
+| 8. Production code grows | Confirmed (+62/−28) | Now 0 lines |
+
+**Limits.** Rule 1 stays: a reorder of signed zeros is not a change. Map and
+Set mutators are still not generated together with assignments.
+

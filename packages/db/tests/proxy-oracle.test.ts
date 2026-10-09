@@ -2660,10 +2660,9 @@ describe(`defineProperty behaves like on a native row`, () => {
 /**
  * Freezing, sealing, or fixing a key of a draft must not lose a later write
  * through a nested value. The Proxy invariants make a frozen key return the
- * raw copy, which a later write changes untracked. The draft therefore
- * compares that key with the original when it reports changes, so a read that
- * writes nothing reports no change. The row law compares rows: applying
- * `getChanges()` to the original must give the native row.
+ * raw copy, so the draft counts that key as changed when it reads it. The law
+ * therefore compares rows, not patches: applying `getChanges()` to the
+ * original must give the native row.
  */
 describe(`frozen and sealed drafts keep nested writes`, () => {
   type Row = { n: { x: number }; m: number }
@@ -2707,12 +2706,6 @@ describe(`frozen and sealed drafts keep nested writes`, () => {
   it(`does not count a primitive read under a frozen key`, () => {
     const { proxy, getChanges } = createChangeProxy(make())
     void Object.freeze(proxy).m
-    expect(getChanges()).toEqual({})
-  })
-
-  it(`does not count an object read under a frozen key`, () => {
-    const { proxy, getChanges } = createChangeProxy(make())
-    void Object.freeze(proxy).n.x
     expect(getChanges()).toEqual({})
   })
 
