@@ -271,7 +271,18 @@ export class CollectionMutationsManager<
           >,
         }),
     })
-    this.applyOwnedMutations(transaction, mutations)
+    try {
+      this.applyOwnedMutations(transaction, mutations)
+    } catch (error) {
+      // A subscriber threw before the handler could run. Roll back only this
+      // write, so no Collection keeps a transaction that nothing will settle.
+      try {
+        transaction.rollback({ isSecondaryRollback: true })
+      } catch {
+        // The admission error is the reported cause.
+      }
+      throw error
+    }
     // Errors still reject `isPersisted.promise`. This catch only prevents an
     // unhandled rejection from the fire-and-forget commit.
     transaction.commit().catch(() => undefined)

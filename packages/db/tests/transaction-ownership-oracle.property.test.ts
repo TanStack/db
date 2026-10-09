@@ -45,6 +45,13 @@ import type { Transaction } from '../src/transactions.js'
  *   transaction.
  * - A failed `mutate()` callback undoes its writes, but the Collection that
  *   took one still tracked the transaction.
+ * - A direct write (`collection.update` outside a transaction) runs in its own
+ *   transaction, which settles within its step: its handler resolves at once
+ *   and writes no sync row, so afterwards it shows nothing and no Collection
+ *   tracks it. A subscriber that throws while the write is admitted makes the
+ *   write fail: the call rethrows that error, the write's transaction rolls
+ *   back without rolling back other transactions, and no Collection keeps
+ *   it. So a direct write never changes the model.
  * - Error shape: a settling call that ran no throwing subscriber reports no
  *   subscriber error. Otherwise it throws one of the subscriber errors, as
  *   is. The contract does not say which one, because these failures are rare
@@ -57,7 +64,9 @@ import type { Transaction } from '../src/transactions.js'
  * state allows that step, so generated steps rarely skip. Steps write a value, write and remove key 9 in one call
  * (a pair that merges away), commit, settle a commit as success or failure,
  * roll back, roll back from a `truncate` listener during a sync commit, and
- * run a `mutate()` callback that writes and then throws. A settling step may
+ * run a `mutate()` callback that writes and then throws. A direct write
+ * updates a key outside any transaction, optionally with a throwing
+ * subscriber on its Collection. A settling step may
  * install a throwing subscriber on one Collection or on both. It stays
  * installed until promises flush, because a commit settles in a later
  * microtask, and it must have run whenever the model predicts that the step
@@ -106,6 +115,13 @@ type Step =
       on: CollectionName
       key: Key
       value: number
+    }
+  | {
+      type: `direct`
+      on: CollectionName
+      key: Key
+      value: number
+      throws: boolean
     }
 
 type ModelState = `pending` | `persisting` | `completed` | `failed`
@@ -247,6 +263,16 @@ const step: fc.Arbitrary<Step> = fc.oneof(
     }),
   },
   {
+    weight: 2,
+    arbitrary: fc.record({
+      type: fc.constant(`direct` as const),
+      on: name,
+      key: fc.constantFrom<Key>(1, 2),
+      value: fc.integer({ min: 1, max: 9 }),
+      throws: fc.boolean(),
+    }),
+  },
+  {
     weight: 1,
     arbitrary: fc.record({
       type: fc.constant(`mutateThrows` as const),
@@ -306,7 +332,9 @@ async function makeCollection(id: string) {
     id: number
     v: number
   }>({ id, getKey: (row) => row.id, startSync: true })
-  const collection = createCollection(options)
+  // A direct write's handler resolves at once, so its transaction settles
+  // within the step instead of waiting for a sync commit.
+  const collection = createCollection({ ...options, onUpdate: async () => {} })
   const writeBase = () => {
     options.utils.write({ type: `insert`, value: { id: 1, v: 0 } })
     options.utils.write({ type: `insert`, value: { id: 2, v: 0 } })
@@ -453,6 +481,19 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
         model.open(
           reuse === undefined ? undefined : model.transactions[reuse]!.id,
         )
+      } else if (current.type === `direct`) {
+        // An update that leaves the visible row unchanged writes nothing.
+        if (model.row(current.on, current.key) === current.value) continue
+        const { result, raised } = await withThrowingSubscribers(
+          label,
+          current.throws ? current.on : undefined,
+          () =>
+            collections[current.on].collection.update(current.key, (draft) => {
+              draft.v = current.value
+            }),
+          () => {},
+        )
+        expectErrorShape(`${label} direct write`, result, raised)
       } else {
         const states: ReadonlyArray<ModelState> =
           current.type === `edit` ||
