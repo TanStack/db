@@ -227,7 +227,10 @@ rejection for that row, removes it from the outbox, and rejects its waiting
 promises with the hook failure. Other queued rows continue after the failed
 row's deletion is acknowledged. New commits may join the queue during cleanup,
 but cannot run ahead of that deletion. A fresh executor does not replay the
-failed row.
+failed row. The named mutation function error is logged; the hook failure is
+the caller-facing and stored error. Stored errors retain `name`, `message`, and
+`stack`, but a restart does not restore an arbitrary error subclass or its
+custom fields.
 If marker storage or deletion fails, the caller still receives the hook error
 while the executor stops with the storage error and retains queued work. A
 saved terminal marker skips the named mutation function after restart; an
@@ -239,6 +242,7 @@ the named mutation function and inspect its numeric status in `shouldRetry`.
 class HttpError extends Error {
   constructor(readonly status: number) {
     super(`HTTP ${status}`)
+    this.name = 'HttpError'
   }
 }
 
@@ -387,6 +391,7 @@ Correct:
 class HttpError extends Error {
   constructor(readonly status: number) {
     super(`HTTP ${status}`)
+    this.name = 'HttpError'
   }
 }
 

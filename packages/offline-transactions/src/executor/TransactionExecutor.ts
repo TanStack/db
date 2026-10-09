@@ -14,7 +14,10 @@ import type {
 const HANDLED_EXECUTION_ERROR = Symbol(`HandledExecutionError`)
 
 function toError(value: unknown): Error {
-  return value instanceof Error ? value : new Error(String(value))
+  return value instanceof Error ||
+    Object.prototype.toString.call(value) === `[object Error]`
+    ? (value as Error)
+    : new Error(String(value))
 }
 
 export class TransactionExecutor {
@@ -156,8 +159,9 @@ export class TransactionExecutor {
       )
     } catch (error) {
       if (
-        error instanceof Error &&
-        (error as any)[HANDLED_EXECUTION_ERROR] === true
+        error !== null &&
+        typeof error === `object` &&
+        (error as Record<symbol, unknown>)[HANDLED_EXECUTION_ERROR] === true
       ) {
         return
       }
@@ -303,6 +307,15 @@ export class TransactionExecutor {
           await this.outbox.update(transaction.id, updatedTransaction)
           span.setAttribute(`result`, `scheduled_retry`)
         } catch (persistError) {
+          // Public removal can finish while the named mutation function runs.
+          // The removed row cannot be retried, but its caller still owns the
+          // provider failure and later queued work must be able to run.
+          if (persistError instanceof OutboxTransactionNotFoundError) {
+            this.scheduler.markCompleted(transaction)
+            span.setAttribute(`result`, `outbox_removed`)
+            this.offlineExecutor.rejectTransaction(transaction.id, error)
+            return
+          }
           span.recordException(persistError as Error)
           span.setAttribute(`result`, `persist_failed`)
           throw persistError

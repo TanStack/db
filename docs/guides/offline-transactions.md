@@ -119,7 +119,10 @@ records a terminal rejection, removes only that outbox row, and rejects its
 `when('settled')` promise with the hook failure. Once deletion is acknowledged,
 queued transactions continue in creation order. New commits may join the queue
 during cleanup, but cannot run ahead of the failed row's deletion. A fresh
-executor does not replay the failed row. If writing the terminal marker or
+executor does not replay the failed row. The named mutation function error is
+logged; the hook failure is the caller-facing and stored error. Stored errors
+retain `name`, `message`, and `stack`, but a restart does not restore an
+arbitrary error subclass or its custom fields. If writing the terminal marker or
 deleting the row fails, the caller still rejects with the hook failure while
 the executor stops with the storage error and retains queued work. A saved
 marker prevents a provider call on restart; an unmarked row can replay.
@@ -227,7 +230,11 @@ The counts describe local work. An outbox entry can include a retry count, next 
 
 `beforeRetry` can remove entries during replay. `onUnknownMutationFn` reports an entry whose registered function is missing. Keep mutation function names stable across releases, or define a migration for stored entries.
 
-The executor also exposes `removeFromOutbox(id)` and `clearOutbox()`. Use these only when the application decides to discard pending writes. Call `dispose()` when the executor's owner ends.
+The executor also exposes `removeFromOutbox(id)` and `clearOutbox()`. Use these
+only when the application decides to discard pending writes. An acknowledged
+removal does not cancel a running named mutation function. If that call later
+fails, its waiting promises reject with the named mutation function error and
+the removed row is not retried. Call `dispose()` when the executor's owner ends.
 
 ## Use SQLite persistence with the outbox
 

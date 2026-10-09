@@ -1,3 +1,4 @@
+import { runInNewContext } from 'node:vm'
 import fc from 'fast-check'
 import { createCollection, createTransaction } from '@tanstack/db'
 import { expect, it, vi } from 'vitest'
@@ -76,7 +77,8 @@ import type {
  * a crash if the marker write failed.
  * The `shouldRetry` option changes only the decision after a named mutation
  * function rejects. The hook receives the original Error and current retry
- * count once.
+ * count once. An Error created in another JavaScript realm is still that
+ * original Error; its status field remains available to the hook.
  * A non-Error named mutation rejection is converted to an Error before the
  * hook runs; its custom fields are not part of this promise.
  * `true` retries, `false` terminates, and `undefined` delegates to the existing
@@ -111,7 +113,12 @@ import type {
  * Public manual removal may acknowledge deletion while a named mutation
  * function call is held. Once that call fulfills, both success conditions have
  * occurred. The caller promise and local persistence promise must settle
- * without another outbox entry.
+ * without another outbox entry. If that call rejects instead, a retry decision
+ * cannot recreate the removed row. Both caller promises reject with the named
+ * mutation function Error, the removed row stays absent, and the same executor
+ * can process later work. This law covers acknowledged removal before the
+ * provider settles, for both public removal methods and both the default and
+ * overridden retry decision.
  * Here, an offline executor restart constructs a fresh executor over the retained
  * outbox. Outbox replay resumes unfinished durable work, including terminal-phase
  * deletion; neither operation is a Collection sync restart or truncate replay.
@@ -1146,6 +1153,102 @@ it.each([`terminal`, `defer`] as const)(
     }
   },
 )
+
+// The same-Error contract is based on the thrown value, not its realm. A foreign
+// Error with a status-bearing field must reach the public hook unchanged. The
+// 401 is a boundary control: the default decision would terminate it, while
+// the hook's true answer retains the row for a later successful attempt.
+it(`passes a cross-realm Error unchanged to shouldRetry`, async () => {
+  const providerError = runInNewContext(
+    `Object.assign(new Error('HTTP 401 Unauthorized'), { status: 401 })`,
+  ) as Error & { status: number }
+  expect(providerError instanceof Error).toBe(false)
+  const hookEntered = gate()
+  const retryStored = gate()
+  let transactionId = ``
+  let hookError: Error | undefined
+  class RetryStorage extends FakeStorageAdapter {
+    override async set(key: string, value: string): Promise<void> {
+      await super.set(key, value)
+      if (key !== `tx:${transactionId}`) return
+      if ((JSON.parse(value) as { retryCount: number }).retryCount === 1)
+        retryStored.resolve()
+    }
+  }
+  const env = createTestOfflineEnvironment({
+    storage: new RetryStorage(),
+    config: {
+      jitter: false,
+      shouldRetry: (error, retryCount) => {
+        expect(retryCount).toBe(0)
+        hookError = error
+        hookEntered.resolve()
+        return (error as Error & { status?: number }).status === 401
+      },
+    },
+    mutationFn: (params) => {
+      if (params.attempt === 1) throw providerError
+      env.applyMutations(params.transaction.mutations)
+    },
+  })
+  const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+  let commitResult: unknown = `pending`
+  let observedCommit: Promise<void> | undefined
+  let hasPrimaryFailure = false
+  try {
+    await env.waitForLeader()
+    const tx = env.executor.createOfflineTransaction({
+      mutationFnName: env.mutationFnName,
+      autoCommit: false,
+    })
+    transactionId = tx.id
+    tx.mutate(() =>
+      env.collection.insert({
+        id: `foreign-error-retry`,
+        value: `pending`,
+        completed: false,
+        updatedAt: new Date(0),
+      }),
+    )
+    observedCommit = tx.commit().then(
+      () => {
+        commitResult = `fulfilled`
+      },
+      (error: unknown) => {
+        commitResult = error
+      },
+    )
+    await atOracleCheckpoint(hookEntered.promise, `foreign Error reached hook`)
+    expect(hookError).toBe(providerError)
+    expect((hookError as Error & { status?: number }).status).toBe(401)
+    await atOracleCheckpoint(retryStored.promise, `foreign Error retry stored`)
+    expect((await env.executor.peekOutbox())[0]?.retryCount).toBe(1)
+    expect(commitResult).toBe(`pending`)
+    env.executor.getOnlineDetector().notifyOnline()
+    await atOracleCheckpoint(observedCommit, `foreign Error retry settled`)
+    expect(commitResult).toBe(`fulfilled`)
+    expect(env.mutationCalls).toHaveLength(2)
+    expect(await env.executor.peekOutbox()).toEqual([])
+  } catch (error) {
+    hasPrimaryFailure = true
+    throw error
+  } finally {
+    if (transactionId && commitResult === `pending`)
+      env.executor.rejectTransaction(
+        transactionId,
+        new Error(`foreign Error oracle cleanup`),
+      )
+    await cleanupOfflineOracle(
+      [
+        () => observedCommit,
+        () => env.executor.dispose(),
+        () => env.collection.cleanup(),
+        () => warning.mockRestore(),
+      ],
+      hasPrimaryFailure,
+    )
+  }
+})
 
 // The public hook always receives an Error, including when the named mutation
 // function rejects with a primitive or object. Returning false distinguishes
@@ -2518,6 +2621,156 @@ it.each([`removeFromOutbox`, `clearOutbox`] as const)(
           () => Promise.all([observed, observedPersistence]),
           () => env.executor.dispose(),
           () => env.collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  },
+)
+
+// The independently chosen result is a rejection with the provider error:
+// deletion is already acknowledged, and a retry cannot re-admit that row.
+// Hold the real public provider call, remove its outbox entry, then reject it.
+// The checkpoint compares both caller promises and the outbox before admitting
+// a later peer. The peer checks that a missing retry record did not stop the
+// executor. The default network retry and overridden 401 retry reach the same
+// persistence boundary by different decisions.
+it.each([
+  [`removeFromOutbox`, `default`],
+  [`removeFromOutbox`, `hook`],
+  [`clearOutbox`, `default`],
+  [`clearOutbox`, `hook`],
+] as const)(
+  `rejects a failed provider after %s removed its outbox row (%s retry)`,
+  async (removal, retryDecision) => {
+    const providerEntered = gate()
+    const releaseProvider = gate()
+    const providerError = new Error(
+      retryDecision === `hook`
+        ? `HTTP 401 Unauthorized`
+        : `network unavailable`,
+    )
+    let headId = ``
+    const env = createTestOfflineEnvironment({
+      config: {
+        jitter: false,
+        ...(retryDecision === `hook`
+          ? { shouldRetry: (error: Error) => error === providerError }
+          : {}),
+      },
+      mutationFn: async (params) => {
+        if (params.transaction.id === headId) {
+          providerEntered.resolve()
+          await releaseProvider.promise
+          throw providerError
+        }
+        env.applyMutations(params.transaction.mutations)
+      },
+    })
+    let headCommit: Promise<void> | undefined
+    let headPersistence: Promise<void> | undefined
+    let headCommitResult: unknown = `pending`
+    let headPersistenceResult: unknown = `pending`
+    let hasPrimaryFailure = false
+    const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    try {
+      await env.waitForLeader()
+      const head = env.executor.createOfflineTransaction({
+        mutationFnName: env.mutationFnName,
+        autoCommit: false,
+      })
+      headId = head.id
+      const localHead = head.mutate(() =>
+        env.collection.insert({
+          id: `removed-failure`,
+          value: `never-applied`,
+          completed: false,
+          updatedAt: new Date(0),
+        }),
+      )
+      headPersistence = localHead.isPersisted.promise.then(
+        () => {
+          headPersistenceResult = `fulfilled`
+        },
+        (error: unknown) => {
+          headPersistenceResult = error
+        },
+      )
+      headCommit = head.commit().then(
+        () => {
+          headCommitResult = `fulfilled`
+        },
+        (error: unknown) => {
+          headCommitResult = error
+        },
+      )
+
+      await atOracleCheckpoint(providerEntered.promise, `provider held`)
+      expect((await env.executor.peekOutbox()).map(({ id }) => id)).toEqual([
+        headId,
+      ])
+      if (removal === `removeFromOutbox`)
+        await env.executor.removeFromOutbox(headId)
+      else await env.executor.clearOutbox()
+      expect(await env.executor.peekOutbox()).toEqual([])
+      expect([headCommitResult, headPersistenceResult]).toEqual([
+        `pending`,
+        `pending`,
+      ])
+
+      releaseProvider.resolve()
+      if (removal === `removeFromOutbox`) {
+        await vi.waitFor(() => expect(env.executor.getRunningCount()).toBe(0))
+        await Promise.resolve()
+        await Promise.resolve()
+      }
+      await atOracleCheckpoint(
+        Promise.all([headCommit, headPersistence]),
+        `provider rejection after acknowledged removal`,
+      )
+      expect([headCommitResult, headPersistenceResult]).toEqual([
+        providerError,
+        providerError,
+      ])
+      expect(localHead.state).toBe(`failed`)
+      expect(await env.executor.peekOutbox()).toEqual([])
+      expect(env.mutationCalls.map(({ transaction: { id } }) => id)).toEqual([
+        headId,
+      ])
+
+      const peer = env.executor.createOfflineTransaction({
+        mutationFnName: env.mutationFnName,
+        autoCommit: false,
+      })
+      peer.mutate(() =>
+        env.collection.insert({
+          id: `later-peer`,
+          value: `applied`,
+          completed: false,
+          updatedAt: new Date(0),
+        }),
+      )
+      await atOracleCheckpoint(peer.commit(), `later peer settled`)
+      expect(env.mutationCalls.map(({ transaction: { id } }) => id)).toEqual([
+        headId,
+        peer.id,
+      ])
+      expect(env.serverState.has(`removed-failure`)).toBe(false)
+      expect(env.serverState.has(`later-peer`)).toBe(true)
+      expect(await env.executor.peekOutbox()).toEqual([])
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releaseProvider.resolve()
+      if (headCommitResult === `pending` && headId)
+        env.executor.rejectTransaction(headId, providerError)
+      await cleanupOfflineOracle(
+        [
+          () => Promise.all([headCommit, headPersistence]),
+          () => env.executor.dispose(),
+          () => env.collection.cleanup(),
+          () => warning.mockRestore(),
         ],
         hasPrimaryFailure,
       )

@@ -204,7 +204,10 @@ returns another value records a terminal rejection for that row, removes it
 from the outbox, and rejects its waiting promises with the hook failure. Once
 the deletion is acknowledged, queued rows continue in creation order. New
 commits may join the queue during cleanup, but cannot run ahead of the failed
-row's deletion. A fresh executor does not replay the failed row.
+row's deletion. The named mutation function error is logged; the hook failure
+is the caller-facing and stored error. A fresh executor does not replay the
+failed row. Stored errors retain `name`, `message`, and `stack`, but a restart
+does not restore an arbitrary error subclass or its custom fields.
 If terminal marker storage or deletion fails, the caller still rejects with
 the hook failure and the executor batch rejects with the storage error. The
 executor then stops with queued work retained. A marked row skips the named
@@ -223,6 +226,11 @@ mutation function after restart; an unmarked row may replay.
 - `removeFromOutbox(id)` - Manually remove transaction from outbox
 - `peekOutbox()` - View all pending transactions
 - `dispose()` - Clean up resources
+
+An acknowledged `removeFromOutbox(id)` or `clearOutbox()` while a named
+mutation function is running does not cancel that call. If the call later
+fails, its waiting promises reject with the named mutation function error; the
+removed row is not retried.
 
 ### Error Handling
 
