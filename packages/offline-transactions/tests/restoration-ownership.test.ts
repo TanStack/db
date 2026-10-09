@@ -1,5 +1,9 @@
-import { createCollection, createTransaction } from '@tanstack/db'
-import { expect, it } from 'vitest'
+import {
+  TransactionNotPendingMutateError,
+  createCollection,
+  createTransaction,
+} from '@tanstack/db'
+import { expect, it, vi } from 'vitest'
 import { KeyScheduler } from '../src/executor/KeyScheduler'
 import { TransactionExecutor } from '../src/executor/TransactionExecutor'
 import { OutboxManager } from '../src/outbox/OutboxManager'
@@ -62,6 +66,30 @@ it(`adds every mutate() call to the same offline transaction`, async () => {
   expect(first.mutations.map((mutation) => mutation.key)).toEqual([`a`, `b`])
   expect(env.collection.get(`a`)?.value).toBe(`first`)
   expect(env.collection.get(`b`)?.value).toBe(`second`)
+  env.executor.dispose()
+})
+
+// With autoCommit, the first mutate() commits the transaction. A later call
+// cannot add to a committed transaction, as for any Transaction, and must not
+// replace it with a second transaction that has the same id.
+it(`rejects a mutate() call after an auto-committed one`, async () => {
+  const env = createTestOfflineEnvironment()
+  await env.waitForLeader()
+  const offlineTx = env.executor.createOfflineTransaction({
+    mutationFnName: env.mutationFnName,
+  })
+
+  const first = offlineTx.mutate(() =>
+    env.collection.insert(item(`a`, `first`)),
+  )
+  expect(() =>
+    offlineTx.mutate(() => env.collection.insert(item(`b`, `second`))),
+  ).toThrow(TransactionNotPendingMutateError)
+
+  expect(first.mutations.map((mutation) => mutation.key)).toEqual([`a`])
+  expect(env.collection.get(`a`)?.value).toBe(`first`)
+  expect(env.collection.get(`b`)).toBeUndefined()
+  await first.isPersisted.promise
   env.executor.dispose()
 })
 
@@ -183,11 +211,16 @@ it(`leaves no Collection tracking a restoration that could not track all of them
     nextAttemptAt: 0,
     version: 1,
   }
+  // The live transaction already shows a transaction with this id, so the
+  // skipped restoration is not a failure to report.
+  const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
   ;(
     executor as unknown as {
       restoreOptimisticState: (transactions: Array<OfflineTransaction>) => void
     }
   ).restoreOptimisticState([offlineTx])
+  expect(warn).not.toHaveBeenCalled()
+  warn.mockRestore()
 
   expect([...first._state.transactions.values()]).toEqual([])
   expect(first.get(`a`)).toBeUndefined()

@@ -1,4 +1,4 @@
-import { createTransaction } from '@tanstack/db'
+import { DuplicateTransactionIdError, createTransaction } from '@tanstack/db'
 import { OutboxTransactionNotFoundError } from '../outbox/OutboxManager'
 import { DefaultRetryPolicy } from '../retry/RetryPolicy'
 import { NonRetriableError } from '../types'
@@ -411,12 +411,8 @@ export class TransactionExecutor {
         // Register with each affected Collection. If one cannot track it, roll
         // it back, so no Collection keeps a restoration nothing will settle.
         try {
+          // The serializer resolves every mutation's Collection or throws.
           for (const mutation of offlineTx.mutations) {
-            // Defensive check for corrupted deserialized data
-            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-            if (!mutation.collection) {
-              continue
-            }
             if (mutation.collection._state.trackTransaction(restorationTx))
               mutation.collection._state.recomputeOptimisticState(true)
           }
@@ -432,6 +428,8 @@ export class TransactionExecutor {
           restorationTx,
         )
       } catch (error) {
+        // A live transaction with this id already shows these mutations.
+        if (error instanceof DuplicateTransactionIdError) continue
         console.warn(
           `Failed to restore optimistic state for transaction ${offlineTx.id}:`,
           error,

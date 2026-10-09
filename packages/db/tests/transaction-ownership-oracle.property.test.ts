@@ -594,7 +594,7 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
 const history = fc.array(step, { minLength: 1, maxLength: 24 })
 
 describe(`settled transactions leave every Collection that tracked them`, () => {
-  it(`generated histories with fixed seed 2080`, async () => {
+  it(`generated histories with a fixed seed`, async () => {
     await fc.assert(
       fc.asyncProperty(history, (steps) => runHistory(steps)),
       { numRuns: oracleRuns(200), seed: 2080 },
@@ -665,7 +665,7 @@ describe(`settled transactions leave every Collection that tracked them`, () => 
     ])
   })
 
-  it(`pinned: conflicting rollbacks that throw report one flat aggregate`, async () => {
+  it(`pinned: conflicting rollbacks that throw settle every transaction and rethrow one subscriber error`, async () => {
     await runHistory([
       { type: `open`, reuse: undefined },
       { type: `edit`, tx: 0, on: `A`, key: 1, value: 5 },

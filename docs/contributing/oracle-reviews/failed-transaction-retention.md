@@ -339,3 +339,25 @@ The focused witnesses in
   not allow. It is unrelated to transaction retention and is not addressed here.
 - The per-mutation pass is still O(unsettled transactions). A key-scoped
   recompute would remove that term, but it touches every settlement law.
+
+## Follow-up review (head `16009c138`)
+
+The review had nine findings from reading the code. Each behavioral claim was
+probed on this head, and on `main`'s core where the claim compared them.
+
+| Finding | Verdict | Change |
+| --- | --- | --- |
+| 1. With `autoCommit`, a second offline `mutate()` throws | Confirmed behavior change | Accepted: the first call commits, and `mutate()` on a committed transaction throws, as for any Transaction. On `main` the second call replaced the first transaction and hid its rows. The changeset says so. Witness: the second call throws `TransactionNotPendingMutateError` and the first row stays. |
+| 2. Corrupted outbox mutations without a Collection throw | Refuted | `TransactionSerializer.deserializeMutation` throws when a Collection is missing, so no restored mutation lacks one. The remaining dead guard in restoration is removed. |
+| 3. `commit()` drops rollback errors | Accepted | Precise errors for rare settlement failures are not required (maintainer decision, 2026-10-09). The mutation error is the reported cause. |
+| 4. `rollback()`'s `finally` can mask the first error | Accepted | Same decision. The oracle law requires one subscriber error, not a particular one. |
+| 5. Release inside `overlayActiveTransactions` drops held rows when a subscriber commits sync into B | Refuted on the stated path | Probe: a transaction spans A and B, B's confirmation is queued, and A's subscriber commits a sync row into B during settlement. B keeps row 1 as `local` with no delete event, on this branch and on `main`'s core. |
+| 6. A Collection tracks before `applyMutations`, which might throw | Refuted | `applyMutations` uses only Map and array operations; nothing in it can throw. Tracking first lets the duplicate-id check change nothing. |
+| 7. Restoration warns on a live transaction with the same id | Confirmed, low reach | Restoration loads only transactions the scheduler does not hold, so it needs a cleared scheduler with the transaction still live. A live transaction with this id already shows its rows, so restoration now skips it without a warning. Witness: the existing untrackable-restoration test asserts no warning; a mutant that warns again fails it. |
+| 8. A test name includes the PR number | Confirmed | Renamed `generated histories with a fixed seed`. |
+| 9. A test name promises one flat aggregate | Confirmed | Renamed to state the current law: every transaction settles, and one subscriber error is rethrown. |
+
+**Noted, outside this change.** `OfflineTransaction.mutate()` with
+`autoCommit` rethrows a failed auto-commit inside a `.catch`, so a failed
+auto-commit is an unhandled rejection. This is on `main` as well.
+
