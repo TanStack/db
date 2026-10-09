@@ -109,11 +109,12 @@ export class TransactionScope {
     }
   }
 
-  /** Rolls back every conflicting candidate. Errors are caught internally. */
+  /** Rolls back every conflicting candidate, then throws the first error. */
   rollbackConflictingTransactions(
     transaction: Transaction<any>,
     mutationIds: Set<string>,
   ): void {
+    const errors: Array<unknown> = []
     for (const candidate of [...this.transactions]) {
       if (
         candidate !== transaction &&
@@ -123,13 +124,13 @@ export class TransactionScope {
         )
       ) {
         try {
-          candidate.rollbackSettlingErrors(true)
-        } catch {
-          // Errors from conflicting rollbacks are not reported;
-          // the primary transaction's settlement handles reporting once.
+          candidate.rollback({ isSecondaryRollback: true })
+        } catch (error) {
+          errors.push(error)
         }
       }
     }
+    if (errors.length > 0) throw errors[0]
   }
 
   clear(): void {
@@ -160,7 +161,6 @@ function getTransactionScope(transaction: object): TransactionScope {
   }
   return scope
 }
-
 
 function getTransactionAmbientScope(transaction: object): TransactionScope {
   const scope = transactionAmbientScopes.get(transaction)
@@ -663,75 +663,48 @@ class Transaction<T extends object = Record<string, unknown>> {
     isSecondaryRollback?: boolean
     error?: Error
   }): Transaction<T> {
-    let firstError: unknown
-    for (const error of this.rollbackSettlingErrors(
-      config?.isSecondaryRollback ?? false,
-      config?.error,
-    )) {
-      firstError ??= error
-    }
-    if (firstError) throw firstError
-    return this
-  }
-
-  /**
-   * Rolls back and returns the settlement errors, flat, instead of throwing
-   * them, so a caller that settles several transactions reports one flat list.
-   * @internal
-   */
-  rollbackSettlingErrors(
-    isSecondaryRollback: boolean,
-    error?: Error,
-  ): Array<unknown> {
+    const isSecondaryRollback = config?.isSecondaryRollback ?? false
     if (this.state === `completed`) {
       throw new TransactionAlreadyCompletedRollbackError()
     }
-    if (this.state === `failed`) return []
-    // A settled transaction keeps the error it settled with.
-    if (error) {
-      this.error = { message: error.message, error }
+    if (this.state === `failed`) return this
+
+    if (config?.error) {
+      this.error = { message: config.error.message, error: config.error }
     }
 
     this.setState(`failed`)
 
-    // A failing subscriber cannot leave this transaction unsettled, so each
-    // step runs and their errors are reported together.
-    const errors: Array<unknown> = []
-    // See if there's any other transactions w/ mutations on the same ids
-    // and roll them back as well.
-    if (!isSecondaryRollback) {
-      const mutationIds = new Set(
-        this.mutations.map((mutation) => mutation.globalKey),
-      )
-      getTransactionScope(this).rollbackConflictingTransactions(
-        this,
-        mutationIds,
-      )
+    // A failing subscriber cannot leave this transaction unsettled.
+    try {
+      // See if there's any other transactions w/ mutations on the same ids
+      // and roll them back as well.
+      if (!isSecondaryRollback) {
+        const mutationIds = new Set(
+          this.mutations.map((mutation) => mutation.globalKey),
+        )
+        getTransactionScope(this).rollbackConflictingTransactions(
+          this,
+          mutationIds,
+        )
+      }
+    } finally {
+      // Reject the promise
+      this.isPersisted.reject(this.error?.error)
+      this.touchCollection()
     }
 
-    // Reject the promise
-    this.isPersisted.reject(this.error?.error)
-    errors.push(...this.settleCollections())
-    return errors
-  }
-
-  // Tell collection that something has changed with the transaction
-  touchCollection(): void {
-    const errors = this.settleCollections()
-    if (errors.length > 0) throw errors[0]
+    return this
   }
 
   /**
-   * Recomputes every Collection that tracked this transaction and returns
-   * their errors. A failure in one Collection must not leave the others
-   * showing this transaction's settled optimistic state. A settled
-   * transaction then empties its set of tracking Collections. Its mutations
-   * still name their Collection.
-   * Not `private`: `TransactionWithMutations` omits a key, which drops
-   * private members, and a Transaction with one is then not assignable.
-   * @internal
+   * Tell every Collection that tracked this transaction that it changed. A
+   * failure in one Collection must not leave the others showing this
+   * transaction's settled optimistic state, so each one recomputes before the
+   * first error is thrown. A settled transaction then empties its set of
+   * tracking Collections. Its mutations still name their Collection.
    */
-  settleCollections(): Array<unknown> {
+  touchCollection(): void {
     const collections = new Set(this.collections)
     for (const mutation of this.mutations) collections.add(mutation.collection)
     if (this.state === `completed` || this.state === `failed`)
@@ -749,7 +722,7 @@ class Transaction<T extends object = Record<string, unknown>> {
         errors.push(error)
       }
     }
-    return errors
+    if (errors.length > 0) throw errors[0]
   }
 
   /**
@@ -840,9 +813,12 @@ class Transaction<T extends object = Record<string, unknown>> {
         error: originalError,
       }
 
-      // Roll back. Every step runs even if one throws. The mutation error is
-      // rethrown to preserve identity and stack.
-      this.rollbackSettlingErrors(false)
+      // Roll back. The mutation error stays the reported cause.
+      try {
+        this.rollback()
+      } catch {
+        // Settlement still ran every step.
+      }
 
       // Re-throw the original error to preserve identity and stack
       throw originalError

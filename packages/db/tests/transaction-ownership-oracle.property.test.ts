@@ -46,10 +46,11 @@ import type { Transaction } from '../src/transactions.js'
  * - A failed `mutate()` callback undoes its writes, but the Collection that
  *   took one still tracked the transaction.
  * - Error shape: a settling call that ran no throwing subscriber reports no
- *   subscriber error. One subscriber error is rethrown as is; several become
- *   one flat `AggregateError` of those errors. A commit whose mutation function
- *   rejected rejects with that error, or, when subscribers also threw, with a
- *   flat `AggregateError` whose first member and `cause` are that error.
+ *   subscriber error. Otherwise it throws one of the subscriber errors, as
+ *   is. The contract does not say which one, because these failures are rare
+ *   and the other laws already require every step to run. A commit whose
+ *   mutation function rejected rejects with that error, also when subscribers
+ *   threw.
  *
  * The grammar opens up to four manual transactions over Collections A and B
  * (keys 1 and 2); an `open` may reuse an earlier transaction's id. A step's `tx` number chooses among the transactions whose
@@ -280,35 +281,24 @@ function expectErrorShape(
   raised: ReadonlyArray<Error>,
   mutationError?: Error,
 ): void {
-  const expected = mutationError ? [mutationError, ...raised] : [...raised]
-  if (expected.length === 0) {
+  if (mutationError) {
+    expect(result.ok, `${label}: mutation error reported`).toBe(false)
+    if (!result.ok)
+      expect(result.error, `${label}: mutation error rethrown`).toBe(
+        mutationError,
+      )
+    return
+  }
+  if (raised.length === 0) {
     expect(result.ok, `${label}: no settlement error`).toBe(true)
     return
   }
   expect(result.ok, `${label}: settlement error reported`).toBe(false)
   if (result.ok) return
-  if (expected.length === 1) {
-    expect(result.error, `${label}: one error rethrown as is`).toBe(expected[0])
-    return
-  }
-  expect(result.error, `${label}: several errors aggregate`).toBeInstanceOf(
-    AggregateError,
-  )
-  const members = (result.error as AggregateError).errors
   expect(
-    members.some((member) => member instanceof AggregateError),
-    `${label}: flat aggregate`,
-  ).toBe(false)
-  expect(new Set(members), `${label}: aggregate members`).toEqual(
-    new Set(expected),
-  )
-  if (mutationError) {
-    expect(members[0], `${label}: mutation error first`).toBe(mutationError)
-    expect(
-      (result.error as AggregateError).cause,
-      `${label}: mutation error is the cause`,
-    ).toBe(mutationError)
-  }
+    raised.includes(result.error as Error),
+    `${label}: one subscriber error rethrown as is`,
+  ).toBe(true)
 }
 
 async function makeCollection(id: string) {

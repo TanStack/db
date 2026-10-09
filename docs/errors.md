@@ -2359,4 +2359,3 @@ Development builds show this message, with `${...}` replaced by values:
 ```text
 [LocalStorageCollection] Error refreshing a same-tab peer for storage key "${key}":
 ```
-

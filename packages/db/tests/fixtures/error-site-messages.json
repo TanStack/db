@@ -865,5 +865,5 @@
       "[LocalStorageCollection] Error refreshing a same-tab peer for storage key \""
     ],
     "kind": "warning"
-  },
+  }
 }

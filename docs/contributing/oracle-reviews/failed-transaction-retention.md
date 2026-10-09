@@ -148,11 +148,11 @@ cleanup had reached every Collection that ever tracked it.
 
 | ID | Finding | RED | Fix |
 | --- | --- | --- | --- |
-| M1 | A conflicting transaction's rollback throws, so the primary never settles | `tx1Settled:false, bValue:1, bTracksTx1:true` on `609e97162` and `main` | `rollback()` runs every step and reports their errors together |
+| M1 | A conflicting transaction's rollback throws, so the primary never settles | `tx1Settled:false, bValue:1, bTracksTx1:true` on `609e97162` and `main` | `rollback()` runs every step, then rethrows a subscriber error |
 | M2 | Mutations that merge away leave the Collection tracking the transaction | Tracked after commit on `609e97162`; released on `main` | The transaction records each Collection that tracked it; settlement, including an empty commit, recomputes all of them |
 | M3 | Two Collection instances with one id | The first instance keeps the transaction on `609e97162`; both keep it on `main` | `touchCollection()` reaches instances, not ids |
 | M4 | A rollback in a `truncate` listener during a sync commit | Tracked on `609e97162` and `main` | Removal moved into `overlayActiveTransactions`, which the sync commit calls after it skips recomputes |
-| M5 | Only the first settlement error survives | — | One error rethrows as is; several throw an `AggregateError`, like `mutate()` |
+| M5 | Only the first settlement error survives | — | Accepted after the simplification below: these failures are rare, and every step still runs |
 | M6 | The history oracle compared a count | A wrong-identity removal could keep the count | It compares transaction ids |
 | M7 | The offline witness yielded a microtask before asserting | — | The yield is gone; the row and the entry leave in one recompute |
 | M8 | The work witness patched `Map` and `Set` globally and asserted equality | — | It counts walks of the Collection's own `transactions`, warms up first, and asserts a bound |
@@ -217,8 +217,8 @@ Probes on `7fd5de08b` and on `main` `fe284ccbd`, from a scratch probe file:
 | --- | --- | --- | --- |
 | A second live transaction with the same id evicts the first | First evicted; its row shows `0`, not `5` | Same | Fixed: `trackTransaction` throws `DuplicateTransactionIdError` (code 233) before applying. Ids are documented as unique (`TransactionConfig.id`) |
 | `TransactionScope` removes by id | Settling `t2` removed live `t1`; a later conflicting rollback left `t1` pending | Same | Fixed: removal by identity |
-| `commit()` loses the mutation error when a rollback subscriber throws | Rejects with the subscriber error | Same | Fixed: one flat `AggregateError`, mutation error first and as `cause` |
-| Nested `AggregateError` from conflicting rollbacks | Pinned history: `flat aggregate: expected true to be false` | Only the first error escapes | Fixed: internal settlement steps return flat error lists |
+| `commit()` loses the mutation error when a rollback subscriber throws | Rejects with the subscriber error | Same | Fixed: `commit()` rejects with the mutation error |
+| Nested `AggregateError` from conflicting rollbacks | Pinned history: `flat aggregate: expected true to be false` | Only the first error escapes | Removed with the aggregate; see the simplification below |
 | A settled transaction keeps its Collections | `collections.size` is 1 after settlement | No such field | Fixed: settlement clears the set |
 | Offline restoration bypasses ownership and removes by id | By source | Same | Fixed: restoration uses `trackTransaction`, and its cleanup settles through `touchCollection()` |
 | Release depends on a recompute | Could not make the capture step throw during settlement; by source, the next recompute or sync-commit end sweeps a skipped release | Main never releases | Refuted as a permanent skip; a transient residue until the next recompute is accepted |
@@ -258,12 +258,37 @@ showed that the model was wrong, not production: a pending transaction is
 tracked. The check now counts pending and persisting transactions.
 
 The collections CI group then failed to build PowerSync. A private
-`settleCollections` made a handler's `TransactionWithMutations` unassignable
+settlement helper made a handler's `TransactionWithMutations` unassignable
 to `Transaction<any>`, because that type omits a key from `Transaction`, and
 `Omit` drops private members. The db typecheck missed it because nothing in db
-made that assignment. The method is now `@internal`, and
+made that assignment. The helper was then `@internal`; the simplification below removed it.
 `mutation-handler-compatibility.test-d.ts` asserts the assignability. The test
 fails with the private method and passes without it.
+
+## Simplification: one error, every step
+
+Review decision: precise reports for these rare settlement failures do not
+earn their code. Correct handling does. The `AggregateError`, its code 234
+and the internal error lists are removed:
+
+- `touchCollection()` recomputes every tracking Collection, then rethrows the
+  first subscriber error.
+- `rollbackConflictingTransactions()` rolls back every conflicting
+  transaction, then rethrows the first error.
+- `rollback()` rejects `isPersisted` and recomputes its Collections in a
+  `finally`, so a throwing conflicting rollback cannot skip them.
+- `commit()` rejects with the mutation error when the rollback also throws.
+
+The ownership oracle's error-shape law now requires one of the step's
+subscriber errors, as is, and the mutation error for a failed commit. It does
+not choose which subscriber error, because the contract does not.
+
+| Mutant | Result |
+| --- | --- |
+| `touchCollection()` stops at the first throw | 4 tests fail |
+| Conflicting rollbacks stop at the first throw | 1 test fails |
+| A throwing conflicting rollback skips the primary's settlement | 2 tests fail |
+| `commit()` rejects with the settlement error | 3 tests fail |
 
 ## Targeted review (head `9e7ebb0a8`)
 

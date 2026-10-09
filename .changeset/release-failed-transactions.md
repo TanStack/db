@@ -7,12 +7,12 @@ Stop tracking a transaction after it fails or rolls back. Before, a Collection k
 
 A settled transaction leaves every Collection that tracked it, including a Collection whose mutations merged away, a second Collection instance with the same id, and a Collection whose transaction rolled back during a sync commit.
 
-When a subscriber throws during settlement, every Collection still recomputes and `isPersisted` still settles, including when the throw comes from a conflicting transaction that the rollback also rolls back. One error is rethrown as is; several are thrown together as an `AggregateError`. Before, a throw could leave other Collections showing the settled transaction's optimistic rows, and a throw from a conflicting rollback left the primary transaction's `isPersisted` pending.
+When a subscriber throws during settlement, every Collection still recomputes and `isPersisted` still settles, including when the throw comes from a conflicting transaction that the rollback also rolls back. The call then rethrows one of the subscriber errors. Before, a throw could leave other Collections showing the settled transaction's optimistic rows, and a throw from a conflicting rollback left the primary transaction's `isPersisted` pending.
 
 A settled transaction no longer keeps the set of Collections that tracked it; its mutations still name their Collection. Offline restoration now tracks and releases its transaction through the same path as other transactions. A completed restoration settles its `isPersisted`, and a restoration that one Collection cannot track is rolled back so no Collection keeps its rows.
 
 Repeated `mutate()` calls on one offline transaction now add to the same transaction. Before, each call created a new transaction with the same id, which replaced the earlier one and hid its rows.
 
-When a mutation function rejects and a subscriber also throws during the rollback, `commit()` now rejects with one flat `AggregateError` whose first member and `cause` are the mutation error. Before, it rejected with the subscriber error and the mutation error was lost. Settlement errors from several conflicting rollbacks are reported as one flat `AggregateError` instead of nested ones.
+When a mutation function rejects and a subscriber also throws during the rollback, `commit()` now rejects with the mutation error. Before, it rejected with the subscriber error and the mutation error was lost.
 
 Transaction ids must be unique among unsettled transactions. A write that would make a Collection track a second unsettled transaction with an id it already tracks now throws `DuplicateTransactionIdError` and changes nothing. Before, the second transaction silently replaced the first, whose optimistic rows disappeared while it was still pending. Settling a transaction also no longer removes a different pending transaction that shares its id from conflict tracking.
