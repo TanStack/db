@@ -52,12 +52,26 @@ function serializeError(error: unknown): ElectronSerializedError {
     }
   }
 
-  const codedError = error as Error & { code?: unknown }
+  const detailedError = error as Error & { code?: unknown; path?: unknown }
+  const path = detailedError.path
   return {
     name: error.name || `Error`,
     message: error.message || fallbackMessage,
     stack: error.stack,
-    code: typeof codedError.code === `string` ? codedError.code : undefined,
+    code:
+      typeof detailedError.code === `string` ||
+      typeof detailedError.code === `number`
+        ? detailedError.code
+        : undefined,
+    path:
+      typeof path === `string` ||
+      (Array.isArray(path) &&
+        path.every(
+          (segment: unknown) =>
+            typeof segment === `string` || typeof segment === `number`,
+        ))
+        ? (path as string | ReadonlyArray<string | number>)
+        : undefined,
   }
 }
 
@@ -180,6 +194,23 @@ async function executeRequestAgainstAdapter(
       }
     }
 
+    case `reconcileCommittedTx`: {
+      const result = adapter.reconcileCommittedTx
+        ? await adapter.reconcileCommittedTx(
+            request.collectionId,
+            request.payload.tx,
+            request.payload.anchor,
+          )
+        : { kind: `unknown` as const }
+      return {
+        v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
+        requestId: request.requestId,
+        method: request.method,
+        ok: true,
+        result,
+      }
+    }
+
     case `ensureIndex`: {
       await adapter.ensureIndex(
         request.collectionId,
@@ -230,6 +261,25 @@ async function executeRequestAgainstAdapter(
         method: request.method,
         ok: true,
         result,
+      }
+    }
+
+    case `reserveLeadershipTerm`: {
+      if (!adapter.reserveLeadershipTerm) {
+        throw new InvalidPersistedCollectionConfigError(
+          `reserveLeadershipTerm is not supported by the configured electron persistence adapter`,
+        )
+      }
+      const position = await adapter.reserveLeadershipTerm(
+        request.collectionId,
+        request.payload.observedTerm,
+      )
+      return {
+        v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
+        requestId: request.requestId,
+        method: request.method,
+        ok: true,
+        result: position,
       }
     }
 

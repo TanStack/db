@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { Temporal } from 'temporal-polyfill'
-import { deepEquals } from '../src/utils'
+import { deepEquals, equalPersistedSnapshotValues } from '../src/utils'
 
 /**
  * The `deepEquals` API contract in `../src/utils.ts`, reinforced by the
@@ -1164,6 +1164,33 @@ describe(`deepEquals property-based tests`, () => {
         expectCopyAndChanged(duration, copy, changed)
       },
     )
+  })
+})
+
+// Persisted-snapshot equality decides whether a reload can leave the public
+// row untouched. Prototype identity is part of that row's observable shape:
+// equal fields on a class or null-prototype record cannot certify that a
+// plain durable record is already public. Two values with the same prototype
+// and fields remain equal. This is a direct comparator boundary; the persisted
+// wrapper oracle owns the source/live publication checkpoint.
+describe(`persisted-snapshot prototype equality`, () => {
+  it(`distinguishes nested prototypes while accepting equal same-prototype values`, () => {
+    class DetailBox {
+      constructor(public rank: number) {}
+    }
+    const authored = { detail: new DetailBox(7) }
+    const durable = { detail: { rank: 7 } }
+    const sameShape = { detail: new DetailBox(7) }
+    const nullPrototype = Object.assign(Object.create(null) as object, {
+      rank: 7,
+    })
+
+    expect(deepEquals(authored, durable)).toBe(true)
+    expect(equalPersistedSnapshotValues(authored, durable)).toBe(false)
+    expect(equalPersistedSnapshotValues(authored, sameShape)).toBe(true)
+    expect(
+      equalPersistedSnapshotValues({ detail: nullPrototype }, durable),
+    ).toBe(false)
   })
 })
 
