@@ -646,14 +646,18 @@ function retryDecisionProviderError(kind: RetryErrorKind): Error {
 // is the marginal FIFO witness; three detect loss of a later admitted peer.
 // A second failure and malformed hook result have separate witnesses below.
 // Duplicate IDs and storage failures belong to other settlement grammars here.
+// After each normal campaign, the reach check proves that fast-check executed
+// every fixed cell. A seed-and-path replay runs only its requested history.
 it.each(oracleSeeds(20261008, retryDecisionOracle))(
   `refines an optional retry decision at the durable FIFO checkpoint (seed %s)`,
   async (seed) => {
+    const reachedCases = new Set<string>()
     await fc.assert(
       fc.asyncProperty(
         fc.constantFrom(...retryDecisionCases),
         fc.integer({ min: 1, max: 3 }),
         async (scenario, peerCount) => {
+          reachedCases.add(`${scenario.errorKind}:${scenario.hook}`)
           const providerError = retryDecisionProviderError(scenario.errorKind)
           const firstEntered = gate()
           const releaseFirst = gate()
@@ -899,6 +903,12 @@ it.each(oracleSeeds(20261008, retryDecisionOracle))(
         examples: retryDecisionExamples,
       },
     )
+    if (retryDecisionOracle.path === undefined)
+      expect([...reachedCases].sort()).toEqual(
+        retryDecisionCases
+          .map(({ errorKind, hook }) => `${errorKind}:${hook}`)
+          .sort(),
+      )
   },
 )
 
