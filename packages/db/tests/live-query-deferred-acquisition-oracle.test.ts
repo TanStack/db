@@ -57,7 +57,7 @@ import {
 } from '../src'
 import { Query } from '../src/query/builder/index.js'
 import { createPooledLiveQuery } from '../src/query/pooled-live-query.js'
-import type { Collection } from '../src'
+import type { Collection, LiveQueryObserver } from '../src'
 
 type Row = { id: string; rank: number; group: string }
 const ROWS: Array<Row> = [
@@ -504,7 +504,10 @@ describe(`live-query deferred acquisition`, () => {
  * subscription defers acquisition until a view has a subscriber or a preload.
  * Only eager source states apply, and pooled cleanup releases a shared
  * partition, so this block uses the histories without cleanup. `start` is
- * building the view.
+ * building the view. An observer is another public demand path for the same
+ * view: its preload must reach the source even though a pooled view has no
+ * query-Collection config. The observer runs with and without an SSR cleanup
+ * client, which must not mistake the absent config for a live-query builder.
  */
 // The pooled entry point takes the internal builder, as its own oracle does.
 const pooledQuery =
@@ -515,6 +518,61 @@ const pooledQuery =
       .orderBy(({ row }: any) => row.rank, `asc`)
 
 describe(`pooled live-query deferred acquisition`, () => {
+  it.each([
+    [`eager-idle`, `no SSR cleanup client`],
+    [`eager-running`, `no SSR cleanup client`],
+    [`eager-idle`, `an SSR cleanup client`],
+    [`eager-running`, `an SSR cleanup client`],
+  ] as const)(
+    `an observer preload reaches a config-free pooled view from %s with %s`,
+    async (state, clientMode) => {
+      const { collection: source, counts } = makeSource(state)
+      const view = createPooledLiveQuery(pooledQuery(source)(new Query()), {
+        gcTime: 0,
+      })
+      expect(view, `the query is poolable`).toBeDefined()
+      const client =
+        clientMode === `an SSR cleanup client` ? new DbClient() : undefined
+      client?._setSsrServerCleanupEnabled(true)
+      let observer: LiveQueryObserver<Row, string | number> | undefined
+      let constructionError: unknown
+      try {
+        observer = createLiveQueryObserver(view as Collection<Row>, {
+          client,
+          queryHash: `config-free-pooled-view`,
+        })
+      } catch (error) {
+        constructionError = error
+      }
+      try {
+        expect(
+          constructionError,
+          `observer construction succeeds`,
+        ).toBeUndefined()
+        if (!observer) throw new Error(`missing observer after construction`)
+        // Model: explicit demand starts an idle source once. An already
+        // running source needs no second start for the same public rows.
+        const startsBefore = counts.starts
+        await expect(
+          Promise.resolve().then(() => observer.preload()),
+          `observer preload succeeds`,
+        ).resolves.toBeUndefined()
+        await settle()
+        expect(counts.starts - startsBefore, `new source starts`).toBe(
+          state === `eager-idle` ? 1 : 0,
+        )
+        expect(observer.getSnapshot().status).toBe(`ready`)
+        const rows = observer.getSnapshot().data as ReadonlyArray<Row>
+        expect(rows.map((row) => row.id)).toEqual(EXPECTED_IDS.all)
+      } finally {
+        observer?.dispose()
+        await view?.cleanup()
+        await source.cleanup()
+        await client?.cleanup()
+      }
+    },
+  )
+
   const pooledHistories: Record<string, Array<Command>> = {
     'build and read without a subscriber': [`start`, `read`],
     'subscribe after build': [`start`, `read`, `subscribe`],

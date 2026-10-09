@@ -247,6 +247,13 @@ are compared against plain per-client maps after initial publication, each
 write, and a mounted A→B→A provider switch. It checks the public `$key` against
 each projected row ID, exact public key sets, and identity equality with direct
 Collection formulations.
+The same owner crosses join, nested FROM, union, and include placements of two
+standalone descriptors under two clients with equal row keys and different
+values. Complete selected rows are compared with plain per-client values after
+initial publication, a child write in the first client, and a parent write in
+the second. A first-client-only binding mutation fails at the second client's
+initial public-row assertion. This finite matrix does not observe on-demand
+requests or arbitrary write interleavings.
 The same owner also checks a prebuilt Query consumed by `useLiveQueryEffect`:
 two clients with the same row key report their own initial enter events, and
 one mounted Effect reports the new client's row after a provider switch.
@@ -290,13 +297,18 @@ same-hash preload over a healthy replacement publishes its own row. Asynchronous
 failure and larger source sets remain open. Retrying the same options after the
 source entered terminal error reports that source error instead of reusing the
 failed query's pending stream; it does not restart the source.
+An observer preload over a config-free pooled view is also explicit demand: it
+starts an idle eager source once, does not restart a running source, and reaches
+a ready public snapshot in both cases, with or without an SSR cleanup client.
+This bounded witness does not claim the same path for on-demand or asynchronous
+sources.
 `packages/svelte-db/tests/descriptor-query-release-oracle.svelte.test.ts`
 checks Svelte's two-source release after a first startup error and a direct
 reader after a second descriptor factory fails. It observes source start counts,
 ready status, and failed-hook subscription release. It does not establish
 two-client Svelte provider binding or reactive query replacement. Concrete-
-config descriptors, on-demand acquisition, joins, union/include rows under
-separate clients, and those Svelte paths remain open for this binding law; a
+config descriptors, on-demand acquisition, and those Svelte paths remain open
+for this binding law; a
 receiving oracle needs the relevant public observation for each. Vue, Solid,
 and Angular have no DbClient descriptor-binding contract in this work. Their
 query callers use concrete Collections.

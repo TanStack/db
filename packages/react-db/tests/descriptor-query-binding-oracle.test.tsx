@@ -35,6 +35,13 @@
  * object. The client must reject that local source substitution before the
  * stream's result can answer the second preload. This is one local hook-first
  * order; hydration from another process has no comparable object identity.
+ * A finite two-source grammar places the same standalone parent and child
+ * descriptors in a join, nested FROM, union, or include. Two clients supply
+ * different values under equal row keys. A plain per-client value model
+ * predicts the complete selected rows after initial publication, a first-
+ * client child write, and a second-client parent write. This detects binding
+ * either source to the wrong provider; it does not observe on-demand requests
+ * or arbitrary interleavings of source writes.
  *
  * A prepared query is a bound snapshot, not a lasting render resolver. Adding
  * a descriptor source later changes the plan without starting a sync run. The
@@ -58,6 +65,7 @@ import {
   eq,
   getStableQueryBuilderHash,
   prepareLiveQueryValue,
+  toArray,
 } from '@tanstack/db'
 import { describe, expect, it } from 'vitest'
 import { Suspense } from 'react'
@@ -66,7 +74,11 @@ import { useLiveQuery } from '../src/useLiveQuery'
 import { useLiveQueryEffect } from '../src/useLiveQueryEffect'
 import { useLiveSuspenseQuery } from '../src/useLiveSuspenseQuery'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
-import type { DeferredLiveQueryCollections } from '@tanstack/db'
+import type {
+  Context,
+  DeferredLiveQueryCollections,
+  QueryBuilder,
+} from '@tanstack/db'
 import type { ReactNode } from 'react'
 
 type Row = { id: string; value: string }
@@ -602,6 +614,191 @@ describe(`standalone descriptor query binding`, () => {
 
       first.unmount()
       second.unmount()
+    },
+  )
+
+  it.each([`join`, `nestedFrom`, `union`, `include`] as const)(
+    `keeps two descriptor sources local to each provider in a %s query`,
+    async (form) => {
+      type Parent = { id: string; value: string }
+      type Child = { id: string; parentId: string; value: string }
+      const parentDescriptor = collectionOptions(
+        `two-source-parent-${form}`,
+        (client) =>
+          mockSyncCollectionOptions<Parent>({
+            id: `two-source-parent-${form}`,
+            getKey: (row) => row.id,
+            initialData: client.requireDependency<Array<Parent>>(`parents`),
+          }),
+      )
+      const childDescriptor = collectionOptions(
+        `two-source-child-${form}`,
+        (client) =>
+          mockSyncCollectionOptions<Child>({
+            id: `two-source-child-${form}`,
+            getKey: (row) => row.id,
+            initialData: client.requireDependency<Array<Child>>(`children`),
+          }),
+      )
+
+      // One plan is built before either client. Each client supplies two
+      // distinct source rows; aliases and query identity are shared.
+      const joined = () =>
+        new Query()
+          .from({ parent: parentDescriptor })
+          .innerJoin({ child: childDescriptor }, ({ parent, child }) =>
+            eq(parent.id, child.parentId),
+          )
+          .select(({ parent, child }) => ({
+            id: parent.id,
+            value: parent.value,
+            childValue: child.value,
+          }))
+      const query =
+        form === `join`
+          ? joined()
+          : form === `nestedFrom`
+            ? new Query().from({ wrapper: joined() }).select(({ wrapper }) => ({
+                id: wrapper.id,
+                value: wrapper.value,
+                childValue: wrapper.childValue,
+              }))
+            : form === `union`
+              ? new Query().unionAll(
+                  new Query()
+                    .from({ parent: parentDescriptor })
+                    .select(({ parent }) => ({
+                      id: parent.id,
+                      value: parent.value,
+                    })),
+                  new Query()
+                    .from({ child: childDescriptor })
+                    .select(({ child }) => ({
+                      id: child.id,
+                      value: child.value,
+                    })),
+                )
+              : new Query()
+                  .from({ parent: parentDescriptor })
+                  .select(({ parent }) => ({
+                    id: parent.id,
+                    value: parent.value,
+                    children: toArray(
+                      new Query()
+                        .from({ child: childDescriptor })
+                        .where(({ child }) => eq(child.parentId, parent.id))
+                        .select(({ child }) => ({
+                          id: child.id,
+                          value: child.value,
+                        })),
+                    ),
+                  }))
+      const hookQuery = query as QueryBuilder<Context>
+      const first = new DbClient({
+        parents: [{ id: `parent`, value: `FIRST PARENT` }],
+        children: [{ id: `child`, parentId: `parent`, value: `FIRST CHILD` }],
+      })
+      const second = new DbClient({
+        parents: [{ id: `parent`, value: `SECOND PARENT` }],
+        children: [{ id: `child`, parentId: `parent`, value: `SECOND CHILD` }],
+      })
+      const models = new Map([
+        [first, { parent: `FIRST PARENT`, child: `FIRST CHILD` }],
+        [second, { parent: `SECOND PARENT`, child: `SECOND CHILD` }],
+      ])
+      const mounted = [first, second].map((client) => ({
+        client,
+        hook: renderHook(() => useLiveQuery({ query: hookQuery }), {
+          wrapper: ({ children }: { children: ReactNode }) => (
+            <DbProvider client={client}>{children}</DbProvider>
+          ),
+        }),
+      }))
+
+      /** The model recomputes rows from each client's two plain values. */
+      const expected = (client: DbClient) => {
+        const values = models.get(client)!
+        return form === `union`
+          ? [
+              { id: `child`, value: values.child },
+              { id: `parent`, value: values.parent },
+            ]
+          : form === `join` || form === `nestedFrom`
+            ? [
+                {
+                  id: `parent`,
+                  value: values.parent,
+                  childValue: values.child,
+                },
+              ]
+            : [
+                {
+                  id: `parent`,
+                  value: values.parent,
+                  children: [{ id: `child`, value: values.child }],
+                },
+              ]
+      }
+      const check = async (cut: string) => {
+        await waitFor(() => {
+          for (const { client, hook } of mounted) {
+            const rows = (
+              hook.result.current.data as Array<{
+                id: string
+                value: string
+                childValue?: string
+                children?: Array<{ id: string; value: string }>
+              }>
+            )
+              .map((row) => ({
+                id: row.id,
+                value: row.value,
+                ...(form === `join` || form === `nestedFrom`
+                  ? { childValue: row.childValue }
+                  : {}),
+                ...(form === `include`
+                  ? {
+                      children: (row.children ?? []).map((child) => ({
+                        id: child.id,
+                        value: child.value,
+                      })),
+                    }
+                  : {}),
+              }))
+              .sort((a, b) => a.id.localeCompare(b.id))
+            expect(
+              rows,
+              `${cut}: ${client === first ? `first` : `second`}`,
+            ).toEqual(expected(client))
+          }
+        })
+      }
+
+      try {
+        await check(`initial publication`)
+        act(() => {
+          first.collection(childDescriptor).update(`child`, (draft) => {
+            draft.value = `FIRST CHILD 2`
+          })
+        })
+        models.get(first)!.child = `FIRST CHILD 2`
+        await check(`first child write`)
+
+        act(() => {
+          second.collection(parentDescriptor).update(`parent`, (draft) => {
+            draft.value = `SECOND PARENT 2`
+          })
+        })
+        models.get(second)!.parent = `SECOND PARENT 2`
+        await check(`second parent write`)
+      } finally {
+        for (const { hook } of mounted) {
+          hook.unmount()
+          await hook.result.current.collection.cleanup()
+        }
+        await first.cleanup()
+        await second.cleanup()
+      }
     },
   )
 })

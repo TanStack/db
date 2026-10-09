@@ -860,11 +860,12 @@ class LiveQueryObserverImpl<
   }
 
   private registerClientResource(): void {
+    const config: object | undefined = this.collection?.config
     if (
       this.unregisterClientResource ||
       !this.client?._isSsrServerCleanupEnabled() ||
-      !this.collection ||
-      !getBuilderFromConfig(this.collection.config)
+      !config ||
+      !getBuilderFromConfig(config)
     ) {
       return
     }
@@ -951,7 +952,7 @@ class LiveQueryObserverImpl<
   preload(): Promise<void> {
     if (this.preloadPromise) return this.preloadPromise
 
-    const sources = this.collection
+    const sources = this.collection?.config
       ? getBuilderFromConfig(this.collection.config)?.getSourceCollections()
       : undefined
     if (this.client && this.queryHash) {
