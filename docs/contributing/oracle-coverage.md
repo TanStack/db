@@ -1265,14 +1265,59 @@ for this oracle repair. Keep these scenarios and decisions with that owner:
   still needs a browser-host composition with leadership loss across a write.
   These paths are outside this bounded repair. The [review record](oracle-reviews/issue-1939-offline-admission.md)
   preserves the RED/GREEN and checker-calibration evidence.
-- **A10 R5/R9:** manual removal/clear outside the active-provider witnesses,
-  restored optimistic lifetimes, and retry-hook failures remain open. The
-  settlement owner checks terminal provider rejection with failed deletion, a
-  halted executor with queued peers held, and restart without a second provider
-  call or optimistic restore. The executor does not automatically retry a failed
-  phase write or deletion. A failed terminal marker write followed by a crash
-  remains an unmarked replay window. Broader offline retry and recovery policy
-  remains with RFC #1659.
+- **A10 R5/R9:** manual removal/clear outside the active-provider witnesses and
+  broader restored optimistic lifetimes remain open. The settlement owner checks
+  the optional retry decision across AbortError, ordinary network, 400/401/403/
+  422/404 message, and permanent errors. Each kind crosses true, false,
+  undefined, and absent hook answers with 1–3 FIFO peers. The fixed examples
+  each receive a campaign run before generated cases, with a reach assertion.
+  A later failure checks the current retry count. Public `commit()` witnesses
+  cover thrown, null, zero, and fulfilled or rejected Promise hook results;
+  a rejected Promise must not escape as an unhandled process rejection. Primitive
+  and status-bearing object provider rejections check Error conversion before
+  the hook. A status-bearing Error from another JavaScript realm reaches the
+  hook by identity, keeps its first retry record, and later settles after a
+  successful attempt. A plain status-bearing object still takes the non-Error
+  conversion path; spoofed Error tags are outside these witnesses. The first
+  stored decision distinguishes terminal rejection from a retry record. A hook
+  fault records a terminal rejection for only the failed row. The executor
+  removes that row,
+  rejects its caller with the hook failure, and continues queued work
+  after acknowledged deletion. The public admission witness holds the terminal
+  marker read, write, or deletion after a thrown or invalid hook: a new commit
+  durably joins the queue at each cut but cannot run before head cleanup.
+  The started-write witness crosses write acknowledgement before, during, or
+  after the hook fault, including a row visible before acknowledgement and a
+  write rejected before storage changes. It checks both public promises,
+  outbox IDs, Collection rows, and same-executor peer progress. A visible but
+  unacknowledged peer cannot run even after the head is removed. The controlled
+  adapter does not cover a write that changes storage and then rejects its
+  acknowledgement; fresh executor startup before a held write acknowledges
+  remains outside this witness.
+  Failed terminal marker or deletion storage still stops the executor: the
+  head caller receives the hook error, the batch receives the storage error,
+  and queued peers stay durable and unrun. If deletion fails after the terminal
+  marker is written, restart removes the marked row without another named
+  mutation function call or optimistic restoration. The settlement owner also
+  checks terminal named mutation function rejection with failed deletion, a
+  halted executor with queued peers held, and offline executor restart without
+  a second named mutation function call or optimistic restore. The executor
+  does not automatically retry a failed phase write or deletion. A failed
+  terminal marker write followed by a crash remains an unmarked outbox replay
+  window. The [row-local review](oracle-reviews/pr-1592-row-local-retry-hook.md),
+  [retry-decision grammar review](oracle-reviews/pr-1592-retry-decision-grammar.md),
+  [rejected-Promise review](oracle-reviews/pr-1592-rejected-hook-promise.md),
+  and [error-boundary review](oracle-reviews/pr-1592-error-boundary-review.md)
+  record the checker controls. The Node-hosted Promise witnesses do not establish
+  browser `unhandledrejection`, third-party thenables, or rejection after executor
+  disposal; this settlement owner needs a receiving witness for any broader
+  claim. A held provider can reject after `removeFromOutbox` or `clearOutbox`
+  acknowledges deletion. The default network retry and a hook's 401 retry both
+  reject that caller with the provider Error, keep the outbox empty, and allow
+  later same-executor work. Manual removal overlapping the read/write inside
+  `outbox.update`, rather than finishing before provider settlement, still needs
+  a controlled witness and an atomicity decision in this owner. Broader offline
+  retry and recovery policy remains with RFC #1659.
 - **A10 R11/R12 and earlier R8:** metadata/native-value domain, old readers of
   new wire records, and unreadable/unknown-version outbox recovery. New readers
   accepting old records does not prove reverse compatibility. Do not delete
