@@ -43,8 +43,9 @@ import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
  * The grammar generates a select object of one to three fields, each a tree of
  * depth at most two over literals, parent fields (include only), source fields,
  * and the aggregates `count`, `sum` and `max`, combined by `add` and
- * `caseWhen`. A field can also be a nested object of such expressions. A
- * shape may spread the source or the parent row. Every shape
+ * `caseWhen`. A field can also be a nested object of such expressions, or a
+ * `caseWhen` whose branches are such objects (a conditional select). A shape
+ * may spread the source or the parent row. Every shape
  * holds at least one aggregate. Each history runs the shape at the top level
  * and inside an include, then applies parent updates and source inserts,
  * updates and deletes. After each step the driver compares the published rows
@@ -199,15 +200,27 @@ const expression = (include: boolean, depth: number): fc.Arbitrary<Part> =>
           })
           .map((c): Part => ({ k: `case`, ...c })),
       )
+const nestedObject = (include: boolean, depth: number): fc.Arbitrary<Part> =>
+  fc
+    .dictionary(fc.constantFrom(`p`, `q`), expression(include, depth), {
+      minKeys: 1,
+      maxKeys: 2,
+    })
+    .map((fields): Part => ({ k: `nested`, fields }))
+// A conditional whose branches are select objects compiles to a conditional
+// select, not to a function call, so it reaches a separate validation path.
 const part = (include: boolean, depth: number): fc.Arbitrary<Part> =>
   fc.oneof(
     { weight: 4, arbitrary: expression(include, depth) },
+    nestedObject(include, depth - 1),
     fc
-      .dictionary(fc.constantFrom(`p`, `q`), expression(include, depth - 1), {
-        minKeys: 1,
-        maxKeys: 2,
+      .record({
+        cond: expression(include, depth - 1),
+        lit: literal,
+        a: nestedObject(include, depth - 1),
+        b: nestedObject(include, depth - 1),
       })
-      .map((fields): Part => ({ k: `nested`, fields })),
+      .map((c): Part => ({ k: `case`, ...c })),
   )
 const shape = (include: boolean): fc.Arbitrary<Shape> =>
   fc
