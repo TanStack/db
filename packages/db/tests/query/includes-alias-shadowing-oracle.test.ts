@@ -459,6 +459,73 @@ describe(`captured alias scope oracle`, () => {
     }
   })
 
+  /**
+   * A union branch or wrapped QueryRef feeds the parent even though its source
+   * alias is not visible in the parent's callback. Reusing that declaration
+   * inside an include must fail at construction. Fresh child declarations and
+   * sibling reuse remain legal in the neighboring checks.
+   */
+  test(`an include cannot reuse a branch of its ancestor union`, async () => {
+    const source = createScopedSource(
+      `ancestor-union-branch-reuse`,
+      [{ id: 1, parentId: 1 }],
+      `eager`,
+    )
+    const first = new Query()
+      .from({ first: source.collection })
+      .select(({ first: row }) => ({ id: row.id, parentId: row.parentId }))
+    const second = new Query()
+      .from({ second: source.collection })
+      .select(({ second: row }) => ({ id: row.id, parentId: row.parentId }))
+
+    try {
+      expect(() =>
+        new Query()
+          .unionAll(first, second)
+          .innerJoin({ anchor: source.collection }, ({ id, anchor }) =>
+            eq(id, anchor.id),
+          )
+          .select(({ anchor }) => ({
+            id: anchor.id,
+            children: toArray(
+              first.where(({ first: child }) => eq(child.parentId, anchor.id)),
+            ),
+          })),
+      ).toThrow(/new Query\(\).*instead of passing the ancestor builder/)
+    } finally {
+      await source.collection.cleanup()
+    }
+  })
+
+  test(`an include cannot reuse a source inside its ancestor QueryRef`, async () => {
+    const source = createScopedSource(
+      `ancestor-queryref-source-reuse`,
+      [{ id: 1, parentId: 1 }],
+      `eager`,
+    )
+    const inner = new Query()
+      .from({ inner: source.collection })
+      .select(({ inner: row }) => ({ id: row.id, parentId: row.parentId }))
+
+    try {
+      expect(() =>
+        new Query()
+          .from({ wrapped: inner })
+          .innerJoin({ anchor: source.collection }, ({ wrapped, anchor }) =>
+            eq(wrapped.id, anchor.id),
+          )
+          .select(({ anchor }) => ({
+            id: anchor.id,
+            children: toArray(
+              inner.where(({ inner: child }) => eq(child.parentId, anchor.id)),
+            ),
+          })),
+      ).toThrow(/new Query\(\).*instead of passing the ancestor builder/)
+    } finally {
+      await source.collection.cleanup()
+    }
+  })
+
   test(`an ancestor binding inside a nested include asks for a new Query`, async () => {
     const source = createScopedSource(
       `ancestor-nested-reuse`,

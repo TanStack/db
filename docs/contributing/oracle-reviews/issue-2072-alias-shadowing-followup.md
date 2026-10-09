@@ -215,3 +215,32 @@ These witnesses cover those two predicate paths and checkpoints. They do not
 claim that all optimizer rewrites, nested joins, or temporal demand histories
 preserve lexical bindings; the alias-scope row in the coverage map retains
 those cells.
+
+## Ancestor source declarations inside union and QueryRef sources
+
+CodeRabbit review `5471809088` at `eda70b96c` noted that a parent built from
+`unionAll(branchA, branchB)` could reuse `branchA` as an include child without
+the fresh-declaration error. The accepted law is ARCHITECTURE.md §Identity and
+law 1: one source declaration cannot serve in both an ancestor source tree and
+its descendant include. A union's projected fields are visible to callbacks;
+its branch source aliases are not. The admission check must still know the
+branches' source identities. The same distinction applies to a QueryRef used
+as the parent's source.
+
+Two finite oracle witnesses at `3617eacd5` returned a builder instead of
+throwing: one reused a parent union branch as an include child, and the other
+reused a source inside a parent QueryRef. Each supplied a separate joined
+anchor for the required correlation, so a missing-correlation error could not
+mask the reuse. The new checker compares the construction result with the
+documented fresh-Query error. Both cases were RED before the repair and pass
+after source-binding collection walks the parent's FROM and JOIN source tree.
+Callback proxies still expose only the union result fields. Existing fresh
+declaration and sibling-reuse controls remain legal.
+The primary, generated-scope, and route-context suites pass 458 tests; the
+full query runtime suite passes 4,785 tests, with DB TypeScript, targeted lint,
+and formatting checks green.
+
+This checks those two source placements at construction. The traversal also
+handles union-from and joined QueryRef sources; no new public-row or temporal
+witness is claimed for them. The broader alias-scope gaps remain in the
+coverage map.

@@ -668,7 +668,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
 
     const select = buildNestedSelect(selectObject, {
       aliases,
-      bindingIds: new Set(bindings.values()),
+      bindingIds: collectSourceTreeBindings(this.query),
     })
 
     return this._clone({
@@ -1724,6 +1724,33 @@ function collectDeclaredBindings(query: QueryIR): Set<string> {
     bindings.add(from.bindingId)
   }
   for (const join of query.join ?? []) bindings.add(join.from.bindingId)
+  return bindings
+}
+
+/** Include ancestor source declarations without binding union output fields. */
+function collectSourceTreeBindings(
+  query: Partial<QueryIR>,
+  bindings = new Set<string>(),
+  seen = new Set<Partial<QueryIR>>(),
+): Set<string> {
+  if (seen.has(query)) return bindings
+  seen.add(query)
+
+  const addSource = (source: CollectionRef | QueryRef) => {
+    bindings.add(source.bindingId)
+    if (source instanceof QueryRef)
+      collectSourceTreeBindings(source.query, bindings, seen)
+  }
+  const from = query.from
+  if (from?.type === `unionFrom`) {
+    for (const source of from.sources) addSource(source)
+  } else if (from?.type === `unionAll`) {
+    for (const branch of from.queries)
+      collectSourceTreeBindings(branch, bindings, seen)
+  } else if (from) {
+    addSource(from)
+  }
+  for (const join of query.join ?? []) addSource(join.from)
   return bindings
 }
 
