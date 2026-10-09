@@ -90,3 +90,7 @@ parent/inner `QueryRef` cell now uses a fresh declaration of the same
 Collection, preserving its row and source-update assertions. The sibling
 reuse cell remains unchanged. This closes the known direct reuse trace under
 the stated API rule; the other evidence gaps above remain open.
+
+At `1f588f53f`, the 51-cell alias-shadowing oracle, 268-cell generated scope
+oracle, alias validation tests, and production error-message oracle all passed
+(346 tests total, no type errors). Lint and whitespace checks passed too.
