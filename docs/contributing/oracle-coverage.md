@@ -261,6 +261,13 @@ The same React owner checks that a descriptor render suspended before commit
 starts no source work, while a later direct `Collection.preload()` starts that
 source once and reaches ready. This is one abandoned-render/direct-reader cut,
 not a general concurrent-render schedule.
+Its no-client diagnostic also covers explicit `queryKey` and legacy dependency
+identity at first consumption. A local hook-first SSR stream over a concrete
+source rejects a later same-hash descriptor preload over a different source;
+the same source is accepted. Hydration-first source provenance remains open:
+server and browser Collection objects differ, and a hydrated stream carries no
+local source-object list. This owner does not claim that a failed Svelte effect
+can recover in place after a reactive query replacement.
 `packages/db/tests/db-client.test.ts` supplies a
 focused nested-query preload witness across two clients, including equal query
 hashes and distinct dehydrated rows.
@@ -277,7 +284,12 @@ from another process and different explicit query keys remain open.
 a two-source descriptor union when the first sync start fails: the second source
 still starts and reaches ready on direct preload, and a preparation error stays
 primary if a deferred source also throws during release. The controlled sources
-start synchronously; asynchronous failure and larger source sets remain open.
+start synchronously. At the synchronous preload error cut, even a caller that
+opts to stream pending queries cannot dehydrate the failed query; a later
+same-hash preload over a healthy replacement publishes its own row. Asynchronous
+failure and larger source sets remain open. Retrying the same options after the
+source entered terminal error reports that source error instead of reusing the
+failed query's pending stream; it does not restart the source.
 `packages/svelte-db/tests/descriptor-query-release-oracle.svelte.test.ts`
 checks Svelte's two-source release after a first startup error and a direct
 reader after a second descriptor factory fails. It observes source start counts,

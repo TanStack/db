@@ -30,6 +30,11 @@
  * descriptor query with the same semantic hash. It must reject the unbound
  * source before reusing the old live-query Collection. The React error names
  * DbProvider as the remedy; the core error remains framework neutral.
+ * A server-streaming history begins with a pending concrete-source hook and
+ * then preloads a descriptor with the same query hash over another source
+ * object. The client must reject that local source substitution before the
+ * stream's result can answer the second preload. This is one local hook-first
+ * order; hydration from another process has no comparable object identity.
  *
  * A prepared query is a bound snapshot, not a lasting render resolver. Adding
  * a descriptor source later changes the plan without starting a sync run. The
@@ -59,6 +64,7 @@ import { Suspense } from 'react'
 import { DbProvider } from '../src/DbProvider'
 import { useLiveQuery } from '../src/useLiveQuery'
 import { useLiveQueryEffect } from '../src/useLiveQueryEffect'
+import { useLiveSuspenseQuery } from '../src/useLiveSuspenseQuery'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import type { DeferredLiveQueryCollections } from '@tanstack/db'
 import type { ReactNode } from 'react'
@@ -292,6 +298,77 @@ describe(`standalone descriptor query binding`, () => {
     query = unboundQuery
     expect(() => mounted.rerender()).toThrow(/requires a DbClient.*DbProvider/)
     mounted.unmount()
+
+    // An explicit identity changes when preparation runs, not the need for a
+    // client. Both supported identity forms still owe the React-specific fix.
+    expect(() =>
+      renderHook(() =>
+        useLiveQuery({ query: unboundQuery, queryKey: [`unbound`] }),
+      ),
+    ).toThrow(/requires a DbClient.*DbProvider/)
+    expect(() =>
+      renderHook(() => useLiveQuery({ query: unboundQuery }, [])),
+    ).toThrow(/requires a DbClient.*DbProvider/)
+  })
+
+  it(`rejects a different source after a hook registered the same stream hash`, async () => {
+    const id = `hook-first-preload-source`
+    let finishFirst!: () => void
+    const first = createCollection({
+      id,
+      getKey: (row: Row) => row.id,
+      sync: {
+        sync: ({ markReady }) => {
+          finishFirst = markReady
+        },
+      },
+    })
+    const second = collectionOptions(id, () =>
+      mockSyncCollectionOptions<Row>({
+        id,
+        getKey: (row) => row.id,
+        initialData: [{ id: `one`, value: `second` }],
+      }),
+    )
+    const firstQuery = new Query()
+      .from({ item: first })
+      .select(({ item }) => ({ id: item.id, value: item.value }))
+    const secondQuery = new Query()
+      .from({ item: second })
+      .select(({ item }) => ({ id: item.id, value: item.value }))
+    expect(getStableQueryBuilderHash(firstQuery)).toBe(
+      getStableQueryBuilderHash(secondQuery),
+    )
+    const client = new DbClient()
+    client._setSsrStreamingEnabled(true)
+    client._setSsrServerCleanupEnabled(true)
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <DbProvider client={client}>
+        <Suspense fallback={null}>{children}</Suspense>
+      </DbProvider>
+    )
+    const mounted = renderHook(
+      () => useLiveSuspenseQuery({ query: firstQuery }),
+      { wrapper },
+    )
+
+    try {
+      expect(
+        client.dehydrate({ shouldDehydrateLiveQuery: () => true }).liveQueries,
+      ).toHaveLength(1)
+      expect(() => client.preloadLiveQuery({ query: firstQuery })).not.toThrow()
+      expect(() => client.preloadLiveQuery({ query: secondQuery })).toThrow(
+        /different source Collections/,
+      )
+    } finally {
+      await act(async () => {
+        finishFirst()
+        await Promise.resolve()
+      })
+      mounted.unmount()
+      await client.cleanup()
+      await first.cleanup()
+    }
   })
 
   it(`dehydrates a descriptor source first consumed by a committed Effect`, async () => {

@@ -39,7 +39,7 @@ export function useLiveQueryEffect<
 
   useEffect(() => {
     const query = prepareLiveQueryValue(config.query, client)
-    getPreparedSources(query, client, `useLiveQueryEffect`)
+    if (!client) getPreparedSources(query, client, `useLiveQueryEffect`)
     const effect = createEffect<TRow, TKey>({
       id: config.id,
       query: query as EffectConfig<TRow, TKey>[`query`],

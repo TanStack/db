@@ -951,9 +951,14 @@ class LiveQueryObserverImpl<
   preload(): Promise<void> {
     if (this.preloadPromise) return this.preloadPromise
 
+    const sources = this.collection
+      ? getBuilderFromConfig(this.collection.config)?.getSourceCollections()
+      : undefined
     if (this.client && this.queryHash) {
       const query = this.client._getLiveQuery(this.queryHash)
       if (query?.status === `pending` || query?.status === `success`) {
+        if (sources)
+          this.client._assertLiveQuerySources(this.queryHash, sources)
         // The client stream answers this preload, but it is still a request
         // for this Collection's data, so its deferred acquisition may resume.
         try {
@@ -973,6 +978,7 @@ class LiveQueryObserverImpl<
         ? this.client._registerLiveQuery(
             this.queryHash,
             collectionPromise.then(() => this.dehydrate()),
+            sources,
           )
         : collectionPromise
     this.preloadPromise = preloadPromise

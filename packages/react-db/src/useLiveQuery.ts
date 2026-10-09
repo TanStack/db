@@ -930,6 +930,9 @@ function useLiveQueryImpl(
             instance.deferredCollections,
           )
         }
+        if (!dbClient) {
+          getPreparedSources(preparedQueryValue, dbClient, `useLiveQuery`)
+        }
         instance.collection = resolveLiveQueryValue(preparedQueryValue, {
           gcTime: forSuspense
             ? DEFAULT_SUSPENSE_GC_TIME_MS

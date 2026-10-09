@@ -14,6 +14,7 @@ import {
   isSingleResultCollection,
   prepareLiveQueryValue,
   resolveLiveQueryValue,
+  resumeDeferredLiveQueryCollections,
 } from '@tanstack/db'
 import { useOptionalDbClient } from './db-context.js'
 import type {
@@ -436,19 +437,8 @@ export function useLiveQuery(
       collection,
       client: dbClient,
       queryHash,
-      resumeDeferredCollections: () => {
-        const pending = Array.from(deferredCollections)
-        deferredCollections.clear()
-        let firstFailure: { error: unknown } | undefined
-        for (const deferredCollection of pending) {
-          try {
-            deferredCollection._resumeSyncStart()
-          } catch (error) {
-            firstFailure ??= { error }
-          }
-        }
-        if (firstFailure) throw firstFailure.error
-      },
+      resumeDeferredCollections: () =>
+        resumeDeferredLiveQueryCollections(deferredCollections),
     }
   })
 

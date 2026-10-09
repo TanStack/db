@@ -1,5 +1,5 @@
 import { BaseQueryBuilder } from './query/builder/index.js'
-import { collectCollectionSources } from './query/ir.js'
+import { collectSourceRefs, requireCollectionSource } from './query/ir.js'
 import { isCollection } from './live-query-adapter.js'
 import { createLiveQueryCollection } from './query/live-query-collection.js'
 import {
@@ -31,6 +31,23 @@ export type LiveQueryOptions = LiveQueryCollectionConfig<any> & {
 export type DeferredLiveQueryCollections = Set<
   CollectionImpl<any, string | number, any, any, any>
 >
+
+/** Release every deferred source, then report the first startup failure. */
+export function resumeDeferredLiveQueryCollections(
+  collections: DeferredLiveQueryCollections,
+): void {
+  const pending = Array.from(collections)
+  collections.clear()
+  let firstFailure: { error: unknown } | undefined
+  for (const collection of pending) {
+    try {
+      collection._resumeSyncStart()
+    } catch (error) {
+      firstFailure ??= { error }
+    }
+  }
+  if (firstFailure) throw firstFailure.error
+}
 
 type PreparedLiveQueryConfigInput = Omit<
   LiveQueryCollectionConfig<Context>,
@@ -122,12 +139,24 @@ export function prepareLiveQueryValue(
 }
 
 /** Concrete source objects in query-position order for a prepared value. */
-export function getPreparedLiveQuerySources(value: unknown): Array<Collection> {
+export function getPreparedLiveQuerySources(
+  value: unknown,
+  onUnboundDescriptor?: (alias: string) => never,
+): Array<Collection> {
+  if (isCollection(value)) return [value]
   const query =
-    value && typeof value === `object` && `query` in value ? value.query : value
+    value instanceof BaseQueryBuilder
+      ? value
+      : value && typeof value === `object` && `query` in value
+        ? value.query
+        : value
   if (query instanceof BaseQueryBuilder) {
-    return collectCollectionSources(query._getQuery()).map(
-      (source) => source.collection,
+    return collectSourceRefs(query._getQuery()).map((source) =>
+      source.type === `descriptorRef`
+        ? onUnboundDescriptor
+          ? onUnboundDescriptor(source.alias)
+          : requireCollectionSource(source)
+        : source.collection,
     )
   }
   return isCollection(query) ? [query] : []

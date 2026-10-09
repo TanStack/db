@@ -4,6 +4,7 @@ import { DbClient, collectionOptions } from '../src/client.js'
 import {
   getLiveQueryHash,
   getPreparedLiveQueryIdentity,
+  getPreparedLiveQuerySources,
   prepareLiveQueryValue,
   resolveLiveQueryValue,
 } from '../src/live-query-options.js'
@@ -18,6 +19,26 @@ import { collectSourceRefs } from '../src/query/ir.js'
 import type { DeferredLiveQueryCollections } from '../src/live-query-options.js'
 
 describe(`live query preparation`, () => {
+  it(`collects the same concrete source from a bare builder and a config`, async () => {
+    const source = createCollection({
+      id: `prepared-source-shapes`,
+      getKey: (row: { id: string }) => row.id,
+      sync: { sync: ({ markReady }) => markReady() },
+    })
+    const query = new BaseQueryBuilder().from({ item: source })
+
+    try {
+      const bareSources = getPreparedLiveQuerySources(query)
+      const configSources = getPreparedLiveQuerySources({ query })
+      expect(bareSources).toHaveLength(1)
+      expect(configSources).toHaveLength(1)
+      expect(bareSources[0]).toBe(source)
+      expect(configSources[0]).toBe(source)
+    } finally {
+      await source.cleanup()
+    }
+  })
+
   it(`requires a client when a standalone descriptor query is consumed`, () => {
     const descriptor = collectionOptions(`unbound-descriptor`, () => ({
       id: `unbound-descriptor`,

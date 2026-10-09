@@ -628,8 +628,54 @@ describe(`preload answered by a DbClient stream`, () => {
  * reader. The model needs only two independent start counts: zero before
  * preload, one for each after release. The public checkpoint is the failed
  * preload followed by readiness of the second source Collection.
+ * The failed call has no result to stream. A dehydration request at the
+ * synchronous error cut must not publish its pending query promise, even when
+ * the caller opts to stream pending queries.
+ * A later same-hash preload over a healthy replacement source must publish
+ * that source's row; the failed attempt has no result to reuse.
+ * The same options can be retried, but the failed source Collection remains
+ * in error until explicitly restarted. That retry must report the source error
+ * rather than wait on the failed query's former pending stream.
  */
 describe(`DbClient preload releases independent source starts`, () => {
+  it(`reports source error instead of reusing a failed query stream`, async () => {
+    const failure = new Error(`source start failed`)
+    let starts = 0
+    const source = collectionOptions(`preload-transient-start`, () => ({
+      id: `preload-transient-start`,
+      getKey: (row: { id: string }) => row.id,
+      startSync: true,
+      sync: {
+        sync: () => {
+          starts++
+          throw failure
+        },
+      },
+    }))
+    const client = new DbClient()
+    const options = {
+      query: new Query()
+        .from({ item: source })
+        .select(({ item }) => ({ id: item.id })),
+    }
+
+    try {
+      expect(() => client.preloadLiveQuery(options)).toThrow(failure)
+      expect(
+        client.dehydrate({ shouldDehydrateLiveQuery: () => true }).liveQueries,
+      ).toBeUndefined()
+      await expect(client.preloadLiveQuery(options)).rejects.toThrow(
+        /entered error state/,
+      )
+      expect(starts).toBe(1)
+      expect(
+        client.dehydrate({ shouldDehydrateLiveQuery: () => true }).liveQueries,
+      ).toBeUndefined()
+    } finally {
+      await client.cleanup()
+    }
+  })
+
   it(`starts a healthy union source after another source throws`, async () => {
     const failure = new Error(`first source failed`)
     let firstStarts = 0
@@ -663,18 +709,55 @@ describe(`DbClient preload releases independent source starts`, () => {
         .from({ second })
         .select(({ second: row }) => ({ id: row.id })),
     )
+    const replacement = createCollection({
+      id: `preload-release-first`,
+      getKey: (row: { id: string }) => row.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          write({ type: `insert`, value: { id: `recovered` } })
+          commit()
+          markReady()
+        },
+      },
+    })
+    const recoveredQuery = new Query().unionAll(
+      new Query()
+        .from({ first: replacement })
+        .select(({ first: row }) => ({ id: row.id })),
+      new Query()
+        .from({ second })
+        .select(({ second: row }) => ({ id: row.id })),
+    )
 
     try {
-      await expect(
-        Promise.resolve().then(() => client.preloadLiveQuery({ query })),
-      ).rejects.toBe(failure)
+      let thrown: unknown
+      try {
+        client.preloadLiveQuery({ query })
+      } catch (error) {
+        thrown = error
+      }
+      expect(thrown).toBe(failure)
       expect(firstStarts).toBe(1)
       expect(secondStarts).toBe(1)
+      expect(
+        client.dehydrate({ shouldDehydrateLiveQuery: () => true }).liveQueries,
+      ).toBeUndefined()
       const healthy = client.collection(second)
       await healthy.preload()
       expect(healthy.status).toBe(`ready`)
+      await client.preloadLiveQuery({ query: recoveredQuery })
+      expect(
+        client
+          .dehydrate()
+          .liveQueries?.[0]?.snapshot?.rows.map(
+            ({ value }) => (value as { id: string }).id,
+          ),
+      ).toEqual([`recovered`])
     } finally {
       await client.cleanup()
+      await replacement.cleanup()
     }
   })
 
