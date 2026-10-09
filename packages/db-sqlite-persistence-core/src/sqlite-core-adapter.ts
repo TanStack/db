@@ -1928,25 +1928,6 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     }
   }
 
-  assertCacheGenerationClaim(
-    storageCollectionId: string,
-    claimId: string,
-  ): Promise<void> {
-    return this.runRegular(async () => {
-      await this.ensureInitialized()
-      const claim = await this.driver.query<{ claim_id: string }>(
-        `SELECT claim_id FROM cache_generation_claim
-         WHERE claim_id = ? AND physical_id = ? AND expires_at_ms > ?`,
-        [claimId, storageCollectionId, this.now()],
-      )
-      if (!claim[0]) {
-        throw new InvalidPersistedCollectionConfigError(
-          `Persisted cache claim is no longer active for collection "${storageCollectionId}"`,
-        )
-      }
-    })
-  }
-
   getCacheGenerationNow(): number {
     return this.now()
   }

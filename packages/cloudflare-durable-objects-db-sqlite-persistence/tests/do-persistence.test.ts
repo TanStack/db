@@ -64,6 +64,35 @@ runRuntimePersistenceContractSuite(
 )
 
 describe(`cloudflare durable object persistence helpers`, () => {
+  it(`uses the configured cache-claim lifetime and clock`, async () => {
+    const runtimeHarness = createRuntimeDatabaseHarness()
+    const driver = runtimeHarness.createDriver() as CloudflareDOSQLiteDriver
+    let now = 1_000
+    try {
+      const persistence = createCloudflareDOSQLitePersistence({
+        storage: driver.getStorage(),
+        cacheGenerationClaimTtlMs: 1_234,
+        now: () => now,
+      })
+      const adapter = persistence.resolvePersistenceForCollection!({
+        collectionId: `claim-options`,
+        mode: `sync-present`,
+        schemaVersion: undefined,
+      }).adapter
+      const claim = await adapter.claimCacheGeneration!(`claim-options`)
+      expect(claim.expiresAtMs).toBe(2_234)
+      now = 2_234
+      expect(
+        await adapter.renewCacheGenerationClaim!(
+          claim.storageCollectionId,
+          claim.claimId,
+        ),
+      ).toBeUndefined()
+    } finally {
+      runtimeHarness.cleanup()
+    }
+  })
+
   it(`defaults coordinator to SingleProcessCoordinator`, () => {
     const runtimeHarness = createRuntimeDatabaseHarness()
     const driver = runtimeHarness.createDriver()

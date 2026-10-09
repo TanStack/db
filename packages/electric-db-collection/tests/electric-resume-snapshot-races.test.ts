@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { IR, createCollection } from '@tanstack/db'
+import { createCollection } from '@tanstack/db'
 import { ShapeStream } from '@electric-sql/client'
 import {
   SQLiteCorePersistenceAdapter,
@@ -631,241 +631,6 @@ async function runRace(
   }
 }
 
-// Uncertified on-demand startup has a different authority boundary from the
-// eager races above. SQLite keeps its rows, but cannot publish them. The
-// authored source state contains rows 1 and 2; only a demand for row 1
-// permits that source snapshot to enter the public Collection. An external
-// durable row loss or replacement during the held metadata read cannot turn
-// the cache into a full-source baseline. This driver uses the real SQLite
-// adapter and persisted wrapper, while the controlled ShapeStream delivers
-// one scoped snapshot. It compares transport mode, local-read scope, public
-// rows, and durable rows after the applied demand settles.
-async function runScopedRace(
-  initialEvidence: `unknown` | `missing`,
-  transition: `none` | `external-row-loss` | `committed-replacement`,
-): Promise<void> {
-  const database = new DatabaseSync(`:memory:`)
-  const driver = createDriver(database)
-  const collectionId = `scoped-resume-${initialEvidence}-${transition}`
-  const metadataReadEntered = deferred()
-  const releaseMetadataRead = deferred()
-  let collection:
-    Collection<Item, string | number, ElectricCollectionUtils<Item>> | undefined
-  let primaryFailure: unknown
-  const cleanupFailures: Array<unknown> = []
-  try {
-    const seedAdapter = new SQLiteCorePersistenceAdapter({ driver })
-    await seedAdapter.applyCommittedTx(collectionId, {
-      txId: `seed`,
-      term: 1,
-      seq: 1,
-      rowVersion: 1,
-      mutations: [
-        { type: `insert`, key: 1, value: { id: 1, name: `one` } },
-        { type: `insert`, key: 2, value: { id: 2, name: `two` } },
-      ],
-      collectionMetadataMutations: [
-        {
-          type: `set`,
-          key: `electric:resume`,
-          value: {
-            kind: `resume`,
-            requiresTagState: false,
-            offset: `10_0`,
-            handle: `shape-old`,
-            shapeId: `{"params":{"table":"test_table"},"url":"http://test-url"}`,
-            updatedAt: 1,
-          },
-        },
-      ],
-    })
-    if (initialEvidence === `unknown`) {
-      await driver.run(
-        `UPDATE collection_version SET key_set_evidence_available = 0 WHERE collection_id = ?`,
-        [collectionId],
-      )
-      await driver.run(
-        `DELETE FROM collection_expected_keys WHERE collection_id = ?`,
-        [collectionId],
-      )
-    }
-
-    const restartedAdapter = new SQLiteCorePersistenceAdapter({ driver })
-    const resumeReads: Array<boolean | undefined> = []
-    let firstRead = true
-    const gateAdapter = (adapter: PersistenceAdapter): PersistenceAdapter =>
-      new Proxy(adapter, {
-        get(target, property) {
-          // Keep this race on the legacy adapter boundary; the managed cache
-          // generation law is checked by the storage and provider-session owners.
-          if (
-            property === `claimCacheGeneration` ||
-            property === `rotateCacheGeneration` ||
-            property === `renewCacheGenerationClaim` ||
-            property === `releaseCacheGenerationClaim` ||
-            property === `assertCacheGenerationClaim`
-          ) {
-            return undefined
-          }
-          if (
-            property === `runInHydrationScope` &&
-            target.runInHydrationScope
-          ) {
-            return <T>(
-              task: (scopedAdapter: HydrationPersistenceAdapter) => Promise<T>,
-            ): Promise<T> =>
-              target.runInHydrationScope!((scopedAdapter) =>
-                task(gateAdapter(scopedAdapter)),
-              )
-          }
-          if (property === `loadResumeSnapshot`) {
-            return async (
-              ...args: Parameters<PersistenceAdapter[`loadResumeSnapshot`]>
-            ) => {
-              resumeReads.push(args[1]?.includeRows)
-              const snapshot = await target.loadResumeSnapshot(...args)
-              if (firstRead) {
-                firstRead = false
-                metadataReadEntered.resolve()
-                await releaseMetadataRead.promise
-              }
-              return initialEvidence === `missing`
-                ? { ...snapshot, keySet: undefined }
-                : snapshot
-            }
-          }
-          const value = Reflect.get(target, property, target) as unknown
-          return typeof value === `function` ? value.bind(target) : value
-        },
-      })
-
-    collection = createCollection(
-      persistedCollectionOptions<
-        Item,
-        string | number,
-        never,
-        ElectricCollectionUtils<Item>
-      >({
-        ...electricCollectionOptions<Item>({
-          id: collectionId,
-          shapeOptions: {
-            url: `http://test-url`,
-            params: { table: `test_table` },
-          },
-          syncMode: `on-demand`,
-          getKey: (row) => row.id,
-          startSync: false,
-        }),
-        persistence: { adapter: gateAdapter(restartedAdapter) },
-      }),
-    )
-    collection.startSyncImmediate()
-    await reachCheckpoint(
-      metadataReadEntered.promise,
-      `scoped startup metadata read`,
-    )
-    if (transition === `external-row-loss`) {
-      const tableName = createPersistedTableName(collectionId, `c`)
-      await driver.run(
-        `DELETE FROM "${tableName}" WHERE json_extract(value, '$.id') = ?`,
-        [1],
-      )
-    } else if (transition === `committed-replacement`) {
-      await seedAdapter.applyCommittedTx(collectionId, {
-        txId: `concurrent-replacement`,
-        term: 2,
-        seq: 1,
-        rowVersion: 2,
-        truncate: true,
-        mutations: [
-          { type: `insert`, key: 1, value: { id: 1, name: `one` } },
-          { type: `insert`, key: 2, value: { id: 2, name: `two` } },
-        ],
-      })
-    }
-    releaseMetadataRead.resolve()
-
-    await vi.waitFor(() => expect(subscribers).toHaveLength(1))
-    const streamRequest = vi.mocked(ShapeStream).mock.calls[0]![0] as {
-      log?: string
-      offset?: string
-      handle?: string
-    }
-    expect(streamRequest).toMatchObject({
-      log: `changes_only`,
-      offset: `now`,
-    })
-    expect(streamRequest.handle).toBeUndefined()
-    const subscriber = subscribers[0]!
-    subscriber([{ headers: { control: `up-to-date` } }])
-    await reachCheckpoint(
-      collection.stateWhenReady(),
-      `scoped Collection ready`,
-    )
-    expect(Array.from(collection.values())).toEqual([])
-    expect(resumeReads.every((includeRows) => includeRows !== true)).toBe(true)
-
-    const sdkStream = vi.mocked(ShapeStream).mock.results[0]!.value as {
-      requestSnapshot: ReturnType<typeof vi.fn>
-    }
-    const snapshotDelivered = deferred()
-    sdkStream.requestSnapshot.mockReturnValue(snapshotDelivered.promise)
-    const loading = Promise.resolve(
-      collection._sync.loadSubset({
-        where: new IR.Func(`eq`, [new IR.PropRef([`id`]), new IR.Value(1)]),
-      }),
-    )
-    await vi.waitFor(() =>
-      expect(sdkStream.requestSnapshot).toHaveBeenCalledTimes(1),
-    )
-    subscriber([
-      change(`insert`, { id: 1, name: `one` }),
-      { headers: { control: `up-to-date` } },
-    ])
-    snapshotDelivered.resolve()
-    await reachCheckpoint(loading, `scoped row 1 demand applied`)
-    expect(
-      Array.from(collection.values(), ({ id, name }) => ({ id, name })),
-    ).toEqual([{ id: 1, name: `one` }])
-    expect(
-      (await restartedAdapter.loadSubset(collectionId, {}))
-        .map(({ value }) => value)
-        .sort((left, right) => Number(left.id) - Number(right.id)),
-    ).toEqual([
-      { id: 1, name: `one` },
-      { id: 2, name: `two` },
-    ])
-    expect(resumeReads.every((includeRows) => includeRows !== true)).toBe(true)
-  } catch (error) {
-    primaryFailure = error
-  } finally {
-    releaseMetadataRead.resolve()
-    try {
-      await collection?.cleanup()
-    } catch (error) {
-      cleanupFailures.push(error)
-    }
-    try {
-      database.close()
-    } catch (error) {
-      cleanupFailures.push(error)
-    }
-  }
-  if (primaryFailure !== undefined) {
-    if (cleanupFailures.length > 0) {
-      throw new AggregateError(
-        [primaryFailure, ...cleanupFailures],
-        `Scoped resume race and cleanup failed`,
-        { cause: primaryFailure },
-      )
-    }
-    throw primaryFailure
-  }
-  if (cleanupFailures.length > 0) {
-    throw new AggregateError(cleanupFailures, `Scoped resume cleanup failed`)
-  }
-}
-
 type LegacyUnknownResumeObservation = {
   checkpoint: `post-restart-up-to-date`
   migratedKeySet: { status: `unknown` | `consistent` | `incompatible` }
@@ -1180,12 +945,12 @@ describe(`Electric resume snapshot races`, () => {
     },
   )
 
-  it(`loads only a demanded subset from an unknown on-demand resume baseline`, async () => {
-    await runScopedRace(`unknown`, `none`)
+  it(`fully replaces an unknown on-demand resume baseline without managed claims`, async () => {
+    await runRace(`none`, `on-demand`, true)
   })
 
-  it(`loads only a demanded subset when on-demand key-set evidence is missing`, async () => {
-    await runScopedRace(`missing`, `none`)
+  it(`fully replaces an on-demand resume baseline with missing key-set evidence without managed claims`, async () => {
+    await runRace(`none`, `on-demand`, false, true)
   })
 
   it(`freshly replaces an unknown eager resume baseline`, async () => {
@@ -1228,9 +993,14 @@ describe(`Electric resume snapshot races`, () => {
       ),
     ),
   )(
-    `keeps a $initialEvidence on-demand cache scoped across $transition`,
+    `fully replaces a $initialEvidence on-demand cache without managed claims across $transition`,
     async ({ initialEvidence, transition }) => {
-      await runScopedRace(initialEvidence, transition)
+      await runRace(
+        transition,
+        `on-demand`,
+        initialEvidence === `unknown`,
+        initialEvidence === `missing`,
+      )
     },
   )
 

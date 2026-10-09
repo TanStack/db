@@ -101,3 +101,60 @@ export function tagPersistence() {
   }
   return { rows, metadata, adapter }
 }
+
+// The installed-SDK scoped-recovery witnesses need separate durable stores
+// for retired and current cache generations. This fixture models that routing;
+// the SQLite oracle independently checks claim enforcement and physical tables.
+export function managedTagPersistence() {
+  const storage = new Map<string, ReturnType<typeof tagPersistence>>()
+  let generation = 0
+  let claimSequence = 0
+  let currentStorageId = `managed-tag-generation-0`
+  storage.set(currentStorageId, tagPersistence())
+  const store = (id: string) => {
+    const selected = storage.get(
+      id.startsWith(`managed-tag-generation-`) ? id : currentStorageId,
+    )
+    if (!selected) throw new Error(`Unknown managed tag storage: ${id}`)
+    return selected
+  }
+  const claim = () => ({
+    storageCollectionId: currentStorageId,
+    claimId: `managed-tag-claim-${++claimSequence}`,
+    expiresAtMs: Date.now() + 600_000,
+  })
+  const adapter: PersistenceAdapter = {
+    loadSubset: (id, options, context) =>
+      store(id).adapter.loadSubset(id, options, context),
+    loadResumeSnapshot: (id, context) =>
+      store(id).adapter.loadResumeSnapshot(id, context),
+    loadCollectionMetadata: (id) =>
+      store(id).adapter.loadCollectionMetadata!(id),
+    applyCommittedTx: (id, transaction) =>
+      store(id).adapter.applyCommittedTx(id, transaction),
+    ensureIndex: (id, signature, spec, context) =>
+      store(id).adapter.ensureIndex(id, signature, spec, context),
+    claimCacheGeneration: async () => claim(),
+    rotateCacheGeneration: async (_id, _claimId, resetMetadata) => {
+      currentStorageId = `managed-tag-generation-${++generation}`
+      const next = tagPersistence()
+      if (resetMetadata) {
+        next.metadata.set(
+          resetMetadata.key,
+          structuredClone(resetMetadata.value),
+        )
+      }
+      storage.set(currentStorageId, next)
+      return claim()
+    },
+    renewCacheGenerationClaim: async () => Date.now() + 600_000,
+    releaseCacheGenerationClaim: async () => {},
+  }
+  return {
+    adapter,
+    rows: () => store(currentStorageId).rows,
+    metadata: () => store(currentStorageId).metadata,
+    rowsAt: (storageId: string) => store(storageId).rows,
+    currentStorageId: () => currentStorageId,
+  }
+}

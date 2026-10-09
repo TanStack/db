@@ -1711,6 +1711,11 @@ second claim check; a live-claim I/O failure remains terminal. The real-SQLite
 owner accepts a valid eager Collection ID with the internal cache prefix and
 rejects late managed registration that tries to recreate collected storage
 after the first claim check.
+The persisted owner also rejects a startup resume read after its claim expires,
+including two successive claim losses, then enters the source only after a live
+read under the replacement claim. A live-claim read error stays terminal. This
+is a controlled adapter second-check witness; the real-SQLite startup case
+holds after the claim check and does not yet exercise this rejection schedule.
 The persisted owner holds resume certification across claim expiry: an old
 answer or a second claim-check rejection starts private recovery, while a
 live-claim I/O failure remains terminal. It also holds initial scoped rotation
@@ -1745,12 +1750,18 @@ new demand can start. These histories killed the one-phase restart, retained
 acknowledgement, and open-transaction designs at their named checkpoints. The
 Electric descriptor owner also holds rotation while aborting one old demand:
 that demand rejects promptly and a sibling later applies fresh source rows.
+Its overlapping-rotation history rejects a callback from the retired middle
+provider session, then requires the final provider session to apply a fresh
+subset demand after the second gate opens.
 The unabortable restart wait failed at this settlement checkpoint before the
 repair. The SQLite owner rejects coordinator stream-position, replay, and
 index work from a specific expired claim even while a peer claim is live. An
 expired run recovers privately while the healthy current cache remains
 claimable. The older Electric resume-race owner explicitly exercises adapters
-without managed generations; it retains that certification contract.
+without managed generations; its unknown and missing on-demand evidence cases
+now require full-log replacement. The scoped reset settlement owner uses an
+abstract managed claim for that one applied-receipt law; the SQLite owner
+checks physical generation separation.
 The installed-SDK delivery owner now holds an old HTTP subset response across
 managed rotation and observes fresh demand settlement, public rows, and the
 new cache's durable rows after that old response arrives. Its adapter is a
@@ -1765,6 +1776,38 @@ delete that row.
 The descriptor owner also checks that cleanup during a held rotation fulfills
 after rotation settles. It does not establish a prompt cleanup bound while the
 adapter rotation remains held.
+The Query ownership owner now pairs a real QueryClient with managed Node SQLite.
+It advances a cache claim beyond expiry, uses a disjoint demand to trigger
+rotation, and requires an already active subset to reacquire its distinct row
+without another caller request. A later demand with stale QueryClient data
+waits for a new fetch; an old fetch and a public utility refetch cannot publish
+or return their retired result. A held real SQLite retention scan cannot delete
+a same-key row reacquired in the replacement generation. A released acquisition
+cannot launch another fetch after its held old result settles. These are fixed
+histories at public-row, request-count, and caller-settlement cuts; two
+Collections sharing one QueryClient, arbitrary retention schedules, and custom
+provider restart implementations remain outside their bounds.
+The expiry and late-fetch histories also read the tested run's claimed physical
+SQLite generation after fresh settlement and after the retired fetch resolves;
+both cuts require the fresh rows and exclude old rows. A separate active-head
+claim would inspect a different generation when an expired run rotates privately.
+The same owner distinguishes a private startup rotation from a warm startup:
+only the rotated run must refetch a cached QueryClient success. It also holds a
+peer Query fetch that began before source entry through that rotation. Both its
+late success and late error require a new fetch before demand fulfillment.
+Two queued rotations have a separate held-second-rotation cut: the first
+recovery cannot reacquire an active Query subset or start a provider fetch.
+After the second rotation, that demand must fetch and apply a fresh row.
+The persisted owner also holds active rotation across index bootstrap and checks
+that an index added during the hold targets new storage. Its adapter call log
+does not prove native SQLite DDL completion. A virtual-clock history holds the
+provider restart after rotation and requires claim renewal once it resumes;
+index creation and renewal failures stay best-effort without changing public
+readiness. A held bootstrap lets index removal settle before the earlier
+creation completes; the wrapper reconciles the final durable index with the
+Collection's declaration. Re-adding that index during reconciliation has a
+separate fixed witness. Native SQLite DDL under this reverse ordering remains
+outside the controlled-adapter result.
 The persisted Electric interleaving owner holds an uncancelable local cache
 read after demand abort. It requires the returned load to remain pending until
 the cached row is public, then reject with `AbortError`; both fixed and random
@@ -1808,28 +1851,30 @@ revises the Electric guide's on-demand cold-recovery contract. The earlier
 assumption is enforced.
 
 Primary owner: `packages/electric-db-collection/tests/electric-descriptor-isolation-oracle.test.ts`.
-Its existing restart grammar reached subset demand, but its ShapeStream mock
-accepted full-mode snapshot requests forbidden by the SDK. The driver now
-separates durable cache from public source rows and successful subset settlement.
-Tagged cold, legacy, explicit reset, warm resume, interruption, partial
-replacement, and late demand have named cuts. On-demand uncertified recovery
-clears public source rows and publishes scoped snapshot rows only after a
-request; eager and progressive recovery keep full replacement. The fixed/random
-tag campaigns share budget and grammar; a direct seed/path replay runs only the
-selected property. This owner's unconstrained subset demand can fetch all rows
-because the caller requested all rows; it does not prove bounded network work.
+Its tag-history fixture has no managed cache claim, so an incompatible on-demand
+resume waits for a full source replacement while cached rows remain visible
+until the source transaction begins. The controlled ShapeStream rejects snapshot
+requests in full mode. Tagged cold, legacy, explicit reset, warm resume,
+interruption, partial replacement, and late demand have named cuts. Managed
+scoped recovery has separate descriptor and installed-SDK histories. The
+fixed/random tag campaigns share budget and grammar; a direct seed/path replay
+runs only the selected property. An unconstrained subset demand can fetch all
+rows because the caller requested all rows; it does not prove bounded network
+work.
 
 Receiver: `packages/electric-db-collection/tests/electric-sdk-delivery-oracle.property.test.ts`.
 A real installed SDK receives two launches through the Electric adapter and
 persistence wrapper with controlled HTTP and durable storage. Direct demand and
-public live-query preload reproduce the original rejection on main and now
-settle through changes-only scoped snapshots. Lost tags, changed shape, and
-malformed resume state each keep stale B on disk without exposing it after an A
-snapshot or an empty B snapshot. The changed-shape case makes B's empty snapshot
-first. A third launch with no demand starts no full-shape transport or
-unrestricted local subset read. Another receiving witness rejects concurrent
-SDK snapshot invocation on the shared cursor. Compatible untagged resumes and
-the true full-mode fallback remain separate controls.
+public live-query preload settle through changes-only scoped snapshots in a
+managed fixture with separate durable stores for retired and current cache
+generations. Lost tags, changed shape, and malformed resume state keep stale B
+in the retired store without exposing it after an A snapshot or an empty B
+snapshot. The changed-shape case makes B's empty snapshot first. A third launch
+with no demand starts no full-shape transport or unrestricted local subset
+read. The fixture models generation routing, while real SQLite independently
+checks claim enforcement and physical tables. Another receiving witness rejects
+concurrent SDK snapshot invocation on the shared cursor. Compatible untagged
+resumes and the unmanaged full-log fallback remain separate controls.
 An installed-SDK abort witness holds subset HTTP across external stream
 retirement, then returns a valid row. The demand rejects, the row stays absent,
 and an identical demand is not certified as loaded.

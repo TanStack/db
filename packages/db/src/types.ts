@@ -547,6 +547,8 @@ export type SyncPersistenceCapabilityV1<
   readonly version: 1
   /** This run owns a claimed on-demand cache generation. */
   readonly managedCacheGeneration?: boolean
+  /** The on-demand cache generation rotated before the source sync run entered. */
+  readonly startupCacheGenerationRotated?: boolean
   readonly hydrateBaseline: () => Promise<void>
   /** Retire untrusted on-demand rows and retain the provider's reset metadata. */
   readonly startScopedRecovery?: (resetMetadata?: {

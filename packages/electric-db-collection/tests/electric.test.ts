@@ -4190,7 +4190,7 @@ describe(`Electric Integration`, () => {
       )
     })
 
-    it(`uses scoped recovery for persisted reset metadata through the wrapper`, async () => {
+    it(`uses full-log recovery for unmanaged persisted reset metadata`, async () => {
       vi.clearAllMocks()
 
       const { ShapeStream } = await import(`@electric-sql/client`)
@@ -4229,8 +4229,8 @@ describe(`Electric Integration`, () => {
 
       expect(ShapeStream).toHaveBeenCalledWith(
         expect.objectContaining({
-          offset: `now`,
-          log: `changes_only`,
+          offset: undefined,
+          log: undefined,
           handle: undefined,
         }),
       )

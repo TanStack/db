@@ -33,11 +33,10 @@ import type { ElectricCollectionUtils } from '../src/electric'
  * Checkpoints compare coherent public snapshots, durable rows, recovery traces,
  * acknowledgement ownership, and unsubscribe calls. Restart demand must use
  * the current stream's capability and wait for its source rows to apply.
- * The Electric guide now authorizes scoped on-demand recovery: an uncertified
- * cache remains durable but is excluded from the source Collection until a
- * fresh subset snapshot establishes its rows. This owner's unconstrained
- * demand checks replacement and tags; the installed-SDK owner checks bounded
- * requests, retained cache rows, and empty later snapshots.
+ * This fixture has no managed cache claim. Its on-demand recovery uses a full
+ * source snapshot: cached rows remain visible until the first source batch,
+ * while a new demand waits for the replacement commit. Managed scoped recovery
+ * has separate real-adapter and installed-SDK owners.
  * The installed-SDK delivery oracle receives the mock's full-mode restriction.
  *
  * Fixed and random campaigns retain replay inputs through the shared oracle
@@ -130,6 +129,7 @@ type StreamHarness = {
 
 const streams: Array<StreamHarness> = []
 let holdNewSnapshots = false
+let onStreamSubscribed: (() => void) | undefined
 
 vi.mock(`@electric-sql/client`, async () => {
   const actual = await vi.importActual(`@electric-sql/client`)
@@ -171,6 +171,7 @@ vi.mock(`@electric-sql/client`, async () => {
             },
           }
           streams.push(harness)
+          onStreamSubscribed?.()
           return unsubscribe
         },
         // ShapeStream.requestSnapshot is legal only in changes_only mode.
@@ -311,10 +312,9 @@ async function runTagHistory(
           stable,
         }))
       const durableRows = () => [...rows.values()].map((entry) => entry.value)
-      // The model's row map is the authoritative provider state. After scoped
-      // recovery, the durable map is only a cache and may retain removed rows;
-      // public refinement remains exact while the SDK receiver checks retention.
-      let scopedRecoveryOccurred = false
+      // The model's row map is the authoritative provider state. This
+      // unmanaged fixture takes a complete replacement on recovery, so its
+      // durable map must agree once that replacement commits.
       const check = async () => {
         await vi.waitFor(
           () =>
@@ -323,14 +323,9 @@ async function runTagHistory(
             ),
           { interval: 1 },
         )
-        if (!scopedRecoveryOccurred) {
-          await vi.waitFor(
-            () => expect(durableRows()).toEqual(expectedRows()),
-            {
-              interval: 1,
-            },
-          )
-        }
+        await vi.waitFor(() => expect(durableRows()).toEqual(expectedRows()), {
+          interval: 1,
+        })
       }
       const snapshot = (): Array<Message<TestRow>> =>
         [...model.values()].map(({ row, tags }) => ({
@@ -400,8 +395,6 @@ async function runTagHistory(
         const rebuild =
           fresh || (cold && (history.tagged || history.legacyResume))
         const waitsForReplacement = history.syncMode === `on-demand` && rebuild
-        scopedRecoveryOccurred = waitsForReplacement
-        if (waitsForReplacement) streams[start + 1]!.holdSnapshots = true
         const acquire = () => {
           let outcome: `pending` | `fulfilled` | `rejected` = `pending`
           const completion = Promise.resolve(current._sync.loadSubset({})).then(
@@ -416,19 +409,17 @@ async function runTagHistory(
           )
           return { completion, outcome: () => outcome }
         }
-        // The controlled provider holds scoped recovery snapshots so demand
-        // cannot settle from an uncertified persisted row before source delivery.
+        // An incompatible on-demand demand waits for the complete source
+        // replacement, even though old cache rows remain visible meanwhile.
         let acquisition = history.syncMode === `eager` ? undefined : acquire()
         if (acquisition && !waitsForReplacement) {
           expect(
             await atCheckpoint(acquisition.completion, `resumed subset`),
           ).toEqual({ kind: `fulfilled` })
         }
-        if (waitsForReplacement) expect(publicRows()).toEqual([])
-        else
-          await vi.waitFor(() => expect(publicRows()).toEqual(expectedRows()), {
-            interval: 1,
-          })
+        await vi.waitFor(() => expect(publicRows()).toEqual(expectedRows()), {
+          interval: 1,
+        })
         if (waitsForReplacement)
           expect(acquisition?.outcome(), `before recovery snapshot`).toBe(
             `pending`,
@@ -436,16 +427,12 @@ async function runTagHistory(
         let resumedStream = streams[start + 1]!
         expect(vi.mocked(ShapeStream).mock.calls[start + 1]?.[0]).toMatchObject(
           {
-            offset: rebuild
-              ? waitsForReplacement
-                ? `now`
-                : undefined
-              : `20_0`,
+            offset: rebuild ? undefined : `20_0`,
           },
         )
         if (rebuild) {
           const cachedRows = structuredClone(expectedRows())
-          const visibleBefore = waitsForReplacement ? [] : cachedRows
+          const visibleBefore = cachedRows
           const exposures: Array<TagExposure> = []
           const record = (cut: string) => {
             exposures.push({ cut, rows: structuredClone(publicRows()) })
@@ -473,11 +460,6 @@ async function runTagHistory(
           // expose a torn snapshot or erase the still-visible cached rows.
           model.delete(2)
           for (const entry of model.values()) entry.tags = new Set([`fresh`])
-          if (waitsForReplacement)
-            await atCheckpoint(
-              resumedStream.snapshotRequested(),
-              `scoped snapshot request`,
-            )
           resumedStream.send(snapshot())
           record(`after partial replacement`)
           expect(publicRows()).toEqual(visibleBefore)
@@ -511,7 +493,6 @@ async function runTagHistory(
             await vi.waitFor(() => expect(streams).toHaveLength(start + 3), {
               interval: 1,
             })
-            if (waitsForReplacement) streams[start + 2]!.holdSnapshots = true
             acquisition = history.syncMode === `eager` ? undefined : acquire()
             if (acquisition && history.syncMode !== `on-demand`) {
               expect(
@@ -528,7 +509,7 @@ async function runTagHistory(
             expect(
               vi.mocked(ShapeStream).mock.calls[start + 2]?.[0],
             ).toMatchObject({
-              offset: waitsForReplacement ? `now` : undefined,
+              offset: undefined,
             })
             observe()
             record(`replacement lifecycle hydrated`)
@@ -548,19 +529,11 @@ async function runTagHistory(
             )
             expectWholeTagRecovery(exposures, [visibleBefore])
             resumedStream = streams[start + 2]!
-            if (waitsForReplacement)
-              await atCheckpoint(
-                resumedStream.snapshotRequested(),
-                `restarted scoped snapshot request`,
-              )
             resumedStream.send(snapshot())
             record(`after restarted partial replacement`)
             expectWholeTagRecovery(exposures, [visibleBefore])
           }
-          if (waitsForReplacement) {
-            resumedStream.send([{ headers: { control: `subset-end` } }])
-            resumedStream.completeSnapshot()
-          } else resumedStream.send([upToDate])
+          resumedStream.send([upToDate])
           record(`after replacement commit`)
           await check()
           if (acquisition) {
@@ -654,6 +627,7 @@ if (replayPath === undefined) {
 beforeEach(() => {
   streams.length = 0
   holdNewSnapshots = false
+  onStreamSubscribed = undefined
   vi.clearAllMocks()
 })
 
@@ -1101,6 +1075,230 @@ fixedCase(`cleans up during a held provider-session restart`, async () => {
     releaseRotation()
   }
 })
+
+// A failed cache rotation cannot leave a retired Electric provider session
+// accepting demands. The hook contract permits cacheRotated to reject. The
+// independent outcome rule is that the next demand rejects that failure and
+// cleanup remains possible; a microtask-scheduled cleanup bounds the test even
+// when a wrong implementation repeatedly revisits the retired session.
+fixedCase(`rejects a demand after provider-session restart fails`, async () => {
+  const options = descriptor(`original`, false, `on-demand`)
+  const rotationError = new Error(`cache rotation failed`)
+  const params = {
+    collection: { utils: {}, getKeyFromItem: (row: TestRow) => row.id },
+    begin: () => {},
+    write: () => {},
+    commit: () => true,
+    markReady: () => {},
+    markError: () => {},
+    truncate: () => {},
+    metadata: {
+      collection: { get: () => undefined, set: () => {} },
+      row: { get: () => undefined, set: () => {} },
+      persistence: {
+        protocol: `@tanstack/db/sync-persistence`,
+        version: 1,
+        managedCacheGeneration: true,
+        hydrateBaseline: async () => {},
+        startScopedRecovery: async () => {},
+        reserveCommitTurn: () => {},
+        scanPersistedRows: async () => [],
+        resumeSnapshot: {
+          certify: async () => {},
+          getKeySetEvidence: () => undefined,
+          expectCurrentCommit: () => {},
+        },
+      },
+    },
+  } as unknown as Parameters<typeof options.sync.sync>[0]
+  const run = options.sync.sync(params)
+  if (typeof run !== `object` || !run.restartAfterScopedRecovery) {
+    throw new Error(`Missing managed Electric restart hook`)
+  }
+  await expect(
+    run.restartAfterScopedRecovery(Promise.reject(rotationError)),
+  ).rejects.toBe(rotationError)
+  const demand = Promise.resolve(run.loadSubset?.({ limit: 1 }))
+  try {
+    const watchdog = (async () => {
+      for (let turn = 0; turn < 50; turn++) await Promise.resolve()
+      throw new Error(`Demand did not reject while the run was active`)
+    })()
+    await expect(Promise.race([demand, watchdog])).rejects.toBe(rotationError)
+  } finally {
+    await run.cleanup?.()
+  }
+})
+
+// Two valid cache rotations may overlap in the persisted wrapper. The second
+// hook call owns a distinct cacheRotated gate: its replacement provider session
+// cannot start and its hook cannot settle merely because the first gate did.
+// Holding each gate separately distinguishes that rule from returning the
+// first restart promise for both calls.
+fixedCase(
+  `waits for every overlapping cache rotation before restarting Electric`,
+  async () => {
+    const options = descriptor(`original`, false, `on-demand`)
+    const params = {
+      collection: { utils: {}, getKeyFromItem: (row: TestRow) => row.id },
+      begin: () => {},
+      write: () => {},
+      commit: () => true,
+      markReady: () => {},
+      markError: () => {},
+      truncate: () => {},
+      metadata: {
+        collection: { get: () => undefined, set: () => {} },
+        row: { get: () => undefined, set: () => {} },
+        persistence: {
+          protocol: `@tanstack/db/sync-persistence`,
+          version: 1,
+          managedCacheGeneration: true,
+          hydrateBaseline: async () => {},
+          startScopedRecovery: async () => {},
+          reserveCommitTurn: () => {},
+          scanPersistedRows: async () => [],
+          resumeSnapshot: {
+            certify: async () => {},
+            getKeySetEvidence: () => undefined,
+            expectCurrentCommit: () => {},
+          },
+        },
+      },
+    } as unknown as Parameters<typeof options.sync.sync>[0]
+    const run = options.sync.sync(params)
+    if (typeof run !== `object` || !run.restartAfterScopedRecovery) {
+      throw new Error(`Missing managed Electric restart hook`)
+    }
+    let releaseFirst!: () => void
+    let releaseSecond!: () => void
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    const secondGate = new Promise<void>((resolve) => {
+      releaseSecond = resolve
+    })
+    const first = Promise.resolve(run.restartAfterScopedRecovery(firstGate))
+    const second = Promise.resolve(run.restartAfterScopedRecovery(secondGate))
+    let secondSettled = false
+    void second.finally(() => {
+      secondSettled = true
+    })
+    try {
+      releaseFirst()
+      await atCheckpoint(first, `first cache rotation`)
+      await new Promise<void>((resolve) => queueMicrotask(resolve))
+      expect(secondSettled).toBe(false)
+      releaseSecond()
+      await atCheckpoint(second, `second cache rotation`)
+    } finally {
+      releaseFirst()
+      releaseSecond()
+      await Promise.allSettled([first, second])
+      await run.cleanup?.()
+    }
+  },
+)
+
+// A second rotation can begin just after the first replacement subscribed but
+// before its restart promise cleared. The newly subscribed stream is now the
+// old provider session: retirement must unsubscribe it synchronously. A mock
+// callback deliberately arrives after unsubscribe while the second cache gate
+// is held; no row may enter the Collection write boundary from that session.
+fixedCase(
+  `retires a replacement Electric stream before a second cache rotation`,
+  async () => {
+    const options = descriptor(`original`, false, `on-demand`)
+    const write = vi.fn()
+    const markError = vi.fn()
+    const params = {
+      collection: {
+        utils: {},
+        getKeyFromItem: (row: TestRow) => row.id,
+        _state: { syncedData: new Map() },
+      },
+      begin: () => {},
+      write,
+      commit: () => true,
+      markReady: () => {},
+      markError,
+      truncate: () => {},
+      metadata: {
+        collection: { get: () => undefined, set: () => {} },
+        row: { get: () => undefined, set: () => {} },
+        persistence: {
+          protocol: `@tanstack/db/sync-persistence`,
+          version: 1,
+          managedCacheGeneration: true,
+          hydrateBaseline: async () => {},
+          startScopedRecovery: async () => {},
+          reserveCommitTurn: () => {},
+          scanPersistedRows: async () => [],
+          resumeSnapshot: {
+            certify: async () => {},
+            getKeySetEvidence: () => undefined,
+            expectCurrentCommit: () => {},
+          },
+        },
+      },
+    } as unknown as Parameters<typeof options.sync.sync>[0]
+    const run = options.sync.sync(params)
+    if (typeof run !== `object` || !run.restartAfterScopedRecovery) {
+      throw new Error(`Missing managed Electric restart hook`)
+    }
+    let releaseFirst!: () => void
+    let releaseSecond!: () => void
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    const secondGate = new Promise<void>((resolve) => {
+      releaseSecond = resolve
+    })
+    let second!: Promise<void>
+    let secondCalled!: () => void
+    const secondStarted = new Promise<void>((resolve) => {
+      secondCalled = resolve
+    })
+    onStreamSubscribed = () => {
+      if (streams.length !== 2) return
+      queueMicrotask(() => {
+        second = Promise.resolve(run.restartAfterScopedRecovery!(secondGate))
+        secondCalled()
+      })
+    }
+    const first = Promise.resolve(run.restartAfterScopedRecovery(firstGate))
+    try {
+      releaseFirst()
+      await atCheckpoint(secondStarted, `second cache rotation starts`)
+      const retiredStream = streams[1]!
+      expect(retiredStream.unsubscribe).toHaveBeenCalledOnce()
+      retiredStream.ignoreUnsubscribe = true
+      retiredStream.send([insert(7, `retired`), upToDate])
+      expect(write).not.toHaveBeenCalled()
+      expect(markError).not.toHaveBeenCalled()
+      releaseSecond()
+      await atCheckpoint(second, `second cache rotation completes`)
+      expect(streams).toHaveLength(3)
+      const fresh = streams[2]!
+      const demand = Promise.resolve(run.loadSubset?.({ limit: 1 }))
+      await atCheckpoint(fresh.snapshotRequested(), `final provider subset`)
+      fresh.send([insert(8, `fresh`), { headers: { control: `subset-end` } }])
+      await atCheckpoint(demand, `final provider demand applied`)
+      expect(write).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: `insert`,
+          value: expect.objectContaining({ id: 8, name: `fresh` }),
+        }),
+      )
+    } finally {
+      onStreamSubscribed = undefined
+      releaseFirst()
+      releaseSecond()
+      await Promise.allSettled([first, second])
+      await run.cleanup?.()
+    }
+  },
+)
 
 // Imported acknowledgement evidence belongs to the old persisted cache.
 // Initial scoped recovery clears that cache before any new source message,

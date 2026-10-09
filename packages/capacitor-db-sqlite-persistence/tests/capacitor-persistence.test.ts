@@ -35,6 +35,33 @@ function createTempSqlitePath(): string {
   return dbPath
 }
 
+it(`uses the configured cache-claim lifetime and clock`, async () => {
+  const database = createCapacitorSQLiteTestDatabase({
+    filename: createTempSqlitePath(),
+  })
+  activeCleanupFns.push(() => database.close())
+  let now = 1_000
+  const persistence = createCapacitorSQLitePersistence({
+    database,
+    cacheGenerationClaimTtlMs: 1_234,
+    now: () => now,
+  })
+  const adapter = persistence.resolvePersistenceForCollection!({
+    collectionId: `claim-options`,
+    mode: `sync-present`,
+    schemaVersion: undefined,
+  }).adapter
+  const claim = await adapter.claimCacheGeneration!(`claim-options`)
+  expect(claim.expiresAtMs).toBe(2_234)
+  now = 2_234
+  expect(
+    await adapter.renewCacheGenerationClaim!(
+      claim.storageCollectionId,
+      claim.claimId,
+    ),
+  ).toBeUndefined()
+})
+
 it(`persists data across app restart (close and reopen)`, async () => {
   const dbPath = createTempSqlitePath()
   const collectionId = `todos-restart`

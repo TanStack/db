@@ -1829,7 +1829,8 @@ function createElectricSync<T extends Row<unknown>>(
     const scopedRecovery =
       syncMode === `on-demand` &&
       requiresFreshSourceEvidence &&
-      persistence?.startScopedRecovery !== undefined
+      persistence?.managedCacheGeneration === true &&
+      persistence.startScopedRecovery !== undefined
     if (scopedRecovery) lifecycle.forgetEvidenceAfterScopedRecovery()
     const usesChangesOnlyLog =
       syncMode === `on-demand` &&
@@ -2732,12 +2733,45 @@ function createElectricSync<T extends Row<unknown>>(
         retireSession = resolve
       })
       let restartInFlight: Promise<void> | undefined
+      let restartFailure: { error: unknown } | undefined
+      let restartSequence = 0
+      let sessionCleaned = false
       let cleanedUp = false
       const isCleanedUp = () => cleanedUp
+      const cleanupCurrentSession = (): Promise<void> => {
+        if (sessionCleaned) return Promise.resolve()
+        sessionCleaned = true
+        try {
+          return Promise.resolve(session.cleanup())
+        } catch (error) {
+          return Promise.reject(error)
+        }
+      }
+      const trackRestart = (work: Promise<void>): Promise<void> => {
+        const tracked = work
+          .catch((error: unknown) => {
+            restartFailure = { error }
+            throw error
+          })
+          .finally(() => {
+            if (restartInFlight === tracked) restartInFlight = undefined
+          })
+        restartInFlight = tracked
+        return tracked
+      }
+      const startReplacement = (sequence: number): void => {
+        if (isCleanedUp() || sequence !== restartSequence) return
+        session = startSession(params, true)
+        sessionCleaned = false
+        retired = new Promise<void>((resolve) => {
+          retireSession = resolve
+        })
+      }
 
       return {
         loadSubset: async (demand: LoadSubsetOptions) => {
           while (!isCleanedUp()) {
+            if (restartFailure) throw restartFailure.error
             if (demand.signal?.aborted) {
               throw (
                 demand.signal.reason ?? new LoadSubsetOperationAbortedError()
@@ -2760,27 +2794,33 @@ function createElectricSync<T extends Row<unknown>>(
               await waitForDemandOrAbort(restartInFlight, demand.signal)
             }
           }
+          if (restartFailure) throw restartFailure.error
         },
         restartAfterScopedRecovery: (cacheRotated) => {
           if (isCleanedUp()) return Promise.resolve()
-          if (restartInFlight) return restartInFlight
-          const previousSession = session
+          if (restartFailure) return Promise.reject(restartFailure.error)
+          const sequence = ++restartSequence
           retireSession()
-          // This cleanup fences the old SDK callback synchronously. The
-          // replacement stream must wait until the cache rotation is accepted.
-          const oldSessionCleanup = Promise.resolve(previousSession.cleanup())
-          restartInFlight = (async () => {
-            await oldSessionCleanup
-            await cacheRotated
-            if (isCleanedUp()) return
-            session = startSession(params, true)
-            retired = new Promise<void>((resolve) => {
-              retireSession = resolve
-            })
-          })().finally(() => {
-            restartInFlight = undefined
-          })
-          return restartInFlight
+          // Every rotation retires the session currently subscribed to the
+          // SDK, including a replacement started by an earlier rotation.
+          const oldSessionCleanup = cleanupCurrentSession()
+          if (restartInFlight) {
+            const previousRestart = restartInFlight
+            return trackRestart(
+              (async () => {
+                await Promise.all([previousRestart, oldSessionCleanup])
+                await cacheRotated
+                startReplacement(sequence)
+              })(),
+            )
+          }
+          return trackRestart(
+            (async () => {
+              await oldSessionCleanup
+              await cacheRotated
+              startReplacement(sequence)
+            })(),
+          )
         },
         cleanup: async () => {
           cleanedUp = true
@@ -2792,7 +2832,7 @@ function createElectricSync<T extends Row<unknown>>(
             // its lifecycle. That cancellation belongs to teardown.
             if (!(error instanceof SyncTransactionAbortedError)) throw error
           }
-          await session.cleanup()
+          await cleanupCurrentSession()
         },
       }
     },

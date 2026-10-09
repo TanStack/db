@@ -37,6 +37,33 @@ function createTempSqlitePath(): string {
   return dbPath
 }
 
+it(`uses the configured cache-claim lifetime and clock`, async () => {
+  const database = createTauriSQLiteTestDatabase({
+    filename: createTempSqlitePath(),
+  })
+  registerDatabaseCleanup(database)
+  let now = 1_000
+  const persistence = createTauriPersistence({
+    database,
+    cacheGenerationClaimTtlMs: 1_234,
+    now: () => now,
+  })
+  const adapter = persistence.resolvePersistenceForCollection!({
+    collectionId: `claim-options`,
+    mode: `sync-present`,
+    schemaVersion: undefined,
+  }).adapter
+  const claim = await adapter.claimCacheGeneration!(`claim-options`)
+  expect(claim.expiresAtMs).toBe(2_234)
+  now = 2_234
+  expect(
+    await adapter.renewCacheGenerationClaim!(
+      claim.storageCollectionId,
+      claim.claimId,
+    ),
+  ).toBeUndefined()
+})
+
 function rethrowDatabaseErrorsAsStrings(
   database: TauriSQLiteDatabaseLike,
 ): TauriSQLiteDatabaseLike {

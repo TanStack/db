@@ -446,10 +446,6 @@ export interface PersistenceAdapter {
     claimId: string,
   ) => Promise<number | undefined>
   getCacheGenerationNow?: () => number
-  assertCacheGenerationClaim?: (
-    storageCollectionId: string,
-    claimId: string,
-  ) => Promise<void>
   loadCollectionMetadata?: (
     collectionId: string,
     ctx?: { cacheGenerationClaimId?: string },
@@ -683,6 +679,7 @@ export type PersistedInitialRenderOptions = {
 }
 
 const DEFAULT_NETWORK_TIMEOUT_MS = 3_000
+const CACHE_CLAIM_RENEW_WINDOW_MS = 60_000
 const MAX_TIMER_TIMEOUT_MS = 2_147_483_647
 
 function getNetworkTimeoutMs(
@@ -1404,8 +1401,10 @@ class PersistedCollectionRuntime<
   /** Durable rows cannot replace source rows during scoped recovery. */
   private scopedRecovery = false
   private scopedRecoveryPending = false
+  private scopedRecoverySequence = 0
   private recoverQueuedAfterLocalLoadFailure = false
   private cacheGenerationClaim: PersistedCacheGenerationClaim | undefined
+  private startupCacheGenerationRotated = false
   private remoteSubsetOwner: RemoteSubsetOwner | undefined
   // Undefined before source assignment; null means the source cannot restart.
   private restartSourceAfterScopedRecovery:
@@ -1485,12 +1484,27 @@ class PersistedCollectionRuntime<
       return
     }
     const remaining = claim.expiresAtMs - this.cacheGenerationNow()
-    const delay = Math.max(1, Math.min(60_000, Math.floor(remaining / 2)))
+    const delay =
+      remaining <= 0
+        ? 1_000
+        : Math.max(
+            1,
+            Math.min(CACHE_CLAIM_RENEW_WINDOW_MS, Math.floor(remaining / 2)),
+          )
     const lifecycleGeneration = this.lifecycleGeneration
     this.cacheClaimRenewTimer = setTimeout(() => {
       this.cacheClaimRenewTimer = null
-      void this.ensureCacheClaimActive().catch((error) => {
-        this.markTerminalFailure(error, lifecycleGeneration)
+      void this.ensureCacheClaimActive().catch(() => {
+        // A failed renewal does not establish claim loss. Adapter reads and
+        // writes still check the claim; retry the background check without
+        // turning one transient storage error into a permanent Collection
+        // failure. An expired claim retries at a bounded pace.
+        if (
+          lifecycleGeneration === this.lifecycleGeneration &&
+          this.cacheGenerationClaim === claim
+        ) {
+          this.scheduleCacheClaimRenewal(claim)
+        }
       })
     }, delay)
   }
@@ -1520,6 +1534,17 @@ class PersistedCollectionRuntime<
     await this.cacheClaimRecovery
   }
 
+  private scheduleCacheClaimRecovery(lifecycleGeneration: number): void {
+    // Recovery may need the apply mutex held by the caller. Let that caller
+    // release its turn before checking the claim and rotating the cache.
+    queueMicrotask(() => {
+      if (lifecycleGeneration !== this.lifecycleGeneration) return
+      void this.ensureCacheClaimActive().catch((error) => {
+        this.markTerminalFailure(error, lifecycleGeneration)
+      })
+    })
+  }
+
   private async reclaimStartupCacheGeneration(): Promise<void> {
     const lifecycleGeneration = this.lifecycleGeneration
     const previous = this.cacheGenerationClaim
@@ -1545,6 +1570,7 @@ class PersistedCollectionRuntime<
       return
     }
     this.cacheGenerationClaim = rotated
+    this.startupCacheGenerationRotated = true
     this.resetSequence++
     this.latestTerm = 0
     this.latestSeq = 0
@@ -1568,6 +1594,19 @@ class PersistedCollectionRuntime<
       this.scopedRecoveryPending
     )
       return true
+    if (
+      claim.expiresAtMs !== undefined &&
+      claim.expiresAtMs - this.cacheGenerationNow() >
+        CACHE_CLAIM_RENEW_WINDOW_MS
+    ) {
+      // Durable operations check their claim at the adapter boundary. Keep
+      // the background timer armed without writing the same live claim for
+      // every foreground operation.
+      if (this.cacheClaimRenewTimer === null) {
+        this.scheduleCacheClaimRenewal(claim)
+      }
+      return true
+    }
     const lifecycleGeneration = this.lifecycleGeneration
     const expiresAtMs = await adapter.renewCacheGenerationClaim(
       claim.storageCollectionId,
@@ -1788,6 +1827,7 @@ class PersistedCollectionRuntime<
     }
 
     const lifecycleGeneration = this.lifecycleGeneration
+    this.startupCacheGenerationRotated = false
     const isRestart = this.hasAttemptedStartup
     this.hasAttemptedStartup = true
     let resolveStartupMetadata!: () => void
@@ -1825,6 +1865,13 @@ class PersistedCollectionRuntime<
           }
           return lifecycleGeneration === this.lifecycleGeneration
         } catch (error) {
+          // SQLite can reject its second claim check after a startup read
+          // entered with a live claim. That old cache cannot authorize source
+          // entry; rotate it after the hydration scope releases its scheduler.
+          if (this.cacheGenerationClaim && this.hasExpiredCacheClaim()) {
+            metadataExpired = true
+            return false
+          }
           rejectStartupMetadata(error)
           throw error
         }
@@ -1841,7 +1888,6 @@ class PersistedCollectionRuntime<
         this.persistence.adapter.runInHydrationScope !== undefined &&
         (!isRestart ||
           (this.persistence.adapter.isHydrationScopeScheduled?.() ?? true))
-      let expiredStartupReads = 0
       for (;;) {
         metadataExpired = false
         const storageAtAttempt = this.storageCollectionId
@@ -1904,11 +1950,6 @@ class PersistedCollectionRuntime<
           metadataExpired = storageAtAttempt !== this.storageCollectionId
         }
         if (!metadataExpired) break
-        if (++expiredStartupReads > 1) {
-          throw new InvalidPersistedCollectionConfigError(
-            `Persisted cache claim expired repeatedly during startup`,
-          )
-        }
         // A startup read cannot reacquire the claim inside its hydration
         // scope: claim acquisition uses the regular scheduler lane.
         await this.ensureCacheClaimActive()
@@ -2049,6 +2090,10 @@ class PersistedCollectionRuntime<
     return this.cacheGenerationClaim !== undefined
   }
 
+  hasRotatedStartupCacheGeneration(): boolean {
+    return this.startupCacheGenerationRotated
+  }
+
   async startScopedRecovery(resetMetadata?: {
     key: string
     value: unknown
@@ -2068,6 +2113,7 @@ class PersistedCollectionRuntime<
     // Invalidate an in-flight old-cache read before yielding to the mutex.
     this.scopedRecovery = true
     this.scopedRecoveryPending = true
+    const recoverySequence = ++this.scopedRecoverySequence
     this.hydratedDemands.clear()
     this.resetSequence++
     let resolveCacheRotated: (() => void) | undefined
@@ -2126,7 +2172,6 @@ class PersistedCollectionRuntime<
           this.coordinatorUnsubscribe?.()
           this.coordinatorUnsubscribe = null
           this.cacheGenerationClaim = rotated
-          this.scheduleCacheClaimRenewal(rotated)
           this.latestTerm = 0
           this.latestSeq = 0
           this.latestRowVersion = 0
@@ -2145,36 +2190,68 @@ class PersistedCollectionRuntime<
             this.registerRemoteSubsetOwner(this.remoteSubsetOwner)
           }
         }
-        if (!this.syncControls.begin || !this.syncControls.commit) return
-        const applied = this.withInternalApply(() => {
-          this.syncControls.begin?.()
-          this.syncControls.truncate?.({ markReady: false })
-          if (resetMetadata) {
-            this.syncControls.metadata?.collection.set(
-              resetMetadata.key,
-              resetMetadata.value,
+        if (this.syncControls.begin && this.syncControls.commit) {
+          const applied = this.withInternalApply(() => {
+            this.syncControls.begin?.()
+            this.syncControls.truncate?.({ markReady: false })
+            if (resetMetadata) {
+              this.syncControls.metadata?.collection.set(
+                resetMetadata.key,
+                resetMetadata.value,
+              )
+            }
+            return this.syncControls.commit?.() ?? true
+          })
+          await whenSyncAccepted(applied)
+          if (
+            !this.cacheGenerationClaim &&
+            recoverySequence === this.scopedRecoverySequence
+          ) {
+            this.scopedRecoveryPending = false
+          }
+          await this.runInHydrationScope(async (adapter) => {
+            if (this.recoverQueuedAfterLocalLoadFailure) {
+              this.recoverQueuedAfterLocalLoadFailure = false
+              await this.recoverBufferedTransactionsAfterLocalLoadFailureUnsafe(
+                lifecycleGeneration,
+                adapter,
+              )
+            } else {
+              await this.flushQueuedHydrationTransactionsUnsafe(adapter)
+            }
+          })
+          await this.flushQueuedTxCommittedUnsafe()
+        }
+        if (recoverySequence === this.scopedRecoverySequence) {
+          // Older overlapping rotations leave quarantine in place. The final
+          // rotation rebuilds the current index registry before releasing the
+          // mutex; later index events can then target only its storage ID.
+          this.scopedRecoveryPending = false
+          if (this.cacheGenerationClaim) {
+            const currentIndexes = this.collection?.getIndexMetadata() ?? []
+            const completedIndexes = await this.bootstrapPersistedIndexes(
+              currentIndexes,
+              this.persistence.adapter,
+            )
+            await this.requestCoordinatorPersistedIndexes(
+              currentIndexes,
+              completedIndexes,
             )
           }
-          return this.syncControls.commit?.() ?? true
-        })
-        await whenSyncAccepted(applied)
-        if (!this.cacheGenerationClaim) this.scopedRecoveryPending = false
-        await this.runInHydrationScope(async (adapter) => {
-          if (this.recoverQueuedAfterLocalLoadFailure) {
-            this.recoverQueuedAfterLocalLoadFailure = false
-            await this.recoverBufferedTransactionsAfterLocalLoadFailureUnsafe(
-              lifecycleGeneration,
-              adapter,
-            )
-          } else {
-            await this.flushQueuedHydrationTransactionsUnsafe(adapter)
-          }
-        })
-        await this.flushQueuedTxCommittedUnsafe()
+        }
       })
-      this.scopedRecoveryPending = false
+      this.throwIfLifecycleReplaced(lifecycleGeneration)
       resolveCacheRotated?.()
       await sourceRestart
+      if (
+        recoverySequence === this.scopedRecoverySequence &&
+        this.cacheGenerationClaim
+      ) {
+        this.scheduleCacheClaimRenewal(this.cacheGenerationClaim)
+      }
+      // A newer rotation owns reacquisition of the active demands. Dispatching
+      // them from this older recovery would fetch against its pending cache.
+      if (recoverySequence !== this.scopedRecoverySequence) return
       for (const options of this.activeSubsets.values()) {
         if (options.signal?.aborted) continue
         const rotatedOptions = this.rotatedAcquisitions.get(options)
@@ -2843,6 +2920,7 @@ class PersistedCollectionRuntime<
     this.cacheClaimRecovery = null
     this.scopedRecovery = false
     this.scopedRecoveryPending = false
+    this.scopedRecoverySequence++
     this.recoverQueuedAfterLocalLoadFailure = false
     this.persistedReadiness?.set({ status: `loading` })
     this.startupSettled = false
@@ -3014,6 +3092,17 @@ class PersistedCollectionRuntime<
       }
       if (config.lifecycleGeneration !== this.lifecycleGeneration) return true
     } catch (error) {
+      // A read admitted under a live claim may fail at the adapter's later
+      // claim check after this run wakes from expiry. Its old cache has no
+      // authority; the retained demand must reacquire under a new generation.
+      if (
+        config.requestLocalLoadFailure &&
+        !rowsLoaded &&
+        this.cacheGenerationClaim &&
+        this.hasExpiredCacheClaim()
+      ) {
+        return false
+      }
       if (config.requestLocalLoadFailure && !rowsLoaded) {
         if (this.scopedRecoveryPending) {
           this.recoverQueuedAfterLocalLoadFailure = true
@@ -4097,12 +4186,7 @@ class PersistedCollectionRuntime<
   ): Promise<void> {
     if (lifecycleGeneration !== this.lifecycleGeneration) return
     if (this.hasExpiredCacheClaim()) {
-      queueMicrotask(() => {
-        if (lifecycleGeneration !== this.lifecycleGeneration) return
-        void this.ensureCacheClaimActive().catch((error) => {
-          this.markTerminalFailure(error, lifecycleGeneration)
-        })
-      })
+      this.scheduleCacheClaimRecovery(lifecycleGeneration)
       return
     }
     if (txCommitted.term < this.latestTerm) {
@@ -4175,12 +4259,7 @@ class PersistedCollectionRuntime<
         this.cacheGenerationClaim &&
         !(await this.renewCacheClaim(this.persistence.adapter))
       ) {
-        queueMicrotask(() => {
-          if (lifecycleGeneration !== this.lifecycleGeneration) return
-          void this.ensureCacheClaimActive().catch((error) => {
-            this.markTerminalFailure(error, lifecycleGeneration)
-          })
-        })
+        this.scheduleCacheClaimRecovery(lifecycleGeneration)
         return false
       }
 
@@ -4460,12 +4539,7 @@ class PersistedCollectionRuntime<
         if (!this.cacheGenerationClaim || !this.hasExpiredCacheClaim()) {
           throw error
         }
-        queueMicrotask(() => {
-          if (lifecycleGeneration !== this.lifecycleGeneration) return
-          void this.ensureCacheClaimActive().catch((failure) => {
-            this.markTerminalFailure(failure, lifecycleGeneration)
-          })
-        })
+        this.scheduleCacheClaimRecovery(lifecycleGeneration)
         return
       }
 
@@ -4474,12 +4548,7 @@ class PersistedCollectionRuntime<
       // needs this apply mutex, so start it only after this callback returns.
       if (this.isScopedRecoveryPending()) return
       if (this.cacheGenerationClaim && !(await this.renewCacheClaim(adapter))) {
-        queueMicrotask(() => {
-          if (lifecycleGeneration !== this.lifecycleGeneration) return
-          void this.ensureCacheClaimActive().catch((error) => {
-            this.markTerminalFailure(error, lifecycleGeneration)
-          })
-        })
+        this.scheduleCacheClaimRecovery(lifecycleGeneration)
         return
       }
       if (
@@ -4540,7 +4609,12 @@ class PersistedCollectionRuntime<
     }
 
     this.indexAddedUnsubscribe = this.collection.on(`index:added`, (event) => {
-      void this.ensurePersistedIndex(event.index)
+      void this.ensurePersistedIndex(event.index).catch((error) => {
+        console.warn(
+          `Failed to ensure persisted index after index:added:`,
+          error,
+        )
+      })
     })
     this.indexRemovedUnsubscribe = this.collection.on(
       `index:removed`,
@@ -4562,8 +4636,22 @@ class PersistedCollectionRuntime<
     const indexMetadata =
       indexMetadataSnapshot ?? collection?.getIndexMetadata() ?? []
     const completedLocalIndexSignatures = new Set<string>()
+    const lifecycleGeneration = this.lifecycleGeneration
     for (const metadata of indexMetadata) {
-      if (await this.ensureLocalPersistedIndex(metadata, adapter)) {
+      const storageCollectionId = this.storageCollectionId
+      const claimId = this.cacheGenerationClaim?.claimId
+      const ensured = await this.ensureLocalPersistedIndex(metadata, adapter)
+      if (
+        ensured &&
+        (await this.reconcilePersistedIndex(
+          metadata,
+          adapter,
+          storageCollectionId,
+          claimId,
+          lifecycleGeneration,
+          true,
+        ))
+      ) {
         completedLocalIndexSignatures.add(metadata.signature)
       }
     }
@@ -4574,12 +4662,61 @@ class PersistedCollectionRuntime<
     indexMetadata: Array<CollectionIndexMetadata>,
     completedLocalIndexSignatures: ReadonlySet<string>,
   ): Promise<void> {
+    const lifecycleGeneration = this.lifecycleGeneration
     for (const metadata of indexMetadata) {
+      if (!this.hasCurrentIndex(metadata)) continue
+      const storageCollectionId = this.storageCollectionId
+      const claimId = this.cacheGenerationClaim?.claimId
       await this.requestCoordinatorPersistedIndex(
         metadata,
         completedLocalIndexSignatures.has(metadata.signature),
       )
+      await this.reconcilePersistedIndex(
+        metadata,
+        this.persistence.adapter,
+        storageCollectionId,
+        claimId,
+        lifecycleGeneration,
+        true,
+      )
     }
+  }
+
+  /** Settle a late index operation against the Collection's current declaration. */
+  private async reconcilePersistedIndex(
+    indexMetadata: CollectionIndexMetadata,
+    adapter: HydrationPersistenceAdapter,
+    storageCollectionId: string,
+    claimId: string | undefined,
+    lifecycleGeneration: number,
+    indexPresent: boolean,
+  ): Promise<boolean> {
+    while (
+      lifecycleGeneration === this.lifecycleGeneration &&
+      storageCollectionId === this.storageCollectionId
+    ) {
+      const declared = this.hasCurrentIndex(indexMetadata)
+      if (declared === indexPresent) return declared
+      if (declared) {
+        if (!(await this.ensureLocalPersistedIndex(indexMetadata, adapter))) {
+          return false
+        }
+      } else {
+        if (!adapter.markIndexRemoved) return false
+        try {
+          await adapter.markIndexRemoved(
+            storageCollectionId,
+            indexMetadata.signature,
+            { cacheGenerationClaimId: claimId },
+          )
+        } catch (error) {
+          console.warn(`Failed to mark persisted index removed:`, error)
+          return false
+        }
+      }
+      indexPresent = declared
+    }
+    return false
   }
 
   private buildPersistedIndexSpec(
@@ -4600,12 +4737,38 @@ class PersistedCollectionRuntime<
     adapter: HydrationPersistenceAdapter = this.persistence.adapter,
   ): Promise<void> {
     if (this.scopedRecoveryPending) return
+    const lifecycleGeneration = this.lifecycleGeneration
     await this.ensureCacheClaimActive()
+    if (
+      lifecycleGeneration !== this.lifecycleGeneration ||
+      !this.hasCurrentIndex(indexMetadata)
+    )
+      return
     const completedLocally = await this.ensureLocalPersistedIndex(
       indexMetadata,
       adapter,
     )
+    if (lifecycleGeneration !== this.lifecycleGeneration) return
+    if (!this.hasCurrentIndex(indexMetadata)) {
+      await this.markIndexRemoved(indexMetadata)
+      return
+    }
     await this.requestCoordinatorPersistedIndex(indexMetadata, completedLocally)
+    if (
+      lifecycleGeneration === this.lifecycleGeneration &&
+      !this.hasCurrentIndex(indexMetadata)
+    ) {
+      await this.markIndexRemoved(indexMetadata)
+    }
+  }
+
+  private hasCurrentIndex(indexMetadata: CollectionIndexMetadata): boolean {
+    return (
+      this.collection
+        ?.getIndexMetadata()
+        .some((current) => current.signature === indexMetadata.signature) ??
+      false
+    )
   }
 
   private async ensureLocalPersistedIndex(
@@ -4658,12 +4821,24 @@ class PersistedCollectionRuntime<
 
     try {
       if (this.scopedRecoveryPending) return
+      const lifecycleGeneration = this.lifecycleGeneration
       await this.ensureCacheClaimActive()
+      if (
+        lifecycleGeneration !== this.lifecycleGeneration ||
+        this.hasCurrentIndex(indexMetadata)
+      )
+        return
       await this.persistence.adapter.markIndexRemoved(
         this.storageCollectionId,
         indexMetadata.signature,
         { cacheGenerationClaimId: this.cacheGenerationClaim?.claimId },
       )
+      if (
+        lifecycleGeneration === this.lifecycleGeneration &&
+        this.hasCurrentIndex(indexMetadata)
+      ) {
+        await this.ensurePersistedIndex(indexMetadata)
+      }
     } catch (error) {
       console.warn(`Failed to mark persisted index removed:`, error)
     }
@@ -4952,6 +5127,9 @@ function createWrappedSyncConfig<
         version: SYNC_PERSISTENCE_VERSION,
         get managedCacheGeneration() {
           return runtime.hasManagedCacheGeneration()
+        },
+        get startupCacheGenerationRotated() {
+          return runtime.hasRotatedStartupCacheGeneration()
         },
         reserveCommitTurn: () => {
           const openTransaction = getOpenTransaction()

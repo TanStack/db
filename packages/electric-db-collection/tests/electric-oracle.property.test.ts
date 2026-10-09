@@ -2850,6 +2850,10 @@ const describeUnlessQueuedPresenceReplay =
 
 function resetElectricOracleMocks(): void {
   vi.clearAllMocks()
+  // clearAllMocks retains one-shot implementations from a failed earlier
+  // history. Each history must own its transport responses independently.
+  mockSubscribe.mockReset()
+  mockStream.requestSnapshot.mockReset().mockResolvedValue(undefined)
   mockStream.isUpToDate = false
   mockStream.shapeHandle = `shape-current`
   mockStream.lastOffset = `20_0`
@@ -5411,7 +5415,7 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
    */
   it(`applies a scoped reset subset before its demand succeeds`, async () => {
     let subscriber: ((messages: Array<Message<OracleRow>>) => void) | undefined
-    mockSubscribe.mockImplementationOnce((callback) => {
+    mockSubscribe.mockImplementation((callback) => {
       subscriber = callback
       return vi.fn()
     })
@@ -5419,6 +5423,20 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
       new Map([[`electric:resume`, { kind: `reset`, updatedAt: 1 }]]),
       new Map(),
     )
+    // This fixture abstracts physical cache IDs because the law here concerns
+    // source settlement. The SQLite generation oracle owns physical isolation.
+    let generation = 0
+    const claim = (id: string) => ({
+      storageCollectionId: `${id}:generation-${generation}`,
+      claimId: `claim-${generation}`,
+    })
+    adapter.claimCacheGeneration = async (id) => claim(id)
+    adapter.rotateCacheGeneration = async (id) => {
+      generation++
+      return claim(id)
+    }
+    adapter.renewCacheGenerationClaim = async () => Date.now() + 60_000
+    adapter.releaseCacheGenerationClaim = async () => {}
     const options = electricCollectionOptions<OracleRow>({
       id: `scoped-reset-applied-settlement`,
       shapeOptions: {

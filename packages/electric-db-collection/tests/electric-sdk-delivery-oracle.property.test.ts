@@ -18,7 +18,7 @@ import {
   oraclePropertyOptions,
   readOracleRunConfig,
 } from '../../db/tests/oracle-config'
-import { tagPersistence } from './electric-persistence-fixture'
+import { managedTagPersistence } from './electric-persistence-fixture'
 import {
   atCheckpoint,
   withElectricCleanup,
@@ -1592,7 +1592,7 @@ fixedCase.each(
 )(
   `satisfies subset demand after a fresh persisted launch, tagged=$tagged consumer=$consumer`,
   async ({ tagged, consumer }) => {
-    const { adapter, rows, metadata } = tagPersistence()
+    const { adapter, rows, metadata } = managedTagPersistence()
     const collectionId = `sdk-persisted-restart-${++sequence}`
     const http = controlledHttp()
     const firstRow: TestRow = { id: 1, name: `first`, stable: `retained` }
@@ -1671,13 +1671,13 @@ fixedCase.each(
       await atCheckpoint(firstLoad, `first launch subset applied`)
       await vi.waitFor(
         () =>
-          expect(metadata.get(`electric:resume`)).toMatchObject({
+          expect(metadata().get(`electric:resume`)).toMatchObject({
             kind: `resume`,
             requiresTagState: tagged,
           }),
         { interval: 1 },
       )
-      expect(rows.get(1)?.value).toEqual(firstRow)
+      expect(rows().get(1)?.value).toEqual(firstRow)
       await first.cleanup()
 
       current = create()
@@ -1719,6 +1719,15 @@ fixedCase.each(
         `resumed subset snapshot`,
       )
       resumedSnapshot.respond(snapshotResponse(replacement, 3))
+      if (query && tagged) {
+        // The live-query planner also requests a source subset for its own
+        // predicate. Both snapshots must apply before preload can settle.
+        const querySnapshot = await atCheckpoint(
+          http.take(true),
+          `live-query subset snapshot`,
+        )
+        querySnapshot.respond(snapshotResponse(replacement, 4))
+      }
       const outcome = await atCheckpoint(
         loading,
         `second launch subset settled`,
@@ -1726,9 +1735,12 @@ fixedCase.each(
       await vi.waitFor(() => expect(current.status).toBe(`ready`), {
         interval: 1,
       })
-      await vi.waitFor(() => expect(rows.get(1)?.value).toEqual(replacement), {
-        interval: 1,
-      })
+      await vi.waitFor(
+        () => expect(rows().get(1)?.value).toEqual(replacement),
+        {
+          interval: 1,
+        },
+      )
       // Observe settlement as well as rows. A ready Collection with correct
       // rows cannot excuse a rejected subset acquisition.
       expect({
@@ -1781,7 +1793,8 @@ fixedCase.each([
 ])(
   `quarantines uncertified cache rows across later scoped demands after $cause`,
   async ({ tagged, nextTable, malformed }) => {
-    const { adapter, rows, metadata } = tagPersistence()
+    const fixture = managedTagPersistence()
+    const { adapter, rows, metadata } = fixture
     const baselineReads = vi.spyOn(adapter, `loadResumeSnapshot`)
     const http = controlledHttp()
     const collectionId = `sdk-scoped-restart-${++sequence}`
@@ -1881,16 +1894,17 @@ fixedCase.each([
         await atCheckpoint(loading, `initial subset ${id} applied`)
       }
       expect(publicRows(first)).toEqual([...source.values()])
-      expect(rows.size).toBe(2)
-      expect(metadata.get(`electric:resume`)).toMatchObject({
+      expect(rows().size).toBe(2)
+      expect(metadata().get(`electric:resume`)).toMatchObject({
         kind: `resume`,
         requiresTagState: tagged,
       })
       await first.cleanup()
       baselineReads.mockClear()
       if (malformed) {
-        metadata.set(`electric:resume`, { kind: `resume`, offset: 10 })
+        metadata().set(`electric:resume`, { kind: `resume`, offset: 10 })
       }
+      const oldStorageId = fixture.currentStorageId()
 
       source.set(1, { id: 1, name: `new-a`, stable: `a` })
       source.delete(2)
@@ -1935,7 +1949,10 @@ fixedCase.each([
       respond(requestA, [source.get(1)!], tagged ? 4 : 5)
       await atCheckpoint(loadingA, `scoped A applied`)
       expect(publicRows(current), `after A applied`).toEqual([source.get(1)])
-      expect(rows.get(2)?.value, `durable B retained`).toEqual({
+      expect(
+        fixture.rowsAt(oldStorageId).get(2)?.value,
+        `durable B retained`,
+      ).toEqual({
         id: 2,
         name: `old-b`,
         stable: `b`,
@@ -1954,7 +1971,7 @@ fixedCase.each([
         stable: `c`,
       }
       source.set(3, otherTabRow)
-      rows.set(3, { value: otherTabRow })
+      rows().set(3, { value: otherTabRow })
       coordinator.emit({
         type: `tx:committed`,
         term: durablePosition.latestTerm,
@@ -1972,29 +1989,29 @@ fixedCase.each([
       ])
 
       if (tagged) {
-        // The coordinator may refresh the still-active A demand after its
-        // notification. Service that source request before B: ShapeStream
-        // serializes both snapshots on one cursor.
-        const refreshA = await atCheckpoint(
-          http.take(true),
-          `active A refresh after coordinator notification`,
-        )
-        expect(refreshA.url.searchParams.get(`subset__params`)).toContain(`"1"`)
-        respond(refreshA, [source.get(1)!], 5)
+        // The coordinator may refresh A, but the new physical cache does not
+        // require that request. Service it first only if the provider sends
+        // it; either path must leave B absent after B's empty snapshot.
         const loadingB = Promise.resolve(current._sync.loadSubset(demand(2)))
-        const requestB = await atCheckpoint(http.take(true), `empty B snapshot`)
+        let requestB = await atCheckpoint(http.take(true), `empty B snapshot`)
+        let bOffset = 5
+        if (requestB.url.searchParams.get(`subset__params`)?.includes(`:"1"`)) {
+          respond(requestB, [source.get(1)!], 5)
+          requestB = await atCheckpoint(http.take(true), `empty B snapshot`)
+          bOffset = 6
+        }
         expect(requestB.url.searchParams.get(`subset__params`)).toContain(`"2"`)
         expect(publicRows(current), `while B is pending`).toEqual([
           source.get(1),
         ])
         expect(localReads).not.toHaveBeenCalled()
-        respond(requestB, [], 6)
+        respond(requestB, [], bOffset)
         await atCheckpoint(loadingB, `empty B applied`)
         expect(publicRows(current), `after empty B applied`).toEqual([
           source.get(1),
         ])
       }
-      expect(metadata.get(`electric:resume`)).toMatchObject({ kind: `reset` })
+      expect(metadata().get(`electric:resume`)).toMatchObject({ kind: `reset` })
 
       await current.cleanup()
       localReads.mockRestore()
@@ -2011,12 +2028,13 @@ fixedCase.each([
         ),
         `no full baseline row read without demand`,
       ).toBe(true)
-      expect(rows.get(2)?.value, `cache retained without demand`).toMatchObject(
-        {
-          id: 2,
-          name: `old-b`,
-        },
-      )
+      expect(
+        fixture.rowsAt(oldStorageId).get(2)?.value,
+        `cache retained without demand`,
+      ).toMatchObject({
+        id: 2,
+        name: `old-b`,
+      })
     }, [
       () => current.cleanup(),
       () => first.cleanup(),

@@ -78,4 +78,23 @@ describe(`sync persistence capability`, () => {
       }),
     ).toThrow(/startScopedRecovery must be a function/)
   })
+
+  it(`validates the optional startup cache-generation rotation signal`, () => {
+    const capability = {
+      ...baseCapability,
+      startupCacheGenerationRotated: true,
+      resumeSnapshot: {
+        certify: () => Promise.resolve(),
+        getKeySetEvidence: () => ({ status: `consistent` as const }),
+        expectCurrentCommit: () => {},
+      },
+    }
+    expect(validateSyncPersistenceCapability(capability)).toBe(capability)
+    expect(() =>
+      validateSyncPersistenceCapability({
+        ...capability,
+        startupCacheGenerationRotated: `yes`,
+      }),
+    ).toThrow(/startupCacheGenerationRotated must be a boolean/)
+  })
 })
