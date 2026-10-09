@@ -32,7 +32,12 @@ type FacadeEntry = {
   sync: FacadeSync | undefined
   keys: WeakMap<object, string | number>
   order: WeakMap<object, string>
-  currentOrder: Map<string | number, string | undefined>
+  /**
+   * The rows the adapter wrote and has not deleted, including writes that a
+   * persisting transaction still holds. The visible rows can lag behind them
+   * or show an optimistic row the graph never sent.
+   */
+  rows: Map<string | number, SnapshotRow>
 }
 
 type SnapshotRow = {
@@ -262,11 +267,7 @@ export class BucketFacadeAdapter {
   }
 
   private copyRows(entry: FacadeEntry): Array<SnapshotRow> {
-    return [...entry.collection._state.syncedData].map(([key, value]) => ({
-      key,
-      value,
-      order: entry.currentOrder.get(key),
-    }))
+    return [...entry.rows.values()]
   }
 
   private snapshot(): FacadeSnapshot {
@@ -326,11 +327,11 @@ export class BucketFacadeAdapter {
       ])) {
         if (!restoredKeys.has(key)) sync.write({ type: `delete`, key })
       }
-      entry.currentOrder.clear()
+      entry.rows.clear()
       for (const row of rows) {
+        entry.rows.set(row.key, row)
         entry.keys.set(row.value, row.key)
         if (row.order !== undefined) entry.order.set(row.value, row.order)
-        entry.currentOrder.set(row.key, row.order)
         sync.write({
           type: synced.has(row.key) ? `update` : `insert`,
           value: row.value,
@@ -398,10 +399,12 @@ export class BucketFacadeAdapter {
     const entry = byBucket?.get(bucketKey)
     if (!entry) return
     // The graph retracts every row it sent before it retires a bucket, and
-    // the adapter deletes a row from `currentOrder` when it applies that
-    // retraction, even while a persisting transaction holds the write. A row
-    // left there is a contradictory graph signal.
-    if (entry.currentOrder.size > 0) {
+    // the adapter deletes a row from `rows` when it applies that retraction,
+    // even while a persisting transaction holds the write. A row left there
+    // is a contradictory graph signal.
+    // A facade whose sync stopped (its Collection was cleaned up) applies no
+    // retraction, so its record is stale.
+    if (entry.sync && entry.rows.size > 0) {
       throw new Error(
         devBuild() && process.env.NODE_ENV !== `production`
           ? `Bucket facade retired with rows the graph did not retract`
@@ -473,7 +476,7 @@ export class BucketFacadeAdapter {
       },
       keys,
       order,
-      currentOrder: new Map(),
+      rows: new Map(),
     }
     byBucket.set(bucketKey, entry)
     return entry
@@ -486,9 +489,10 @@ export class BucketFacadeAdapter {
     hasOrderBy: boolean,
   ): void {
     const key = change.value.publicKey as string | number
-    const previousOrder = entry.currentOrder.get(key)
+    const previousOrder = entry.rows.get(key)?.order
     const nextOrder = change.value.order
-    const orderChanged = sync.collection.has(key) && previousOrder !== nextOrder
+    const present = entry.rows.has(key)
+    const orderChanged = present && previousOrder !== nextOrder
     const resolvedRow = this.resolve(change.value.value)
     const row = orderChanged ? { ...resolvedRow } : resolvedRow
     entry.keys.set(row, key)
@@ -497,19 +501,16 @@ export class BucketFacadeAdapter {
     }
 
     if (change.inserts > change.deletes) {
-      sync.write({
-        type: sync.collection.has(key) ? `update` : `insert`,
-        value: row,
-      })
-    } else if (change.inserts === change.deletes && sync.collection.has(key)) {
+      sync.write({ type: present ? `update` : `insert`, value: row })
+    } else if (change.inserts === change.deletes && present) {
       sync.write({ type: `update`, value: row })
     } else if (change.deletes > 0) {
       sync.write({ type: `delete`, key })
-      entry.currentOrder.delete(key)
+      entry.rows.delete(key)
       return
     }
 
-    entry.currentOrder.set(key, nextOrder)
+    entry.rows.set(key, { key, value: row, order: nextOrder })
     if (hasOrderBy && orderChanged) sync.collection._markLayoutChange()
   }
 

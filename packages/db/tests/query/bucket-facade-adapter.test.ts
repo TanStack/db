@@ -337,13 +337,15 @@ describe(`BucketFacadeAdapter`, () => {
 
     expect(() => adapter.flush()).toThrow(`facade flush failed`)
     expect(facade.toArray.map(stripVirtualProps)).toEqual([original, fixed])
-    expect([
-      ...(
-        entries.get(`children`)?.get(bucketKey) as unknown as {
-          currentOrder: Map<number, string | undefined>
-        }
-      ).currentOrder,
-    ]).toEqual([
+    expect(
+      [
+        ...(
+          entries.get(`children`)?.get(bucketKey) as unknown as {
+            rows: Map<number, { order: string | undefined }>
+          }
+        ).rows,
+      ].map(([key, row]) => [key, row.order]),
+    ).toEqual([
       [original.id, `0`],
       [fixed.id, `1`],
     ])
@@ -382,13 +384,15 @@ describe(`BucketFacadeAdapter`, () => {
       replacement.id,
       added.id,
     ])
-    expect([
-      ...(
-        entries.get(`children`)?.get(bucketKey) as unknown as {
-          currentOrder: Map<number, string | undefined>
-        }
-      ).currentOrder,
-    ]).toEqual([
+    expect(
+      [
+        ...(
+          entries.get(`children`)?.get(bucketKey) as unknown as {
+            rows: Map<number, { order: string | undefined }>
+          }
+        ).rows,
+      ].map(([key, row]) => [key, row.order]),
+    ).toEqual([
       [original.id, `2`],
       [fixed.id, `1`],
       [added.id, `3`],

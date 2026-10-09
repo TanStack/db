@@ -71,10 +71,13 @@ import type { BucketRow } from '../../src/query/live/materialized-pipeline.js'
  * keeps only synced rows, so the comparison sets those optimistic rows aside
  * and checks that each stays visible while its facade is held. A step may
  * also hold one shown facade's sync commits behind a persisting user
- * transaction during the flush, and settle it before the comparison. The
- * flush's writes and a rollback's restoring writes then land only when the
- * transaction settles, so every law is checked after they land. The settled
- * transaction's own row and its events are set aside.
+ * transaction during the flush and up to two later flushes (`holdFor`). The
+ * flushes' writes and a rollback's restoring writes then land only when the
+ * transaction settles. Steps that end with the hold still open compare only
+ * reads, because nothing they wrote has landed. The step that settles it
+ * compares rows, and also events and layout when the hold covered only that
+ * step. The settled transaction's own row and its events are set aside. A
+ * hold still open at the end settles and its rows are compared.
  *
  * The driver runs the real adapter over a D2 graph. After each flush it
  * compares the set of facades the adapter holds with the model's buckets,
@@ -107,9 +110,10 @@ import type { BucketRow } from '../../src/query/live/materialized-pipeline.js'
  *   signal, so retiring its bucket throws and the flush restores the facade.
  *   That case has a pinned witness only; the grammar retires only after the
  *   graph's retractions, including under a hold, and must not throw. Held
- *   commits are in the grammar (the `hold` step field), with one hold per
- *   step that settles before the comparison. A hold that stays open across
- *   several flushes is not generated.
+ *   commits are in the grammar (the `hold` and `holdFor` step fields), one
+ *   hold at a time, for up to three flushes. A step that releases a hold
+ *   opened earlier checks rows only, not events or layout. A facade that a
+ *   holder cleaned up has a pinned witness only.
  * - After a failed flush, each facade the flush created must report
  *   `status === 'cleaned-up'`. The model does not otherwise follow facades
  *   after the adapter drops them.
@@ -706,11 +710,17 @@ async function runHistory(
     throwPick: number
     local?: number
     hold?: number
+    holdFor?: number
   }>,
 ): Promise<void> {
   const driver = new Driver()
   let published: Model = new Map()
   let pending: Array<Op> = []
+  // A hold can stay open for later steps. Until it settles, its facade's
+  // writes have not landed, so those steps compare nothing but reads.
+  let open:
+    | { settle: () => Promise<void>; remaining: number; openedAt: number }
+    | undefined
   await withCleanup(
     async () => {
       for (const [index, step] of steps.entries()) {
@@ -722,13 +732,23 @@ async function runHistory(
           driver.addLocal(localBucket)
         }
         // A persisting user transaction may hold one shown facade's sync
-        // commits through the flush. It settles before the comparison.
+        // commits through this flush and up to two more. It settles before
+        // the comparison of its last step.
         const holdBucket =
           step.hold === undefined ? undefined : BUCKETS[step.hold]
-        const settle =
-          holdBucket && published.has(holdBucket)
-            ? driver.hold(holdBucket)
-            : undefined
+        if (!open && holdBucket && published.has(holdBucket)) {
+          const settleHold = driver.hold(holdBucket)
+          if (settleHold)
+            open = {
+              settle: settleHold,
+              remaining: step.holdFor ?? 0,
+              openedAt: index,
+            }
+        }
+        const settle = open?.remaining === 0 ? open.settle : undefined
+        // The events and layout of a step that releases a hold opened earlier
+        // mix several flushes, so only its rows are compared.
+        const spanning = settle !== undefined && open!.openedAt < index
         const ops = legalize(applyOps(published, pending), step.choices)
         driver.send(ops)
         pending = [...pending, ...ops]
@@ -805,11 +825,28 @@ async function runHistory(
           ).toBe(0)
         }
 
+        if (open && open.remaining > 0) {
+          open.remaining--
+          driver.takeChanges()
+          if (outcome === `publish`) {
+            published = applyOps(published, pending)
+            pending = []
+          }
+          continue
+        }
         // The held commits land when the transaction settles. Every law below
         // is checked after that, so a write the flush held cannot hide.
         await settle?.()
+        open = undefined
 
         const layoutsAfter = driver.layoutCounts()
+        if (outcome === `publish` && spanning) {
+          published = applyOps(published, pending)
+          pending = []
+          driver.takeChanges()
+          driver.check(published, `${label} (hold released)`)
+          continue
+        }
         if (outcome === `publish`) {
           const next = applyOps(published, pending)
           // Layout: the revision advances once for each facade whose shown rows
@@ -850,6 +887,10 @@ async function runHistory(
           )
         }
         driver.check(published, `${label} (${outcome})`)
+        if (spanning) {
+          driver.takeChanges()
+          continue
+        }
         // Settling the hold publishes only its own row's events.
         for (const messages of driver.takeChanges().values()) {
           expect(
@@ -871,6 +912,11 @@ async function runHistory(
             `${label}: layout revision after ${outcome}`,
           ).toBe(layoutsBefore.get(facade))
         }
+      }
+      // A hold still open at the end settles, and its writes must then match.
+      if (open) {
+        await open.settle()
+        driver.check(published, `end (hold released)`)
       }
     },
     () => driver.cleanup(),
@@ -903,7 +949,8 @@ const step = fc.record({
   // transaction during the flush.
   hold: fc
     .integer({ min: -3, max: BUCKETS.length - 1 })
-    .map((bucket) => (bucket < 0 ? undefined : bucket)),
+    .map((bucket) => (bucket < 0 ? undefined : bucket)), // A hold stays open for this step and up to two more.
+  holdFor: fc.integer({ min: 0, max: 2 }),
 })
 const history = fc.array(step, { minLength: 1, maxLength: 8 })
 
@@ -1457,5 +1504,50 @@ describe(`bucket facade rollback`, () => {
       },
       () => driver.cleanup(),
     )
+  })
+
+  // A facade whose Collection a holder cleaned up has no sync, so the graph's
+  // retractions cannot reach it. Retiring its bucket is legal and must not
+  // throw.
+  it(`retires a bucket whose facade a holder cleaned up`, async () => {
+    const driver = new Driver()
+    await withCleanup(
+      async () => {
+        driver.send([
+          { type: `activate`, bucket: `b0` },
+          { type: `insert`, bucket: `b0`, id: 1, v: 1, rank: 1 },
+        ])
+        driver.adapter.flush().publish()
+        await driver.entry(`b0`)!.collection.cleanup()
+        driver.send([{ type: `retire`, bucket: `b0` }])
+        expect(() => driver.adapter.flush().publish()).not.toThrow()
+        expect(driver.entry(`b0`)).toBeUndefined()
+      },
+      () => driver.cleanup(),
+    )
+  })
+
+  // Pinned replay of a generated failure: an update to a row that an earlier
+  // flush wrote behind a still-persisting transaction keeps the row.
+  it(`updates a row that a persisting transaction still holds`, async () => {
+    await runHistory([
+      {
+        choices: [{ kind: 0, bucket: 0, id: 0, v: 0, rank: 0 }],
+        outcome: `publish`,
+        throwPick: 0,
+      },
+      {
+        choices: [{ kind: 0, bucket: 0, id: 0, v: 1, rank: 0 }],
+        outcome: `publish`,
+        throwPick: 0,
+        hold: 0,
+        holdFor: 1,
+      },
+      {
+        choices: [{ kind: 0, bucket: 0, id: 0, v: 2, rank: 0 }],
+        outcome: `publish`,
+        throwPick: 0,
+      },
+    ])
   })
 })
