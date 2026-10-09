@@ -88,5 +88,6 @@
   "DatabaseRequiredError": 175,
   "ObjectStoreNotFoundError": 176,
   "NameRequiredError": 177,
-  "GetKeyRequiredError": 178
+  "GetKeyRequiredError": 178,
+  "DuplicateTransactionIdError": 233
 }

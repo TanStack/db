@@ -63,7 +63,7 @@ and a provider-qualified `provider session` for a remote lifecycle.
 | offline executor restart | Replacing an executor with a fresh one over retained durable outbox state. This does not restart a Collection sync run. |
 | outbox replay | Resuming unfinished durable offline transaction work, including outbox reconciliation and permitted mutation execution or terminal-phase deletion. This is separate from truncate replay and oracle replay. |
 | `deletion-pending` | The mutation function fulfilled; only acknowledged outbox deletion remains before caller success. An offline executor restart must not call the mutation function again. |
-| `rejection-pending` | The mutation function failed permanently; the caller rejects with that failure. An offline executor restart removes the marked row without calling the mutation function again or restoring its optimistic state. |
+| `rejection-pending` | The named mutation function failed and the executor chose terminal rejection, or the retry decision hook failed. The caller rejects with that failure. An offline executor restart removes the marked row without calling the mutation function again or restoring its optimistic state. |
 
 ## Demand and pagination terms
 
