@@ -667,12 +667,6 @@ function createGenerationRecordingAdapter(
     claims.delete(claimId)
     return Promise.resolve()
   }
-  adapter.assertCacheGenerationClaim = (storageId, claimId) => {
-    if (claimExpired() || claims.get(claimId) !== storageId) {
-      return Promise.reject(new Error(`cache claim expired`))
-    }
-    return Promise.resolve()
-  }
   return Object.assign(adapter, { currentStorageId: () => currentStorageId })
 }
 
