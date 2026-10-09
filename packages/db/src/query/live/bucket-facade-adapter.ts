@@ -405,9 +405,7 @@ export class BucketFacadeAdapter {
     // the adapter deletes a row from `rows` when it applies that retraction,
     // even while a persisting transaction holds the write. A row left there
     // is a contradictory graph signal.
-    // A facade whose sync stopped (its Collection was cleaned up) applies no
-    // retraction, so its record is stale.
-    if (entry.sync && entry.rows.size > 0) {
+    if (entry.rows.size > 0) {
       throw new Error(
         devBuild() && process.env.NODE_ENV !== `production`
           ? `Bucket facade retired with rows the graph did not retract`
@@ -466,6 +464,9 @@ export class BucketFacadeAdapter {
           sync = methods
           return () => {
             sync = undefined
+            // A cleaned-up facade holds no rows. If a holder starts it again,
+            // the graph's later writes rebuild the record.
+            entry.rows.clear()
           }
         },
       },

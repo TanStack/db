@@ -67,7 +67,13 @@ import type { BucketRow } from '../../src/query/live/materialized-pipeline.js'
  * a facade (leaving its sync transaction open), throws from the commit of a
  * facade it creates, or is rolled back after `prepare()`. Before a step's
  * operations, the step may insert an optimistic row into a held facade
- * through a user transaction that stays pending until cleanup. The model
+ * through a user transaction that stays pending until cleanup. That row may
+ * take an id the graph does not hold in the bucket now, so a later graph row
+ * can share its key (`shareId`); the comparison sets such ids aside. A step
+ * may also clean up a shown facade from outside the adapter (`cleanup`), as a
+ * holder can. A cleaned-up facade is not compared, but every flush, rollback
+ * and retirement must still succeed, including after a holder starts the
+ * facade again. The model
  * keeps only synced rows, so the comparison sets those optimistic rows aside
  * and checks that each stays visible while its facade is held. A step may
  * also hold one shown facade's sync commits behind a persisting user
@@ -112,8 +118,9 @@ import type { BucketRow } from '../../src/query/live/materialized-pipeline.js'
  *   graph's retractions, including under a hold, and must not throw. Held
  *   commits are in the grammar (the `hold` and `holdFor` step fields), one
  *   hold at a time, for up to three flushes. A step that releases a hold
- *   opened earlier checks rows only, not events or layout. A facade that a
- *   holder cleaned up has a pinned witness only.
+ *   opened earlier checks rows only, not events or layout. The rows of a
+ *   cleaned-up facade, and optimistic rows that share a graph id, are not
+ *   compared by value.
  * - After a failed flush, each facade the flush created must report
  *   `status === 'cleaned-up'`. The model does not otherwise follow facades
  *   after the adapter drops them.
@@ -413,10 +420,10 @@ class Driver {
    * pending, as an application may with a Collection-valued include. The
    * facade then shows an optimistic row the graph never sent.
    */
-  addLocal(bucket: BucketKey): void {
+  addLocal(bucket: BucketKey, sharedId?: number): void {
     const facade = this.entry(bucket)?.collection
     if (!facade) return
-    const id = this.nextLocalId++
+    const id = sharedId ?? this.nextLocalId++
     const transaction = createTransaction({
       autoCommit: false,
       mutationFn: () => new Promise<void>(() => {}),
@@ -594,24 +601,44 @@ class Driver {
       const facade = this.entry(bucket)?.collection
       if (!rows) continue
       expect(facade, `${label}: facade ${bucket}`).toBeDefined()
-      const local = this.localIds.get(facade!) ?? new Set<number>()
+      if (this.cleaned.has(facade!)) continue
+      // An optimistic row overlays a graph row with the same id, so neither is
+      // compared by value.
+      const local = this.local(facade!)
       expect(
         facade!.toArray
           .map(stripVirtualProps)
           .filter((row) => !local.has(row.id)),
         `${label}: rows of ${bucket}`,
-      ).toEqual(expectedRows(rows))
+      ).toEqual(expectedRows(rows).filter((row) => !local.has(row.id)))
       for (const id of local) {
         expect(facade!.has(id), `${label}: local row ${bucket}/${id}`).toBe(
           true,
         )
       }
       for (const id of rows.keys()) {
+        if (local.has(id)) continue
         const stored = facade!.get(id)
         expect(stored, `${label}: row ${bucket}/${id}`).toBeDefined()
         expect(facade!.getKeyFromItem(stored!), `${label}: key ${id}`).toBe(id)
       }
     }
+  }
+
+  /** Facades that a holder cleaned up; their rows are not compared. */
+  readonly cleaned = new WeakSet<object>()
+
+  /** Clean up a shown facade from outside the adapter, as a holder may. */
+  async cleanupFacade(bucket: BucketKey): Promise<void> {
+    const facade = this.entry(bucket)?.collection
+    if (!facade) return
+    this.cleaned.add(facade)
+    await facade.cleanup()
+  }
+
+  /** Optimistic row ids on a facade. */
+  local(facade: object): Set<number> {
+    return this.localIds.get(facade) ?? new Set()
   }
 
   async cleanup(): Promise<void> {
@@ -656,9 +683,10 @@ function checkEvents(
   const changes = driver.takeChanges()
   for (const bucket of BUCKETS) {
     const facade = facadesBefore.get(bucket)
-    if (!facade) continue
+    if (!facade || driver.cleaned.has(facade)) continue
+    const local = driver.local(facade)
     const messages = (changes.get(facade) ?? []).filter(
-      (message) => !driver.heldIds.has(message.key),
+      (message) => !driver.heldIds.has(message.key) && !local.has(message.key),
     )
     const touched = touchedIds(bucket, previous, ops)
     const named = messages.map((message) => message.key)
@@ -689,6 +717,10 @@ function checkEvents(
           ]),
         )
       : new Map()
+    for (const id of local) {
+      replayed.delete(id)
+      expected.delete(id)
+    }
     expect(
       Object.fromEntries(replayed),
       `${label}: replayed events of ${bucket}`,
@@ -709,8 +741,10 @@ async function runHistory(
     outcome: Outcome
     throwPick: number
     local?: number
+    shareId?: boolean
     hold?: number
     holdFor?: number
+    cleanup?: number
   }>,
 ): Promise<void> {
   const driver = new Driver()
@@ -729,8 +763,37 @@ async function runHistory(
         const localBucket =
           step.local === undefined ? undefined : BUCKETS[step.local]
         if (localBucket && published.has(localBucket)) {
-          driver.addLocal(localBucket)
+          // The optimistic row may take a graph id the bucket does not hold
+          // now, so a later graph row can share its key.
+          // A rolled-back delete keeps its row shown, so skip ids shown now
+          // as well as ids the pending operations leave.
+          const shown = published.get(localBucket) ?? new Map()
+          const after =
+            applyOps(published, pending).get(localBucket) ?? new Map()
+          const facade = driver.entry(localBucket)?.collection
+          const taken = facade ? driver.local(facade) : new Set<number>()
+          // Under an open hold the facade can still show a row the model has
+          // already removed.
+          const free = IDS.filter(
+            (id) =>
+              !shown.has(id) &&
+              !after.has(id) &&
+              !taken.has(id) &&
+              !facade?.has(id),
+          )
+          driver.addLocal(
+            localBucket,
+            step.shareId && free.length > 0
+              ? free[index % free.length]
+              : undefined,
+          )
         }
+        // A holder may clean up a shown facade. The graph then cannot write
+        // it, and its bucket must still flush and retire without failing.
+        const cleanupBucket =
+          step.cleanup === undefined ? undefined : BUCKETS[step.cleanup]
+        if (cleanupBucket && published.has(cleanupBucket))
+          await driver.cleanupFacade(cleanupBucket)
         // A persisting user transaction may hold one shown facade's sync
         // commits through this flush and up to two more. It settles before
         // the comparison of its last step.
@@ -768,8 +831,9 @@ async function runHistory(
             .filter((op) => op.type !== `activate` && op.type !== `retire`)
             .map((op) => op.bucket),
         )
-        const throwTargets = [...rowBuckets].filter((bucket) =>
-          driver.entry(bucket),
+        // A cleaned-up facade has no sync, so the flush never writes it.
+        const throwTargets = [...rowBuckets].filter(
+          (bucket) => driver.entry(bucket)?.sync !== undefined,
         )
         // A facade created in this flush: no facade before the flush, and the
         // pending operations leave its bucket active with rows to commit.
@@ -854,6 +918,8 @@ async function runHistory(
           for (const bucket of BUCKETS) {
             const facade = facadesBefore.get(bucket)
             if (!facade || driver.entry(bucket)?.collection !== facade) continue
+            // A cleaned-up facade is never written, so it owes no revision.
+            if (driver.cleaned.has(facade)) continue
             const previous = published.get(bucket)
             const following = next.get(bucket)
             if (!previous || !following) continue
@@ -892,7 +958,9 @@ async function runHistory(
           continue
         }
         // Settling the hold publishes only its own row's events.
-        for (const messages of driver.takeChanges().values()) {
+        // A cleaned-up facade publishes its own removals.
+        for (const [facade, messages] of driver.takeChanges()) {
+          if (driver.cleaned.has(facade)) continue
           expect(
             messages
               .map((message) => message.key)
@@ -903,6 +971,7 @@ async function runHistory(
         const after = driver.eventCounts()
         for (const [facade, count] of before) {
           // The hold's own row adds events when the transaction settles.
+          if (driver.cleaned.has(facade)) continue
           if (!settle)
             expect(after.get(facade), `${label}: events after ${outcome}`).toBe(
               count,
@@ -949,8 +1018,15 @@ const step = fc.record({
   // transaction during the flush.
   hold: fc
     .integer({ min: -3, max: BUCKETS.length - 1 })
-    .map((bucket) => (bucket < 0 ? undefined : bucket)), // A hold stays open for this step and up to two more.
+    .map((bucket) => (bucket < 0 ? undefined : bucket)),
+  // A hold stays open for this step and up to two more.
   holdFor: fc.integer({ min: 0, max: 2 }),
+  // An optimistic row sometimes takes a graph id.
+  shareId: fc.boolean(),
+  // About one step in eight cleans up a shown facade from outside.
+  cleanup: fc
+    .integer({ min: -28, max: BUCKETS.length - 1 })
+    .map((bucket) => (bucket < 0 ? undefined : bucket)),
 })
 const history = fc.array(step, { minLength: 1, maxLength: 8 })
 
@@ -1575,6 +1651,55 @@ describe(`bucket facade rollback`, () => {
         choices: [{ kind: 0, bucket: 3, id: 5, v: 1, rank: 0 }],
         outcome: `rollback`,
         throwPick: 0,
+      },
+    ])
+  })
+
+  // Pinned replay of a generated failure: a holder cleans up a facade, the
+  // graph removes its row, and a persisting transaction starts the facade
+  // again. Retiring the bucket is legal and must not throw.
+  it(`retires a bucket whose cleaned-up facade a holder started again`, async () => {
+    const plain = {
+      throwPick: 0,
+      local: 0,
+      hold: 0,
+      holdFor: 0,
+      shareId: false,
+    }
+    await runHistory([
+      {
+        ...plain,
+        choices: [
+          { kind: 0, bucket: 1, id: 0, v: 0, rank: 0 },
+          { kind: 0, bucket: 0, id: 0, v: 0, rank: 0 },
+        ],
+        outcome: `publish`,
+      },
+      {
+        ...plain,
+        choices: [
+          { kind: 0, bucket: 1, id: 0, v: 0, rank: 0 },
+          { kind: 0, bucket: 0, id: 0, v: 0, rank: 0 },
+        ],
+        outcome: `publish`,
+      },
+      {
+        ...plain,
+        choices: [
+          { kind: 3, bucket: 1, id: 0, v: 0, rank: 0 },
+          { kind: 0, bucket: 0, id: 0, v: 0, rank: 0 },
+        ],
+        outcome: `publish`,
+        cleanup: 1,
+      },
+      {
+        ...plain,
+        choices: [
+          { kind: 4, bucket: 1, id: 0, v: 0, rank: 0 },
+          { kind: 0, bucket: 0, id: 0, v: 0, rank: 0 },
+        ],
+        outcome: `publish`,
+        hold: 1,
       },
     ])
   })
