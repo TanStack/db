@@ -1329,6 +1329,45 @@ it.each([
   },
 )
 
+// An auto-committed transaction has no caller of commit(). A terminal failure
+// still settles isPersisted with the mutation function's error, and it must
+// not escape as an unhandled process rejection: the caller observes it through
+// isPersisted, as for a manual commit that nobody awaits.
+it(`settles a failed auto-commit through isPersisted without an unhandled rejection`, async () => {
+  const providerError = new NonRetriableError(`auto-commit rejected`)
+  const unhandled: Array<unknown> = []
+  const onUnhandled = (reason: unknown) => unhandled.push(reason)
+  const env = createTestOfflineEnvironment({
+    mutationFn: async () => {
+      throw providerError
+    },
+  })
+  const logged = vi.spyOn(console, `error`).mockImplementation(() => {})
+  process.on(`unhandledRejection`, onUnhandled)
+  try {
+    await env.waitForLeader()
+    const tx = env.executor.createOfflineTransaction({
+      mutationFnName: env.mutationFnName,
+    })
+    const transaction = tx.mutate(() =>
+      env.collection.insert({
+        id: `auto`,
+        value: `pending`,
+        completed: false,
+        updatedAt: new Date(0),
+      }),
+    )
+    await expect(transaction.isPersisted.promise).rejects.toBe(providerError)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(unhandled).toEqual([])
+    expect(env.collection.get(`auto`)).toBeUndefined()
+  } finally {
+    process.off(`unhandledRejection`, onUnhandled)
+    logged.mockRestore()
+    env.executor.dispose()
+  }
+})
+
 // A configuration failure is observed through public commit(), not only the
 // executor's internal batch promise. The provider error is a 401, so ignoring
 // the hook would reject with the provider error. A Promise is invalid whether

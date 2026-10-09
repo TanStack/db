@@ -86,9 +86,9 @@ export class OfflineTransaction {
 
     if (this.autoCommit) {
       // Auto-commit for direct OfflineTransaction usage
+      // The caller observes the failure through isPersisted.
       this.commit().catch((error) => {
         console.error(`Auto-commit failed:`, error)
-        throw error
       })
     }
 
