@@ -1238,9 +1238,12 @@ for this oracle repair. Keep these scenarios and decisions with that owner:
   does not automatically retry a failed phase write or deletion. A failed
   terminal marker write followed by a crash remains an unmarked outbox replay
   window. The [row-local review](oracle-reviews/pr-1592-row-local-retry-hook.md)
-  and [retry-decision grammar review](oracle-reviews/pr-1592-retry-decision-grammar.md)
-  record the checker controls. Broader offline retry and recovery policy
-  remains with RFC #1659.
+  [retry-decision grammar review](oracle-reviews/pr-1592-retry-decision-grammar.md),
+  and [rejected-Promise review](oracle-reviews/pr-1592-rejected-hook-promise.md)
+  record the checker controls. The Node-hosted Promise witnesses do not establish
+  browser `unhandledrejection`, third-party thenables, or rejection after executor
+  disposal; this settlement owner needs a receiving witness for any broader
+  claim. Broader offline retry and recovery policy remains with RFC #1659.
 - **A10 R11/R12 and earlier R8:** metadata/native-value domain, old readers of
   new wire records, and unreadable/unknown-version outbox recovery. New readers
   accepting old records does not prove reverse compatibility. Do not delete
