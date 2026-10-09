@@ -633,7 +633,13 @@ export async function runOptimisticHistory(
   // one, except that the source may delete a key it does not hold. Resolve
   // each batch once, in write order, for the model and driver.
   const sourceKeys = new Set(initial.map((row) => row.id))
-  let open: { batch: SourceBatch; keysBefore: Set<number> } | undefined
+  let open:
+    | {
+        batch: SourceBatch
+        keysBefore: Set<number>
+        rowsBefore: Map<number, HistoryRow>
+      }
+    | undefined
   const sourceInserts = new WeakMap<SourceBatch, Set<number>>()
   const absentDeletes = new WeakMap<SourceBatch, Set<number>>()
   function resolveSourceBatch(step: SourceBatch): SourceBatch {
@@ -680,7 +686,9 @@ export async function runOptimisticHistory(
       const type = inserts.has(index) ? `insert` : `update`
       if (type === `insert`) counts.sourceInserts++
       const held = sourceRows.get(row.id)
-      if (type === `update` && partialUpdates && step.partial && held) {
+      if (type === `update` && partialUpdates && step.partial) {
+        // An update names a key the source holds, so its row must be known.
+        if (!held) throw new Error(`Partial update of unknown source row`)
         const { c: _omitted, ...partialRow } = row
         if (held.c !== row.c) counts.distinguishingPartialUpdates++
         sync.write({ type, value: partialRow as HistoryRow })
@@ -1118,13 +1126,14 @@ export async function runOptimisticHistory(
         } else if (step.type === `open`) {
           if (open || step.batch.truncate) continue
           const keysBefore = new Set(sourceKeys)
+          const rowsBefore = new Map(sourceRows)
           const batch = resolveSourceBatch(step.batch)
           beginSourceBatch(batch)
-          open = { batch, keysBefore }
+          open = { batch, keysBefore, rowsBefore }
           counts.openBatches++
         } else if (step.type === `close`) {
           if (!open) continue
-          const { batch, keysBefore } = open
+          const { batch, keysBefore, rowsBefore } = open
           open = undefined
           if (step.commit) {
             model.sync(batch)
@@ -1134,6 +1143,8 @@ export async function runOptimisticHistory(
             // Aborted before acceptance: its writes never apply.
             sourceKeys.clear()
             for (const key of keysBefore) sourceKeys.add(key)
+            sourceRows.clear()
+            for (const [key, row] of rowsBefore) sourceRows.set(key, row)
             const controller = new AbortController()
             controller.abort()
             const receipt = sync.commit(controller.signal)
