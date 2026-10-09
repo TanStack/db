@@ -679,8 +679,17 @@ a position-only certification history shows that observing a durable version
 does not publish its rows. Reset continuations rebase the publicly applied row
 version, reject a delayed pre-reset notification in both orders relative to a
 newer election, and recover a row committed between the reset reload and the
-later position-only read. The controlled wrapper compares public rows after
-each held cut; removing the old-term fence or treating the later position read
+later position-only read. A controlled same-term reset continuation checks two
+new-epoch commits separated by a delayed old-epoch notice. The commit envelope
+has no reset epoch, so the wrapper rereads durable rows for all three ambiguous
+notices; a no-fence mutant publishes the old row. This establishes public-row
+safety and its three-reload work cost, not a bounded-work promise. The built-in
+coordinator currently has no `collection:reset` sender; a real-host same-term
+reset needs a Browser/OPFS receiving witness. A future epoch-aware fast path
+needs the persisted wrapper owner to distinguish old and new same-term notices
+at each public cut before that real-host receiving witness. The controlled
+wrapper compares public rows after each held cut; removing the old-term fence
+or treating the later position read
 as published rows fails those assertions. The SQLite adapter owner checks exact
 IDs, row versions, reset epochs, pruning,
 unchanged anchors, same-key peer writes, cursor metadata, durable no-write term
@@ -742,6 +751,18 @@ the Browser Electric, hydration, and OPFS page-lifecycle suites. Arbitrary
 concurrent writes, physical crash durability, other browsers, and
 cross-version tabs are outside the established host evidence. These limits do
 not authorize a late apply after an intervening durable write.
+
+The persisted wrapper owner now also checks the no-`pullSince` row-version-gap
+fallback at every Collection change callback: a durable baseline, a missed
+commit, and a later notice may expose only the baseline or the complete durable
+replacement. The old truncate fallback exposed an empty intermediate snapshot.
+The Electric recovery owner drives ordinary peer notifications only after its
+adapter commits matching rows, metadata, and a contiguous row version; its
+bounded peer/stream histories retain exact public-row and publication-marker
+checks. The previous fixture announced version 101 while its durable position
+remained zero, so the new gap detector treated an ordinary notification as a
+missed history. These controlled owners do not prove real Electric delivery of
+a lost-notice gap; the Browser Electric/OPFS receiver owns that schedule.
 
 The [live Electric hydration-straddle oracle](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/electric-hydration-straddle.opfs.spec.ts)
 owns one #1754 host history: an on-demand Collection has an initial durable row;

@@ -548,3 +548,68 @@ M07, M09) plus four `accepted-design` (M04, M06, M08, M10). Zero items were
 dropped, deferred, or left as confirmed-open. Accounting and authorized repairs
 are complete at the named executable commit; the bounded receiving gaps above
 remain in the coverage map.
+
+## Follow-up: collections CI and CodeRabbit review 5472852817
+
+This addendum evaluated the complete CodeRabbit review of `3d7bd9e73` and the
+failed `Test (collections)` job on that head. The executable repair is
+`ef287d8464e3cbd640ab60098a838ac4384751ab`. Earlier entries remain
+versioned evidence for their own heads. In particular, the earlier sentence
+that called Electron IPC protocol v3 is superseded: the reviewed and repaired
+protocol is v4. The Electron README and changeset now say v4, and both
+directions of the IPC version test reject v3 as well as v1 and v2.
+
+### Laws, experiments, and inference
+
+| Law and authority | Earlier oracle reach | Decisive experiment and inference | Enforcement and remaining limit |
+| --- | --- | --- | --- |
+| **A row-version gap without `pullSince` replaces one complete durable public snapshot.** The persisted wrapper's complete-publication and accepted-source laws require readers to see an earlier permitted snapshot or the durable replacement at each change callback. | The wrapper had a term-jump row check but no change-callback trace for its no-`pullSince` fallback. | A legal baseline at version 1, missed version 2, and received version 3 were RED when the old fallback published `[]` between the baseline and durable rows. The replacement path passed with no empty or partial cut. The failure was at a public event, not only a final-row mismatch. | The wrapper oracle records each Collection change callback and permits only the baseline or all three durable rows. `reloadActiveSubsetsUnsafe` replaces the snapshot in one publication. Real lost-notice delivery through Electric/OPFS remains with the Browser receiver in the coverage map. |
+| **An ordinary peer notice describes an already durable, contiguous commit.** The Electric recovery owner's peer/stream grammar requires the row, metadata marker, and reported position to describe one committed peer step before delivery. | The old fixture changed durable Maps directly, left the adapter position at zero, and announced row version 101. A new gap detector treated that as a missed 100-version history. | CI had eleven Electric recovery failures, including an empty intermediate event and an unexpected subset load. Committing each peer transaction through the fixture adapter before its notice, with the next durable row version, made all 60 recovery tests and all 629 Electric package tests pass without weakening the public-row or marker assertions. | The bounded Electric owner still checks complete intermediate rows, marker reach, deletion, full reload, and peer/stream pairs. Its mock SDK and adapter do not establish real cross-tab delivery. The original impossible notice remains a calibration for fixture legality, not a product RED for an ordinary peer commit. |
+| **After a reset, an unlabelled same-term notice cannot publish old-epoch rows.** `CollectionReset` carries an epoch; `TxCommitted` does not. The reset/public-row law requires a durable reread for an ambiguous notice. | Earlier reset histories moved to a newer term. They did not count work after multiple same-term notices. | A controlled history now sends new-epoch commit A, delayed old-epoch notice, then new-epoch commit B under term 1. All public cuts contain only durable rows. It counts three subset reloads. A temporary no-fence mutant was RED at the public cut: `[first, stale]` instead of `[first]`. Restored production is GREEN. | CodeRabbit's hidden H1 cost observation is true at this controlled receive boundary. Its proposed one-reload cap lacks an epoch distinction and would permit the stale row. There is no bounded-work promise for this envelope, and the built-in coordinator currently has no `collection:reset` sender. A real same-term reset sender, or an epoch-bearing fast path with its receiving witness, remains with the Browser/OPFS owner. |
+| **Coordinated Electron elections reserve a durable term before publishing a route.** The coordinator checks for `reserveLeadershipTerm` when an adapter is registered and the Electron main handler rejects a missing capability during reservation. | The generic `PersistenceAdapter` type keeps the method optional because `SingleProcessCoordinator` does not elect. The renderer IPC proxy exposes it; the main adapter is resolved per Collection. | Source inspection reaches the exact boundary: a missing main capability produces `InvalidPersistedCollectionConfigError` before `state.isLeader` and route heartbeat. The review's request to let such a custom adapter complete a coordinated election conflicts with the durable-term law. | The README now states the conditional main-adapter requirement and the supported single-renderer case. No new election algorithm was introduced. The existing Browser/Electron election and IPC oracles remain the production owners; an absent-main-capability real-process witness is outside this documentation correction. |
+
+The reset experiment tests a controlled envelope accepted by the wrapper, not
+an emitted built-in reset. Its work count is measured, but no elapsed latency
+or host-size bound follows. The older same-version protocol limit and the
+separate real SQLite reset premise still apply. The new gap witness is bounded
+to eager active rows and a recording adapter without `pullSince`; the Electric
+fixture repair covers ordinary contiguous peer histories, not the same
+lost-notice schedule.
+
+### Lossless CodeRabbit ledger
+
+| ID | Original claim and proposed action | Technical verdict and evidence | PR action and durable value |
+| --- | --- | --- | --- |
+| CR3-H1 | After `collection:reset`, a same-term leader causes every later `tx:committed` notice to reload, skip position observation, and miss the hydrated fast path. Add at least two same-term commits and make only the first or neither reload, perhaps by carrying an epoch or reserving a new term. The review marked this unverified and hidden. | Confirmed three reloads for three controlled ambiguous notices. The no-fence mutant publishes a stale row. No built-in `collection:reset` sender, latency bound, or work contract was identified. | `accepted-design` for the current conservative receive cost. The new same-term oracle and coverage map preserve the safety law and the condition for a future epoch-aware optimization; a one-reload cap is not a correct standalone fix. |
+| CR3-I1 | `PersistenceAdapter.reserveLeadershipTerm` is optional, so a custom Electron main adapter without it cannot elect. Require it for Electron main adapters or return an unsupported result that the coordinator handles. | The inability to elect is real and deliberate. The shared type is optional for single-process use; the coordinated path already rejects before route publication. No successful election without durable reservation is a supported history. | `fixed-now` documentation: the Electron README states the conditional capability and the supported single-renderer path. Existing fail-fast runtime behavior stays. |
+| CR3-I2 | Protocol constant is v4, but README and review record say v3; add a v3 rejection test only if that build was published. | Confirmed stale prose. v3 existed in earlier PR commits; main was v2. Both peers already reject any mismatched version, but the test omitted v3. | `fixed-now`: README and changeset say v4, this append-only entry corrects the earlier review record, and the two version-rejection loops include v3. |
+| CR3-P1 | Consider running `coderabbit review --agent` locally. | Optional process suggestion in the review body and agent prompt. The raw review and local tests supplied the needed evidence; it is not a product or PR requirement. | `refuted` as a required action. The idea is preserved here. |
+
+The remaining 17 hidden file comments say LGTM and contain no additional
+change request. The autofix checkbox and repeated agent prompts add no distinct
+technical claim. Four raw claims are accounted for: two `fixed-now`, one
+`accepted-design`, and one `refuted` as a required process action. No item is
+deferred or silently dropped.
+
+### Verification and reviewer assessment
+
+The original persisted gap witness was RED at an exposed empty Collection and
+GREEN after the atomic replacement. The no-fence mutant failed the new
+same-term test at the stale public row. On the executable repair, the full
+Electric package passed 629 tests, the persisted wrapper oracle passed 664
+tests with one existing todo, and Electron IPC passed 58 tests. All three
+affected packages passed standalone TypeScript checks after the Electric
+package declarations were built. Affected-file ESLint had zero errors and
+pre-existing `require-await` warnings in the large wrapper test; Prettier and
+`git diff --check` passed. These local checks do not substitute for the pending
+required CI checks on the pushed head.
+
+CodeRabbit found a real documentation mismatch and a useful reset-work
+observation. It assigned major severity to a synthetic receive path without
+establishing a built-in reset sender, and its one-reload suggestion would lose
+the old-epoch safety witness. It also treated a deliberately optional generic
+capability as a supported coordinated-election fallback. Recommend hiring for
+review work with explicit protocol-history and oracle calibration before
+accepting proposed fixes. The accounting is complete at the reviewed head;
+the executable repair is complete for the bounded laws above, with real-host
+receiving limits retained in the coverage map.
