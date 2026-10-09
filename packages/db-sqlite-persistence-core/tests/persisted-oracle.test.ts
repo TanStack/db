@@ -1170,6 +1170,89 @@ it.each([`sparse slot`, `extra array property`] as const)(
   },
 )
 
+// A real version gap can arrive after a baseline row was published while the
+// coordinator offers no pullSince capability. The independent durable ledger
+// has versions 1, 2, and 3; the passive Collection sees only version 3's notice.
+// The fallback must replace its rows in one public publication. Recording each
+// change callback catches a transient empty snapshot that a final-only
+// assertion would miss.
+it(`publishes a durable gap reload without an empty intermediate snapshot`, async () => {
+  const adapter = createRecordingAdapter()
+  const coordinator = createCoordinatorHarness()
+  coordinator.pullSince = undefined
+  const collectionId = `source-atomic-gap-fallback`
+  const durableWrite = (id: string, term: number, rowVersion: number) =>
+    adapter.applyCommittedTx(collectionId, {
+      txId: id,
+      term,
+      seq: 1,
+      rowVersion,
+      mutations: [{ type: `insert`, key: id, value: { id, title: id } }],
+    })
+  await durableWrite(`old`, 1, 1)
+  const collection = createCollection(
+    persistedCollectionOptions<Todo, string>({
+      id: collectionId,
+      getKey: (row) => row.id,
+      sync: { sync: (params) => params.markReady() },
+      persistence: { adapter, coordinator },
+    }),
+  )
+  const exposed: Array<Array<string>> = []
+  let stopPublication = () => {}
+  let hasPrimaryFailure = false
+  try {
+    await atPersistedOracleCheckpoint(collection.preload(), `baseline ready`)
+    expect([...collection.keys()]).toEqual([`old`])
+    const publication = collection.subscribeChanges(
+      () => exposed.push([...collection.keys()].sort()),
+      { includeInitialState: false },
+    )
+    stopPublication = () => publication.unsubscribe()
+    await durableWrite(`missed`, 2, 2)
+    await durableWrite(`received`, 3, 3)
+    coordinator.emit(
+      {
+        type: `tx:committed`,
+        term: 3,
+        seq: 1,
+        txId: `received`,
+        latestRowVersion: 3,
+        requiresFullReload: false,
+        changedRows: [
+          { key: `received`, value: { id: `received`, title: `received` } },
+        ],
+        deletedKeys: [],
+      },
+      `replacement`,
+      collectionId,
+    )
+    await vi.waitFor(() =>
+      expect([...collection.keys()].sort()).toEqual([
+        `missed`,
+        `old`,
+        `received`,
+      ]),
+    )
+    expect(exposed.length).toBeGreaterThan(0)
+    const complete = [`missed`, `old`, `received`]
+    for (const rows of exposed) {
+      expect([[`old`], complete]).toContainEqual(rows)
+    }
+    expect(exposed.at(-1)).toEqual(complete)
+    expect(coordinator.pullSinceCalls).toBe(0)
+  } catch (error) {
+    hasPrimaryFailure = true
+    throw error
+  } finally {
+    stopPublication()
+    await cleanupPersistedOracle(
+      [() => collection.cleanup()],
+      hasPrimaryFailure,
+    )
+  }
+})
+
 // Row versions cross election terms even when an owner commits no rows.
 // The authored durable ledger has a missed term-1 row, an empty term-2
 // election, and a term-3 row. The passive Collection only receives the final
@@ -1407,6 +1490,119 @@ it(`accepts a lower row version after a collection reset`, async () => {
     )
     await vi.waitFor(() => expect([...collection.keys()]).toEqual([`new`]))
     expect(collection.get(`new`)).toMatchObject(newRow)
+  } catch (error) {
+    hasPrimaryFailure = true
+    throw error
+  } finally {
+    await cleanupPersistedOracle(
+      [() => collection.cleanup()],
+      hasPrimaryFailure,
+    )
+  }
+})
+
+// The reset envelope has an epoch, but tx:committed does not. This controlled
+// ledger keeps the same term after reset, then delivers a current notice, an
+// old-epoch notice, and another current notice. Their terms alone cannot
+// authorize row deltas. At each settled cut, the public Collection must equal
+// durable rows and never expose the old-epoch row. The load counter records
+// the conservative cost of checking each ambiguous notice against storage.
+it(`checks same-term post-reset notices against durable rows`, async () => {
+  const adapter = createRecordingAdapter([{ id: `old`, title: `old epoch` }])
+  const coordinator = createCoordinatorHarness()
+  const collectionId = `source-reset-same-term`
+  let position = { term: 1, seq: 1, rowVersion: 1, resetEpoch: 0 }
+  const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
+  adapter.loadResumeSnapshot = async (...args) => ({
+    ...(await loadResumeSnapshot(...args)),
+    latestTerm: position.term,
+    latestSeq: position.seq,
+    latestRowVersion: position.rowVersion,
+    resetEpoch: position.resetEpoch,
+  })
+  const collection = createCollection(
+    persistedCollectionOptions<Todo, string>({
+      id: collectionId,
+      getKey: (row) => row.id,
+      sync: { sync: (params) => params.markReady() },
+      persistence: { adapter, coordinator },
+    }),
+  )
+  let hasPrimaryFailure = false
+  try {
+    await atPersistedOracleCheckpoint(collection.preload(), `baseline ready`)
+    expect([...collection.keys()]).toEqual([`old`])
+    adapter.rows.clear()
+    position = { term: 1, seq: 0, rowVersion: 0, resetEpoch: 1 }
+    coordinator.emit(
+      { type: `collection:reset`, schemaVersion: 2, resetEpoch: 1 },
+      `replacement`,
+      collectionId,
+    )
+    await vi.waitFor(() => expect([...collection.keys()]).toEqual([]))
+    const loadsAfterReset = adapter.loadSubsetCalls.length
+
+    const first = { id: `first`, title: `new epoch` }
+    adapter.rows.set(first.id, first)
+    position = { term: 1, seq: 1, rowVersion: 1, resetEpoch: 1 }
+    coordinator.emit(
+      {
+        type: `tx:committed`,
+        term: 1,
+        seq: 1,
+        txId: `new-first`,
+        latestRowVersion: 1,
+        requiresFullReload: false,
+        changedRows: [{ key: first.id, value: first }],
+        deletedKeys: [],
+      },
+      `replacement`,
+      collectionId,
+    )
+    await vi.waitFor(() => expect([...collection.keys()]).toEqual([`first`]))
+
+    const stale = { id: `stale`, title: `old epoch` }
+    coordinator.emit(
+      {
+        type: `tx:committed`,
+        term: 1,
+        seq: 2,
+        txId: `old-delayed`,
+        latestRowVersion: 2,
+        requiresFullReload: false,
+        changedRows: [{ key: stale.id, value: stale }],
+        deletedKeys: [],
+      },
+      `replacement`,
+      collectionId,
+    )
+    await flushAsyncWork()
+    expect([...collection.keys()]).toEqual([`first`])
+    await vi.waitFor(() =>
+      expect(adapter.loadSubsetCalls).toHaveLength(loadsAfterReset + 2),
+    )
+
+    const second = { id: `second`, title: `new epoch` }
+    adapter.rows.set(second.id, second)
+    position = { term: 1, seq: 2, rowVersion: 2, resetEpoch: 1 }
+    coordinator.emit(
+      {
+        type: `tx:committed`,
+        term: 1,
+        seq: 2,
+        txId: `new-second`,
+        latestRowVersion: 2,
+        requiresFullReload: false,
+        changedRows: [{ key: second.id, value: second }],
+        deletedKeys: [],
+      },
+      `replacement`,
+      collectionId,
+    )
+    await vi.waitFor(() =>
+      expect([...collection.keys()].sort()).toEqual([`first`, `second`]),
+    )
+    expect(adapter.loadSubsetCalls).toHaveLength(loadsAfterReset + 3)
   } catch (error) {
     hasPrimaryFailure = true
     throw error

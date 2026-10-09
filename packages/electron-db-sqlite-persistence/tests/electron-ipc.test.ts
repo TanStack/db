@@ -4049,7 +4049,7 @@ describe(`electron sqlite persistence bridge`, () => {
   })
 
   it(`rejects older main responses before reading their result`, async () => {
-    for (const oldVersion of [1, 2]) {
+    for (const oldVersion of [1, 2, 3]) {
       const rendererPersistence = createElectronSQLitePersistence({
         invoke: (_channel, request) =>
           Promise.resolve({
@@ -4163,7 +4163,7 @@ describe(`electron sqlite persistence bridge`, () => {
       },
     })
 
-    for (const oldVersion of [1, 2]) {
+    for (const oldVersion of [1, 2, 3]) {
       const legacyVersionResponse = await registeredHandler?.(undefined, {
         v: oldVersion,
         requestId: `req-v${oldVersion}`,

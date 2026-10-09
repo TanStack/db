@@ -3774,8 +3774,10 @@ class PersistedCollectionRuntime<
     }
 
     if (lifecycleGeneration !== this.lifecycleGeneration) return
+    // A gap is not a schema reset. Replace the durable snapshot in one
+    // publication so readers never see an empty intermediate Collection.
     await this.runInHydrationScope((adapter) =>
-      this.truncateAndReloadUnsafe(adapter, lifecycleGeneration),
+      this.reloadActiveSubsetsUnsafe(adapter),
     )
     this.publicRowVersion = Math.max(
       this.publicRowVersion,

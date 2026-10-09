@@ -113,7 +113,12 @@ unknown initial route or any leader/term change rejects the direct RPC with
 wrapper can certify the original transaction ID through the replacement leader
 and the main-process SQLite adapter. Application-issued mutations still need
 caller reconciliation. Main and renderer must use matching persistence protocol
-v3 peers for this IPC operation.
+v4 peers for this IPC operation. A main-process adapter used by an
+`ElectronCollectionCoordinator` must implement `reserveLeadershipTerm` so each
+election reserves a durable term before publishing a route. An adapter without
+that capability can still serve single-renderer persistence through
+`SingleProcessCoordinator`; a coordinated election rejects it before route
+publication.
 
 Remote-subset requests use the same crash-only boundary. The coordinator
 projects a live `LoadSubsetOptions` input to the exported
