@@ -718,7 +718,7 @@ function expectHistory({ original, ops }: History): void {
   const before = realizeRoot(original)
   const { proxy, getChanges } = createChangeProxy(row)
   let state: Root = { ...original }
-  const written = new Set<string>()
+  const written = new Set<Field>()
   for (const generated of ops) {
     const op = resolve(state, original, generated)
     if (op === undefined || !applicable(state, original, op)) continue
@@ -742,8 +742,14 @@ function expectHistory({ original, ops }: History): void {
       true,
     )
   // An extra report is permitted only for a written key, with its final value.
-  for (const field of Object.keys(changes)) {
-    if (expected.has(field)) continue
+  expect(
+    Object.keys(changes).filter(
+      (key) => !(FIELDS as ReadonlyArray<string>).includes(key),
+    ),
+    `keys outside the row reported, ${context}`,
+  ).toEqual([])
+  for (const field of FIELDS) {
+    if (!(field in changes) || expected.has(field)) continue
     expect(written.has(field), `unwritten ${field} reported, ${context}`).toBe(
       true,
     )
