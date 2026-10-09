@@ -624,19 +624,23 @@ describe(`Operators`, () => {
       expect(latestMessage.getInner()).toEqual(expectedResult)
     })
 
-    // These are readable replay witnesses. The generated groupBy law lives in
-    // incrementalization-law-oracle.property.test.ts.
-    // Contract for callers: groupBy consolidates values by their hash, and the
-    // hash treats -0 as 0 and equal Dates as one value. So after a delete,
-    // min and max return a value hash-equal to a remaining member, but not
-    // necessarily the remaining instance: here they return the deleted -0 and
-    // the deleted Date. A caller that needs the exact remaining value, such as
-    // the query compiler's group representatives, must keep its own exact
-    // inputs. Distinct values are not affected.
+    // Contract for callers, not a replay witness: the generated groupBy law in
+    // incrementalization-law-oracle.property.test.ts compares JSON values and
+    // does not cover -0 or Date identity. groupBy consolidates values by their
+    // hash, which treats -0 as 0 and equal Dates as one value. So after a
+    // delete, min and max return a value hash-equal to a remaining member, but
+    // not necessarily the remaining instance; the group is retracted and
+    // inserted again with that value. A caller that needs the exact remaining
+    // value, such as the query compiler's group representatives, must keep its
+    // own exact inputs. A distinct remaining value is returned as is.
     test(`min and max after a delete return a hash-equal value, not a particular instance`, () => {
-      const extremes = (first: unknown, second: unknown) => {
+      const extremes = (first: number | Date, second: number | Date) => {
         const graph = new D2()
-        const input = graph.newInput<{ g: string; id: number; v: any }>()
+        const input = graph.newInput<{
+          g: string
+          id: number
+          v: number | Date
+        }>()
         let latest: { lo: unknown; hi: unknown } | undefined
         input.pipe(
           groupBy((row) => ({ g: row.g }), {
@@ -657,8 +661,11 @@ describe(`Operators`, () => {
           ]),
         )
         graph.run()
+        // Only the output of the delete counts.
+        latest = undefined
         input.sendData(new MultiSet([[deleted, -1]]))
         graph.run()
+        expect(latest, `the delete publishes the group again`).toBeDefined()
         return latest!
       }
 
@@ -671,10 +678,15 @@ describe(`Operators`, () => {
       expect((date.lo as Date).getTime()).toBe(kept.getTime())
       expect((date.hi as Date).getTime()).toBe(kept.getTime())
 
-      const distinct = extremes(1, 2)
-      expect(distinct).toMatchObject({ lo: 2, hi: 2 })
+      expect(extremes(1, 2)).toMatchObject({ lo: 2, hi: 2 })
+      const distinct = new Date(6)
+      const distinctDates = extremes(new Date(5), distinct)
+      expect(distinctDates.lo).toBe(distinct)
+      expect(distinctDates.hi).toBe(distinct)
     })
 
+    // These are readable replay witnesses. The generated groupBy law lives in
+    // incrementalization-law-oracle.property.test.ts.
     test(`min and max reduce keep 0, 0n, and empty string as extremes`, () => {
       const minNum = min<number>()
       const maxNum = max<number>()
