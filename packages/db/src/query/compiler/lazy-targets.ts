@@ -1,5 +1,6 @@
 import {
   PropRef,
+  collectCollectionSources,
   followRef,
   getFromSources,
   requireCollectionSource,
@@ -60,6 +61,7 @@ export function getLazyLoadTargets(
   const source = resolveLazySource(rawQuery, lazyFrom, {
     alias,
     collection: followRefResult.collection,
+    sourceId: followRefResult.sourceId,
   })
   if (!source) {
     return []
@@ -160,7 +162,7 @@ function getTargetsFromPropRef(
   }
 
   const [alias, ...path] = ref.path
-  const source = getSourceFromAlias(query, alias!)
+  const source = getSourceFromAlias(query, alias!, ref.bindingId)
   if (!source) {
     return []
   }
@@ -192,69 +194,49 @@ function getTargetsFromPropRef(
 function getSourceFromAlias(
   query: QueryIR,
   alias: string,
+  bindingId?: string,
 ): CollectionSourceRef | QueryRef | undefined {
   if (query.join) {
     for (const join of query.join) {
-      if (join.from.alias === alias) {
+      if (
+        join.from.alias === alias &&
+        (bindingId === undefined || join.from.bindingId === bindingId)
+      ) {
         return join.from
       }
     }
   }
 
-  return getFromSources(query.from).find((source) => source.alias === alias)
+  return getFromSources(query.from).find(
+    (source) =>
+      source.alias === alias &&
+      (bindingId === undefined || source.bindingId === bindingId),
+  )
 }
 
 function resolveLazySource(
   query: QueryIR,
   lazyFrom: From,
-  target: { alias: string; collection: Collection },
+  target: { alias: string; collection: Collection; sourceId?: string },
 ): CollectionRef | undefined {
-  // Prefer the lexical source from the user's query. The optimizer may create
-  // an equivalent CollectionRef with a new source ID, but subscriptions and
-  // demand callbacks are owned by the original lexical source.
-  const source = findCollectionSource(query, target.alias, target.collection)
-  if (source) return source
+  // Subscription and demand callbacks belong to one lexical source. An alias
+  // may also name a source in a nested scope, so text cannot resolve it here.
+  if (target.sourceId !== undefined) {
+    return collectCollectionSources(query).find(
+      (source) =>
+        source.sourceId === target.sourceId &&
+        source.collection === target.collection,
+    )
+  }
 
+  // A direct source has no recursive alias ambiguity. A recursive source with
+  // no resolved ID cannot safely receive a keyed demand.
   if (
     lazyFrom.type === `collectionRef` &&
     lazyFrom.collection === target.collection &&
     lazyFrom.alias === target.alias
   ) {
     return lazyFrom
-  }
-
-  return undefined
-}
-
-function findCollectionSource(
-  query: QueryIR,
-  alias: string,
-  collection: Collection,
-): CollectionRef | undefined {
-  const sources = [
-    ...getFromSources(query.from),
-    ...(query.join?.map((join) => join.from) ?? []),
-  ]
-
-  for (const source of sources) {
-    if (
-      source.type === `collectionRef` &&
-      source.alias === alias &&
-      source.collection === collection
-    ) {
-      return source
-    }
-    if (source.type === `queryRef`) {
-      const nested = findCollectionSource(source.query, alias, collection)
-      if (nested) return nested
-    }
-  }
-
-  if (query.from.type === `unionAll`) {
-    for (const branch of query.from.queries) {
-      const nested = findCollectionSource(branch, alias, collection)
-      if (nested) return nested
-    }
   }
 
   return undefined

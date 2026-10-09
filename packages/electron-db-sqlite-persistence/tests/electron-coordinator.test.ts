@@ -51,6 +51,7 @@ type QueuedLock = {
 }
 const heldLocks = new Set<string>()
 const lockQueues = new Map<string, Array<QueuedLock>>()
+const durableTerms = new Map<string, number>()
 
 function grantNextLock(name: string): void {
   if (heldLocks.has(name)) return
@@ -149,6 +150,17 @@ function createStubAdapter(): StubAdapter {
       latestSeq: 0,
       latestRowVersion: 0,
     }),
+    async reserveLeadershipTerm(collectionId, observedTerm) {
+      const position = await this.getStreamPosition(collectionId)
+      const latestTerm =
+        Math.max(
+          position.latestTerm,
+          durableTerms.get(collectionId) ?? 0,
+          observedTerm,
+        ) + 1
+      durableTerms.set(collectionId, latestTerm)
+      return { ...position, latestTerm }
+    },
   }
 }
 
@@ -187,6 +199,7 @@ function inspectCoordinator(
 
 describe(`ElectronCollectionCoordinator parity`, () => {
   beforeEach(() => {
+    durableTerms.clear()
     ;(globalThis as Record<string, unknown>).BroadcastChannel =
       MockBroadcastChannel as unknown
     Object.defineProperty(globalThis, `navigator`, {

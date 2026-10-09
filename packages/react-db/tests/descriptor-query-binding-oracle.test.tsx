@@ -42,6 +42,12 @@
  * client child write, and a second-client parent write. This detects binding
  * either source to the wrong provider; it does not observe on-demand requests
  * or arbitrary interleavings of source writes.
+ * A receiving include repeats those checkpoints with a child alias that
+ * shadows the parent alias and a renamed control. The child's projection
+ * includes the captured parent value, so alias-only lookup changes an
+ * observable field even when the correlation still admits the child. Its
+ * stable identity must also survive descriptor binding: changing source
+ * binding IDs while retaining captured references changes the public hash.
  *
  * A prepared query is a bound snapshot, not a lasting render resolver. Adding
  * a descriptor source later changes the plan without starting a sync run. The
@@ -790,6 +796,163 @@ describe(`standalone descriptor query binding`, () => {
           })
         })
         models.get(second)!.parent = `SECOND PARENT 2`
+        await check(`second parent write`)
+      } finally {
+        for (const { hook } of mounted) {
+          hook.unmount()
+          await hook.result.current.collection.cleanup()
+        }
+        await first.cleanup()
+        await second.cleanup()
+      }
+    },
+  )
+
+  it.each([`shadowed`, `renamed`] as const)(
+    `keeps client and lexical source identity in a %s descriptor include`,
+    async (aliasForm) => {
+      type Parent = { id: string; value: string }
+      type Child = { id: string; parentId: string; value: string }
+      const parentDescriptor = collectionOptions(
+        `combined-parent-${aliasForm}`,
+        (client) =>
+          mockSyncCollectionOptions<Parent>({
+            id: `combined-parent-${aliasForm}`,
+            getKey: (row) => row.id,
+            initialData: client.requireDependency<Array<Parent>>(`parents`),
+          }),
+      )
+      const childDescriptor = collectionOptions(
+        `combined-child-${aliasForm}`,
+        (client) =>
+          mockSyncCollectionOptions<Child>({
+            id: `combined-child-${aliasForm}`,
+            getKey: (row) => row.id,
+            initialData: client.requireDependency<Array<Child>>(`children`),
+          }),
+      )
+
+      // Both branches promise the same rows. Renaming only the child alias
+      // must not change which client or lexical source supplies either value.
+      const query =
+        aliasForm === `shadowed`
+          ? new Query()
+              .from({ issue: parentDescriptor })
+              .select(({ issue }) => ({
+                id: issue.id,
+                value: issue.value,
+                children: toArray(
+                  new Query()
+                    .from({ issue: childDescriptor })
+                    .where(({ issue: child }) => eq(child.parentId, issue.id))
+                    .select(({ issue: child }) => ({
+                      id: child.id,
+                      value: child.value,
+                      parentValue: issue.value,
+                    })),
+                ),
+              }))
+          : new Query()
+              .from({ issue: parentDescriptor })
+              .select(({ issue }) => ({
+                id: issue.id,
+                value: issue.value,
+                children: toArray(
+                  new Query()
+                    .from({ child: childDescriptor })
+                    .where(({ child }) => eq(child.parentId, issue.id))
+                    .select(({ child }) => ({
+                      id: child.id,
+                      value: child.value,
+                      parentValue: issue.value,
+                    })),
+                ),
+              }))
+      const first = new DbClient({
+        parents: [{ id: `p`, value: `FIRST PARENT` }],
+        children: [{ id: `c`, parentId: `p`, value: `FIRST CHILD` }],
+      })
+      const second = new DbClient({
+        parents: [{ id: `p`, value: `SECOND PARENT` }],
+        children: [{ id: `c`, parentId: `p`, value: `SECOND CHILD` }],
+      })
+      const model = new Map([
+        [first, { parent: `FIRST PARENT`, child: `FIRST CHILD` }],
+        [second, { parent: `SECOND PARENT`, child: `SECOND CHILD` }],
+      ])
+      const mounted = [first, second].map((client) => ({
+        client,
+        hook: renderHook(
+          () => useLiveQuery({ query: query as QueryBuilder<Context> }),
+          {
+            wrapper: ({ children }: { children: ReactNode }) => (
+              <DbProvider client={client}>{children}</DbProvider>
+            ),
+          },
+        ),
+      }))
+      const check = async (cut: string) => {
+        await waitFor(() => {
+          for (const { client, hook } of mounted) {
+            const values = model.get(client)!
+            const rows = (
+              hook.result.current.data as Array<{
+                id: string
+                value: string
+                children: Array<{
+                  id: string
+                  value: string
+                  parentValue: string
+                }>
+              }>
+            ).map((row) => ({
+              id: row.id,
+              value: row.value,
+              children: row.children.map((child) => ({
+                id: child.id,
+                value: child.value,
+                parentValue: child.parentValue,
+              })),
+            }))
+            expect(rows, `${cut}: public rows`).toEqual([
+              {
+                id: `p`,
+                value: values.parent,
+                children: [
+                  {
+                    id: `c`,
+                    value: values.child,
+                    parentValue: values.parent,
+                  },
+                ],
+              },
+            ])
+          }
+        })
+      }
+
+      try {
+        await check(`initial publication`)
+        const bound = prepareLiveQueryValue(
+          query,
+          first,
+        ) as QueryBuilder<Context>
+        expect(getStableQueryBuilderHash(bound)).toBe(
+          getStableQueryBuilderHash(query),
+        )
+        act(() => {
+          first.collection(childDescriptor).update(`c`, (draft) => {
+            draft.value = `FIRST CHILD 2`
+          })
+        })
+        model.get(first)!.child = `FIRST CHILD 2`
+        await check(`first child write`)
+        act(() => {
+          second.collection(parentDescriptor).update(`p`, (draft) => {
+            draft.value = `SECOND PARENT 2`
+          })
+        })
+        model.get(second)!.parent = `SECOND PARENT 2`
         await check(`second parent write`)
       } finally {
         for (const { hook } of mounted) {

@@ -124,6 +124,7 @@ function change(
 async function runRace(
   transition:
     | `none`
+    | `no-write-term-reservation`
     | `external-row-loss`
     | `schema-reset`
     | `committed-write`
@@ -392,7 +393,7 @@ async function runRace(
               change(`insert`, { id: 2, name: `two` }),
               { headers: { control: `up-to-date` } },
             ]
-          : transition === `none`
+          : transition === `none` || transition === `no-write-term-reservation`
             ? [{ headers: { control: `up-to-date` } }]
             : [
                 change(`update`, { id: 2, name: `new-two` }),
@@ -400,7 +401,27 @@ async function runRace(
               ],
       )
     }
-    if (transition === `external-row-loss`) {
+    if (transition === `no-write-term-reservation`) {
+      const before = await seedAdapter.loadResumeSnapshot(collectionId, {
+        includeRows: false,
+      })
+      expect(before.keySet).toEqual({ status: `consistent` })
+      expect(await seedAdapter.reserveLeadershipTerm(collectionId, 1)).toEqual({
+        latestTerm: 2,
+        latestSeq: 0,
+        latestRowVersion: 1,
+      })
+      const after = await seedAdapter.loadResumeSnapshot(collectionId, {
+        includeRows: false,
+      })
+      expect(after).toMatchObject({
+        latestTerm: 2,
+        latestSeq: 0,
+        latestRowVersion: 1,
+      })
+      expect(after.resetEpoch).toBe(before.resetEpoch)
+      expect(after.keySet).toEqual(before.keySet)
+    } else if (transition === `external-row-loss`) {
       const tableName = createPersistedTableName(collectionId, `c`)
       await driver.run(
         `DELETE FROM "${tableName}" WHERE json_extract(value, '$.id') = ?`,
@@ -438,7 +459,11 @@ async function runRace(
     }
     releaseLaterSnapshot.resolve()
 
-    if (transition === `none` || replacesUncertifiedBaseline) {
+    if (
+      transition === `none` ||
+      transition === `no-write-term-reservation` ||
+      replacesUncertifiedBaseline
+    ) {
       await vi.waitFor(() => expect(collection!.status).toBe(`ready`))
       expect(
         Array.from(collection.values(), ({ id, name }) => ({ id, name })),
@@ -835,9 +860,11 @@ async function observeLegacyUnknownResume(): Promise<LegacyUnknownResumeObservat
  * The reference is the small baseline tuple captured by each case: generation,
  * complete key set, resume state, and expected source delivery. Legal histories
  * vary eager versus on-demand sync, compatible versus unknown legacy evidence,
- * startup reset cause, and row loss, schema reset, or committed write between
- * the initial metadata read and certification. No production classifier or SQL
- * helper computes the expected public and durable rows.
+ * startup reset cause, and no-write term reservation, row loss, schema reset,
+ * or committed write between the initial metadata read and certification. A
+ * reserved term with sequence zero leaves the row version, reset epoch, and
+ * source cursor unchanged. No production classifier or SQL helper computes the
+ * expected public and durable rows.
  *
  * The production driver uses `SQLiteCorePersistenceAdapter`, the persisted
  * Collection wrapper, and `electricCollectionOptions`. It holds the adapter's
@@ -907,6 +934,10 @@ describe(`Electric resume snapshot races`, () => {
 
   it(`conservatively rejects a committed write between startup snapshots`, async () => {
     await runRace(`committed-write`)
+  })
+
+  it(`resumes from a certified on-demand baseline after a no-write term reservation`, async () => {
+    await runRace(`no-write-term-reservation`, `on-demand`)
   })
 
   it.each([

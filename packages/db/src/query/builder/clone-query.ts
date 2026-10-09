@@ -88,7 +88,7 @@ function cloneSourceForPlacement(
   context: CloneContext,
 ): CollectionSourceRef | QueryRef {
   if (source.type === `collectionRef`) {
-    return new CollectionRef(source.collection, source.alias)
+    return new CollectionRef(source.collection, source.alias, source.bindingId)
   }
 
   if (source.type === `descriptorRef`) {
@@ -96,11 +96,16 @@ function cloneSourceForPlacement(
       ? new CollectionRef(
           context.resolveDescriptor(source.descriptor),
           source.alias,
+          source.bindingId,
         )
-      : new DescriptorRef(source.descriptor, source.alias)
+      : new DescriptorRef(source.descriptor, source.alias, source.bindingId)
   }
 
-  return new QueryRef(cloneQuery(source.query, context), source.alias)
+  return new QueryRef(
+    cloneQuery(source.query, context),
+    source.alias,
+    source.bindingId,
+  )
 }
 
 function cloneSelectForPlacement(

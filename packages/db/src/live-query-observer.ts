@@ -5,6 +5,7 @@ import {
   isSingleResultCollection,
 } from './live-query-adapter.js'
 import { getBuilderFromConfig } from './query/live/collection-registry.js'
+import { getPooledLiveQuerySource } from './query/pooled-live-query.js'
 import { getPersistedReadinessSource } from './persisted-readiness.js'
 import type { Collection } from './collection/index.js'
 import type { DbClient, DehydratedLiveQueryResult } from './client.js'
@@ -952,14 +953,28 @@ class LiveQueryObserverImpl<
   preload(): Promise<void> {
     if (this.preloadPromise) return this.preloadPromise
 
-    const sources = this.collection?.config
-      ? getBuilderFromConfig(this.collection.config)?.getSourceCollections()
-      : undefined
+    const config = this.collection?.config
+    const pooledSource =
+      this.collection && getPooledLiveQuerySource(this.collection)
+    const sources = config
+      ? getBuilderFromConfig(config)?.getSourceCollections()
+      : pooledSource
+        ? [pooledSource]
+        : undefined
     if (this.client && this.queryHash) {
       const query = this.client._getLiveQuery(this.queryHash)
       if (query?.status === `pending` || query?.status === `success`) {
         if (sources)
           this.client._assertLiveQuerySources(this.queryHash, sources)
+        if (pooledSource) {
+          try {
+            return Promise.all([query.promise, this.collection.preload()]).then(
+              () => {},
+            )
+          } catch (error) {
+            return Promise.reject(error)
+          }
+        }
         // The client stream answers this preload, but it is still a request
         // for this Collection's data, so its deferred acquisition may resume.
         try {

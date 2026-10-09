@@ -882,6 +882,14 @@
     ]
   },
   "236": {
+    "file": "query/builder/index.ts",
+    "template": "Includes subquery for \"${fieldName}\" reuses an ancestor's source declaration. Use new Query().from({ alias: collection }) in the child instead of passing the ancestor builder to from().",
+    "literals": [
+      "Includes subquery for \"",
+      "\" reuses an ancestor's source declaration. Use new Query().from({ alias: collection }) in the child instead of passing the ancestor builder to from()."
+    ]
+  },
+  "237": {
     "file": "query/builder/query-ir.ts",
     "template": "Query must resolve to a QueryBuilder; received ${received}.",
     "literals": ["Query must resolve to a QueryBuilder; received "]

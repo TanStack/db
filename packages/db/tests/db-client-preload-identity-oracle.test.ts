@@ -2,8 +2,9 @@
  * # A DbClient preload cannot substitute another source Collection
  *
  * A query hash names a reusable result only while its source Collection
- * objects remain the same at each source position in one DbClient. A descriptor query and its concrete
- * form intentionally have the same hash when they name the same source object.
+ * objects remain the same at each source position in one DbClient. A descriptor
+ * query and its concrete form intentionally have the same hash when they name
+ * the same source object.
  * If a second plan with that hash names a different source object, including
  * one with the same Collection ID, preload rejects the ambiguous request.
  * Returning the first plan's rows would report data from the wrong source.
@@ -13,13 +14,18 @@
  * asking for the other source rejects and leaves the first result intact.
  * Swapping two same-ID source objects between query positions also rejects:
  * a set of source objects cannot tell which row belongs to each position.
+ * A pooled view has one source even though it has no query Collection config.
+ * Its observer may reuse an existing stream only for that same source, and its
+ * preload must finish the view's own source demand.
  * This model uses source-object identity, not the query cache implementation.
  *
  * The finite history crosses concrete then descriptor, descriptor then
- * concrete, and two concrete source objects, plus a same-object control.
+ * concrete, and two concrete source objects, plus a same-object control. The
+ * pooled observer path crosses same and different local source objects.
  * Each query is built through the public Query API, and every successful
  * preload is observed through public DbClient.dehydrate(). The comparison
- * runs after the first preload and after the second attempted preload. This
+ * runs after the first preload and after the second attempted preload. The
+ * pooled path also checks its observer snapshot after same-source reuse. This
  * does not define how a hydrated stream from another process matches a local
  * source, or how different explicit query keys share one hash.
  */
@@ -29,7 +35,11 @@ import {
   Query,
   collectionOptions,
   createCollection,
+  createLiveQueryObserver,
+  eq,
+  getLiveQueryHash,
   getStableQueryBuilderHash,
+  resolveLiveQueryValue,
 } from '../src'
 import type { SyncConfig } from '../src/types'
 
@@ -183,4 +193,51 @@ describe(`DbClient preload source identity`, () => {
       await right.cleanup()
     }
   })
+
+  it.each([`same`, `different`] as const)(
+    `%s source: an observer preload respects a pooled view's source identity`,
+    async (sourceRelation) => {
+      const id = `preload-source-identity-pooled-observer`
+      const first = createCollection(sourceConfig(id, `first`))
+      const second = createCollection(sourceConfig(id, `second`))
+      const queryFor = (source: typeof first) =>
+        new Query()
+          .from({ item: source })
+          .where(({ item }) => eq(item.id, `one`))
+      const firstQuery = queryFor(first)
+      const candidateQuery = queryFor(
+        sourceRelation === `same` ? first : second,
+      )
+      const client = new DbClient()
+      const queryHash = getLiveQueryHash({ query: firstQuery })
+      let observer: ReturnType<typeof createLiveQueryObserver> | undefined
+
+      try {
+        expect(getLiveQueryHash({ query: candidateQuery })).toBe(queryHash)
+        await client.preloadLiveQuery({ query: firstQuery })
+        expect(rows(client)?.[0]?.value).toBe(`first`)
+
+        const view = resolveLiveQueryValue(candidateQuery)
+        expect(view).not.toBeNull()
+        expect(view?.config, `the receiving view is pooled`).toBeUndefined()
+        observer = createLiveQueryObserver(view, { client, queryHash })
+        if (sourceRelation === `different`) {
+          await expect(
+            Promise.resolve().then(() => observer!.preload()),
+          ).rejects.toThrow(/different source Collections/)
+        } else {
+          await expect(observer.preload()).resolves.toBeUndefined()
+          expect(
+            (observer.getSnapshot().data as Array<Row>).map((row) => row.value),
+          ).toEqual([`first`])
+        }
+        expect(rows(client)?.[0]?.value).toBe(`first`)
+      } finally {
+        observer?.dispose()
+        await client.cleanup()
+        await first.cleanup()
+        await second.cleanup()
+      }
+    },
+  )
 })
