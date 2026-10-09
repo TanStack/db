@@ -1,5 +1,4 @@
 import { createTransaction, safeRandomUUID } from '@tanstack/db'
-import { NonRetriableError } from '../types'
 import type { PendingMutation, Transaction } from '@tanstack/db'
 import type {
   CreateOfflineTransactionOptions,
@@ -35,9 +34,11 @@ export class OfflineTransaction {
   mutate(callback: () => void): Transaction {
     // Repeated calls add to the same transaction: one offline transaction is
     // one transaction, and its id is unique among live transactions.
+    // With autoCommit, the transaction commits after this callback and
+    // reports a failure through isPersisted.
     this.transaction ??= createTransaction({
       id: this.offlineId,
-      autoCommit: false,
+      autoCommit: this.autoCommit,
       mutationFn: async () => {
         // This is the blocking mutationFn that waits for the executor
         // First persist the transaction to the outbox
@@ -84,14 +85,6 @@ export class OfflineTransaction {
       callback()
     })
 
-    if (this.autoCommit) {
-      // Auto-commit for direct OfflineTransaction usage
-      // The caller observes the failure through isPersisted.
-      this.commit().catch((error) => {
-        console.error(`Auto-commit failed:`, error)
-      })
-    }
-
     return this.transaction
   }
 
@@ -100,18 +93,10 @@ export class OfflineTransaction {
       throw new Error(`No mutations to commit. Call mutate() first.`)
     }
 
-    try {
-      // Commit the TanStack DB transaction
-      // This will trigger the mutationFn which handles persistence and waiting
-      await this.transaction.commit()
-      return this.transaction
-    } catch (error) {
-      // Only rollback for NonRetriableError - other errors should allow retry
-      if (error instanceof NonRetriableError) {
-        this.transaction.rollback()
-      }
-      throw error
-    }
+    // The mutationFn persists the transaction and waits for the executor. A
+    // failed commit has already rolled the transaction back.
+    await this.transaction.commit()
+    return this.transaction
   }
 
   rollback(): void {
