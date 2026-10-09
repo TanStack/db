@@ -626,6 +626,55 @@ describe(`Operators`, () => {
 
     // These are readable replay witnesses. The generated groupBy law lives in
     // incrementalization-law-oracle.property.test.ts.
+    // Contract for callers: groupBy consolidates values by their hash, and the
+    // hash treats -0 as 0 and equal Dates as one value. So after a delete,
+    // min and max return a value hash-equal to a remaining member, but not
+    // necessarily the remaining instance: here they return the deleted -0 and
+    // the deleted Date. A caller that needs the exact remaining value, such as
+    // the query compiler's group representatives, must keep its own exact
+    // inputs. Distinct values are not affected.
+    test(`min and max after a delete return a hash-equal value, not a particular instance`, () => {
+      const extremes = (first: unknown, second: unknown) => {
+        const graph = new D2()
+        const input = graph.newInput<{ g: string; id: number; v: any }>()
+        let latest: { lo: unknown; hi: unknown } | undefined
+        input.pipe(
+          groupBy((row) => ({ g: row.g }), {
+            lo: min((row) => row.v),
+            hi: max((row) => row.v),
+          }),
+          output((message) => {
+            for (const [[, row], multiplicity] of message.getInner())
+              if (multiplicity > 0) latest = row as typeof latest
+          }),
+        )
+        graph.finalize()
+        const deleted = { g: `x`, id: 1, v: first }
+        input.sendData(
+          new MultiSet([
+            [deleted, 1],
+            [{ g: `x`, id: 2, v: second }, 1],
+          ]),
+        )
+        graph.run()
+        input.sendData(new MultiSet([[deleted, -1]]))
+        graph.run()
+        return latest!
+      }
+
+      const zero = extremes(-0, 0)
+      expect(serializeValue(zero.lo)).toBe(serializeValue(0))
+      expect(serializeValue(zero.hi)).toBe(serializeValue(0))
+
+      const kept = new Date(5)
+      const date = extremes(new Date(5), kept)
+      expect((date.lo as Date).getTime()).toBe(kept.getTime())
+      expect((date.hi as Date).getTime()).toBe(kept.getTime())
+
+      const distinct = extremes(1, 2)
+      expect(distinct).toMatchObject({ lo: 2, hi: 2 })
+    })
+
     test(`min and max reduce keep 0, 0n, and empty string as extremes`, () => {
       const minNum = min<number>()
       const maxNum = max<number>()
