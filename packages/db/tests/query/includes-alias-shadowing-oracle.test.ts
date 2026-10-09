@@ -420,7 +420,7 @@ describe(`captured alias scope oracle`, () => {
                       .select(({ inner }) => ({ id: inner.id })),
                   ),
           })),
-        ).toThrow(/new Query\(\)/)
+        ).toThrow(/new Query\(\).*instead of passing the ancestor builder/)
       } finally {
         await source.collection.cleanup()
       }
@@ -1651,5 +1651,597 @@ describe(`lazy join demand across nested alias scopes`, () => {
           () => entry.posts.collection.cleanup(),
         ]),
     )
+  })
+})
+
+/**
+ * # Lexical source bindings survive recursive joins and whole-row selection
+ *
+ * ARCHITECTURE.md §Identity and law 1 say that a nested source may shadow an
+ * ancestor or sibling name. Each captured reference still reads its declared
+ * source. The independent model below joins plain rows by role and applies
+ * ordinary object spread order. Its names do not affect the expected rows.
+ *
+ * This finite grammar crosses shadowed and renamed aliases, eager and
+ * on-demand joined sources, and initial and post-write public snapshots. It
+ * reaches QueryRef sources, joined include children, two spreads constructed
+ * by different callbacks, a grandchild whole-row capture, and direct alias
+ * selection. It does not cover arbitrary join trees or provider schedules.
+ */
+describe(`lexical bindings through recursive joins and selections`, () => {
+  test.each([`eager`, `onDemand`] as const)(
+    `a self-join with a shadowed FROM alias returns the same rows with %s loading`,
+    async (mode) => {
+      const people = createScopedSource(
+        `shadowed-self-join`,
+        [
+          { id: 1, managerId: 0, name: `manager` },
+          { id: 2, managerId: 1, name: `A` },
+          { id: 3, managerId: 1, name: `B` },
+          { id: 4, managerId: 1, name: `C` },
+        ],
+        mode,
+      )
+      people.collection.createIndex((person) => person.managerId, {
+        indexType: BasicIndex,
+      })
+      const build = (innerAlias: `user` | `u`) => {
+        const managers = new Query()
+          .from({ [innerAlias]: people.collection })
+          .where((context: Context) =>
+            eq((context[innerAlias] as { id: number }).id, 1),
+          )
+          .select((context: Context) => ({
+            id: (context[innerAlias] as { id: number }).id,
+          }))
+        return createLiveQueryCollection({
+          query: new Query()
+            .from({ manager: managers })
+            .leftJoin({ user: people.collection }, ({ manager, user }) =>
+              eq(manager.id, user.managerId),
+            )
+            .where(({ user }) => eq(user.managerId, 1))
+            .select(({ manager, user }) => ({
+              managerId: manager.id,
+              userId: user.id,
+            })),
+        })
+      }
+      const shadowed = build(`user`)
+      const renamed = build(`u`)
+      const check = (live: typeof shadowed) =>
+        expect(
+          live.toArray
+            .map(({ managerId, userId }) => ({ managerId, userId }))
+            .sort((a, b) => (a.userId ?? Infinity) - (b.userId ?? Infinity)),
+        ).toEqual([
+          { managerId: 1, userId: 2 },
+          { managerId: 1, userId: 3 },
+          { managerId: 1, userId: 4 },
+        ])
+      await withHistoryCleanup(
+        async () => {
+          await shadowed.preload()
+          check(shadowed)
+          await renamed.preload()
+          check(shadowed)
+          check(renamed)
+        },
+        () => [
+          () => shadowed.cleanup(),
+          () => renamed.cleanup(),
+          () => people.collection.cleanup(),
+        ],
+      )
+    },
+  )
+
+  test.each([`eager`, `onDemand`] as const)(
+    `a shadowed FROM subquery preserves joined rows with %s loading`,
+    async (mode) => {
+      type Manager = { id: number; name: string }
+      type User = { id: number; managerId: number; name: string }
+      const managerRows: Array<Manager> = [
+        { id: 1, name: `one` },
+        { id: 2, name: `two` },
+      ]
+      const userRows: Array<User> = [
+        { id: 10, managerId: 1, name: `A` },
+        { id: 11, managerId: 1, name: `B` },
+        { id: 12, managerId: 2, name: `C` },
+      ]
+      const managers = createScopedSource(
+        `recursive-managers`,
+        managerRows,
+        `eager`,
+      )
+      const users = createScopedSource(`recursive-users`, userRows, mode)
+      const modelUsers = new Map(userRows.map((row) => [row.id, row]))
+      users.collection.createIndex((user) => user.managerId, {
+        indexType: BasicIndex,
+      })
+
+      const build = (innerAlias: `user` | `member`) => {
+        const inner = new Query()
+          .from({ [innerAlias]: managers.collection })
+          .select((context: Context) => ({
+            id: (context[innerAlias] as Manager).id,
+          }))
+        return createLiveQueryCollection({
+          query: new Query()
+            .from({ manager: inner })
+            .leftJoin({ user: users.collection }, ({ manager, user }) =>
+              eq(manager.id, user.managerId),
+            )
+            .select(({ manager, user }) => ({
+              managerId: manager.id,
+              userId: user.id,
+              userName: user.name,
+            })),
+        })
+      }
+      const shadowed = build(`user`)
+      const renamed = build(`member`)
+
+      // Model: each manager joins its matching users, regardless of spelling.
+      type ExpectedRow = {
+        managerId: number
+        userId: number | undefined
+        userName: string | undefined
+      }
+      const expected = (): Array<ExpectedRow> =>
+        managerRows
+          .flatMap((manager): Array<ExpectedRow> => {
+            const matching = [...modelUsers.values()].filter(
+              (user) => user.managerId === manager.id,
+            )
+            return matching.length > 0
+              ? matching.map((user) => ({
+                  managerId: manager.id,
+                  userId: user.id,
+                  userName: user.name,
+                }))
+              : [
+                  {
+                    managerId: manager.id,
+                    userId: undefined,
+                    userName: undefined,
+                  },
+                ]
+          })
+          .sort((a, b) => (a.userId ?? Infinity) - (b.userId ?? Infinity))
+      const check = (checkpoint: string) => {
+        for (const live of [shadowed, renamed]) {
+          expect(
+            live.toArray
+              .map(({ managerId, userId, userName }) => ({
+                managerId,
+                userId,
+                userName,
+              }))
+              .sort((a, b) => (a.userId ?? Infinity) - (b.userId ?? Infinity)),
+            checkpoint,
+          ).toEqual(expected())
+        }
+      }
+
+      await withHistoryCleanup(
+        async () => {
+          await shadowed.preload()
+          // On-demand sources are shared; check shadowing before the renamed
+          // control can supply rows that conceal a missed source request.
+          expect(
+            shadowed.toArray
+              .map(({ managerId, userId, userName }) => ({
+                managerId,
+                userId,
+                userName,
+              }))
+              .sort((a, b) => (a.userId ?? Infinity) - (b.userId ?? Infinity)),
+          ).toEqual(expected())
+          await renamed.preload()
+          check(`after preload`)
+          const changed = { id: 12, managerId: 1, name: `C2` }
+          modelUsers.set(changed.id, changed)
+          users.put(changed)
+          await flushPromises()
+          check(`after user moves between managers`)
+        },
+        () => [
+          () => shadowed.cleanup(),
+          () => renamed.cleanup(),
+          () => managers.collection.cleanup(),
+          () => users.collection.cleanup(),
+        ],
+      )
+    },
+  )
+
+  test.each([`issue`, `comment`] as const)(
+    `joined child keeps its local source when named %s`,
+    async (childAlias) => {
+      const parents = createScopedSource(
+        `join-context-parent`,
+        [{ id: 1 }],
+        `eager`,
+      )
+      const children = createScopedSource(
+        `join-context-child`,
+        [{ id: 10, parentId: 1, anchorId: 7, title: `CHILD` }],
+        `eager`,
+      )
+      const anchors = createScopedSource(
+        `join-context-anchor`,
+        [{ id: 7, parentId: 1 }],
+        `eager`,
+      )
+      const live = createLiveQueryCollection({
+        query: new Query()
+          .from({ issue: parents.collection })
+          .select(({ issue: parent }) => {
+            const anchorQuery = new Query()
+              .from({ a: anchors.collection })
+              .where(({ a }) => eq(a.parentId, parent.id))
+              .select(({ a }) => ({ id: a.id }))
+            return {
+              id: parent.id,
+              children: toArray(
+                new Query()
+                  .from({ [childAlias]: children.collection })
+                  .innerJoin({ anchor: anchorQuery }, (context: Context) =>
+                    eq(
+                      (context[childAlias] as { anchorId: number }).anchorId,
+                      (context.anchor as { id: number }).id,
+                    ),
+                  )
+                  .where((context: Context) =>
+                    eq(
+                      (context[childAlias] as { parentId: number }).parentId,
+                      parent.id,
+                    ),
+                  )
+                  .select((context: Context) => ({
+                    title: (context[childAlias] as { title: string }).title,
+                    anchorId: (context.anchor as { id: number }).id,
+                  })),
+              ),
+            }
+          }),
+      })
+      await withHistoryCleanup(
+        async () => {
+          await live.preload()
+          // Model: child.title and anchor.id come from separate source roles.
+          const check = (title: string) =>
+            expect(
+              live.toArray.map(({ id, children: rows }) => ({
+                id,
+                children: rows.map(({ title: value, anchorId }) => ({
+                  title: value,
+                  anchorId,
+                })),
+              })),
+            ).toEqual([{ id: 1, children: [{ title, anchorId: 7 }] }])
+          check(`CHILD`)
+          children.put({ id: 10, parentId: 1, anchorId: 7, title: `UPDATED` })
+          await flushPromises()
+          check(`UPDATED`)
+        },
+        () => [
+          () => live.cleanup(),
+          () => parents.collection.cleanup(),
+          () => children.collection.cleanup(),
+          () => anchors.collection.cleanup(),
+        ],
+      )
+    },
+  )
+
+  test.each([`issue`, `anchor`] as const)(
+    `a missing joined source named %s does not read its parent alias`,
+    async (joinAlias) => {
+      const parents = createScopedSource(
+        `missing-join-parent`,
+        [{ id: 1 }],
+        `eager`,
+      )
+      const comments = createScopedSource(
+        `missing-join-comment`,
+        [{ id: 10, parentId: 1, anchorId: 7 }],
+        `eager`,
+      )
+      const anchors = createScopedSource<{ id: number }>(
+        `missing-join-anchor`,
+        [],
+        `eager`,
+      )
+      const live = createLiveQueryCollection({
+        query: new Query()
+          .from({ issue: parents.collection })
+          .select(({ issue: parent }) => ({
+            id: parent.id,
+            children: toArray(
+              new Query()
+                .from({ comment: comments.collection })
+                .leftJoin(
+                  { [joinAlias]: anchors.collection },
+                  (context: Context) =>
+                    eq(
+                      (context.comment as { anchorId: number }).anchorId,
+                      (context[joinAlias] as { id: number }).id,
+                    ),
+                )
+                .where((context: Context) =>
+                  eq(
+                    (context.comment as { parentId: number }).parentId,
+                    parent.id,
+                  ),
+                )
+                .select((context: Context) => ({
+                  childId: (context.comment as { id: number }).id,
+                  parentId: parent.id,
+                  joinedId: (context[joinAlias] as { id: number }).id,
+                })),
+            ),
+          })),
+      })
+      await withHistoryCleanup(
+        async () => {
+          await live.preload()
+          // Model: a left join without an anchor has no joined ID, even when
+          // the missing alias is also the parent's lexical name.
+          const check = (joinedId: number | undefined) =>
+            expect(
+              live.toArray.map(({ children }) =>
+                children.map((child) => ({
+                  childId: child.childId,
+                  parentId: child.parentId,
+                  joinedId: child.joinedId,
+                })),
+              ),
+            ).toEqual([[{ childId: 10, parentId: 1, joinedId }]])
+          check(undefined)
+          anchors.put({ id: 7 })
+          await flushPromises()
+          check(7)
+          anchors.remove(7)
+          await flushPromises()
+          check(undefined)
+        },
+        () => [
+          () => live.cleanup(),
+          () => parents.collection.cleanup(),
+          () => comments.collection.cleanup(),
+          () => anchors.collection.cleanup(),
+        ],
+      )
+    },
+  )
+
+  test.each([`issue`, `comment`] as const)(
+    `captured and local spreads keep both sources when named %s`,
+    async (childAlias) => {
+      const parents = createScopedSource(
+        `spread-parent`,
+        [{ id: 1, parentName: `PARENT` }],
+        `eager`,
+      )
+      const children = createScopedSource(
+        `spread-child`,
+        [{ id: 10, parentId: 1, childName: `CHILD` }],
+        `eager`,
+      )
+      const live = createLiveQueryCollection({
+        query: new Query()
+          .from({ issue: parents.collection })
+          .select(({ issue: parent }) => ({
+            id: parent.id,
+            children: toArray(
+              new Query()
+                .from({ [childAlias]: children.collection })
+                .where((context: Context) =>
+                  eq(
+                    (context[childAlias] as { parentId: number }).parentId,
+                    parent.id,
+                  ),
+                )
+                .select((context: Context) => ({
+                  ...parent,
+                  ...(context[childAlias] as object),
+                })),
+            ),
+          })),
+      })
+      await withHistoryCleanup(
+        async () => {
+          await live.preload()
+          // Model: the later child spread replaces shared fields only.
+          const check = (parentName: string, childName: string) =>
+            expect(
+              live.toArray.map(({ children: rows }) =>
+                rows.map((row) => {
+                  const child = row as typeof row & { childName?: string }
+                  return {
+                    id: child.id,
+                    parentName: child.parentName,
+                    childName: child.childName,
+                  }
+                }),
+              ),
+            ).toEqual([[{ id: 10, parentName, childName }]])
+          check(`PARENT`, `CHILD`)
+          parents.put({ id: 1, parentName: `PARENT2` })
+          await flushPromises()
+          check(`PARENT2`, `CHILD`)
+          children.put({ id: 10, parentId: 1, childName: `CHILD2` })
+          await flushPromises()
+          check(`PARENT2`, `CHILD2`)
+        },
+        () => [
+          () => live.cleanup(),
+          () => parents.collection.cleanup(),
+          () => children.collection.cleanup(),
+        ],
+      )
+    },
+  )
+
+  test(`a grandchild whole-row capture retains its grandparent fields`, async () => {
+    const roots = createScopedSource(
+      `grand-spread-root`,
+      [{ id: 1, rootName: `ROOT` }],
+      `eager`,
+    )
+    const middle = createScopedSource(
+      `grand-spread-middle`,
+      [{ id: 10, rootId: 1 }],
+      `eager`,
+    )
+    const leaves = createScopedSource(
+      `grand-spread-leaf`,
+      [{ id: 100, middleId: 10, leafName: `LEAF` }],
+      `eager`,
+    )
+    const live = createLiveQueryCollection({
+      query: new Query()
+        .from({ root: roots.collection })
+        .select(({ root: grandparent }) => ({
+          id: grandparent.id,
+          middle: toArray(
+            new Query()
+              .from({ m: middle.collection })
+              .where(({ m }) => eq(m.rootId, grandparent.id))
+              .select(({ m: parent }) => ({
+                id: parent.id,
+                leaves: toArray(
+                  new Query()
+                    .from({ leaf: leaves.collection })
+                    .where(({ leaf }) => eq(leaf.middleId, parent.id))
+                    .select(({ leaf }) => ({
+                      ...grandparent,
+                      leafName: leaf.leafName,
+                    })),
+                ),
+              })),
+          ),
+        })),
+    })
+    await withHistoryCleanup(
+      async () => {
+        await live.preload()
+        // Model: the leaf belongs to middle 10, and its captured root is 1.
+        const check = (rootName: string) =>
+          expect(
+            live.toArray.map(({ middle: rows }) =>
+              rows.map(({ leaves: nested }) =>
+                nested.map(({ rootName: value, leafName }) => ({
+                  rootName: value,
+                  leafName,
+                })),
+              ),
+            ),
+          ).toEqual([[[{ rootName, leafName: `LEAF` }]]])
+        check(`ROOT`)
+        roots.put({ id: 1, rootName: `ROOT2` })
+        await flushPromises()
+        check(`ROOT2`)
+      },
+      () => [
+        () => live.cleanup(),
+        () => roots.collection.cleanup(),
+        () => middle.collection.cleanup(),
+        () => leaves.collection.cleanup(),
+      ],
+    )
+  })
+
+  test.each([`issue`, `comment`] as const)(
+    `selecting a captured alias directly keeps its binding with child %s`,
+    async (childAlias) => {
+      const parents = createScopedSource(
+        `direct-parent`,
+        [{ id: 1, name: `PARENT` }],
+        `eager`,
+      )
+      const children = createScopedSource(
+        `direct-child`,
+        [{ id: 10, parentId: 1, name: `CHILD` }],
+        `eager`,
+      )
+      const live = createLiveQueryCollection({
+        query: new Query()
+          .from({ issue: parents.collection })
+          .select(({ issue: parent }) => ({
+            id: parent.id,
+            copies: toArray(
+              new Query()
+                .from({ [childAlias]: children.collection })
+                .where((context: Context) =>
+                  eq(
+                    (context[childAlias] as { parentId: number }).parentId,
+                    parent.id,
+                  ),
+                )
+                .select(() => parent),
+            ),
+          })),
+      })
+      await withHistoryCleanup(
+        async () => {
+          await live.preload()
+          const check = (name: string) =>
+            expect(
+              live.toArray.map(({ copies }) =>
+                copies.map(({ id, name: value }) => ({ id, name: value })),
+              ),
+            ).toEqual([[{ id: 1, name }]])
+          check(`PARENT`)
+          parents.put({ id: 1, name: `PARENT2` })
+          await flushPromises()
+          check(`PARENT2`)
+          children.put({ id: 10, parentId: 1, name: `CHILD2` })
+          await flushPromises()
+          check(`PARENT2`)
+        },
+        () => [
+          () => live.cleanup(),
+          () => parents.collection.cleanup(),
+          () => children.collection.cleanup(),
+        ],
+      )
+    },
+  )
+
+  test(`repeated captured and local spreads have stable query identity`, async () => {
+    const parents = createScopedSource(
+      `identity-parent`,
+      [{ id: 1, name: `P` }],
+      `eager`,
+    )
+    const children = createScopedSource(
+      `identity-child`,
+      [{ id: 10, parentId: 1 }],
+      `eager`,
+    )
+    const build = () =>
+      new Query()
+        .from({ issue: parents.collection })
+        .select(({ issue: parent }) => ({
+          id: parent.id,
+          children: toArray(
+            new Query()
+              .from({ issue: children.collection })
+              .where(({ issue: child }) => eq(child.parentId, parent.id))
+              .select(({ issue: child }) => ({ ...parent, ...child })),
+          ),
+        }))
+    try {
+      expect(getQueryIdentity(getQueryIR(build()))).toBe(
+        getQueryIdentity(getQueryIR(build())),
+      )
+    } finally {
+      await parents.collection.cleanup()
+      await children.collection.cleanup()
+    }
   })
 })

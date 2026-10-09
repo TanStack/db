@@ -8,6 +8,11 @@ import type { PublishedVirtualRowProps } from '../../virtual-props.js'
 
 export { isRefProxy } from './ref-proxy-identity.js'
 
+// A captured proxy and a local proxy can be spread into the same select
+// object. Their temporary keys must stay distinct until buildNestedSelect
+// gives them deterministic per-object positions.
+let nextSpreadSentinelId = 0
+
 export interface RefProxy<T = any> {
   /** @internal */
   readonly __refProxy: true
@@ -145,7 +150,6 @@ export function createRefProxy<T extends Record<string, any>>(
 ): RefProxy<T> & T {
   // Each path has one proxy, cached by its parent under the property name.
   const aliasProxies = new Map<string, any>()
-  let accessId = 0 // Monotonic counter to record evaluation order
 
   function createProxy(path: Array<string>): any {
     let children: Map<string, any> | undefined
@@ -185,7 +189,7 @@ export function createRefProxy<T extends Record<string, any>>(
       },
 
       ownKeys(target) {
-        const id = ++accessId
+        const id = ++nextSpreadSentinelId
         const sentinelKey = `__SPREAD_SENTINEL__${path.join(`.`)}__${id}`
         if (!Object.prototype.hasOwnProperty.call(target, sentinelKey)) {
           Object.defineProperty(target, sentinelKey, {

@@ -512,7 +512,7 @@ function processJoin(
 
   return mainPipeline.pipe(
     joinOperator(joinedPipeline, joinClause.type as JoinType),
-    processJoinResults,
+    processJoinResults(joinedSource),
   )
 }
 
@@ -762,42 +762,46 @@ function getFirstFromAlias(query: QueryIR): string | undefined {
 }
 
 function processJoinResults(
+  joinedSource: string,
+): (
   pipeline: IStreamBuilder<
     [key: string, [JoinInputValue | undefined, JoinInputValue | undefined]]
   >,
-): NamespacedAndKeyedStream {
-  return pipeline.pipe(
-    map((result) => {
-      const [_key, [main, joined]] = result
-      const mainKey = main?.[0]
-      const mainNamespacedRow = main?.[1]
-      const joinedKey = joined?.[0]
-      const joinedNamespacedRow = joined?.[1]
+) => NamespacedAndKeyedStream {
+  return (pipeline) =>
+    pipeline.pipe(
+      map((result) => {
+        const [_key, [main, joined]] = result
+        const mainKey = main?.[0]
+        const mainNamespacedRow = main?.[1]
+        const joinedKey = joined?.[0]
+        const joinedNamespacedRow = joined?.[1]
 
-      // Merge the namespaced rows
-      const mergedNamespacedRow: NamespacedRow = {}
+        // A joined row carries inherited parent aliases. Keep local main-row
+        // aliases, then add only the actual joined source from its own row.
+        const mergedNamespacedRow: NamespacedRow = Object.assign(
+          {},
+          joinedNamespacedRow,
+          mainNamespacedRow,
+        )
+        if (joinedNamespacedRow) {
+          mergedNamespacedRow[joinedSource] = joinedNamespacedRow[joinedSource]!
+        } else {
+          // A missing joined side cannot inherit a same-named parent source.
+          delete mergedNamespacedRow[joinedSource]
+        }
 
-      // Add main row data if it exists
-      if (mainNamespacedRow) {
-        Object.assign(mergedNamespacedRow, mainNamespacedRow)
-      }
+        // Combine the main and joined keys without ambiguity: keys may contain
+        // delimiters, numbers and strings may print alike, and a missing outer
+        // side encodes as null, which no source key can be.
+        const resultKey = JSON.stringify(
+          [mainKey ?? null, joinedKey ?? null],
+          encodeNonFiniteKey,
+        )
 
-      // Add joined row data if it exists
-      if (joinedNamespacedRow) {
-        Object.assign(mergedNamespacedRow, joinedNamespacedRow)
-      }
-
-      // Combine the main and joined keys without ambiguity: keys may contain
-      // delimiters, numbers and strings may print alike, and a missing outer
-      // side encodes as null, which no source key can be.
-      const resultKey = JSON.stringify(
-        [mainKey ?? null, joinedKey ?? null],
-        encodeNonFiniteKey,
-      )
-
-      return [resultKey, mergedNamespacedRow] as [string, NamespacedRow]
-    }),
-  )
+        return [resultKey, mergedNamespacedRow] as [string, NamespacedRow]
+      }),
+    )
 }
 
 /**

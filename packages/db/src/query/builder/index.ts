@@ -663,7 +663,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     // Leaf refs like `row.name` must remain scalar selections.
     if (isRefProxy(selectObject) && selectObject.__path.length === 1) {
       const sentinelKey = `__SPREAD_SENTINEL__${selectObject.__path[0]}__0`
-      selectObject = { [sentinelKey]: true }
+      selectObject = { [sentinelKey]: toExpression(selectObject) }
     }
 
     const select = buildNestedSelect(selectObject, {
@@ -1147,10 +1147,14 @@ function buildNestedSelect(
   }
   if (!isNestedSelectRecord(obj)) return toExpr(obj)
   const out: Record<string, any> = {}
+  let spreadIndex = 0
   for (const [k, v] of Object.entries(obj)) {
     if (typeof k === `string` && k.startsWith(`__SPREAD_SENTINEL__`)) {
-      // Preserve sentinel key and its value (value is unimportant at compile time)
-      out[k] = v
+      // The proxy's process-wide key prevents JavaScript object spread from
+      // dropping a captured ref before we get here. Re-key by local order so
+      // equivalent query plans still have the same stable identity.
+      const base = k.slice(0, k.lastIndexOf(`__`))
+      out[`${base}__${++spreadIndex}`] = v
       continue
     }
     if (v instanceof BaseQueryBuilder) {
@@ -1331,7 +1335,12 @@ function collectExternalRefsFromQuery(query: QueryIR): Array<PropRef> {
 
   const seen = new Set<string>()
   return refs.filter((ref) => {
-    const alias = ref.path.length > 1 ? ref.path[0] : undefined
+    // A single-segment ref with a binding ID is a whole source, including a
+    // captured ancestor spread. An unbound single segment is ambiguous here.
+    const alias =
+      ref.path.length > 1 || ref.bindingId !== undefined
+        ? ref.path[0]
+        : undefined
     const path = JSON.stringify([ref.bindingId, ref.path])
     if (
       alias == null ||
@@ -1496,7 +1505,7 @@ function buildIncludesSubquery(
   if (reusesAncestorBinding(sourceQuery, parentScope.bindingIds)) {
     throw new Error(
       devBuild() && process.env.NODE_ENV !== `production`
-        ? `Includes subquery for "${fieldName}" reuses a source binding from an ancestor query. Start the child with new Query().from(...).`
+        ? `Includes subquery for "${fieldName}" reuses an ancestor's source declaration. Use new Query().from({ alias: collection }) in the child instead of passing the ancestor builder to from().`
         : codedMessage(233, { fieldName }),
     )
   }

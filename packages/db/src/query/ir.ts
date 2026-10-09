@@ -376,15 +376,22 @@ export function getFromSources(from: From): Array<CollectionRef | QueryRef> {
 function getRefFromAlias(
   query: QueryIR,
   alias: string,
+  bindingId?: string,
 ): CollectionRef | QueryRef | void {
   for (const source of getFromSources(query.from)) {
-    if (source.alias === alias) {
+    if (
+      source.alias === alias &&
+      (bindingId === undefined || source.bindingId === bindingId)
+    ) {
       return source
     }
   }
 
   for (const join of query.join || []) {
-    if (join.from.alias === alias) {
+    if (
+      join.from.alias === alias &&
+      (bindingId === undefined || join.from.bindingId === bindingId)
+    ) {
       return join.from
     }
   }
@@ -411,7 +418,7 @@ export function followRef(
 } | void {
   const explicitAlias = getPropRefSourceAlias(ref)
   if (explicitAlias !== undefined) {
-    const aliasRef = getRefFromAlias(query, explicitAlias)
+    const aliasRef = getRefFromAlias(query, explicitAlias, ref.bindingId)
     if (!aliasRef) return
 
     const propertyPath = getPropRefPropertyPath(ref)
@@ -447,13 +454,23 @@ export function followRef(
     }
 
     // Without a projection for this field, it belongs to the source row.
-    return { collection, path: [field] }
+    const from = getFromSources(query.from)[0]
+    if (from?.type === `queryRef`) {
+      return followRef(from.query, new PropRef([field]), collection)
+    }
+    if (from?.type !== `collectionRef`) return
+    return {
+      collection,
+      path: [field],
+      alias: from.alias,
+      sourceId: from.sourceId,
+    }
   }
 
   if (ref.path.length > 1) {
     // This is a nested field
     const [alias, ...rest] = ref.path
-    const aliasRef = getRefFromAlias(query, alias!)
+    const aliasRef = getRefFromAlias(query, alias!, ref.bindingId)
     if (!aliasRef) {
       return
     }

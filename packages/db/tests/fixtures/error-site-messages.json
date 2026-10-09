@@ -868,10 +868,10 @@
   },
   "233": {
     "file": "query/builder/index.ts",
-    "template": "Includes subquery for \"${fieldName}\" reuses a source binding from an ancestor query. Start the child with new Query().from(...).",
+    "template": "Includes subquery for \"${fieldName}\" reuses an ancestor's source declaration. Use new Query().from({ alias: collection }) in the child instead of passing the ancestor builder to from().",
     "literals": [
       "Includes subquery for \"",
-      "\" reuses a source binding from an ancestor query. Start the child with new Query().from(...)."
+      "\" reuses an ancestor's source declaration. Use new Query().from({ alias: collection }) in the child instead of passing the ancestor builder to from()."
     ]
   }
 }
