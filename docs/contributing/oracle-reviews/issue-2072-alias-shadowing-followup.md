@@ -75,3 +75,18 @@ This follow-up does not close the alias-scope bug class. The direct reused
 builder trace is an in-scope counterexample to the approved lexical law.
 Broader lazy targets, captured ordering/grouping, optimizer rewrites, and
 temporal demand retain the owners and limits recorded in the coverage map.
+
+## Follow-up: ancestor/descendant builder reuse
+
+The API now requires a fresh `new Query().from()` when a source is declared in a
+descendant of a query that already uses that source binding. The same builder
+may still be placed in sibling include fields. The primary oracle's direct and
+`QueryRef` rejection cells were RED at `5bd355a7`: the direct form gave the
+misleading missing-correlation error and the `QueryRef` form constructed
+silently. Two more cells require the same error through a union branch and a
+nested include. The rejection checks source bindings through those placements
+before correlation extraction. The former positive
+parent/inner `QueryRef` cell now uses a fresh declaration of the same
+Collection, preserving its row and source-update assertions. The sibling
+reuse cell remains unchanged. This closes the known direct reuse trace under
+the stated API rule; the other evidence gaps above remain open.

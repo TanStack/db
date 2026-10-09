@@ -146,6 +146,11 @@ The builder gives each source reference a binding ID when it is created and
 preserves that ID when it places or rewrites the query. Compilation assigns
 separate opaque IDs to the accepted plan:
 
+A source declaration may be placed in sibling query scopes, but one builder's
+source declaration cannot serve as both an ancestor and a descendant in an
+include. Those scopes need distinct binding IDs. Start the descendant with a
+fresh `new Query().from(...)`, even when it reads the same Collection.
+
 ```ts
 type SourceId = Brand<string, 'SourceId'>
 type RelationNodeId = Brand<string, 'RelationNodeId'>
@@ -1353,7 +1358,10 @@ create recursive Collection machinery.
    source even when a nested query shadows its alias. An implicit namespaced
    result and a functional callback keep the user's aliases as public field
    names. Aliases must be unique within one lexical scope. The branches of one
-   `unionAll()` share one alias namespace.
+   `unionAll()` share one alias namespace. A builder's source declaration may
+   be reused in sibling includes, but an include cannot reuse it across an
+   ancestor/descendant scope boundary; the descendant starts from a fresh
+   `new Query().from()`.
 2. **Contribution conservation:** a public row exists exactly when its reduced
    supporting weight and collision policy produce one.
 3. **Batch partition:** equivalent valid split and atomic deliveries converge.

@@ -2319,3 +2319,13 @@ Development builds show this message, with `${...}` replaced by values:
 ```text
 Initial subset load failed: ${normalized.message}
 ```
+
+<a id="error-230"></a>
+
+## Error 230: `query/builder/index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Includes subquery for "${fieldName}" reuses a source binding from an ancestor query. Start the child with new Query().from(...).
+```

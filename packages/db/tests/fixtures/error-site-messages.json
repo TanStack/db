@@ -843,5 +843,13 @@
     "file": "query/live/collection-config-builder.ts",
     "template": "Initial subset load failed: ${normalized.message}",
     "literals": ["Initial subset load failed: "]
+  },
+  "230": {
+    "file": "query/builder/index.ts",
+    "template": "Includes subquery for \"${fieldName}\" reuses a source binding from an ancestor query. Start the child with new Query().from(...).",
+    "literals": [
+      "Includes subquery for \"",
+      "\" reuses a source binding from an ancestor query. Start the child with new Query().from(...)."
+    ]
   }
 }

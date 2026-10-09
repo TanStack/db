@@ -22,7 +22,9 @@ import { createScopedSource } from './includes-scope-identity-oracle.js'
  * that alias as a key. Same-scope and union-branch duplicates remain illegal.
  *
  * This finite oracle covers eager and on-demand children, direct and recursive
- * child plans, an implicit join, and writes after initial publication. The
+ * child plans, an implicit join, and writes after initial publication. Each
+ * ancestor/descendant source declaration starts from a fresh Query; a builder
+ * may still be placed in two sibling include fields. The
  * QueryRef and union paths use an inner captured name predicate beside a
  * required outer key correlation. Neither predicate implies the other. The
  * union has a nonempty right branch. It does not claim arbitrary expression
@@ -375,13 +377,121 @@ describe(`captured alias scope oracle`, () => {
   })
 
   /**
+   * One source declaration cannot play both the ancestor and descendant role.
+   * The same binding ID would make the required equality ambiguous before any
+   * live row is published. Sibling placement above remains legal because the
+   * two fields have no ancestor/descendant relationship.
+   */
+  for (const placement of [`direct`, `queryRef`] as const) {
+    test(`an ancestor builder reused in a ${placement} child asks for a new Query`, async () => {
+      const source = createScopedSource(
+        `ancestor-reuse-${placement}`,
+        [
+          { id: 1, parentId: 1 },
+          { id: 2, parentId: 1 },
+        ],
+        `eager`,
+      )
+      const base = new Query().from({ n: source.collection })
+
+      try {
+        expect(() =>
+          base.select(({ n: parent }) => ({
+            id: parent.id,
+            children: toArray(
+              placement === `direct`
+                ? base
+                    .where(({ n: child }) => eq(child.parentId, parent.id))
+                    .select(({ n: child }) => ({ id: child.id }))
+                : new Query()
+                    .from({
+                      inner: base.select(({ n }) => ({
+                        id: n.id,
+                        parentId: n.parentId,
+                      })),
+                    })
+                    .where(({ inner }) => eq(inner.parentId, parent.id))
+                    .select(({ inner }) => ({ id: inner.id })),
+            ),
+          })),
+        ).toThrow(/new Query\(\)/)
+      } finally {
+        await source.collection.cleanup()
+      }
+    })
+  }
+
+  test(`an ancestor binding inside a union branch asks for a new Query`, async () => {
+    const source = createScopedSource(
+      `ancestor-union-reuse`,
+      [{ id: 1, parentId: 1 }],
+      `eager`,
+    )
+    const base = new Query().from({ n: source.collection })
+    try {
+      expect(() =>
+        base.select(({ n: parent }) => ({
+          id: parent.id,
+          children: toArray(
+            new Query()
+              .unionAll(
+                base.select(({ n }) => ({ id: n.id, parentId: n.parentId })),
+                new Query()
+                  .from({ other: source.collection })
+                  .select(({ other }) => ({
+                    id: other.id,
+                    parentId: other.parentId,
+                  })),
+              )
+              .where(({ parentId }) => eq(parentId, parent.id))
+              .select(({ id }) => ({ id })),
+          ),
+        })),
+      ).toThrow(/new Query\(\)/)
+    } finally {
+      await source.collection.cleanup()
+    }
+  })
+
+  test(`an ancestor binding inside a nested include asks for a new Query`, async () => {
+    const source = createScopedSource(
+      `ancestor-nested-reuse`,
+      [{ id: 1, parentId: 1 }],
+      `eager`,
+    )
+    const base = new Query().from({ n: source.collection })
+    try {
+      expect(() =>
+        base.select(({ n: parent }) => ({
+          id: parent.id,
+          children: toArray(
+            new Query()
+              .from({ c: source.collection })
+              .where(({ c }) => eq(c.parentId, parent.id))
+              .select(({ c }) => ({
+                id: c.id,
+                descendants: toArray(
+                  base
+                    .where(({ n }) => eq(n.parentId, c.id))
+                    .select(({ n }) => ({ id: n.id })),
+                ),
+              })),
+          ),
+        })),
+      ).toThrow(/new Query\(\)/)
+    } finally {
+      await source.collection.cleanup()
+    }
+  })
+
+  /**
    * The inner QueryRef owns a different lexical scope from the include that
    * contains it. Its declarations cannot classify the captured parent ref as
-   * child-local, even when an immutable base builder is reused to form both.
+   * child-local, even when both scopes read the same Collection.
    * The plain model groups each current row by parentId after preload and a
    * source update; it never consults the builder's binding IDs.
    */
-  test(`inner QueryRef declarations do not impersonate a captured parent`, async () => {
+  test(`fresh inner QueryRef declarations do not impersonate a captured parent`, async () => {
     const rows = [
       { id: 1, parentId: 1 },
       { id: 2, parentId: 1 },
@@ -394,10 +504,12 @@ describe(`captured alias scope oracle`, () => {
         children: toArray(
           new Query()
             .from({
-              inner: base.select(({ n }) => ({
-                id: n.id,
-                parentId: n.parentId,
-              })),
+              inner: new Query()
+                .from({ n: source.collection })
+                .select(({ n }) => ({
+                  id: n.id,
+                  parentId: n.parentId,
+                })),
             })
             .where(({ inner }) => eq(inner.parentId, parent.id))
             .select(({ inner }) => ({ id: inner.id })),

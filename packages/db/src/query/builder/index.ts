@@ -652,9 +652,10 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     ) => SelectObject | ScalarSelectValue,
   ) {
     const aliases = this._getCurrentAliases()
+    const bindings = this._getCurrentBindings()
     const refProxy = createRefProxy(
       aliases,
-      this._getCurrentBindings(),
+      bindings,
     ) as RefsForContext<TContext>
     let selectObject = callback(refProxy)
 
@@ -665,7 +666,10 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
       selectObject = { [sentinelKey]: true }
     }
 
-    const select = buildNestedSelect(selectObject, aliases)
+    const select = buildNestedSelect(selectObject, {
+      aliases,
+      bindingIds: new Set(bindings.values()),
+    })
 
     return this._clone({
       ...this.query,
@@ -1076,9 +1080,14 @@ function isNestedSelectRecord(value: any): value is Record<string, any> {
   )
 }
 
+type ParentScope = {
+  aliases: Array<string>
+  bindingIds: ReadonlySet<string>
+}
+
 function buildNestedSelect(
   obj: any,
-  parentAliases: Array<string> = [],
+  parentScope: ParentScope,
   fieldName?: string,
 ): any {
   if (Array.isArray(obj)) {
@@ -1097,7 +1106,7 @@ function buildNestedSelect(
           : codedMessage(114),
       )
     }
-    return buildIncludesSubquery(obj, fieldName, parentAliases, `collection`)
+    return buildIncludesSubquery(obj, fieldName, parentScope, `collection`)
   }
   if (obj instanceof ToArrayWrapper) {
     if (!(obj.query instanceof BaseQueryBuilder)) {
@@ -1114,7 +1123,7 @@ function buildNestedSelect(
           : codedMessage(116),
       )
     }
-    return buildIncludesSubquery(obj.query, fieldName, parentAliases, `array`)
+    return buildIncludesSubquery(obj.query, fieldName, parentScope, `array`)
   }
   if (obj instanceof ConcatToArrayWrapper) {
     if (!(obj.query instanceof BaseQueryBuilder)) {
@@ -1131,10 +1140,10 @@ function buildNestedSelect(
           : codedMessage(118),
       )
     }
-    return buildIncludesSubquery(obj.query, fieldName, parentAliases, `concat`)
+    return buildIncludesSubquery(obj.query, fieldName, parentScope, `concat`)
   }
   if (obj instanceof CaseWhenWrapper) {
-    return buildConditionalSelect(obj, parentAliases, fieldName)
+    return buildConditionalSelect(obj, parentScope, fieldName)
   }
   if (!isNestedSelectRecord(obj)) return toExpr(obj)
   const out: Record<string, any> = {}
@@ -1145,7 +1154,7 @@ function buildNestedSelect(
       continue
     }
     if (v instanceof BaseQueryBuilder) {
-      out[k] = buildIncludesSubquery(v, k, parentAliases, `collection`)
+      out[k] = buildIncludesSubquery(v, k, parentScope, `collection`)
       continue
     }
     if (v instanceof ToArrayWrapper) {
@@ -1156,7 +1165,7 @@ function buildNestedSelect(
             : codedMessage(119),
         )
       }
-      out[k] = buildIncludesSubquery(v.query, k, parentAliases, `array`)
+      out[k] = buildIncludesSubquery(v.query, k, parentScope, `array`)
       continue
     }
     if (v instanceof ConcatToArrayWrapper) {
@@ -1167,7 +1176,7 @@ function buildNestedSelect(
             : codedMessage(120),
         )
       }
-      out[k] = buildIncludesSubquery(v.query, k, parentAliases, `concat`)
+      out[k] = buildIncludesSubquery(v.query, k, parentScope, `concat`)
       continue
     }
     if (v instanceof MaterializeWrapper) {
@@ -1182,21 +1191,21 @@ function buildNestedSelect(
       const materialization: IncludesMaterialization = childQuery.singleResult
         ? `singleton`
         : `array`
-      out[k] = buildIncludesSubquery(v.query, k, parentAliases, materialization)
+      out[k] = buildIncludesSubquery(v.query, k, parentScope, materialization)
       continue
     }
     if (v instanceof CaseWhenWrapper) {
-      out[k] = buildConditionalSelect(v, parentAliases, k)
+      out[k] = buildConditionalSelect(v, parentScope, k)
       continue
     }
-    out[k] = buildNestedSelect(v, parentAliases, k)
+    out[k] = buildNestedSelect(v, parentScope, k)
   }
   return out
 }
 
 function buildConditionalSelect(
   wrapper: CaseWhenWrapper,
-  parentAliases: Array<string>,
+  parentScope: ParentScope,
   fieldName?: string,
 ): ConditionalSelect {
   const args = wrapper.args
@@ -1215,12 +1224,12 @@ function buildConditionalSelect(
   for (let i = 0; i < pairCount; i++) {
     branches.push({
       condition: toExpression(args[i * 2]),
-      value: buildNestedSelect(args[i * 2 + 1], parentAliases, fieldName),
+      value: buildNestedSelect(args[i * 2 + 1], parentScope, fieldName),
     })
   }
 
   const defaultValue = hasDefaultValue
-    ? buildNestedSelect(args[args.length - 1], parentAliases, fieldName)
+    ? buildNestedSelect(args[args.length - 1], parentScope, fieldName)
     : undefined
 
   return new ConditionalSelect(branches, defaultValue)
@@ -1430,6 +1439,48 @@ function referencesParent(
   )
 }
 
+/** Reject one source declaration playing both ancestor and child roles. */
+function reusesAncestorBinding(
+  query: QueryIR,
+  ancestorBindings: ReadonlySet<string>,
+  seen = new Set<QueryIR>(),
+): boolean {
+  if (seen.has(query)) return false
+  seen.add(query)
+
+  const sourceReuses = (source: CollectionRef | QueryRef): boolean =>
+    ancestorBindings.has(source.bindingId) ||
+    (source instanceof QueryRef &&
+      reusesAncestorBinding(source.query, ancestorBindings, seen))
+  const selectReuses = (value: unknown): boolean => {
+    if (value instanceof IncludesSubquery)
+      return reusesAncestorBinding(value.query, ancestorBindings, seen)
+    if (value instanceof ConditionalSelect)
+      return (
+        value.branches.some((branch) => selectReuses(branch.value)) ||
+        (value.defaultValue !== undefined && selectReuses(value.defaultValue))
+      )
+    return (
+      isNestedSelectRecord(value) && Object.values(value).some(selectReuses)
+    )
+  }
+
+  const from = query.from
+  const fromReuses =
+    from.type === `unionFrom`
+      ? from.sources.some(sourceReuses)
+      : from.type === `unionAll`
+        ? from.queries.some((branch) =>
+            reusesAncestorBinding(branch, ancestorBindings, seen),
+          )
+        : sourceReuses(from)
+  return (
+    fromReuses ||
+    (query.join?.some((join) => sourceReuses(join.from)) ?? false) ||
+    (query.select !== undefined && selectReuses(query.select))
+  )
+}
+
 /**
  * Builds an IncludesSubquery IR node from a child query builder.
  * Extracts the correlation condition from the child's WHERE clauses by finding
@@ -1438,16 +1489,27 @@ function referencesParent(
 function buildIncludesSubquery(
   childBuilder: BaseQueryBuilder,
   fieldName: string,
-  parentAliases: Array<string>,
+  parentScope: ParentScope,
   materialization: IncludesMaterialization,
 ): IncludesSubquery {
-  const childQuery = cloneQueryForPlacement(childBuilder._getQuery())
+  const sourceQuery = childBuilder._getQuery()
+  if (reusesAncestorBinding(sourceQuery, parentScope.bindingIds)) {
+    throw new Error(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `Includes subquery for "${fieldName}" reuses a source binding from an ancestor query. Start the child with new Query().from(...).`
+        : codedMessage(230, { fieldName }),
+    )
+  }
+  const childQuery = cloneQueryForPlacement(sourceQuery)
 
   // Collect child's own aliases
   const childAliases = collectQueryAliases(childQuery)
   const childBindings = collectDeclaredBindings(childQuery)
   const visibleParentAliases = [
-    ...new Set([...parentAliases, ...collectExternalParentAliases(childQuery)]),
+    ...new Set([
+      ...parentScope.aliases,
+      ...collectExternalParentAliases(childQuery),
+    ]),
   ]
 
   // Walk child's WHERE clauses to find the correlation condition.
