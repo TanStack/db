@@ -85,3 +85,19 @@ policy, every retry count, or every interleaving. The existing second-error
 witness covers count one; the row-local cleanup matrices cover peer admission
 and storage failures. The coverage map keeps native storage and broader offline
 recovery limits with their owners and RFC #1659.
+
+## Final production follow-up
+
+The production and documentation follow-up executable commit is
+`c4cd2dd8de085a8cc1680f7eb8bc8a67b740428e`. It keeps the retry decision
+law and the oracle unchanged. The settlement oracle passed 51/51 cases. A
+package run excluding the separate uncommitted leadership/FIFO experiment
+passed 217 tests in 17 files; package typecheck, source and oracle ESLint,
+Prettier, and diff checks passed.
+
+The false-as-delegation, Promise-await, AbortError, 400, 403, 422, and 404
+temporary mutants were rerun on that executable commit. Each failed at the
+stored-decision assertion. Direct seed/path replay again reached the
+ordinary/false assertion. The temporary source edits were restored exactly;
+none of these results relies on a timeout or a setup error. No later executable
+change is part of this record.
