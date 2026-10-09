@@ -16,7 +16,9 @@
  * Legal histories: one has disjoint row keys across clients; the other has the
  * same key with different values in both clients. Build once, mount under two
  * clients, write independently to each, then switch one mounted hook to the
- * other client and back. The public observation at each settled cut is the
+ * other client and back. After an Effect switches providers, an old-source
+ * write produces no update event, while a new-source write produces one. The
+ * public observation at each settled cut is the
  * complete projected row bag and row key from each useLiveQuery hook. A separate
  * Effect history checks enter events from two clients with the same row key,
  * then switches one mounted Effect to the other client. The
@@ -37,7 +39,10 @@
  * a base query, releases its render deferral, then extends and mounts it. A
  * neighboring Suspense history extends a query during a render that is never
  * committed. The sync callback count and public rows are checked at those
- * cuts. These two histories do not cover arbitrary concurrent render schedules.
+ * cuts. Another suspended render leaves a source shared with a later direct
+ * reader. That reader's preload is an independent demand for data: it may
+ * start the source even though the earlier render never committed. These
+ * histories do not cover arbitrary concurrent render schedules.
  */
 import { act, render, renderHook, waitFor } from '@testing-library/react'
 import {
@@ -203,6 +208,53 @@ describe(`standalone descriptor query binding`, () => {
     mounted.unmount()
   })
 
+  it(`lets a direct reader start a source after a descriptor render suspends`, async () => {
+    const client = new DbClient()
+    let starts = 0
+    const descriptor = collectionOptions(`suspended-direct-reader`, () => ({
+      id: `suspended-direct-reader`,
+      getKey: (row: Row) => row.id,
+      startSync: true,
+      sync: {
+        sync: ({ markReady }) => {
+          starts++
+          markReady()
+        },
+      },
+    }))
+    const query = new Query().from({ item: descriptor })
+    const never = new Promise<void>(() => {})
+
+    function Suspended(): ReactNode {
+      useLiveQuery({ query })
+      throw never
+    }
+
+    const mounted = render(
+      <DbProvider client={client}>
+        <Suspense fallback={<div>Waiting</div>}>
+          <Suspended />
+        </Suspense>
+      </DbProvider>,
+    )
+    const source = client.collection(descriptor)
+    let directRead: Promise<void> | undefined
+    try {
+      expect(mounted.getByText(`Waiting`)).toBeDefined()
+      expect(starts, `before commit or direct demand`).toBe(0)
+
+      directRead = source.preload()
+      void directRead.catch(() => {})
+      expect(starts, `direct demand starts the source`).toBe(1)
+      await directRead
+      expect(source.status).toBe(`ready`)
+    } finally {
+      mounted.unmount()
+      await client.cleanup()
+      await directRead?.catch(() => {})
+    }
+  })
+
   it(`rejects an unbound descriptor after a same-hash concrete query`, async () => {
     const id = `standalone-descriptor-unbound-transition`
     const concrete = createCollection(
@@ -303,7 +355,9 @@ describe(`standalone descriptor query binding`, () => {
       { id: `shared`, value: `second` },
     ]
     const observed: Array<Array<Row>> = [[], []]
+    const updates: Array<Array<Row>> = [[], []]
     const clients = expected.map((row) => new DbClient({ rows: [{ ...row }] }))
+    const oldClient = clients[0]!
     const mounted = expected.map((_, index) => {
       return renderHook(
         () =>
@@ -311,6 +365,9 @@ describe(`standalone descriptor query binding`, () => {
             query,
             onEnter: ({ value }) => {
               observed[index]!.push({ id: value.id, value: value.value })
+            },
+            onUpdate: ({ value }) => {
+              updates[index]!.push({ id: value.id, value: value.value })
             },
           }),
         {
@@ -330,6 +387,24 @@ describe(`standalone descriptor query binding`, () => {
     mounted[0]!.rerender()
     await waitFor(() => {
       expect(observed[0]).toEqual([expected[0], expected[1]])
+    })
+
+    act(() => {
+      oldClient.collection(descriptor).update(`shared`, (draft) => {
+        draft.value = `old write`
+      })
+    })
+    await act(async () => {})
+    expect(observed[0]).toEqual([expected[0], expected[1]])
+    expect(updates[0]).toEqual([])
+
+    act(() => {
+      clients[1]!.collection(descriptor).update(`shared`, (draft) => {
+        draft.value = `new write`
+      })
+    })
+    await waitFor(() => {
+      expect(updates[0]).toEqual([{ id: `shared`, value: `new write` }])
     })
 
     mounted.forEach((hook) => hook.unmount())

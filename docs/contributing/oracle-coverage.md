@@ -66,7 +66,7 @@ that test identifiers must copy production's private data structures.
 | Joined result keys                       | Complete for bounded two-source key grammar                    | The contract, nested-loop pair model, delimiter-, number-like, infinite, and `NaN` key grammar, public join driver, and per-checkpoint pair and key-count check are literate. Joins over subqueries, more than two sources, custom `getKey`, and optimistic mutations remain outside this owner.                                                                                                                                                                                                                                                                                                                                                   |
 | D2 Index storage                         | Complete for bounded prefix grammar                            | The contract, plain-`Map` multiset model, prefixed and unprefixed value grammar, `Index` driver, and per-addition `get`/`has` check are literate. Compaction, presence tracking, and structural payloads remain outside this owner.                                                                                                                                                                                                                                                                                                                                                                                                                |
 | Pooled live queries | Complete for bounded eq-filter grammar | The contract, independent `eq` model, live-query Collection second formulation, sync/optimistic/mount/cleanup-restart grammar, observer driver, and per-step refinement check are literate. On-demand and persisted sources, `DbClient`, Suspense, and every clause beyond `eq` conjuncts keep the live-query Collection. |
-| Live-query deferred acquisition | Complete for bounded synchronous grammar | The law, independent model, history grammar over source states, shapes, and depth, real-Collection driver, and per-step refinement check are literate. Pooled views and DbClient stream preloads have their own blocks. The grammar also adds a peer consumer starting the source and a source truncate before the first subscriber; pinned blocks cover a subscriber that outlives cleanup and reads that wait for readiness. Asynchronous sources, several live-query consumers, and failure stay open. |
+| Live-query deferred acquisition | Complete for bounded synchronous grammar | The law, independent model, history grammar over source states, shapes, and depth, real-Collection driver, and per-step refinement check are literate. Pooled views and DbClient stream preloads have their own blocks. The grammar also adds a peer consumer starting the source and a source truncate before the first subscriber; pinned blocks cover a subscriber that outlives cleanup, reads that wait for readiness, and release of two independent descriptor sources when one start fails. Asynchronous sources, several live-query consumers, and general failure histories stay open. |
 | Flat-row change tracking | Complete for bounded flat-row grammar | Flat and proxy trackers and an independent change model run the same generated callbacks. Nested values fall back to the proxy, which its own oracles own. |
 | Production error messages | `packages/db/tests/production-error-messages-oracle.test.ts` | Every public error class keeps its development message for frozen sample inputs, and its coded production line shows the JSON of each shown input, even for hostile inputs. Every plain `Error`, `TypeError`, `RangeError`, or `AggregateError` site in `packages/db/src` keeps its frozen development template, has a code, and passes each showable interpolated expression or one of its sub-expressions; the TypeScript checker keeps plain objects, such as rows, out of production lines. A projection of an object, such as `Object.keys(handlers)`, is not required. Every `console` call whose argument holds library text is coded, development-only with its text frozen per guarded region, or a development-only decoration of a value. Text that reaches the console through a parameter, such as `setErrorState(message)`, is coded where it is written; the census cannot follow it. `scripts/test-production-errors.mjs` checks that a production bundle drops the full text and every development-only hint, in ESM and CommonJS. Errors built from a caller's value stay outside this owner. |
 | Lazy target path identity                | Focused compiler boundary                                      | A same-source union/coalesce witness keeps dotted and nested demand paths distinct during target deduplication.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -250,17 +250,44 @@ Collection formulations.
 The same owner also checks a prebuilt Query consumed by `useLiveQueryEffect`:
 two clients with the same row key report their own initial enter events, and
 one mounted Effect reports the new client's row after a provider switch.
+After that switch, an old-provider write produces no update event and a
+new-provider write produces one. The event-history check rejects an Effect
+that retains the old subscription.
 It checks that a descriptor Collection first acquired by a committed Effect
 appears in `DbClient.dehydrate()` after the first enter event. A separate
 same-hash transition from a concrete query to an unbound descriptor query
 checks that the hook reports the missing client before reusing prior rows.
+The same React owner checks that a descriptor render suspended before commit
+starts no source work, while a later direct `Collection.preload()` starts that
+source once and reaches ready. This is one abandoned-render/direct-reader cut,
+not a general concurrent-render schedule.
 `packages/db/tests/db-client.test.ts` supplies a
 focused nested-query preload witness across two clients, including equal query
-hashes and distinct dehydrated rows. Concrete-config descriptors, on-demand
-acquisition, joins, union sources, and Svelte's provider path remain open for
-this binding law; a receiving oracle needs the relevant public observation for
-each. Vue, Solid, and Angular have no DbClient descriptor-binding contract in
-this work. Their query callers use concrete Collections.
+hashes and distinct dehydrated rows.
+`packages/db/tests/db-client-preload-identity-oracle.test.ts` owns the bounded
+same-hash preload law within one DbClient: the second local preload reuses a
+result only when its source Collection objects are the same at each query
+position. Concrete then
+descriptor, descriptor then concrete, and two concrete same-ID sources must
+reject a conflicting second request without changing the first dehydrated row;
+a same-ID pair swapped between union branches also rejects. A descriptor and
+its own materialized Collection may reuse it. Hydrated streams
+from another process and different explicit query keys remain open.
+`packages/db/tests/live-query-deferred-acquisition-oracle.test.ts` also checks
+a two-source descriptor union when the first sync start fails: the second source
+still starts and reaches ready on direct preload, and a preparation error stays
+primary if a deferred source also throws during release. The controlled sources
+start synchronously; asynchronous failure and larger source sets remain open.
+`packages/svelte-db/tests/descriptor-query-release-oracle.svelte.test.ts`
+checks Svelte's two-source release after a first startup error and a direct
+reader after a second descriptor factory fails. It observes source start counts,
+ready status, and failed-hook subscription release. It does not establish
+two-client Svelte provider binding or reactive query replacement. Concrete-
+config descriptors, on-demand acquisition, joins, union/include rows under
+separate clients, and those Svelte paths remain open for this binding law; a
+receiving oracle needs the relevant public observation for each. Vue, Solid,
+and Angular have no DbClient descriptor-binding contract in this work. Their
+query callers use concrete Collections.
 `packages/db/tests/live-query-options.test.ts` checks that a client-aware
 consumer binds nested, union-branch, and include-child descriptors during final
 preparation. Construction retains descriptor refs in those positions, including

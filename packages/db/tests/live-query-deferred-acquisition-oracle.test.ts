@@ -49,6 +49,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   BTreeIndex,
   DbClient,
+  collectionOptions,
   createCollection,
   createLiveQueryCollection,
   createLiveQueryObserver,
@@ -618,6 +619,107 @@ describe(`preload answered by a DbClient stream`, () => {
       }
     })
   }
+})
+
+/**
+ * A DbClient preload owns the release of every source it prepared. If the
+ * first source's sync run throws, that error belongs to the failed query;
+ * the later healthy source still gets its release and can serve a direct
+ * reader. The model needs only two independent start counts: zero before
+ * preload, one for each after release. The public checkpoint is the failed
+ * preload followed by readiness of the second source Collection.
+ */
+describe(`DbClient preload releases independent source starts`, () => {
+  it(`starts a healthy union source after another source throws`, async () => {
+    const failure = new Error(`first source failed`)
+    let firstStarts = 0
+    let secondStarts = 0
+    const first = collectionOptions(`preload-release-first`, () => ({
+      id: `preload-release-first`,
+      getKey: (row: { id: string }) => row.id,
+      startSync: true,
+      sync: {
+        sync: () => {
+          firstStarts++
+          throw failure
+        },
+      },
+    }))
+    const second = collectionOptions(`preload-release-second`, () => ({
+      id: `preload-release-second`,
+      getKey: (row: { id: string }) => row.id,
+      startSync: true,
+      sync: {
+        sync: ({ markReady }) => {
+          secondStarts++
+          markReady()
+        },
+      },
+    }))
+    const client = new DbClient()
+    const query = new Query().unionAll(
+      new Query().from({ first }).select(({ first: row }) => ({ id: row.id })),
+      new Query()
+        .from({ second })
+        .select(({ second: row }) => ({ id: row.id })),
+    )
+
+    try {
+      await expect(
+        Promise.resolve().then(() => client.preloadLiveQuery({ query })),
+      ).rejects.toBe(failure)
+      expect(firstStarts).toBe(1)
+      expect(secondStarts).toBe(1)
+      const healthy = client.collection(second)
+      await healthy.preload()
+      expect(healthy.status).toBe(`ready`)
+    } finally {
+      await client.cleanup()
+    }
+  })
+
+  it(`reports a preparation error even if a deferred source also throws`, async () => {
+    const preparationFailure = new Error(`second source factory failed`)
+    const startFailure = new Error(`first source start failed`)
+    let firstStarts = 0
+    const first = collectionOptions(`preload-primary-first`, () => ({
+      id: `preload-primary-first`,
+      getKey: (row: { id: string }) => row.id,
+      startSync: true,
+      sync: {
+        sync: () => {
+          firstStarts++
+          throw startFailure
+        },
+      },
+    }))
+    const second = collectionOptions(
+      `preload-primary-second`,
+      (): {
+        id: string
+        getKey: (row: { id: string }) => string
+        sync: { sync: () => void }
+      } => {
+        throw preparationFailure
+      },
+    )
+    const client = new DbClient()
+    const query = new Query().unionAll(
+      new Query().from({ first }).select(({ first: row }) => ({ id: row.id })),
+      new Query()
+        .from({ second })
+        .select(({ second: row }) => ({ id: row.id })),
+    )
+
+    try {
+      expect(() => client.preloadLiveQuery({ query })).toThrow(
+        preparationFailure,
+      )
+      expect(firstStarts).toBe(1)
+    } finally {
+      await client.cleanup()
+    }
+  })
 })
 
 /**

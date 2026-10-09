@@ -2359,3 +2359,13 @@ Development builds show this message, with `${...}` replaced by values:
 ```text
 Query must resolve to a QueryBuilder; received ${received}.
 ```
+
+<a id="error-234"></a>
+
+## Error 234: `client.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+DbClient cannot reuse live query "${queryHash}" with different source Collections. Use the same Collection objects or a distinct query key.
+```

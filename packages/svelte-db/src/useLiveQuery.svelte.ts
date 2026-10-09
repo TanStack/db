@@ -437,10 +437,17 @@ export function useLiveQuery(
       client: dbClient,
       queryHash,
       resumeDeferredCollections: () => {
-        for (const deferredCollection of deferredCollections) {
-          deferredCollection._resumeSyncStart()
-        }
+        const pending = Array.from(deferredCollections)
         deferredCollections.clear()
+        let firstFailure: { error: unknown } | undefined
+        for (const deferredCollection of pending) {
+          try {
+            deferredCollection._resumeSyncStart()
+          } catch (error) {
+            firstFailure ??= { error }
+          }
+        }
+        if (firstFailure) throw firstFailure.error
       },
     }
   })
@@ -517,8 +524,14 @@ export function useLiveQuery(
         syncFromObserver(observer, changes)
       },
     )
-    currentResolved.resumeDeferredCollections()
-    syncFromObserver(observer)
+    try {
+      currentResolved.resumeDeferredCollections()
+      syncFromObserver(observer)
+    } catch (error) {
+      unsubscribe()
+      observer.dispose()
+      throw error
+    }
 
     // Cleanup when effect is invalidated
     return () => {

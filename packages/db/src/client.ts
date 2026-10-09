@@ -11,6 +11,7 @@ import { createLiveQueryObserver } from './live-query-observer.js'
 import { createDeferred } from './deferred.js'
 import {
   getLiveQueryHash,
+  getPreparedLiveQuerySources,
   prepareLiveQueryValue,
 } from './live-query-options.js'
 import { codedMessage, devBuild } from './error-message.js'
@@ -47,6 +48,16 @@ export type CollectionOptions<
 
 type AnyCollectionOptions = CollectionOptions<any, any, any, any>
 type AnyCollection = Collection<any, any, any, any, any>
+
+function sameSourcesAtEachPosition(
+  left: ReadonlyArray<AnyCollection>,
+  right: ReadonlyArray<AnyCollection>,
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((source, index) => source === right[index])
+  )
+}
 
 type DescriptorFromConfig<TConfig extends AnyCollectionConfig> =
   TConfig extends {
@@ -322,6 +333,7 @@ export class DbClient {
     {
       collection: AnyCollection
       observer: { dispose: () => void }
+      sources: ReadonlyArray<AnyCollection>
     }
   >()
   private liveQueryResources = new Map<object, () => Promise<void>>()
@@ -361,38 +373,78 @@ export class DbClient {
 
   preloadLiveQuery(options: LiveQueryOptions): Promise<void> {
     const deferredCollections: DeferredLiveQueryCollections = new Set()
+    let result: Promise<void> | undefined
+    let primaryFailure: { error: unknown } | undefined
     try {
-      const prepared = prepareLiveQueryValue(options, this, deferredCollections)
-      const queryHash = getLiveQueryHash(prepared, options.queryKey)
-      const existing = this.liveQueries.get(queryHash)
-      if (existing && existing.status !== `error`) return existing.promise
-
-      const failedPreload = this.preloadedLiveQueries.get(queryHash)
-      if (failedPreload) {
-        failedPreload.observer.dispose()
-        void failedPreload.collection.cleanup().catch(() => {})
-        this.preloadedLiveQueries.delete(queryHash)
-      }
-
-      const collection = createLiveQueryCollection({
-        ...(prepared as LiveQueryOptions),
-        startSync: true,
-      }) as AnyCollection
-      const observer = createLiveQueryObserver(collection, {
-        client: this,
-        queryHash,
-        mode: `wholesale`,
-      })
-      this.preloadedLiveQueries.set(queryHash, { collection, observer })
-
-      return this._registerLiveQuery(
-        queryHash,
-        collection.preload().then(() => observer.dehydrate()),
-      )
-    } finally {
-      for (const source of deferredCollections) source._resumeSyncStart()
-      deferredCollections.clear()
+      result = this.startLiveQueryPreload(options, deferredCollections)
+    } catch (error) {
+      primaryFailure = { error }
     }
+
+    const pending = Array.from(deferredCollections)
+    deferredCollections.clear()
+    let resumeFailure: { error: unknown } | undefined
+    for (const source of pending) {
+      try {
+        source._resumeSyncStart()
+      } catch (error) {
+        resumeFailure ??= { error }
+      }
+    }
+    if (primaryFailure) throw primaryFailure.error
+    if (resumeFailure) {
+      void result?.catch(() => {})
+      throw resumeFailure.error
+    }
+    return result!
+  }
+
+  private startLiveQueryPreload(
+    options: LiveQueryOptions,
+    deferredCollections: DeferredLiveQueryCollections,
+  ): Promise<void> {
+    const prepared = prepareLiveQueryValue(options, this, deferredCollections)
+    const queryHash = getLiveQueryHash(prepared, options.queryKey)
+    const sources = getPreparedLiveQuerySources(prepared)
+    const existing = this.liveQueries.get(queryHash)
+    if (existing && existing.status !== `error`) {
+      const preloaded = this.preloadedLiveQueries.get(queryHash)
+      if (preloaded && !sameSourcesAtEachPosition(preloaded.sources, sources)) {
+        throw new Error(
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `DbClient cannot reuse live query "${queryHash}" with different source Collections. Use the same Collection objects or a distinct query key.`
+            : codedMessage(234, { queryHash }),
+        )
+      }
+      return existing.promise
+    }
+
+    const failedPreload = this.preloadedLiveQueries.get(queryHash)
+    if (failedPreload) {
+      failedPreload.observer.dispose()
+      void failedPreload.collection.cleanup().catch(() => {})
+      this.preloadedLiveQueries.delete(queryHash)
+    }
+
+    const collection = createLiveQueryCollection({
+      ...(prepared as LiveQueryOptions),
+      startSync: true,
+    }) as AnyCollection
+    const observer = createLiveQueryObserver(collection, {
+      client: this,
+      queryHash,
+      mode: `wholesale`,
+    })
+    this.preloadedLiveQueries.set(queryHash, {
+      collection,
+      observer,
+      sources,
+    })
+
+    return this._registerLiveQuery(
+      queryHash,
+      collection.preload().then(() => observer.dehydrate()),
+    )
   }
 
   collection<

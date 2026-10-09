@@ -1,4 +1,5 @@
 import { BaseQueryBuilder } from './query/builder/index.js'
+import { collectCollectionSources } from './query/ir.js'
 import { isCollection } from './live-query-adapter.js'
 import { createLiveQueryCollection } from './query/live-query-collection.js'
 import {
@@ -118,6 +119,18 @@ export function prepareLiveQueryValue(
   }
 
   return value
+}
+
+/** Concrete source objects in query-position order for a prepared value. */
+export function getPreparedLiveQuerySources(value: unknown): Array<Collection> {
+  const query =
+    value && typeof value === `object` && `query` in value ? value.query : value
+  if (query instanceof BaseQueryBuilder) {
+    return collectCollectionSources(query._getQuery()).map(
+      (source) => source.collection,
+    )
+  }
+  return isCollection(query) ? [query] : []
 }
 
 export function getPreparedLiveQueryIdentity(value: unknown): unknown {

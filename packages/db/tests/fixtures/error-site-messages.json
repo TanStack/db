@@ -870,5 +870,13 @@
     "file": "query/builder/query-ir.ts",
     "template": "Query must resolve to a QueryBuilder; received ${received}.",
     "literals": ["Query must resolve to a QueryBuilder; received "]
+  },
+  "234": {
+    "file": "client.ts",
+    "template": "DbClient cannot reuse live query \"${queryHash}\" with different source Collections. Use the same Collection objects or a distinct query key.",
+    "literals": [
+      "DbClient cannot reuse live query \"",
+      "\" with different source Collections. Use the same Collection objects or a distinct query key."
+    ]
   }
 }
