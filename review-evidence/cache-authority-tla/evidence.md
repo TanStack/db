@@ -182,3 +182,18 @@ and the real-SQLite post-rotation boundary. The bounded model remains an
 atomic projection. Live Electric service framing, installed-SDK delivery at
 this exact held cut, native SQLite hosts, and arbitrary schedules remain
 outside these fixed witnesses.
+
+## Installed-SDK receiving correction
+
+The Collections CI run on `733864f1a` found a tagged live-query receiver that
+waited for a second HTTP subset request. A controlled probe at the first
+request showed `id = 1` with parameter `1`. After its response, preload fulfilled
+and the replacement row was present in both the public query and durable
+fixture. The test's second-request count was stronger than the demand law.
+One applied source snapshot can satisfy this active demand. The receiver now
+checks the exact predicate and parameter on both launches, the applied row,
+and fulfillment without requiring an extra physical request. A temporary
+`id = 2` demand failed all four cases at the HTTP parameter assertion; it was
+then restored. The full Electric package passed locally with 1,081 tests, one
+skip, and no type errors. This correction does not establish the exact request
+count for other legal schedules.

@@ -1899,8 +1899,12 @@ A real installed SDK receives two launches through the Electric adapter and
 persistence wrapper with controlled HTTP and durable storage. Direct demand and
 public live-query preload settle through changes-only scoped snapshots in a
 managed fixture with separate durable stores for retired and current cache
-generations. Lost tags, changed shape, and malformed resume state keep stale B
-in the retired store without exposing it after an A snapshot or an empty B
+generations. The receiver verifies `id = 1` and its bound parameter on both
+launches. It permits one snapshot to satisfy the live query's active demand
+and checks its public and durable row after settlement.
+It does not require a second physical request for the same subset. Lost tags,
+changed shape, and malformed resume state keep stale B in the retired store
+without exposing it after an A snapshot or an empty B
 snapshot. The changed-shape case makes B's empty snapshot first. A third launch
 with no demand starts no full-shape transport or unrestricted local subset
 read. The fixture models generation routing, while real SQLite independently

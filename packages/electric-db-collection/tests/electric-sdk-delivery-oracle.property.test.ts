@@ -1581,6 +1581,10 @@ fixedCase(`detects dropped move-in at its visibility checkpoint`, async () => {
  * A new descriptor and Collection discard all prior in-memory tag state.
  * This checks SDK behavior over controlled HTTP, not server tag generation,
  * native SQLite, or a separate operating-system process.
+ * One source snapshot for id = 1 may satisfy the live query's active demand.
+ * The receiver verifies that scope before returning the authored row. The
+ * law judges applied rows and demand settlement, not the number of physical
+ * snapshot requests.
  */
 fixedCase.each(
   [false, true].flatMap((tagged) =>
@@ -1652,6 +1656,12 @@ fixedCase.each(
     const demand = {
       where: new IR.Func(`eq`, [new IR.PropRef([`id`]), new IR.Value(1)]),
     }
+    const expectIdOneSnapshot = (request: Request) => {
+      expect(request.url.searchParams.get(`subset__where`)).toBe(`"id" = $1`)
+      expect(
+        JSON.parse(request.url.searchParams.get(`subset__params`) ?? `null`),
+      ).toEqual({ 1: `1` })
+    }
     const first = create()
     let current = first
     let cleanupQuery = () => Promise.resolve()
@@ -1667,6 +1677,7 @@ fixedCase.each(
         http.take(true),
         `first launch snapshot`,
       )
+      expectIdOneSnapshot(request)
       request.respond(snapshotResponse(firstRow, 2))
       await atCheckpoint(firstLoad, `first launch subset applied`)
       await vi.waitFor(
@@ -1718,16 +1729,8 @@ fixedCase.each(
         http.take(true),
         `resumed subset snapshot`,
       )
+      expectIdOneSnapshot(resumedSnapshot)
       resumedSnapshot.respond(snapshotResponse(replacement, 3))
-      if (query && tagged) {
-        // The live-query planner also requests a source subset for its own
-        // predicate. Both snapshots must apply before preload can settle.
-        const querySnapshot = await atCheckpoint(
-          http.take(true),
-          `live-query subset snapshot`,
-        )
-        querySnapshot.respond(snapshotResponse(replacement, 4))
-      }
       const outcome = await atCheckpoint(
         loading,
         `second launch subset settled`,
