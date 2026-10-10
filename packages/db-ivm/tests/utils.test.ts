@@ -607,7 +607,7 @@ describe(`hash`, () => {
       expect(equalHashValues(regex1, regex4)).toBe(false)
     })
 
-    it(`should include sparse array length in its hash`, () => {
+    it(`should distinguish sparse arrays by length`, () => {
       expect(equalHashValues([], Array(1))).toBe(false)
       expect(equalHashValues(Array(1), Array(2))).toBe(false)
       expect(typeof hash([])).toBe(hashType)
