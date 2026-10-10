@@ -2409,3 +2409,13 @@ Development builds show this message, with `${...}` replaced by values:
 ```text
 Query reference "${ref.path.join(`.`)}" is out of scope. Use a source from this query or a containing query.
 ```
+
+<a id="error-239"></a>
+
+## Error 239: `query/compiler/index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Include query is missing a captured parent projection for "${ref.path.join(`.`)}".
+```

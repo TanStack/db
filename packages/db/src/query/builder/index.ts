@@ -1278,7 +1278,7 @@ function collectRefsFromSelectValue(value: unknown): Array<PropRef> {
   return Object.values(value).flatMap(collectRefsFromSelectValue)
 }
 
-function collectExternalRefsFromQuery(query: QueryIR): Array<PropRef> {
+export function collectExternalRefsFromQuery(query: QueryIR): Array<PropRef> {
   const localAliases = new Set(collectQueryAliases(query))
   const localBindings = collectDeclaredBindings(query)
   const refs: Array<PropRef> = []

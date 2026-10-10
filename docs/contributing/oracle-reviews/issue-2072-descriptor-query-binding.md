@@ -223,3 +223,34 @@ The deferred-acquisition owner now controls a later `markError` from the first o
 A controlled Svelte probe changed a reactive query after an uncaught synchronous `$effect` error and saw no effect rerun or healthy source start. A minimal Svelte effect behaved the same way. The Svelte receiving oracle now retires the failed root and proves that a fresh effect root reads an independent healthy query. The accepted lifecycle boundary is that an uncaught effect error terminates that effect; in-place reactive recovery is not promised. Ordinary reactive replacement that does not throw remains a separate coverage cell.
 
 On the initially resolved combined tree, the focused DB owners passed 398 tests, the wider DB query runtime suite passed 4,903, the full React runtime suite passed 397, and the full Svelte runtime suite passed 125. Standalone DB and React TypeScript checks, Svelte checking, and the DB build passed. The new held-readiness and later-failure mutants were run after those wider suites: both failed by assertion at their intended checkpoints and passed after restoration. These results establish a bounded local integration; the final formatted tree, pushed head, CI, and external review still require separate verification.
+
+## Suspense preload on a pending hydrated stream
+
+The follow-up starts from pushed combined head `712e572bf`. A normal
+`useLiveQuery` render waits until its committed subscription to claim a
+hydrated stream's local source objects. `useLiveSuspenseQuery` has a different
+request boundary: it preloads during render so React receives a promise to
+retry. That preload counts as local demand even if the render is abandoned.
+The first source object therefore claims the pending hydrated hash; a later
+same-source preload is accepted and a different same-hash source rejects.
+This is the existing `DbClient` source-identity rule applied at the Suspense
+preload cut, not a claim that every React render starts provider work.
+
+The primary React descriptor oracle holds a hydrated stream result, renders a
+Suspense component that never commits, observes the fallback and one source
+sync start, then calls public `DbClient.preloadLiveQuery` with the conflicting
+and same-source plans before releasing the result. The two plans have equal
+stable hashes and different Collection objects. A temporary mutant that
+removed the observer's existing-stream source claim made the conflicting
+preload resolve; the assertion failed at that cut. Restored code passed. The
+same-source control initially ran first and masked the mutant by claiming the
+source itself; the oracle was corrected before this RED result was counted.
+The test does not cover arbitrary concurrent Suspense renders or cancellation
+of already started provider work.
+
+On this repaired combined tree, the primary React owner passed 25 tests and
+the broader React runtime suite passed 377. React TypeScript, changed-code
+lint, and formatting checks passed. The runtime run disabled Vitest's built-in
+typecheck because its cross-package test imports fall outside the configured
+runner root; the separate TypeScript check passed. Final pushed-head CI and a
+fresh external review remain distinct gates.

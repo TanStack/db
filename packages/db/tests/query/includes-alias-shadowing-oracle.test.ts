@@ -12,7 +12,7 @@ import {
   toArray,
 } from '../../src/query/index.js'
 import { getQueryIR } from '../../src/query/builder/query-ir.js'
-import { PropRef } from '../../src/query/ir.js'
+import { IncludesSubquery, PropRef } from '../../src/query/ir.js'
 import { getQueryIdentity } from '../../src/query/ir-stable-identity.js'
 import { optimizeQuery } from '../../src/query/optimizer.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
@@ -1163,6 +1163,59 @@ describe(`captured alias scope oracle`, () => {
         })
       }
     }
+  }
+})
+
+/**
+ * A child may use a captured ancestor only when its route projects that
+ * binding. This is an internal plan invariant, separate from the public row
+ * model above. Remove the projection from a legal, shadowed plan after the
+ * builder made it: compilation must reject the malformed plan before a child
+ * can silently read its same-named local row.
+ */
+test(`a missing captured parent projection fails before child rows are read`, async () => {
+  const parents = createScopedSource(
+    `missing-projection-parent`,
+    [{ id: 1, name: `PARENT` }],
+    `eager`,
+  )
+  const children = createScopedSource(
+    `missing-projection-child`,
+    [{ id: 10, parentId: 1, name: `CHILD` }],
+    `eager`,
+  )
+  const query = new Query()
+    .from({ item: parents.collection })
+    .select(({ item: parent }) => ({
+      id: parent.id,
+      children: toArray(
+        new Query()
+          .from({ item: children.collection })
+          .where(({ item }) => eq(item.parentId, parent.id))
+          .select(({ item }) => ({
+            id: item.id,
+            parentName: parent.name,
+          })),
+      ),
+    }))
+  const includes = (getQueryIR(query).select as Record<string, unknown>)[
+    `children`
+  ]
+  expect(includes).toBeInstanceOf(IncludesSubquery)
+  const childPlan = includes as IncludesSubquery
+  expect(childPlan.parentProjection?.length).toBeGreaterThan(0)
+  childPlan.parentProjection = []
+  let live: ReturnType<typeof createLiveQueryCollection> | undefined
+
+  try {
+    await expect(async () => {
+      live = createLiveQueryCollection({ query })
+      await live.preload()
+    }).rejects.toThrow(/missing a captured parent projection/)
+  } finally {
+    await live?.cleanup()
+    await parents.collection.cleanup()
+    await children.collection.cleanup()
   }
 })
 

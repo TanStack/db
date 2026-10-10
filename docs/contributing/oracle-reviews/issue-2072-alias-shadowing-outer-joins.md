@@ -477,3 +477,33 @@ These work probes are diagnostic observations, not permanent work laws. The
 primary oracle keeps the public behavior claim and its hostile-matcher
 calibration. No production repair was made for M3, M6, M7, or M8 in this
 follow-up.
+
+## Missing captured projection invariant on the combined tree
+
+This follow-up starts from #2077's pushed combined head `712e572bf`. A
+builder-created include projects each captured ancestor reference into the
+child route. An absent projection is a malformed internal plan, not a valid
+way to reinterpret a bound ancestor reference as a same-named local source.
+The compiler must reject it before child rows are accepted.
+
+The primary alias oracle builds a valid shadowed include through `Query`,
+confirms its captured parent projection exists, then removes that projection
+from the resulting IR. Before the compiler guard, the query compiled and its
+preload fulfilled; the expected rejection assertion was RED. A separate
+hostile mutant that made the builder omit parent projections was rejected by
+the existing `QueryRef` public-row comparison at initial publication: both
+children became empty. The new compiler guard reuses the builder's external-
+reference walk, checks bound parent references in the child plan and extracted
+parent filters against the projected list, and throws before compilation when
+one is absent. The malformed-plan witness and all 178 primary alias tests now
+pass. This check does not assert that arbitrary hand-written IR is otherwise
+valid, or prove every possible runtime route-metadata transport path; the
+public-row oracle retains the bounded legal histories stated above.
+
+On the repaired combined tree, the primary alias owner passed 178 tests and
+the broader DB query runtime suite passed 4,675. DB source and test TypeScript
+checks, changed-code lint, formatting, generated error documentation, and
+production error-text checks passed. The broad runtime run disabled Vitest's
+built-in typecheck because that runner tried to write a build-info file through
+a dependency symlink outside this worktree; the separate TypeScript checks
+passed. The pushed head and CI remain a separate gate.

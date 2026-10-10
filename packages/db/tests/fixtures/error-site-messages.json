@@ -901,5 +901,10 @@
       "Query reference \"",
       "\" is out of scope. Use a source from this query or a containing query."
     ]
+  },
+  "239": {
+    "file": "query/compiler/index.ts",
+    "template": "Include query is missing a captured parent projection for \"${ref.path.join(`.`)}\".",
+    "literals": ["Include query is missing a captured parent projection for \""]
   }
 }

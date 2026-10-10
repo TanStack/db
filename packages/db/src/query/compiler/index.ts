@@ -30,7 +30,10 @@ import {
   UnsupportedFromTypeError,
 } from '../../errors.js'
 import { VIRTUAL_PROP_NAMES } from '../../virtual-props.js'
-import { BaseQueryBuilder } from '../builder/index.js'
+import {
+  BaseQueryBuilder,
+  collectExternalRefsFromQuery,
+} from '../builder/index.js'
 import { isRefProxy } from '../builder/ref-proxy-identity.js'
 import {
   CaseWhenWrapper,
@@ -1478,6 +1481,30 @@ function validateQueryStructure(
         validateExpressionBindings(getWhereExpression(where), childBindings)
       }
       validateQueryStructure(subquery.query, availableBindings)
+      const projected = new Set(
+        (subquery.parentProjection ?? []).map((ref) =>
+          JSON.stringify([ref.bindingId, ref.path]),
+        ),
+      )
+      const required = [
+        ...collectExternalRefsFromQuery(subquery.query),
+        ...(subquery.parentFilters ?? []).flatMap((where) =>
+          collectPropRefs(getWhereExpression(where)),
+        ),
+      ]
+      for (const ref of required) {
+        if (
+          ref.bindingId !== undefined &&
+          availableBindings.has(ref.bindingId) &&
+          !projected.has(JSON.stringify([ref.bindingId, ref.path]))
+        ) {
+          throw new QueryCompilationError(
+            devBuild() && process.env.NODE_ENV !== `production`
+              ? `Include query is missing a captured parent projection for "${ref.path.join(`.`)}".`
+              : codedMessage(239, { path: ref.path }),
+          )
+        }
+      }
     }
   }
 }

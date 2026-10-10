@@ -41,6 +41,11 @@
  * the server row before browser readiness and the browser row after handoff.
  * A hostile observer that omits the committed claim fails at the conflicting
  * preload assertion while the source remains unready.
+ * A Suspense read is itself a preload, even if React abandons its render. With
+ * a pending hydrated stream, that first local preload starts the source and
+ * claims its object identity before commit. A later same-source preload is
+ * accepted and a different same-hash source is rejected at that cut. This
+ * demand is distinct from an ordinary hook's commit-owned subscription.
  * A finite two-source grammar places the same standalone parent and child
  * descriptors in a join, nested FROM, union, or include. Two clients supply
  * different values under equal row keys. A plain per-client value model
@@ -486,6 +491,94 @@ describe(`standalone descriptor query binding`, () => {
       await browser.cleanup()
       await server.cleanup()
       await other.cleanup()
+    }
+  })
+
+  /**
+   * Suspense requests data during render so that React has a promise to retry.
+   * That preload is local demand even if React never commits the render. The
+   * independent ownership rule is first local preload wins: another source
+   * object with the same query hash cannot borrow its hydrated stream. The
+   * fallback, source start, same-source acceptance, and conflicting-preload
+   * error are observed before the held server result settles.
+   */
+  it(`keeps a hydrated stream's source claim from an abandoned Suspense preload`, async () => {
+    const client = new DbClient()
+    client._setSsrServerCleanupEnabled(true)
+    const server = new DbClient()
+    let firstStarts = 0
+    let finishFirst: (() => void) | undefined
+    let finishSecond: (() => void) | undefined
+    const source = (started: (markReady: () => void) => void) =>
+      createCollection({
+        id: `hydrated-suspense-claim`,
+        getKey: (row: Row) => row.id,
+        sync: { sync: ({ markReady }) => started(markReady) },
+      })
+    const first = source((markReady) => {
+      firstStarts++
+      finishFirst = markReady
+    })
+    const second = source((markReady) => {
+      finishSecond = markReady
+    })
+    const serverSource = source((markReady) => markReady())
+    const queryFor = (collection: typeof first) =>
+      new Query()
+        .from({ item: collection })
+        .select(({ item }) => ({ id: item.id, value: item.value }))
+    const firstQuery = queryFor(first)
+    const secondQuery = queryFor(second)
+    let settle!: (value: { rows: Array<{ key: string; value: Row }> }) => void
+    const pending = new Promise<{ rows: Array<{ key: string; value: Row }> }>(
+      (resolve) => {
+        settle = resolve
+      },
+    )
+    let mounted: ReturnType<typeof render> | undefined
+
+    try {
+      expect(getStableQueryBuilderHash(secondQuery)).toBe(
+        getStableQueryBuilderHash(firstQuery),
+      )
+      await server.preloadLiveQuery({ query: queryFor(serverSource) })
+      const queryHash = server.dehydrate().liveQueries![0]!.queryHash
+      client.hydrate({
+        collections: [],
+        liveQueries: [{ queryHash, dehydratedAt: 1, promise: pending }],
+      })
+      const never = new Promise<void>(() => {})
+      function Abandoned(): ReactNode {
+        useLiveSuspenseQuery({ query: firstQuery })
+        throw never
+      }
+
+      mounted = render(
+        <DbProvider client={client}>
+          <Suspense fallback={<div>Waiting</div>}>
+            <Abandoned />
+          </Suspense>
+        </DbProvider>,
+      )
+      expect(mounted.getByText(`Waiting`)).toBeDefined()
+      expect(firstStarts, `Suspense preload begins before commit`).toBe(1)
+      expect(() => client.preloadLiveQuery({ query: secondQuery })).toThrow(
+        /different source Collections/,
+      )
+      expect(() => client.preloadLiveQuery({ query: firstQuery })).not.toThrow()
+    } finally {
+      mounted?.unmount()
+      settle({ rows: [] })
+      finishFirst?.()
+      finishSecond?.()
+      await act(async () => {
+        await pending
+      })
+      await client.cleanup()
+      await server.cleanup()
+      await first.cleanup()
+      await second.cleanup()
+      await serverSource.cleanup()
     }
   })
 
