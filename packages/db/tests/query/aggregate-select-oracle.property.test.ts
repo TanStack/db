@@ -8,6 +8,7 @@ import {
   createLiveQueryCollection,
   eq,
   max,
+  upper,
   sum,
   toArray,
 } from '../../src/query/index.js'
@@ -54,8 +55,10 @@ import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
  * updates and deletes. After each step the driver compares the published rows
  * with the model, or that compilation threw when the model says it must.
  *
- * Each history also chooses whether both queries group by `c.k`, and a shape
- * may hold a nested include. Group order is not part of the law, so rows are
+ * Each history also chooses whether both queries group, by the ref `c.k` or
+ * by the computed `upper(c.k)`, and a shape may hold a nested include. A
+ * grouped history favours the group key over source fields, and conditions
+ * can compare with key values, so a missing key changes the branch taken. Group order is not part of the law, so rows are
  * compared in a fixed order.
  *
  * Limits: one parent field (`x`), one source field (`v`) and one group key
@@ -71,7 +74,7 @@ type Part =
   | { k: `key` }
   | { k: `agg`; fn: `count` | `sum` | `max` }
   | { k: `add`; a: Part; b: Part }
-  | { k: `case`; cond: Part; lit: number; a: Part; b: Part }
+  | { k: `case`; cond: Part; lit: number | string; a: Part; b: Part }
   | { k: `nested`; fields: Record<string, Part> }
 
 type Shape = {
@@ -80,6 +83,12 @@ type Shape = {
   /** A nested include beside the aggregate. */
   include?: boolean
 }
+
+/**
+ * How a history groups: not at all, by the ref `c.k`, or by the computed
+ * expression `upper(c.k)`. The `key` leaf is that group expression.
+ */
+type Grouping = `none` | `key` | `upper`
 
 type Issue = { id: number; k: string; x: number }
 type Comment = { id: number; k: string; v: number }
@@ -133,10 +142,15 @@ function modelThrows(shape: Shape, grouped: boolean): boolean {
   )
 }
 
+function groupKeyOf(row: Comment, grouping: Grouping): string {
+  return grouping === `upper` ? row.k.toUpperCase() : row.k
+}
+
 function evaluate(
   part: Part,
   rows: ReadonlyArray<Comment>,
   parent: Issue | undefined,
+  grouping: Grouping,
 ): unknown {
   switch (part.k) {
     case `lit`:
@@ -146,25 +160,25 @@ function evaluate(
     case `source`:
       throw new Error(`unreachable: the model throws first`)
     case `key`:
-      return rows[0]!.k
+      return groupKeyOf(rows[0]!, grouping)
     case `agg`:
       if (part.fn === `count`) return rows.length
       if (part.fn === `sum`) return rows.reduce((t, r) => t + r.v, 0)
       return Math.max(...rows.map((r) => r.v))
     case `add`:
       return (
-        (evaluate(part.a, rows, parent) as number) +
-        (evaluate(part.b, rows, parent) as number)
+        (evaluate(part.a, rows, parent, grouping) as number) +
+        (evaluate(part.b, rows, parent, grouping) as number)
       )
     case `case`:
-      return evaluate(part.cond, rows, parent) === part.lit
-        ? evaluate(part.a, rows, parent)
-        : evaluate(part.b, rows, parent)
+      return evaluate(part.cond, rows, parent, grouping) === part.lit
+        ? evaluate(part.a, rows, parent, grouping)
+        : evaluate(part.b, rows, parent, grouping)
     case `nested`:
       return Object.fromEntries(
         Object.entries(part.fields).map(([key, child]) => [
           key,
-          evaluate(child, rows, parent),
+          evaluate(child, rows, parent, grouping),
         ]),
       )
   }
@@ -175,21 +189,22 @@ function modelGroup(
   shape: Shape,
   rows: ReadonlyArray<Comment>,
   parent: Issue | undefined,
-  grouped: boolean,
+  grouping: Grouping,
 ): Array<Record<string, unknown>> {
-  const groups = grouped
-    ? [...new Set(rows.map((row) => row.k))].map((k) =>
-        rows.filter((row) => row.k === k),
-      )
-    : rows.length === 0
-      ? []
-      : [rows]
+  const groups =
+    grouping !== `none`
+      ? [...new Set(rows.map((row) => groupKeyOf(row, grouping)))].map((k) =>
+          rows.filter((row) => groupKeyOf(row, grouping) === k),
+        )
+      : rows.length === 0
+        ? []
+        : [rows]
   return sortRows(
     groups.map((group) =>
       Object.fromEntries(
         Object.entries(shape.fields).map(([key, part]) => [
           key,
-          evaluate(part, group, parent),
+          evaluate(part, group, parent, grouping),
         ]),
       ),
     ),
@@ -200,78 +215,105 @@ function modelGroup(
 function sortRows(
   rows: Array<Record<string, unknown>>,
 ): Array<Record<string, unknown>> {
-  return [...rows].sort((a, b) =>
-    JSON.stringify(a) < JSON.stringify(b) ? -1 : 1,
-  )
+  // Compare by a canonical form: key order is not part of the law either.
+  const canonical = (value: unknown): string =>
+    JSON.stringify(value, (_key, inner) =>
+      inner !== null && typeof inner === `object` && !Array.isArray(inner)
+        ? Object.fromEntries(
+            Object.entries(inner).sort(([a], [b]) => (a < b ? -1 : 1)),
+          )
+        : inner,
+    )
+  return [...rows].sort((a, b) => (canonical(a) < canonical(b) ? -1 : 1))
 }
 
 // --- Grammar ---------------------------------------------------------------
 
 const literal = fc.integer({ min: 0, max: 3 })
-const leaf = (include: boolean): fc.Arbitrary<Part> =>
+// A condition may compare with a group key value, so a missing key changes
+// the branch it takes.
+const conditionLiteral = fc.oneof(literal, fc.constantFrom(`a`, `b`, `A`, `B`))
+// A grouped history favours the group key over source fields, so more of its
+// shapes compile and publish values.
+const leaf = (include: boolean, grouped: boolean): fc.Arbitrary<Part> =>
   fc.oneof(
     literal.map((n): Part => ({ k: `lit`, n })),
     ...(include ? [fc.constant<Part>({ k: `parent` })] : []),
-    fc.constant<Part>({ k: `source` }),
-    fc.constant<Part>({ k: `key` }),
+    { weight: grouped ? 1 : 2, arbitrary: fc.constant<Part>({ k: `source` }) },
+    { weight: grouped ? 4 : 1, arbitrary: fc.constant<Part>({ k: `key` }) },
     fc
       .constantFrom(`count` as const, `sum` as const, `max` as const)
       .map((fn): Part => ({ k: `agg`, fn })),
   )
 // Function arguments and conditions are expressions; a nested object is a
 // select value, so it appears only as a field.
-const expression = (include: boolean, depth: number): fc.Arbitrary<Part> =>
+const expression = (
+  include: boolean,
+  grouped: boolean,
+  depth: number,
+): fc.Arbitrary<Part> =>
   depth === 0
-    ? leaf(include)
+    ? leaf(include, grouped)
     : fc.oneof(
-        { weight: 3, arbitrary: leaf(include) },
+        { weight: 3, arbitrary: leaf(include, grouped) },
         fc
           .record({
-            a: expression(include, depth - 1),
-            b: expression(include, depth - 1),
+            a: expression(include, grouped, depth - 1),
+            b: expression(include, grouped, depth - 1),
           })
           .map(({ a, b }): Part => ({ k: `add`, a, b })),
         fc
           .record({
-            cond: expression(include, depth - 1),
-            lit: literal,
-            a: expression(include, depth - 1),
-            b: expression(include, depth - 1),
+            cond: expression(include, grouped, depth - 1),
+            lit: conditionLiteral,
+            a: expression(include, grouped, depth - 1),
+            b: expression(include, grouped, depth - 1),
           })
           .map((c): Part => ({ k: `case`, ...c })),
       )
-const nestedObject = (include: boolean, depth: number): fc.Arbitrary<Part> =>
+const nestedObject = (
+  include: boolean,
+  grouped: boolean,
+  depth: number,
+): fc.Arbitrary<Part> =>
   fc
-    .dictionary(fc.constantFrom(`p`, `q`), expression(include, depth), {
-      minKeys: 1,
-      maxKeys: 2,
-    })
+    .dictionary(
+      fc.constantFrom(`p`, `q`),
+      expression(include, grouped, depth),
+      {
+        minKeys: 1,
+        maxKeys: 2,
+      },
+    )
     .map((fields): Part => ({ k: `nested`, fields }))
 // A conditional whose branches are select objects compiles to a conditional
 // select, not to a function call, so it reaches a separate validation path.
-const part = (include: boolean, depth: number): fc.Arbitrary<Part> =>
+const part = (
+  include: boolean,
+  grouped: boolean,
+  depth: number,
+): fc.Arbitrary<Part> =>
   fc.oneof(
-    { weight: 4, arbitrary: expression(include, depth) },
-    nestedObject(include, depth - 1),
+    { weight: 4, arbitrary: expression(include, grouped, depth) },
+    nestedObject(include, grouped, depth - 1),
     fc
       .record({
-        cond: expression(include, depth - 1),
-        lit: literal,
-        a: nestedObject(include, depth - 1),
-        b: nestedObject(include, depth - 1),
+        cond: expression(include, grouped, depth - 1),
+        lit: conditionLiteral,
+        a: nestedObject(include, grouped, depth - 1),
+        b: nestedObject(include, grouped, depth - 1),
       })
       .map((c): Part => ({ k: `case`, ...c })),
   )
-const shape = (include: boolean): fc.Arbitrary<Shape> =>
+// A grouped query needs no aggregate; an ungrouped one is an aggregate query
+// only when it holds one.
+const shape = (include: boolean, grouping: Grouping): fc.Arbitrary<Shape> =>
   fc
     .record({
       fields: fc.dictionary(
         fc.constantFrom(`f0`, `f1`, `f2`),
-        part(include, 2),
-        {
-          minKeys: 1,
-          maxKeys: 3,
-        },
+        part(include, grouping !== `none`, 2),
+        { minKeys: 1, maxKeys: 3 },
       ),
       spread: fc.option(
         fc.constantFrom<`source` | `parent`>(
@@ -283,7 +325,9 @@ const shape = (include: boolean): fc.Arbitrary<Shape> =>
       ),
       include: fc.boolean().map((b) => (b ? true : undefined)),
     })
-    .filter((s) => Object.values(s.fields).some(hasAggregate))
+    .filter(
+      (s) => grouping !== `none` || Object.values(s.fields).some(hasAggregate),
+    )
 
 type Step =
   | { t: `parent`; id: number; x: number }
@@ -308,6 +352,9 @@ const step: fc.Arbitrary<Step> = fc.oneof(
 // --- Driver ----------------------------------------------------------------
 
 /** Build the select value of a part from the query's refs. */
+/** The group expression of the current history. */
+let keyExpression: (c: any) => any = (c) => c.k
+
 function build(p: Part, c: any, issue: any): any {
   switch (p.k) {
     case `lit`:
@@ -317,7 +364,7 @@ function build(p: Part, c: any, issue: any): any {
     case `source`:
       return c.v
     case `key`:
-      return c.k
+      return keyExpression(c)
     case `agg`:
       return p.fn === `count`
         ? count(c.id)
@@ -367,9 +414,11 @@ function buildSelect(
 async function runHistory(
   top: Shape,
   nested: Shape,
-  grouped: boolean,
+  grouping: Grouping,
   steps: ReadonlyArray<Step>,
 ): Promise<void> {
+  const grouped = grouping !== `none`
+  keyExpression = grouping === `upper` ? (c) => upper(c.k) : (c) => c.k
   const suffix = Math.random().toString(36).slice(2)
   let issues: Array<Issue> = [
     { id: 1, k: `a`, x: 1 },
@@ -407,7 +456,7 @@ async function runHistory(
   }
   // A grouped query groups by `c.k`; its select may read that group key.
   const group = (query: any) =>
-    grouped ? query.groupBy(({ c }: any) => c.k) : query
+    grouped ? query.groupBy(({ c }: any) => keyExpression(c)) : query
   const topQuery = compile(() =>
     createLiveQueryCollection((q) =>
       group(q.from({ c: commentSource })).select(({ c }: any) =>
@@ -454,7 +503,7 @@ async function runHistory(
             topQuery.value.toArray.map((row: any) => stripVirtualProps(row)),
           ),
           `${label}: top-level rows`,
-        ).toEqual(modelGroup(top, comments, undefined, grouped))
+        ).toEqual(modelGroup(top, comments, undefined, grouping))
       }
       if (includeQuery.ok) {
         for (const issue of issues) {
@@ -469,7 +518,7 @@ async function runHistory(
               nested,
               comments.filter((comment) => comment.k === issue.k),
               issue,
-              grouped,
+              grouping,
             ),
           )
         }
@@ -515,19 +564,23 @@ async function runHistory(
   }
 }
 
-const history = fc.tuple(
-  shape(false),
-  shape(true),
-  fc.boolean(),
-  fc.array(step, { maxLength: 6 }),
-)
+const history = fc
+  .constantFrom<Grouping>(`none`, `key`, `upper`)
+  .chain((grouping) =>
+    fc.tuple(
+      shape(false, grouping),
+      shape(true, grouping),
+      fc.constant(grouping),
+      fc.array(step, { maxLength: 6 }),
+    ),
+  )
 
 describe(`aggregate select shapes`, () => {
   it(`match the model across generated shapes (fixed campaign)`, async () => {
     // A repeatable baseline. Seed 2094 is arbitrary.
     await fc.assert(
-      fc.asyncProperty(history, ([top, nested, grouped, steps]) =>
-        runHistory(top, nested, grouped, steps),
+      fc.asyncProperty(history, ([top, nested, grouping, steps]) =>
+        runHistory(top, nested, grouping, steps),
       ),
       { numRuns: oracleRuns(120), seed: 2094 },
     )
@@ -535,10 +588,21 @@ describe(`aggregate select shapes`, () => {
 
   it(`match the model across generated shapes (random or replayed)`, async () => {
     await fc.assert(
-      fc.asyncProperty(history, ([top, nested, grouped, steps]) =>
-        runHistory(top, nested, grouped, steps),
+      fc.asyncProperty(history, ([top, nested, grouping, steps]) =>
+        runHistory(top, nested, grouping, steps),
       ),
       oraclePropertyOptions(120, PROPERTY),
+    )
+  })
+
+  // Pinned replay of a review counterexample: a grouped select value that
+  // holds the group key inside a function must read the group's key.
+  it(`reads the group key inside a function`, async () => {
+    await runHistory(
+      { fields: { f0: { k: `add`, a: { k: `lit`, n: 0 }, b: { k: `key` } } } },
+      { fields: { f0: { k: `agg`, fn: `count` } } },
+      `key`,
+      [],
     )
   })
 })

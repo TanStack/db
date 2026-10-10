@@ -268,12 +268,15 @@ normalizing only the later group key is too late.
 
 An aggregate query has one row per group: one group without `groupBy`, or one
 per group key, within each route inside an include. Each select value must
-have one value for its group outside its aggregates: a literal, a group key,
-or a parent field that the route's parent context supplies. Any other field of
+have one value for its group outside its aggregates: a literal, a group key
+(a `groupBy` expression, a ref or a computed one), or a parent field that the
+route's parent context supplies. Every such value is evaluated with its group
+keys substituted, as the parts of a wrapped aggregate are. Any other field of
 the query's own sources has none, wherever it appears, so the query throws
 `NonAggregateExpressionNotInGroupByError`. A spread throws too, because a
 parent context holds only the parent fields the query names, and so does a
-nested include, which has one Collection per row. Recorded limit: parents that
+nested include in a grouped or aggregate select, which has one Collection per
+row. Recorded limit: parents that
 are equal under query equality but differ exactly, such as `x: 0` and `x: -0`,
 share a route, so a parent field can show the other parent's exact value,
 which is equal under query equality.

@@ -289,37 +289,6 @@ function getRowVirtualMetadata(row: NamespacedRow): RowVirtualMetadata {
 const { sum, count, avg, min, max } = groupByOperators
 
 /**
- * Validates that all non-aggregate expressions in SELECT are present in GROUP BY
- * and creates a cached mapping for efficient lookup during processing
- */
-function validateAndCreateMapping(
-  groupByClause: GroupBy,
-  selectClause?: Select,
-): Map<string, number> {
-  const selectToGroupByIndex = new Map<string, number>()
-
-  if (!selectClause) {
-    return selectToGroupByIndex
-  }
-
-  // Validate each SELECT expression
-  for (const [alias, expr] of Object.entries(selectClause)) {
-    if (expr.type === `agg` || containsAggregate(expr)) {
-      // Aggregate expressions (plain or wrapped) are allowed and don't need to be in GROUP BY
-      continue
-    }
-
-    // A group key maps to its group value; the caller checks the rest.
-    const groupIndex = groupByClause.findIndex((groupExpr) =>
-      expressionsEqual(expr, groupExpr),
-    )
-    if (groupIndex !== -1) selectToGroupByIndex.set(alias, groupIndex)
-  }
-
-  return selectToGroupByIndex
-}
-
-/**
  * Processes the GROUP BY clause with optional HAVING and SELECT
  * Works with the new $selected structure from early SELECT processing
  */
@@ -362,30 +331,18 @@ export function processGroupBy(
   }
 
   const singleGroup = groupByClause.length === 0
-  const mapping = singleGroup
-    ? undefined
-    : validateAndCreateMapping(groupByClause, selectClause)
-  // A non-aggregate select value that is not a group key has a value for the
-  // group only when it is constant within it: a literal, or a parent field,
+  // Outside its aggregates, a select value has a value for the group only
+  // when it is constant within it: a literal, a group key, or a parent field,
   // which the route fixes. A field of the query's own sources has none, and
   // neither does a spread: a route's parent context holds only the parent
-  // fields the query names. The parts of a wrapped aggregate outside its
-  // aggregates follow the same rule; a group key has one value per group.
-  let constantFields: ((row: NamespacedRow) => Record<string, any>) | undefined
+  // fields the query names.
   if (selectClause) {
-    const fieldsOnly: Select = {}
     for (const [alias, expr] of Object.entries(selectClause)) {
-      if (mapping?.has(alias)) continue
-      const aggregated = expr.type === `agg` || containsAggregate(expr)
       if (lacksGroupValue(alias, expr, sourceAliases, groupByClause))
         throw new NonAggregateExpressionNotInGroupByError(
-          alias.startsWith(SPREAD_SENTINEL)
-            ? `...${alias.slice(SPREAD_SENTINEL.length).split(`__`)[0]}`
-            : alias,
+          alias.startsWith(SPREAD_SENTINEL) ? `...${spreadPath(alias)}` : alias,
         )
-      if (!aggregated) fieldsOnly[alias] = expr
     }
-    constantFields = compileGroupedSelectObject(fieldsOnly)
   }
 
   // Pre-compile groupBy expressions
@@ -480,13 +437,21 @@ export function processGroupBy(
           addAggregate(syntheticAlias, aggExpr)
         }
         wrappedAggExprs[alias] = compileGroupedSelectValue(
-          singleGroup
-            ? transformed
-            : replaceGroupByRefsInSelectValue(
-                transformed,
-                groupByClause,
-                fields.groupKeyRefs,
-              ),
+          replaceGroupByRefsInSelectValue(
+            transformed,
+            groupByClause,
+            fields.groupKeyRefs,
+          ),
+        )
+      } else {
+        // A literal, group key or parent field reads the group's key values
+        // and the route's parent context, as a wrapped aggregate does.
+        wrappedAggExprs[alias] = compileGroupedSelectValue(
+          replaceGroupByRefsInSelectValue(
+            expr as SelectValueExpression,
+            groupByClause,
+            fields.groupKeyRefs,
+          ),
         )
       }
     }
@@ -508,26 +473,13 @@ export function processGroupBy(
   // Update $selected to handle GROUP BY results
   pipeline = pipeline.pipe(
     map(([, aggregatedRow]) => {
-      // Start with the existing $selected from early SELECT processing
-      const selectResults = (aggregatedRow as any).$selected || {}
-      const finalResults: Record<string, any> = {
-        ...(singleGroup ? selectResults : {}),
-        ...constantFields?.(getGroupEvaluationRow(aggregatedRow, fields)),
-      }
+      const finalResults: Record<string, any> = {}
 
       if (selectClause) {
-        // First pass: populate group keys, plain aggregates, and synthetic aliases
+        // Plain aggregates first; every other value reads them, the group
+        // keys, and the route's parent context.
         for (const [alias, expr] of Object.entries(selectClause)) {
-          if (expr.type === `agg`) {
-            finalResults[alias] = aggregatedRow[alias]
-          } else if (!singleGroup && !wrappedAggExprs[alias]) {
-            // Use cached mapping to get the corresponding __key_X for non-aggregates
-            // A constant field is already set; a group key reads its value.
-            const groupIndex = mapping?.get(alias)
-            if (groupIndex !== undefined)
-              finalResults[alias] =
-                aggregatedRow[fields.groupValues[groupIndex]!]
-          }
+          if (expr.type === `agg`) finalResults[alias] = aggregatedRow[alias]
         }
         evaluateWrappedAggregates(
           finalResults,
@@ -641,6 +593,13 @@ export function processGroupBy(
 }
 
 const SPREAD_SENTINEL = `__SPREAD_SENTINEL__`
+
+/** The path a spread sentinel key names, as `__SPREAD_SENTINEL__<path>__<id>`. */
+function spreadPath(key: string): string {
+  const rest = key.slice(SPREAD_SENTINEL.length)
+  const idIndex = rest.lastIndexOf(`__`)
+  return idIndex >= 0 ? rest.slice(0, idIndex) : rest
+}
 
 /**
  * Whether a select value has no single value for an aggregate's group: it
@@ -1069,14 +1028,12 @@ function replaceGroupByRefsInExpression(
   groupByClause: GroupBy,
   groupKeyRefs: Array<string>,
 ): BasicExpression {
-  if (expr.type === `ref`) {
-    const groupIndex = groupByClause.findIndex((groupExpr) =>
-      expressionsEqual(expr, groupExpr),
-    )
-    return groupIndex === -1
-      ? expr
-      : new PropRef([`$selected`, groupKeyRefs[groupIndex]!], `$selected`)
-  }
+  // A group expression, a ref or a computed one, reads the group's value.
+  const groupIndex = groupByClause.findIndex((groupExpr) =>
+    expressionsEqual(expr, groupExpr),
+  )
+  if (groupIndex !== -1)
+    return new PropRef([`$selected`, groupKeyRefs[groupIndex]!], `$selected`)
 
   if (expr.type === `func`) {
     return new Func(

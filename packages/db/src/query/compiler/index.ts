@@ -713,8 +713,11 @@ export function compileQuery(
   if (query.select) {
     const includesEntries = extractIncludesFromSelect(query.select)
     // A nested include has one Collection per row, not one value per group,
-    // so it cannot sit beside an aggregate.
-    if (includesEntries.length > 0 && containsAggregate(query.select))
+    // so it cannot sit in a grouped or aggregate select.
+    if (
+      includesEntries.length > 0 &&
+      ((query.groupBy?.length ?? 0) > 0 || containsAggregate(query.select))
+    )
       throw new NonAggregateExpressionNotInGroupByError(includesEntries[0]!.key)
     if (includesEntries.length > 0) {
       query = { ...query, select: { ...query.select } }
@@ -1050,12 +1053,15 @@ export function compileQuery(
   // When in includes mode (parentKeyStream), pass mainSource so that groupBy
   // preserves route metadata for per-parent aggregation.
   const groupByMainSource = parentKeyStream ? mainSource : undefined
+  const sourceAliases = new Set(
+    getAllSources(query).map((source) => source.alias),
+  )
   if (query.groupBy && query.groupBy.length > 0) {
     pipeline = processGroupBy(
       pipeline,
       query.groupBy,
       valueIdentity,
-      new Set(getAllSources(query).map((source) => source.alias)),
+      sourceAliases,
       query.having,
       query.select,
       query.fnHaving,
@@ -1069,7 +1075,7 @@ export function compileQuery(
       pipeline,
       [], // Empty group by means single group
       valueIdentity,
-      new Set(getAllSources(query).map((source) => source.alias)),
+      sourceAliases,
       query.having,
       query.select,
       query.fnHaving,
