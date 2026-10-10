@@ -237,6 +237,60 @@ describe('optimizer aggregate semantics', () => {
     })
   }
 
+  // A literal field of an aggregate subquery has one value for every group,
+  // but no source row holds it. Under a join the optimizer pushes outer
+  // predicates toward sources; one on a literal field must stay outside the
+  // aggregate subquery, where it would remove every source row.
+  test('literal-field filtering keeps each aggregate whole under a left join', () => {
+    const source = createCollection(
+      mockSyncCollectionOptions<Row>({
+        id: `optimizer-literal-source`,
+        getKey: (row) => row.id,
+        initialData: rows,
+      }),
+    )
+    const anchor = createCollection(
+      mockSyncCollectionOptions({
+        id: `optimizer-literal-anchor`,
+        getKey: (row: { id: number; target: number }) => row.id,
+        initialData: [{ id: 1, target: 1 }],
+      }),
+    )
+    const total = (filter: (row: Row) => boolean) =>
+      rows.filter(filter).reduce((n, row) => n + row.v, 0)
+    const keys = [...new Set(rows.map((row) => row.k))].sort((a, b) =>
+      a < b ? -1 : 1,
+    )
+    for (const grouped of [false, true]) {
+      const query = createLiveQueryCollection({
+        startSync: true,
+        query: (q) => {
+          const base = q.from({ b: source })
+          const summary = grouped
+            ? base
+                .groupBy(({ b }) => b.k)
+                .select(({ b }) => ({ k: b.k, tag: `x`, total: sum(b.v) }))
+            : base.select(({ b }) => ({ k: 1, tag: `x`, total: sum(b.v) }))
+          return q
+            .from({ s: summary })
+            .leftJoin({ a: anchor }, ({ s, a }) => eq(s.k, a.target))
+            .where(({ s }) => eq(s.tag, `x`))
+            .select(({ s }) => ({ k: s.k, total: s.total }))
+        },
+      })
+      expect(
+        query.toArray
+          .map(stripVirtualProps)
+          .sort((a: any, b: any) => (a.k < b.k ? -1 : 1)),
+        grouped ? `grouped` : `single group`,
+      ).toEqual(
+        grouped
+          ? keys.map((k) => ({ k, total: total((row) => row.k === k) }))
+          : [{ k: 1, total: total(() => true) }],
+      )
+    }
+  })
+
   test('group-key filtering keeps each grouped aggregate under a left join', () => {
     const source = createCollection(
       mockSyncCollectionOptions<Row>({
