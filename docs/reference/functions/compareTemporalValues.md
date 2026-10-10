@@ -7,7 +7,7 @@ title: compareTemporalValues
 function compareTemporalValues(a, b): number;
 ```
 
-Defined in: [packages/db/src/utils/comparison.ts:310](https://github.com/TanStack/db/blob/main/packages/db/src/utils/comparison.ts#L310)
+Defined in: [packages/db/src/utils/comparison.ts:313](https://github.com/TanStack/db/blob/main/packages/db/src/utils/comparison.ts#L313)
 
 Compare two Temporal values of the same type, returning -1, 0, or 1.
 

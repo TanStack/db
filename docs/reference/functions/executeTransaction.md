@@ -5,13 +5,13 @@ title: executeTransaction
 
 ```ts
 function executeTransaction<T>(
-   db,
-   storeNames,
-   mode,
+   db, 
+   storeNames, 
+   mode, 
 callback): Promise<T>;
 ```
 
-Defined in: packages/db/src/indexed-db-wrapper.ts:248
+Defined in: [packages/db/src/indexed-db-wrapper.ts:266](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db-wrapper.ts#L266)
 
 Executes a callback within an IndexedDB transaction.
 

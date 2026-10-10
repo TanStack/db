@@ -15,4 +15,4 @@ type DbClientEvent =
 };
 ```
 
-Defined in: [packages/db/src/client.ts:146](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L146)
+Defined in: [packages/db/src/client.ts:148](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L148)
