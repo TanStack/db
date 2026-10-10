@@ -2379,3 +2379,13 @@ Development builds show this message, with `${...}` replaced by values:
 ```text
 Includes subquery for "${fieldName}" reuses an ancestor's source declaration. Use new Query().from({ alias: collection }) in the child instead of passing the ancestor builder to from().
 ```
+
+<a id="error-237"></a>
+
+## Error 237: `query/compiler/index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Query reference "${ref.path.join(`.`)}" is out of scope. Use a source from this query or a containing query.
+```

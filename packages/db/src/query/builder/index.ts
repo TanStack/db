@@ -12,6 +12,7 @@ import {
   QueryRef,
   UnionAll,
   UnionFrom,
+  collectPropRefs,
   isExpressionLike,
 } from '../ir.js'
 import {
@@ -668,7 +669,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
 
     const select = buildNestedSelect(selectObject, {
       aliases,
-      bindingIds: collectSourceTreeBindings(this.query),
+      bindingIds: collectDeclaredBindings(this._getQuery()),
     })
 
     return this._clone({
@@ -1239,41 +1240,18 @@ function buildConditionalSelect(
   return new ConditionalSelect(branches, defaultValue)
 }
 
-/**
- * Recursively collects all PropRef nodes from an expression tree.
- */
-function collectRefsFromExpression(
-  expr: BasicExpression | Aggregate,
-): Array<PropRef> {
-  const refs: Array<PropRef> = []
-  switch (expr.type) {
-    case `ref`:
-      refs.push(expr)
-      break
-    case `func`:
-    case `agg`:
-      for (const arg of expr.args) {
-        refs.push(...collectRefsFromExpression(arg))
-      }
-      break
-    default:
-      break
-  }
-  return refs
-}
-
 function collectRefsFromSelectValue(value: unknown): Array<PropRef> {
   if (
     value instanceof PropRef ||
     value instanceof FuncExpr ||
     value instanceof AggregateExpr
   ) {
-    return collectRefsFromExpression(value)
+    return collectPropRefs(value)
   }
   if (value instanceof ConditionalSelect) {
     return [
       ...value.branches.flatMap((branch) => [
-        ...collectRefsFromExpression(branch.condition),
+        ...collectPropRefs(branch.condition),
         ...collectRefsFromSelectValue(branch.value),
       ]),
       ...(value.defaultValue === undefined
@@ -1297,7 +1275,7 @@ function collectExternalRefsFromQuery(query: QueryIR): Array<PropRef> {
   const localBindings = collectDeclaredBindings(query)
   const refs: Array<PropRef> = []
   const addExpression = (expression: BasicExpression | Aggregate) => {
-    refs.push(...collectRefsFromExpression(expression))
+    refs.push(...collectPropRefs(expression))
   }
   const addWhere = (where: Where) => {
     addExpression(
@@ -1364,7 +1342,7 @@ function collectParentRefsFromQuery(
   const localBindings = collectDeclaredBindings(query)
   const refs: Array<PropRef> = []
   const addExpression = (expression: BasicExpression | Aggregate) => {
-    refs.push(...collectRefsFromExpression(expression))
+    refs.push(...collectPropRefs(expression))
   }
   const addWhere = (where: Where) => {
     addExpression(
@@ -1440,7 +1418,7 @@ function referencesParent(
     typeof where === `object` && `expression` in where
       ? where.expression
       : where
-  return collectRefsFromExpression(expr).some(
+  return collectPropRefs(expr).some(
     (ref) =>
       ref.path[0] != null &&
       parentAliases.includes(ref.path[0]) &&
@@ -1724,33 +1702,6 @@ function collectDeclaredBindings(query: QueryIR): Set<string> {
     bindings.add(from.bindingId)
   }
   for (const join of query.join ?? []) bindings.add(join.from.bindingId)
-  return bindings
-}
-
-/** Include ancestor source declarations without binding union output fields. */
-function collectSourceTreeBindings(
-  query: Partial<QueryIR>,
-  bindings = new Set<string>(),
-  seen = new Set<Partial<QueryIR>>(),
-): Set<string> {
-  if (seen.has(query)) return bindings
-  seen.add(query)
-
-  const addSource = (source: CollectionRef | QueryRef) => {
-    bindings.add(source.bindingId)
-    if (source instanceof QueryRef)
-      collectSourceTreeBindings(source.query, bindings, seen)
-  }
-  const from = query.from
-  if (from?.type === `unionFrom`) {
-    for (const source of from.sources) addSource(source)
-  } else if (from?.type === `unionAll`) {
-    for (const branch of from.queries)
-      collectSourceTreeBindings(branch, bindings, seen)
-  } else if (from) {
-    addSource(from)
-  }
-  for (const join of query.join ?? []) addSource(join.from)
   return bindings
 }
 
