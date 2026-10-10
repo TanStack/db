@@ -150,8 +150,11 @@ A source declaration may be placed in sibling query scopes, but one builder's
 source declaration cannot serve as both an ancestor and a descendant in an
 include. Those scopes need distinct binding IDs. Start the descendant with a
 fresh `new Query().from(...)`, even when it reads the same Collection.
-A join operand captured from an unrelated query is outside the lexical scope,
-even when its alias matches a local source, and must be rejected.
+A bound reference captured from an unrelated query is outside the lexical
+scope, even when its alias matches a local source, and must be rejected before
+its expression can accept rows. This applies to join operands, predicates,
+grouping, ordering, and projections. Functional callbacks receive row values
+at runtime and do not carry statically inspectable binding references.
 A `QueryRef` or union branch exports its result, not its internal source
 declarations, to the containing query or an include. A joined `QueryRef` may
 read actual ancestor route context, but it does not receive the enclosing

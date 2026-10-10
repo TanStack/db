@@ -44,8 +44,11 @@ import {
   PropRef,
   Value as ValClass,
   collectCollectionSources,
+  collectPropRefs,
   getFromSources,
+  getHavingExpression,
   getWhereExpression,
+  isBasicOrAggregateExpression,
   isExpressionLike,
 } from '../ir.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
@@ -58,11 +61,7 @@ import {
   isCaseWhenConditionTrue,
   toBooleanPredicate,
 } from './evaluators.js'
-import {
-  getJoinReferences,
-  processJoins,
-  registerLazyDemandPlan,
-} from './joins.js'
+import { processJoins, registerLazyDemandPlan } from './joins.js'
 import { containsAggregate, processGroupBy } from './group-by.js'
 import { getLazyLoadTargets } from './lazy-targets.js'
 import { processOrderBy } from './order-by.js'
@@ -85,6 +84,7 @@ import type { ValueIdentity } from '../equality-value-identity.js'
 import type { CollectionSubscription } from '../../collection/subscription.js'
 import type { OrderByOptimizationInfo } from './order-by.js'
 import type {
+  Aggregate,
   BasicExpression,
   CollectionRef,
   IncludesMaterialization,
@@ -1366,6 +1366,43 @@ function canonicalizeSelectedRows(
 }
 
 /** Validate each lexical scope before optimization changes the plan. */
+function validateExpressionBindings(
+  expression: BasicExpression | Aggregate,
+  availableBindings: ReadonlySet<string>,
+): void {
+  for (const ref of collectPropRefs(expression)) {
+    if (ref.bindingId !== undefined && !availableBindings.has(ref.bindingId)) {
+      throw new QueryCompilationError(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `Query reference "${ref.path.join(`.`)}" is out of scope. Use a source from this query or a containing query.`
+          : codedMessage(237, { path: ref.path }),
+      )
+    }
+  }
+}
+
+function validateSelectBindings(
+  value: unknown,
+  availableBindings: ReadonlySet<string>,
+): void {
+  if (value instanceof IncludesSubquery) return
+  if (isBasicOrAggregateExpression(value)) {
+    validateExpressionBindings(value, availableBindings)
+  } else if (value instanceof ConditionalSelect) {
+    for (const branch of value.branches) {
+      validateExpressionBindings(branch.condition, availableBindings)
+      validateSelectBindings(branch.value, availableBindings)
+    }
+    if (value.defaultValue !== undefined) {
+      validateSelectBindings(value.defaultValue, availableBindings)
+    }
+  } else if (isNestedSelectObject(value)) {
+    for (const nested of Object.values(value)) {
+      validateSelectBindings(nested, availableBindings)
+    }
+  }
+}
+
 function validateQueryStructure(
   query: QueryIR,
   ancestorBindings: ReadonlySet<string> = new Set(),
@@ -1409,21 +1446,35 @@ function validateQueryStructure(
       }
       const joinBindings = new Set(availableBindings)
       joinBindings.add(joinClause.from.bindingId)
-      for (const ref of getJoinReferences(joinClause.on)) {
-        if (ref.bindingId !== undefined && !joinBindings.has(ref.bindingId)) {
-          throw new QueryCompilationError(
-            devBuild() && process.env.NODE_ENV !== `production`
-              ? `Join reference "${ref.path.join(`.`)}" is out of scope. Use a source from this query or a containing query.`
-              : codedMessage(237, { path: ref.path }),
-          )
-        }
-      }
+      validateExpressionBindings(joinClause.on, joinBindings)
       availableBindings.add(joinClause.from.bindingId)
     }
   }
 
+  for (const where of query.where ?? []) {
+    validateExpressionBindings(getWhereExpression(where), availableBindings)
+  }
+  for (const expression of query.groupBy ?? []) {
+    validateExpressionBindings(expression, availableBindings)
+  }
+  for (const having of query.having ?? []) {
+    validateExpressionBindings(getHavingExpression(having), availableBindings)
+  }
+  for (const { expression } of query.orderBy ?? []) {
+    validateExpressionBindings(expression, availableBindings)
+  }
   if (query.select) {
+    validateSelectBindings(query.select, availableBindings)
     for (const { subquery } of extractIncludesFromSelect(query.select)) {
+      validateExpressionBindings(subquery.correlationField, availableBindings)
+      const childBindings = new Set(availableBindings)
+      for (const source of getAllSources(subquery.query)) {
+        childBindings.add(source.bindingId)
+      }
+      validateExpressionBindings(subquery.childCorrelationField, childBindings)
+      for (const where of subquery.parentFilters ?? []) {
+        validateExpressionBindings(getWhereExpression(where), childBindings)
+      }
       validateQueryStructure(subquery.query, availableBindings)
     }
   }

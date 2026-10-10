@@ -2387,5 +2387,5 @@ Includes subquery for "${fieldName}" reuses an ancestor's source declaration. Us
 Development builds show this message, with `${...}` replaced by values:
 
 ```text
-Join reference "${ref.path.join(`.`)}" is out of scope. Use a source from this query or a containing query.
+Query reference "${ref.path.join(`.`)}" is out of scope. Use a source from this query or a containing query.
 ```

@@ -883,9 +883,9 @@
   },
   "237": {
     "file": "query/compiler/index.ts",
-    "template": "Join reference \"${ref.path.join(`.`)}\" is out of scope. Use a source from this query or a containing query.",
+    "template": "Query reference \"${ref.path.join(`.`)}\" is out of scope. Use a source from this query or a containing query.",
     "literals": [
-      "Join reference \"",
+      "Query reference \"",
       "\" is out of scope. Use a source from this query or a containing query."
     ]
   }

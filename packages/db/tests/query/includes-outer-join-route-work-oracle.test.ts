@@ -7,6 +7,7 @@ import {
 } from '../../src/query/index.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
+import { flushPromises } from '../utils.js'
 import { createScopedSource } from './includes-scope-identity-oracle.js'
 import type { crossJoinParentRoutes } from '../../src/query/compiler/parent-routes.js'
 
@@ -27,10 +28,11 @@ import type { crossJoinParentRoutes } from '../../src/query/compiler/parent-rout
  * its unmatched joined rows can belong to a parent and do require routing.
  *
  * The driver uses public Query and Collection APIs. A transparent wrapper
- * counts calls to the compiler's route assembler at preload; public rows are
- * checked at the same cut. This finite fixture crosses RIGHT/FULL and eager or
- * on-demand direct sources, with two parents, matched and unmatched sides, and
- * applicable indexes.
+ * counts calls to the compiler's route assembler at preload and after each
+ * write; public rows are checked at the same cuts. This finite fixture crosses
+ * RIGHT/FULL and eager or on-demand direct sources, with two parents, matched
+ * and unmatched sides, and applicable indexes. The history changes a main
+ * row's join key, removes a matched row, restores it, and moves the key back.
  * It does not measure index traversal, real-provider delivery, or QueryRef
  * routing, which the primary alias oracle checks for row correctness.
  */
@@ -118,6 +120,7 @@ describe(`direct outer-join route work`, () => {
           { id: 11, parentId: 1, anchorId: 99 },
         ]
         const observe = async (anchorRows: Array<Anchor>, size: string) => {
+          const currentMains = new Map(mainRows.map((row) => [row.id, row]))
           const parents = createScopedSource(
             `route-work-parent-${kind}-${mode}-${size}`,
             parentRows,
@@ -166,21 +169,62 @@ describe(`direct outer-join route work`, () => {
 
           return withHistoryCleanup(
             async () => {
+              const cuts: Array<{
+                cut: string
+                rows: Array<Expected>
+                assemblies: number
+              }> = []
+              const check = (cut: string) => {
+                const rows = sortRows(
+                  live.toArray.flatMap(({ id, rows: children }) =>
+                    children.map(({ mainId, anchorId }) => ({
+                      parentId: id,
+                      mainId,
+                      anchorId,
+                    })),
+                  ),
+                )
+                expect(rows, `${size} at ${cut}`).toEqual(
+                  model(
+                    parentRows,
+                    [...currentMains.values()],
+                    anchorRows,
+                    kind,
+                  ),
+                )
+                cuts.push({ cut, rows, assemblies: routeWork.assemblies })
+              }
               routeWork.assemblies = 0
               await live.preload()
-              const rows = sortRows(
-                live.toArray.flatMap(({ id, rows: children }) =>
-                  children.map(({ mainId, anchorId }) => ({
-                    parentId: id,
-                    mainId,
-                    anchorId,
-                  })),
-                ),
-              )
-              expect(rows).toEqual(
-                model(parentRows, mainRows, anchorRows, kind),
-              )
-              return { rows, assemblies: routeWork.assemblies }
+              check(`preload`)
+
+              const moved = { id: 11, parentId: 1, anchorId: 7 }
+              currentMains.set(11, moved)
+              routeWork.assemblies = 0
+              mains.put(moved)
+              await flushPromises()
+              check(`main key moves into match`)
+
+              currentMains.delete(10)
+              routeWork.assemblies = 0
+              mains.remove(10)
+              await flushPromises()
+              check(`matched main row disappears`)
+
+              const restored = { id: 10, parentId: 1, anchorId: 7 }
+              currentMains.set(10, restored)
+              routeWork.assemblies = 0
+              mains.put(restored)
+              await flushPromises()
+              check(`matched main row returns`)
+
+              const movedBack = { id: 11, parentId: 1, anchorId: 99 }
+              currentMains.set(11, movedBack)
+              routeWork.assemblies = 0
+              mains.put(movedBack)
+              await flushPromises()
+              check(`main key moves out of match`)
+              return cuts
             },
             () => [
               () => live.cleanup(),
@@ -196,8 +240,12 @@ describe(`direct outer-join route work`, () => {
           [{ id: 7 }, { id: 8 }, { id: 9 }],
           `scaled`,
         )
-        expect(scaled.rows).toEqual(baseline.rows)
-        expect(scaled.assemblies).toBe(baseline.assemblies)
+        expect(scaled.map(({ rows }) => rows)).toEqual(
+          baseline.map(({ rows }) => rows),
+        )
+        expect(scaled.map(({ assemblies }) => assemblies)).toEqual(
+          baseline.map(({ assemblies }) => assemblies),
+        )
       })
     }
   }

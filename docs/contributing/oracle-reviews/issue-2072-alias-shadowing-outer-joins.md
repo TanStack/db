@@ -287,3 +287,75 @@ applies to inline typechecking in this local checkout.
 | Grammar and driver | Root/include × matching/renamed alias × eager/on-demand mode; public Query and live Collection preload. |
 | Observations and refinement | Eight rejection assertions before accepted rows; four true-ancestor controls compare exact public rows after preload. |
 | Sensitivity and limits | A one-line permissive validator mutant fails all eight invalid cells and passes all four controls; the recursive and provider limits remain with the alias-scope owner. |
+
+## Expanded alias-scope laws — 2026-10-10 follow-up
+
+This expansion starts from `a598fa2bb`. The primary executable owner is
+`packages/db/tests/query/includes-alias-shadowing-oracle.test.ts`; the
+companion route-work owner is
+`packages/db/tests/query/includes-outer-join-route-work-oracle.test.ts`.
+`ARCHITECTURE.md` §Identity and law 1 authorize lexical source identity and
+rejection of an unrelated bound reference before its expression accepts rows.
+Law 12 supplies the bounded route-work relation. These tests use plain source
+rows and declaration roles to predict results, without compiler binding maps,
+parent-route metadata, or join classifiers.
+
+**Legal histories and observations.** The primary owner now recomputes four
+two-join chains: RIGHT then LEFT, RIGHT then RIGHT, FULL then FULL, and FULL
+then LEFT. The finite grammar crosses main, first-joined, or second-joined
+parent correlation as applicable; shadowed and renamed aliases; eager and
+controlled on-demand sources; and six writes that remove or restore first and
+second join matches or change an ancestor value. Two parent routes distinguish
+leakage between routes. At initial publication and after every write, the
+driver compares exact public child rows, including the presence of each source.
+The route-work owner now compares public rows and route-assembly counts at
+preload and four main-source writes while irrelevant joined rows grow. It
+asserts equal useful work across fixture sizes, without asserting that a
+particular implementation performs zero assemblies.
+
+**Provenance grammar.** A source hidden inside a parent QueryRef or union
+branch remains unavailable to an include child at one or two recursive levels.
+Sixteen cells cross the four source placements, matching or renamed alias, and
+source mode. Twelve non-join cells reject an unrelated bound reference in WHERE,
+GROUP BY, HAVING, ORDER BY, direct SELECT, or conditional SELECT, with matching
+and renamed aliases. A separate grouped include accepts actual ancestor refs
+through shadowing, grouping, HAVING, ordering, and parent or child writes. Four
+parent-filter cells reject a foreign reference moved out of the child's WHERE;
+four extracted-correlation cells reject a foreign parent field removed from
+that WHERE. Each has an exact-row control using the real parent. Public preload
+is the rejection checkpoint; the valid controls compare public rows.
+
+**Sensitivity and repair.** A temporary later-FULL-as-LEFT mutant failed two
+mixed-chain cells at their first public-row comparison. Restoring the
+source-tree-binding mistake failed eight deeper hidden-source cells by
+resolving preload instead of rejecting. Disabling the new non-join expression
+checks failed all twelve cells at that same rejection assertion. The
+parent-filter gap was RED on the starting validator and a focused mutant
+omitting its repair failed all four parent-filter cells. Omitting validation
+of the extracted correlation field failed all four new correlation cells.
+These were assertion failures at the promised checkpoints, not setup errors or
+timeouts; every temporary mutant was removed. The final validator checks
+visible bindings in join operands, predicates, grouping, ordering, select
+expressions, extracted parent filters, and both correlation fields before
+optimization. The development text for error 237 now says “Query reference”
+to match its wider scope.
+
+**GREEN and limits.** On the final working tree, the two focused owners passed
+170 tests; the query directory passed 4,643 tests in 110 files; and the
+production-error-message oracle passed 19 tests. Separate TypeScript, ESLint,
+Prettier, and whitespace checks passed. The production compiler diff is 65
+added and 14 removed lines, net **+51**; the independent oracle tests grow
+separately to prove the expanded law. The validation machinery accounts for
+the positive production weight. This evidence covers the enumerated histories
+and public checkpoints. Other expression forms, arbitrary join-subquery and
+lazy-target shapes, deeper captures, other chained outer joins, external
+provider schedules, and broader source-work bounds remain open in the
+alias-scope coverage-map owner.
+
+| Oracle responsibility | Evidence or limit |
+| --- | --- |
+| Contract and model (ORC-001–003, 009) | §Identity and laws 1 and 12 supply the promise; plain relational rows and fixture declaration roles supply independent expected results. The executable comments place the law, limits, model, histories, public path, and comparison beside the tests. |
+| Grammar (ORC-004, 007–008) | These are bounded matrices and stateless recomputations, not an important generated property or a new stateful model. The named axes expose absent and present source roles, alias renaming, recursion depth, and extraction boundaries. |
+| Public path and comparison (ORC-005, 010–011) | Public Query and live Collection preload or writes reach compilation. Exact rows, rejection before accepted rows, and bounded route work are checked at their stated cuts; cleanup preserves the primary failure. Valid local and ancestor controls provide opposite formulations. |
+| Calibration (ORC-006, 013) | The five temporary mistakes above fail at intended assertions; none survived or failed only in setup. |
+| Handoff and record (ORC-012, 014) | The coverage-map owner states remaining paths. Controlled on-demand sources do not establish external-provider scheduling or work bounds. |

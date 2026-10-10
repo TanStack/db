@@ -2,10 +2,13 @@ import { describe, expect, test } from 'vitest'
 import {
   Query,
   add,
+  caseWhen,
   count,
   createLiveQueryCollection,
   eq,
+  gt,
   isUndefined,
+  multiply,
   toArray,
 } from '../../src/query/index.js'
 import { getQueryIR } from '../../src/query/builder/query-ir.js'
@@ -3137,6 +3140,317 @@ describe(`chained joins keep an absent local source absent`, () => {
 })
 
 /**
+ * # Later outer joins preserve the source roles of an earlier outer join
+ *
+ * ARCHITECTURE.md §Identity makes an absent child source distinct from an
+ * ancestor with the same alias. A later join can carry ancestor route context,
+ * but it cannot turn that absent source into a present child source. This law
+ * applies whether the first join preserves its right side or both sides, and
+ * whether the next join preserves its left, right, or both sides.
+ *
+ * The model below performs two ordinary relational joins over plain rows. It
+ * represents a missing source with undefined before applying the parent
+ * correlation. Source roles, not alias text or compiler route data, determine
+ * the expected fields. The bounded history crosses four mixed join chains,
+ * correlation through the first main or joined source, shadowing of the source
+ * that can be absent, a renamed control, two source modes, and writes that
+ * remove and restore each join's matches. The public driver compares exact
+ * child rows after preload and each committed write; it does not claim every
+ * join permutation or provider schedule.
+ */
+describe(`mixed outer-join chains retain absent source roles`, () => {
+  type Parent = { id: number; marker: string }
+  type Main = { id: number; parentId: number; anchorId: number }
+  type Anchor = { id: number; parentId: number }
+  type Tag = { id: number; anchorId: number; parentId: number }
+  type Kind = `left` | `right` | `full`
+  type Pair = { main?: Main; anchor?: Anchor; tag?: Tag }
+  type Expected = {
+    parentId: number
+    mainId: number | undefined
+    anchorId: number | undefined
+    tagId: number | undefined
+    marker: string
+    missingMain: boolean
+    missingAnchor: boolean
+    missingTag: boolean
+  }
+  const chains = [
+    { first: `right`, second: `left`, correlation: `joined` },
+    { first: `right`, second: `right`, correlation: `joined` },
+    { first: `full`, second: `full`, correlation: `tag` },
+    { first: `full`, second: `left`, correlation: `main` },
+  ] as const
+
+  const sortRows = (rows: Array<Expected>) =>
+    rows.sort(
+      (a, b) =>
+        a.parentId - b.parentId ||
+        (a.anchorId ?? Infinity) - (b.anchorId ?? Infinity) ||
+        (a.mainId ?? Infinity) - (b.mainId ?? Infinity) ||
+        (a.tagId ?? Infinity) - (b.tagId ?? Infinity),
+    )
+
+  /** Pair source rows without using alias names or the production join path. */
+  const model = (
+    parents: ReadonlyMap<number, Parent>,
+    mains: ReadonlyMap<number, Main>,
+    anchors: ReadonlyMap<number, Anchor>,
+    tags: ReadonlyMap<number, Tag>,
+    first: Kind,
+    second: Kind,
+    correlation: `main` | `joined` | `tag`,
+  ): Array<Expected> => {
+    const firstPairs: Array<Pair> = []
+    for (const main of mains.values()) {
+      const matches = [...anchors.values()].filter(
+        (anchor) => main.anchorId === anchor.id,
+      )
+      for (const anchor of matches) firstPairs.push({ main, anchor })
+      if (matches.length === 0 && first === `full`) firstPairs.push({ main })
+    }
+    if (first === `right` || first === `full`) {
+      for (const anchor of anchors.values()) {
+        if (![...mains.values()].some((main) => main.anchorId === anchor.id)) {
+          firstPairs.push({ anchor })
+        }
+      }
+    }
+
+    const secondPairs: Array<Pair> = []
+    for (const pair of firstPairs) {
+      const matches = [...tags.values()].filter(
+        (tag) => pair.anchor?.id === tag.anchorId,
+      )
+      for (const tag of matches) secondPairs.push({ ...pair, tag })
+      if (matches.length === 0 && second !== `right`) secondPairs.push(pair)
+    }
+    if (second === `right` || second === `full`) {
+      for (const tag of tags.values()) {
+        if (!firstPairs.some((pair) => pair.anchor?.id === tag.anchorId)) {
+          secondPairs.push({ tag })
+        }
+      }
+    }
+
+    return sortRows(
+      [...parents.values()].flatMap((parent) =>
+        secondPairs
+          .filter((pair) =>
+            correlation === `main`
+              ? pair.main?.parentId === parent.id
+              : correlation === `joined`
+                ? pair.anchor?.parentId === parent.id
+                : pair.tag?.parentId === parent.id,
+          )
+          .map((pair) => ({
+            parentId: parent.id,
+            mainId: pair.main?.id,
+            anchorId: pair.anchor?.id,
+            tagId: pair.tag?.id,
+            marker: parent.marker,
+            missingMain: pair.main === undefined,
+            missingAnchor: pair.anchor === undefined,
+            missingTag: pair.tag === undefined,
+          })),
+      ),
+    )
+  }
+
+  for (const { first, second, correlation } of chains) {
+    for (const mode of [`eager`, `onDemand`] as const) {
+      test(`${first} then ${second}, ${correlation} correlation, ${mode} sources`, async () => {
+        const parentRows = new Map<number, Parent>([
+          [1, { id: 1, marker: `ONE` }],
+          [2, { id: 2, marker: `TWO` }],
+        ])
+        const mainRows = new Map<number, Main>([
+          [10, { id: 10, parentId: 1, anchorId: 7 }],
+          [11, { id: 11, parentId: 1, anchorId: 99 }],
+          [20, { id: 20, parentId: 2, anchorId: 20 }],
+        ])
+        const anchorRows = new Map<number, Anchor>([
+          [7, { id: 7, parentId: 1 }],
+          [8, { id: 8, parentId: 1 }],
+          [20, { id: 20, parentId: 2 }],
+        ])
+        const tagRows = new Map<number, Tag>([
+          [70, { id: 70, anchorId: 7, parentId: 1 }],
+          [80, { id: 80, anchorId: 8, parentId: 1 }],
+          [90, { id: 90, anchorId: 90, parentId: 1 }],
+          [200, { id: 200, anchorId: 20, parentId: 2 }],
+        ])
+        const cases = ([`shadowed`, `renamed`] as const).map((spelling) => {
+          const mainAlias =
+            correlation !== `main` && spelling === `shadowed` ? `issue` : `main`
+          const anchorAlias =
+            correlation === `main` && spelling === `shadowed`
+              ? `issue`
+              : `anchor`
+          const name = `mixed-chain-${first}-${second}-${correlation}-${mode}-${spelling}`
+          const parents = createScopedSource(
+            `${name}-parent`,
+            [...parentRows.values()],
+            `eager`,
+          )
+          const mains = createScopedSource(
+            `${name}-main`,
+            [...mainRows.values()],
+            mode,
+          )
+          const anchors = createScopedSource(
+            `${name}-anchor`,
+            [...anchorRows.values()],
+            mode,
+          )
+          const tags = createScopedSource(
+            `${name}-tag`,
+            [...tagRows.values()],
+            mode,
+          )
+          mains.collection.createIndex((row) => row.parentId, {
+            indexType: BasicIndex,
+          })
+          mains.collection.createIndex((row) => row.anchorId, {
+            indexType: BasicIndex,
+          })
+          anchors.collection.createIndex((row) => row.parentId, {
+            indexType: BasicIndex,
+          })
+          anchors.collection.createIndex((row) => row.id, {
+            indexType: BasicIndex,
+          })
+          tags.collection.createIndex((row) => row.anchorId, {
+            indexType: BasicIndex,
+          })
+          tags.collection.createIndex((row) => row.parentId, {
+            indexType: BasicIndex,
+          })
+          const live = createLiveQueryCollection({
+            query: new Query()
+              .from({ issue: parents.collection })
+              .select(({ issue: parent }) => ({
+                id: parent.id,
+                rows: toArray(
+                  new Query()
+                    .from({ [mainAlias]: mains.collection })
+                    .join(
+                      { [anchorAlias]: anchors.collection },
+                      (context: Context) =>
+                        eq(
+                          (context[mainAlias] as Main).anchorId,
+                          (context[anchorAlias] as Anchor).id,
+                        ),
+                      first,
+                    )
+                    .join(
+                      { tag: tags.collection },
+                      (context: Context) =>
+                        eq(
+                          (context[anchorAlias] as Anchor).id,
+                          (context.tag as Tag).anchorId,
+                        ),
+                      second,
+                    )
+                    .where((context: Context) =>
+                      correlation === `main`
+                        ? eq((context[mainAlias] as Main).parentId, parent.id)
+                        : correlation === `joined`
+                          ? eq(
+                              (context[anchorAlias] as Anchor).parentId,
+                              parent.id,
+                            )
+                          : eq((context.tag as Tag).parentId, parent.id),
+                    )
+                    .select((context: Context) => ({
+                      mainId: (context[mainAlias] as Main).id,
+                      anchorId: (context[anchorAlias] as Anchor).id,
+                      tagId: (context.tag as Tag).id,
+                      marker: parent.marker,
+                      missingMain: isUndefined((context[mainAlias] as Main).id),
+                      missingAnchor: isUndefined(
+                        (context[anchorAlias] as Anchor).id,
+                      ),
+                      missingTag: isUndefined((context.tag as Tag).id),
+                    })),
+                ),
+              })),
+          })
+          return { spelling, parents, mains, anchors, tags, live }
+        })
+
+        await withHistoryCleanup(
+          async () => {
+            for (const entry of cases) await entry.live.preload()
+            const check = (cut: string) => {
+              const expected = model(
+                parentRows,
+                mainRows,
+                anchorRows,
+                tagRows,
+                first,
+                second,
+                correlation,
+              )
+              for (const entry of cases) {
+                const actual = sortRows(
+                  entry.live.toArray.flatMap(({ id, rows }) =>
+                    rows.map((row) => ({ parentId: id, ...row })),
+                  ),
+                )
+                expect(actual, `${entry.spelling} at ${cut}`).toEqual(expected)
+              }
+            }
+            check(`initial publication`)
+
+            tagRows.delete(80)
+            for (const entry of cases) entry.tags.remove(80)
+            await flushPromises()
+            check(`second joined source disappears`)
+
+            const newMain = { id: 12, parentId: 1, anchorId: 8 }
+            mainRows.set(12, newMain)
+            for (const entry of cases) entry.mains.put(newMain)
+            await flushPromises()
+            check(`first joined source gains a match`)
+
+            mainRows.delete(12)
+            for (const entry of cases) entry.mains.remove(12)
+            await flushPromises()
+            check(`first joined source loses its match`)
+
+            const restoredTag = { id: 80, anchorId: 8, parentId: 1 }
+            tagRows.set(80, restoredTag)
+            for (const entry of cases) entry.tags.put(restoredTag)
+            await flushPromises()
+            check(`second joined source returns`)
+
+            anchorRows.delete(7)
+            for (const entry of cases) entry.anchors.remove(7)
+            await flushPromises()
+            check(`first joined source disappears`)
+
+            const changedParent = { id: 1, marker: `CHANGED` }
+            parentRows.set(1, changedParent)
+            for (const entry of cases) entry.parents.put(changedParent)
+            await flushPromises()
+            check(`ancestor value changes`)
+          },
+          () =>
+            cases.flatMap((entry) => [
+              () => entry.live.cleanup(),
+              () => entry.parents.collection.cleanup(),
+              () => entry.mains.collection.cleanup(),
+              () => entry.anchors.collection.cleanup(),
+              () => entry.tags.collection.cleanup(),
+            ]),
+        )
+      })
+    }
+  }
+})
+
+/**
  * # Join operands keep their lexical source
  *
  * A captured ancestor reference is an available expression on the main side
@@ -3484,6 +3798,469 @@ describe(`join operands reject captured sources outside lexical scope`, () => {
 })
 
 /**
+ * # An unrelated bound reference cannot acquire a local alias's meaning
+ *
+ * ARCHITECTURE.md §Identity makes a captured reference name its declaration.
+ * The foreign Query below is neither this query nor an ancestor, so its field
+ * cannot be evaluated in a WHERE, GROUP BY, HAVING, ORDER BY, or SELECT
+ * expression. The source-role model
+ * predicts rejection before rows are accepted, regardless of whether the
+ * foreign alias spells the local alias. A valid local reference must still
+ * publish its row. This finite matrix owns those expression positions at
+ * root preload; joins and recursive placements have separate cells above.
+ */
+describe(`non-join expressions reject unrelated bound references`, () => {
+  type Row = { id: number }
+  for (const position of [
+    `where`,
+    `groupBy`,
+    `having`,
+    `orderBy`,
+    `select`,
+    `conditionalSelect`,
+  ] as const) {
+    for (const alias of [`local`, `unrelated`] as const) {
+      test(`${position} rejects a foreign source named ${alias}`, async () => {
+        const foreign = createScopedSource<Row>(
+          `foreign-${position}-${alias}`,
+          [{ id: 999 }],
+          `eager`,
+        )
+        const local = createScopedSource<Row>(
+          `local-${position}-${alias}`,
+          [{ id: 1 }],
+          `eager`,
+        )
+        let foreignRef!: number
+        new Query()
+          .from({ [alias]: foreign.collection })
+          .select((context: Context) => {
+            foreignRef = (context[alias] as Row).id
+            return { id: foreignRef }
+          })
+        const root = new Query().from({ local: local.collection })
+        const createInvalid = () => {
+          switch (position) {
+            case `where`:
+              return createLiveQueryCollection({
+                query: root
+                  .where(({ local: own }) => eq(foreignRef, own.id))
+                  .select(({ local: own }) => ({ id: own.id })),
+              })
+            case `groupBy`:
+              return createLiveQueryCollection({
+                query: root
+                  .groupBy(() => foreignRef)
+                  .select(({ local: own }) => ({
+                    total: count(own.id),
+                  })),
+              })
+            case `having`:
+              return createLiveQueryCollection({
+                query: root
+                  .groupBy(({ local: own }) => own.id)
+                  .select(({ local: own }) => ({
+                    id: own.id,
+                    total: count(own.id),
+                  }))
+                  .having(() => eq(foreignRef, 999)),
+              })
+            case `orderBy`:
+              return createLiveQueryCollection({
+                query: root
+                  .orderBy(() => foreignRef, `asc`)
+                  .select(({ local: own }) => ({ id: own.id })),
+              })
+            case `select`:
+              return createLiveQueryCollection({
+                query: root.select(({ local: own }) => ({
+                  id: own.id,
+                  foreignId: foreignRef,
+                })),
+              })
+            case `conditionalSelect`:
+              return createLiveQueryCollection({
+                query: root.select(({ local: own }) => ({
+                  id: own.id,
+                  selected: caseWhen(eq(foreignRef, own.id), own.id, 0),
+                })),
+              })
+          }
+        }
+        const invalidCleanups: Array<() => unknown | Promise<unknown>> = []
+        const preloadInvalid = async () => {
+          const invalid = createInvalid()
+          invalidCleanups.push(() => invalid.cleanup())
+          await invalid.preload()
+        }
+        const control = createLiveQueryCollection({
+          query: new Query()
+            .from({ local: local.collection })
+            .where(({ local: own }) => eq(own.id, 1))
+            .select(({ local: own }) => ({ id: own.id })),
+        })
+        await withHistoryCleanup(
+          async () => {
+            await control.preload()
+            expect(control.toArray.map(({ id }) => ({ id }))).toEqual([
+              { id: 1 },
+            ])
+            await expect(() => preloadInvalid()).rejects.toThrow(/out of scope/)
+          },
+          () => [
+            ...invalidCleanups,
+            () => control.cleanup(),
+            () => foreign.collection.cleanup(),
+            () => local.collection.cleanup(),
+          ],
+        )
+      })
+    }
+  }
+})
+
+/**
+ * # A real ancestor remains available in grouping, HAVING, and ordering
+ *
+ * The rejected foreign references above must not turn into a ban on captured
+ * ancestors. ARCHITECTURE.md's route-context law says a valid ancestor value
+ * is attached before a child aggregate, filter, or order that uses it. This
+ * plain-row model groups each parent's children by score, keeps groups whose
+ * count exceeds that parent's threshold, and sorts the selected group score
+ * by that parent's direction. Alias spelling is absent from the model. The public include
+ * crosses a shadowed and renamed child alias, eager/on-demand sources, and
+ * parent and child updates; exact ordered child rows are compared at each cut.
+ */
+describe(`grouped includes keep valid ancestor references`, () => {
+  type Parent = { id: number; threshold: number; direction: number }
+  type Child = { id: number; parentId: number; score: number }
+  type Group = { score: number; total: number }
+  const model = (
+    parents: ReadonlyMap<number, Parent>,
+    children: ReadonlyMap<number, Child>,
+  ): Array<{ id: number; rows: Array<Group> }> =>
+    [...parents.values()]
+      .map((parent) => {
+        const counts = new Map<number, number>()
+        for (const child of children.values()) {
+          if (child.parentId === parent.id) {
+            counts.set(child.score, (counts.get(child.score) ?? 0) + 1)
+          }
+        }
+        return {
+          id: parent.id,
+          rows: [...counts]
+            .filter(([, total]) => total > parent.threshold)
+            .map(([score, total]) => ({ score, total }))
+            .sort(
+              (a, b) => a.score * parent.direction - b.score * parent.direction,
+            ),
+        }
+      })
+      .sort((a, b) => a.id - b.id)
+
+  for (const mode of [`eager`, `onDemand`] as const) {
+    test(`${mode} grouped includes use ancestors across shadowing and updates`, async () => {
+      const parentRows = new Map<number, Parent>([
+        [1, { id: 1, threshold: 0, direction: 1 }],
+        [2, { id: 2, threshold: 0, direction: -1 }],
+      ])
+      const childRows = new Map<number, Child>([
+        [10, { id: 10, parentId: 1, score: 1 }],
+        [11, { id: 11, parentId: 1, score: 3 }],
+        [20, { id: 20, parentId: 2, score: 1 }],
+        [21, { id: 21, parentId: 2, score: 1 }],
+        [22, { id: 22, parentId: 2, score: 2 }],
+      ])
+      const cases = ([`issue`, `child`] as const).map((alias) => {
+        const name = `group-ancestor-${mode}-${alias}`
+        const parents = createScopedSource(
+          `${name}-parent`,
+          [...parentRows.values()],
+          `eager`,
+        )
+        const children = createScopedSource(
+          `${name}-child`,
+          [...childRows.values()],
+          mode,
+        )
+        children.collection.createIndex((row) => row.parentId, {
+          indexType: BasicIndex,
+        })
+        const live = createLiveQueryCollection({
+          query: new Query()
+            .from({ issue: parents.collection })
+            .select(({ issue: parent }) => ({
+              id: parent.id,
+              rows: toArray(
+                new Query()
+                  .from({ [alias]: children.collection })
+                  .where((context: Context) =>
+                    eq((context[alias] as Child).parentId, parent.id),
+                  )
+                  .groupBy(
+                    (context: Context) => (context[alias] as Child).score,
+                  )
+                  .select((context: Context) => ({
+                    score: (context[alias] as Child).score,
+                    total: count((context[alias] as Child).id),
+                  }))
+                  .having((context: Context) =>
+                    gt(count((context[alias] as Child).id), parent.threshold),
+                  )
+                  .orderBy(
+                    (context: Context) =>
+                      multiply(
+                        (context.$selected as Group).score,
+                        parent.direction,
+                      ),
+                    `asc`,
+                  ),
+              ),
+            })),
+        })
+        return { alias, parents, children, live }
+      })
+
+      await withHistoryCleanup(
+        async () => {
+          for (const entry of cases) await entry.live.preload()
+          const check = (cut: string) => {
+            const expected = model(parentRows, childRows)
+            for (const entry of cases) {
+              expect(
+                entry.live.toArray
+                  .map(({ id, rows }) => ({
+                    id,
+                    rows: rows.map(({ score, total }) => ({ score, total })),
+                  }))
+                  .sort((a, b) => a.id - b.id),
+                `${entry.alias} at ${cut}`,
+              ).toEqual(expected)
+            }
+          }
+          check(`initial publication`)
+
+          const stricterParent = { id: 2, threshold: 1, direction: -1 }
+          parentRows.set(2, stricterParent)
+          for (const entry of cases) entry.parents.put(stricterParent)
+          await flushPromises()
+          check(`ancestor threshold changes`)
+
+          const changedChild = { id: 22, parentId: 2, score: 1 }
+          childRows.set(22, changedChild)
+          for (const entry of cases) entry.children.put(changedChild)
+          await flushPromises()
+          check(`child changes group`)
+
+          const reversedParent = { id: 1, threshold: 0, direction: -1 }
+          parentRows.set(1, reversedParent)
+          for (const entry of cases) entry.parents.put(reversedParent)
+          await flushPromises()
+          check(`ancestor sort direction changes`)
+        },
+        () =>
+          cases.flatMap((entry) => [
+            () => entry.live.cleanup(),
+            () => entry.parents.collection.cleanup(),
+            () => entry.children.collection.cleanup(),
+          ]),
+      )
+    })
+  }
+})
+
+/**
+ * # Extracting an include filter does not grant a foreign source ancestry
+ *
+ * A child WHERE that also reads its actual parent is evaluated per route.
+ * The builder may move that predicate into the include's parent filters, but
+ * moving it does not make an unrelated bound reference a parent. The model
+ * distinguishes the parent's desired ID from a foreign declaration and
+ * predicts exact rows for the legal filter and rejection for the foreign one.
+ * The grammar crosses foreign alias spelling and source mode. Public preload
+ * is the observation cut, before any invalid rows can be accepted.
+ */
+describe(`include parent filters retain lexical provenance`, () => {
+  type Parent = { id: number; desiredId: number }
+  type Child = { id: number; parentId: number }
+  for (const mode of [`eager`, `onDemand`] as const) {
+    for (const foreignAlias of [`issue`, `unrelated`] as const) {
+      test(`${mode} include filter rejects foreign ${foreignAlias} but accepts its parent`, async () => {
+        const parent = createScopedSource<Parent>(
+          `filter-parent-${mode}-${foreignAlias}`,
+          [{ id: 1, desiredId: 1 }],
+          `eager`,
+        )
+        const child = createScopedSource<Child>(
+          `filter-child-${mode}-${foreignAlias}`,
+          [
+            { id: 1, parentId: 1 },
+            { id: 2, parentId: 1 },
+          ],
+          mode,
+        )
+        const foreign = createScopedSource(
+          `filter-foreign-${mode}-${foreignAlias}`,
+          [{ id: 999 }],
+          mode,
+        )
+        child.collection.createIndex((row) => row.parentId, {
+          indexType: BasicIndex,
+        })
+        child.collection.createIndex((row) => row.id, {
+          indexType: BasicIndex,
+        })
+        let foreignRef!: number
+        new Query()
+          .from({ [foreignAlias]: foreign.collection })
+          .select((context: Context) => {
+            foreignRef = (context[foreignAlias] as { id: number }).id
+            return { id: foreignRef }
+          })
+        const build = (useForeign: boolean) =>
+          createLiveQueryCollection({
+            query: new Query()
+              .from({ issue: parent.collection })
+              .select(({ issue: ancestor }) => ({
+                id: ancestor.id,
+                rows: toArray(
+                  new Query()
+                    .from({ issue: child.collection })
+                    .where(({ issue: own }) => eq(own.parentId, ancestor.id))
+                    .where(({ issue: own }) =>
+                      useForeign
+                        ? eq(foreignRef, own.id)
+                        : eq(own.id, ancestor.desiredId),
+                    )
+                    .select(({ issue: own }) => ({ id: own.id })),
+                ),
+              })),
+          })
+        const invalidCleanups: Array<() => unknown | Promise<unknown>> = []
+        const preloadInvalid = async () => {
+          const live = build(true)
+          invalidCleanups.push(() => live.cleanup())
+          await live.preload()
+        }
+        const valid = build(false)
+
+        await withHistoryCleanup(
+          async () => {
+            await valid.preload()
+            expect(
+              valid.toArray.map(({ id, rows }) => ({
+                id,
+                rows: rows.map(({ id: childId }) => ({ id: childId })),
+              })),
+            ).toEqual([{ id: 1, rows: [{ id: 1 }] }])
+            await expect(() => preloadInvalid()).rejects.toThrow(/out of scope/)
+          },
+          () => [
+            () => valid.cleanup(),
+            ...invalidCleanups,
+            () => parent.collection.cleanup(),
+            () => child.collection.cleanup(),
+            () => foreign.collection.cleanup(),
+          ],
+        )
+      })
+    }
+  }
+})
+
+/**
+ * # Extracted include correlations still require a visible parent source
+ *
+ * ARCHITECTURE.md §Identity gives an include child access to its containing
+ * query's declarations, not a source captured from an unrelated Query. The
+ * builder removes the correlation equality from the child's WHERE, so the
+ * source-role model checks that extracted field separately. A real parent
+ * correlation must publish its child row. An unrelated source must reject
+ * before rows are accepted, whether its alias matches the parent's or not.
+ * The finite driver crosses both alias spellings and controlled source modes
+ * at public preload; it makes no provider scheduling claim.
+ */
+describe(`extracted include correlations retain lexical provenance`, () => {
+  type Parent = { id: number }
+  type Child = { id: number; parentId: number }
+  for (const mode of [`eager`, `onDemand`] as const) {
+    for (const foreignAlias of [`issue`, `unrelated`] as const) {
+      test(`${mode} correlation rejects foreign ${foreignAlias} but accepts its parent`, async () => {
+        const parent = createScopedSource<Parent>(
+          `correlation-parent-${mode}-${foreignAlias}`,
+          [{ id: 1 }],
+          `eager`,
+        )
+        const child = createScopedSource<Child>(
+          `correlation-child-${mode}-${foreignAlias}`,
+          [{ id: 10, parentId: 1 }],
+          mode,
+        )
+        const foreign = createScopedSource<Parent>(
+          `correlation-foreign-${mode}-${foreignAlias}`,
+          [{ id: 999 }],
+          mode,
+        )
+        child.collection.createIndex((row) => row.parentId, {
+          indexType: BasicIndex,
+        })
+        let foreignRef!: number
+        new Query()
+          .from({ [foreignAlias]: foreign.collection })
+          .select((context: Context) => {
+            foreignRef = (context[foreignAlias] as Parent).id
+            return { id: foreignRef }
+          })
+        const build = (useForeign: boolean) =>
+          createLiveQueryCollection({
+            query: new Query()
+              .from({ issue: parent.collection })
+              .select(({ issue: ancestor }) => ({
+                id: ancestor.id,
+                rows: toArray(
+                  new Query()
+                    .from({ child: child.collection })
+                    .where(({ child: own }) =>
+                      eq(own.parentId, useForeign ? foreignRef : ancestor.id),
+                    )
+                    .select(({ child: own }) => ({ id: own.id })),
+                ),
+              })),
+          })
+        const invalidCleanups: Array<() => unknown | Promise<unknown>> = []
+        const preloadInvalid = async () => {
+          const live = build(true)
+          invalidCleanups.push(() => live.cleanup())
+          await live.preload()
+        }
+        const valid = build(false)
+
+        await withHistoryCleanup(
+          async () => {
+            await valid.preload()
+            expect(
+              valid.toArray.map(({ id, rows }) => ({
+                id,
+                rows: rows.map(({ id: childId }) => ({ id: childId })),
+              })),
+            ).toEqual([{ id: 1, rows: [{ id: 10 }] }])
+            await expect(() => preloadInvalid()).rejects.toThrow(/out of scope/)
+          },
+          () => [
+            () => valid.cleanup(),
+            ...invalidCleanups,
+            () => parent.collection.cleanup(),
+            () => child.collection.cleanup(),
+            () => foreign.collection.cleanup(),
+          ],
+        )
+      })
+    }
+  }
+})
+
+/**
  * # A source inside a parent operand is not an include ancestor
  *
  * ARCHITECTURE.md §Identity/law 1 gives a child include access to the parent
@@ -3494,18 +4271,25 @@ describe(`join operands reject captured sources outside lexical scope`, () => {
  *
  * The independent provenance model here labels the inner declaration
  * `hidden` and predicts rejection; it never reads binding IDs or source-tree
- * traversal. The finite grammar crosses QueryRef or union placement, matching
- * or renamed hidden alias, and eager or on-demand sources. Public Query and
- * live Collection entry points must reject by construction or preload, before
- * accepting public rows. The legal local and true-ancestor controls above
- * prevent a blanket captured-ref rejection from satisfying this rule.
+ * traversal. The finite grammar crosses one or two recursive source levels,
+ * QueryRef or union placement, matching or renamed hidden alias, and eager or
+ * on-demand sources. Public Query and live Collection entry points must reject
+ * by construction or preload, before accepting public rows. The legal local
+ * and true-ancestor controls above prevent a blanket captured-ref rejection
+ * from satisfying this rule. This does not claim every recursive expression
+ * position; the captured value is a join operand in the include child.
  */
 describe(`include joins reject sources hidden inside parent operands`, () => {
   type Hidden = { id: number; secret: number }
   type Row = { id: number }
 
   for (const mode of [`eager`, `onDemand`] as const) {
-    for (const placement of [`queryRef`, `unionBranch`] as const) {
+    for (const placement of [
+      `queryRef`,
+      `unionBranch`,
+      `nestedQueryRef`,
+      `nestedUnionBranch`,
+    ] as const) {
       for (const alias of [`local`, `inner`] as const) {
         test(`${mode} ${placement} cannot expose inner binding ${alias} to its include`, async () => {
           const hidden = createScopedSource<Hidden>(
@@ -3545,17 +4329,23 @@ describe(`include joins reject sources hidden inside parent operands`, () => {
                 hiddenRef = row.secret
                 return { id: row.id }
               })
-            const outer =
-              placement === `queryRef`
-                ? new Query().from({ parent: inner })
-                : new Query().from({
-                    parent: new Query().unionAll(
-                      inner,
-                      new Query()
-                        .from({ other: other.collection })
-                        .select(({ other: row }) => ({ id: row.id })),
-                    ),
-                  })
+            const branch =
+              placement === `unionBranch` || placement === `nestedUnionBranch`
+                ? new Query().unionAll(
+                    inner,
+                    new Query()
+                      .from({ other: other.collection })
+                      .select(({ other: row }) => ({ id: row.id })),
+                  )
+                : inner
+            const parentSource = placement.startsWith(`nested`)
+              ? new Query()
+                  .from({ middle: branch })
+                  .select((context: Context) => ({
+                    id: (context.middle as Row).id,
+                  }))
+              : branch
+            const outer = new Query().from({ parent: parentSource })
             const live = createLiveQueryCollection({
               query: outer.select((context: Context) => {
                 const parentId = (context.parent as Row).id
@@ -3707,10 +4497,10 @@ describe(`joined subqueries reject captured sibling sources`, () => {
   for (const mode of [`eager`, `onDemand`] as const) {
     for (const alias of [`issue`, `inner`] as const) {
       test(`${mode} joined subquery may capture an actual ancestor with inner alias ${alias}`, async () => {
-        const parentRows = [{ id: 1 }]
-        const mainRows = [{ id: 1 }]
-        const innerRows = [{ id: 1 }]
-        const probeRows = [{ id: 1 }]
+        const parentRows = [{ id: 1 }, { id: 2 }]
+        const mainRows = [{ id: 1 }, { id: 2 }]
+        const innerRows = [{ id: 1 }, { id: 2 }]
+        const probeRows = [{ id: 1 }, { id: 2 }]
         const expected = parentRows.map((parent) => ({
           id: parent.id,
           rows: mainRows.flatMap((main) =>
@@ -3721,7 +4511,11 @@ describe(`joined subqueries reject captured sibling sources`, () => {
                   main.id === parent.id &&
                   probeRows.some((probe) => probe.id === parent.id),
               )
-              .map((inner) => ({ localId: main.id, joinedId: inner.id })),
+              .map((inner) => ({
+                localId: main.id,
+                joinedId: inner.id,
+                ancestorId: parent.id,
+              })),
           ),
         }))
         const parent = createScopedSource(
@@ -3750,11 +4544,15 @@ describe(`joined subqueries reject captured sibling sources`, () => {
             .select(({ issue: ancestor }) => {
               const joinedQuery = new Query()
                 .from({ [alias]: inner.collection })
+                .where((context: Context) =>
+                  eq((context[alias] as Row).id, ancestor.id),
+                )
                 .innerJoin({ probe: probe.collection }, ({ probe: row }) =>
                   eq(ancestor.id, row.id),
                 )
                 .select((context: Context) => ({
                   id: (context[alias] as Row).id,
+                  ancestorId: ancestor.id,
                 }))
               return {
                 id: ancestor.id,
@@ -3769,6 +4567,7 @@ describe(`joined subqueries reject captured sibling sources`, () => {
                     .select(({ local: row, nested }) => ({
                       localId: row.id,
                       joinedId: nested.id,
+                      ancestorId: nested.ancestorId,
                     })),
                 ),
               }
@@ -3781,9 +4580,10 @@ describe(`joined subqueries reject captured sibling sources`, () => {
             expect(
               live.toArray.map(({ id, rows }) => ({
                 id,
-                rows: rows.map(({ localId, joinedId }) => ({
+                rows: rows.map(({ localId, joinedId, ancestorId }) => ({
                   localId,
                   joinedId,
+                  ancestorId,
                 })),
               })),
             ).toEqual(expected)
