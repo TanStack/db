@@ -10,11 +10,11 @@ import {
 import { localOnlyCollectionOptions } from '../src/local-only'
 import { PropRef } from '../src/query/ir'
 import { oraclePropertyOptions, oracleRuns } from './oracle-config'
+import { captureCreatedTransactions } from './utils'
 import type { LocalOnlyCollectionUtils } from '../src/local-only'
 import type { Collection } from '../src/index'
 import type { BaseIndex } from '../src/indexes/base-index'
 import type { ChangeMessage, SyncConfig } from '../src/types'
-import { captureCreatedTransactions } from './utils'
 
 /**
  * # Do settled change messages reconstruct the Collection's public rows?
