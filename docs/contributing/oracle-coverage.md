@@ -688,8 +688,9 @@ skips needed cleanup. Sparse-array, extra-array-property, and nested-prototype
 histories require a changed durable value to reload even when ordinary deep
 equality would skip it.
 
-Direct persisted options and their spread copies can create only one Collection.
-The second creation rejects before it redirects the first owner's writes.
+Direct persisted options and their spread copies can create only one Collection,
+both with and without a wrapped upstream sync source. The second creation
+rejects before it redirects the first owner's local or source writes.
 Cleanup does not release that claim. Two DbClients materializing one descriptor
 receive independent runtimes. A no-demand on-demand full-reload notification
 reads collection metadata without fetching every durable row; a later

@@ -4092,6 +4092,62 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     },
   )
 
+  // The same ownership rule applies when an upstream sync source is wrapped.
+  // A source commit through the first Collection must remain public and durable
+  // after a second Collection is rejected at admission.
+  it.each([`same object`, `spread copy`] as const)(
+    `keeps a wrapped sync source bound to its first Collection (%s)`,
+    async (reuse) => {
+      const adapter = createRecordingAdapter()
+      let source!: TodoSyncParams
+      const options = persistedCollectionOptions<Todo, string>({
+        id: `one-source-owner-${reuse}`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            source = params
+            params.markReady()
+          },
+        },
+        persistence: { adapter },
+      })
+      const first = createCollection(options)
+      let second: typeof first | undefined
+      let hasPrimaryFailure = false
+      try {
+        await first.stateWhenReady()
+        expect(() => {
+          second = createCollection(
+            reuse === `same object` ? options : { ...options },
+          )
+        }).toThrow(InvalidPersistedCollectionConfigError)
+
+        source.begin()
+        source.write({
+          type: `insert`,
+          value: { id: `owned`, title: `First source` },
+        })
+        await Promise.resolve(source.commit())
+        expect(stripVirtualProps(first.get(`owned`))).toEqual({
+          id: `owned`,
+          title: `First source`,
+        })
+        expect(adapter.rows.get(`owned`)).toEqual({
+          id: `owned`,
+          title: `First source`,
+        })
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        await cleanupPersistedOracle(
+          [() => second?.cleanup(), () => first.cleanup()],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
   it(`does not reuse a persisted runtime after its Collection cleans up`, async () => {
     const options = persistedCollectionOptions<Todo, string>({
       id: `cleaned-up-owner`,
