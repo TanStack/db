@@ -14416,6 +14416,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       await collection.stateWhenReady()
       expect(collection.has(`stored`)).toBe(false)
       expect(adapter.loadSubsetCalls).toHaveLength(0)
+      const metadataReadsBefore = adapter.loadCollectionMetadataCalls.length
       coordinator.emit(
         {
           type: `tx:committed`,
@@ -14427,6 +14428,11 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         },
         undefined,
         collectionId,
+      )
+      await vi.waitFor(() =>
+        expect(adapter.loadCollectionMetadataCalls).toHaveLength(
+          metadataReadsBefore + 1,
+        ),
       )
       await flushAsyncWork()
       await flushAsyncWork()
