@@ -382,6 +382,10 @@ lexical scope makes them pass; the existing actual ancestor/descendant reuse
 cells still reject before publication. This is admission and row evidence for
 those three placements and one update, not an arbitrary recursion proof.
 
+The joined placement also has one manager without a matching helper row. Its
+absence from the public output distinguishes a real joined-source execution
+from an implementation that simply drops the helper join.
+
 The same review found that each enumeration of a captured reference proxy left
 a spread marker behind. An independent selected-plan control now discards one
 enumeration, then selects the same parent and child fields as a plan without

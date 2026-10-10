@@ -391,7 +391,9 @@ describe(`captured alias scope oracle`, () => {
    * is a sibling of that query's include child. ARCHITECTURE.md §Identity
    * permits placing one builder in both sibling scopes. The plain-row model
    * gives each visible manager the current employees whose managerId equals
-   * that manager's id. Reusing the builder cannot change admission or rows.
+   * that manager's id. The joined placement has one manager without a helper
+   * match, so the join must participate in the public result. Reusing the
+   * builder cannot change admission or rows.
    *
    * The finite grammar crosses the three parent operand positions and two
    * controlled source modes. Construction must accept the plan; preload and
@@ -419,7 +421,7 @@ describe(`captured alias scope oracle`, () => {
         )
         const managers = createScopedSource(
           `sibling-manager-${placement}-${mode}`,
-          [{ id: 1 }, { id: 2 }, { id: 3 }],
+          [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 99 }],
           `eager`,
         )
         employees.collection.createIndex((row) => row.managerId, {
