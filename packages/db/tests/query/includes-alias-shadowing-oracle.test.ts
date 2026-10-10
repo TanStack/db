@@ -9,6 +9,7 @@ import {
   toArray,
 } from '../../src/query/index.js'
 import { getQueryIR } from '../../src/query/builder/query-ir.js'
+import { PropRef } from '../../src/query/ir.js'
 import { getQueryIdentity } from '../../src/query/ir-stable-identity.js'
 import { optimizeQuery } from '../../src/query/optimizer.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
@@ -2700,6 +2701,7 @@ describe(`outer joins preserve absent source bindings under shadowing`, () => {
 
   for (const [kind, correlationSide] of [
     [`right`, `joined`],
+    [`right`, `main`],
     [`full`, `joined`],
     [`full`, `main`],
   ] as const) {
@@ -2891,6 +2893,246 @@ describe(`outer joins preserve absent source bindings under shadowing`, () => {
         )
       })
     }
+  }
+})
+
+/**
+ * # A later join cannot restore an absent local source
+ *
+ * ARCHITECTURE.md §Identity and law 1 make the outer and child `issue`
+ * declarations distinct. A LEFT join with no local issue leaves that source
+ * absent. A later joined input may carry the outer issue for correlation.
+ * Whether routing comes from a parent-dependent QueryRef or a captured join
+ * operand, it cannot restore the absent local declaration.
+ *
+ * The independent model below recomputes two LEFT joins from plain rows. Its
+ * legal history changes an absent local issue into a match and back, then
+ * removes and restores the second joined side. A second parent route keeps a
+ * matched local issue as the opposite control. The QueryRef filters tags by
+ * parent; the direct source reads the parent in its equality operand instead.
+ * The production driver uses public Query and Collection APIs; after preload
+ * and each write, public child rows are compared with the model. Shadowed and
+ * renamed aliases, both route causes, and eager and on-demand sources agree.
+ */
+describe(`chained joins keep an absent local source absent`, () => {
+  type Issue = { id: number }
+  type Comment = {
+    id: number
+    issueId: number
+    localIssueId: number
+    tagId: number
+  }
+  type Tag = { id: number; issueId: number }
+  type Expected = {
+    parentId: number
+    commentId: number
+    localIssueId: number | undefined
+    tagId: number | undefined
+    missingLocalIssue: boolean
+  }
+
+  const model = (
+    parents: ReadonlyMap<number, Issue>,
+    comments: ReadonlyMap<number, Comment>,
+    localIssues: ReadonlyMap<number, Issue>,
+    tags: ReadonlyMap<number, Tag>,
+    routeCause: `queryRef` | `capturedOperand`,
+  ): Array<Expected> =>
+    [...parents.values()]
+      .flatMap((parent) =>
+        [...comments.values()]
+          .filter((comment) => comment.issueId === parent.id)
+          .map((comment) => {
+            const localIssue = localIssues.get(comment.localIssueId)
+            const tag = tags.get(comment.tagId)
+            return {
+              parentId: parent.id,
+              commentId: comment.id,
+              localIssueId: localIssue?.id,
+              tagId:
+                tag &&
+                (routeCause === `capturedOperand` || tag.issueId === parent.id)
+                  ? tag.id
+                  : undefined,
+              missingLocalIssue: localIssue === undefined,
+            }
+          }),
+      )
+      .sort((a, b) => a.parentId - b.parentId || a.commentId - b.commentId)
+
+  for (const mode of [`eager`, `onDemand`] as const) {
+    test(`${mode} chained joins preserve absence under shadowing and renaming`, async () => {
+      const parentRows = new Map<number, Issue>([
+        [1, { id: 1 }],
+        [2, { id: 2 }],
+      ])
+      const commentRows = new Map<number, Comment>([
+        [10, { id: 10, issueId: 1, localIssueId: 99, tagId: 7 }],
+        [20, { id: 20, issueId: 2, localIssueId: 2, tagId: 8 }],
+      ])
+      const localIssueRows = new Map<number, Issue>([[2, { id: 2 }]])
+      const tagRows = new Map<number, Tag>([
+        [7, { id: 7, issueId: 1 }],
+        [8, { id: 8, issueId: 2 }],
+      ])
+      const cases = ([`issue`, `localIssue`] as const).flatMap((alias) =>
+        ([`capturedOperand`, `queryRef`] as const).map((routeCause) => {
+          const parents = createScopedSource(
+            `chain-parent-${mode}-${alias}-${routeCause}`,
+            [...parentRows.values()],
+            `eager`,
+          )
+          const comments = createScopedSource(
+            `chain-comment-${mode}-${alias}-${routeCause}`,
+            [...commentRows.values()],
+            mode,
+          )
+          const localIssues = createScopedSource(
+            `chain-local-${mode}-${alias}-${routeCause}`,
+            [...localIssueRows.values()],
+            mode,
+          )
+          const tags = createScopedSource(
+            `chain-tag-${mode}-${alias}-${routeCause}`,
+            [...tagRows.values()],
+            mode,
+          )
+          comments.collection.createIndex((row) => row.issueId, {
+            indexType: BasicIndex,
+          })
+          localIssues.collection.createIndex((row) => row.id, {
+            indexType: BasicIndex,
+          })
+          tags.collection.createIndex((row) => row.id, {
+            indexType: BasicIndex,
+          })
+          const live = createLiveQueryCollection({
+            query: new Query()
+              .from({ issue: parents.collection })
+              .select(({ issue: parent }) => {
+                const scopedTags = new Query()
+                  .from({ source: tags.collection })
+                  .where(({ source }) => eq(source.issueId, parent.id))
+                  .select(({ source }) => ({
+                    id: source.id,
+                    issueId: source.issueId,
+                  }))
+                const tagSource =
+                  routeCause === `queryRef` ? scopedTags : tags.collection
+                return {
+                  id: parent.id,
+                  rows: toArray(
+                    new Query()
+                      .from({ comment: comments.collection })
+                      .leftJoin(
+                        { [alias]: localIssues.collection },
+                        (context: Context) =>
+                          eq(
+                            (context.comment as Comment).localIssueId,
+                            (context[alias] as Issue).id,
+                          ),
+                      )
+                      .leftJoin({ tag: tagSource }, (context: Context) =>
+                        routeCause === `queryRef`
+                          ? eq(
+                              (context.comment as Comment).tagId,
+                              (context.tag as Tag).id,
+                            )
+                          : eq(
+                              add(
+                                (context.comment as Comment).tagId,
+                                parent.id,
+                              ),
+                              add((context.tag as Tag).id, parent.id),
+                            ),
+                      )
+                      .where((context: Context) =>
+                        eq((context.comment as Comment).issueId, parent.id),
+                      )
+                      .select((context: Context) => ({
+                        commentId: (context.comment as Comment).id,
+                        localIssueId: (context[alias] as Issue).id,
+                        tagId: (context.tag as Tag).id,
+                        missingLocalIssue: isUndefined(
+                          (context[alias] as Issue).id,
+                        ),
+                      })),
+                  ),
+                }
+              }),
+          })
+          return {
+            alias,
+            routeCause,
+            parents,
+            comments,
+            localIssues,
+            tags,
+            live,
+          }
+        }),
+      )
+
+      await withHistoryCleanup(
+        async () => {
+          for (const entry of cases) await entry.live.preload()
+          const check = (cut: string) => {
+            for (const entry of cases) {
+              const expected = model(
+                parentRows,
+                commentRows,
+                localIssueRows,
+                tagRows,
+                entry.routeCause,
+              )
+              const actual = entry.live.toArray
+                .flatMap(({ id, rows }) =>
+                  rows.map((row) => ({ parentId: id, ...row })),
+                )
+                .sort(
+                  (a, b) =>
+                    a.parentId - b.parentId || a.commentId - b.commentId,
+                )
+              expect(
+                actual,
+                `${entry.alias}, ${entry.routeCause} at ${cut}`,
+              ).toEqual(expected)
+            }
+          }
+          check(`initial publication`)
+
+          const matchedIssue = { id: 99 }
+          localIssueRows.set(99, matchedIssue)
+          for (const entry of cases) entry.localIssues.put(matchedIssue)
+          await flushPromises()
+          check(`local issue arrives`)
+
+          localIssueRows.delete(99)
+          for (const entry of cases) entry.localIssues.remove(99)
+          await flushPromises()
+          check(`local issue disappears`)
+
+          tagRows.delete(7)
+          for (const entry of cases) entry.tags.remove(7)
+          await flushPromises()
+          check(`second joined side disappears`)
+
+          const returnedTag = { id: 7, issueId: 1 }
+          tagRows.set(7, returnedTag)
+          for (const entry of cases) entry.tags.put(returnedTag)
+          await flushPromises()
+          check(`second joined side returns`)
+        },
+        () =>
+          cases.flatMap((entry) => [
+            () => entry.live.cleanup(),
+            () => entry.parents.collection.cleanup(),
+            () => entry.comments.collection.cleanup(),
+            () => entry.localIssues.collection.cleanup(),
+            () => entry.tags.collection.cleanup(),
+          ]),
+      )
+    })
   }
 })
 
@@ -3239,4 +3481,58 @@ describe(`join operands reject captured sources outside lexical scope`, () => {
       })
     }
   }
+})
+
+/**
+ * A bound ancestor reference and an unbound raw-IR reference to the child's
+ * joined alias name different declarations. The small public-row control
+ * checks admission at preload; it does not model arbitrary raw-IR expressions.
+ */
+test(`mixed bound and unbound same-alias join references name separate sources`, async () => {
+  const parent = createScopedSource(`mixed-bound-parent`, [{ id: 1 }], `eager`)
+  const child = createScopedSource(
+    `mixed-bound-child`,
+    [{ id: 10, parentId: 1 }],
+    `eager`,
+  )
+  const local = createScopedSource(`mixed-bound-local`, [{ id: 1 }], `eager`)
+  child.collection.createIndex((row) => row.parentId, {
+    indexType: BasicIndex,
+  })
+  local.collection.createIndex((row) => row.id, {
+    indexType: BasicIndex,
+  })
+  const live = createLiveQueryCollection({
+    query: new Query()
+      .from({ issue: parent.collection })
+      .select(({ issue: ancestor }) => ({
+        id: ancestor.id,
+        rows: toArray(
+          new Query()
+            .from({ child: child.collection })
+            .innerJoin({ issue: local.collection }, () =>
+              eq(ancestor.id, new PropRef([`issue`, `id`])),
+            )
+            .where(({ child: row }) => eq(row.parentId, ancestor.id))
+            .select(({ child: row, issue }) => ({
+              childId: row.id,
+              localIssueId: issue.id,
+            })),
+        ),
+      })),
+  })
+  await withHistoryCleanup(
+    async () => {
+      await live.preload()
+      expect(live.toArray.map(({ id, rows }) => ({ id, rows }))).toEqual([
+        { id: 1, rows: [{ childId: 10, localIssueId: 1 }] },
+      ])
+    },
+    () => [
+      () => live.cleanup(),
+      () => parent.collection.cleanup(),
+      () => child.collection.cleanup(),
+      () => local.collection.cleanup(),
+    ],
+  )
 })

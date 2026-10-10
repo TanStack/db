@@ -606,7 +606,7 @@ function compileQueryInternal(
       aliasToCollectionId,
       aliasRemapping,
       sourceWhereClauses,
-      parentKeyStream !== undefined,
+      joinsParentDirectly,
       valueIdentity,
       parentKeyStream,
     )

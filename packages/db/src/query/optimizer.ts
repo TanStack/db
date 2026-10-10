@@ -129,6 +129,7 @@ import {
   QueryRef as QueryRefClass,
   UnionAll as UnionAllClass,
   UnionFrom as UnionFromClass,
+  collectPropRefs,
   createResidualWhere,
   getFromSources,
   getWhereExpression,
@@ -1098,34 +1099,6 @@ function isSafeToPushIntoExistingSubquery(
 }
 
 /**
- * Recursively collects all PropRef references from an expression.
- *
- * @param expr - The expression to traverse
- * @returns Array of PropRef references found in the expression
- */
-function collectRefs(expr: any): Array<PropRef> {
-  const refs: Array<PropRef> = []
-
-  if (expr == null || typeof expr !== `object`) return refs
-
-  switch (expr.type) {
-    case `ref`:
-      refs.push(expr as PropRef)
-      break
-    case `func`:
-    case `agg`:
-      for (const arg of expr.args ?? []) {
-        refs.push(...collectRefs(arg))
-      }
-      break
-    default:
-      break
-  }
-
-  return refs
-}
-
-/**
  * Determines whether the provided WHERE clause references fields that are
  * computed by a subquery SELECT rather than pass-through properties.
  *
@@ -1152,7 +1125,7 @@ function whereReferencesComputedSelectFields(
     computed.add(key)
   }
 
-  const refs = collectRefs(whereClause)
+  const refs = collectPropRefs(whereClause)
 
   for (const ref of refs) {
     const path = (ref as any).path as Array<string>
@@ -1177,7 +1150,7 @@ function referencesAliasWithRemappedSelect(
   whereClause: BasicExpression<boolean>,
   outerAlias: string,
 ): boolean {
-  const refs = collectRefs(whereClause)
+  const refs = collectPropRefs(whereClause)
   // Only care about clauses that actually reference the outer alias.
   if (refs.every((ref) => ref.path[0] !== outerAlias)) {
     return false

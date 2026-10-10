@@ -21,7 +21,11 @@ import {
 } from '../equality-value-identity.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
 import { validateJoinConditions } from '../join-conditions.js'
-import { getFromSources, getPropRefSourceAlias } from '../ir.js'
+import {
+  collectPropRefs,
+  getFromSources,
+  getPropRefSourceAlias,
+} from '../ir.js'
 import { compileExpression } from './evaluators.js'
 import { getLazyLoadTargets } from './lazy-targets.js'
 import { crossJoinParentRoutes } from './parent-routes.js'
@@ -301,36 +305,37 @@ function processJoin(
 
   const joinedSource = joinClause.from.alias
   const mainAliases = Object.keys(sources)
-  const availableSources = [...Object.keys(sources), joinedSource]
+  const role = (ref: PropRef): JoinRefRole => {
+    const alias = getJoinRefAlias(ref)
+    if (ref.bindingId !== undefined) {
+      if (ref.bindingId === joinClause.from.bindingId) return `joined`
+      return localBindings.has(ref.bindingId) ? `main` : `ancestor`
+    }
+    if (alias === joinedSource) return `joined`
+    if (
+      alias &&
+      (mainAliases.includes(alias) || rawQuery.from.type === `unionAll`)
+    )
+      return `main`
+    return `unknown`
+  }
   const conditions = validateJoinConditions(joinClause.on).map(
-    ([left, right]) =>
-      analyzeJoinExpressions(
-        left,
-        right,
-        availableSources,
-        joinedSource,
-        joinClause.from.bindingId,
-        localBindings,
-        rawQuery.from.type === `unionAll`,
-      ),
+    ([left, right]) => analyzeJoinExpressions(left, right, joinedSource, role),
   )
   // The first equality supplies candidate demand; the full tuple decides matches.
   const { mainExpr, joinedExpr } = conditions[0]!
   const joinedExpressionUsesParent = conditions.some(
     ({ joinedExpr: expression }) =>
-      getJoinReferences(expression).some((ref) =>
-        ref.bindingId !== undefined
-          ? ref.bindingId !== joinClause.from.bindingId &&
-            !localBindings.has(ref.bindingId)
-          : (getPropRefSourceAlias(ref) ?? ref.path[0]) !== joinedSource &&
-            !sources[getPropRefSourceAlias(ref) ?? ref.path[0]!],
-      ),
+      getJoinReferences(expression).some((ref) => {
+        const sourceRole = role(ref)
+        return sourceRole === `ancestor` || sourceRole === `unknown`
+      }),
   )
   const routeJoinedSource =
     parentKeyStream !== undefined &&
     (joinClause.from.type === `queryRef` ||
-      joinClause.type === `right` ||
-      joinClause.type === `full` ||
+      ((joinClause.type === `right` || joinClause.type === `full`) &&
+        !mainSourceIsParentFiltered) ||
       joinedExpressionUsesParent)
 
   // Get the joined source alias and input stream
@@ -534,9 +539,12 @@ function processJoin(
   )
 }
 
-export function getJoinReferences(expr: BasicExpression): Array<PropRef> {
-  if (expr.type === `ref`) return [expr]
-  return expr.type === `func` ? expr.args.flatMap(getJoinReferences) : []
+export const getJoinReferences = collectPropRefs
+
+type JoinRefRole = `joined` | `main` | `ancestor` | `unknown`
+
+function getJoinRefAlias(ref: PropRef): string | undefined {
+  return getPropRefSourceAlias(ref) ?? ref.path[0]
 }
 
 /**
@@ -546,30 +554,11 @@ export function getJoinReferences(expr: BasicExpression): Array<PropRef> {
 function analyzeJoinExpressions(
   left: BasicExpression,
   right: BasicExpression,
-  allAvailableSourceAliases: Array<string>,
   joinedSource: string,
-  joinedBinding: string,
-  localBindings: ReadonlySet<string>,
-  allowResultFields: boolean = false,
+  role: (ref: PropRef) => JoinRefRole,
 ): { mainExpr: BasicExpression; joinedExpr: BasicExpression } {
-  // Filter out the joined source alias from the available source aliases
-  const availableSources = allAvailableSourceAliases.filter(
-    (alias) => alias !== joinedSource,
-  )
-
   const leftRefs = getJoinReferences(left)
   const rightRefs = getJoinReferences(right)
-  const role = (ref: PropRef): `joined` | `main` | `ancestor` | `unknown` => {
-    const alias = getPropRefSourceAlias(ref) ?? ref.path[0]
-    if (ref.bindingId !== undefined) {
-      if (ref.bindingId === joinedBinding) return `joined`
-      return localBindings.has(ref.bindingId) ? `main` : `ancestor`
-    }
-    if (alias === joinedSource) return `joined`
-    if (alias && (availableSources.includes(alias) || allowResultFields))
-      return `main`
-    return `unknown`
-  }
   const leftRoles = new Set(leftRefs.map(role))
   const rightRoles = new Set(rightRefs.map(role))
   const leftMain = leftRoles.has(`main`) || leftRoles.has(`ancestor`)
@@ -599,11 +588,10 @@ function analyzeJoinExpressions(
     (leftRefs[0]!.bindingId !== undefined &&
     rightRefs[0]!.bindingId !== undefined
       ? leftRefs[0]!.bindingId === rightRefs[0]!.bindingId
-      : (getPropRefSourceAlias(leftRefs[0]!) ?? leftRefs[0]!.path[0]) ===
-        (getPropRefSourceAlias(rightRefs[0]!) ?? rightRefs[0]!.path[0]))
+      : getJoinRefAlias(leftRefs[0]!) === getJoinRefAlias(rightRefs[0]!))
   ) {
     throw new InvalidJoinConditionSameSourceError(
-      getPropRefSourceAlias(leftRefs[0]!) ?? leftRefs[0]!.path[0]!,
+      getJoinRefAlias(leftRefs[0]!)!,
     )
   }
 
@@ -612,7 +600,7 @@ function analyzeJoinExpressions(
   // to an unavailable source, but just in case, but could happen with the IR
   if (!leftMain) {
     throw new InvalidJoinConditionLeftSourceError(
-      getPropRefSourceAlias(leftRefs[0]!) ?? leftRefs[0]!.path[0]!,
+      getJoinRefAlias(leftRefs[0]!)!,
     )
   }
 
@@ -806,12 +794,11 @@ function processJoinResults(
         const joinedKey = joined?.[0]
         const joinedNamespacedRow = joined?.[1]
 
-        // A joined row carries inherited parent aliases. Keep local main-row
-        // aliases, then add only the actual joined source from its own row.
+        // A joined row carries inherited parent aliases. When the main row is
+        // present it owns that scope; copy only the joined source from its row.
         const mergedNamespacedRow: NamespacedRow = Object.assign(
           {},
-          joinedNamespacedRow,
-          mainNamespacedRow,
+          mainNamespacedRow ?? joinedNamespacedRow,
         )
         if (main == null) {
           // The joined row may carry parent context with a local main alias.
