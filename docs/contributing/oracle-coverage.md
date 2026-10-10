@@ -2017,6 +2017,9 @@ records the Query startup handoff, index reverse-order challenge, all review
 dispositions, and the repair commit's ORC-012 audit. The
 [review of code head `7f1df5c82`](oracle-reviews/issue-2056-cache-generation-audit-7f1df5c82.md)
 records the ORC-012 outcomes, RED/GREEN witnesses, and evidence gaps. The
+[receiving-gap audit at `87aead1be`](oracle-reviews/issue-2069-receiving-gap-audit-87aead1be.md)
+records the native Electric, shared-QueryClient, and old-leader timeout
+histories, their mutant outcomes, and remaining cuts. The
 real-SQLite owner checks generation rotation, legacy-writer isolation,
 warm-run claims, rejection of moved or expired claims, uncertified key-set
 evidence after partial writes, and physical collection of a retired row table.
