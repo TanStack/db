@@ -32,10 +32,10 @@ export class OfflineTransaction {
   }
 
   mutate(callback: () => void): Transaction {
-    // Repeated calls add to the same transaction: one offline transaction is
-    // one transaction, and its id is unique among live transactions.
-    // With autoCommit, the transaction commits after this callback and
-    // reports a failure through isPersisted.
+    // One offline transaction is one transaction, and its id is unique among
+    // live transactions. Repeated calls add to it while it is pending. With
+    // autoCommit, it commits after this callback and reports a failure
+    // through isPersisted, so a later call throws: it is no longer pending.
     this.transaction ??= createTransaction({
       id: this.offlineId,
       autoCommit: this.autoCommit,

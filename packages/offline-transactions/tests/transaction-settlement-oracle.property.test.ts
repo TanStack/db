@@ -11,6 +11,7 @@ import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
 import { atOracleCheckpoint, cleanupOfflineOracle } from './oracle-lifecycle'
 import { readOfflineOracleConfig } from './oracle-config'
 import type { TestItem } from './harness'
+import type { Transaction } from '@tanstack/db'
 import type {
   OfflineConfig,
   OfflineTransaction,
@@ -38,10 +39,11 @@ import type {
  * Collection rows from optimistic state, not durable outbox entries.
  * Generated histories use 2–5 transactions, 1–3 rows each, shared or disjoint
  * keys, and success or permanent failure at each position. Each transaction
- * either commits manually or auto-commits after its `mutate()` callback; an
+ * either commits manually or auto-commits after its `mutate()` callback, with
+ * `autoCommit: true`, with the option omitted, or as an `OfflineAction`. An
  * auto-commit has no `commit()` caller, so its `isPersisted` is the commit
  * receipt. No failure, manual or auto-committed, may escape as an unhandled
- * process rejection. Pinned examples
+ * process rejection, be logged again, or write debug output. Pinned examples
  * reconstruct all-success, middle-failure, all-failure, and alternating
  * outcomes. Shared keys distinguish sibling rollback from disjoint-key
  * survival. Width distinguishes complete optimistic state for several rows
@@ -188,36 +190,44 @@ function expectLocalRows(
   expect(localRows(actual)).toEqual(localRows(expected))
 }
 
+/**
+ * How a generated transaction commits: by `commit()`, by auto-commit with the
+ * option set or omitted, or as an `OfflineAction`, which always auto-commits.
+ */
+const settlementTransaction = fc.record({
+  succeeds: fc.boolean(),
+  commit: fc.constantFrom(
+    `manual` as const,
+    `auto` as const,
+    `default` as const,
+    `action` as const,
+  ),
+  readReceipt: fc.boolean(),
+})
+
 it.each(oracleSeeds(20260913, settlementOracle))(
   `settles each transaction independently while preserving FIFO (seed %s)`,
   async (seed) => {
     await fc.assert(
       fc.asyncProperty(
-        // One record per transaction, so auto-commit and an unread receipt
-        // are as likely at every position.
-        fc
-          .record({
-            sharedKeys: fc.boolean(),
-            width: fc.integer({ min: 1, max: 3 }),
-            transactions: fc.array(
-              fc.record({
-                succeeds: fc.boolean(),
-                autoCommit: fc.boolean(),
-                readReceipt: fc.boolean(),
-              }),
-              { minLength: 2, maxLength: 5 },
-            ),
-          })
-          .map(({ sharedKeys, width, transactions }) => ({
-            sharedKeys,
-            width,
-            outcomes: transactions.map((tx) => tx.succeeds),
-            autoCommits: transactions.map((tx) => tx.autoCommit),
-            // An auto-commit's receipt may go unread, as a caller may.
-            unread: transactions.map((tx) => tx.autoCommit && !tx.readReceipt),
-          })),
-        async ({ sharedKeys, width, outcomes, autoCommits, unread }) => {
-          const succeeds = outcomes
+        // One record per transaction, so every commit path and an unread
+        // receipt are as likely at every position.
+        fc.record({
+          sharedKeys: fc.boolean(),
+          width: fc.integer({ min: 1, max: 3 }),
+          transactions: fc.array(settlementTransaction, {
+            minLength: 2,
+            maxLength: 5,
+          }),
+        }),
+        async ({ sharedKeys, width, transactions }) => {
+          const succeeds = transactions.map((tx) => tx.succeeds)
+          // Every path but a manual commit commits after the mutate callback.
+          const autoCommits = transactions.map((tx) => tx.commit !== `manual`)
+          // An auto-commit's receipt may go unread, as a caller may.
+          const unread = transactions.map(
+            (tx, index) => autoCommits[index]! && !tx.readReceipt,
+          )
           const failures = succeeds.map(
             (_value, index) => new NonRetriableError(`failed-${index}`),
           )
@@ -336,24 +346,19 @@ it.each(oracleSeeds(20260913, settlementOracle))(
           }
           let hasPrimaryFailure = false
           // No failure, manual or auto-committed, escapes as an unhandled
-          // process rejection.
+          // process rejection, and none is logged again: isPersisted reports
+          // it.
           const unhandled: Array<unknown> = []
           const onUnhandled = (reason: unknown) => unhandled.push(reason)
           process.on(`unhandledRejection`, onUnhandled)
+          const logged = vi.spyOn(console, `error`).mockImplementation(() => {})
+          // Settlement writes no debug output.
+          const debug = vi.spyOn(console, `log`).mockImplementation(() => {})
           try {
             await env.waitForLeader()
             for (let index = 0; index < succeeds.length; index++) {
-              const autoCommit = autoCommits[index] ?? false
-              const tx = env.executor.createOfflineTransaction({
-                mutationFnName: env.mutationFnName,
-                autoCommit,
-              })
-              ids.push(tx.id)
-              observe(
-                `wait-${index}`,
-                env.executor.waitForTransactionCompletion(tx.id),
-              )
-              const transaction = tx.mutate(() => {
+              const { commit } = transactions[index]!
+              const write = () => {
                 for (const row of expectedRows[index]!) {
                   if (sharedKeys && index > 0) {
                     env.collection.update(row.id, (draft) => {
@@ -362,13 +367,37 @@ it.each(oracleSeeds(20260913, settlementOracle))(
                     })
                   } else env.collection.insert(row)
                 }
-              })
+              }
+              let transaction: Transaction
+              let tx: ReturnType<typeof env.executor.createOfflineTransaction>
+              if (commit === `action`) {
+                transaction = env.executor.createOfflineAction({
+                  mutationFnName: env.mutationFnName,
+                  onMutate: write,
+                })(undefined)
+              } else {
+                tx = env.executor.createOfflineTransaction({
+                  mutationFnName: env.mutationFnName,
+                  // A transaction auto-commits when the option is omitted.
+                  ...(commit === `default`
+                    ? {}
+                    : { autoCommit: commit === `auto` }),
+                })
+                transaction = tx.mutate(write)
+              }
+              ids.push(transaction.id)
+              observe(
+                `wait-${index}`,
+                env.executor.waitForTransactionCompletion(transaction.id),
+              )
               // An auto-commit has no commit() caller; its receipt is
               // isPersisted, which settles like a manual commit's.
               if (!unread[index])
                 observe(
                   `commit-${index}`,
-                  autoCommit ? transaction.isPersisted.promise : tx.commit(),
+                  autoCommits[index]
+                    ? transaction.isPersisted.promise
+                    : tx!.commit(),
                 )
               if (index === 0)
                 await atOracleCheckpoint(
@@ -399,11 +428,20 @@ it.each(oracleSeeds(20260913, settlementOracle))(
             }
             await turn()
             expect(unhandled, `unhandled rejections`).toEqual([])
+            expect(
+              logged.mock.calls.filter(([message]) =>
+                String(message).includes(`commit failed`),
+              ),
+              `commit failures logged`,
+            ).toEqual([])
+            expect(debug.mock.calls, `debug output`).toEqual([])
           } catch (error) {
             hasPrimaryFailure = true
             throw error
           } finally {
             process.off(`unhandledRejection`, onUnhandled)
+            logged.mockRestore()
+            debug.mockRestore()
             for (const item of release) item.resolve()
             await cleanupOfflineOracle(
               [
@@ -423,45 +461,66 @@ it.each(oracleSeeds(20260913, settlementOracle))(
             {
               sharedKeys: true,
               width: 1,
-              outcomes: [true, true],
-              autoCommits: [],
-              unread: [false, false, false, false, false],
+              transactions: [
+                { succeeds: true, commit: `manual`, readReceipt: true },
+                { succeeds: true, commit: `manual`, readReceipt: true },
+              ],
             },
           ],
           [
             {
               sharedKeys: false,
               width: 2,
-              outcomes: [true, false, true],
-              autoCommits: [],
-              unread: [false, false, false, false, false],
+              transactions: [
+                { succeeds: true, commit: `manual`, readReceipt: true },
+                { succeeds: false, commit: `manual`, readReceipt: true },
+                { succeeds: true, commit: `manual`, readReceipt: true },
+              ],
             },
           ],
           [
             {
               sharedKeys: true,
               width: 2,
-              outcomes: [false, false, false],
-              autoCommits: [],
-              unread: [false, false, false, false, false],
+              transactions: [
+                { succeeds: false, commit: `manual`, readReceipt: true },
+                { succeeds: false, commit: `manual`, readReceipt: true },
+                { succeeds: false, commit: `manual`, readReceipt: true },
+              ],
             },
           ],
           [
             {
               sharedKeys: true,
               width: 1,
-              outcomes: [false, true, false],
-              autoCommits: [],
-              unread: [false, false, false, false, false],
+              transactions: [
+                { succeeds: false, commit: `manual`, readReceipt: true },
+                { succeeds: true, commit: `manual`, readReceipt: true },
+                { succeeds: false, commit: `manual`, readReceipt: true },
+              ],
             },
           ],
           [
             {
               sharedKeys: true,
               width: 1,
-              outcomes: [false, true, false],
-              autoCommits: [true, false, true],
-              unread: [true, false, false],
+              transactions: [
+                { succeeds: false, commit: `auto`, readReceipt: false },
+                { succeeds: true, commit: `manual`, readReceipt: true },
+                { succeeds: false, commit: `auto`, readReceipt: true },
+              ],
+            },
+          ],
+          // A failed auto-commit with the default option, and a failed
+          // action, settle through isPersisted only.
+          [
+            {
+              sharedKeys: false,
+              width: 1,
+              transactions: [
+                { succeeds: false, commit: `default`, readReceipt: false },
+                { succeeds: false, commit: `action`, readReceipt: true },
+              ],
             },
           ],
         ],
@@ -1407,50 +1466,6 @@ it.each([
     }
   },
 )
-
-// An auto-committed transaction has no caller of commit(). A terminal failure
-// still settles isPersisted with the mutation function's error, and it must
-// not escape as an unhandled process rejection: the caller observes it through
-// isPersisted, as for a manual commit that nobody awaits.
-it(`settles a failed auto-commit through isPersisted without an unhandled rejection`, async () => {
-  const providerError = new NonRetriableError(`auto-commit rejected`)
-  const unhandled: Array<unknown> = []
-  const onUnhandled = (reason: unknown) => unhandled.push(reason)
-  const env = createTestOfflineEnvironment({
-    mutationFn: async () => {
-      throw providerError
-    },
-  })
-  const logged = vi.spyOn(console, `error`).mockImplementation(() => {})
-  process.on(`unhandledRejection`, onUnhandled)
-  try {
-    await env.waitForLeader()
-    const tx = env.executor.createOfflineTransaction({
-      mutationFnName: env.mutationFnName,
-    })
-    const transaction = tx.mutate(() =>
-      env.collection.insert({
-        id: `auto`,
-        value: `pending`,
-        completed: false,
-        updatedAt: new Date(0),
-      }),
-    )
-    await expect(transaction.isPersisted.promise).rejects.toBe(providerError)
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    expect(unhandled).toEqual([])
-    // The failure is reported through isPersisted, not logged again.
-    expect(logged).not.toHaveBeenCalledWith(
-      `Auto-commit failed:`,
-      expect.anything(),
-    )
-    expect(env.collection.get(`auto`)).toBeUndefined()
-  } finally {
-    process.off(`unhandledRejection`, onUnhandled)
-    logged.mockRestore()
-    env.executor.dispose()
-  }
-})
 
 // A configuration failure is observed through public commit(), not only the
 // executor's internal batch promise. The provider error is a 401, so ignoring
