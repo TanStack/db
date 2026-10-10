@@ -338,17 +338,26 @@ describe(`BucketFacadeAdapter`, () => {
     expect(() => adapter.flush()).toThrow(`facade flush failed`)
     expect(facade.toArray.map(stripVirtualProps)).toEqual([original, fixed])
     expect(
-      [
-        ...(
-          entries.get(`children`)?.get(bucketKey) as unknown as {
-            rows: Map<number, { order: string | undefined }>
+      (() => {
+        const entry = entries.get(`children`)?.get(bucketKey) as unknown as {
+          collection: {
+            _state: { acceptedSyncedEntries: () => Iterable<[number, object]> }
           }
-        ).rows,
-      ].map(([key, row]) => [key, row.order]),
-    ).toEqual([
-      [original.id, `0`],
-      [fixed.id, `1`],
-    ])
+          order: WeakMap<object, string>
+        }
+        // Each row's order, keyed by row: iteration order is not compared.
+        return new Map(
+          [...entry.collection._state.acceptedSyncedEntries()].map(
+            ([key, value]) => [key, entry.order.get(value)],
+          ),
+        )
+      })(),
+    ).toEqual(
+      new Map([
+        [original.id, `0`],
+        [fixed.id, `1`],
+      ]),
+    )
     expect(publications).toEqual([])
     expect(layoutPublications).toBe(0)
     expect(statusChanges).toBe(0)
@@ -385,18 +394,27 @@ describe(`BucketFacadeAdapter`, () => {
       added.id,
     ])
     expect(
-      [
-        ...(
-          entries.get(`children`)?.get(bucketKey) as unknown as {
-            rows: Map<number, { order: string | undefined }>
+      (() => {
+        const entry = entries.get(`children`)?.get(bucketKey) as unknown as {
+          collection: {
+            _state: { acceptedSyncedEntries: () => Iterable<[number, object]> }
           }
-        ).rows,
-      ].map(([key, row]) => [key, row.order]),
-    ).toEqual([
-      [original.id, `2`],
-      [fixed.id, `1`],
-      [added.id, `3`],
-    ])
+          order: WeakMap<object, string>
+        }
+        // Each row's order, keyed by row: iteration order is not compared.
+        return new Map(
+          [...entry.collection._state.acceptedSyncedEntries()].map(
+            ([key, value]) => [key, entry.order.get(value)],
+          ),
+        )
+      })(),
+    ).toEqual(
+      new Map([
+        [original.id, `2`],
+        [fixed.id, `1`],
+        [added.id, `3`],
+      ]),
+    )
 
     rows.sendData(
       new MultiSet([

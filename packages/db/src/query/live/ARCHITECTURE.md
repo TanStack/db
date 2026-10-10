@@ -601,19 +601,20 @@ facade is a Collection: a user transaction can show an optimistic row in it, and
 a sync commit can be held behind a persisting transaction. Retirement is
 therefore a legal write to a non-empty facade, not an invariant violation.
 Retirement is a facade write of the flush, so a failed flush restores it. A row
-that the graph sent and never retracted is different. The adapter keeps its own
-record of the rows it wrote, including writes that a persisting transaction
-still holds, and decides inserts, updates and deletes from that record rather
-than from the visible rows. A row left in that record at retirement is a
+that the graph sent and never retracted is different. The adapter reads each
+facade's accepted synced rows, which include writes that a persisting
+transaction still holds, and decides inserts, updates and deletes from them
+rather than from the visible rows. An accepted row left at retirement is a
 contradictory graph signal: the retirement throws, and the flush aborts and
 restores every facade it wrote. A facade whose Collection a holder cleaned up
-has no sync and receives no retractions, so its retirement does not check the
-record. A restore deletes every key the flush wrote, including a write that a
-persisting transaction still holds, so the held write cannot land after the
-rollback. A facade that `resolve()` created before its bucket activated can stay
-ready and empty after a failed flush; the next flush writes its rows (a recorded
-limit). An external holder may keep the retired Collection alive, but a later
-active interval gets a new facade. Inline modes do not create child Collections.
+holds no accepted rows; if a holder starts it again, it shows only rows the
+graph writes afterwards (a recorded limit). A restore undoes only the keys the
+flush wrote, including writes that a persisting transaction still holds, so a
+held write cannot land after the rollback. A facade that `resolve()` created
+before its bucket activated can stay ready and empty after a failed flush; the
+next flush writes its rows (a recorded limit). An external holder may keep the
+retired Collection alive, but a later active interval gets a new facade. Inline
+modes do not create child Collections.
 
 Composition is pure. It constructs a new result along changed paths and does
 not mutate a previously published row or use public routing metadata:

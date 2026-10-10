@@ -32,12 +32,6 @@ type FacadeEntry = {
   sync: FacadeSync | undefined
   keys: WeakMap<object, string | number>
   order: WeakMap<object, string>
-  /**
-   * The rows the adapter wrote and has not deleted, including writes that a
-   * persisting transaction still holds. The visible rows can lag behind them
-   * or show an optimistic row the graph never sent.
-   */
-  rows: Map<string | number, SnapshotRow>
 }
 
 type SnapshotRow = {
@@ -267,7 +261,11 @@ export class BucketFacadeAdapter {
   }
 
   private copyRows(entry: FacadeEntry): Array<SnapshotRow> {
-    return [...entry.rows.values()]
+    // The accepted synced rows include writes a persisting transaction
+    // still holds; the visible rows can lag behind them.
+    return [...entry.collection._state.acceptedSyncedEntries()].map(
+      ([key, value]) => ({ key, value, order: entry.order.get(value) }),
+    )
   }
 
   private snapshot(): FacadeSnapshot {
@@ -316,27 +314,23 @@ export class BucketFacadeAdapter {
       if (!previousEntries.has(entry)) continue
       const sync = entry.sync
       if (!sync) continue
-      const restoredKeys = new Set(rows.map((row) => row.key))
-      const synced = entry.collection._state.syncedData
+      const before = new Map(rows.map((row) => [row.key, row]))
       sync.begin()
-      // A write held behind a persisting transaction is not yet in the synced
-      // rows, so delete every key the flush wrote as well.
-      for (const key of new Set([
-        ...synced.keys(),
-        ...snapshot.written.get(entry)!,
-      ])) {
-        if (!restoredKeys.has(key)) sync.write({ type: `delete`, key })
-      }
-      // The record after the failed writes, held ones included, says whether
-      // a row still exists: the flush may have deleted it.
-      const written = new Set(entry.rows.keys())
-      entry.rows.clear()
-      for (const row of rows) {
-        entry.rows.set(row.key, row)
+      // Undo only the keys the flush wrote, held writes included; a row it did
+      // not touch is still the one the facade showed before the flush.
+      for (const key of snapshot.written.get(entry)!) {
+        const row = before.get(key)
+        if (!row) {
+          sync.write({ type: `delete`, key })
+          continue
+        }
         entry.keys.set(row.value, row.key)
         if (row.order !== undefined) entry.order.set(row.value, row.order)
         sync.write({
-          type: written.has(row.key) ? `update` : `insert`,
+          type:
+            entry.collection._state.getAcceptedSyncedRow(key) === undefined
+              ? `insert`
+              : `update`,
           value: row.value,
         })
       }
@@ -402,10 +396,10 @@ export class BucketFacadeAdapter {
     const entry = byBucket?.get(bucketKey)
     if (!entry) return
     // The graph retracts every row it sent before it retires a bucket, and
-    // the adapter deletes a row from `rows` when it applies that retraction,
-    // even while a persisting transaction holds the write. A row left there
-    // is a contradictory graph signal.
-    if (entry.rows.size > 0) {
+    // the accepted synced rows include that retraction even while a
+    // persisting transaction holds it. A row left there is a contradictory
+    // graph signal.
+    if (!entry.collection._state.acceptedSyncedEntries().next().done) {
       throw new Error(
         devBuild() && process.env.NODE_ENV !== `production`
           ? `Bucket facade retired with rows the graph did not retract`
@@ -464,9 +458,6 @@ export class BucketFacadeAdapter {
           sync = methods
           return () => {
             sync = undefined
-            // A cleaned-up facade holds no rows. If a holder starts it again,
-            // the graph's later writes rebuild the record.
-            entry.rows.clear()
           }
         },
       },
@@ -480,7 +471,6 @@ export class BucketFacadeAdapter {
       },
       keys,
       order,
-      rows: new Map(),
     }
     byBucket.set(bucketKey, entry)
     return entry
@@ -493,9 +483,10 @@ export class BucketFacadeAdapter {
     hasOrderBy: boolean,
   ): void {
     const key = change.value.publicKey as string | number
-    const previousOrder = entry.rows.get(key)?.order
+    const accepted = entry.collection._state.getAcceptedSyncedRow(key)
+    const present = accepted !== undefined
+    const previousOrder = present ? entry.order.get(accepted) : undefined
     const nextOrder = change.value.order
-    const present = entry.rows.has(key)
     const orderChanged = present && previousOrder !== nextOrder
     const resolvedRow = this.resolve(change.value.value)
     const row = orderChanged ? { ...resolvedRow } : resolvedRow
@@ -510,11 +501,9 @@ export class BucketFacadeAdapter {
       sync.write({ type: `update`, value: row })
     } else if (change.deletes > 0) {
       sync.write({ type: `delete`, key })
-      entry.rows.delete(key)
       return
     }
 
-    entry.rows.set(key, { key, value: row, order: nextOrder })
     if (hasOrderBy && orderChanged) sync.collection._markLayoutChange()
   }
 
