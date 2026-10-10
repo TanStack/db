@@ -191,7 +191,7 @@ function isSdkResetFramedPartition(
   batches: Array<Array<Message<OracleRow>>>,
 ): boolean {
   // Model the installed SDK's HTTP 409 reset path: it publishes a synthetic
-  // singleton reset, not the response body. See electric-sdk-framing-oracle.test.ts.
+  // singleton reset, not the response body. See electric-sdk-framing.test.ts.
   // Arbitrary data/reset coalescing is outside this verified protocol domain;
   // this is not a claim that the SDK validates every other server response.
   return batches.every(
