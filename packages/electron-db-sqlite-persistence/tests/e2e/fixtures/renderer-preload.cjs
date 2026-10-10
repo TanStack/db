@@ -14,6 +14,7 @@ async function runScenario(input) {
     timeoutMs: input.timeoutMs,
   })
   const adapter = persistence.adapter
+  const eagerTarget = (collectionId) => ({ kind: `eager`, collectionId })
 
   const scenario = input.scenario
   switch (scenario.type) {
@@ -21,7 +22,7 @@ async function runScenario(input) {
       return { type: `noop` }
 
     case `writeTodo`: {
-      await adapter.applyCommittedTx(input.collectionId, {
+      await adapter.applyCommittedTx(eagerTarget(input.collectionId), {
         txId: scenario.txId,
         term: 1,
         seq: scenario.seq,
@@ -39,7 +40,7 @@ async function runScenario(input) {
 
     case `loadTodos`: {
       const rows = await adapter.loadSubset(
-        scenario.collectionId ?? input.collectionId,
+        eagerTarget(scenario.collectionId ?? input.collectionId),
         {},
       )
       return {
@@ -57,7 +58,7 @@ async function runScenario(input) {
 
     case `loadUnknownCollectionError`: {
       try {
-        await adapter.loadSubset(scenario.collectionId, {})
+        await adapter.loadSubset(eagerTarget(scenario.collectionId), {})
         return {
           type: `loadUnknownCollectionError`,
           error: {
