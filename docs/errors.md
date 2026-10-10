@@ -2389,3 +2389,13 @@ Development builds show this message, with `${...}` replaced by values:
 ```text
 Bucket facade retired with rows the graph did not retract
 ```
+
+<a id="error-238"></a>
+
+## Error 238: `query/live/bucket-facade-adapter.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Bucket facade cannot start again after cleanup
+```

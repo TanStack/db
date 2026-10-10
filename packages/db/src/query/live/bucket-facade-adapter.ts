@@ -313,8 +313,7 @@ export class BucketFacadeAdapter {
       // A failed write or commit can leave the facade's sync transaction
       // open with staged writes. Restore into it and commit it, so its
       // writes cannot reappear in the projected synced rows later.
-      const pending = entry.collection._state.pendingSyncedTransactions
-      if (pending[pending.length - 1]?.committed !== false) sync.begin()
+      if (!entry.collection._state.hasOpenSyncTransaction()) sync.begin()
       // Undo only the keys the flush wrote, held writes included; a row it did
       // not touch is still the one the facade showed before the flush.
       for (const key of snapshot.written.get(entry)!) {
@@ -418,6 +417,7 @@ export class BucketFacadeAdapter {
     const keys = new WeakMap<object, string | number>()
     const order = new WeakMap<object, string>()
     let sync: FacadeSync | undefined
+    let stopped = false
     const collection = createCollection<any, string | number>({
       id: `__bucket-facade:${this.parentId}:${edgeId}:${bucketKey}`,
       getKey: (row) => {
@@ -442,9 +442,18 @@ export class BucketFacadeAdapter {
       sync: {
         rowUpdateMode: `full`,
         sync: (methods) => {
+          // Cleanup is final: the adapter never writes a facade again, so a
+          // restart would show a Collection that the graph no longer feeds.
+          if (stopped)
+            throw new Error(
+              devBuild() && process.env.NODE_ENV !== `production`
+                ? `Bucket facade cannot start again after cleanup`
+                : codedMessage(238),
+            )
           sync = methods
           return () => {
             sync = undefined
+            stopped = true
           }
         },
       },

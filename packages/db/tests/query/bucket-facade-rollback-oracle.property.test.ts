@@ -73,9 +73,9 @@ import type { BucketRow } from '../../src/query/live/materialized-pipeline.js'
  * step rolls back the open optimistic rows (`settleLocal`), after which those
  * keys are compared by value. A step
  * may also clean up a shown facade from outside the adapter (`cleanup`), as a
- * holder can. A cleaned-up facade is not compared, but every flush, rollback
- * and retirement must still succeed, including after a holder starts the
- * facade again. The model
+ * holder can. Cleanup is final: starting the facade again by subscribing,
+ * preloading or writing throws, and the facade stays empty. Every later
+ * flush, rollback and retirement must still succeed. The model
  * keeps only synced rows, so the comparison sets those optimistic rows aside
  * and checks that each stays visible while its facade is held. A step may
  * also hold one shown facade's sync commits behind a persisting user
@@ -118,14 +118,17 @@ import type { BucketRow } from '../../src/query/live/materialized-pipeline.js'
  *   optimistic row from a user transaction on the facade, or a sync commit
  *   held behind a persisting transaction. The grammar adds optimistic
  *   inserts and optimistic deletes of shown graph rows (the `local` and
- *   `deleteShown` step fields). The oracle requires a retired facade to show
+ *   `changeShown` step fields). An optimistic update of a facade row throws
+ *   code 146, because the facade's getKey cannot read the key of the
+ *   updated copy; that bug is outside this oracle. The oracle requires a retired facade to show
  *   exactly its visible optimistic rows. Those rows have no synced row, so
  *   they leave when their transactions settle, and every history ends by
  *   settling them and comparing all rows again. A row the graph sent and
  *   never retracted is a contradictory graph
  *   signal, so retiring its bucket throws and the flush restores the facade.
- *   That case has a pinned witness only; the grammar retires only after the
- *   graph's retractions, including under a hold, and must not throw. Held
+ *   The `contradict` outcome generates it for a shown facade with rows; every
+ *   other retirement follows the graph's retractions, including under a
+ *   hold, and must not throw. Held
  *   commits are in the grammar (the `hold` and `holdFor` step fields), one
  *   hold at a time, for up to three flushes. A step that releases a hold
  *   opened earlier checks rows only, not events or layout. The rows of a
@@ -161,8 +164,19 @@ type Op =
   | { type: `delete`; bucket: BucketKey; id: number }
   | { type: `retire`; bucket: BucketKey }
 
+/**
+ * How a flush ends. `contradict` retires a shown bucket without the graph's
+ * retractions, a contradictory graph signal: the flush throws code 237 and
+ * restores every facade, as for any failed flush.
+ */
 type Outcome =
-  `publish` | `throw` | `throwWrite` | `throwStaged` | `throwNew` | `rollback`
+  | `publish`
+  | `throw`
+  | `throwWrite`
+  | `throwStaged`
+  | `throwNew`
+  | `rollback`
+  | `contradict`
 
 type FacadeSync = Parameters<SyncConfig<Record<string, unknown>>[`sync`]>[0]
 type FacadeEntry = {
@@ -460,29 +474,44 @@ class Driver {
     this.graph.run()
   }
 
+  /** Cancel a contradictory retirement that a failed flush kept pending. */
+  cancelRetirement(bucket: BucketKey): void {
+    this.activity.sendData(new MultiSet([[[bucket, true], 1]]))
+    this.graph.run()
+  }
+
   /**
    * Insert a row into a shown facade inside a user transaction that stays
    * pending, as an application may with a Collection-valued include. The
    * facade then shows an optimistic row the graph never sent.
    */
-  addLocal(bucket: BucketKey, sharedId?: number, deleteId?: number): void {
+  addLocal(
+    bucket: BucketKey,
+    sharedId?: number,
+    shown?: { id: number; type: `delete` | `update` },
+  ): void {
     const facade = this.entry(bucket)?.collection
-    if (!facade) return
-    if (deleteId !== undefined && !facade.has(deleteId)) return
-    const id = deleteId ?? sharedId ?? this.nextLocalId++
+    // A cleaned-up facade refuses every use; `cleanupFacade` checks that.
+    if (!facade || this.cleaned.has(facade)) return
+    if (shown && !facade.has(shown.id)) return
+    const id = shown?.id ?? sharedId ?? this.nextLocalId++
     const transaction = createTransaction({
       autoCommit: false,
       mutationFn: () => new Promise<void>(() => {}),
     })
-    // An optimistic delete of a graph row makes the visible rows differ from
-    // the projected synced rows without any hold.
+    // An optimistic delete or update of a graph row makes the visible rows
+    // differ from the projected synced rows without any hold.
     transaction.mutate(() => {
-      if (deleteId !== undefined) facade.delete(deleteId)
+      if (shown?.type === `delete`) facade.delete(id)
+      else if (shown?.type === `update`)
+        facade.update(id, (draft) => {
+          draft.v = 100
+        })
       else facade.insert({ id, v: 0, $key: id } as unknown as Row)
     })
     this.localTransactions.push(transaction)
     const ids = this.localIds.get(facade) ?? new Map()
-    ids.set(id, deleteId === undefined)
+    ids.set(id, shown?.type !== `delete`)
     this.localIds.set(facade, ids)
   }
 
@@ -493,7 +522,7 @@ class Driver {
    */
   hold(bucket: BucketKey): (() => Promise<void>) | undefined {
     const facade = this.entry(bucket)?.collection
-    if (!facade) return undefined
+    if (!facade || this.cleaned.has(facade)) return undefined
     const id = this.nextHeldId++
     this.heldIds.add(id)
     let settle!: () => void
@@ -735,12 +764,32 @@ class Driver {
   /** Facades that a holder cleaned up; their rows are not compared. */
   readonly cleaned = new WeakSet<object>()
 
-  /** Clean up a shown facade from outside the adapter, as a holder may. */
+  /**
+   * Clean up a shown facade from outside the adapter, as a holder may. The
+   * cleanup is final: every use that would start the facade again throws,
+   * and the facade stays empty.
+   */
   async cleanupFacade(bucket: BucketKey): Promise<void> {
     const facade = this.entry(bucket)?.collection
     if (!facade) return
     this.cleaned.add(facade)
     await facade.cleanup()
+    const restart = /Bucket facade cannot start again after cleanup/
+    expect(
+      () => facade.subscribeChanges(() => {}),
+      `restart by subscribe`,
+    ).toThrow(restart)
+    await expect(facade.preload(), `restart by preload`).rejects.toThrow(
+      restart,
+    )
+    // The refused start leaves the facade in an error state, so a later
+    // write fails on that state.
+    expect(facade.status, `status after a refused start`).toBe(`error`)
+    expect(
+      () => facade.insert({ id: 99, v: 0, $key: 99 } as unknown as Row),
+      `restart by insert`,
+    ).toThrow()
+    expect(facade.size, `rows of a cleaned-up facade`).toBe(0)
   }
 
   /**
@@ -859,7 +908,7 @@ async function runHistory(
     throwPick: number
     local?: number
     shareId?: boolean
-    deleteShown?: boolean
+    changeShown?: `delete` | `update`
     hold?: number
     holdFor?: number
     cleanup?: number
@@ -911,8 +960,11 @@ async function runHistory(
             step.shareId && free.length > 0
               ? free[index % free.length]
               : undefined,
-            step.deleteShown && shownIds.length > 0
-              ? shownIds[index % shownIds.length]
+            step.changeShown && shownIds.length > 0
+              ? {
+                  id: shownIds[index % shownIds.length]!,
+                  type: step.changeShown,
+                }
               : undefined,
           )
         }
@@ -945,6 +997,23 @@ async function runHistory(
         pending = [...pending, ...ops]
         driver.instrument()
         const written = writtenBuckets(pending)
+        // A contradictory retirement targets a shown, live facade that keeps
+        // rows after the pending operations.
+        const afterOps = applyOps(published, pending)
+        const contradictTargets = BUCKETS.filter(
+          (bucket) =>
+            driver.entry(bucket)?.sync !== undefined &&
+            (afterOps.get(bucket)?.size ?? 0) > 0,
+        )
+        const contradicted =
+          step.outcome === `contradict` && contradictTargets.length > 0
+            ? contradictTargets[step.throwPick % contradictTargets.length]!
+            : undefined
+        if (contradicted) {
+          driver.retireWithoutRetractions(contradicted)
+          // The retirement check reads that facade's rows.
+          written.add(contradicted)
+        }
         const before = driver.eventCounts()
         const layoutsBefore = driver.layoutCounts()
         const facadesBefore = new Map(
@@ -980,6 +1049,7 @@ async function runHistory(
           outcome = `publish`
         if (outcome === `throwNew` && newTargets.length === 0)
           outcome = `publish`
+        if (outcome === `contradict` && !contradicted) outcome = `publish`
         if (
           outcome === `throw` ||
           outcome === `throwWrite` ||
@@ -1005,8 +1075,11 @@ async function runHistory(
         const created = driver.recordCreated()
         if (outcome !== `publish` && outcome !== `rollback`) {
           expect(() => driver.adapter.flush(), label).toThrow(
-            `injected facade write failure`,
+            outcome === `contradict`
+              ? `Bucket facade retired with rows the graph did not retract`
+              : `injected facade write failure`,
           )
+          if (contradicted) driver.cancelRetirement(contradicted)
         } else {
           const publication = driver.adapter.flush()
           if (outcome === `rollback`) {
@@ -1191,6 +1264,7 @@ const step = fc.record({
     `throwStaged`,
     `throwNew`,
     `rollback`,
+    `contradict`,
   ),
   throwPick: fc.nat(3),
   // About two steps in five add an optimistic row to a facade first.
@@ -1206,8 +1280,16 @@ const step = fc.record({
   holdFor: fc.integer({ min: 0, max: 2 }),
   // An optimistic row sometimes takes a graph id.
   shareId: fc.boolean(),
-  // The optimistic change is sometimes a delete of a shown graph row.
-  deleteShown: fc.integer({ min: 0, max: 3 }).map((n) => n === 0),
+  // The optimistic change is sometimes a delete or an update of a shown
+  // graph row.
+  // An optimistic update of a facade row is not generated: the facade's
+  // getKey cannot read the key of the updated copy, so the update throws
+  // code 146 (also on main). A separate change owns that bug.
+  changeShown: fc.constantFrom<`delete` | undefined>(
+    undefined,
+    undefined,
+    `delete`,
+  ),
   // About one step in eight cleans up a shown facade from outside.
   cleanup: fc
     .integer({ min: -28, max: BUCKETS.length - 1 })
