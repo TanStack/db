@@ -2649,29 +2649,31 @@ describe(`SQLite resume snapshots`, () => {
           },
         })
         let recover!: () => Promise<void>
-        const collection = createCollection(
-          persistedCollectionOptions<{ id: string; title: string }, string>({
-            id: logicalId,
-            syncMode: `on-demand`,
-            getKey: (row) => row.id,
-            defaultIndexType: BasicIndex,
-            sync: {
-              sync: (params) => {
-                recover = params.metadata!.persistence!.startScopedRecovery!
-                params.markReady()
-                return { restartAfterScopedRecovery: (gate) => gate }
-              },
-            },
-            persistence: { adapter },
-          }),
-        )
-        const index = collection.createIndex((row) => row.title)
-        const signature = collection
-          .getIndexMetadata()
-          .find((metadata) => metadata.indexId === index.id)?.signature
-        if (!signature) throw new Error(`Missing index signature`)
+        let collection:
+          Collection<{ id: string; title: string }, string> | undefined
         let recovery: Promise<void> | undefined
         try {
+          collection = createCollection(
+            persistedCollectionOptions<{ id: string; title: string }, string>({
+              id: logicalId,
+              syncMode: `on-demand`,
+              getKey: (row) => row.id,
+              defaultIndexType: BasicIndex,
+              sync: {
+                sync: (params) => {
+                  recover = params.metadata!.persistence!.startScopedRecovery!
+                  params.markReady()
+                  return { restartAfterScopedRecovery: (gate) => gate }
+                },
+              },
+              persistence: { adapter },
+            }),
+          )
+          const index = collection.createIndex((row) => row.title)
+          const signature = collection
+            .getIndexMetadata()
+            .find((metadata) => metadata.indexId === index.id)?.signature
+          if (!signature) throw new Error(`Missing index signature`)
           await collection.stateWhenReady()
           const originalClaim = database
             .prepare(
@@ -2715,25 +2717,35 @@ describe(`SQLite resume snapshots`, () => {
             )
             .get(logicalId) as { physical_id: string }
           expect(currentClaim.physical_id).not.toBe(initialStorageId)
-          await vi.waitFor(() => {
-            const currentIndex = database
+          const currentIndex = database
+            .prepare(
+              `SELECT index_name, removed FROM persisted_index_registry
+               WHERE collection_id = ? AND signature = ?`,
+            )
+            .get(currentClaim.physical_id, signature) as
+            { index_name: string; removed: number } | undefined
+          if (!currentIndex) throw new Error(`Missing rotated SQLite index row`)
+          expect(currentIndex.removed).toBe(readdDuringReconciliation ? 0 : 1)
+          expect(
+            database
               .prepare(
-                `SELECT index_name, removed FROM persisted_index_registry
-             WHERE collection_id = ? AND signature = ?`,
+                `SELECT name, tbl_name FROM sqlite_master
+                 WHERE type = 'index' AND name = ?`,
               )
-              .get(currentClaim.physical_id, signature) as
-              { index_name: string; removed: number } | undefined
-            if (!currentIndex)
-              throw new Error(`Missing rotated SQLite index row`)
-            expect(currentIndex.removed).toBe(readdDuringReconciliation ? 0 : 1)
-            expect(
-              database
-                .prepare(
-                  `SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?`,
-                )
-                .all(currentIndex.index_name),
-            ).toHaveLength(readdDuringReconciliation ? 1 : 0)
-          })
+              .all(currentIndex.index_name),
+          ).toEqual(
+            readdDuringReconciliation
+              ? [
+                  {
+                    name: currentIndex.index_name,
+                    tbl_name: createPersistedTableName(
+                      currentClaim.physical_id,
+                      `c`,
+                    ),
+                  },
+                ]
+              : [],
+          )
           expect(collection.getIndexMetadata()).toHaveLength(
             readdDuringReconciliation ? 1 : 0,
           )
@@ -2743,13 +2755,24 @@ describe(`SQLite resume snapshots`, () => {
         } finally {
           releaseEnsure.resolve()
           releaseSecondRemoval.resolve()
-          try {
-            await Promise.allSettled([recovery])
-            await collection.cleanup()
-          } catch (error) {
-            primaryFailure ??= error
+          const secondaryFailures: Array<unknown> = []
+          if (recovery) {
+            try {
+              await reachCheckpoint(recovery, `recovery during cleanup`, 5_000)
+            } catch (error) {
+              if (error !== primaryFailure) secondaryFailures.push(error)
+            }
           }
-          closeDatabasePreservingPrimary(database, primaryFailure)
+          try {
+            await collection?.cleanup()
+          } catch (error) {
+            secondaryFailures.push(error)
+          }
+          closeDatabasePreservingPrimary(
+            database,
+            primaryFailure,
+            secondaryFailures,
+          )
         }
       },
     )
