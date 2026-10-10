@@ -7765,6 +7765,163 @@ it(`reacquires an active Query subset after its SQLite cache claim expires`, asy
   ])
 })
 
+// Distinct Query keys are independent documents even when one key is a
+// prefix of the other and both Collections share one QueryClient. The model
+// has two claims: A expires at 11000 and B, acquired later, expires at 15000.
+// At 11001 only A may replace its persisted cache generation and source row.
+// The real QueryClient uses prefix matching, so B's cache entry is deliberately
+// inside A's base-key search. Public rows, B's Query entry, its durable rows,
+// its current storage ID, and its fetch count are compared after A reloads.
+it(`keeps a warm Query Collection independent when a prefix-sharing peer rotates`, async () => {
+  const firstId = `query-prefix-rotation-a`
+  const secondId = `query-prefix-rotation-b`
+  const driver = new BetterSqlite3SQLiteDriver({ filename: `:memory:` })
+  let now = 1_000
+  const persistence = createNodeSQLitePersistence({
+    database: driver.getDatabase(),
+    cacheGenerationClaimTtlMs: 10_000,
+    now: () => now,
+  })
+  const firstManaged = persistence.resolvePersistenceForCollection!({
+    collectionId: firstId,
+    mode: `sync-present`,
+  })
+  const secondManaged = persistence.resolvePersistenceForCollection!({
+    collectionId: secondId,
+    mode: `sync-present`,
+  })
+  const queryClient = createQueryClient()
+  const firstDemand = { limit: 1 }
+  const secondDemand = { limit: 2 }
+  const firstKey = [`shared-prefix`, getLoadSubsetDemandKey(firstDemand)]
+  const secondKey = [
+    `shared-prefix`,
+    `peer`,
+    getLoadSubsetDemandKey(firstDemand),
+  ]
+  let firstRows: Array<Item> = [
+    { id: `first-old`, category: `active`, name: `Old` },
+  ]
+  const firstQueryFn = vi.fn((context: QueryFunctionContext) =>
+    Promise.resolve(
+      structuredClone(
+        context.queryKey[1] === getLoadSubsetDemandKey(firstDemand)
+          ? firstRows
+          : [{ id: `trigger`, category: `active`, name: `Trigger` }],
+      ),
+    ),
+  )
+  const secondRow: Item = {
+    id: `second-warm`,
+    category: `peer`,
+    name: `Warm`,
+  }
+  const secondQueryFn = vi.fn(() => Promise.resolve([secondRow]))
+  const first = createCollection(
+    persistedCollectionOptions<
+      Item,
+      string | number,
+      never,
+      QueryCollectionUtils<Item, string | number, Item, unknown>
+    >({
+      ...queryCollectionOptions<Item>({
+        id: firstId,
+        queryClient,
+        queryKey: [`shared-prefix`],
+        queryFn: firstQueryFn,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+      }),
+      persistence: firstManaged,
+    }),
+  )
+  const mounted = [first]
+  cleanups.push(async () => {
+    for (const collection of mounted.reverse()) await collection.cleanup()
+    queryClient.clear()
+    driver.close()
+  })
+  await first._sync.loadSubset(firstDemand)
+  expect(itemIds(first.toArray)).toEqual([`first-old`])
+  expect(queryClient.getQueryData(firstKey)).toHaveLength(1)
+
+  now = 5_000
+  const peer = createCollection(
+    persistedCollectionOptions<
+      Item,
+      string | number,
+      never,
+      QueryCollectionUtils<Item, string | number, Item, unknown>
+    >({
+      ...queryCollectionOptions<Item>({
+        id: secondId,
+        queryClient,
+        queryKey: [`shared-prefix`, `peer`],
+        queryFn: secondQueryFn,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+      }),
+      persistence: secondManaged,
+    }),
+  )
+  mounted.push(peer)
+  await peer._sync.loadSubset(firstDemand)
+  expect(itemIds(peer.toArray)).toEqual([`second-warm`])
+  expect(secondQueryFn).toHaveBeenCalledTimes(1)
+  const secondHead = driver
+    .getDatabase()
+    .prepare(
+      `SELECT physical_id FROM cache_generation
+       WHERE logical_id = ? AND retired = 0`,
+    )
+    .get(secondId) as { physical_id: string }
+  const secondClaim = driver
+    .getDatabase()
+    .prepare(`SELECT claim_id FROM cache_generation_claim WHERE logical_id = ?`)
+    .get(secondId) as { claim_id: string }
+  expect(
+    await secondManaged.adapter.loadSubset(
+      secondHead.physical_id,
+      {},
+      {
+        cacheGenerationClaimId: secondClaim.claim_id,
+      },
+    ),
+  ).toMatchObject([{ value: secondRow }])
+
+  now = 11_001
+  firstRows = [{ id: `first-fresh`, category: `active`, name: `Fresh` }]
+  await first._sync.loadSubset(secondDemand)
+  await vi.waitFor(() =>
+    expect(new Set(itemIds(first.toArray))).toEqual(
+      new Set([`first-fresh`, `trigger`]),
+    ),
+  )
+  expect(itemIds(peer.toArray)).toEqual([`second-warm`])
+  expect(queryClient.getQueryData(secondKey)).toEqual([secondRow])
+  expect(secondQueryFn).toHaveBeenCalledTimes(1)
+  expect(
+    driver
+      .getDatabase()
+      .prepare(
+        `SELECT physical_id FROM cache_generation
+         WHERE logical_id = ? AND retired = 0`,
+      )
+      .get(secondId),
+  ).toMatchObject(secondHead)
+  expect(
+    await secondManaged.adapter.loadSubset(
+      secondHead.physical_id,
+      {},
+      {
+        cacheGenerationClaimId: secondClaim.claim_id,
+      },
+    ),
+  ).toMatchObject([{ value: secondRow }])
+})
+
 // A claim can expire while persisted startup is reading metadata, before the
 // Query source enters its sync run. The wrapper rotates the cache privately at
 // that boundary. The old QueryClient success is not a source snapshot for the

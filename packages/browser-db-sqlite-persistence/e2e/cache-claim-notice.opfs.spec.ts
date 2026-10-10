@@ -4,7 +4,9 @@
  * that notice must reload its retained subset into private storage. A later
  * live claimant keeps the current head, public rows, and durable rows. This
  * fixed schedule controls receiver handling after native BroadcastChannel
- * delivery; it does not claim arbitrary scheduling or Electric delivery.
+ * delivery. The installed Electric SDK variant receives controlled HTTP
+ * source snapshots in the expired tab; arbitrary native scheduling and a
+ * live Electric service remain outside this bounded history.
  * The independent model is two claims with half-open lifetimes: first expires
  * at t+300000, peer at t+450000. At t+300001 only the first may rotate
  * privately. A second explicit demand stays pending until the provider's
@@ -13,7 +15,7 @@
  * 60-second test, so recovery at this cut follows the delivered callback.
  */
 import { expect, test } from '@playwright/test'
-import type { Page } from '@playwright/test'
+import type { BrowserContext, Page } from '@playwright/test'
 import type { Observation } from './cache-claim-notice.opfs'
 
 async function observe(page: Page): Promise<Observation> {
@@ -31,13 +33,14 @@ async function openProbe(page: Page, url: string): Promise<void> {
   if (state.phase === `failed`) throw new Error(state.failure)
 }
 
-test(`a native OPFS peer notice preserves the warm cache while an expired run refetches`, async ({
-  context,
-}) => {
+async function runHistory(
+  context: BrowserContext,
+  expiredProvider: `controlled` | `electric`,
+): Promise<void> {
   const databaseId = `cache-claim-${crypto.randomUUID()}`
   const startAt = Date.now() + 86_400_000
   const url = (role: `expired` | `warm`, now: number) =>
-    `/e2e/cache-claim-notice.opfs.html?databaseId=${databaseId}&role=${role}&now=${now}`
+    `/e2e/cache-claim-notice.opfs.html?databaseId=${databaseId}&role=${role}&now=${now}&provider=${role === `expired` ? expiredProvider : `controlled`}`
   const pages: Array<Page> = []
   let primaryFailure: unknown
   try {
@@ -167,4 +170,10 @@ test(`a native OPFS peer notice preserves the warm cache while an expired run re
   }
   if (primaryFailure) throw primaryFailure
   expect(cleanupFailures).toEqual([])
-})
+}
+
+for (const expiredProvider of [`controlled`, `electric`] as const) {
+  test(`a native OPFS peer notice preserves the warm cache while an expired ${expiredProvider} run refetches`, async ({
+    context,
+  }) => runHistory(context, expiredProvider))
+}

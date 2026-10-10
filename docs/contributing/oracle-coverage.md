@@ -2161,9 +2161,14 @@ waits for a new fetch; an old fetch and a public utility refetch cannot publish
 or return their retired result. A held real SQLite retention scan cannot delete
 a same-key row reacquired in the replacement generation. A released acquisition
 cannot launch another fetch after its held old result settles. These are fixed
-histories at public-row, request-count, and caller-settlement cuts; two
-Collections sharing one QueryClient, arbitrary retention schedules, and custom
-provider restart implementations remain outside their bounds.
+histories at public-row, request-count, and caller-settlement cuts. A paired-Collection real-SQLite history now gives two on-demand Query
+Collections one QueryClient and prefix-overlapping but distinct Query keys.
+Only the earlier claim expires; its rotation and fresh fetch must leave the
+warm peer's public row, Query cache entry, durable row, current storage ID,
+and fetch count intact. A broad prefix-eviction mutant failed at the peer
+cache-entry comparison. Shared exact-key cleanup follows the documented Query
+cache contract; arbitrary retention schedules and custom provider restart
+implementations remain outside these histories.
 The expiry and late-fetch histories also read the tested run's claimed physical
 SQLite generation after fresh settlement and after the retired fetch resolves;
 both cuts require the fresh rows and exclude old rows. A separate active-head
@@ -2211,9 +2216,16 @@ and leaves the Collection in terminal error; a real-SQLite hostile probe
 confirmed the row can remain public without becoming durable. The ordinary
 durability-failure law permits that fail-stop, while automatic expiry reload
 covers admission before publication. The first new-format
-claim isolates but does not reclaim legacy storage. The present tests do not
-establish release retry after a timed-out old-leader RPC or claimless
-direct-adapter access to a physical ID after its catalog row is collected. The Browser owner
+claim isolates but does not reclaim legacy storage.
+The Browser coordinator owner now drops an old leader's release reply after
+its adapter unload, transfers leadership, lets the real RPC timer expire, and
+checks that retry retires the outbound acquisition without replaying demand or
+unloading twice. A release-without-retirement mutant failed at the new owner's
+unexpected load. Claimless direct-adapter access to a physical ID after its
+catalog row is collected remains unproved and has a reproduced orphan-write
+probe; rejecting it while retaining arbitrary eager Collection IDs requires a
+durable distinction for former physical IDs.
+The Browser owner
 now has a combined receiving history over real wa-sqlite and the controlled
 Browser coordinator wire. Two runs hold distinct claims on one generation;
 only the earlier claim expires before its renewal timer. A real durable peer
@@ -2244,11 +2256,15 @@ BroadcastChannel. One receiver callback is held until its claim expires;
 its private reload leaves the warm peer's public and durable rows and current
 head intact. An explicit demand stays pending until the fresh source receipt
 applies. The renewal timer lies beyond the fixed test window, and the receiver
-checks no refetch before releasing the delivered callback. Arbitrary native
-scheduling, a live Electric provider in this same two-context history, and
-claimless direct-adapter access after collection
-remain separate unproved cuts; these fixed receivers do not close every
-cache-eviction interleaving.
+checks no refetch before releasing the delivered callback. The same fixed
+two-context history now also runs the installed Electric SDK
+in the expired tab against controlled HTTP source snapshots. It holds an old
+subset request and the new source response across the native notice, then
+checks pending demand, public and durable rows, and the warm peer. Dropping the
+held native callback fails at the refetch-entry checkpoint. Arbitrary native
+scheduling, a live Electric service rather than controlled HTTP, and claimless
+direct-adapter access after collection remain separate unproved cuts; these
+fixed receivers do not close every cache-eviction interleaving.
 
 The [cache-generation oracle audit](oracle-reviews/issue-2069-cache-generation-oracle-audit-53ded62d8.md)
 records the generated grammar controls, killed mutants, direct replays, and

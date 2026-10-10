@@ -4939,6 +4939,74 @@ describe(`BrowserCollectionCoordinator`, () => {
       },
     )
 
+    // A release may reach the old leader and unload its exact acquisition,
+    // while the reply is lost. The real RPC timer then expires after takeover;
+    // its retry must retire the outbound debt without replaying demand or
+    // unloading the old acquisition twice. The independent expectation is one
+    // old-owner unload, zero replacement-owner loads, and no outbound lease at
+    // the release settlement checkpoint.
+    it(`retries a timed-out old-leader release after takeover without replaying demand`, async () => {
+      const leader = createCoordinator()
+      const follower = createCoordinator()
+      const unsubscribeLeader = leader.subscribe(`todos`, () => {})
+      follower.subscribe(`todos`, () => {})
+      await flush(50)
+      const oldOwner = Object.assign(
+        vi.fn(() => Promise.resolve()),
+        {
+          unloadSubset: vi.fn(() => Promise.resolve()),
+          onError: vi.fn(),
+        },
+      )
+      const newOwner = Object.assign(
+        vi.fn(() => Promise.resolve()),
+        {
+          unloadSubset: vi.fn(() => Promise.resolve()),
+          onError: vi.fn(),
+        },
+      )
+      const unregisterOld = leader.registerRemoteSubsetOwner(`todos`, oldOwner)
+      const unregisterNew = follower.registerRemoteSubsetOwner(
+        `todos`,
+        newOwner,
+      )
+      const options: LoadSubsetOptions = { limit: 1 }
+      const internals = follower as unknown as {
+        outboundRemoteSubsetAcquisitions: Map<string, unknown>
+      }
+      let droppedResponses = 0
+
+      try {
+        await follower.requestEnsureRemoteSubset(`todos`, options)
+        dropNextBroadcastMessage = (data) => {
+          const type = (data as { payload?: { type?: string } }).payload?.type
+          if (type !== `rpc:releaseRemoteSubset:res`) return false
+          droppedResponses++
+          return true
+        }
+        const release = follower.requestReleaseRemoteSubset(`todos`, options)
+        void release.catch(() => undefined)
+        await vi.waitFor(() => expect(droppedResponses).toBe(1))
+        expect(oldOwner.unloadSubset).toHaveBeenCalledTimes(1)
+        expect(internals.outboundRemoteSubsetAcquisitions.size).toBe(1)
+
+        unsubscribeLeader()
+        await vi.waitFor(() => expect(follower.isLeader(`todos`)).toBe(true))
+        await release
+        expect(internals.outboundRemoteSubsetAcquisitions.size).toBe(0)
+        expect(oldOwner.unloadSubset).toHaveBeenCalledTimes(1)
+        expect(newOwner).not.toHaveBeenCalled()
+        expect(newOwner.unloadSubset).not.toHaveBeenCalled()
+      } finally {
+        dropNextBroadcastMessage = undefined
+        unsubscribeLeader()
+        unregisterOld()
+        unregisterNew()
+        leader.dispose()
+        follower.dispose()
+      }
+    }, 20_000)
+
     it(`keeps a Browser release tombstone when a transferred load rejects concurrently`, async () => {
       const coordinator = createCoordinator()
       coordinator.subscribe(`todos`, () => {})

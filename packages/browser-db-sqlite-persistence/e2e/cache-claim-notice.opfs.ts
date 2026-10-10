@@ -2,10 +2,13 @@
  * Browser receiver for cache-claim-notice.opfs.spec.ts. Two real Chromium
  * contexts share OPFS, Web Locks, and BroadcastChannel. The test controls one
  * subscriber callback after native delivery; it never constructs or publishes
- * a notice. The source is a small deterministic provider that keeps one
- * explicit demand pending until a fresh source receipt applies, not Electric.
+ * a notice. One history uses a small deterministic provider. The paired
+ * history uses the installed Electric SDK with controlled HTTP responses in
+ * the expired tab while the warm tab commits through the deterministic source.
+ * Both use real OPFS storage and native BroadcastChannel delivery.
  */
 import { createCollection } from '@tanstack/db'
+import { electricCollectionOptions } from '../../electric-db-collection/src/electric'
 import {
   BrowserCollectionCoordinator,
   createBrowserWASQLitePersistence,
@@ -59,10 +62,13 @@ declare global {
 const parameters = new URL(location.href).searchParams
 const databaseId = parameters.get(`databaseId`)
 const role = parameters.get(`role`)
+const provider = parameters.get(`provider`) ?? `controlled`
 const initialNow = Number(parameters.get(`now`))
 if (
   !databaseId ||
   (role !== `expired` && role !== `warm`) ||
+  (provider !== `controlled` && provider !== `electric`) ||
+  (provider === `electric` && role !== `expired`) ||
   !Number.isSafeInteger(initialNow)
 ) {
   throw new Error(`Invalid cache-claim notice parameters`)
@@ -73,12 +79,12 @@ let hostNow = initialNow
 let phase: Observation[`phase`] = `starting`
 let failure: string | undefined
 let storageId: string | undefined
-let collection: Collection<Row, string> | undefined
+let collection: Collection<Row, string | number> | undefined
 let coordinator: BrowserCollectionCoordinator | undefined
 let database:
   Awaited<ReturnType<typeof openBrowserWASQLiteOPFSDatabase>> | undefined
 let persistence: ReturnType<typeof createBrowserWASQLitePersistence> | undefined
-let source: Parameters<SyncConfig<Row, string>[`sync`]>[0] | undefined
+let source: Parameters<SyncConfig<Row, string | number>[`sync`]>[0] | undefined
 let seeded = false
 let refetchEntered = false
 let refreshStarted = false
@@ -98,6 +104,110 @@ const heldNotices: Array<() => void> = []
 const receivedPeerNotices: Array<string> = []
 const postedPeerNotices: Array<string> = []
 const sourceLoads: Array<boolean | undefined> = []
+let firstElectricStorageId: string | undefined
+let electricSnapshotNumber = 0
+let initialElectricLiveDelivered = false
+const pendingElectricRequests = new Set<() => void>()
+
+function electricSnapshotResponse(row: Row): Response {
+  const offset = ++electricSnapshotNumber
+  return new Response(
+    JSON.stringify({
+      metadata: {
+        xmin: `10`,
+        xmax: `20`,
+        xip_list: [],
+        database_lsn: `10`,
+        snapshot_mark: offset,
+      },
+      data: [
+        {
+          key: row.id,
+          value: row,
+          headers: { operation: `insert` },
+        },
+      ],
+    }),
+    {
+      headers: {
+        'electric-handle': `shape`,
+        'electric-offset': `${offset}_0`,
+        'electric-cursor': String(offset),
+        'electric-up-to-date': `true`,
+        'electric-schema': JSON.stringify({
+          id: { type: `text` },
+          title: { type: `text` },
+        }),
+      },
+    },
+  )
+}
+
+function holdElectricRequest(signal?: AbortSignal): Promise<Response> {
+  return new Promise<Response>((_resolve, reject) => {
+    const abort = () => {
+      signal?.removeEventListener(`abort`, abort)
+      pendingElectricRequests.delete(abort)
+      reject(
+        signal?.reason ?? new DOMException(`Request aborted`, `AbortError`),
+      )
+    }
+    if (signal?.aborted) {
+      abort()
+      return
+    }
+    pendingElectricRequests.add(abort)
+    signal?.addEventListener(`abort`, abort, { once: true })
+  })
+}
+
+const electricFetch: typeof fetch = (input, init) => {
+  const url = new URL(String(input), location.href)
+  const isSubset = [...url.searchParams.keys()].some((key) =>
+    key.startsWith(`subset__`),
+  )
+  if (!isSubset) {
+    if (!initialElectricLiveDelivered) {
+      initialElectricLiveDelivered = true
+      return Promise.resolve(
+        new Response(
+          JSON.stringify([
+            { headers: { control: `up-to-date`, global_last_seen_lsn: `1` } },
+          ]),
+          {
+            headers: {
+              'electric-handle': `shape`,
+              'electric-offset': `0_0`,
+              'electric-cursor': `0`,
+              'electric-up-to-date': `true`,
+              'electric-schema': JSON.stringify({
+                id: { type: `text` },
+                title: { type: `text` },
+              }),
+            },
+          },
+        ),
+      )
+    }
+    return holdElectricRequest(init?.signal ?? undefined)
+  }
+  sourceLoads.push(undefined)
+  firstElectricStorageId ??= storageId
+  if (!seeded) {
+    seeded = true
+    return Promise.resolve(
+      electricSnapshotResponse({ id: `old`, title: `Warm source row` }),
+    )
+  }
+  if (storageId === firstElectricStorageId) {
+    return holdElectricRequest(init?.signal ?? undefined)
+  }
+  refetchEntered = true
+  return refetchRelease.then(() =>
+    electricSnapshotResponse({ id: `fresh`, title: `Fresh source row` }),
+  )
+}
+
 let originalPostMessage:
   typeof BroadcastChannel.prototype.postMessage | undefined
 
@@ -131,7 +241,7 @@ window.__cacheClaimNoticeProbe = {
     ...(failure ? { failure } : {}),
     storageId,
     isLeader: storageId ? (coordinator?.isLeader(storageId) ?? false) : false,
-    publicIds: collection ? [...collection.keys()].sort() : [],
+    publicIds: collection ? [...collection.keys()].map(String).sort() : [],
     sourceLoads: [...sourceLoads],
     pendingDemand,
     ...(pendingDemandError ? { pendingDemandError } : {}),
@@ -210,6 +320,9 @@ window.__cacheClaimNoticeProbe = {
     return { head, claims: snapshots }
   },
   cleanup: async () => {
+    for (const abort of [...pendingElectricRequests]) {
+      abort()
+    }
     releaseRefetch()
     releaseFreshApplied()
     holdNotices = false
@@ -273,13 +386,26 @@ try {
     cacheGenerationClaimTtlMs: 300_000,
     now: () => hostNow,
   })
+  const electricSync =
+    provider === `electric`
+      ? electricCollectionOptions<Row>({
+          id: logicalId,
+          shapeOptions: {
+            url: `${location.origin}/electric/v1/shape`,
+            params: { table: `public.cache_claim_notice` },
+            fetchClient: electricFetch,
+          },
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+        }).sync
+      : undefined
   collection = createCollection(
-    persistedCollectionOptions<Row, string>({
+    persistedCollectionOptions<Row, string | number>({
       id: logicalId,
       syncMode: `on-demand`,
       getKey: (row) => row.id,
       persistence,
-      sync: {
+      sync: electricSync ?? {
         sync: (params) => {
           source = params
           params.markReady()
