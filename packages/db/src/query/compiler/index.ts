@@ -30,10 +30,7 @@ import {
   UnsupportedFromTypeError,
 } from '../../errors.js'
 import { VIRTUAL_PROP_NAMES } from '../../virtual-props.js'
-import {
-  BaseQueryBuilder,
-  collectSourceTreeBindings,
-} from '../builder/index.js'
+import { BaseQueryBuilder } from '../builder/index.js'
 import { isRefProxy } from '../builder/ref-proxy-identity.js'
 import {
   CaseWhenWrapper,
@@ -1426,12 +1423,8 @@ function validateQueryStructure(
   }
 
   if (query.select) {
-    const includeAncestors = collectSourceTreeBindings(
-      query,
-      new Set(ancestorBindings),
-    )
     for (const { subquery } of extractIncludesFromSelect(query.select)) {
-      validateQueryStructure(subquery.query, includeAncestors)
+      validateQueryStructure(subquery.query, availableBindings)
     }
   }
 }

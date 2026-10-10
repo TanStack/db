@@ -3484,6 +3484,124 @@ describe(`join operands reject captured sources outside lexical scope`, () => {
 })
 
 /**
+ * # A source inside a parent operand is not an include ancestor
+ *
+ * ARCHITECTURE.md §Identity/law 1 gives a child include access to the parent
+ * query's declarations and its actual ancestors. A FROM QueryRef's own source
+ * and a union branch's source are hidden behind their result rows. Capturing
+ * either source's ref in an include join is therefore out of scope, whether
+ * its alias matches the child's local alias or has another spelling.
+ *
+ * The independent provenance model here labels the inner declaration
+ * `hidden` and predicts rejection; it never reads binding IDs or source-tree
+ * traversal. The finite grammar crosses QueryRef or union placement, matching
+ * or renamed hidden alias, and eager or on-demand sources. Public Query and
+ * live Collection entry points must reject by construction or preload, before
+ * accepting public rows. The legal local and true-ancestor controls above
+ * prevent a blanket captured-ref rejection from satisfying this rule.
+ */
+describe(`include joins reject sources hidden inside parent operands`, () => {
+  type Hidden = { id: number; secret: number }
+  type Row = { id: number }
+
+  for (const mode of [`eager`, `onDemand`] as const) {
+    for (const placement of [`queryRef`, `unionBranch`] as const) {
+      for (const alias of [`local`, `inner`] as const) {
+        test(`${mode} ${placement} cannot expose inner binding ${alias} to its include`, async () => {
+          const hidden = createScopedSource<Hidden>(
+            `hidden-${mode}-${placement}`,
+            [{ id: 1, secret: 999 }],
+            mode,
+          )
+          const other = createScopedSource<Row>(
+            `hidden-other-${mode}-${placement}`,
+            [{ id: 2 }],
+            mode,
+          )
+          const local = createScopedSource<Row>(
+            `hidden-local-${mode}-${placement}`,
+            [{ id: 1 }],
+            mode,
+          )
+          const joined = createScopedSource<Row>(
+            `hidden-joined-${mode}-${placement}`,
+            [{ id: 1 }, { id: 999 }],
+            mode,
+          )
+          local.collection.createIndex((row) => row.id, {
+            indexType: BasicIndex,
+          })
+          joined.collection.createIndex((row) => row.id, {
+            indexType: BasicIndex,
+          })
+          const invalidCleanups: Array<() => unknown | Promise<unknown>> = []
+
+          const preloadHidden = async () => {
+            let hiddenRef!: number
+            const inner = new Query()
+              .from({ [alias]: hidden.collection })
+              .select((context: Context) => {
+                const row = context[alias] as Hidden
+                hiddenRef = row.secret
+                return { id: row.id }
+              })
+            const outer =
+              placement === `queryRef`
+                ? new Query().from({ parent: inner })
+                : new Query().from({
+                    parent: new Query().unionAll(
+                      inner,
+                      new Query()
+                        .from({ other: other.collection })
+                        .select(({ other: row }) => ({ id: row.id })),
+                    ),
+                  })
+            const live = createLiveQueryCollection({
+              query: outer.select((context: Context) => {
+                const parentId = (context.parent as Row).id
+                return {
+                  id: parentId,
+                  rows: toArray(
+                    new Query()
+                      .from({ local: local.collection })
+                      .innerJoin(
+                        { joined: joined.collection },
+                        ({ joined: target }) => eq(hiddenRef, target.id),
+                      )
+                      .where(({ local: row }) => eq(row.id, parentId))
+                      .select(({ local: row, joined: target }) => ({
+                        localId: row.id,
+                        joinedId: target.id,
+                      })),
+                  ),
+                }
+              }),
+            })
+            invalidCleanups.push(() => live.cleanup())
+            await live.preload()
+          }
+
+          await withHistoryCleanup(
+            async () => {
+              await expect(() => preloadHidden()).rejects.toThrow(
+                /out of scope/,
+              )
+            },
+            () => [
+              ...invalidCleanups,
+              () => hidden.collection.cleanup(),
+              () => other.collection.cleanup(),
+              () => local.collection.cleanup(),
+              () => joined.collection.cleanup(),
+            ],
+          )
+        })
+      }
+    }
+  }
+})
+
+/**
  * A bound ancestor reference and an unbound raw-IR reference to the child's
  * joined alias name different declarations. The small public-row control
  * checks admission at preload; it does not model arbitrary raw-IR expressions.

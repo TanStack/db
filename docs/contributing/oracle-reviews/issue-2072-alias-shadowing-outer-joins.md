@@ -132,9 +132,10 @@ optimization, carrying declarations visible at each join through `QueryRef`,
 union branches, and includes. It rejects a bound join ref absent from the
 current and ancestor sets. Recursive compilation uses the already validated
 tree, while the public compiler entry keeps its original signature. The
-checker uses the builder's existing source-tree traversal for include
-ancestors. It does not infer ancestry from alias text. The remaining owner
-entry in `oracle-coverage.md` tracks foreign refs outside join operands,
+checker passes only the current query's visible declarations and its actual
+ancestors to include validation. It does not infer ancestry from alias text or
+expose declarations hidden inside a `QueryRef` or union branch. The remaining
+owner entry in `oracle-coverage.md` tracks foreign refs outside join operands,
 other recursive join shapes, and provider schedules; this bounded evidence
 does not establish those cells.
 
@@ -193,3 +194,53 @@ Focused primary and work owners passed 112 tests. The wider query directory pass
 | ORC-012 | This table records every applicable guide requirement and states the finite closure boundary and unresolved cells above. |
 | ORC-013 | An absent versus matched local issue distinguishes the source-binding consequence; one versus three anchors distinguishes useful joined rows from unrelated route work. The original merge and unconditional-route mutants are rejected at those checkpoints. |
 | ORC-014 | Eager and controlled on-demand Collections supply the source premise. No claim is made about an external provider's request work; it needs a receiving witness before extension. |
+
+## Include validation and hidden source bindings — 2026-10-10 follow-up
+
+CodeRabbit review `5479589545` covered `43d7c3d77`, before the chained-join
+repair, and reported that an include child could capture a source declared
+inside its parent's `QueryRef` or union branch. The reviewed implementation
+passed all bindings in the parent's source tree to the child validator.
+`ARCHITECTURE.md` §Identity/law 1 instead gives the child the parent's visible
+declarations and actual ancestors. A nested source's result may be visible, but
+its private declaration is not. A child join operand bound to that declaration
+must be rejected before public rows are accepted, regardless of alias text.
+
+The primary alias oracle now crosses hidden-source placement (`QueryRef` or
+union branch), matching or renamed alias, and eager or on-demand source mode.
+It captures the hidden source through the public builder and attempts an
+include join through `createLiveQueryCollection`. The expected rejection comes
+from the fixture's declaration provenance; it does not inspect compiler
+binding sets. Valid local and genuine ancestor captures in the same owner are
+opposite controls. The observation is rejection during construction or preload,
+before public rows are accepted. All eight matrix tests failed on `6bd64e86f`
+because preload resolved instead of rejecting. This was an assertion failure
+at the intended checkpoint, not a setup error. Passing the validator's
+existing visible-binding set to include validation made all eight pass.
+
+The query directory passed 4,593 tests in 110 files with Vitest inline
+typecheck disabled; separate TypeScript and ESLint checks passed. A first run
+with inline typecheck enabled passed 4,818 tests in 130 files before the alias
+cells were split for independent RED assertions, then exited nonzero because
+the linked Vitest installation could not write its temporary
+TypeScript cache outside this workspace. Prettier and whitespace checks passed
+after formatting. The finite matrix does not prove every hidden-source
+expression position, deeper recursive source topology, or provider schedule.
+Those remain under the alias-scope owner in `oracle-coverage.md`.
+
+| Guide requirement | Evidence or limit for this follow-up |
+| --- | --- |
+| ORC-001 | §Identity/law 1 authorizes lexical visibility; the parent result does not export its nested source declarations. |
+| ORC-002 | The fixture labels visible and hidden declarations independently of the compiler's binding collection. |
+| ORC-003 | The executable block states the law, model distinction, finite grammar, public driver, rejection cut, and limits beside the test. |
+| ORC-004 | The bounded matrix crosses placement, alias spelling, and source mode; valid local and ancestor controls distinguish overbroad rejection. |
+| ORC-005 | Public builders and live Collection preload reach the validator; each cell asserts rejection before accepting rows. |
+| ORC-006 | Restoring the pre-repair source-tree collector fails all eight final cells by resolving preload; the repaired compiler passes them. |
+| ORC-007 | No generated property or seed interface changed. |
+| ORC-008 | Declaration provenance is a static model rule; no model lifecycle state changed. |
+| ORC-009 | `hidden`, `local`, and `ancestor` name lexical source roles, not compiler IDs. |
+| ORC-010 | `withHistoryCleanup` preserves rejection failures and disposes live and source Collections. |
+| ORC-011 | Matching and renamed aliases are alternate formulations of the same visibility law. |
+| ORC-012 | This table records the applicable guide requirements and the finite boundary above. |
+| ORC-013 | The original recursive source-tree collector is the rejected wrong design; valid captures rule out a blanket ban. |
+| ORC-014 | Both controlled source modes reach public preload. Real-provider scheduling is not claimed. |
