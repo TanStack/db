@@ -337,6 +337,14 @@ errored records fails at that cut. Other asynchronous schedules and larger
 source sets remain open. Retrying the same options after the
 source entered terminal error reports that source error instead of reusing the
 failed query's pending stream; it does not restart the source.
+A replacement observer subscribed after the controlled asynchronous failure
+can attach under the same hash and reads the healthy replacement row as ready,
+without a stale stream error, before a new client preload. The prior
+source-mismatch check fails that attachment assertion; the active-stream
+identity owner retains the contrasting rule: a live result cannot be borrowed
+by a different source object. This witness does not enumerate concurrent
+replacement observers or later conflicting preloads while an observer has no
+reusable client stream.
 An observer preload over a config-free pooled view is also explicit demand: it
 starts an idle eager source once, does not restart a running source, and reaches
 a ready public snapshot in both cases, with or without an SSR cleanup client.

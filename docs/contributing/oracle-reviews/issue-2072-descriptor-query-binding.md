@@ -254,3 +254,37 @@ lint, and formatting checks passed. The runtime run disabled Vitest's built-in
 typecheck because its cross-package test imports fall outside the configured
 runner root; the separate TypeScript check passed. Final pushed-head CI and a
 fresh external review remain distinct gates.
+
+## Failed stream followed by a replacement observer
+
+CodeRabbit review 5480955302 covered combined head `c70142812` and found a
+receiving path missing from the controlled asynchronous failure history. The
+law is that a failed client stream has no result to reuse and no source-object
+claim. A new observer for a healthy replacement Collection may subscribe with
+the same hash. An active or successful stream still rejects a different source
+object, as the separate preload-identity owner checks. This is the existing
+same-hash result rule at a new consumer boundary, not a new retry policy for a
+source Collection that entered terminal error.
+
+The deferred-acquisition owner's plain-row model predicts `recovered` from
+the replacement source. Its legal history now starts two descriptor sources,
+fails the first after startup through controlled `markError`, checks that the
+pending client stream rejects and disappears from dehydration, then subscribes
+a prepared replacement observer before any new client preload. At the attach
+cut it must not throw a source-mismatch error; after preload its public snapshot
+must be ready, contain only the replacement row, and expose no stale stream
+error. The existing later same-hash client preload checks that the replacement
+also publishes through `DbClient`. This adds observer subscription to the
+failure history's consumer dimension. The active-stream same-source and
+different-source controls remain in the preload-identity owner.
+
+On the reviewed head, the new attach assertion was RED: `_assertLiveQuerySources`
+compared the replacement against the failed record's old sources and threw
+`different source Collections`. This was an assertion failure at the intended
+attach cut, not a timeout or setup failure. Treating an error record as
+non-claiming before consulting the old preload entry made the focused test
+GREEN. Both primary owners then passed 220 tests. The witness covers one later
+failure, one observer, an eager replacement, the attach cut, settled public
+rows, and subsequent client dehydration. Concurrent replacement observers,
+other asynchronous orders, and later conflicting preloads while no reusable
+client stream exists remain outside this finite history.

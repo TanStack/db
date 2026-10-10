@@ -160,7 +160,7 @@ Guide audit for this oracle repair:
 
 ## Chained joins and main-correlated route work — 2026-10-10 follow-up
 
-The nine-item user review inspected `2d0cbafabddb898d8fadcb7d304ff06fb0154d7e` without executing its findings. The current repair started from `43d7c3d771c52c39bff38ba5a4fb7b1d02e99215`; its executable commit is `b41dc35bf`. This section records the bounded oracle evidence for the two reported behavior gaps. The task-local lossless ledger is `/private/tmp/pr2095-user-review-ledger.md`.
+The nine-item user review inspected `2d0cbafabddb898d8fadcb7d304ff06fb0154d7e` without executing its findings. The current repair started from `43d7c3d771c52c39bff38ba5a4fb7b1d02e99215`; its executable commit is `b41dc35bf`. This section records the bounded oracle evidence for the two reported behavior gaps.
 
 **Absent local binding law.** `ARCHITECTURE.md` §Identity and law 1 distinguish a captured ancestor's `issue` from a child's same-named declaration. Once a LEFT join has no child `issue`, a later routed joined row may carry the ancestor context but cannot supply the missing child source. The prior outer-join matrix had one join only. It was green for its declared boundary and could not generate the reported two-join sequence.
 
@@ -337,7 +337,7 @@ These were assertion failures at the promised checkpoints, not setup errors or
 timeouts; every temporary mutant was removed. The final validator checks
 visible bindings in join operands, predicates, grouping, ordering, select
 expressions, extracted parent filters, and both correlation fields before
-optimization. The development text for error 237 now says “Query reference”
+optimization. The development text for error 238 now says “Query reference”
 to match its wider scope.
 
 **GREEN and limits.** On the final working tree, the two focused owners passed

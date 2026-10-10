@@ -54,6 +54,8 @@ import {
   createLiveQueryCollection,
   createLiveQueryObserver,
   eq,
+  getLiveQueryHash,
+  prepareLiveQueryValue,
 } from '../src'
 import { Query } from '../src/query/builder/index.js'
 import { createPooledLiveQuery } from '../src/query/pooled-live-query.js'
@@ -696,7 +698,12 @@ describe(`preload answered by a DbClient stream`, () => {
  * rather than wait on the failed query's former pending stream. A controlled
  * later `markError` crosses the asynchronous failure cut: the pending preload
  * rejects, its stream disappears, and a healthy replacement of the same
- * query hash can publish its own row while the peer source remains ready.
+ * query hash can publish its own row while the peer source remains ready. A
+ * failed stream has no reusable result, so a replacement observer may attach
+ * through the same hash before a new preload. Its public snapshot must show
+ * the replacement row as ready, with no stale stream error. The active-stream
+ * identity owner separately rejects a different source while a result remains
+ * reusable.
  */
 describe(`DbClient preload releases independent source starts`, () => {
   it(`retire a pending stream after asynchronous source startup failure`, async () => {
@@ -766,6 +773,41 @@ describe(`DbClient preload releases independent source starts`, () => {
         client.dehydrate({ shouldDehydrateLiveQuery: () => true }).liveQueries,
       ).toBeUndefined()
       expect(client.collection(second).status).toBe(`ready`)
+
+      // Model: failure retired the first result. The observer's subscription
+      // is a new local demand for the healthy replacement, so it may attach
+      // and must show that source's row at the settled-read checkpoint.
+      const queryHash = getLiveQueryHash({ query: failedQuery })
+      expect(getLiveQueryHash({ query: recoveredQuery })).toBe(queryHash)
+      const prepared = prepareLiveQueryValue(recoveredQuery, client)
+      const view = createLiveQueryCollection({
+        query: prepared as typeof recoveredQuery,
+        startSync: false,
+      })
+      const observer = createLiveQueryObserver(view, {
+        client,
+        queryHash,
+        mode: `wholesale`,
+      })
+      try {
+        let unsubscribe!: () => void
+        expect(() => {
+          unsubscribe = observer.subscribe(() => {})
+        }, `replacement observer attaches after the failed stream`).not.toThrow()
+        try {
+          await observer.preload()
+          expect(observer.getSnapshot().data).toEqual([
+            expect.objectContaining({ id: `recovered` }),
+          ])
+          expect(observer.getSnapshot().status).toBe(`ready`)
+          expect(observer.getError()).toBeUndefined()
+        } finally {
+          unsubscribe()
+        }
+      } finally {
+        observer.dispose()
+        await view.cleanup()
+      }
 
       await client.preloadLiveQuery({ query: recoveredQuery })
       expect(

@@ -715,6 +715,8 @@ export class DbClient {
     sources: ReadonlyArray<AnyCollection>,
   ): void {
     const record = this.liveQueries.get(queryHash)
+    // A failed stream has no result to reuse and claims no source objects.
+    if (record?.status === `error`) return
     const priorSources =
       record?.sources ?? this.preloadedLiveQueries.get(queryHash)?.sources
     if (priorSources && !sameSourcesAtEachPosition(priorSources, sources)) {
