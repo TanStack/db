@@ -2325,6 +2325,9 @@ the remaining handoff limits for code commit `53ded62d8ef70ccd63b75d0e6dbc0a964f
 The [cache-claim gap audit](oracle-reviews/issue-2069-cache-claim-gap-audit-575fb9473.md)
 records the added receiving witnesses, hostile checks, direct replay, and
 remaining limits for code commit `575fb9473dd7d8eccbe469d0831dc9f71cffddd4`.
+The [native SQLite index receiving audit](oracle-reviews/issue-2069-native-ddl-receiver-b4d57ced6.md)
+records the two reverse-order DDL witnesses, hostile checks, and remaining
+host-specific limit for code commit `b4d57ced63d513dd0dcb794b8e8bb2a840577758`.
 
 [Issue #2056 evaluation](oracle-reviews/issue-2056-full-mode-recovery.md) records
 the original RED and candidate comparisons on head
