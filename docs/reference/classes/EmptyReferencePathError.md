@@ -3,7 +3,7 @@ id: EmptyReferencePathError
 title: EmptyReferencePathError
 ---
 
-Defined in: [packages/db/src/errors.ts:624](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L624)
+Defined in: [packages/db/src/errors.ts:831](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L831)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:624](https://github.com/TanStack/db/blob/
 new EmptyReferencePathError(): EmptyReferencePathError;
 ```
 
-Defined in: [packages/db/src/errors.ts:625](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L625)
+Defined in: [packages/db/src/errors.ts:832](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L832)
 
 #### Returns
 

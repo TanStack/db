@@ -3,7 +3,7 @@ id: UnionFrom
 title: UnionFrom
 ---
 
-Defined in: [packages/db/src/query/ir.ts:108](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L108)
+Defined in: [packages/db/src/query/ir.ts:123](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L123)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/query/ir.ts:108](https://github.com/TanStack/db/blo
 new UnionFrom(sources): UnionFrom;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:110](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L110)
+Defined in: [packages/db/src/query/ir.ts:125](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L125)
 
 #### Parameters
 
@@ -43,7 +43,7 @@ BaseExpression.constructor
 readonly __returnType: any;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:78](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L78)
+Defined in: [packages/db/src/query/ir.ts:79](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L79)
 
 **`Internal`**
 
@@ -63,7 +63,7 @@ BaseExpression.__returnType
 sources: (CollectionRef | QueryRef)[];
 ```
 
-Defined in: [packages/db/src/query/ir.ts:110](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L110)
+Defined in: [packages/db/src/query/ir.ts:125](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L125)
 
 ***
 
@@ -73,7 +73,7 @@ Defined in: [packages/db/src/query/ir.ts:110](https://github.com/TanStack/db/blo
 type: "unionFrom";
 ```
 
-Defined in: [packages/db/src/query/ir.ts:109](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L109)
+Defined in: [packages/db/src/query/ir.ts:124](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L124)
 
 #### Overrides
 
@@ -91,7 +91,7 @@ BaseExpression.type
 get alias(): string;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:114](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L114)
+Defined in: [packages/db/src/query/ir.ts:129](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L129)
 
 ##### Returns
 

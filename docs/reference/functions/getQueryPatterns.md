@@ -12,7 +12,7 @@ function getQueryPatterns(): Map<string, {
 }>;
 ```
 
-Defined in: [packages/db/src/indexes/index-registry.ts:164](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-registry.ts#L164)
+Defined in: [packages/db/src/indexes/index-registry.ts:199](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-registry.ts#L199)
 
 Get query patterns (useful for debugging/testing)
 

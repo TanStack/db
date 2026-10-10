@@ -3,7 +3,7 @@ id: IndexDevModeConfig
 title: IndexDevModeConfig
 ---
 
-Defined in: [packages/db/src/indexes/index-registry.ts:15](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-registry.ts#L15)
+Defined in: [packages/db/src/indexes/index-registry.ts:17](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-registry.ts#L17)
 
 ## Properties
 
@@ -13,7 +13,7 @@ Defined in: [packages/db/src/indexes/index-registry.ts:15](https://github.com/Ta
 collectionSizeThreshold: number;
 ```
 
-Defined in: [packages/db/src/indexes/index-registry.ts:19](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-registry.ts#L19)
+Defined in: [packages/db/src/indexes/index-registry.ts:21](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-registry.ts#L21)
 
 Suggest indexes when collection has more than this many items
 
@@ -25,7 +25,7 @@ Suggest indexes when collection has more than this many items
 enabled: boolean;
 ```
 
-Defined in: [packages/db/src/indexes/index-registry.ts:17](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-registry.ts#L17)
+Defined in: [packages/db/src/indexes/index-registry.ts:19](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-registry.ts#L19)
 
 Enable dev mode index suggestions
 
@@ -37,7 +37,7 @@ Enable dev mode index suggestions
 onSuggestion: (suggestion) => void | null;
 ```
 
-Defined in: [packages/db/src/indexes/index-registry.ts:23](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-registry.ts#L23)
+Defined in: [packages/db/src/indexes/index-registry.ts:25](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-registry.ts#L25)
 
 Custom handler for index suggestions
 
@@ -49,6 +49,6 @@ Custom handler for index suggestions
 slowQueryThresholdMs: number;
 ```
 
-Defined in: [packages/db/src/indexes/index-registry.ts:21](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-registry.ts#L21)
+Defined in: [packages/db/src/indexes/index-registry.ts:23](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-registry.ts#L23)
 
 Suggest indexes when queries take longer than this (ms)

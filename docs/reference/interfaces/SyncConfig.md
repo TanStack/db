@@ -23,7 +23,7 @@ Defined in: [packages/db/src/types.ts:419](https://github.com/TanStack/db/blob/m
 optional exportSyncMeta: () => unknown;
 ```
 
-Defined in: [packages/db/src/types.ts:460](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L460)
+Defined in: [packages/db/src/types.ts:466](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L466)
 
 Export adapter-specific metadata that lets hydration/persistence resume sync.
 The payload shape is owned by the adapter.
@@ -40,7 +40,7 @@ The payload shape is owned by the adapter.
 optional getSyncMetadata: () => Record<string, unknown>;
 ```
 
-Defined in: [packages/db/src/types.ts:454](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L454)
+Defined in: [packages/db/src/types.ts:460](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L460)
 
 Get the sync metadata for insert operations
 
@@ -58,7 +58,7 @@ Record containing relation information
 optional importSyncMeta: (meta) => void;
 ```
 
-Defined in: [packages/db/src/types.ts:465](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L465)
+Defined in: [packages/db/src/types.ts:471](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L471)
 
 Import adapter-specific metadata produced by exportSyncMeta.
 
@@ -80,7 +80,7 @@ Import adapter-specific metadata produced by exportSyncMeta.
 optional mergeSyncMeta: (current, incoming) => unknown;
 ```
 
-Defined in: [packages/db/src/types.ts:470](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L470)
+Defined in: [packages/db/src/types.ts:476](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L476)
 
 Merge two adapter-specific metadata payloads during hydration.
 
@@ -106,7 +106,7 @@ Merge two adapter-specific metadata payloads during hydration.
 optional rowUpdateMode: "full" | "partial";
 ```
 
-Defined in: [packages/db/src/types.ts:479](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L479)
+Defined in: [packages/db/src/types.ts:485](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L485)
 
 The row update mode used to sync to the collection.
 
@@ -178,12 +178,12 @@ Signal that a usable initial or recovered snapshot is available.
 
 ###### truncate
 
-`truncate({ markReady: false })` replaces synced rows without changing Collection
-status. Omitting the option preserves the default behavior of marking the
-Collection ready. The last truncate in one transaction supplies its readiness
-intent; the last replacement in one published batch supplies that batch's intent.
+(`options?`) => `void`
 
-(options?: { markReady?: boolean }) => `void`
+Replace the synced rows. By default the replacement also marks the
+Collection ready. Set markReady:false to publish without changing status,
+for example when confirming a committed write from a closed source.
+The last truncate in a transaction supplies its readiness intent.
 
 ###### write
 

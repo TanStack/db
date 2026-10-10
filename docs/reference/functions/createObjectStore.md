@@ -5,12 +5,12 @@ title: createObjectStore
 
 ```ts
 function createObjectStore(
-   db,
-   storeName,
+   db, 
+   storeName, 
    options?): IDBObjectStore;
 ```
 
-Defined in: packages/db/src/indexed-db-wrapper.ts:179
+Defined in: [packages/db/src/indexed-db-wrapper.ts:191](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db-wrapper.ts#L191)
 
 Creates an object store during a database upgrade.
 

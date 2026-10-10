@@ -7,7 +7,7 @@ title: withChangeTracking
 function withChangeTracking<T>(target, callback): Record<string | symbol, unknown>;
 ```
 
-Defined in: [packages/db/src/proxy.ts:807](https://github.com/TanStack/db/blob/main/packages/db/src/proxy.ts#L807)
+Defined in: [packages/db/src/proxy.ts:862](https://github.com/TanStack/db/blob/main/packages/db/src/proxy.ts#L862)
 
 Creates a proxy for an object, passes it to a callback function,
 and returns the changes made by the callback

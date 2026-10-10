@@ -7,7 +7,7 @@ title: getLiveQueryWindowInputKind
 function getLiveQueryWindowInputKind(input): LiveQueryWindowInputKind;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:41](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L41)
+Defined in: [packages/db/src/live-query-window-controller.ts:42](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L42)
 
 **`Internal`**
 

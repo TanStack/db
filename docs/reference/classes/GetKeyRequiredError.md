@@ -3,7 +3,7 @@ id: GetKeyRequiredError
 title: GetKeyRequiredError
 ---
 
-Defined in: packages/db/src/indexed-db.ts:76
+Defined in: [packages/db/src/indexed-db.ts:83](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L83)
 
 Thrown when the getKey function is missing
 
@@ -19,7 +19,7 @@ Thrown when the getKey function is missing
 new GetKeyRequiredError(): GetKeyRequiredError;
 ```
 
-Defined in: packages/db/src/indexed-db.ts:77
+Defined in: [packages/db/src/indexed-db.ts:84](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L84)
 
 #### Returns
 

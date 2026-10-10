@@ -9,7 +9,7 @@ title: gte
 function gte<T>(left, right): BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:169](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L169)
+Defined in: [packages/db/src/query/builder/functions.ts:170](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L170)
 
 ### Type Parameters
 
@@ -37,7 +37,7 @@ Defined in: [packages/db/src/query/builder/functions.ts:169](https://github.com/
 function gte<T>(left, right): BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:173](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L173)
+Defined in: [packages/db/src/query/builder/functions.ts:174](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L174)
 
 ### Type Parameters
 
@@ -65,7 +65,7 @@ Defined in: [packages/db/src/query/builder/functions.ts:173](https://github.com/
 function gte<T>(left, right): BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:177](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L177)
+Defined in: [packages/db/src/query/builder/functions.ts:178](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L178)
 
 ### Type Parameters
 
