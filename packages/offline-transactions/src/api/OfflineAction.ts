@@ -22,44 +22,26 @@ export function createOfflineAction<T>(
   executor: any,
 ): (variables: T) => Transaction {
   const { mutationFnName, onMutate } = options
-  console.log(`createOfflineAction 2`, options)
 
   return (variables: T): Transaction => {
     const offlineTransaction = new OfflineTransaction(
       {
         mutationFnName,
-        autoCommit: false,
+        // The transaction commits after onMutate and reports a failure
+        // through isPersisted.
+        autoCommit: true,
       },
       mutationFn,
       persistTransaction,
       executor,
     )
 
-    const transaction = offlineTransaction.mutate(() => {
-      console.log(`mutate`)
+    return offlineTransaction.mutate(() => {
       const maybePromise = onMutate(variables) as unknown
 
       if (isPromiseLike(maybePromise)) {
         throw new OnMutateMustBeSynchronousError()
       }
     })
-
-    // Immediately commit
-    const commitPromise = (async () => {
-      try {
-        await transaction.commit()
-        console.log(`offlineAction committed - success`)
-      } catch {
-        console.log(`offlineAction commit failed - error`)
-      }
-    })()
-
-    // Don't await - this is fire-and-forget for optimistic actions
-    // But catch to prevent unhandled rejection
-    commitPromise.catch(() => {
-      // Already handled in try/catch above
-    })
-
-    return transaction
   }
 }

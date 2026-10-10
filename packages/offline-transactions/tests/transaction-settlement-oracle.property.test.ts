@@ -8,9 +8,14 @@ import { KeyScheduler } from '../src/executor/KeyScheduler'
 import { TransactionExecutor } from '../src/executor/TransactionExecutor'
 import { DefaultRetryPolicy } from '../src/retry/RetryPolicy'
 import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
-import { atOracleCheckpoint, cleanupOfflineOracle } from './oracle-lifecycle'
+import {
+  atOracleCheckpoint,
+  captureUnhandledRejections,
+  cleanupOfflineOracle,
+} from './oracle-lifecycle'
 import { readOfflineOracleConfig } from './oracle-config'
 import type { TestItem } from './harness'
+import type { Transaction } from '@tanstack/db'
 import type {
   OfflineConfig,
   OfflineTransaction,
@@ -37,7 +42,12 @@ import type {
  * folded map of provider-applied rows. Its `localRows` field represents public
  * Collection rows from optimistic state, not durable outbox entries.
  * Generated histories use 2–5 transactions, 1–3 rows each, shared or disjoint
- * keys, and success or permanent failure at each position. Pinned examples
+ * keys, and success or permanent failure at each position. Each transaction
+ * either commits manually or auto-commits after its `mutate()` callback, with
+ * `autoCommit: true`, with the option omitted, or as an `OfflineAction`. An
+ * auto-commit has no `commit()` caller, so its `isPersisted` is the commit
+ * receipt. No failure, manual or auto-committed, may escape as an unhandled
+ * process rejection, be logged again, or write debug output. Pinned examples
  * reconstruct all-success, middle-failure, all-failure, and alternating
  * outcomes. Shared keys distinguish sibling rollback from disjoint-key
  * survival. Width distinguishes complete optimistic state for several rows
@@ -184,18 +194,44 @@ function expectLocalRows(
   expect(localRows(actual)).toEqual(localRows(expected))
 }
 
+/**
+ * How a generated transaction commits: by `commit()`, by auto-commit with the
+ * option set or omitted, or as an `OfflineAction`, which always auto-commits.
+ */
+const settlementTransaction = fc.record({
+  succeeds: fc.boolean(),
+  commit: fc.constantFrom(
+    `manual` as const,
+    `auto` as const,
+    `default` as const,
+    `action` as const,
+  ),
+  readReceipt: fc.boolean(),
+})
+
 it.each(oracleSeeds(20260913, settlementOracle))(
   `settles each transaction independently while preserving FIFO (seed %s)`,
   async (seed) => {
     await fc.assert(
       fc.asyncProperty(
+        // One record per transaction, so every commit path and an unread
+        // receipt are as likely at every position.
         fc.record({
           sharedKeys: fc.boolean(),
           width: fc.integer({ min: 1, max: 3 }),
-          outcomes: fc.array(fc.boolean(), { minLength: 2, maxLength: 5 }),
+          transactions: fc.array(settlementTransaction, {
+            minLength: 2,
+            maxLength: 5,
+          }),
         }),
-        async ({ sharedKeys, width, outcomes }) => {
-          const succeeds = outcomes
+        async ({ sharedKeys, width, transactions }) => {
+          const succeeds = transactions.map((tx) => tx.succeeds)
+          // Every path but a manual commit commits after the mutate callback.
+          const autoCommits = transactions.map((tx) => tx.commit !== `manual`)
+          // An auto-commit's receipt may go unread, as a caller may.
+          const unread = transactions.map(
+            (tx, index) => autoCommits[index]! && !tx.readReceipt,
+          )
           const failures = succeeds.map(
             (_value, index) => new NonRetriableError(`failed-${index}`),
           )
@@ -269,7 +305,7 @@ it.each(oracleSeeds(20260913, settlementOracle))(
                       : failures[index]!.message
                     : `pending`
                 return [
-                  [`commit-${index}`, status],
+                  ...(unread[index] ? [] : [[`commit-${index}`, status]]),
                   [`wait-${index}`, status],
                 ]
               }),
@@ -286,7 +322,8 @@ it.each(oracleSeeds(20260913, settlementOracle))(
             }
             for (let index = 0; index < completed; index++) {
               if (!succeeds[index]) {
-                expect(statuses[`commit-${index}`]).toBe(failures[index])
+                if (!unread[index])
+                  expect(statuses[`commit-${index}`]).toBe(failures[index])
                 expect(statuses[`wait-${index}`]).toBe(failures[index])
               }
             }
@@ -312,19 +349,19 @@ it.each(oracleSeeds(20260913, settlementOracle))(
             ).toEqual(ids.slice(completed))
           }
           let hasPrimaryFailure = false
+          // No failure, manual or auto-committed, escapes as an unhandled
+          // process rejection, and none is logged again: isPersisted reports
+          // it.
+          const { rejections: unhandled, cleanup: cleanupUnhandled } =
+            captureUnhandledRejections()
+          const logged = vi.spyOn(console, `error`).mockImplementation(() => {})
+          // Settlement writes no debug output.
+          const debug = vi.spyOn(console, `log`).mockImplementation(() => {})
           try {
             await env.waitForLeader()
             for (let index = 0; index < succeeds.length; index++) {
-              const tx = env.executor.createOfflineTransaction({
-                mutationFnName: env.mutationFnName,
-                autoCommit: false,
-              })
-              ids.push(tx.id)
-              observe(
-                `wait-${index}`,
-                env.executor.waitForTransactionCompletion(tx.id),
-              )
-              tx.mutate(() => {
+              const { commit } = transactions[index]!
+              const write = () => {
                 for (const row of expectedRows[index]!) {
                   if (sharedKeys && index > 0) {
                     env.collection.update(row.id, (draft) => {
@@ -333,8 +370,38 @@ it.each(oracleSeeds(20260913, settlementOracle))(
                     })
                   } else env.collection.insert(row)
                 }
-              })
-              observe(`commit-${index}`, tx.commit())
+              }
+              let transaction: Transaction
+              let tx: ReturnType<typeof env.executor.createOfflineTransaction>
+              if (commit === `action`) {
+                transaction = env.executor.createOfflineAction({
+                  mutationFnName: env.mutationFnName,
+                  onMutate: write,
+                })(undefined)
+              } else {
+                tx = env.executor.createOfflineTransaction({
+                  mutationFnName: env.mutationFnName,
+                  // A transaction auto-commits when the option is omitted.
+                  ...(commit === `default`
+                    ? {}
+                    : { autoCommit: commit === `auto` }),
+                })
+                transaction = tx.mutate(write)
+              }
+              ids.push(transaction.id)
+              observe(
+                `wait-${index}`,
+                env.executor.waitForTransactionCompletion(transaction.id),
+              )
+              // An auto-commit has no commit() caller; its receipt is
+              // isPersisted, which settles like a manual commit's.
+              if (!unread[index])
+                observe(
+                  `commit-${index}`,
+                  autoCommits[index]
+                    ? transaction.isPersisted.promise
+                    : tx!.commit(),
+                )
               if (index === 0)
                 await atOracleCheckpoint(
                   entered[0]!.promise,
@@ -362,10 +429,22 @@ it.each(oracleSeeds(20260913, settlementOracle))(
                   expectedServer.set(row.id, row)
               await assertState(index + 1)
             }
+            await turn()
+            expect(unhandled, `unhandled rejections`).toEqual([])
+            expect(
+              logged.mock.calls.filter(([message]) =>
+                String(message).includes(`commit failed`),
+              ),
+              `commit failures logged`,
+            ).toEqual([])
+            expect(debug.mock.calls, `debug output`).toEqual([])
           } catch (error) {
             hasPrimaryFailure = true
             throw error
           } finally {
+            cleanupUnhandled()
+            logged.mockRestore()
+            debug.mockRestore()
             for (const item of release) item.resolve()
             await cleanupOfflineOracle(
               [
@@ -381,10 +460,72 @@ it.each(oracleSeeds(20260913, settlementOracle))(
       {
         ...oracleOptions(settlementOracle, seed),
         examples: [
-          [{ sharedKeys: true, width: 1, outcomes: [true, true] }],
-          [{ sharedKeys: false, width: 2, outcomes: [true, false, true] }],
-          [{ sharedKeys: true, width: 2, outcomes: [false, false, false] }],
-          [{ sharedKeys: true, width: 1, outcomes: [false, true, false] }],
+          [
+            {
+              sharedKeys: true,
+              width: 1,
+              transactions: [
+                { succeeds: true, commit: `manual`, readReceipt: true },
+                { succeeds: true, commit: `manual`, readReceipt: true },
+              ],
+            },
+          ],
+          [
+            {
+              sharedKeys: false,
+              width: 2,
+              transactions: [
+                { succeeds: true, commit: `manual`, readReceipt: true },
+                { succeeds: false, commit: `manual`, readReceipt: true },
+                { succeeds: true, commit: `manual`, readReceipt: true },
+              ],
+            },
+          ],
+          [
+            {
+              sharedKeys: true,
+              width: 2,
+              transactions: [
+                { succeeds: false, commit: `manual`, readReceipt: true },
+                { succeeds: false, commit: `manual`, readReceipt: true },
+                { succeeds: false, commit: `manual`, readReceipt: true },
+              ],
+            },
+          ],
+          [
+            {
+              sharedKeys: true,
+              width: 1,
+              transactions: [
+                { succeeds: false, commit: `manual`, readReceipt: true },
+                { succeeds: true, commit: `manual`, readReceipt: true },
+                { succeeds: false, commit: `manual`, readReceipt: true },
+              ],
+            },
+          ],
+          [
+            {
+              sharedKeys: true,
+              width: 1,
+              transactions: [
+                { succeeds: false, commit: `auto`, readReceipt: false },
+                { succeeds: true, commit: `manual`, readReceipt: true },
+                { succeeds: false, commit: `auto`, readReceipt: true },
+              ],
+            },
+          ],
+          // A failed auto-commit with the default option, and a failed
+          // action, settle through isPersisted only.
+          [
+            {
+              sharedKeys: false,
+              width: 1,
+              transactions: [
+                { succeeds: false, commit: `default`, readReceipt: false },
+                { succeeds: false, commit: `action`, readReceipt: true },
+              ],
+            },
+          ],
         ],
       },
     )
@@ -1347,8 +1488,8 @@ it.each([
     const providerError = new Error(`HTTP 401 Unauthorized`)
     const hookError = new Error(`retry decision unavailable`)
     const asyncError = new Error(`async retry decision failed`)
-    const unhandled: Array<unknown> = []
-    const onUnhandled = (reason: unknown) => unhandled.push(reason)
+    const { rejections: unhandled, cleanup: cleanupUnhandled } =
+      captureUnhandledRejections()
     const providerEntered = gate()
     const releaseProvider = gate()
     const terminalMarkerStored = gate()
@@ -1401,7 +1542,6 @@ it.each([
     let commitStatus: unknown = `pending`
     let hasPrimaryFailure = false
     try {
-      process.on(`unhandledRejection`, onUnhandled)
       await env.waitForLeader()
       const tx = env.executor.createOfflineTransaction({
         mutationFnName: env.mutationFnName,
@@ -1504,7 +1644,7 @@ it.each([
           () => env.collection.cleanup(),
           () => restarted?.collection.cleanup(),
           () => warning.mockRestore(),
-          () => process.off(`unhandledRejection`, onUnhandled),
+          () => cleanupUnhandled(),
         ],
         hasPrimaryFailure,
       )
@@ -1550,8 +1690,8 @@ it.each([
     const providerError = new Error(`HTTP 401 Unauthorized`)
     const hookError = new Error(`retry decision failed`)
     const asyncError = new Error(`async retry decision failed`)
-    const unhandled: Array<unknown> = []
-    const onUnhandled = (reason: unknown) => unhandled.push(reason)
+    const { rejections: unhandled, cleanup: cleanupUnhandled } =
+      captureUnhandledRejections()
     const providerEntered = gate()
     const releaseProvider = gate()
     const hookEntered = gate()
@@ -1663,7 +1803,6 @@ it.each([
     }
 
     try {
-      process.on(`unhandledRejection`, onUnhandled)
       await env.waitForLeader()
       const head = createObservedTransaction(`head`, 0)
       headId = head.id
@@ -1764,7 +1903,7 @@ it.each([
           () => env.collection.cleanup(),
           () => warning.mockRestore(),
           () => errorLog.mockRestore(),
-          () => process.off(`unhandledRejection`, onUnhandled),
+          () => cleanupUnhandled(),
         ],
         hasPrimaryFailure,
       )
@@ -3703,3 +3842,71 @@ it(`stops after failed deletion without rerunning the provider`, async () => {
     delay.mockRestore()
   }
 })
+
+// Focused witness, not a generated history: a failed outbox write stops the
+// executor, so a FIFO history cannot continue past it. For every commit path,
+// the admission write fails, the receipt rejects with the storage error, and
+// the failure neither escapes as an unhandled rejection nor is logged again.
+it.each([`manual`, `auto`, `default`, `action`] as const)(
+  `rejects the receipt when the outbox write fails (%s)`,
+  async (commit) => {
+    const storageError = new Error(`outbox write unavailable`)
+    class FailingStorage extends FakeStorageAdapter {
+      override async set(key: string, value: string): Promise<void> {
+        if (key.startsWith(`tx:`)) throw storageError
+        await super.set(key, value)
+      }
+    }
+    const env = createTestOfflineEnvironment({
+      storage: new FailingStorage(),
+      mutationFn: (params) => {
+        env.applyMutations(params.transaction.mutations)
+        return Promise.resolve()
+      },
+    })
+    const { rejections: unhandled, cleanup: cleanupUnhandled } =
+      captureUnhandledRejections()
+    const logged = vi.spyOn(console, `error`).mockImplementation(() => {})
+    try {
+      await env.waitForLeader()
+      const write = () =>
+        env.collection.insert({
+          id: `stored`,
+          value: `v`,
+          completed: false,
+          updatedAt: new Date(0),
+        })
+      let receipt: Promise<unknown>
+      if (commit === `action`) {
+        const transaction = env.executor.createOfflineAction({
+          mutationFnName: env.mutationFnName,
+          onMutate: write,
+        })(undefined)
+        receipt = transaction.isPersisted.promise
+      } else {
+        const tx = env.executor.createOfflineTransaction({
+          mutationFnName: env.mutationFnName,
+          ...(commit === `default` ? {} : { autoCommit: commit === `auto` }),
+        })
+        const transaction = tx.mutate(write)
+        receipt =
+          commit === `manual` ? tx.commit() : transaction.isPersisted.promise
+      }
+      await expect(receipt).rejects.toBe(storageError)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(unhandled, `unhandled rejections`).toEqual([])
+      expect(
+        logged.mock.calls.filter(([message]) =>
+          String(message).includes(`commit failed`),
+        ),
+        `commit failures logged`,
+      ).toEqual([])
+      expect(env.collection.get(`stored`), `optimistic row`).toBeUndefined()
+      expect(env.serverState.size, `provider calls`).toBe(0)
+    } finally {
+      cleanupUnhandled()
+      logged.mockRestore()
+      env.executor.dispose()
+    }
+  },
+)
