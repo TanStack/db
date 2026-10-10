@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
-import { HashReplayError, captureHashSession } from './hash-session'
+import { hash } from '../src/hashing/hash'
 import type { Arbitrary } from 'fast-check'
-import type { HashSession } from './hash-session'
-
-const nativeSession = await captureHashSession()
-const { hash } = nativeSession
 
 /**
  * The hash is a deterministic fingerprint of its declared value domain.
@@ -15,11 +11,9 @@ const { hash } = nativeSession
  *
  * Independent constructors build equivalent values with different allocation,
  * plain-object property order, and normalized numeric representations.
- * They must agree. Unlike values may share a 32-bit digest. The
- * distinct-digest samples below are collision-sensitive failing assertions,
- * not an injectivity contract. A failure needs diagnosis: a collision alone
- * is not a value-identity defect. `HashSession` records environment and calls
- * so the sampled failure can be replayed.
+ * They must agree. Distinct values may share a 32-bit digest, so this file
+ * makes no distinct-digest assertion. The identity owner checks inequality
+ * through `equalHashValues`, including under deliberately colliding markers.
  *
  * Graph reachability, mixed carriers, failed traversal, and retry atomicity are
  * separate owners. Keeping them separate makes this file's flat-value model
@@ -47,54 +41,6 @@ const arbitrarySimpleObject = fc.dictionary(fc.string(), fc.integer(), {
 const arbitrarySimpleArray = fc.array(fc.integer(), { maxLength: 10 })
 
 type HashValue = (value: unknown) => number
-
-function expectDistinctHashes(
-  law: string,
-  input: unknown,
-  left: unknown,
-  right: unknown,
-  session: HashSession = nativeSession,
-): void {
-  // Callers supply JSON-safe descriptors (arrays, entries, finite timestamps),
-  // detached before either driver input is exposed to the hasher.
-  const originalInput: unknown = JSON.parse(JSON.stringify(input))
-  const observed: Array<number> = []
-  try {
-    observed.push(session.hash(left), session.hash(right))
-    expect(observed[0]).not.toBe(observed[1])
-  } catch (cause) {
-    throw new HashReplayError(
-      {
-        law,
-        input: originalInput,
-        observed,
-        tape: session.tape,
-        environment: session.environment,
-      },
-      cause,
-    )
-  }
-}
-
-// This is the original sampled array/object distinction. A collision is not a
-// product defect.
-function expectArrayObjectDistinct(
-  arr: Array<number>,
-  session: HashSession = nativeSession,
-): void {
-  const obj: Record<string, number> = {}
-  arr.forEach((value, index) => {
-    obj[String(index)] = value
-  })
-  expectDistinctHashes(`array-object`, arr, arr, obj, session)
-}
-
-function expectBooleanNullDistinct(
-  value: boolean,
-  session: HashSession = nativeSession,
-): void {
-  expectDistinctHashes(`boolean-null`, value, value, null, session)
-}
 
 function expectEqualHashes(
   value: unknown,
@@ -124,13 +70,6 @@ function expectPermutedHashes(
   expect(original).toEqual(reversed)
   expectEqualHashes(original, reversed, hashValue)
 }
-
-// The generated values supply the same numeric entries to each pair. Only the
-// container kind may distinguish Set/Map from the corresponding plain object.
-const typeMarkerValues = fc.uniqueArray(fc.integer(), {
-  minLength: 1,
-  maxLength: 5,
-})
 
 // The reusable value laws run with identical generators and checks in a
 // stable campaign and a fresh campaign. Select a single test name with Vitest
@@ -177,24 +116,6 @@ function hashProp<Ts extends [unknown, ...Array<unknown>]>(arbitraries: {
   }
 }
 
-const typeMarkerReplaySeed = process.env.TANSTACK_DB_IVM_HASH_TYPE_SEED
-const typeMarkerReplayPath = process.env.TANSTACK_DB_IVM_HASH_TYPE_PATH
-const typeMarkerCampaigns =
-  typeMarkerReplaySeed === undefined && typeMarkerReplayPath === undefined
-    ? [
-        { name: `1659001`, seed: 1659001 },
-        { name: `random`, seed: undefined },
-      ]
-    : [
-        {
-          name: `replay`,
-          seed:
-            typeMarkerReplaySeed === undefined
-              ? undefined
-              : Number(typeMarkerReplaySeed),
-        },
-      ]
-
 describe(`hash property-based tests`, () => {
   describe(`determinism`, () => {
     hashProp([arbitraryPrimitive])(
@@ -240,7 +161,7 @@ describe(`hash property-based tests`, () => {
     )
   })
 
-  describe(`D2 value identity`, () => {
+  describe(`equal-hash consequences of D2 value identity`, () => {
     hashProp([arbitrarySimpleObject])(
       `cloned objects have same hash`,
       (obj) => {
@@ -354,100 +275,6 @@ describe(`hash property-based tests`, () => {
     )
   })
 
-  // These are sampled discrimination controls, not universal injectivity laws.
-  // A finite hash can collide; a collision needs diagnosis, not a stronger API claim.
-  describe(`sampled type distinction controls`, () => {
-    hashProp([fc.array(fc.integer(), { minLength: 1, maxLength: 5 })])(
-      `array and object with same indices have different hashes`,
-      (arr) => {
-        expectArrayObjectDistinct(arr)
-      },
-    )
-
-    hashProp([fc.integer()])(
-      `number and string representation have different hashes`,
-      (n) => {
-        expectDistinctHashes(`number-string`, n, n, String(n))
-      },
-    )
-
-    hashProp([fc.boolean()])(
-      `boolean and its string representation have different hashes`,
-      (b) => {
-        expectDistinctHashes(`boolean-string`, b, b, String(b))
-      },
-    )
-
-    hashProp([fc.date({ noInvalidDate: true })])(
-      `date and its timestamp have different hashes`,
-      (date) => {
-        expectDistinctHashes(
-          `date-timestamp`,
-          date.getTime(),
-          date,
-          date.getTime(),
-        )
-      },
-    )
-
-    hashProp([fc.array(fc.integer(), { minLength: 1, maxLength: 5 })])(
-      `array and Set with same values have different hashes`,
-      (arr) => {
-        const set = new Set(arr)
-        expectDistinctHashes(`array-set`, arr, arr, set)
-      },
-    )
-
-    // These sampled hash distinctions do not claim collision freedom.
-    for (const carrier of [`Set`, `Map`] as const) {
-      const property = fc.property(typeMarkerValues, (values) => {
-        if (carrier === `Set`) {
-          expectDistinctHashes(
-            `set-object`,
-            values,
-            new Set(values),
-            Object.fromEntries(values.map((value, index) => [index, value])),
-          )
-        } else {
-          const entries = values.map((value) => [String(value), value] as const)
-          expectDistinctHashes(
-            `map-object`,
-            entries,
-            new Map(entries),
-            Object.fromEntries(entries.map((entry, index) => [index, entry])),
-          )
-        }
-      })
-      for (const { name, seed } of typeMarkerCampaigns) {
-        it(`${carrier} differs from an object with matching entries (${name})`, () => {
-          if (
-            typeMarkerReplayPath !== undefined &&
-            typeMarkerReplaySeed === undefined
-          )
-            throw new Error(`TANSTACK_DB_IVM_HASH_TYPE_PATH requires a seed`)
-          if (
-            typeMarkerReplaySeed !== undefined &&
-            (typeMarkerReplaySeed.trim() === `` ||
-              typeof seed !== `number` ||
-              !Number.isSafeInteger(seed) ||
-              seed < -2147483648 ||
-              seed > 2147483647)
-          )
-            throw new Error(
-              `TANSTACK_DB_IVM_HASH_TYPE_SEED must be a 32-bit integer`,
-            )
-          fc.assert(property, {
-            numRuns: 100,
-            ...(seed === undefined ? {} : { seed }),
-            ...(typeMarkerReplayPath === undefined
-              ? {}
-              : { path: typeMarkerReplayPath }),
-          })
-        })
-      }
-    }
-  })
-
   describe(`nested structures`, () => {
     hashProp([
       fc.array(fc.array(fc.integer(), { maxLength: 3 }), { maxLength: 3 }),
@@ -516,108 +343,7 @@ describe(`hash property-based tests`, () => {
     )
   })
 
-  describe(`sampled extension distinction controls`, () => {
-    hashProp([
-      fc.array(fc.integer(), { minLength: 1, maxLength: 10 }),
-      fc.integer(),
-    ])(`arrays with extra element have different hashes`, (arr, extra) => {
-      const extended = [...arr, extra]
-      expectDistinctHashes(`array-extension`, { arr, extra }, arr, extended)
-    })
-
-    hashProp([
-      fc.dictionary(fc.string(), fc.integer(), { minKeys: 1, maxKeys: 5 }),
-      fc.string(),
-      fc.integer(),
-    ])(
-      `objects with extra property have different hashes`,
-      (obj, newKey, newValue) => {
-        // Keep arbitrary key content, but construct a fresh key rather than
-        // silently pass when it already exists (including on the prototype).
-        while (newKey in obj) newKey += `\0`
-        const extended = { ...obj, [newKey]: newValue }
-        expect(Object.keys(extended)).toHaveLength(Object.keys(obj).length + 1)
-        expectDistinctHashes(
-          `object-extension`,
-          { entries: Object.entries(obj), newKey, newValue },
-          obj,
-          extended,
-        )
-      },
-    )
-  })
-
   describe(`law checker calibration`, () => {
-    it(`replays an actual sampled-law collision with its native failure cause`, async () => {
-      // A legal but deliberately colliding initialization environment. Its
-      // count comes from native capture, not a copied list of marker constants.
-      const collisionSession = await captureHashSession(
-        nativeSession.tape.map(() => 0),
-      )
-      const property = fc.property(fc.boolean(), (value) =>
-        expectBooleanNullDistinct(value, collisionSession),
-      )
-      const failed = fc.check(property, { seed: 205205, numRuns: 1 })
-      expect(failed.failed).toBe(true)
-      expect(failed.numShrinks).toBeGreaterThan(0)
-      expect(failed.counterexample).toEqual([false])
-      expect(failed.counterexamplePath).toBe(`0:0`)
-      expect(failed.errorInstance).toBeInstanceOf(HashReplayError)
-      if (
-        !(failed.errorInstance instanceof HashReplayError) ||
-        failed.counterexamplePath === null
-      ) {
-        throw new Error(`Missing sampled-law replay evidence`)
-      }
-      const failure = failed.errorInstance
-      expect(failure.cause).toMatchObject({ name: `AssertionError` })
-      expect(failure.replay.law).toBe(`boolean-null`)
-      expect(failure.replay.input).toEqual(failed.counterexample[0])
-      expect(failure.replay.observed[0]).toBe(failure.replay.observed[1])
-      const replaySession = await captureHashSession(failure.replay.tape)
-      const replay = fc.check(
-        fc.property(fc.boolean(), (value) =>
-          expectBooleanNullDistinct(value, replaySession),
-        ),
-        {
-          seed: failed.seed,
-          path: failed.counterexamplePath,
-          numRuns: 1,
-          endOnFailure: true,
-        },
-      )
-      expect(replay.failed).toBe(true)
-      expect(replay.counterexample).toEqual(failed.counterexample)
-      expect(replay.errorInstance).toBeInstanceOf(HashReplayError)
-      if (!(replay.errorInstance instanceof HashReplayError))
-        throw new Error(`Missing replay error`)
-      expect(replay.errorInstance.replay).toEqual(failure.replay)
-      expect(replay.errorInstance.cause).toMatchObject({
-        name: `AssertionError`,
-      })
-      let reported: unknown
-      try {
-        fc.assert(property, {
-          seed: failed.seed,
-          path: failed.counterexamplePath,
-          numRuns: 1,
-          endOnFailure: true,
-          errorWithCause: true,
-        })
-      } catch (cause) {
-        reported = cause
-      }
-      expect(reported).toBeInstanceOf(Error)
-      if (!(reported instanceof Error))
-        throw new Error(`Missing native fast-check report`)
-      expect(reported.message).toContain(`seed: ${failed.seed}`)
-      expect(reported.message).toContain(`path:`)
-      expect(reported.cause).toBeInstanceOf(HashReplayError)
-      // The same original consumer remains a valid sampled control under its
-      // native initialization; it is not weakened to accommodate the collision.
-      expectBooleanNullDistinct(false)
-    })
-
     it.each([0, 42, ``, `reconstructed`])(
       `rejects inconsistent equal-value hashes for %j`,
       (value) => {

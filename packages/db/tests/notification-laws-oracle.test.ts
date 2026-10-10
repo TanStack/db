@@ -6,7 +6,8 @@
  * `packages/db-collection-e2e/src/utils/notification-laws-oracle.ts`.
  *
  * The production history has one keyed row, an optional initial row, and a
- * sequence of synchronous source insert, update, or delete transactions.
+ * sequence of synchronous source insert, update, delete, or empty transactions.
+ * An update may write the same value as before.
  * After preload, the driver subscribes with initial state and checks the
  * callback trace after each source transaction, then checks silence after
  * unsubscribe. Synthetic multi-key histories and corruptions calibrate the

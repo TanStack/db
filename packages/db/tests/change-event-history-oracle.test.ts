@@ -34,12 +34,13 @@ import type { ChangeMessage, SyncConfig } from '../src/types'
  * sequentially. After all batched writes settle, or after each sequential
  * write settles, public rows and a change-message mirror must equal the
  * reference rows. An eager-index lane also builds an index before the history
- * and compares both equality buckets after each settled prefix. In batched
- * histories it also compares them after each synchronous operation. At the
+ * and compares both equality buckets after each settled prefix in sequential
+ * histories. In batched histories it compares them after each synchronous
+ * operation before settlement, then once after all writes settle. At the
  * final checkpoint, fresh indexed live queries are compared with the same Map
- * model. The indexed field stays stable when a key is reused. Sequential
- * histories check every settled prefix. Every delivered batch records the
- * public rows visible during its callback and the mirror after applying it.
+ * model. The indexed field stays stable when a key is reused. Every delivered
+ * batch records the public rows visible during its callback and the mirror
+ * after applying it.
  * A maintainer decision permits either order for different keys in one
  * callback. Changes to the same key retain their causal order. A deferred
  * sync history checks this by comparing one ordered trace per key, including
