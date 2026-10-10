@@ -948,7 +948,7 @@ export class NonAggregateExpressionNotInGroupByError extends GroupByError {
   constructor(alias: string) {
     super(
       devBuild() && process.env.NODE_ENV !== `production`
-        ? `Non-aggregate expression '${alias}' in SELECT must also appear in GROUP BY clause`
+        ? `Non-aggregate expression '${alias}' must also appear in GROUP BY clause`
         : codedMessage(70, { alias }),
     )
   }

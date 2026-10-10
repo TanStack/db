@@ -21,7 +21,7 @@ function validateSelectAgainstGroupBy(
 
     if (groupIndex === -1) {
       throw new Error(
-        `Non-aggregate expression '${alias}' in SELECT must also appear in GROUP BY clause`,
+        `Non-aggregate expression '${alias}' must also appear in GROUP BY clause`,
       )
     }
   }
@@ -65,7 +65,7 @@ describe(`group-by compiler`, () => {
         expect(() => {
           validateSelectAgainstGroupBy(groupByClause, selectClause)
         }).toThrow(
-          `Non-aggregate expression 'invalidField' in SELECT must also appear in GROUP BY clause`,
+          `Non-aggregate expression 'invalidField' must also appear in GROUP BY clause`,
         )
       })
 

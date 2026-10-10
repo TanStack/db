@@ -70,6 +70,7 @@ describe(`group-by production pipeline`, () => {
       input,
       [],
       createValueIdentity(),
+      new Map([[`row`, `binding-row`]]),
       undefined,
       undefined,
       undefined,
@@ -107,8 +108,10 @@ describe(`group-by production pipeline`, () => {
     expect(grouped.$synced).toBe(!expectedPending)
   })
 
+  // A source field that is not grouped has no single value, with or without
+  // groupBy, so both compiles throw.
   test.each([false, true])(
-    `validates ungrouped SELECT references only with grouping keys: %s`,
+    `rejects an ungrouped source field in SELECT: grouped=%s`,
     (grouped) => {
       const graph = new D2()
       const compile = () =>
@@ -116,14 +119,11 @@ describe(`group-by production pipeline`, () => {
           graph.newInput<KeyedNamespacedRow>(),
           grouped ? [new PropRef([`row`, `group`])] : [],
           createValueIdentity(),
+          new Map([[`row`, `binding-row`]]),
           undefined,
           { amount: new PropRef([`row`, `amount`]) },
         )
-      if (grouped) {
-        expect(compile).toThrow(NonAggregateExpressionNotInGroupByError)
-      } else {
-        expect(compile).not.toThrow()
-      }
+      expect(compile).toThrow(NonAggregateExpressionNotInGroupByError)
     },
   )
 
@@ -160,6 +160,7 @@ describe(`group-by production pipeline`, () => {
         input,
         grouped ? [groupRef] : [],
         createValueIdentity(),
+        new Map([[`row`, `binding-row`]]),
         having === `expression`
           ? [
               selection === `none`
