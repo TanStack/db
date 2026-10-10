@@ -2328,6 +2328,9 @@ remaining limits for code commit `575fb9473dd7d8eccbe469d0831dc9f71cffddd4`.
 The [native SQLite index receiving audit](oracle-reviews/issue-2069-native-ddl-receiver-b4d57ced6.md)
 records the two reverse-order DDL witnesses, hostile checks, and remaining
 host-specific limit for code commit `b4d57ced63d513dd0dcb794b8e8bb2a840577758`.
+The [follow-up review audit](oracle-reviews/issue-2069-native-ddl-review-followup-b42b94b73.md)
+records the exact recovery-settlement and target-table assertion repairs for
+code commit `b42b94b73ddba79a6a87fa93e71787dd126ea1bd`.
 
 [Issue #2056 evaluation](oracle-reviews/issue-2056-full-mode-recovery.md) records
 the original RED and candidate comparisons on head

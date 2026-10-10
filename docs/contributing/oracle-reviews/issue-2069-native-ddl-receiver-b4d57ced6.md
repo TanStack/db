@@ -5,6 +5,14 @@ This record audits two fixed histories added to
 `packages/db-sqlite-persistence-core/tests/sqlite-resume-snapshot-oracle.test.ts`.
 It does not claim arbitrary host scheduling or a new product behavior.
 
+**Subsequent review correction:** At this recorded code commit, the durable
+assertion polled after recovery settlement and checked the index name without
+checking its table. Its cleanup path also discarded secondary failures. Those
+claims below were too broad for this exact code commit. The
+[follow-up audit](issue-2069-native-ddl-review-followup-b42b94b73.md) records
+the repaired checkpoint, target-table assertion, and failure handling at
+`b42b94b73ddba79a6a87fa93e71787dd126ea1bd`.
+
 ## Law and receiving boundary
 
 The Collection's current index declaration determines whether a successful
