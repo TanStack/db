@@ -1296,13 +1296,8 @@ export class CollectionSubscription
         (!this.sentKeys.has(change.key) && !knownRows.has(change.key)),
     )
 
-    // Add keys to sentKeys BEFORE calling callback to prevent race condition.
-    // If a change event arrives while the callback is executing, it will see
-    // the keys already in sentKeys and filter out duplicates correctly.
-    for (const change of filteredSnapshot) {
-      this.sentKeys.add(change.key)
-    }
-
+    // The callback wrapper records these keys before user code runs, so a
+    // change that arrives during the callback is filtered against them.
     this.snapshotSent = true
     this.publishSnapshot(
       this.isBufferingForTruncate
@@ -1551,9 +1546,9 @@ export class CollectionSubscription
     // Use the current count as the offset for this load
     const currentOffset = this.limitedSnapshotRowCount
 
-    // Add keys to sentKeys BEFORE calling callback to prevent race condition.
-    // If a change event arrives while the callback is executing, it will see
-    // the keys already in sentKeys and filter out duplicates correctly.
+    // During a direct truncate replay the rows go to the private buffer, so
+    // the callback wrapper does not record them; a repeated ordered snapshot
+    // must still continue after them.
     for (const change of changes) {
       this.sentKeys.add(change.key)
     }
