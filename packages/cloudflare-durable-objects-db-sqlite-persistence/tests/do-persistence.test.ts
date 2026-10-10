@@ -111,6 +111,7 @@ describe(`cloudflare durable object persistence helpers`, () => {
     const tempDirectory = mkdtempSync(join(tmpdir(), `db-cf-do-schema-infer-`))
     const dbPath = join(tempDirectory, `state.sqlite`)
     const collectionId = `todos`
+    const target = { kind: `eager`, collectionId } as const
     const firstStorageHarness = createBetterSqliteDoStorageHarness({
       filename: dbPath,
     })
@@ -129,7 +130,7 @@ describe(`cloudflare durable object persistence helpers`, () => {
         persistence: firstPersistence,
       })
       await firstCollectionOptions.persistence.adapter.applyCommittedTx(
-        collectionId,
+        target,
         {
           txId: `tx-1`,
           term: 1,
@@ -169,7 +170,7 @@ describe(`cloudflare durable object persistence helpers`, () => {
         persistence: secondPersistence,
       })
       await expect(
-        syncAbsentOptions.persistence.adapter.loadSubset(collectionId, {}),
+        syncAbsentOptions.persistence.adapter.loadSubset(target, {}),
       ).rejects.toThrow(`Schema version mismatch`)
 
       const syncPresentOptions = persistedCollectionOptions<
@@ -187,7 +188,7 @@ describe(`cloudflare durable object persistence helpers`, () => {
         persistence: secondPersistence,
       })
       const rows = await syncPresentOptions.persistence.adapter.loadSubset(
-        collectionId,
+        target,
         {},
       )
       expect(rows).toEqual([])
