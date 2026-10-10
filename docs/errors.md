@@ -2379,3 +2379,23 @@ Development builds show this message, with `${...}` replaced by values:
 ```text
 Includes subquery for "${fieldName}" reuses an ancestor's source declaration. Use new Query().from({ alias: collection }) in the child instead of passing the ancestor builder to from().
 ```
+
+<a id="error-237"></a>
+
+## Error 237: `query/live/bucket-facade-adapter.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Bucket facade retired with rows the graph did not retract
+```
+
+<a id="error-238"></a>
+
+## Error 238: `query/live/bucket-facade-adapter.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Bucket facade cannot start again after cleanup
+```

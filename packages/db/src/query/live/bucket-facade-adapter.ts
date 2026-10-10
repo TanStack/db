@@ -30,9 +30,7 @@ type PendingRow = {
 type FacadeEntry = {
   collection: Collection<any, any, any>
   sync: FacadeSync | undefined
-  keys: WeakMap<object, string | number>
   order: WeakMap<object, string>
-  currentOrder: Map<string | number, string | undefined>
 }
 
 type SnapshotRow = {
@@ -153,12 +151,7 @@ export class BucketFacadeAdapter {
         for (const [bucketKey, multiplicity] of activity ?? []) {
           if (multiplicity >= 0) continue
           active.delete(bucketKey)
-          this.retireEntry(
-            compilation.edgeId,
-            bucketKey,
-            snapshot,
-            publications,
-          )
+          this.retireEntry(compilation.edgeId, bucketKey)
         }
       }
     } catch (error) {
@@ -262,11 +255,11 @@ export class BucketFacadeAdapter {
   }
 
   private copyRows(entry: FacadeEntry): Array<SnapshotRow> {
-    return [...entry.collection._state.syncedData].map(([key, value]) => ({
-      key,
-      value,
-      order: entry.currentOrder.get(key),
-    }))
+    // The projected synced rows include every queued sync write, held or
+    // still open; the visible rows can lag behind them.
+    return [...entry.collection._state.acceptedSyncedEntries()].map(
+      ([key, value]) => ({ key, value, order: entry.order.get(value) }),
+    )
   }
 
   private snapshot(): FacadeSnapshot {
@@ -315,24 +308,25 @@ export class BucketFacadeAdapter {
       if (!previousEntries.has(entry)) continue
       const sync = entry.sync
       if (!sync) continue
-      const restoredKeys = new Set(rows.map((row) => row.key))
-      const synced = entry.collection._state.syncedData
-      sync.begin()
-      // A write held behind a persisting transaction is not yet in the synced
-      // rows, so delete every key the flush wrote as well.
-      for (const key of new Set([
-        ...synced.keys(),
-        ...snapshot.written.get(entry)!,
-      ])) {
-        if (!restoredKeys.has(key)) sync.write({ type: `delete`, key })
-      }
-      entry.currentOrder.clear()
-      for (const row of rows) {
-        entry.keys.set(row.value, row.key)
+      const before = new Map(rows.map((row) => [row.key, row]))
+      // A failed write or commit can leave the facade's sync transaction
+      // open with staged writes. Restore into it and commit it, so its
+      // writes cannot reappear in the projected synced rows later.
+      if (!entry.collection._state.hasOpenSyncTransaction()) sync.begin()
+      // Undo only the keys the flush wrote, held writes included; a row it did
+      // not touch is still the one the facade showed before the flush.
+      for (const key of snapshot.written.get(entry)!) {
+        const row = before.get(key)
+        if (!row) {
+          sync.write({ type: `delete`, key })
+          continue
+        }
         if (row.order !== undefined) entry.order.set(row.value, row.order)
-        entry.currentOrder.set(row.key, row.order)
         sync.write({
-          type: synced.has(row.key) ? `update` : `insert`,
+          type:
+            entry.collection._state.getAcceptedSyncedRow(key) === undefined
+              ? `insert`
+              : `update`,
           value: row.value,
         })
       }
@@ -370,7 +364,7 @@ export class BucketFacadeAdapter {
   /**
    * Begin a facade write. Copy the facade's rows and defer its events before
    * its first write in the flush, so a rollback reads only the facades the
-   * flush wrote. A bucket written and then retired in one flush copies once.
+   * flush wrote.
    */
   private beginWrite(
     entry: FacadeEntry,
@@ -388,27 +382,25 @@ export class BucketFacadeAdapter {
     sync.begin()
   }
 
-  private retireEntry(
-    edgeId: string,
-    bucketKey: string,
-    snapshot: FacadeSnapshot,
-    publications: Array<PublicationDeferral>,
-  ): void {
+  private retireEntry(edgeId: string, bucketKey: string): void {
     const byBucket = this.entries.get(edgeId)
     const entry = byBucket?.get(bucketKey)
     if (!entry) return
-
-    // The graph retracts a bucket's rows when it retires it, but the facade
-    // can still show rows it never sent: an optimistic row from a pending
-    // transaction, or a sync commit held behind a persisting one. Retract
-    // whatever it still holds.
-    const sync = entry.sync
-    const keys = [...entry.collection.keys()]
-    if (sync && keys.length > 0) {
-      this.beginWrite(entry, sync, snapshot, publications, keys)
-      for (const key of keys) sync.write({ type: `delete`, key })
-      sync.commit()
+    // The graph retracts every row it sent before it retires a bucket, and
+    // the projected synced rows include that retraction even while a
+    // persisting transaction holds it. A row left there is a contradictory
+    // graph signal.
+    if (!entry.collection._state.acceptedSyncedEntries().next().done) {
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `Bucket facade retired with rows the graph did not retract`
+          : codedMessage(237),
+      )
     }
+
+    // The facade can still show rows the graph never sent, such as an
+    // optimistic row or a held sync commit. It has no synced row to retract,
+    // so those rows leave when their transactions settle.
     byBucket!.delete(bucketKey)
     if (byBucket!.size === 0) this.entries.delete(edgeId)
     const retired = getOrCreate(this.retiredEntries, edgeId, () => new Map())
@@ -420,13 +412,15 @@ export class BucketFacadeAdapter {
     const existing = byBucket.get(bucketKey)
     if (existing) return existing
 
-    const keys = new WeakMap<object, string | number>()
     const order = new WeakMap<object, string>()
     let sync: FacadeSync | undefined
+    let stopped = false
     const collection = createCollection<any, string | number>({
       id: `__bucket-facade:${this.parentId}:${edgeId}:${bucketKey}`,
       getKey: (row) => {
-        const key = keys.get(row) ?? row?.$key
+        // Every stored row carries its key, so a copy that core makes for an
+        // update keeps it.
+        const key = row?.$key
         if (typeof key !== `string` && typeof key !== `number`) {
           throw new Error(
             devBuild() && process.env.NODE_ENV !== `production`
@@ -447,9 +441,18 @@ export class BucketFacadeAdapter {
       sync: {
         rowUpdateMode: `full`,
         sync: (methods) => {
+          // Cleanup is final: the adapter never writes a facade again, so a
+          // restart would show a Collection that the graph no longer feeds.
+          if (stopped)
+            throw new Error(
+              devBuild() && process.env.NODE_ENV !== `production`
+                ? `Bucket facade cannot start again after cleanup`
+                : codedMessage(238),
+            )
           sync = methods
           return () => {
             sync = undefined
+            stopped = true
           }
         },
       },
@@ -461,9 +464,7 @@ export class BucketFacadeAdapter {
       get sync() {
         return sync
       },
-      keys,
       order,
-      currentOrder: new Map(),
     }
     byBucket.set(bucketKey, entry)
     return entry
@@ -476,39 +477,32 @@ export class BucketFacadeAdapter {
     hasOrderBy: boolean,
   ): void {
     const key = change.value.publicKey as string | number
-    const previousOrder = entry.currentOrder.get(key)
+    const accepted = entry.collection._state.getAcceptedSyncedRow(key)
+    const present = accepted !== undefined
+    const previousOrder = present ? entry.order.get(accepted) : undefined
     const nextOrder = change.value.order
-    const orderChanged = sync.collection.has(key) && previousOrder !== nextOrder
-    const resolvedRow = this.resolve(change.value.value)
-    const row = orderChanged ? { ...resolvedRow } : resolvedRow
-    entry.keys.set(row, key)
+    const orderChanged = present && previousOrder !== nextOrder
+    const row = { ...this.resolve(change.value.value), $key: key }
     if (nextOrder !== undefined) {
       entry.order.set(row, nextOrder)
     }
 
     if (change.inserts > change.deletes) {
-      sync.write({
-        type: sync.collection.has(key) ? `update` : `insert`,
-        value: row,
-      })
-    } else if (change.inserts === change.deletes && sync.collection.has(key)) {
+      sync.write({ type: present ? `update` : `insert`, value: row })
+    } else if (change.inserts === change.deletes && present) {
       sync.write({ type: `update`, value: row })
     } else if (change.deletes > 0) {
       sync.write({ type: `delete`, key })
-      entry.currentOrder.delete(key)
       return
     }
 
-    entry.currentOrder.set(key, nextOrder)
     if (hasOrderBy && orderChanged) sync.collection._markLayoutChange()
   }
 
   /** Resolve and validate every public key before opening a sync transaction. */
   private prepareChange(entry: FacadeEntry, change: PendingRow): void {
-    const key = change.value.publicKey as string | number
-    const row = this.resolve(change.value.value)
-    entry.keys.set(row, key)
-    entry.collection.getKeyFromItem(row)
+    this.resolve(change.value.value)
+    entry.collection.getKeyFromItem({ $key: change.value.publicKey })
   }
 
   private resolveValue(value: unknown): unknown {
