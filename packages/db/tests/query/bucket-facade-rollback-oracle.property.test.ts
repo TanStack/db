@@ -117,10 +117,9 @@ import type { BucketRow } from '../../src/query/live/materialized-pipeline.js'
  *   but a retired facade can still show rows the graph never sent: an
  *   optimistic row from a user transaction on the facade, or a sync commit
  *   held behind a persisting transaction. The grammar adds optimistic
- *   inserts and optimistic deletes of shown graph rows (the `local` and
- *   `changeShown` step fields). An optimistic update of a facade row throws
- *   code 146, because the facade's getKey cannot read the key of the
- *   updated copy; that bug is outside this oracle. The oracle requires a retired facade to show
+ *   inserts and optimistic deletes and updates of shown graph rows (the
+ *   `local` and `changeShown` step fields). An update builds a copy of the
+ *   stored row, which must keep the row's key. The oracle requires a retired facade to show
  *   exactly its visible optimistic rows. Those rows have no synced row, so
  *   they leave when their transactions settle, and every history ends by
  *   settling them and comparing all rows again. A row the graph sent and
@@ -1281,14 +1280,12 @@ const step = fc.record({
   // An optimistic row sometimes takes a graph id.
   shareId: fc.boolean(),
   // The optimistic change is sometimes a delete or an update of a shown
-  // graph row.
-  // An optimistic update of a facade row is not generated: the facade's
-  // getKey cannot read the key of the updated copy, so the update throws
-  // code 146 (also on main). A separate change owns that bug.
-  changeShown: fc.constantFrom<`delete` | undefined>(
+  // graph row. An update copies the stored row, so the copy must keep its key.
+  changeShown: fc.constantFrom<`delete` | `update` | undefined>(
     undefined,
     undefined,
     `delete`,
+    `update`,
   ),
   // About one step in eight cleans up a shown facade from outside.
   cleanup: fc

@@ -6,4 +6,6 @@ A live query with included child collections now throws when the query graph ret
 
 A child collection is now final after cleanup. Subscribing to it, preloading it or writing to it afterwards throws, because the query graph never writes it again. Before, it started again and showed only rows the graph wrote later. Ordinary Collections still restart after cleanup.
 
+An optimistic update of a row in a child collection no longer throws "Bucket facade row has no public key". Each child row now carries its key in `$key`, so the copy that an update makes keeps it.
+
 Also fix a lost child row behind a persisting transaction. When a user transaction on a child collection was persisting, an update to a child row that an earlier flush had written was applied as a delete, so the row disappeared when the transaction settled. A rollback in that state could also delete such a row. The adapter now decides each write from the child collection's synced rows, including writes that a persisting transaction holds, not from the rows the child collection shows.

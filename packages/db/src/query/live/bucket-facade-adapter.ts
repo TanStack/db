@@ -30,7 +30,6 @@ type PendingRow = {
 type FacadeEntry = {
   collection: Collection<any, any, any>
   sync: FacadeSync | undefined
-  keys: WeakMap<object, string | number>
   order: WeakMap<object, string>
 }
 
@@ -322,7 +321,6 @@ export class BucketFacadeAdapter {
           sync.write({ type: `delete`, key })
           continue
         }
-        entry.keys.set(row.value, row.key)
         if (row.order !== undefined) entry.order.set(row.value, row.order)
         sync.write({
           type:
@@ -414,14 +412,15 @@ export class BucketFacadeAdapter {
     const existing = byBucket.get(bucketKey)
     if (existing) return existing
 
-    const keys = new WeakMap<object, string | number>()
     const order = new WeakMap<object, string>()
     let sync: FacadeSync | undefined
     let stopped = false
     const collection = createCollection<any, string | number>({
       id: `__bucket-facade:${this.parentId}:${edgeId}:${bucketKey}`,
       getKey: (row) => {
-        const key = keys.get(row) ?? row?.$key
+        // Every stored row carries its key, so a copy that core makes for an
+        // update keeps it.
+        const key = row?.$key
         if (typeof key !== `string` && typeof key !== `number`) {
           throw new Error(
             devBuild() && process.env.NODE_ENV !== `production`
@@ -465,7 +464,6 @@ export class BucketFacadeAdapter {
       get sync() {
         return sync
       },
-      keys,
       order,
     }
     byBucket.set(bucketKey, entry)
@@ -484,9 +482,7 @@ export class BucketFacadeAdapter {
     const previousOrder = present ? entry.order.get(accepted) : undefined
     const nextOrder = change.value.order
     const orderChanged = present && previousOrder !== nextOrder
-    const resolvedRow = this.resolve(change.value.value)
-    const row = orderChanged ? { ...resolvedRow } : resolvedRow
-    entry.keys.set(row, key)
+    const row = { ...this.resolve(change.value.value), $key: key }
     if (nextOrder !== undefined) {
       entry.order.set(row, nextOrder)
     }
@@ -505,10 +501,8 @@ export class BucketFacadeAdapter {
 
   /** Resolve and validate every public key before opening a sync transaction. */
   private prepareChange(entry: FacadeEntry, change: PendingRow): void {
-    const key = change.value.publicKey as string | number
-    const row = this.resolve(change.value.value)
-    entry.keys.set(row, key)
-    entry.collection.getKeyFromItem(row)
+    this.resolve(change.value.value)
+    entry.collection.getKeyFromItem({ $key: change.value.publicKey })
   }
 
   private resolveValue(value: unknown): unknown {
