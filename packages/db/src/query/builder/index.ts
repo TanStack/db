@@ -1728,7 +1728,7 @@ function collectDeclaredBindings(query: QueryIR): Set<string> {
 }
 
 /** Include ancestor source declarations without binding union output fields. */
-function collectSourceTreeBindings(
+export function collectSourceTreeBindings(
   query: Partial<QueryIR>,
   bindings = new Set<string>(),
   seen = new Set<Partial<QueryIR>>(),

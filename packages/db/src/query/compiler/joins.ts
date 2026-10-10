@@ -534,7 +534,7 @@ function processJoin(
   )
 }
 
-function getJoinReferences(expr: BasicExpression): Array<PropRef> {
+export function getJoinReferences(expr: BasicExpression): Array<PropRef> {
   if (expr.type === `ref`) return [expr]
   return expr.type === `func` ? expr.args.flatMap(getJoinReferences) : []
 }

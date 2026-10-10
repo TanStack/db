@@ -3099,3 +3099,144 @@ describe(`captured ancestor join operands retain their bindings`, () => {
     })
   }
 })
+
+/**
+ * # A captured source must be in the query's lexical scope
+ *
+ * ARCHITECTURE.md §Identity gives captured references their original source,
+ * not the meaning of a later source with the same alias. A root query has no
+ * ancestor; an include can use only its own sources and the containing query's
+ * ancestors. The independent provenance model here has three source roles:
+ * an unrelated declaration, the local main source, and the joined source.
+ * Only the latter two are in scope, so a join using the unrelated declaration
+ * must reject before preload can accept public rows. Renaming that declaration
+ * cannot make it legal. The valid local operand and the ancestor-operand
+ * matrix above distinguish this law from a validator that rejects every
+ * captured reference.
+ *
+ * The finite grammar crosses root or include placement, eager or on-demand
+ * sources, and matching or different alias spelling. It does not claim every
+ * expression position or recursive source form. The driver uses public Query
+ * and live-query Collection APIs; the observation cut is preload settlement.
+ */
+describe(`join operands reject captured sources outside lexical scope`, () => {
+  type Row = { id: number }
+  type ForeignAlias = `local` | `unrelated`
+
+  for (const mode of [`eager`, `onDemand`] as const) {
+    for (const placement of [`root`, `include`] as const) {
+      test(`${mode} ${placement} joins reject foreign bindings regardless of alias`, async () => {
+        const unrelated = createScopedSource<Row>(
+          `foreign-${mode}-${placement}`,
+          [{ id: 999 }],
+          mode,
+        )
+        const local = createScopedSource<Row>(
+          `foreign-local-${mode}-${placement}`,
+          [{ id: 1 }],
+          mode,
+        )
+        const joined = createScopedSource<Row>(
+          `foreign-joined-${mode}-${placement}`,
+          [{ id: 1 }],
+          mode,
+        )
+        const parent = createScopedSource<Row>(
+          `foreign-parent-${mode}-${placement}`,
+          [{ id: 1 }],
+          `eager`,
+        )
+        joined.collection.createIndex((row) => row.id, {
+          indexType: BasicIndex,
+        })
+
+        // Capture the unrelated declaration through the same public callback
+        // mechanism as a legal ancestor reference. Its row value differs from
+        // the local source, so alias-based substitution would be observable.
+        const capture = (alias: ForeignAlias): number => {
+          let ref!: number
+          new Query()
+            .from({ [alias]: unrelated.collection })
+            .select((context: Context) => {
+              ref = (context[alias] as Row).id
+              return { id: ref }
+            })
+          return ref
+        }
+
+        const child = (operand: number) =>
+          new Query()
+            .from({ local: local.collection })
+            .innerJoin({ joined: joined.collection }, ({ joined: target }) =>
+              eq(operand, target.id),
+            )
+            .select(({ local: own, joined: target }) => ({
+              localId: own.id,
+              joinedId: target.id,
+            }))
+        const invalidCleanups: Array<() => unknown | Promise<unknown>> = []
+        const preloadForeign = async (alias: ForeignAlias) => {
+          const operand = capture(alias)
+          if (placement === `root`) {
+            const live = createLiveQueryCollection({ query: child(operand) })
+            invalidCleanups.push(() => live.cleanup())
+            await live.preload()
+            return
+          }
+          const live = createLiveQueryCollection({
+            query: new Query()
+              .from({ parent: parent.collection })
+              .select(({ parent: ancestor }) => ({
+                id: ancestor.id,
+                rows: toArray(
+                  child(operand).where(({ local: own }) =>
+                    eq(own.id, ancestor.id),
+                  ),
+                ),
+              })),
+          })
+          invalidCleanups.push(() => live.cleanup())
+          await live.preload()
+        }
+        const localControl = createLiveQueryCollection({
+          query: new Query()
+            .from({ local: local.collection })
+            .innerJoin(
+              { joined: joined.collection },
+              ({ local: own, joined: target }) => eq(own.id, target.id),
+            )
+            .select(({ local: own, joined: target }) => ({
+              localId: own.id,
+              joinedId: target.id,
+            })),
+        })
+
+        await withHistoryCleanup(
+          async () => {
+            await localControl.preload()
+            expect(
+              localControl.toArray.map(({ localId, joinedId }) => ({
+                localId,
+                joinedId,
+              })),
+            ).toEqual([{ localId: 1, joinedId: 1 }])
+            for (const alias of [`local`, `unrelated`] as const) {
+              await expect(
+                () => preloadForeign(alias),
+                `${placement}, ${mode}, unrelated alias ${alias}`,
+              ).rejects.toThrow(/out of scope/)
+            }
+          },
+          () => [
+            () => localControl.cleanup(),
+            ...invalidCleanups,
+            () => unrelated.collection.cleanup(),
+            () => local.collection.cleanup(),
+            () => joined.collection.cleanup(),
+            () => parent.collection.cleanup(),
+          ],
+        )
+      })
+    }
+  }
+})
