@@ -3,7 +3,7 @@ id: SyncRowReusedWithoutPreviousValueError
 title: SyncRowReusedWithoutPreviousValueError
 ---
 
-Defined in: [packages/db/src/errors.ts:396](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L396)
+Defined in: [packages/db/src/errors.ts:528](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L528)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:396](https://github.com/TanStack/db/blob/
 new SyncRowReusedWithoutPreviousValueError(key): SyncRowReusedWithoutPreviousValueError;
 ```
 
-Defined in: [packages/db/src/errors.ts:397](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L397)
+Defined in: [packages/db/src/errors.ts:529](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L529)
 
 #### Parameters
 

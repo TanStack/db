@@ -136,10 +136,10 @@ export function canonicalScopedAliases(shape: ScopedShape): ScopedAliases {
 }
 
 /**
- * Legality follows the documented lexical rules (ARCHITECTURE.md §Identity),
- * not the builder's validator. One scope keeps its names distinct, and no
- * scope inside an include can reuse an alias its ancestors can see. Sibling
- * scopes are unconstrained. The scopes are:
+ * Legality follows the lexical query scopes, not the builder's validator.
+ * One scope keeps its names distinct. An include may reuse an ancestor's
+ * alias: captured references still identify their original source. Sibling
+ * scopes may also reuse names. The scopes are:
  *
  * - subquery: `sub`, plus `joined` and `noted` when those joins exist;
  * - outer: `outer`;
@@ -147,15 +147,15 @@ export function canonicalScopedAliases(shape: ScopedShape): ScopedAliases {
  *   name that two branches repeat, so a union's subquery aliases and
  *   `inactive` must all differ. A union row holds projected fields, so the
  *   union's own joins and includes do not see branch aliases;
- * - include: `include` plus its body's level (`includeJoin`, or
- *   `includeOther` and `includeAnchor`); a `nestedFrom` body has the
- *   include level `includeOuter` and the inner body `include`. Every
- *   include slot is inside the outer row's scope, so none may equal `outer`;
+ * - include: `include` and `includeJoin` share a scope in a joined body.
+ *   In a union body, `include` and `includeOther` are separate branches in
+ *   one union namespace; `includeAnchor` belongs to a join above the union.
+ *   A `nestedFrom` body has outer source `includeOuter` and inner source
+ *   `include`, in distinct scopes;
  * - wrapper outer: `wrapped` and `joinSub`; wrapped and join bodies:
  *   `wrapped` and `joinSource`.
  *
- * A same-scope repeat must be rejected. A shadowing name must be rejected
- * with `DuplicateAliasInSubqueryError`.
+ * A same-scope or union-branch repeat must be rejected. Shadowing is legal.
  */
 export type ScopedNaming = `legal` | `sameScope` | `shadowing`
 
@@ -166,13 +166,13 @@ export function classifyScopedNaming(
   const repeats = (scope: Array<string | undefined>) =>
     new Set(scope).size !== scope.length
   if (shape.topology === `wrapper`) {
-    return aliases.wrapped === aliases.joinSub ? `sameScope` : `legal`
+    if (aliases.wrapped === aliases.joinSub) return `sameScope`
+    return aliases.joinSub === aliases.joinSource ? `shadowing` : `legal`
   }
   if (shape.topology === `unionParent`) {
-    // Branches share one namespace. The builder's existing rule rejects a
-    // branch that reuses the anchor, a parent Collection alias.
+    // Branches share one namespace. The anchor join is above the union.
     const { activeBranch, inactiveBranch, anchor, include } = aliases
-    if (repeats([activeBranch, inactiveBranch, anchor])) return `sameScope`
+    if (repeats([activeBranch, inactiveBranch])) return `sameScope`
     return include === anchor ? `shadowing` : `legal`
   }
   const { joins } = shape.subquery
@@ -186,21 +186,27 @@ export function classifyScopedNaming(
   > = {
     plain: [[aliases.include]],
     joined: [[aliases.include, aliases.includeJoin]],
-    // The anchor join is a sibling of the branches, but the builder's existing
-    // rule rejects a nested query that reuses a parent Collection alias.
-    union: [[aliases.include, aliases.includeOther, aliases.includeAnchor]],
+    // The branch aliases share a union namespace. The anchor join sees
+    // projected fields, not branch aliases.
+    union: [[aliases.include, aliases.includeOther], [aliases.includeAnchor]],
     nestedFrom: [[aliases.includeOuter], [aliases.include]],
   }
   const includeSlots = includeScopes[shape.include.body]
   if (repeats(subScope) || includeSlots.some(repeats)) return `sameScope`
-  return includeSlots.flat().includes(aliases.outer) ? `shadowing` : `legal`
+  return includeSlots.flat().includes(aliases.outer) ||
+    (shape.include.body === `nestedFrom` &&
+      aliases.include === aliases.includeOuter) ||
+    (shape.include.body === `union` &&
+      [aliases.include, aliases.includeOther].includes(aliases.includeAnchor))
+    ? `shadowing`
+    : `legal`
 }
 
 export function isLegalScopedNaming(
   shape: ScopedShape,
   aliases: ScopedAliases,
 ): boolean {
-  return classifyScopedNaming(shape, aliases) === `legal`
+  return classifyScopedNaming(shape, aliases) !== `sameScope`
 }
 
 const aliasPool = [`a`, `b`, `c`] as const

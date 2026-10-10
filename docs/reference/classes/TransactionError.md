@@ -3,7 +3,7 @@ id: TransactionError
 title: TransactionError
 ---
 
-Defined in: [packages/db/src/errors.ts:308](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L308)
+Defined in: [packages/db/src/errors.ts:385](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L385)
 
 ## Extends
 
@@ -11,6 +11,7 @@ Defined in: [packages/db/src/errors.ts:308](https://github.com/TanStack/db/blob/
 
 ## Extended by
 
+- [`PacedTransactionManualCommitError`](PacedTransactionManualCommitError.md)
 - [`QueueCapacityExceededError`](QueueCapacityExceededError.md)
 - [`QueueDisposedError`](QueueDisposedError.md)
 - [`ThrottleCallDroppedError`](ThrottleCallDroppedError.md)
@@ -19,6 +20,7 @@ Defined in: [packages/db/src/errors.ts:308](https://github.com/TanStack/db/blob/
 - [`OnMutateMustBeSynchronousError`](OnMutateMustBeSynchronousError.md)
 - [`TransactionNotPendingMutateError`](TransactionNotPendingMutateError.md)
 - [`TransactionAlreadyCompletedRollbackError`](TransactionAlreadyCompletedRollbackError.md)
+- [`DuplicateTransactionIdError`](DuplicateTransactionIdError.md)
 - [`TransactionNotPendingCommitError`](TransactionNotPendingCommitError.md)
 - [`NoPendingSyncTransactionWriteError`](NoPendingSyncTransactionWriteError.md)
 - [`SyncTransactionAlreadyCommittedWriteError`](SyncTransactionAlreadyCommittedWriteError.md)
@@ -35,7 +37,7 @@ Defined in: [packages/db/src/errors.ts:308](https://github.com/TanStack/db/blob/
 new TransactionError(message): TransactionError;
 ```
 
-Defined in: [packages/db/src/errors.ts:309](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L309)
+Defined in: [packages/db/src/errors.ts:386](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L386)
 
 #### Parameters
 

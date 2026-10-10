@@ -7,7 +7,7 @@ title: safeRandomUUID
 function safeRandomUUID(): string;
 ```
 
-Defined in: [packages/db/src/utils/uuid.ts:11](https://github.com/TanStack/db/blob/main/packages/db/src/utils/uuid.ts#L11)
+Defined in: [packages/db/src/utils/uuid.ts:13](https://github.com/TanStack/db/blob/main/packages/db/src/utils/uuid.ts#L13)
 
 Returns a RFC 4122 version 4 UUID.
 

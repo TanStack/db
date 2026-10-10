@@ -3,7 +3,7 @@ id: IndexSuggestion
 title: IndexSuggestion
 ---
 
-Defined in: [packages/db/src/indexes/index-registry.ts:26](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-registry.ts#L26)
+Defined in: [packages/db/src/indexes/index-registry.ts:28](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-registry.ts#L28)
 
 ## Properties
 
@@ -13,7 +13,7 @@ Defined in: [packages/db/src/indexes/index-registry.ts:26](https://github.com/Ta
 collectionId: string;
 ```
 
-Defined in: [packages/db/src/indexes/index-registry.ts:28](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-registry.ts#L28)
+Defined in: [packages/db/src/indexes/index-registry.ts:30](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-registry.ts#L30)
 
 ***
 
@@ -23,7 +23,7 @@ Defined in: [packages/db/src/indexes/index-registry.ts:28](https://github.com/Ta
 optional collectionSize: number;
 ```
 
-Defined in: [packages/db/src/indexes/index-registry.ts:31](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-registry.ts#L31)
+Defined in: [packages/db/src/indexes/index-registry.ts:33](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-registry.ts#L33)
 
 ***
 
@@ -33,7 +33,7 @@ Defined in: [packages/db/src/indexes/index-registry.ts:31](https://github.com/Ta
 fieldPath: string[];
 ```
 
-Defined in: [packages/db/src/indexes/index-registry.ts:29](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-registry.ts#L29)
+Defined in: [packages/db/src/indexes/index-registry.ts:31](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-registry.ts#L31)
 
 ***
 
@@ -43,7 +43,7 @@ Defined in: [packages/db/src/indexes/index-registry.ts:29](https://github.com/Ta
 message: string;
 ```
 
-Defined in: [packages/db/src/indexes/index-registry.ts:30](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-registry.ts#L30)
+Defined in: [packages/db/src/indexes/index-registry.ts:32](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-registry.ts#L32)
 
 ***
 
@@ -53,7 +53,7 @@ Defined in: [packages/db/src/indexes/index-registry.ts:30](https://github.com/Ta
 optional queryCount: number;
 ```
 
-Defined in: [packages/db/src/indexes/index-registry.ts:33](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-registry.ts#L33)
+Defined in: [packages/db/src/indexes/index-registry.ts:35](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-registry.ts#L35)
 
 ***
 
@@ -63,7 +63,7 @@ Defined in: [packages/db/src/indexes/index-registry.ts:33](https://github.com/Ta
 optional queryTimeMs: number;
 ```
 
-Defined in: [packages/db/src/indexes/index-registry.ts:32](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-registry.ts#L32)
+Defined in: [packages/db/src/indexes/index-registry.ts:34](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-registry.ts#L34)
 
 ***
 
@@ -73,4 +73,4 @@ Defined in: [packages/db/src/indexes/index-registry.ts:32](https://github.com/Ta
 type: "collection-size" | "slow-query" | "frequent-field";
 ```
 
-Defined in: [packages/db/src/indexes/index-registry.ts:27](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-registry.ts#L27)
+Defined in: [packages/db/src/indexes/index-registry.ts:29](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-registry.ts#L29)

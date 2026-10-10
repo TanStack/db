@@ -3,11 +3,14 @@ id: DuplicateAliasInSubqueryError
 title: DuplicateAliasInSubqueryError
 ---
 
-Defined in: [packages/db/src/errors.ts:601](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L601)
+Defined in: [packages/db/src/errors.ts:798](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L798)
 
-Error thrown when a subquery uses the same alias as its parent query.
-This causes issues because parent and subquery would share the same input streams,
-leading to empty results or incorrect data (aggregation cross-leaking).
+Retained for callers that imported this formerly thrown error.
+
+## Deprecated
+
+Nested queries may now shadow ancestor aliases. Duplicate aliases
+are rejected only within one lexical scope or union branch namespace.
 
 ## Extends
 
@@ -21,7 +24,7 @@ leading to empty results or incorrect data (aggregation cross-leaking).
 new DuplicateAliasInSubqueryError(alias, parentAliases): DuplicateAliasInSubqueryError;
 ```
 
-Defined in: [packages/db/src/errors.ts:602](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L602)
+Defined in: [packages/db/src/errors.ts:799](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L799)
 
 #### Parameters
 
@@ -43,7 +46,7 @@ Defined in: [packages/db/src/errors.ts:602](https://github.com/TanStack/db/blob/
 
 ## Properties
 
-### cause?
+### ~~cause?~~
 
 ```ts
 optional cause: unknown;
@@ -57,7 +60,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 ***
 
-### message
+### ~~message~~
 
 ```ts
 message: string;
@@ -71,7 +74,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 ***
 
-### name
+### ~~name~~
 
 ```ts
 name: string;
@@ -85,7 +88,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 ***
 
-### stack?
+### ~~stack?~~
 
 ```ts
 optional stack: string;
@@ -99,7 +102,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 ***
 
-### stackTraceLimit
+### ~~stackTraceLimit~~
 
 ```ts
 static stackTraceLimit: number;
@@ -123,7 +126,7 @@ not capture any frames.
 
 ## Methods
 
-### captureStackTrace()
+### ~~captureStackTrace()~~
 
 ```ts
 static captureStackTrace(targetObject, constructorOpt?): void;
@@ -195,7 +198,7 @@ a();
 
 ***
 
-### prepareStackTrace()
+### ~~prepareStackTrace()~~
 
 ```ts
 static prepareStackTrace(err, stackTraces): any;

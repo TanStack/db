@@ -7,7 +7,7 @@ title: divide
 function divide<T1, T2>(left, right): DivideReturnType;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:637](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L637)
+Defined in: [packages/db/src/query/builder/functions.ts:648](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L648)
 
 ## Type Parameters
 

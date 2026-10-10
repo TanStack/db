@@ -818,6 +818,8 @@ export function runSQLiteCoreAdapterContractSuite(
      * ledger and version comparison even if its final row matched. Each txId
      * identifies one immutable source payload; reusing an ID for different
      * content is outside this source-transaction grammar.
+     * The CLI harness starts a sqlite3 process for each SQL command, so these
+     * seven histories need more than Vitest's default timeout under parallel CI.
      */
     it(`reconciles only a certified source transaction against SQLite`, async () => {
       const { adapter, driver } = registerContractHarness()
@@ -1035,7 +1037,7 @@ export function runSQLiteCoreAdapterContractSuite(
         rowVersion: 0,
         txIds: [],
       })
-    })
+    }, 30_000)
 
     /**
      * A cache claim belongs to one physical generation. The reference history

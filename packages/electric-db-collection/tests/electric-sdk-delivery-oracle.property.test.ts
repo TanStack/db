@@ -43,7 +43,7 @@ import type { Message } from '@electric-sql/client'
  *
  * The Collection subset contract and the Electric adapter's tagged-row
  * contract are owned by electric-oracle.property.test.ts. The installed SDK's
- * reset framing is checked by electric-sdk-framing-oracle.test.ts. This driver
+ * reset framing is checked by electric-sdk-framing.test.ts. This driver
  * moves the boundary outward: a finite HTTP provider sends authored Electric
  * responses, and the installed ShapeStream owns framing, pause, snapshot,
  * abort, and silent-move delivery. The adapter must publish the union of

@@ -7,7 +7,7 @@ title: configureIndexDevMode
 function configureIndexDevMode(config): void;
 ```
 
-Defined in: [packages/db/src/indexes/index-registry.ts:50](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-registry.ts#L50)
+Defined in: [packages/db/src/indexes/index-registry.ts:52](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-registry.ts#L52)
 
 Configure dev mode for index suggestions
 

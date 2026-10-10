@@ -7,7 +7,7 @@ title: getQueryIdentity
 function getQueryIdentity(query): QueryIdentity;
 ```
 
-Defined in: [packages/db/src/query/ir-stable-identity.ts:88](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir-stable-identity.ts#L88)
+Defined in: [packages/db/src/query/ir-stable-identity.ts:82](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir-stable-identity.ts#L82)
 
 Returns the semantic identity of a structured query.
 

@@ -3,7 +3,7 @@ id: ThrottleStrategy
 title: ThrottleStrategy
 ---
 
-Defined in: [packages/db/src/strategies/types.ts:90](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L90)
+Defined in: [packages/db/src/strategies/types.ts:99](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L99)
 
 Throttle strategy that spaces executions evenly over time
 
@@ -35,7 +35,7 @@ Type discriminator for strategy identification
 cleanup: () => void;
 ```
 
-Defined in: [packages/db/src/strategies/types.ts:23](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L23)
+Defined in: [packages/db/src/strategies/types.ts:30](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L30)
 
 Clean up any resources held by the strategy
 Should be called when the strategy is no longer needed
@@ -53,10 +53,10 @@ Should be called when the strategy is no longer needed
 ### execute()
 
 ```ts
-execute: <T>(fn) => boolean | void | Promise<void>;
+execute: <T>(fn, onAdmit?, onCommit?) => boolean | void | Promise<void>;
 ```
 
-Defined in: [packages/db/src/strategies/types.ts:15](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L15)
+Defined in: [packages/db/src/strategies/types.ts:20](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L20)
 
 Execute a function according to the strategy's timing rules
 
@@ -73,6 +73,21 @@ Execute a function according to the strategy's timing rules
 () => [`Transaction`](Transaction.md)\<`T`\>
 
 The function to execute
+
+##### onAdmit?
+
+() => `void` \| [`Transaction`](Transaction.md)\<`T`\>
+
+Optional synchronous preparation for an admitted call.
+Built-in debounce/throttle strategies call it after reserving the current
+edge but before invoking fn, and do not call it when returning false.
+
+##### onCommit?
+
+() => `Promise`\<`unknown`\> \| `undefined`
+
+Optional promise for the actual commit attempt. It can
+outlive the public persistence receipt after a manual rollback.
 
 #### Returns
 
@@ -92,4 +107,4 @@ The result of the function execution (if applicable)
 options: ThrottleStrategyOptions;
 ```
 
-Defined in: [packages/db/src/strategies/types.ts:91](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L91)
+Defined in: [packages/db/src/strategies/types.ts:100](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L100)

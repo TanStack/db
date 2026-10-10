@@ -3,7 +3,7 @@ id: IndexedDBInstance
 title: IndexedDBInstance
 ---
 
-Defined in: packages/db/src/indexed-db.ts:103
+Defined in: [packages/db/src/indexed-db.ts:112](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L112)
 
 A shared IndexedDB database instance.
 Create with createIndexedDB() and pass to collections.
@@ -16,7 +16,7 @@ Create with createIndexedDB() and pass to collections.
 close: () => void;
 ```
 
-Defined in: packages/db/src/indexed-db.ts:115
+Defined in: [packages/db/src/indexed-db.ts:124](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L124)
 
 Close the connection and mark its managed Collections as errored.
 
@@ -32,7 +32,7 @@ Close the connection and mark its managed Collections as errored.
 readonly db: IDBDatabase;
 ```
 
-Defined in: packages/db/src/indexed-db.ts:105
+Defined in: [packages/db/src/indexed-db.ts:114](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L114)
 
 The underlying IDBDatabase connection
 
@@ -44,7 +44,7 @@ The underlying IDBDatabase connection
 readonly optional idbFactory: IDBFactory;
 ```
 
-Defined in: packages/db/src/indexed-db.ts:113
+Defined in: [packages/db/src/indexed-db.ts:122](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L122)
 
 IDBFactory used to create this database (for testing)
 
@@ -56,7 +56,7 @@ IDBFactory used to create this database (for testing)
 readonly name: string;
 ```
 
-Defined in: packages/db/src/indexed-db.ts:107
+Defined in: [packages/db/src/indexed-db.ts:116](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L116)
 
 Database name
 
@@ -68,7 +68,7 @@ Database name
 readonly stores: readonly string[];
 ```
 
-Defined in: packages/db/src/indexed-db.ts:111
+Defined in: [packages/db/src/indexed-db.ts:120](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L120)
 
 Requested object store names (frozen); omissions do not remove stores
 
@@ -80,6 +80,6 @@ Requested object store names (frozen); omissions do not remove stores
 readonly version: number;
 ```
 
-Defined in: packages/db/src/indexed-db.ts:109
+Defined in: [packages/db/src/indexed-db.ts:118](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L118)
 
 Database version
