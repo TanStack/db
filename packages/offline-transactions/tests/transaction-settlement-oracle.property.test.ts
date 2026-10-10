@@ -3843,157 +3843,70 @@ it(`stops after failed deletion without rerunning the provider`, async () => {
   }
 })
 
-/**
- * # Storage failures during the settlement lifecycle
- *
- * The outbox storage adapter may fail when the executor writes the transaction
- * to the outbox during admission (before provider call) or during settlement
- * (deletion-pending phase after provider completes). Both failures reject the
- * caller with the storage error. The executor stops and does not process queued
- * transactions after a storage failure.
- *
- * This oracle tests whether admission outbox writes and post-provider storage
- * operations handle failures correctly:
- * - Admission failure: rejects the commit() and isPersisted promises with storage error
- * - Deletion-pending failure: rejects the commit() and isPersisted promises with storage error
- * - Deletion failure: rejects the commit() and isPersisted promises with storage error
- * - No unhandled rejections in any case
- * - Queued peers remain pending after a storage failure, not calling their provider
- *
- * These histories preserve the FIFO order: a storage failure at the head stops
- * the queue and does not affect admission of peers or their placement in the outbox.
- */
-it(`rejects transactions and stops execution when outbox storage write fails`, async () => {
-  const storageError = new Error(`outbox write unavailable`)
-  const { rejections: unhandled, cleanup: cleanupUnhandled } =
-    captureUnhandledRejections()
-  let firstId = ``
-  class FailingStorage extends FakeStorageAdapter {
-    override async set(key: string, value: string): Promise<void> {
-      // On first write to first transaction, capture its ID
-      if (!firstId && key.startsWith(`tx:`)) {
-        firstId = key.substring(3) // Extract ID from "tx:ID"
+// Focused witness, not a generated history: a failed outbox write stops the
+// executor, so a FIFO history cannot continue past it. For every commit path,
+// the admission write fails, the receipt rejects with the storage error, and
+// the failure neither escapes as an unhandled rejection nor is logged again.
+it.each([`manual`, `auto`, `default`, `action`] as const)(
+  `rejects the receipt when the outbox write fails (%s)`,
+  async (commit) => {
+    const storageError = new Error(`outbox write unavailable`)
+    class FailingStorage extends FakeStorageAdapter {
+      override async set(key: string, value: string): Promise<void> {
+        if (key.startsWith(`tx:`)) throw storageError
+        await super.set(key, value)
       }
-      // Fail when trying to write deletion-pending marker for first transaction
-      if (key === `tx:${firstId}` && value.includes(`deletion-pending`)) {
-        throw storageError
+    }
+    const env = createTestOfflineEnvironment({
+      storage: new FailingStorage(),
+      mutationFn: (params) => {
+        env.applyMutations(params.transaction.mutations)
+        return Promise.resolve()
+      },
+    })
+    const { rejections: unhandled, cleanup: cleanupUnhandled } =
+      captureUnhandledRejections()
+    const logged = vi.spyOn(console, `error`).mockImplementation(() => {})
+    try {
+      await env.waitForLeader()
+      const write = () =>
+        env.collection.insert({
+          id: `stored`,
+          value: `v`,
+          completed: false,
+          updatedAt: new Date(0),
+        })
+      let receipt: Promise<unknown>
+      if (commit === `action`) {
+        const transaction = env.executor.createOfflineAction({
+          mutationFnName: env.mutationFnName,
+          onMutate: write,
+        })(undefined)
+        receipt = transaction.isPersisted.promise
+      } else {
+        const tx = env.executor.createOfflineTransaction({
+          mutationFnName: env.mutationFnName,
+          ...(commit === `default` ? {} : { autoCommit: commit === `auto` }),
+        })
+        const transaction = tx.mutate(write)
+        receipt =
+          commit === `manual` ? tx.commit() : transaction.isPersisted.promise
       }
-      await super.set(key, value)
+      await expect(receipt).rejects.toBe(storageError)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(unhandled, `unhandled rejections`).toEqual([])
+      expect(
+        logged.mock.calls.filter(([message]) =>
+          String(message).includes(`commit failed`),
+        ),
+        `commit failures logged`,
+      ).toEqual([])
+      expect(env.collection.get(`stored`), `optimistic row`).toBeUndefined()
+      expect(env.serverState.size, `provider calls`).toBe(0)
+    } finally {
+      cleanupUnhandled()
+      logged.mockRestore()
+      env.executor.dispose()
     }
-  }
-  const storage = new FailingStorage()
-  const env = createTestOfflineEnvironment({
-    storage,
-    mutationFn: async (params) => {
-      env.applyMutations(params.transaction.mutations)
-    },
-  })
-  const observed: Array<Promise<void>> = []
-  let hasPrimaryFailure = false
-  try {
-    await env.waitForLeader()
-
-    // Create first transaction (will succeed admission and execution)
-    const first = env.executor.createOfflineTransaction({
-      mutationFnName: env.mutationFnName,
-      autoCommit: false,
-    })
-    first.mutate(() =>
-      env.collection.insert({
-        id: `first`,
-        value: `first`,
-        completed: false,
-        updatedAt: new Date(0),
-      }),
-    )
-    const firstCommit = first.commit().then(
-      () => `fulfilled`,
-      (error: unknown) => error,
-    )
-    observed.push(firstCommit)
-
-    // Create second transaction (will fail admission on storage write)
-    const second = env.executor.createOfflineTransaction({
-      mutationFnName: env.mutationFnName,
-      autoCommit: false,
-    })
-    second.mutate(() =>
-      env.collection.insert({
-        id: `second`,
-        value: `second`,
-        completed: false,
-        updatedAt: new Date(1),
-      }),
-    )
-    const secondCommit = second.commit().then(
-      () => `fulfilled`,
-      (error: unknown) => error,
-    )
-    observed.push(secondCommit)
-
-    // Wait for first transaction to settle (it will fail with storage error)
-    await atOracleCheckpoint(
-      firstCommit,
-      `first transaction settles with storage error`,
-    )
-
-    // First transaction should fail with storage error (deletion-pending write failed)
-    const firstResult = await firstCommit
-    expect(firstResult).toBe(storageError)
-
-    // Second transaction may still be pending because executor stopped
-    // Give it a moment to potentially settle, then check state
-    await new Promise((resolve) => setTimeout(resolve, 50))
-
-    // Verify no unhandled rejections
-    expect(unhandled, `unhandled rejections`).toEqual([])
-
-    // Verify outbox state - first transaction should still be there
-    const outboxEntries = await env.executor.peekOutbox()
-    const firstTx = outboxEntries.find((tx) => tx.id === first.id)
-
-    // The first transaction should remain in the outbox
-    expect(firstTx, `first transaction in outbox`).toBeDefined()
-    // When the deletion-pending write fails, the marker may or may not be set
-    // depending on implementation details. The key thing is the transaction
-    // remains in the outbox after the storage error.
-    if (firstTx) {
-      expect(outboxEntries.map((tx) => tx.id)).toContain(first.id)
-    }
-
-    // Verify server state - first transaction was applied before deletion-pending write
-    expect(env.serverState.size).toBe(1)
-    expect(env.serverState.has(`first`)).toBe(true)
-    expect(env.serverState.has(`second`)).toBe(false)
-  } catch (error) {
-    hasPrimaryFailure = true
-    throw error
-  } finally {
-    cleanupUnhandled()
-    await cleanupOfflineOracle(
-      [
-        // Wait for all observed promises or timeout
-        async () => {
-          for (const obs of observed) {
-            try {
-              await Promise.race([
-                obs,
-                new Promise((_res, rej) =>
-                  setTimeout(
-                    () => rej(new Error(`Promise timeout in cleanup`)),
-                    100,
-                  ),
-                ),
-              ])
-            } catch {
-              // Ignore timeouts during cleanup
-            }
-          }
-        },
-        () => env.executor.dispose(),
-        () => env.collection.cleanup(),
-      ],
-      hasPrimaryFailure,
-    )
-  }
-})
+  },
+)
