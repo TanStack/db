@@ -1,6 +1,7 @@
 import { createCollection } from './collection/index.js'
 import {
   collectionOptionsBrand,
+  collectionOptionsClaim,
   collectionOptionsFactory,
   hasCollectionOptionsBrand,
 } from './collection-options.js'
@@ -85,11 +86,18 @@ export function withCollectionConfigFactory<
 >(
   config: TConfig,
   factory: (client: DbClient) => TConfig,
+  claim?: () => void,
 ): CollectionConfigWithFactory<TConfig> {
   Object.defineProperty(config, collectionConfigFactory, {
     value: factory,
     enumerable: false,
   })
+  if (claim) {
+    Object.defineProperty(config, collectionOptionsClaim, {
+      value: claim,
+      enumerable: true,
+    })
+  }
   return config as CollectionConfigWithFactory<TConfig>
 }
 

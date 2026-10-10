@@ -1381,6 +1381,12 @@ class PersistedCollectionRuntime<
 
   private collection: Collection<T, TKey, PersistedCollectionUtils> | null =
     null
+  // Cleanup ends the active sync run, but cannot transfer this runtime's owner.
+  private boundCollection: Collection<
+    T,
+    TKey,
+    PersistedCollectionUtils
+  > | null = null
   private syncControls: SyncControlFns<T, TKey> = {
     begin: null,
     write: null,
@@ -1581,11 +1587,17 @@ class PersistedCollectionRuntime<
 
   setCollection(
     collection: Collection<T, TKey, PersistedCollectionUtils>,
+    syncControls: SyncControlFns<T, TKey>,
   ): void {
-    if (this.collection === collection) {
-      return
+    if (this.boundCollection && this.boundCollection !== collection) {
+      throw new InvalidPersistedCollectionConfigError(
+        `Persisted options cannot own more than one Collection`,
+      )
     }
 
+    this.boundCollection ??= collection
+    this.setSyncControls(syncControls)
+    if (this.collection === collection) return
     this.collection = collection
     this.attachCoordinatorSubscription()
   }
@@ -2449,6 +2461,13 @@ class PersistedCollectionRuntime<
         } else {
           rows = await this.loadSubsetRowsUnsafe(options, adapter)
         }
+        const complete =
+          this.syncMode === `on-demand` &&
+          options.where === undefined &&
+          options.limit === undefined &&
+          options.offset === undefined &&
+          options.cursor === undefined
+        const validationRows = complete ? rows : undefined
         rowsLoaded = true
         if (config.lifecycleGeneration !== this.lifecycleGeneration) return
         if (resetSequence !== this.resetSequence) return
@@ -2460,7 +2479,7 @@ class PersistedCollectionRuntime<
           for (const row of rows) {
             hydrationContext.suppliedRowKeys.add(row.key)
           }
-          const applied = this.applyRowsToCollection(rows)
+          const applied = this.applyRowsToCollection(rows, validationRows)
           await whenSyncAccepted(applied)
           if (boundRowVersion !== undefined) {
             this.publicRowVersion = Math.max(
@@ -2649,6 +2668,8 @@ class PersistedCollectionRuntime<
 
   private applyRowsToCollection(
     rows: Array<{ key: TKey; value: T; metadata?: unknown }>,
+    validationRows?: Array<{ key: TKey; value: T; metadata?: unknown }>,
+    collectionMetadata?: Array<{ key: string; value: unknown }>,
   ): SyncAppliedReceipt {
     if (
       !this.syncControls.begin ||
@@ -2661,8 +2682,46 @@ class PersistedCollectionRuntime<
     return this.withInternalApply(() => {
       this.syncControls.begin?.()
 
+      // A full durable snapshot validates already public keys. Only the
+      // requested subset may add keys to the public Collection.
+      if (validationRows) {
+        const durableRows = new Map(validationRows.map((row) => [row.key, row]))
+        for (const key of this.collection?.base.keys() ?? []) {
+          const durable = durableRows.get(key)
+          if (!durable) {
+            this.syncControls.write?.({ type: `delete`, key })
+          } else {
+            const valueChanged = !equalPersistedSnapshotValues(
+              this.collection?.base.get(key),
+              durable.value,
+            )
+            const metadataChanged = !equalPersistedSnapshotValues(
+              this.syncControls.metadata?.row.get(key),
+              durable.metadata,
+            )
+            if (
+              valueChanged ||
+              (metadataChanged && durable.metadata !== undefined)
+            ) {
+              this.syncControls.write?.({
+                type: `update`,
+                value: durable.value,
+                metadata: durable.metadata as
+                  Record<string, unknown> | undefined,
+              })
+            }
+            if (metadataChanged && durable.metadata === undefined) {
+              this.syncControls.metadata?.row.delete(key)
+            }
+          }
+        }
+      }
+
       for (const row of rows) {
-        if (this.collection?._hasHydratedKey(row.key)) {
+        if (
+          (validationRows && this.collection?.base.has(row.key)) ||
+          this.collection?._hasHydratedKey(row.key)
+        ) {
           continue
         }
         this.syncControls.write?.({
@@ -2670,6 +2729,20 @@ class PersistedCollectionRuntime<
           value: row.value,
           metadata: row.metadata as Record<string, unknown> | undefined,
         })
+      }
+
+      if (collectionMetadata && this.syncControls.metadata) {
+        const nextMetadata = new Map(
+          collectionMetadata.map(({ key, value }) => [key, value]),
+        )
+        for (const { key } of this.syncControls.metadata.collection.list()) {
+          if (!nextMetadata.has(key)) {
+            this.syncControls.metadata.collection.delete(key)
+          }
+        }
+        for (const [key, value] of nextMetadata) {
+          this.syncControls.metadata.collection.set(key, value)
+        }
       }
 
       return this.syncControls.commit?.() ?? true
@@ -3813,7 +3886,7 @@ class PersistedCollectionRuntime<
     }
 
     if (lifecycleGeneration !== this.lifecycleGeneration) return
-    await this.reloadActiveSubsetsUnsafe(adapter)
+    await this.reloadActiveSubsetsUnsafe(adapter, false, true)
   }
 
   private async invalidateFromCommittedTxUnsafe(
@@ -3913,13 +3986,14 @@ class PersistedCollectionRuntime<
   private async reloadActiveSubsetsUnsafe(
     adapter: HydrationPersistenceAdapter,
     skipUnchangedReplace = false,
+    restoreResetBaseline = false,
   ): Promise<void> {
     const lifecycleGeneration = this.lifecycleGeneration
     const truncateGeneration = this.sourceTruncateGeneration
-    const activeSubsetOptions =
-      this.activeSubsets.size > 0
-        ? Array.from(this.activeSubsets.values())
-        : [{}]
+    const activeSubsetOptions = Array.from(this.activeSubsets.values())
+    if (restoreResetBaseline && activeSubsetOptions.length === 0) {
+      activeSubsetOptions.push({})
+    }
 
     this.hydratedDemands.clear()
     this.hydrationSequence++
@@ -3928,8 +4002,16 @@ class PersistedCollectionRuntime<
     this.hydratingGeneration = lifecycleGeneration
     try {
       const mergedRows = new Map<TKey, { value: T; metadata?: unknown }>()
-      const collectionMetadata =
-        await this.loadCollectionMetadataSnapshot(adapter)
+      const validationSnapshot =
+        activeSubsetOptions.length === 0 && this.collection?.base.size
+          ? await adapter.loadResumeSnapshot(this.collectionId, {
+              requiredIndexSignatures: this.getRequiredIndexSignatures(),
+              includeRows: true,
+            })
+          : undefined
+      const collectionMetadata = validationSnapshot
+        ? validationSnapshot.collectionMetadata
+        : await this.loadCollectionMetadataSnapshot(adapter)
       if (lifecycleGeneration !== this.lifecycleGeneration) return
       for (const options of activeSubsetOptions) {
         const subsetRows = await this.loadSubsetRowsUnsafe(options, adapter)
@@ -3946,7 +4028,23 @@ class PersistedCollectionRuntime<
         hydrationContext.suppliedRowKeys.add(key)
       }
 
-      if (
+      if (activeSubsetOptions.length === 0) {
+        // Retired demand does not hide already public rows. Validate only
+        // those keys; do not publish unrelated durable rows without demand.
+        await whenSyncAccepted(
+          validationSnapshot
+            ? this.applyRowsToCollection(
+                [],
+                validationSnapshot.rows as Array<{
+                  key: TKey
+                  value: T
+                  metadata?: unknown
+                }>,
+                collectionMetadata,
+              )
+            : this.replaceCollectionMetadataSnapshot(collectionMetadata),
+        )
+      } else if (
         skipUnchangedReplace &&
         this.matchesCollectionSnapshot(mergedRows, collectionMetadata)
       ) {
@@ -4402,16 +4500,16 @@ function createWrappedSyncConfig<
           throw error
         }
       }
-      runtime.setSyncControls({
-        begin: params.begin,
-        write: params.write as SyncControlFns<T, TKey>[`write`],
-        commit: params.commit,
-        truncate: params.truncate,
-        metadata: params.metadata ?? null,
-        markError: params.markError,
-      })
       runtime.setCollection(
         params.collection as Collection<T, TKey, PersistedCollectionUtils>,
+        {
+          begin: params.begin,
+          write: params.write as SyncControlFns<T, TKey>[`write`],
+          commit: params.commit,
+          truncate: params.truncate,
+          metadata: params.metadata ?? null,
+          markError: params.markError,
+        },
       )
 
       const persistenceCapability: SyncPersistenceCapabilityV1<TKey> = {
@@ -5077,16 +5175,16 @@ function createLoopbackSyncConfig<
 >(runtime: PersistedCollectionRuntime<T, TKey>): SyncConfig<T, TKey> {
   return {
     sync: (params) => {
-      runtime.setSyncControls({
-        begin: params.begin,
-        write: params.write as SyncControlFns<T, TKey>[`write`],
-        commit: params.commit,
-        truncate: params.truncate,
-        metadata: params.metadata ?? null,
-        markError: params.markError,
-      })
       runtime.setCollection(
         params.collection as Collection<T, TKey, PersistedCollectionUtils>,
+        {
+          begin: params.begin,
+          write: params.write as SyncControlFns<T, TKey>[`write`],
+          commit: params.commit,
+          truncate: params.truncate,
+          metadata: params.metadata ?? null,
+          markError: params.markError,
+        },
       )
 
       void runtime
@@ -5206,6 +5304,16 @@ export function persistedCollectionOptions<
       ? new PersistedReadinessTracker(networkTimeoutMs)
       : undefined
 
+  let claimed = false
+  const claimOptions = () => {
+    if (claimed) {
+      throw new InvalidPersistedCollectionConfigError(
+        `Persisted options can create only one Collection. Create fresh options for each Collection.`,
+      )
+    }
+    claimed = true
+  }
+
   if (hasOwnSyncKey(options)) {
     if (!isValidSyncConfig(options.sync)) {
       throw new InvalidSyncConfigError(
@@ -5259,6 +5367,7 @@ export function persistedCollectionOptions<
           ...options,
           id: collectionId,
         } as never) as typeof result,
+      claimOptions,
     )
   }
 
@@ -5381,6 +5490,7 @@ export function persistedCollectionOptions<
         ...options,
         id: collectionId,
       } as never) as typeof result,
+    claimOptions,
   )
 }
 

@@ -686,8 +686,38 @@ hydration, later work, known durability failures, and an unchanged
 reconciliation reload. Its orphan row-metadata case fails on a shortcut that
 skips needed cleanup. Sparse-array, extra-array-property, and nested-prototype
 histories require a changed durable value to reload even when ordinary deep
-equality would skip it. A controlled term-jump history recovers a missed row;
-a position-only certification history shows that observing a durable version
+equality would skip it.
+
+Direct persisted options and their spread copies can create only one Collection,
+both with and without a wrapped upstream sync source. The second creation
+rejects before it redirects the first owner's local or source writes.
+Selecting only the exposed wrapped `sync` config omits the descriptor claim;
+the runtime guard rejects that second Collection before changing control
+callbacks. A local-only write and an in-flight upstream source transaction
+remain with the first owner after the rejection.
+Cleanup does not release that claim. A selected `sync` config also cannot bind
+a second Collection after the first cleans up; the original Collection can
+restart and write through the same runtime in local-only and upstream-sync
+modes. Two DbClients materializing one descriptor receive independent runtimes.
+A no-demand on-demand full-reload notification reads collection metadata
+without fetching durable rows when no row is public. If a retired demand left
+public rows, the notification reads one durable snapshot and corrects only
+those rows. It retracts a peer-deleted row, updates a changed row, and removes
+obsolete row metadata without exposing unrelated stored rows. A later
+constrained demand does not need another validation read. An empty bounded
+page does not retract a row outside its scope. Eighteen source-precedence histories
+for that route preserve accepted source rows across insert/update/delete,
+truncate replay, and queued or serial reads. The original unbounded-read path
+and direct options reuse both failed these new witnesses before repair.
+The notice corrects already public rows even during the idle interval after
+demand retirement. Arbitrary overlapping retired subsets and host scheduling
+remain outside these bounded controlled histories.
+Schema reset still restores an unconstrained baseline to preserve the existing
+accepted-source precedence contract. Avoiding that broad reset read requires a
+separate authority decision and history model.
+
+A controlled term-jump history recovers a missed row; a position-only
+certification history shows that observing a durable version
 does not publish its rows. Reset continuations rebase the publicly applied row
 version, reject a delayed pre-reset notification in both orders relative to a
 newer election, and recover a row committed between the reset reload and the
@@ -1351,7 +1381,12 @@ opt-in/outcome combinations independently of the observer classifier. Its
 controlled persistence histories check nonempty
 and empty restore while upstream remains pending, all-source conjunction,
 mixed opt-out, nested live-query sources, exact failure, SSR seed handoff,
-stale cleanup/restart work, an already-restored source, a network-first deadline,
+stale cleanup/restart work, an already-restored source, and a two-source
+history in which A restores, restarts, and remains pending
+after B restores. A new query's persisted readiness and initial-render wait
+stay gated until A restores in its current sync run. This history uses controlled
+adapter reads and does not claim that an old query survives source cleanup.
+The remaining controlled histories cover a network-first deadline,
 early network success and failure, network failure before nonempty restore,
 client query stream failure before or after empty and nonempty restore or before
 observer construction,
