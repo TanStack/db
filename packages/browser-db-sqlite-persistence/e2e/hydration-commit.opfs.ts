@@ -211,29 +211,39 @@ async function run(): Promise<void> {
       schemaVersion: 33,
     }).adapter
     const seed = (id: string, row: Row, target: typeof adapter) =>
-      target.applyCommittedTx(id, {
-        txId: `seed-${id}`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [{ type: `insert`, key: row.id, value: row }],
-      })
+      target.applyCommittedTx(
+        { kind: `eager`, collectionId: id },
+        {
+          txId: `seed-${id}`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [{ type: `insert`, key: row.id, value: row }],
+        },
+      )
     if (baseline && phase === `subscription`) {
       const claim = await adapter.claimCacheGeneration!(`a`)
-      await adapter.applyCommittedTx(claim.storageCollectionId, {
-        txId: `seed-a`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        cacheGenerationClaimId: claim.claimId,
-        mutations: [
-          {
-            type: `insert`,
-            key: `baseline`,
-            value: { id: `baseline`, value: 0 },
-          },
-        ],
-      })
+      await adapter.applyCommittedTx(
+        {
+          kind: `managed`,
+          storageCollectionId: claim.storageCollectionId,
+          claimId: claim.claimId,
+        },
+        {
+          txId: `seed-a`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          cacheGenerationClaimId: claim.claimId,
+          mutations: [
+            {
+              type: `insert`,
+              key: `baseline`,
+              value: { id: `baseline`, value: 0 },
+            },
+          ],
+        },
+      )
       await adapter.releaseCacheGenerationClaim!(claim.claimId)
     } else if (baseline) {
       await seed(`a`, { id: `baseline`, value: 0 }, adapter)
@@ -330,12 +340,17 @@ async function run(): Promise<void> {
     adapter.applyCommittedTx = (id, tx) => {
       const result = apply(id, tx)
       if (
-        id === sourceStorageId &&
+        (id.kind === `managed` ? id.storageCollectionId : id.collectionId) ===
+          sourceStorageId &&
         tailStarted &&
         tailTransactions.has(tx.txId)
       )
         tailScheduling.push(`public-apply`)
-      if (id === sourceStorageId && nested.has(tx.txId)) {
+      if (
+        (id.kind === `managed` ? id.storageCollectionId : id.collectionId) ===
+          sourceStorageId &&
+        nested.has(tx.txId)
+      ) {
         cycleCalls++
         cycle.resolve()
       }
@@ -522,8 +537,15 @@ async function run(): Promise<void> {
       const sourceClaimContext = sourceClaimId
         ? { cacheGenerationClaimId: sourceClaimId }
         : undefined
+      const sourceTarget = sourceClaimId
+        ? {
+            kind: `managed` as const,
+            storageCollectionId: sourceStorageId,
+            claimId: sourceClaimId,
+          }
+        : { kind: `eager` as const, collectionId: sourceStorageId }
       const durable = await adapter.loadSubset(
-        sourceStorageId,
+        sourceTarget,
         {},
         sourceClaimContext,
       )
@@ -534,15 +556,15 @@ async function run(): Promise<void> {
         .filter(({ metadata }) => metadata !== undefined)
         .map(({ key, metadata }) => ({ key, metadata }))
       durableMetadata = await adapter.loadCollectionMetadata!(
-        sourceStorageId,
+        sourceTarget,
         sourceClaimContext,
       )
-      peerRows = (await bAdapter.loadSubset(`b`, {})).map(
-        ({ value }) => value as Row,
-      )
-      ordinaryRows = (await cAdapter.loadSubset(`c`, {})).map(
-        ({ value }) => value as Row,
-      )
+      peerRows = (
+        await bAdapter.loadSubset({ kind: `eager`, collectionId: `b` }, {})
+      ).map(({ value }) => value as Row)
+      ordinaryRows = (
+        await cAdapter.loadSubset({ kind: `eager`, collectionId: `c` }, {})
+      ).map(({ value }) => value as Row)
       schemas = [
         ...(await database.execute<{
           collection_id: string
@@ -590,7 +612,11 @@ async function run(): Promise<void> {
         try {
           captured.reopenedRows = (
             await adapter.loadSubset(
-              freshClaim.storageCollectionId,
+              {
+                kind: `managed`,
+                storageCollectionId: freshClaim.storageCollectionId,
+                claimId: freshClaim.claimId,
+              },
               {},
               {
                 cacheGenerationClaimId: freshClaim.claimId,

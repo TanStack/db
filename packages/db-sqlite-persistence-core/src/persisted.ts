@@ -361,6 +361,90 @@ export type PersistedCacheGenerationClaim = {
   expiresAtMs?: number
 }
 
+/** An eager Collection name or a claim-bound persisted cache generation. */
+export type PersistedStorageTarget =
+  | { kind: `eager`; collectionId: string }
+  | {
+      kind: `managed`
+      storageCollectionId: string
+      claimId: string
+    }
+
+export function eagerStorageTarget(
+  collectionId: string,
+): PersistedStorageTarget {
+  return { kind: `eager`, collectionId }
+}
+
+export function managedStorageTarget(
+  storageCollectionId: string,
+  claimId: string,
+): PersistedStorageTarget {
+  return { kind: `managed`, storageCollectionId, claimId }
+}
+
+export function resolvePersistedStorageTarget(
+  target: PersistedStorageTarget,
+  legacyClaimId?: string,
+): { collectionId: string; claimId?: string } {
+  const input: unknown = target
+  if (typeof input !== `object` || input === null) {
+    throw new InvalidPersistedCollectionConfigError(
+      `SQLite persistence requires an explicit eager or managed storage target`,
+    )
+  }
+  const fields = input as Record<string, unknown>
+  if (fields.kind === `eager`) {
+    if (
+      typeof fields.collectionId !== `string` ||
+      fields.collectionId.trim().length === 0
+    ) {
+      throw new InvalidPersistedCollectionConfigError(
+        `An eager storage target requires a nonempty collectionId`,
+      )
+    }
+    if (
+      legacyClaimId !== undefined ||
+      `claimId` in fields ||
+      `storageCollectionId` in fields
+    ) {
+      throw new InvalidPersistedCollectionConfigError(
+        `An eager storage target cannot carry a persisted cache claim`,
+      )
+    }
+    return { collectionId: fields.collectionId }
+  }
+  if (fields.kind !== `managed`) {
+    throw new InvalidPersistedCollectionConfigError(
+      `Unknown SQLite persistence storage target kind`,
+    )
+  }
+  if (
+    typeof fields.storageCollectionId !== `string` ||
+    fields.storageCollectionId.trim().length === 0 ||
+    typeof fields.claimId !== `string` ||
+    fields.claimId.trim().length === 0
+  ) {
+    throw new InvalidPersistedCollectionConfigError(
+      `A managed storage target requires a storageCollectionId and persisted cache claim`,
+    )
+  }
+  if (`collectionId` in fields) {
+    throw new InvalidPersistedCollectionConfigError(
+      `A managed storage target cannot carry an eager collectionId`,
+    )
+  }
+  if (legacyClaimId !== undefined && legacyClaimId !== fields.claimId) {
+    throw new InvalidPersistedCollectionConfigError(
+      `The persisted cache claim does not match its storage target`,
+    )
+  }
+  return {
+    collectionId: fields.storageCollectionId,
+    claimId: fields.claimId,
+  }
+}
+
 type PersistedResumeGeneration = {
   latestTerm: number
   latestSeq: number
@@ -432,7 +516,7 @@ export const SQLITE_DRIVER_SHARED_LOGICAL_SCHEDULING_KEY = Symbol.for(
 
 export interface PersistenceAdapter {
   loadSubset: (
-    collectionId: string,
+    target: PersistedStorageTarget,
     options: LoadSubsetOptions,
     ctx?: {
       requiredIndexSignatures?: ReadonlyArray<string>
@@ -446,7 +530,7 @@ export interface PersistenceAdapter {
     }>
   >
   loadResumeSnapshot: (
-    collectionId: string,
+    target: PersistedStorageTarget,
     ctx?: {
       requiredIndexSignatures?: ReadonlyArray<string>
       includeRows?: boolean
@@ -465,7 +549,10 @@ export interface PersistenceAdapter {
     latestRowVersion: number
     resetEpoch: number
   }>
-  applyCommittedTx: (collectionId: string, tx: PersistedTx) => Promise<void>
+  applyCommittedTx: (
+    target: PersistedStorageTarget,
+    tx: PersistedTx,
+  ) => Promise<void>
   claimCacheGeneration?: (
     collectionId: string,
   ) => Promise<PersistedCacheGenerationClaim>
@@ -483,32 +570,32 @@ export interface PersistenceAdapter {
   getCacheGenerationNow?: () => number
   /** Atomically certify or apply one source transaction after a lost response. */
   reconcileCommittedTx?: (
-    collectionId: string,
+    target: PersistedStorageTarget,
     tx: PersistedTx,
     anchor: CommittedTxAnchor,
   ) => Promise<ReconciledCommittedTx>
   loadCollectionMetadata?: (
-    collectionId: string,
+    target: PersistedStorageTarget,
     ctx?: { cacheGenerationClaimId?: string },
   ) => Promise<Array<{ key: string; value: unknown }>>
   scanRows?: (
-    collectionId: string,
+    target: PersistedStorageTarget,
     options?: PersistedRowScanOptions,
     ctx?: { cacheGenerationClaimId?: string },
   ) => Promise<Array<PersistedScannedRow>>
   ensureIndex: (
-    collectionId: string,
+    target: PersistedStorageTarget,
     signature: string,
     spec: PersistedIndexSpec,
     ctx?: { cacheGenerationClaimId?: string },
   ) => Promise<void>
   markIndexRemoved?: (
-    collectionId: string,
+    target: PersistedStorageTarget,
     signature: string,
     ctx?: { cacheGenerationClaimId?: string },
   ) => Promise<void>
   getStreamPosition?: (
-    collectionId: string,
+    target: PersistedStorageTarget,
     ctx?: { cacheGenerationClaimId?: string },
   ) => Promise<{
     latestTerm: number
@@ -517,7 +604,7 @@ export interface PersistenceAdapter {
   }>
   /** Reserve a new durable election term before announcing Browser leadership. */
   reserveLeadershipTerm?: (
-    collectionId: string,
+    target: PersistedStorageTarget,
     observedTerm: number,
     ctx?: { cacheGenerationClaimId?: string },
   ) => Promise<{
@@ -543,7 +630,7 @@ export interface PersistenceAdapter {
 
 export type HydrationPersistenceAdapter = PersistenceAdapter & {
   pullSince?: (
-    collectionId: string,
+    target: PersistedStorageTarget,
     fromRowVersion: number,
     ctx?: { cacheGenerationClaimId?: string },
   ) => Promise<PersistencePullSinceResult>
@@ -635,6 +722,7 @@ export interface PersistedCollectionCoordinator {
   requestApplyLocalMutations?: (
     collectionId: string,
     mutations: Array<PersistedMutationEnvelope>,
+    cacheGenerationClaimId?: string,
   ) => Promise<ApplyLocalMutationsResponse>
   /**
    * Applies a committed transaction through the supplied adapter when present.
@@ -997,7 +1085,12 @@ export class SingleProcessCoordinator implements PersistedCollectionCoordinator 
     }
 
     try {
-      await adapter.applyCommittedTx(collectionId, tx)
+      await adapter.applyCommittedTx(
+        tx.cacheGenerationClaimId
+          ? managedStorageTarget(collectionId, tx.cacheGenerationClaimId)
+          : eagerStorageTarget(collectionId),
+        tx,
+      )
     } catch (error) {
       throw toPersistedCollectionDurabilityError(collectionId, error)
     }
@@ -1496,6 +1589,25 @@ class PersistedCollectionRuntime<
 
   private get storageCollectionId(): string {
     return this.cacheGenerationClaim?.storageCollectionId ?? this.collectionId
+  }
+
+  private storageTargetFor(
+    storageCollectionId: string = this.storageCollectionId,
+    claimId: string | undefined = this.cacheGenerationClaim?.claimId,
+  ): PersistedStorageTarget {
+    if (
+      this.mode === `sync-present` &&
+      this.syncMode === `on-demand` &&
+      this.persistence.adapter.claimCacheGeneration
+    ) {
+      if (!claimId) {
+        throw new InvalidPersistedCollectionConfigError(
+          `A managed on-demand cache operation requires a persisted cache claim`,
+        )
+      }
+      return { kind: `managed`, storageCollectionId, claimId }
+    }
+    return { kind: `eager`, collectionId: storageCollectionId }
   }
 
   private cacheGenerationNow(): number {
@@ -2126,7 +2238,7 @@ class PersistedCollectionRuntime<
       >
       try {
         snapshot = await this.persistence.adapter.loadResumeSnapshot(
-          storageCollectionId,
+          this.storageTargetFor(storageCollectionId, claimId),
           {
             requiredIndexSignatures: this.getRequiredIndexSignatures(),
             includeRows: false,
@@ -2426,10 +2538,13 @@ class PersistedCollectionRuntime<
   ): Promise<boolean> {
     const claimId = this.cacheGenerationClaim?.claimId
     const storageCollectionId = this.storageCollectionId
-    const snapshot = await adapter.loadResumeSnapshot(storageCollectionId, {
-      includeRows: false,
-      cacheGenerationClaimId: claimId,
-    })
+    const snapshot = await adapter.loadResumeSnapshot(
+      this.storageTargetFor(storageCollectionId, claimId),
+      {
+        includeRows: false,
+        cacheGenerationClaimId: claimId,
+      },
+    )
     if (lifecycleGeneration !== this.lifecycleGeneration) return false
     if (claimId !== this.cacheGenerationClaim?.claimId) return false
     if (storageCollectionId !== this.storageCollectionId) return false
@@ -2458,7 +2573,7 @@ class PersistedCollectionRuntime<
       return []
     }
 
-    return adapter.loadCollectionMetadata(this.storageCollectionId, {
+    return adapter.loadCollectionMetadata(this.storageTargetFor(), {
       cacheGenerationClaimId: this.cacheGenerationClaim?.claimId,
     })
   }
@@ -3031,7 +3146,7 @@ class PersistedCollectionRuntime<
     adapter: HydrationPersistenceAdapter,
   ): Promise<Array<{ key: TKey; value: T; metadata?: unknown }>> {
     if (this.scopedRecovery) return Promise.resolve([])
-    return adapter.loadSubset(this.storageCollectionId, options, {
+    return adapter.loadSubset(this.storageTargetFor(), options, {
       requiredIndexSignatures: this.getRequiredIndexSignatures(),
       cacheGenerationClaimId: this.cacheGenerationClaim?.claimId,
     }) as Promise<Array<{ key: TKey; value: T; metadata?: unknown }>>
@@ -3044,11 +3159,9 @@ class PersistedCollectionRuntime<
       return []
     }
 
-    return this.persistence.adapter.scanRows(
-      this.storageCollectionId,
-      options,
-      { cacheGenerationClaimId: this.cacheGenerationClaim?.claimId },
-    ) as Promise<Array<PersistedScannedRow<T, TKey>>>
+    return this.persistence.adapter.scanRows(this.storageTargetFor(), options, {
+      cacheGenerationClaimId: this.cacheGenerationClaim?.claimId,
+    }) as Promise<Array<PersistedScannedRow<T, TKey>>>
   }
 
   async scanPersistedRows(
@@ -3103,7 +3216,7 @@ class PersistedCollectionRuntime<
         let bindResumeSnapshot: (() => void) | undefined
         if (config.bindKeySetEvidence && !this.scopedRecovery) {
           const snapshot = await adapter.loadResumeSnapshot(
-            this.storageCollectionId,
+            this.storageTargetFor(),
             {
               requiredIndexSignatures: this.getRequiredIndexSignatures(),
               includeRows: true,
@@ -3279,7 +3392,7 @@ class PersistedCollectionRuntime<
               if (snapshotRows === undefined) {
                 const snapshot = this.scopedRecovery
                   ? undefined
-                  : await adapter.loadResumeSnapshot(this.storageCollectionId, {
+                  : await adapter.loadResumeSnapshot(this.storageTargetFor(), {
                       requiredIndexSignatures:
                         this.getRequiredIndexSignatures(),
                       includeRows: true,
@@ -3797,7 +3910,7 @@ class PersistedCollectionRuntime<
     this.throwIfLifecycleReplaced(lifecycleGeneration)
     try {
       await this.persistence.adapter.applyCommittedTx(
-        this.storageCollectionId,
+        this.storageTargetFor(),
         tx,
       )
     } catch (error) {
@@ -3951,6 +4064,7 @@ class PersistedCollectionRuntime<
     // but leave the coordinator's state.latestSeq stale, causing seq collisions
     // when follower RPCs later arrive.
     if (this.persistence.coordinator.requestApplyLocalMutations) {
+      const target = this.storageTargetFor()
       const envelopeMutations = mutations.map((mutation) =>
         toPersistedMutationEnvelope(
           mutation as unknown as PendingMutation<Record<string, unknown>>,
@@ -3961,6 +4075,7 @@ class PersistedCollectionRuntime<
         await this.persistence.coordinator.requestApplyLocalMutations(
           this.storageCollectionId,
           envelopeMutations,
+          target.kind === `managed` ? target.claimId : undefined,
         )
 
       this.throwIfLifecycleReplaced(lifecycleGeneration)
@@ -4452,8 +4567,9 @@ class PersistedCollectionRuntime<
     lifecycleGeneration: number,
   ): Promise<void> {
     if (lifecycleGeneration !== this.lifecycleGeneration) return
-    const snapshot = await adapter.loadResumeSnapshot(this.collectionId, {
+    const snapshot = await adapter.loadResumeSnapshot(this.storageTargetFor(), {
       includeRows: false,
+      cacheGenerationClaimId: this.cacheGenerationClaim?.claimId,
     })
     if (lifecycleGeneration !== this.lifecycleGeneration) return
     // The reset epoch can restart row versions at zero. Keep the term/seq
@@ -4978,7 +5094,7 @@ class PersistedCollectionRuntime<
         if (!adapter.markIndexRemoved) return false
         try {
           await adapter.markIndexRemoved(
-            storageCollectionId,
+            this.storageTargetFor(storageCollectionId, claimId),
             indexMetadata.signature,
             { cacheGenerationClaimId: claimId },
           )
@@ -5051,7 +5167,7 @@ class PersistedCollectionRuntime<
     try {
       const spec = this.buildPersistedIndexSpec(indexMetadata)
       await adapter.ensureIndex(
-        this.storageCollectionId,
+        this.storageTargetFor(),
         indexMetadata.signature,
         spec,
         { cacheGenerationClaimId: this.cacheGenerationClaim?.claimId },
@@ -5102,7 +5218,7 @@ class PersistedCollectionRuntime<
       )
         return
       await this.persistence.adapter.markIndexRemoved(
-        this.storageCollectionId,
+        this.storageTargetFor(),
         indexMetadata.signature,
         { cacheGenerationClaimId: this.cacheGenerationClaim?.claimId },
       )

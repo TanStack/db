@@ -7668,7 +7668,11 @@ async function readClaimedCacheRows(
   claim: PersistedCacheGenerationClaim,
 ): Promise<Array<{ key: string | number; name: unknown }>> {
   const persistedRows = await adapter.loadSubset(
-    claim.storageCollectionId,
+    {
+      kind: `managed`,
+      storageCollectionId: claim.storageCollectionId,
+      claimId: claim.claimId,
+    },
     {},
     {
       cacheGenerationClaimId: claim.claimId,
@@ -7883,7 +7887,11 @@ it(`keeps a warm Query Collection independent when a prefix-sharing peer rotates
     .get(secondId) as { claim_id: string }
   expect(
     await secondManaged.adapter.loadSubset(
-      secondHead.physical_id,
+      {
+        kind: `managed`,
+        storageCollectionId: secondHead.physical_id,
+        claimId: secondClaim.claim_id,
+      },
       {},
       {
         cacheGenerationClaimId: secondClaim.claim_id,
@@ -7913,7 +7921,11 @@ it(`keeps a warm Query Collection independent when a prefix-sharing peer rotates
   ).toMatchObject(secondHead)
   expect(
     await secondManaged.adapter.loadSubset(
-      secondHead.physical_id,
+      {
+        kind: `managed`,
+        storageCollectionId: secondHead.physical_id,
+        claimId: secondClaim.claim_id,
+      },
       {},
       {
         cacheGenerationClaimId: secondClaim.claim_id,

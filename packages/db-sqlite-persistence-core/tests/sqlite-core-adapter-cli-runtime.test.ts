@@ -21,21 +21,35 @@ it(`persists a claimed on-demand row through sqlite3 CLI arguments`, async () =>
     Awaited<ReturnType<typeof adapter.claimCacheGeneration>> | undefined
   try {
     claim = await adapter.claimCacheGeneration(`cli-managed-cache`)
-    await adapter.applyCommittedTx(claim.storageCollectionId, {
-      txId: `source-row`,
-      term: 1,
-      seq: 1,
-      rowVersion: 1,
-      cacheGenerationClaimId: claim.claimId,
-      mutations: [
-        { type: `insert`, key: `row`, value: { id: `row`, title: `Fresh` } },
-      ],
-    })
+    await adapter.applyCommittedTx(
+      {
+        kind: `managed`,
+        storageCollectionId: claim.storageCollectionId,
+        claimId: claim.claimId,
+      },
+      {
+        txId: `source-row`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        cacheGenerationClaimId: claim.claimId,
+        mutations: [
+          { type: `insert`, key: `row`, value: { id: `row`, title: `Fresh` } },
+        ],
+      },
+    )
     expect(
       (
-        await adapter.loadResumeSnapshot(claim.storageCollectionId, {
-          cacheGenerationClaimId: claim.claimId,
-        })
+        await adapter.loadResumeSnapshot(
+          {
+            kind: `managed`,
+            storageCollectionId: claim.storageCollectionId,
+            claimId: claim.claimId,
+          },
+          {
+            cacheGenerationClaimId: claim.claimId,
+          },
+        )
       ).rows.map(({ value }) => value),
     ).toEqual([{ id: `row`, title: `Fresh` }])
   } finally {

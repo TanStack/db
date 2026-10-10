@@ -5,12 +5,13 @@ import type {
   PersistedCollectionMode,
   PersistedIndexSpec,
   PersistedKeySetEvidence,
+  PersistedStorageTarget,
   PersistedTx,
   ReconciledCommittedTx,
   SQLitePullSinceResult,
 } from '@tanstack/db-sqlite-persistence-core'
 
-export const ELECTRON_PERSISTENCE_PROTOCOL_VERSION = 5 as const
+export const ELECTRON_PERSISTENCE_PROTOCOL_VERSION = 6 as const
 export const DEFAULT_ELECTRON_PERSISTENCE_CHANNEL = `tanstack-db:sqlite-persistence`
 
 export type ElectronPersistedRow = Record<string, unknown>
@@ -154,6 +155,8 @@ export type ElectronPersistenceRequestByMethod = {
     v: number
     requestId: string
     collectionId: string
+    /** Required for data operations; preserves eager or managed identity across IPC. */
+    storageTarget?: PersistedStorageTarget
     resolution?: ElectronPersistenceResolution
     method: Method
     payload: ElectronPersistencePayloadMap[Method]

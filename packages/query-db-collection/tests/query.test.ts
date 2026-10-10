@@ -28,6 +28,7 @@ import { evaluateReferenceExpression } from '../../db/tests/reference-expression
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { queryCollectionOptions } from '../src/query'
 import { SyncNotInitializedError } from '../src/errors'
+import type { PersistedStorageTarget } from '../../db-sqlite-persistence-core/src'
 import type { QueryFunctionContext } from '@tanstack/query-core'
 import type {
   Collection,
@@ -172,7 +173,7 @@ function createPersistedQueryAdapter<TItem extends { id: string }>(
         metadata: rowMetadata.get(value.id),
       })),
     loadResumeSnapshot: async (
-      _collectionId: string,
+      _target: PersistedStorageTarget,
       options?: { includeRows?: boolean },
     ) => ({
       rows:
@@ -204,7 +205,7 @@ function createPersistedQueryAdapter<TItem extends { id: string }>(
         value,
         metadata: rowMetadata.get(value.id),
       })),
-    applyCommittedTx: async (_collectionId: string, tx: any) => {
+    applyCommittedTx: async (_target: PersistedStorageTarget, tx: any) => {
       if (tx.truncate) {
         rows.clear()
         rowMetadata.clear()

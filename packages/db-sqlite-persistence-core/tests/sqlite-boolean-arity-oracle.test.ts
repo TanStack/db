@@ -456,9 +456,12 @@ it('refines boolean arity and SQL row work across generated SQLite loads', async
 
   async function check(model: Model): Promise<Array<Failure>> {
     driver.reads = []
-    const result = await adapter.loadSubset('boolean-arity', {
-      where: toIR(model),
-    })
+    const result = await adapter.loadSubset(
+      { kind: `eager`, collectionId: 'boolean-arity' },
+      {
+        where: toIR(model),
+      },
+    )
     const actual = result.map((row) => String(row.key)).sort()
     const expected = expectedKeys(model)
     const read = driver.reads[0]
@@ -543,17 +546,20 @@ it('refines boolean arity and SQL row work across generated SQLite loads', async
   }
 
   async function runOracle(): Promise<void> {
-    await adapter.applyCommittedTx('boolean-arity', {
-      txId: 'seed',
-      term: 1,
-      seq: 1,
-      rowVersion: 1,
-      mutations: fixture.map((row) => ({
-        type: 'insert' as const,
-        key: row.id,
-        value: structuredClone(row),
-      })),
-    })
+    await adapter.applyCommittedTx(
+      { kind: `eager`, collectionId: 'boolean-arity' },
+      {
+        txId: 'seed',
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: fixture.map((row) => ({
+          type: 'insert' as const,
+          key: row.id,
+          value: structuredClone(row),
+        })),
+      },
+    )
     if (replaySeed !== undefined) {
       const replay = await campaign(Number(replaySeed), replayPath)
       if (replay.failed)
@@ -564,7 +570,10 @@ it('refines boolean arity and SQL row work across generated SQLite loads', async
     }
 
     driver.reads = []
-    const baseline = await adapter.loadSubset('boolean-arity', {})
+    const baseline = await adapter.loadSubset(
+      { kind: `eager`, collectionId: 'boolean-arity' },
+      {},
+    )
     expect(baseline).toHaveLength(fixture.length)
     expect(driver.reads).toHaveLength(1)
     expect(driver.reads[0]?.rawRows).toBe(fixture.length)
@@ -576,9 +585,12 @@ it('refines boolean arity and SQL row work across generated SQLite loads', async
     const random = await campaign()
 
     driver.reads = []
-    const emptyIn = await adapter.loadSubset('boolean-arity', {
-      where: toIR(atom('in-empty')),
-    })
+    const emptyIn = await adapter.loadSubset(
+      { kind: `eager`, collectionId: 'boolean-arity' },
+      {
+        where: toIR(atom('in-empty')),
+      },
+    )
     expect(emptyIn).toHaveLength(0)
     expect(driver.reads).toHaveLength(1)
     expect(driver.reads[0]?.rawRows).toBe(0)
@@ -587,23 +599,26 @@ it('refines boolean arity and SQL row work across generated SQLite loads', async
     // The cursor receiver forms two new AND nodes around the base predicate.
     // A root-only arity repair would leave this nested empty-OR work unbounded.
     driver.reads = []
-    const cursorRows = await adapter.loadSubset('boolean-arity', {
-      where: toIR(op('or')),
-      orderBy: [
-        {
-          expression: new IR.PropRef(['id']),
-          compareOptions: { direction: 'asc', nulls: 'last' },
+    const cursorRows = await adapter.loadSubset(
+      { kind: `eager`, collectionId: 'boolean-arity' },
+      {
+        where: toIR(op('or')),
+        orderBy: [
+          {
+            expression: new IR.PropRef(['id']),
+            compareOptions: { direction: 'asc', nulls: 'last' },
+          },
+        ],
+        limit: 2,
+        cursor: {
+          whereCurrent: toIR(atom('first')),
+          whereFrom: new IR.Func('gt', [
+            new IR.PropRef(['id']),
+            new IR.Value('row-1'),
+          ]),
         },
-      ],
-      limit: 2,
-      cursor: {
-        whereCurrent: toIR(atom('first')),
-        whereFrom: new IR.Func('gt', [
-          new IR.PropRef(['id']),
-          new IR.Value('row-1'),
-        ]),
       },
-    })
+    )
     const cursorReads = driver.reads.slice()
     const cursorWorkFailed =
       cursorRows.length !== 0 ||
@@ -632,9 +647,12 @@ it('refines boolean arity and SQL row work across generated SQLite loads', async
     const mixedAnd = op('and', atom('first'), atom('gt-positive'))
     async function observeMixedAnd(model: Model = mixedAnd) {
       driver.reads = []
-      const rows = await adapter.loadSubset('boolean-arity', {
-        where: toIR(model),
-      })
+      const rows = await adapter.loadSubset(
+        { kind: `eager`, collectionId: 'boolean-arity' },
+        {
+          where: toIR(model),
+        },
+      )
       return {
         keys: rows.map((row) => String(row.key)).sort(),
         read: driver.reads[0],
@@ -684,9 +702,12 @@ it('refines boolean arity and SQL row work across generated SQLite loads', async
       })
       nested = node
     }
-    const nestedRows = await adapter.loadSubset('boolean-arity', {
-      where: nested,
-    })
+    const nestedRows = await adapter.loadSubset(
+      { kind: `eager`, collectionId: 'boolean-arity' },
+      {
+        where: nested,
+      },
+    )
     expect(nestedRows).toHaveLength(fixture.length)
     expect(argumentReads).toBeLessThanOrEqual(depth * 10)
 
@@ -801,35 +822,45 @@ it('keeps large string-ID OR scopes selective at the SQLite boundary', async () 
   const allowed = new Set(ids)
 
   try {
-    await adapter.applyCommittedTx(collectionId, {
-      txId: 'seed-string-scope',
-      term: 1,
-      seq: 1,
-      rowVersion: 1,
-      mutations: scopeRows.map((row) => ({
-        type: 'insert' as const,
-        key: row.issueId,
-        value: structuredClone(row),
-      })),
-    })
+    await adapter.applyCommittedTx(
+      { kind: `eager`, collectionId: collectionId },
+      {
+        txId: 'seed-string-scope',
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: scopeRows.map((row) => ({
+          type: 'insert' as const,
+          key: row.issueId,
+          value: structuredClone(row),
+        })),
+      },
+    )
     for (const field of ['issueId', 'relatedIssueId']) {
-      await adapter.ensureIndex(collectionId, field, {
-        expressionSql: [JSON.stringify(new IR.PropRef([field]))],
-      })
+      await adapter.ensureIndex(
+        { kind: `eager`, collectionId: collectionId },
+        field,
+        {
+          expressionSql: [JSON.stringify(new IR.PropRef([field]))],
+        },
+      )
     }
 
     driver.reads = []
-    const rows = await adapter.loadSubset(collectionId, {
-      where: new IR.Func('and', [
-        new IR.Func('or', [
-          new IR.Func('in', [new IR.PropRef(['issueId']), new IR.Value(ids)]),
-          new IR.Func('in', [
-            new IR.PropRef(['relatedIssueId']),
-            new IR.Value(ids),
+    const rows = await adapter.loadSubset(
+      { kind: `eager`, collectionId: collectionId },
+      {
+        where: new IR.Func('and', [
+          new IR.Func('or', [
+            new IR.Func('in', [new IR.PropRef(['issueId']), new IR.Value(ids)]),
+            new IR.Func('in', [
+              new IR.PropRef(['relatedIssueId']),
+              new IR.Value(ids),
+            ]),
           ]),
         ]),
-      ]),
-    })
+      },
+    )
     const expected = scopeRows
       .filter(
         (row) => allowed.has(row.issueId) || allowed.has(row.relatedIssueId),
@@ -897,36 +928,46 @@ it.sequential.each([0, 1, 32, 1_025])(
         return Reflect.apply(replace, this, args)
       })
     try {
-      await adapter.applyCommittedTx('string-membership-work', {
-        txId: 'seed',
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [
-          { type: 'insert', key: 'match', value: { value: 'work-0' } },
-          { type: 'insert', key: 'other', value: { value: 'outside' } },
-        ],
-      })
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: 'string-membership-work' },
+        {
+          txId: 'seed',
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [
+            { type: 'insert', key: 'match', value: { value: 'work-0' } },
+            { type: 'insert', key: 'other', value: { value: 'outside' } },
+          ],
+        },
+      )
       // An index literal must reach the probe, even for an empty bound list.
-      await adapter.ensureIndex('string-membership-work', 'quote-control', {
-        expressionSql: [
-          JSON.stringify(
-            new IR.Func('coalesce', [
-              new IR.PropRef(['value']),
-              new IR.Value(control),
-            ]),
-          ),
-        ],
-      })
+      await adapter.ensureIndex(
+        { kind: `eager`, collectionId: 'string-membership-work' },
+        'quote-control',
+        {
+          expressionSql: [
+            JSON.stringify(
+              new IR.Func('coalesce', [
+                new IR.PropRef(['value']),
+                new IR.Value(control),
+              ]),
+            ),
+          ],
+        },
+      )
       expect(quotedValues).toBeGreaterThan(0)
       quotedValues = 0
       driver.reads = []
-      const rows = await adapter.loadSubset('string-membership-work', {
-        where: new IR.Func('in', [
-          new IR.PropRef(['value']),
-          new IR.Value(values),
-        ]),
-      })
+      const rows = await adapter.loadSubset(
+        { kind: `eager`, collectionId: 'string-membership-work' },
+        {
+          where: new IR.Func('in', [
+            new IR.PropRef(['value']),
+            new IR.Value(values),
+          ]),
+        },
+      )
       expect(rows.map((row) => row.key)).toEqual(size === 0 ? [] : ['match'])
       expect(driver.reads).toHaveLength(1)
       expect(driver.reads[0]?.parameters).toBe(size === 0 ? 0 : 1)

@@ -18,7 +18,10 @@ import {
   oraclePropertyOptions,
   readOracleRunConfig,
 } from '../../db/tests/oracle-config'
-import { managedTagPersistence } from './electric-persistence-fixture'
+import {
+  managedTagPersistence,
+  storageTargetId,
+} from './electric-persistence-fixture'
 import {
   atCheckpoint,
   withElectricCleanup,
@@ -871,19 +874,28 @@ fixedCase(
       releaseCacheGenerationClaim: async () => {},
       loadSubset: (id) =>
         Promise.resolve(
-          Array.from(rows.get(id) ?? [], ([key, value]) => ({ key, value })),
-        ),
-      loadResumeSnapshot: (id) =>
-        Promise.resolve({
-          rows: Array.from(rows.get(id) ?? [], ([key, value]) => ({
+          Array.from(rows.get(storageTargetId(id)) ?? [], ([key, value]) => ({
             key,
             value,
           })),
+        ),
+      loadResumeSnapshot: (id) =>
+        Promise.resolve({
+          rows: Array.from(
+            rows.get(storageTargetId(id)) ?? [],
+            ([key, value]) => ({
+              key,
+              value,
+            }),
+          ),
           keySet: {
-            status: id === `old-generation` ? `consistent` : `incompatible`,
+            status:
+              storageTargetId(id) === `old-generation`
+                ? `consistent`
+                : `incompatible`,
           },
           collectionMetadata: Array.from(
-            metadata.get(id) ?? [],
+            metadata.get(storageTargetId(id)) ?? [],
             ([key, value]) => ({ key, value }),
           ),
           latestTerm: 0,
@@ -893,7 +905,7 @@ fixedCase(
         }),
       applyCommittedTx: (id, tx) => {
         expect(tx.cacheGenerationClaimId).toBe(claimId)
-        const generationRows = rows.get(id)!
+        const generationRows = rows.get(storageTargetId(id))!
         if (tx.truncate) generationRows.clear()
         for (const mutation of tx.mutations) {
           if (mutation.type === `delete`) {
@@ -902,7 +914,7 @@ fixedCase(
             generationRows.set(Number(mutation.key), mutation.value as Item)
           }
         }
-        const generationMetadata = metadata.get(id)!
+        const generationMetadata = metadata.get(storageTargetId(id))!
         for (const mutation of tx.collectionMetadataMutations ?? []) {
           if (mutation.type === `delete`)
             generationMetadata.delete(mutation.key)
@@ -1040,22 +1052,33 @@ fixedCase.each([
       collectionId,
       first.claimId,
     )
-    await adapter.applyCommittedTx(partial.storageCollectionId, {
-      txId: `partial-subset-row`,
-      term: 1,
-      seq: 1,
-      rowVersion: 1,
-      cacheGenerationClaimId: partial.claimId,
-      mutations: [
-        {
-          type: `insert`,
-          key: 1,
-          value: { id: 1, name: `stale-partial` },
-        },
-      ],
-    })
+    await adapter.applyCommittedTx(
+      {
+        kind: `managed`,
+        storageCollectionId: partial.storageCollectionId,
+        claimId: partial.claimId,
+      },
+      {
+        txId: `partial-subset-row`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        cacheGenerationClaimId: partial.claimId,
+        mutations: [
+          {
+            type: `insert`,
+            key: 1,
+            value: { id: 1, name: `stale-partial` },
+          },
+        ],
+      },
+    )
     const seeded = await adapter.loadResumeSnapshot(
-      partial.storageCollectionId,
+      {
+        kind: `managed`,
+        storageCollectionId: partial.storageCollectionId,
+        claimId: partial.claimId,
+      },
       { cacheGenerationClaimId: partial.claimId },
     )
     expect(seeded.keySet).toEqual({ status: `incompatible` })
@@ -1965,9 +1988,12 @@ fixedCase.each([
       // provider has not sent another source change, so the public A row still
       // follows its applied source snapshot. The capability scan fences the
       // coordinator's async handling before this public observation.
-      const durablePosition = await adapter.loadResumeSnapshot(collectionId, {
-        includeRows: false,
-      })
+      const durablePosition = await adapter.loadResumeSnapshot(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          includeRows: false,
+        },
+      )
       const otherTabRow: TestRow = {
         id: 3,
         name: `other-tab-cache`,

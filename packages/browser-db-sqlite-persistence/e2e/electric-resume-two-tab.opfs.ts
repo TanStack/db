@@ -320,7 +320,10 @@ try {
     readCollections = async () =>
       Promise.all(
         cells.map(async ({ collectionId, adapter, collection }) => {
-          const snapshot = await adapter.loadResumeSnapshot(collectionId)
+          const snapshot = await adapter.loadResumeSnapshot({
+            kind: `eager`,
+            collectionId: collectionId,
+          })
           const registry = await database.execute<{ schema_version: number }>(
             `SELECT schema_version FROM collection_registry WHERE collection_id = ?`,
             [collectionId],

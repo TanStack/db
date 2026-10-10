@@ -72,7 +72,11 @@ describe(`durable cache and upstream ownership histories`, () => {
         if (!seedClaim)
           throw new Error(`Node adapter must support cache claims`)
         await persistence.adapter.applyCommittedTx(
-          seedClaim.storageCollectionId,
+          {
+            kind: `managed`,
+            storageCollectionId: seedClaim.storageCollectionId,
+            claimId: seedClaim.claimId,
+          },
           {
             txId: `seed`,
             term: 1,
@@ -98,7 +102,11 @@ describe(`durable cache and upstream ownership histories`, () => {
           if (!readerClaim)
             throw new Error(`Node adapter must support cache claims`)
           const cachedRows = await reader.loadSubset(
-            readerClaim.storageCollectionId,
+            {
+              kind: `managed`,
+              storageCollectionId: readerClaim.storageCollectionId,
+              claimId: readerClaim.claimId,
+            },
             {},
             { cacheGenerationClaimId: readerClaim.claimId },
           )
@@ -127,7 +135,11 @@ describe(`durable cache and upstream ownership histories`, () => {
         expect(
           (
             await reopened.loadSubset(
-              reopenedClaim.storageCollectionId,
+              {
+                kind: `managed`,
+                storageCollectionId: reopenedClaim.storageCollectionId,
+                claimId: reopenedClaim.claimId,
+              },
               {},
               {
                 cacheGenerationClaimId: reopenedClaim.claimId,
@@ -136,18 +148,29 @@ describe(`durable cache and upstream ownership histories`, () => {
           ).map(({ value }) => value),
         ).toEqual([next])
         const fresh: Row = { id: `fresh`, title: `Next use`, score: 99 }
-        await reopened.applyCommittedTx(reopenedClaim.storageCollectionId, {
-          txId: `after-reopen`,
-          term: 2,
-          seq: 1,
-          rowVersion: 2,
-          cacheGenerationClaimId: reopenedClaim.claimId,
-          mutations: [{ type: `insert`, key: fresh.id, value: fresh }],
-        })
+        await reopened.applyCommittedTx(
+          {
+            kind: `managed`,
+            storageCollectionId: reopenedClaim.storageCollectionId,
+            claimId: reopenedClaim.claimId,
+          },
+          {
+            txId: `after-reopen`,
+            term: 2,
+            seq: 1,
+            rowVersion: 2,
+            cacheGenerationClaimId: reopenedClaim.claimId,
+            mutations: [{ type: `insert`, key: fresh.id, value: fresh }],
+          },
+        )
         expect(
           (
             await reopened.loadSubset(
-              reopenedClaim.storageCollectionId,
+              {
+                kind: `managed`,
+                storageCollectionId: reopenedClaim.storageCollectionId,
+                claimId: reopenedClaim.claimId,
+              },
               {},
               {
                 cacheGenerationClaimId: reopenedClaim.claimId,
@@ -179,16 +202,24 @@ describe(`durable cache and upstream ownership histories`, () => {
       await assertRuntimeRestartHistory({
         writeTodoFromClient: async (value) => {
           seq++
-          await adapter.applyCommittedTx(`restart`, {
-            txId: `write-${seq}`,
-            term: 1,
-            seq,
-            rowVersion: seq,
-            mutations: [{ type: `insert`, key: value.id, value }],
-          })
+          await adapter.applyCommittedTx(
+            { kind: `eager`, collectionId: `restart` },
+            {
+              txId: `write-${seq}`,
+              term: 1,
+              seq,
+              rowVersion: seq,
+              mutations: [{ type: `insert`, key: value.id, value }],
+            },
+          )
         },
         loadTodosFromClient: async () =>
-          (await adapter.loadSubset(`restart`, {})).map(({ key, value }) => ({
+          (
+            await adapter.loadSubset(
+              { kind: `eager`, collectionId: `restart` },
+              {},
+            )
+          ).map(({ key, value }) => ({
             key: key as string,
             value: value as Row,
           })),

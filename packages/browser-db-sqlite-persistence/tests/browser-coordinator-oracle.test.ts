@@ -19,6 +19,7 @@ import type {
   ApplyLocalMutationsResponse,
   IndeterminateCommitError,
   PersistedCollectionDurabilityError,
+  PersistedStorageTarget,
   PersistedTx,
   PersistenceAdapter,
   RemoteSubsetOwner,
@@ -286,9 +287,15 @@ function cleanupGlobals(): void {
 // Adapter stub
 // ---------------------------------------------------------------------------
 
+function storageId(target: PersistedStorageTarget): string {
+  return target.kind === `managed`
+    ? target.storageCollectionId
+    : target.collectionId
+}
+
 function createStubAdapter(): PersistenceAdapter & {
   pullSince: (
-    collectionId: string,
+    target: PersistedStorageTarget,
     fromRowVersion: number,
   ) => Promise<{
     latestRowVersion: number
@@ -296,7 +303,7 @@ function createStubAdapter(): PersistenceAdapter & {
     changedKeys: Array<string | number>
     deletedKeys: Array<string | number>
   }>
-  getStreamPosition: (collectionId: string) => Promise<{
+  getStreamPosition: (target: PersistedStorageTarget) => Promise<{
     latestTerm: number
     latestSeq: number
     latestRowVersion: number
@@ -318,8 +325,8 @@ function createStubAdapter(): PersistenceAdapter & {
         latestRowVersion: 0,
         resetEpoch: 0,
       }),
-    applyCommittedTx: (collectionId, tx) => {
-      appliedTxs.push({ collectionId, tx })
+    applyCommittedTx: (target, tx) => {
+      appliedTxs.push({ collectionId: storageId(target), tx })
       return Promise.resolve()
     },
     ensureIndex: () => Promise.resolve(),
@@ -336,8 +343,9 @@ function createStubAdapter(): PersistenceAdapter & {
         latestSeq: 0,
         latestRowVersion: 0,
       }),
-    async reserveLeadershipTerm(collectionId, observedTerm) {
-      const position = await this.getStreamPosition(collectionId)
+    async reserveLeadershipTerm(target, observedTerm) {
+      const collectionId = storageId(target)
+      const position = await this.getStreamPosition(target)
       const latestTerm =
         Math.max(
           position.latestTerm,
@@ -660,16 +668,16 @@ describe(`BrowserCollectionCoordinator`, () => {
     it(`reserves a physical cache term under its registered claim`, async () => {
       const adapter = createStubAdapter()
       const calls: Array<{
-        collectionId: string
+        target: PersistedStorageTarget
         claimId?: string
       }> = []
       const reserve = adapter.reserveLeadershipTerm!.bind(adapter)
-      adapter.reserveLeadershipTerm = (collectionId, observedTerm, ctx) => {
+      adapter.reserveLeadershipTerm = (target, observedTerm, ctx) => {
         calls.push({
-          collectionId,
+          target,
           claimId: ctx?.cacheGenerationClaimId,
         })
-        return reserve(collectionId, observedTerm, ctx)
+        return reserve(target, observedTerm, ctx)
       }
       const coordinator = createCoordinator(adapter)
       coordinator.setAdapterForCollection(
@@ -683,10 +691,78 @@ describe(`BrowserCollectionCoordinator`, () => {
       )
       expect(calls).toEqual([
         {
-          collectionId: `physical-cache`,
+          target: {
+            kind: `managed`,
+            storageCollectionId: `physical-cache`,
+            claimId: `claim-for-physical-cache`,
+          },
           claimId: `claim-for-physical-cache`,
         },
       ])
+    })
+
+    // A local mutation originates without a persisted tx. Its coordinator
+    // request must carry the Collection's claim across leader and follower
+    // routing before the coordinator creates that tx. Otherwise the adapter sees an eager
+    // write to a physical cache ID and can resurrect it after collection.
+    it(`keeps a managed claim on coordinator local mutations`, async () => {
+      const adapter = createStubAdapter()
+      const targets: Array<PersistedStorageTarget> = []
+      const apply = adapter.applyCommittedTx.bind(adapter)
+      adapter.applyCommittedTx = (target, tx) => {
+        targets.push(target)
+        return apply(target, tx)
+      }
+      const coordinator = createCoordinator(adapter)
+      const storageCollectionId = `local-mutation-cache`
+      const claimId = `claim-for-local-mutation-cache`
+      coordinator.setAdapterForCollection(storageCollectionId, adapter, claimId)
+      coordinator.subscribe(storageCollectionId, () => {})
+      await vi.waitFor(() =>
+        expect(coordinator.isLeader(storageCollectionId)).toBe(true),
+      )
+
+      const mutations = [
+        {
+          mutationId: `local-managed-write`,
+          type: `insert` as const,
+          key: `row`,
+          value: { id: `row` },
+        },
+      ]
+      const response = await coordinator.requestApplyLocalMutations(
+        storageCollectionId,
+        mutations,
+        claimId,
+      )
+      expect(response.ok).toBe(true)
+      expect(targets).toEqual([
+        { kind: `managed`, storageCollectionId, claimId },
+      ])
+      expect(adapter.appliedTxs[0]?.tx.cacheGenerationClaimId).toBe(claimId)
+
+      const follower = createCoordinator(adapter)
+      follower.setAdapterForCollection(storageCollectionId, adapter, claimId)
+      follower.subscribe(storageCollectionId, () => {})
+      await vi.waitFor(() =>
+        expect(follower.isLeader(storageCollectionId)).toBe(false),
+      )
+      const followerResponse = await follower.requestApplyLocalMutations(
+        storageCollectionId,
+        [{ ...mutations[0]!, mutationId: `follower-managed-write` }],
+        claimId,
+      )
+      expect(followerResponse.ok).toBe(true)
+      expect(targets).toEqual([
+        { kind: `managed`, storageCollectionId, claimId },
+        { kind: `managed`, storageCollectionId, claimId },
+      ])
+      expect(adapter.appliedTxs[1]?.tx.cacheGenerationClaimId).toBe(claimId)
+
+      await expect(
+        coordinator.requestApplyLocalMutations(storageCollectionId, mutations),
+      ).rejects.toThrow(`requires a persisted cache claim`)
+      expect(targets).toHaveLength(2)
     })
 
     it(`first coordinator becomes leader for a collection`, async () => {
@@ -923,7 +999,10 @@ describe(`BrowserCollectionCoordinator`, () => {
             getKey: (row) => row.id,
             persistence,
           })
-          await optionsV1.persistence.adapter.loadResumeSnapshot(collectionV1)
+          await optionsV1.persistence.adapter.loadResumeSnapshot({
+            kind: `eager`,
+            collectionId: collectionV1,
+          })
 
           const optionsV2 = persistedCollectionOptions<
             { id: string; title: string },
@@ -934,7 +1013,10 @@ describe(`BrowserCollectionCoordinator`, () => {
             getKey: (row) => row.id,
             persistence,
           })
-          await optionsV2.persistence.adapter.loadResumeSnapshot(collectionV2)
+          await optionsV2.persistence.adapter.loadResumeSnapshot({
+            kind: `eager`,
+            collectionId: collectionV2,
+          })
 
           coordinator.subscribe(collectionV1, () => {})
           coordinator.subscribe(collectionV2, () => {})
@@ -965,12 +1047,18 @@ describe(`BrowserCollectionCoordinator`, () => {
           expect(resultV1.ok).toBe(true)
           expect(resultV2.ok).toBe(true)
           expect(
-            await optionsV1.persistence.adapter.loadSubset(collectionV1, {}),
+            await optionsV1.persistence.adapter.loadSubset(
+              { kind: `eager`, collectionId: collectionV1 },
+              {},
+            ),
           ).toMatchObject([
             { key: `v1`, value: { id: `v1`, title: `schema one` } },
           ])
           expect(
-            await optionsV2.persistence.adapter.loadSubset(collectionV2, {}),
+            await optionsV2.persistence.adapter.loadSubset(
+              { kind: `eager`, collectionId: collectionV2 },
+              {},
+            ),
           ).toMatchObject([
             { key: `v2`, value: { id: `v2`, title: `schema two` } },
           ])
@@ -1032,7 +1120,7 @@ describe(`BrowserCollectionCoordinator`, () => {
         latestTerm: state?.latestTerm,
         joinedLeadership: coordinator.isLeader(`notes`),
         streamPositionCollections: getStreamPosition.mock.calls.map(
-          ([collectionId]) => collectionId,
+          ([target]) => storageId(target),
         ),
       }).toEqual({
         leaderId: `notes-owner`,
@@ -2095,7 +2183,7 @@ describe(`BrowserCollectionCoordinator`, () => {
           firstApplyEntered.resolve()
           await releaseFirstApply.promise
         }
-        adapter.appliedTxs.push({ collectionId, tx })
+        adapter.appliedTxs.push({ collectionId: storageId(collectionId), tx })
       }
       const coordinator = createCoordinator(adapter)
       coordinator.subscribe(`todos`, () => {})
@@ -2460,7 +2548,12 @@ describe(`BrowserCollectionCoordinator`, () => {
         ])
         expect(response.ok).toBe(true)
         expect(
-          (await persistence.adapter.loadResumeSnapshot(`first-commit`)).rows,
+          (
+            await persistence.adapter.loadResumeSnapshot({
+              kind: `eager`,
+              collectionId: `first-commit`,
+            })
+          ).rows,
         ).toEqual([{ key: `first`, value: { id: `first` } }])
         expect(
           await database.execute<{ count: number }>(
@@ -2509,7 +2602,7 @@ describe(`BrowserCollectionCoordinator`, () => {
       const sourceCommitStarted = createDeferred()
       const reserveLeadershipTerm = adapter.reserveLeadershipTerm.bind(adapter)
       adapter.reserveLeadershipTerm = async (collectionId, observedTerm) => {
-        if (collectionId === `cold`) {
+        if (storageId(collectionId) === `cold`) {
           electionReadStarted.resolve()
           await releaseElectionRead.promise
         }
@@ -2586,11 +2679,21 @@ describe(`BrowserCollectionCoordinator`, () => {
         ])
         expect(sourceResponse.ok).toBe(true)
         expect(otherResponse.ok).toBe(true)
-        expect((await adapter.loadResumeSnapshot(`cold`)).rows).toEqual([
-          { key: `cold`, value: { id: `cold` } },
-        ])
         expect(
-          (await active.adapter.loadResumeSnapshot(`active`)).rows,
+          (
+            await adapter.loadResumeSnapshot({
+              kind: `eager`,
+              collectionId: `cold`,
+            })
+          ).rows,
+        ).toEqual([{ key: `cold`, value: { id: `cold` } }])
+        expect(
+          (
+            await active.adapter.loadResumeSnapshot({
+              kind: `eager`,
+              collectionId: `active`,
+            })
+          ).rows,
         ).toEqual([{ key: `active`, value: { id: `active` } }])
       } finally {
         if (timeout) clearTimeout(timeout)
@@ -3452,7 +3555,7 @@ describe(`BrowserCollectionCoordinator`, () => {
       adapter.reconcileCommittedTx = async (collectionId, tx) => {
         entered.resolve()
         await release.promise
-        adapter.appliedTxs.push({ collectionId, tx })
+        adapter.appliedTxs.push({ collectionId: storageId(collectionId), tx })
         return {
           kind: `applied-now`,
           committed: {
@@ -6974,9 +7077,13 @@ describe(`BrowserCollectionCoordinator`, () => {
         expressionSql: [`title`],
       })
 
-      expect(adapter.ensureIndex).toHaveBeenCalledWith(`todos`, `idx-1`, {
-        expressionSql: [`title`],
-      })
+      expect(adapter.ensureIndex).toHaveBeenCalledWith(
+        { kind: `eager`, collectionId: `todos` },
+        `idx-1`,
+        {
+          expressionSql: [`title`],
+        },
+      )
 
       coord.dispose()
     })
@@ -7021,7 +7128,11 @@ describe(`BrowserCollectionCoordinator`, () => {
         await vi.waitFor(() => expect(coord.isLeader(`todos`)).toBe(true))
 
         const spec = { expressionSql: [`title`] }
-        await adapter.ensureIndex(`todos`, `idx-once`, spec)
+        await adapter.ensureIndex(
+          { kind: `eager`, collectionId: `todos` },
+          `idx-once`,
+          spec,
+        )
         await coord.requestEnsurePersistedIndex(
           `todos`,
           `idx-once`,
@@ -7356,7 +7467,7 @@ describe(`BrowserCollectionCoordinator`, () => {
         expect(defaultAdapter.ensureIndex).toHaveBeenCalledOnce()
         expect(replacementAdapter.ensureIndex).toHaveBeenCalledOnce()
         expect(replacementAdapter.ensureIndex).toHaveBeenCalledWith(
-          `todos`,
+          { kind: `eager`, collectionId: `todos` },
           `idx-replacement`,
           { expressionSql: [`title`] },
         )

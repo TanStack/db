@@ -14,6 +14,7 @@ import { createWASQLiteTestDatabase } from './helpers/wa-sqlite-test-db'
 import type {
   PersistedCollectionCoordinator,
   PersistedMutationEnvelope,
+  PersistedStorageTarget,
   PersistedTx,
   PersistenceAdapter,
   TransportedLoadSubsetOptions,
@@ -531,12 +532,18 @@ type PullFixtureResult = {
 
 type RecordedSubsetOptions = LoadSubsetOptions | TransportedLoadSubsetOptions
 
+function storageId(target: PersistedStorageTarget): string {
+  return target.kind === `managed`
+    ? target.storageCollectionId
+    : target.collectionId
+}
+
 type RecordingAdapter = PersistenceAdapter & {
   id: string
   schemaVersion: number
   policy: `sync-present-reset` | `sync-absent-error`
   calls: Array<AdapterCall>
-  getStreamPosition: (collectionId: string) => Promise<{
+  getStreamPosition: (target: PersistedStorageTarget) => Promise<{
     latestTerm: number
     latestSeq: number
     latestRowVersion: number
@@ -546,7 +553,7 @@ type RecordingAdapter = PersistenceAdapter & {
     options: RecordedSubsetOptions,
   ) => Promise<void>
   pullSince: (
-    collectionId: string,
+    target: PersistedStorageTarget,
     fromRowVersion: number,
   ) => Promise<PullFixtureResult>
 }
@@ -582,8 +589,8 @@ function createRecordingAdapter(options: {
     schemaVersion: options.schemaVersion ?? 1,
     policy: options.policy ?? `sync-present-reset`,
     calls,
-    loadSubset: (collectionId) => {
-      record(`load`, collectionId)
+    loadSubset: (target) => {
+      record(`load`, storageId(target))
       return Promise.resolve([])
     },
     loadResumeSnapshot: () =>
@@ -596,24 +603,25 @@ function createRecordingAdapter(options: {
         latestRowVersion: 0,
         resetEpoch: 0,
       }),
-    applyCommittedTx: (collectionId) => {
-      record(`apply`, collectionId)
+    applyCommittedTx: (target) => {
+      record(`apply`, storageId(target))
       return Promise.resolve()
     },
-    ensureIndex: (collectionId, signature, spec) => {
-      record(`index`, collectionId, semanticValue({ signature, spec }))
+    ensureIndex: (target, signature, spec) => {
+      record(`index`, storageId(target), semanticValue({ signature, spec }))
       return Promise.resolve()
     },
-    getStreamPosition: (collectionId) => {
-      record(`position`, collectionId)
+    getStreamPosition: (target) => {
+      record(`position`, storageId(target))
       return Promise.resolve({
         latestTerm: 0,
         latestSeq: 0,
         latestRowVersion: 0,
       })
     },
-    async reserveLeadershipTerm(collectionId, observedTerm) {
-      const position = await this.getStreamPosition(collectionId)
+    async reserveLeadershipTerm(target, observedTerm) {
+      const collectionId = storageId(target)
+      const position = await this.getStreamPosition(target)
       const latestTerm =
         Math.max(
           position.latestTerm,
@@ -630,8 +638,8 @@ function createRecordingAdapter(options: {
       }
       return options.remoteSubsetOwner(collectionId, subsetOptions)
     },
-    pullSince: (collectionId, fromRowVersion) => {
-      record(`pull`, collectionId, semanticValue({ fromRowVersion }))
+    pullSince: (target, fromRowVersion) => {
+      record(`pull`, storageId(target), semanticValue({ fromRowVersion }))
       const result = options.pullResult ?? {
         latestRowVersion: 0,
         requiresFullReload: false,
@@ -2414,23 +2422,38 @@ describe(`persisted cache generation routing oracle`, () => {
         mode: `sync-present`,
       }).adapter
       const beforePeerWrite = await warmAdapter.loadResumeSnapshot(
-        sharedStorageId,
+        {
+          kind: `managed`,
+          storageCollectionId: sharedStorageId,
+          claimId: warmClaim.claim_id,
+        },
         { cacheGenerationClaimId: warmClaim.claim_id },
       )
       const peerTerm = beforePeerWrite.latestTerm
       const peerSeq = beforePeerWrite.latestSeq + 1
       const peerRowVersion = beforePeerWrite.latestRowVersion + 1
       const peerTxId = `notice-after-one-claim-expires`
-      await warmAdapter.applyCommittedTx(sharedStorageId, {
-        txId: peerTxId,
-        term: peerTerm,
-        seq: peerSeq,
-        rowVersion: peerRowVersion,
-        cacheGenerationClaimId: warmClaim.claim_id,
-        mutations: [{ type: `update`, key: old.id, value: old }],
-      })
+      await warmAdapter.applyCommittedTx(
+        {
+          kind: `managed`,
+          storageCollectionId: sharedStorageId,
+          claimId: warmClaim.claim_id,
+        },
+        {
+          txId: peerTxId,
+          term: peerTerm,
+          seq: peerSeq,
+          rowVersion: peerRowVersion,
+          cacheGenerationClaimId: warmClaim.claim_id,
+          mutations: [{ type: `update`, key: old.id, value: old }],
+        },
+      )
       const afterPeerWrite = await warmAdapter.loadResumeSnapshot(
-        sharedStorageId,
+        {
+          kind: `managed`,
+          storageCollectionId: sharedStorageId,
+          claimId: warmClaim.claim_id,
+        },
         { cacheGenerationClaimId: warmClaim.claim_id },
       )
       expect(afterPeerWrite.latestRowVersion).toBe(peerRowVersion)
@@ -2496,12 +2519,23 @@ describe(`persisted cache generation routing oracle`, () => {
         [sharedStorageId, hostNow],
       )
       expect(warmClaims).toEqual([{ claim_id: warmClaim.claim_id }])
-      const durable = await warmAdapter.loadResumeSnapshot(sharedStorageId, {
-        cacheGenerationClaimId: warmClaim.claim_id,
-      })
+      const durable = await warmAdapter.loadResumeSnapshot(
+        {
+          kind: `managed`,
+          storageCollectionId: sharedStorageId,
+          claimId: warmClaim.claim_id,
+        },
+        {
+          cacheGenerationClaimId: warmClaim.claim_id,
+        },
+      )
       expect(durable.rows.map(({ value }) => value)).toEqual([old])
       const privateRows = await expiredAdapter.loadResumeSnapshot(
-        privateClaim.storageCollectionId,
+        {
+          kind: `managed`,
+          storageCollectionId: privateClaim.storageCollectionId,
+          claimId: privateClaim.claimId,
+        },
         { cacheGenerationClaimId: privateClaim.claimId },
       )
       expect(privateRows.rows.map(({ value }) => value)).toEqual([fresh])
@@ -3237,6 +3271,125 @@ async function readRawCollectionSnapshot(
 }
 
 describe(`per-collection adapter and SQLite-state oracle`, () => {
+  // The coordinator constructs a transaction for local mutations. A managed
+  // Collection's claim must survive that construction and the Browser route.
+  // The real SQLite row is the receiving observation: an eager target with a
+  // physical cache ID is rejected, even if a recording adapter accepts it.
+  it(`persists a managed local mutation through its claimed Browser route`, async () => {
+    const directory = mkdtempSync(join(tmpdir(), `db-managed-local-route-`))
+    const database = createWASQLiteTestDatabase({
+      filename: join(directory, `local.sqlite`),
+    })
+    const coordinator = createCoordinator(
+      `managed-local-route`,
+      createRecordingAdapter({ id: `bootstrap` }),
+    )
+    const logicalId = `managed-local-route-collection`
+    const persistence = createBrowserWASQLitePersistence({
+      database,
+      coordinator,
+    })
+    const adapter = persistence.resolvePersistenceForCollection!({
+      collectionId: logicalId,
+      mode: `sync-present`,
+    }).adapter
+    let claim:
+      | Awaited<ReturnType<NonNullable<typeof adapter.claimCacheGeneration>>>
+      | undefined
+    let replacement:
+      | Awaited<ReturnType<NonNullable<typeof adapter.rotateCacheGeneration>>>
+      | undefined
+    await withFailurePreservingCleanup(async () => {
+      claim = await adapter.claimCacheGeneration!(logicalId)
+      coordinator.setAdapterForCollection(
+        claim.storageCollectionId,
+        adapter,
+        claim.claimId,
+      )
+      coordinator.subscribe(claim.storageCollectionId, () => {})
+      await waitFor(
+        () => coordinator.isLeader(claim!.storageCollectionId),
+        `claimed local-mutation route`,
+      )
+      const result = await coordinator.requestApplyLocalMutations(
+        claim.storageCollectionId,
+        [
+          {
+            mutationId: `managed-local-row`,
+            type: `insert`,
+            key: `row`,
+            value: { id: `row` },
+          },
+        ],
+        claim.claimId,
+      )
+      expect(result.ok).toBe(true)
+      const snapshot = await adapter.loadResumeSnapshot({
+        kind: `managed`,
+        storageCollectionId: claim.storageCollectionId,
+        claimId: claim.claimId,
+      })
+      expect(snapshot.rows).toMatchObject([
+        { key: `row`, value: { id: `row` } },
+      ])
+      const oldRegistry = await database.execute<{ table_name: string }>(
+        `SELECT table_name FROM collection_registry WHERE collection_id = ?`,
+        [claim.storageCollectionId],
+      )
+      expect(oldRegistry).toHaveLength(1)
+      const oldTable = oldRegistry[0]?.table_name
+      if (!oldTable) throw new Error(`missing managed row table`)
+      replacement = await adapter.rotateCacheGeneration!(
+        logicalId,
+        claim.claimId,
+      )
+      await expect(
+        coordinator.requestApplyLocalMutations(
+          claim.storageCollectionId,
+          [
+            {
+              mutationId: `late-managed-local-row`,
+              type: `insert`,
+              key: `late`,
+              value: { id: `late` },
+            },
+          ],
+          claim.claimId,
+        ),
+      ).rejects.toThrow(`Persisted cache claim`)
+      expect(
+        await database.execute(
+          `SELECT name FROM sqlite_master WHERE name = ?`,
+          [oldTable],
+        ),
+      ).toEqual([])
+      expect(
+        await database.execute(
+          `SELECT collection_id FROM collection_registry WHERE collection_id = ?`,
+          [claim.storageCollectionId],
+        ),
+      ).toEqual([])
+    }, [
+      [
+        `replacement claim`,
+        async () => {
+          if (replacement) {
+            await adapter.releaseCacheGenerationClaim?.(replacement.claimId)
+          }
+        },
+      ],
+      [
+        `claim`,
+        async () => {
+          if (claim) await adapter.releaseCacheGenerationClaim?.(claim.claimId)
+        },
+      ],
+      [`coordinator`, () => disposeCoordinator(coordinator)],
+      [`database`, () => Promise.resolve(database.close?.())],
+      [`directory`, () => rmSync(directory, { recursive: true, force: true })],
+    ])
+  })
+
   // A host factory promises the same configured claim lifetime as its core
   // adapter. The supplied clock makes the claim's expiry exact; this catches
   // options accepted by the public type but dropped before adapter creation.
@@ -3300,19 +3453,22 @@ describe(`per-collection adapter and SQLite-state oracle`, () => {
       }
 
       const alphaAdapter = resolve(`alpha`, 11)
-      await alphaAdapter.applyCommittedTx(`alpha`, {
-        txId: `alpha-seed`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [
-          {
-            type: `insert`,
-            key: `a-1`,
-            value: { id: `a-1`, group: `kept` },
-          },
-        ],
-      })
+      await alphaAdapter.applyCommittedTx(
+        { kind: `eager`, collectionId: `alpha` },
+        {
+          txId: `alpha-seed`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [
+            {
+              type: `insert`,
+              key: `a-1`,
+              value: { id: `a-1`, group: `kept` },
+            },
+          ],
+        },
+      )
       const expected: RawCollectionSnapshot = {
         registryRowCount: 1,
         schemaVersion: 11,
@@ -3325,7 +3481,7 @@ describe(`per-collection adapter and SQLite-state oracle`, () => {
       // Merely resolving beta replaces the coordinator's one adapter slot.
       // The later alpha leadership read therefore runs through beta's schema.
       const betaAdapter = resolve(`beta`, 22)
-      await betaAdapter.loadSubset(`beta`, {})
+      await betaAdapter.loadSubset({ kind: `eager`, collectionId: `beta` }, {})
       createdCoordinator.subscribe(`alpha`, () => {})
       await waitFor(
         () => createdCoordinator.isLeader(`alpha`),
@@ -3384,8 +3540,8 @@ describe(`per-collection adapter and SQLite-state oracle`, () => {
       const second = createAdapter()
 
       const outcomes = await Promise.allSettled([
-        first.loadSubset(`shared`, {}),
-        second.loadSubset(`shared`, {}),
+        first.loadSubset({ kind: `eager`, collectionId: `shared` }, {}),
+        second.loadSubset({ kind: `eager`, collectionId: `shared` }, {}),
       ])
       const observed: Array<FreshInitOutcome> = outcomes.map((outcome) =>
         outcome.status === `fulfilled`
@@ -4508,7 +4664,10 @@ describe(`sync-ingested write ownership oracle`, () => {
         }
         activeWriter = electedOwner
         try {
-          await adapter.applyCommittedTx(collectionId, ownerTx)
+          await adapter.applyCommittedTx(
+            { kind: `eager`, collectionId: collectionId },
+            ownerTx,
+          )
         } finally {
           activeWriter = undefined
         }
@@ -4628,9 +4787,10 @@ describe(`sync-ingested write ownership oracle`, () => {
             latestRowVersion: 0,
           }),
         reserveLeadershipTerm: async (collectionId, observedTerm) => {
+          const id = storageId(collectionId)
           const latestTerm =
-            Math.max(durableTerms.get(collectionId) ?? 0, observedTerm) + 1
-          durableTerms.set(collectionId, latestTerm)
+            Math.max(durableTerms.get(id) ?? 0, observedTerm) + 1
+          durableTerms.set(id, latestTerm)
           return { latestTerm, latestSeq: 0, latestRowVersion: 0 }
         },
       }

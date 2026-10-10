@@ -131,7 +131,7 @@ function createPersistedCollection<T extends PersistableRow>(
     }
     seedSequence++
     await persistence.adapter.applyCommittedTx(
-      id,
+      { kind: `eager`, collectionId: id },
       createSeedTx(id, seedSequence, rows),
     )
   }

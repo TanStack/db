@@ -2044,6 +2044,14 @@ second claim check; a live-claim I/O failure remains terminal. The real-SQLite
 owner accepts a valid eager Collection ID with the internal cache prefix and
 rejects late managed registration that tries to recreate collected storage
 after the first claim check.
+Its explicit-storage-target history rejects bare IDs of both ordinary and
+cache-generated form. It checks all eleven adapter data operations after a
+managed generation is collected, compares every per-ID catalog and physical
+table after each rejection, reopens the adapter, and retries the old managed
+target after explicit eager reuse of the same ID. The contract is claim
+authority, not a reserved naming prefix: an application that explicitly
+declares an eager Collection with those bytes may create eager storage. The
+bare-ID fallback mutant fails at the first post-collection read.
 The persisted owner also keeps a subset demand through rotation from an old
 row version 10 to a new version 1 and requires the new peer notice to request
 source reacquisition. Four held-rotation histories cross old row versions 1 and 10
@@ -2079,9 +2087,17 @@ its source-backed row. Another controlled receiving test delivers a peer
 notification to an expired claimant before its renewal timer runs and checks
 subset reload. Both coordinator owners offer unload before a held source load
 settles.
+The Browser coordinator owner also checks that a managed local mutation carries
+its exact claim into the coordinator-created transaction. Its recording-adapter
+law failed before the repair at the target-kind comparison. A follower-RPC
+claim-loss mutant fails at its success checkpoint. A real SQLite
+receiving history accepts that write and rejects a late local mutation after
+rotation without recreating the retired table or registry. Direct coordinator
+callers that omit a claim remain outside this adapter law; the coordinator
+interface still accepts eager Collection IDs.
 The Electron IPC receiving owner forwards claim, renewal, rotation, release,
 cache-claim read contexts, exact-ID reconciliation, and durable term reservation
-through protocol v5. Its in-process main adapter
+through protocol v6. Its in-process main adapter
 witness keeps the logical Collection ID for adapter selection while reads
 address the claimed physical storage ID. The shared SQLite adapter contract
 runs its claimed-cache cases over that bridge. A custom main-process adapter
@@ -2265,8 +2281,8 @@ in the expired tab against controlled HTTP source snapshots. It holds an old
 subset request and the new source response across the native notice, then
 checks pending demand, public and durable rows, and the warm peer. Dropping the
 held native callback fails at the refetch-entry checkpoint. Arbitrary native
-scheduling, a live Electric service rather than controlled HTTP, and claimless
-direct-adapter access after collection remain separate unproved cuts; these
+scheduling and a live Electric service rather than controlled HTTP remain
+separate unproved cuts; these
 fixed receivers do not close every cache-eviction interleaving.
 
 The [cache-generation oracle audit](oracle-reviews/issue-2069-cache-generation-oracle-audit-53ded62d8.md)

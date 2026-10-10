@@ -17,6 +17,7 @@ import {
 import { harnessScope } from './contracts/harness-scope'
 import type {
   CommittedTxAnchor,
+  PersistedStorageTarget,
   PersistedTx,
   PersistenceAdapter,
   SQLiteDriver,
@@ -192,7 +193,7 @@ type AdapterHarness = {
 export type SQLiteCoreAdapterContractHarness = {
   adapter: PersistenceAdapter & {
     pullSince: (
-      collectionId: string,
+      target: PersistedStorageTarget,
       fromRowVersion: number,
     ) => Promise<SQLitePullSinceResult<string | number>>
   }
@@ -399,62 +400,71 @@ async function observeResetResumeHistory(
 
   try {
     harness = harnessFactory({ schemaVersion: history.fromSchemaVersion })
-    await harness.adapter.applyCommittedTx(collectionId, {
-      txId: `seed-baseline`,
-      term: 1,
-      seq: 1,
-      rowVersion: 1,
-      mutations: [
-        ...seedRows.map((row) => ({
-          type: `insert` as const,
-          key: row.id,
-          value: structuredClone(row),
-        })),
-        {
-          type: `delete` as const,
-          key: `deleted-before-baseline`,
-          value: {
-            id: `deleted-before-baseline`,
-            title: `baseline tombstone`,
-            createdAt: `2026-01-01T00:00:00.000Z`,
-            score: -1,
+    await harness.adapter.applyCommittedTx(
+      { kind: `eager`, collectionId: collectionId },
+      {
+        txId: `seed-baseline`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [
+          ...seedRows.map((row) => ({
+            type: `insert` as const,
+            key: row.id,
+            value: structuredClone(row),
+          })),
+          {
+            type: `delete` as const,
+            key: `deleted-before-baseline`,
+            value: {
+              id: `deleted-before-baseline`,
+              title: `baseline tombstone`,
+              createdAt: `2026-01-01T00:00:00.000Z`,
+              score: -1,
+            },
           },
-        },
-      ],
-      collectionMetadataMutations: [
-        ...(history.resumeKind === `none`
-          ? []
-          : [
-              {
-                type: `set` as const,
-                key: `electric:resume`,
-                value:
-                  history.resumeKind === `reset`
-                    ? { kind: `reset`, updatedAt: 1 }
-                    : {
-                        kind: `resume`,
-                        offset: `10_0`,
-                        handle: `handle-before-reset`,
-                        shapeId: `shape-before-reset`,
-                        updatedAt: 1,
-                      },
-              },
-            ]),
-        ...history.unrelatedMetadataKeys.map((key, index) => ({
-          type: `set` as const,
-          key: `oracle:${key}`,
-          value: { index },
-        })),
-      ],
-    })
+        ],
+        collectionMetadataMutations: [
+          ...(history.resumeKind === `none`
+            ? []
+            : [
+                {
+                  type: `set` as const,
+                  key: `electric:resume`,
+                  value:
+                    history.resumeKind === `reset`
+                      ? { kind: `reset`, updatedAt: 1 }
+                      : {
+                          kind: `resume`,
+                          offset: `10_0`,
+                          handle: `handle-before-reset`,
+                          shapeId: `shape-before-reset`,
+                          updatedAt: 1,
+                        },
+                },
+              ]),
+          ...history.unrelatedMetadataKeys.map((key, index) => ({
+            type: `set` as const,
+            key: `oracle:${key}`,
+            value: { index },
+          })),
+        ],
+      },
+    )
 
     for (let index = 0; index < history.reopensBeforeTransition; index++) {
       const reopened = new SQLiteCorePersistenceAdapter({
         driver: harness.driver,
         schemaVersion: history.fromSchemaVersion,
       })
-      await reopened.loadSubset(collectionId, {})
-      await reopened.loadCollectionMetadata(collectionId)
+      await reopened.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {},
+      )
+      await reopened.loadCollectionMetadata({
+        kind: `eager`,
+        collectionId: collectionId,
+      })
     }
 
     const usesSchemaReset = destroysPersistedBaseline(history)
@@ -466,20 +476,23 @@ async function observeResetResumeHistory(
       schemaVersion: nextSchemaVersion,
       schemaMismatchPolicy: `sync-present-reset`,
     })
-    await reopened.loadSubset(collectionId, {})
+    await reopened.loadSubset({ kind: `eager`, collectionId: collectionId }, {})
 
     if (history.transition === `partial-restore`) {
-      await reopened.applyCommittedTx(collectionId, {
-        txId: `partial-restore`,
-        term: 2,
-        seq: 1,
-        rowVersion: 2,
-        mutations: restoreRows.slice(0, -1).map((row) => ({
-          type: `insert` as const,
-          key: row.id,
-          value: structuredClone(row),
-        })),
-      })
+      await reopened.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `partial-restore`,
+          term: 2,
+          seq: 1,
+          rowVersion: 2,
+          mutations: restoreRows.slice(0, -1).map((row) => ({
+            type: `insert` as const,
+            key: row.id,
+            value: structuredClone(row),
+          })),
+        },
+      )
     } else if (history.transition === `external-row-loss`) {
       const collectionTable = createPersistedTableName(collectionId, `c`)
       await harness.driver.run(
@@ -494,10 +507,16 @@ async function observeResetResumeHistory(
         schemaVersion: nextSchemaVersion,
         schemaMismatchPolicy: `sync-present-reset`,
       })
-      await reopened.loadSubset(collectionId, {})
+      await reopened.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {},
+      )
     }
 
-    const metadata = await reopened.loadCollectionMetadata(collectionId)
+    const metadata = await reopened.loadCollectionMetadata({
+      kind: `eager`,
+      collectionId: collectionId,
+    })
     const resetEpochRows = await harness.driver.query<{ reset_epoch: number }>(
       `SELECT reset_epoch FROM collection_reset_epoch WHERE collection_id = ?`,
       [collectionId],
@@ -528,9 +547,12 @@ async function observeResetResumeHistory(
       checkpoint: `after-persistence-transition-reopen`,
       resetEpoch: resetEpochRows[0]?.reset_epoch ?? -1,
       schemaVersion: registryRows[0]?.schema_version ?? -1,
-      durableRows: (await reopened.loadSubset(collectionId, {})).sort((a, b) =>
-        String(a.key).localeCompare(String(b.key)),
-      ),
+      durableRows: (
+        await reopened.loadSubset(
+          { kind: `eager`, collectionId: collectionId },
+          {},
+        )
+      ).sort((a, b) => String(a.key).localeCompare(String(b.key))),
       tombstones: tombstones.map(({ key, row_version }) => ({
         key,
         rowVersion: row_version,
@@ -716,32 +738,43 @@ export function runSQLiteCoreAdapterContractSuite(
           `SELECT latest_term FROM leader_term WHERE collection_id = ?`,
           [collectionId],
         )
-      expect(await reserve(collectionId, 0)).toEqual({
+      expect(
+        await reserve({ kind: `eager`, collectionId: collectionId }, 0),
+      ).toEqual({
         latestTerm: 1,
         latestSeq: 0,
         latestRowVersion: 0,
       })
       expect(await observeDurableTerm()).toEqual([{ latest_term: 1 }])
-      expect(await reserve(collectionId, 0)).toEqual({
+      expect(
+        await reserve({ kind: `eager`, collectionId: collectionId }, 0),
+      ).toEqual({
         latestTerm: 2,
         latestSeq: 0,
         latestRowVersion: 0,
       })
       expect(await observeDurableTerm()).toEqual([{ latest_term: 2 }])
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `term-two-write`,
-        term: 2,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [],
-      })
-      expect(await reserve(collectionId, 0)).toEqual({
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `term-two-write`,
+          term: 2,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [],
+        },
+      )
+      expect(
+        await reserve({ kind: `eager`, collectionId: collectionId }, 0),
+      ).toEqual({
         latestTerm: 3,
         latestSeq: 0,
         latestRowVersion: 1,
       })
       expect(await observeDurableTerm()).toEqual([{ latest_term: 3 }])
-      expect(await reserve(collectionId, 8)).toEqual({
+      expect(
+        await reserve({ kind: `eager`, collectionId: collectionId }, 8),
+      ).toEqual({
         latestTerm: 9,
         latestSeq: 0,
         latestRowVersion: 1,
@@ -757,7 +790,10 @@ export function runSQLiteCoreAdapterContractSuite(
      */
     it(`indexes exact transaction ID lookup within a collection`, async () => {
       const { adapter, driver } = registerContractHarness()
-      await adapter.loadResumeSnapshot(`plan-index`)
+      await adapter.loadResumeSnapshot({
+        kind: `eager`,
+        collectionId: `plan-index`,
+      })
       const plan = await driver.query<{ detail: string }>(
         `EXPLAIN QUERY PLAN
          SELECT term, seq, row_version FROM applied_tx
@@ -821,7 +857,10 @@ export function runSQLiteCoreAdapterContractSuite(
         ],
       })
       const observe = async (collectionId: string) => {
-        const snapshot = await adapter.loadResumeSnapshot(collectionId)
+        const snapshot = await adapter.loadResumeSnapshot({
+          kind: `eager`,
+          collectionId: collectionId,
+        })
         const log = await driver.query<{ tx_id: string }>(
           `SELECT tx_id FROM applied_tx WHERE collection_id = ? ORDER BY row_version`,
           [collectionId],
@@ -839,10 +878,20 @@ export function runSQLiteCoreAdapterContractSuite(
 
       const appliedId = `source-id-present`
       const crossing = tx(`crossing`, 1, 1, 1, `crossing`)
-      await adapter.applyCommittedTx(appliedId, crossing)
-      await adapter.applyCommittedTx(appliedId, tx(`peer`, 1, 2, 2, `newer`))
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: appliedId },
+        crossing,
+      )
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: appliedId },
+        tx(`peer`, 1, 2, 2, `newer`),
+      )
       expect(
-        await reconcile(appliedId, tx(`crossing`, 2, 1, 2, `crossing`), anchor),
+        await reconcile(
+          { kind: `eager`, collectionId: appliedId },
+          tx(`crossing`, 2, 1, 2, `crossing`),
+          anchor,
+        ),
       ).toEqual({
         kind: `already-applied`,
         committed: { term: 1, seq: 1, rowVersion: 1 },
@@ -857,7 +906,11 @@ export function runSQLiteCoreAdapterContractSuite(
 
       const absentId = `source-id-absent`
       expect(
-        await reconcile(absentId, tx(`crossing`, 2, 1, 1, `crossing`), anchor),
+        await reconcile(
+          { kind: `eager`, collectionId: absentId },
+          tx(`crossing`, 2, 1, 1, `crossing`),
+          anchor,
+        ),
       ).toEqual({
         kind: `applied-now`,
         committed: { term: 2, seq: 1, rowVersion: 1 },
@@ -871,9 +924,16 @@ export function runSQLiteCoreAdapterContractSuite(
       })
 
       const intervenedId = `source-intervened`
-      await adapter.applyCommittedTx(intervenedId, tx(`peer`, 2, 1, 1, `newer`))
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: intervenedId },
+        tx(`peer`, 2, 1, 1, `newer`),
+      )
       expect(
-        await reconcile(intervenedId, tx(`crossing`, 2, 2, 2, `stale`), anchor),
+        await reconcile(
+          { kind: `eager`, collectionId: intervenedId },
+          tx(`crossing`, 2, 2, 2, `stale`),
+          anchor,
+        ),
       ).toEqual({ kind: `unknown` })
       expect(await observe(intervenedId)).toEqual({
         title: `newer`,
@@ -883,12 +943,19 @@ export function runSQLiteCoreAdapterContractSuite(
       })
 
       const prunedId = `source-pruned`
-      await adapter.applyCommittedTx(prunedId, crossing)
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: prunedId },
+        crossing,
+      )
       await driver.run(`DELETE FROM applied_tx WHERE collection_id = ?`, [
         prunedId,
       ])
       expect(
-        await reconcile(prunedId, tx(`crossing`, 2, 1, 2, `stale`), anchor),
+        await reconcile(
+          { kind: `eager`, collectionId: prunedId },
+          tx(`crossing`, 2, 1, 2, `stale`),
+          anchor,
+        ),
       ).toEqual({ kind: `unknown` })
       expect(await observe(prunedId)).toEqual({
         title: `crossing`,
@@ -898,21 +965,30 @@ export function runSQLiteCoreAdapterContractSuite(
       })
 
       const resetId = `source-reset`
-      await adapter.applyCommittedTx(resetId, crossing)
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: resetId },
+        crossing,
+      )
       const resetAdapter = new SQLiteCorePersistenceAdapter({
         driver,
         schemaVersion: 2,
         schemaMismatchPolicy: `sync-present-reset`,
       })
-      await resetAdapter.loadSubset(resetId, {})
+      await resetAdapter.loadSubset(
+        { kind: `eager`, collectionId: resetId },
+        {},
+      )
       expect(
         await resetAdapter.reconcileCommittedTx(
-          resetId,
+          { kind: `eager`, collectionId: resetId },
           tx(`crossing`, 2, 1, 1, `stale`),
           anchor,
         ),
       ).toEqual({ kind: `unknown` })
-      const resetSnapshot = await resetAdapter.loadResumeSnapshot(resetId)
+      const resetSnapshot = await resetAdapter.loadResumeSnapshot({
+        kind: `eager`,
+        collectionId: resetId,
+      })
       expect({
         ids: resetSnapshot.rows.map(({ key }) => key),
         resetEpoch: resetSnapshot.resetEpoch,
@@ -920,13 +996,23 @@ export function runSQLiteCoreAdapterContractSuite(
       }).toEqual({ ids: [], resetEpoch: 1, rowVersion: 0 })
 
       const staleId = `source-old-id`
-      await adapter.applyCommittedTx(staleId, crossing)
-      await adapter.applyCommittedTx(staleId, tx(`peer`, 1, 2, 2, `newer`))
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: staleId },
+        crossing,
+      )
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: staleId },
+        tx(`peer`, 1, 2, 2, `newer`),
+      )
       expect(
-        await reconcile(staleId, tx(`crossing`, 2, 1, 3, `crossing`), {
-          latestRowVersion: 1,
-          resetEpoch: 0,
-        }),
+        await reconcile(
+          { kind: `eager`, collectionId: staleId },
+          tx(`crossing`, 2, 1, 3, `crossing`),
+          {
+            latestRowVersion: 1,
+            resetEpoch: 0,
+          },
+        ),
       ).toEqual({ kind: `unknown` })
       expect(await observe(staleId)).toEqual({
         title: `newer`,
@@ -938,7 +1024,7 @@ export function runSQLiteCoreAdapterContractSuite(
       const malformedId = `source-missing-anchor`
       await expect(async () =>
         reconcile(
-          malformedId,
+          { kind: `eager`, collectionId: malformedId },
           tx(`crossing`, 2, 1, 1, `unsafe`),
           undefined as unknown as CommittedTxAnchor,
         ),
@@ -1013,13 +1099,25 @@ export function runSQLiteCoreAdapterContractSuite(
         [newId, oldClaim.claimId],
       ] as const) {
         await expect(
-          adapter.reserveLeadershipTerm(targetId, 0, {
-            cacheGenerationClaimId: wrongClaimId,
-          }),
+          adapter.reserveLeadershipTerm(
+            {
+              kind: `managed`,
+              storageCollectionId: targetId,
+              claimId: wrongClaimId,
+            },
+            0,
+            {
+              cacheGenerationClaimId: wrongClaimId,
+            },
+          ),
         ).rejects.toThrow(/cache claim is no longer active/)
         await expect(
           adapter.reconcileCommittedTx(
-            targetId,
+            {
+              kind: `managed`,
+              storageCollectionId: targetId,
+              claimId: wrongClaimId,
+            },
             candidate(wrongClaimId, `wrong-generation`),
             anchor,
           ),
@@ -1031,13 +1129,25 @@ export function runSQLiteCoreAdapterContractSuite(
       }
 
       expect(
-        await adapter.reserveLeadershipTerm(oldId, 0, {
-          cacheGenerationClaimId: oldClaim.claimId,
-        }),
+        await adapter.reserveLeadershipTerm(
+          {
+            kind: `managed`,
+            storageCollectionId: oldId,
+            claimId: oldClaim.claimId,
+          },
+          0,
+          {
+            cacheGenerationClaimId: oldClaim.claimId,
+          },
+        ),
       ).toMatchObject({ latestTerm: 1, latestRowVersion: 0 })
       expect(
         await adapter.reconcileCommittedTx(
-          oldId,
+          {
+            kind: `managed`,
+            storageCollectionId: oldId,
+            claimId: oldClaim.claimId,
+          },
           candidate(oldClaim.claimId, `old-commit`),
           anchor,
         ),
@@ -1053,15 +1163,27 @@ export function runSQLiteCoreAdapterContractSuite(
       )
       await expect(
         adapter.reconcileCommittedTx(
-          oldId,
+          {
+            kind: `managed`,
+            storageCollectionId: oldId,
+            claimId: oldClaim.claimId,
+          },
           candidate(oldClaim.claimId, `late-commit`),
           { latestRowVersion: 1, resetEpoch: 0 },
         ),
       ).rejects.toThrow(/cache claim is no longer active/)
       await expect(
-        adapter.reserveLeadershipTerm(oldId, 1, {
-          cacheGenerationClaimId: oldClaim.claimId,
-        }),
+        adapter.reserveLeadershipTerm(
+          {
+            kind: `managed`,
+            storageCollectionId: oldId,
+            claimId: oldClaim.claimId,
+          },
+          1,
+          {
+            cacheGenerationClaimId: oldClaim.claimId,
+          },
+        ),
       ).rejects.toThrow(/cache claim is no longer active/)
       expect(await observeLedger(oldId)).toEqual({
         terms: [{ latest_term: 1 }],
@@ -1069,13 +1191,25 @@ export function runSQLiteCoreAdapterContractSuite(
       })
 
       expect(
-        await adapter.reserveLeadershipTerm(newId, 0, {
-          cacheGenerationClaimId: newClaim.claimId,
-        }),
+        await adapter.reserveLeadershipTerm(
+          {
+            kind: `managed`,
+            storageCollectionId: newId,
+            claimId: newClaim.claimId,
+          },
+          0,
+          {
+            cacheGenerationClaimId: newClaim.claimId,
+          },
+        ),
       ).toMatchObject({ latestTerm: 1, latestRowVersion: 0 })
       expect(
         await adapter.reconcileCommittedTx(
-          newId,
+          {
+            kind: `managed`,
+            storageCollectionId: newId,
+            claimId: newClaim.claimId,
+          },
           candidate(newClaim.claimId, `new-commit`),
           anchor,
         ),
@@ -1090,42 +1224,48 @@ export function runSQLiteCoreAdapterContractSuite(
       const { adapter, driver } = registerContractHarness()
       const collectionId = `todos`
 
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `tx-1`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [
-          {
-            type: `insert`,
-            key: `1`,
-            value: {
-              id: `1`,
-              title: `Initial`,
-              createdAt: `2026-01-01T00:00:00.000Z`,
-              score: 10,
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `tx-1`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [
+            {
+              type: `insert`,
+              key: `1`,
+              value: {
+                id: `1`,
+                title: `Initial`,
+                createdAt: `2026-01-01T00:00:00.000Z`,
+                score: 10,
+              },
             },
-          },
-        ],
-      })
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `tx-1-replay`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [
-          {
-            type: `insert`,
-            key: `1`,
-            value: {
-              id: `1`,
-              title: `Initial`,
-              createdAt: `2026-01-01T00:00:00.000Z`,
-              score: 10,
+          ],
+        },
+      )
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `tx-1-replay`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [
+            {
+              type: `insert`,
+              key: `1`,
+              value: {
+                id: `1`,
+                title: `Initial`,
+                createdAt: `2026-01-01T00:00:00.000Z`,
+                score: 10,
+              },
             },
-          },
-        ],
-      })
+          ],
+        },
+      )
 
       const txRows = await driver.query<{ count: number }>(
         `SELECT COUNT(*) AS count
@@ -1135,28 +1275,34 @@ export function runSQLiteCoreAdapterContractSuite(
       )
       expect(txRows[0]?.count).toBe(1)
 
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `tx-2`,
-        term: 1,
-        seq: 2,
-        rowVersion: 2,
-        mutations: [
-          {
-            type: `update`,
-            key: `1`,
-            value: {
-              id: `1`,
-              title: `Updated`,
-              createdAt: `2026-01-01T00:00:00.000Z`,
-              score: 11,
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `tx-2`,
+          term: 1,
+          seq: 2,
+          rowVersion: 2,
+          mutations: [
+            {
+              type: `update`,
+              key: `1`,
+              value: {
+                id: `1`,
+                title: `Updated`,
+                createdAt: `2026-01-01T00:00:00.000Z`,
+                score: 11,
+              },
             },
-          },
-        ],
-      })
+          ],
+        },
+      )
 
-      const updated = await adapter.loadSubset(collectionId, {
-        where: new IR.Func(`eq`, [new IR.PropRef([`id`]), new IR.Value(`1`)]),
-      })
+      const updated = await adapter.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          where: new IR.Func(`eq`, [new IR.PropRef([`id`]), new IR.Value(`1`)]),
+        },
+      )
       expect(updated).toEqual([
         {
           key: `1`,
@@ -1169,26 +1315,32 @@ export function runSQLiteCoreAdapterContractSuite(
         },
       ])
 
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `tx-3`,
-        term: 1,
-        seq: 3,
-        rowVersion: 3,
-        mutations: [
-          {
-            type: `delete`,
-            key: `1`,
-            value: {
-              id: `1`,
-              title: `Updated`,
-              createdAt: `2026-01-01T00:00:00.000Z`,
-              score: 11,
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `tx-3`,
+          term: 1,
+          seq: 3,
+          rowVersion: 3,
+          mutations: [
+            {
+              type: `delete`,
+              key: `1`,
+              value: {
+                id: `1`,
+                title: `Updated`,
+                createdAt: `2026-01-01T00:00:00.000Z`,
+                score: 11,
+              },
             },
-          },
-        ],
-      })
+          ],
+        },
+      )
 
-      const remainingRows = await adapter.loadSubset(collectionId, {})
+      const remainingRows = await adapter.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {},
+      )
       expect(remainingRows).toEqual([])
 
       const tombstoneTable = createPersistedTableName(collectionId, `t`)
@@ -1213,14 +1365,21 @@ export function runSQLiteCoreAdapterContractSuite(
       const cacheClaim = await adapter.claimCacheGeneration?.(collectionId)
       if (!cacheClaim) throw new Error(`Expected managed cache claim`)
       expect(cacheClaim.storageCollectionId).not.toBe(collectionId)
-      await adapter.applyCommittedTx(cacheClaim.storageCollectionId, {
-        txId: `seed-partial-source-baseline`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        cacheGenerationClaimId: cacheClaim.claimId,
-        mutations: [{ type: `insert`, key: baseline.id, value: baseline }],
-      })
+      await adapter.applyCommittedTx(
+        {
+          kind: `managed`,
+          storageCollectionId: cacheClaim.storageCollectionId,
+          claimId: cacheClaim.claimId,
+        },
+        {
+          txId: `seed-partial-source-baseline`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          cacheGenerationClaimId: cacheClaim.claimId,
+          mutations: [{ type: `insert`, key: baseline.id, value: baseline }],
+        },
+      )
 
       const subsetFailure = new Error(`controlled incremental subset failure`)
       const subsetLoad = holdAndRejectFirstSubsetLoad(adapter, subsetFailure)
@@ -1281,7 +1440,11 @@ export function runSQLiteCoreAdapterContractSuite(
         await expect(load).rejects.toBe(subsetFailure)
         await receipt
         const durableBeforeRetry = await adapter.loadSubset(
-          cacheClaim.storageCollectionId,
+          {
+            kind: `managed`,
+            storageCollectionId: cacheClaim.storageCollectionId,
+            claimId: cacheClaim.claimId,
+          },
           {},
           { cacheGenerationClaimId: cacheClaim.claimId },
         )
@@ -1298,7 +1461,12 @@ export function runSQLiteCoreAdapterContractSuite(
           publicBeforeRetry: expected,
           durableBeforeRetry: [expected],
         })
-        expect(await adapter.loadSubset(collectionId, {})).toEqual([])
+        expect(
+          await adapter.loadSubset(
+            { kind: `eager`, collectionId: collectionId },
+            {},
+          ),
+        ).toEqual([])
 
         await collection._sync.loadSubset({ limit: 1 })
         expect({
@@ -1334,14 +1502,21 @@ export function runSQLiteCoreAdapterContractSuite(
         if (!cacheClaim) throw new Error(`Expected managed cache claim`)
         expect(cacheClaim.storageCollectionId).not.toBe(collectionId)
         if (operation === `delete`) {
-          await adapter.applyCommittedTx(cacheClaim.storageCollectionId, {
-            txId: `seed-delete-baseline`,
-            term: 1,
-            seq: 1,
-            rowVersion: 1,
-            cacheGenerationClaimId: cacheClaim.claimId,
-            mutations: [{ type: `insert`, key: row.id, value: row }],
-          })
+          await adapter.applyCommittedTx(
+            {
+              kind: `managed`,
+              storageCollectionId: cacheClaim.storageCollectionId,
+              claimId: cacheClaim.claimId,
+            },
+            {
+              txId: `seed-delete-baseline`,
+              term: 1,
+              seq: 1,
+              rowVersion: 1,
+              cacheGenerationClaimId: cacheClaim.claimId,
+              mutations: [{ type: `insert`, key: row.id, value: row }],
+            },
+          )
         }
 
         const subsetFailure = new Error(
@@ -1409,7 +1584,11 @@ export function runSQLiteCoreAdapterContractSuite(
             })),
             durableRows: (
               await adapter.loadSubset(
-                cacheClaim.storageCollectionId,
+                {
+                  kind: `managed`,
+                  storageCollectionId: cacheClaim.storageCollectionId,
+                  claimId: cacheClaim.claimId,
+                },
                 {},
                 {
                   cacheGenerationClaimId: cacheClaim.claimId,
@@ -1425,7 +1604,12 @@ export function runSQLiteCoreAdapterContractSuite(
             status: `ready`,
             publicError: undefined,
           })
-          expect(await adapter.loadSubset(collectionId, {})).toEqual([])
+          expect(
+            await adapter.loadSubset(
+              { kind: `eager`, collectionId: collectionId },
+              {},
+            ),
+          ).toEqual([])
 
           await collection._sync.loadSubset({ limit: 1 })
           expect({
@@ -1457,39 +1641,45 @@ export function runSQLiteCoreAdapterContractSuite(
       const collectionId = `atomicity`
 
       await expect(
-        adapter.applyCommittedTx(collectionId, {
-          txId: `atomicity-1`,
-          term: 1,
-          seq: 1,
-          rowVersion: 1,
-          mutations: [
-            {
-              type: `insert`,
-              key: `1`,
-              value: {
-                id: `1`,
-                title: `First`,
-                createdAt: `2026-01-01T00:00:00.000Z`,
-                score: 1,
+        adapter.applyCommittedTx(
+          { kind: `eager`, collectionId: collectionId },
+          {
+            txId: `atomicity-1`,
+            term: 1,
+            seq: 1,
+            rowVersion: 1,
+            mutations: [
+              {
+                type: `insert`,
+                key: `1`,
+                value: {
+                  id: `1`,
+                  title: `First`,
+                  createdAt: `2026-01-01T00:00:00.000Z`,
+                  score: 1,
+                },
               },
-            },
-            {
-              type: `insert`,
-              key: `2`,
-              value: {
-                id: `2`,
-                title: `Second`,
-                createdAt: `2026-01-01T00:00:00.000Z`,
-                score: 2,
-                // Trigger serialization failure after the first mutation executes.
-                unsafeDate: new Date(Number.NaN),
-              } as unknown as Todo,
-            },
-          ],
-        }),
+              {
+                type: `insert`,
+                key: `2`,
+                value: {
+                  id: `2`,
+                  title: `Second`,
+                  createdAt: `2026-01-01T00:00:00.000Z`,
+                  score: 2,
+                  // Trigger serialization failure after the first mutation executes.
+                  unsafeDate: new Date(Number.NaN),
+                } as unknown as Todo,
+              },
+            ],
+          },
+        ),
       ).rejects.toThrow()
 
-      const rows = await adapter.loadSubset(collectionId, {})
+      const rows = await adapter.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {},
+      )
       expect(rows).toEqual([])
 
       const txRows = await driver.query<{ count: number }>(
@@ -1505,47 +1695,53 @@ export function runSQLiteCoreAdapterContractSuite(
       const { adapter, driver } = registerContractHarness()
       const collectionId = `metadata-roundtrip`
 
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `metadata-1`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [
-          {
-            type: `insert`,
-            key: `1`,
-            value: {
-              id: `1`,
-              title: `Tracked`,
-              createdAt: `2026-01-01T00:00:00.000Z`,
-              score: 1,
-            },
-            metadata: {
-              queryCollection: {
-                owners: {
-                  q1: true,
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `metadata-1`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [
+            {
+              type: `insert`,
+              key: `1`,
+              value: {
+                id: `1`,
+                title: `Tracked`,
+                createdAt: `2026-01-01T00:00:00.000Z`,
+                score: 1,
+              },
+              metadata: {
+                queryCollection: {
+                  owners: {
+                    q1: true,
+                  },
                 },
               },
+              metadataChanged: true,
             },
-            metadataChanged: true,
-          },
-        ],
-        collectionMetadataMutations: [
-          {
-            type: `set`,
-            key: `electric:resume`,
-            value: {
-              kind: `resume`,
-              offset: `10_0`,
-              handle: `handle-1`,
-              shapeId: `shape-1`,
-              updatedAt: 1,
+          ],
+          collectionMetadataMutations: [
+            {
+              type: `set`,
+              key: `electric:resume`,
+              value: {
+                kind: `resume`,
+                offset: `10_0`,
+                handle: `handle-1`,
+                shapeId: `shape-1`,
+                updatedAt: 1,
+              },
             },
-          },
-        ],
-      })
+          ],
+        },
+      )
 
-      const rows = await adapter.loadSubset(collectionId, {})
+      const rows = await adapter.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {},
+      )
       expect(rows).toEqual([
         {
           key: `1`,
@@ -1565,8 +1761,10 @@ export function runSQLiteCoreAdapterContractSuite(
         },
       ])
 
-      const collectionMetadata =
-        await adapter.loadCollectionMetadata?.(collectionId)
+      const collectionMetadata = await adapter.loadCollectionMetadata?.({
+        kind: `eager`,
+        collectionId: collectionId,
+      })
       expect(collectionMetadata).toEqual([
         {
           key: `electric:resume`,
@@ -1581,36 +1779,42 @@ export function runSQLiteCoreAdapterContractSuite(
       ])
 
       await expect(
-        adapter.applyCommittedTx(collectionId, {
-          txId: `metadata-2`,
-          term: 1,
-          seq: 2,
-          rowVersion: 2,
-          mutations: [
-            {
-              type: `insert`,
-              key: `2`,
-              value: {
-                id: `2`,
-                title: `Bad`,
-                createdAt: `2026-01-01T00:00:00.000Z`,
-                score: 2,
+        adapter.applyCommittedTx(
+          { kind: `eager`, collectionId: collectionId },
+          {
+            txId: `metadata-2`,
+            term: 1,
+            seq: 2,
+            rowVersion: 2,
+            mutations: [
+              {
+                type: `insert`,
+                key: `2`,
+                value: {
+                  id: `2`,
+                  title: `Bad`,
+                  createdAt: `2026-01-01T00:00:00.000Z`,
+                  score: 2,
+                },
               },
-            },
-          ],
-          collectionMetadataMutations: [
-            {
-              type: `set`,
-              key: `broken`,
-              value: {
-                invalid: new Date(Number.NaN),
+            ],
+            collectionMetadataMutations: [
+              {
+                type: `set`,
+                key: `broken`,
+                value: {
+                  invalid: new Date(Number.NaN),
+                },
               },
-            },
-          ],
-        }),
+            ],
+          },
+        ),
       ).rejects.toThrow()
 
-      const rowsAfterFailure = await adapter.loadSubset(collectionId, {})
+      const rowsAfterFailure = await adapter.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {},
+      )
       expect(rowsAfterFailure).toEqual(rows)
 
       const metadataRows = await driver.query<{ key: string }>(
@@ -1626,77 +1830,88 @@ export function runSQLiteCoreAdapterContractSuite(
       const { adapter } = registerContractHarness()
       const collectionId = `truncate-metadata-roundtrip`
 
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `seed-1`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [
-          {
-            type: `insert`,
-            key: `1`,
-            value: {
-              id: `1`,
-              title: `Before truncate`,
-              createdAt: `2026-01-01T00:00:00.000Z`,
-              score: 1,
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `seed-1`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [
+            {
+              type: `insert`,
+              key: `1`,
+              value: {
+                id: `1`,
+                title: `Before truncate`,
+                createdAt: `2026-01-01T00:00:00.000Z`,
+                score: 1,
+              },
+              metadata: {
+                owner: `before`,
+              },
+              metadataChanged: true,
             },
-            metadata: {
-              owner: `before`,
+          ],
+          collectionMetadataMutations: [
+            {
+              type: `set`,
+              key: `electric:resume`,
+              value: {
+                kind: `resume`,
+                offset: `10_0`,
+                handle: `handle-1`,
+                shapeId: `shape-1`,
+                updatedAt: 1,
+              },
             },
-            metadataChanged: true,
-          },
-        ],
-        collectionMetadataMutations: [
-          {
-            type: `set`,
-            key: `electric:resume`,
-            value: {
-              kind: `resume`,
-              offset: `10_0`,
-              handle: `handle-1`,
-              shapeId: `shape-1`,
-              updatedAt: 1,
-            },
-          },
-        ],
-      })
+          ],
+        },
+      )
 
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `truncate-2`,
-        term: 1,
-        seq: 2,
-        rowVersion: 2,
-        truncate: true,
-        mutations: [
-          {
-            type: `insert`,
-            key: `2`,
-            value: {
-              id: `2`,
-              title: `After truncate`,
-              createdAt: `2026-01-02T00:00:00.000Z`,
-              score: 2,
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `truncate-2`,
+          term: 1,
+          seq: 2,
+          rowVersion: 2,
+          truncate: true,
+          mutations: [
+            {
+              type: `insert`,
+              key: `2`,
+              value: {
+                id: `2`,
+                title: `After truncate`,
+                createdAt: `2026-01-02T00:00:00.000Z`,
+                score: 2,
+              },
+              metadata: {
+                owner: `after`,
+              },
+              metadataChanged: true,
             },
-            metadata: {
-              owner: `after`,
+          ],
+          collectionMetadataMutations: [
+            {
+              type: `set`,
+              key: `electric:resume`,
+              value: {
+                kind: `reset`,
+                updatedAt: 2,
+              },
             },
-            metadataChanged: true,
-          },
-        ],
-        collectionMetadataMutations: [
-          {
-            type: `set`,
-            key: `electric:resume`,
-            value: {
-              kind: `reset`,
-              updatedAt: 2,
-            },
-          },
-        ],
-      })
+          ],
+        },
+      )
 
-      expect(await adapter.loadSubset(collectionId, {})).toEqual([
+      expect(
+        await adapter.loadSubset(
+          { kind: `eager`, collectionId: collectionId },
+          {},
+        ),
+      ).toEqual([
         {
           key: `2`,
           value: {
@@ -1711,7 +1926,12 @@ export function runSQLiteCoreAdapterContractSuite(
         },
       ])
 
-      expect(await adapter.loadCollectionMetadata?.(collectionId)).toEqual([
+      expect(
+        await adapter.loadCollectionMetadata?.({
+          kind: `eager`,
+          collectionId: collectionId,
+        }),
+      ).toEqual([
         {
           key: `electric:resume`,
           value: {
@@ -1753,42 +1973,48 @@ export function runSQLiteCoreAdapterContractSuite(
         },
       ]
 
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `seed-1`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: rows.map((row) => ({
-          type: `insert` as const,
-          key: row.id,
-          value: row,
-        })),
-      })
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `seed-1`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: rows.map((row) => ({
+            type: `insert` as const,
+            key: row.id,
+            value: row,
+          })),
+        },
+      )
 
-      const filtered = await adapter.loadSubset(collectionId, {
-        where: new IR.Func(`and`, [
-          new IR.Func(`or`, [
-            new IR.Func(`like`, [
-              new IR.PropRef([`title`]),
-              new IR.Value(`%Task%`),
+      const filtered = await adapter.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          where: new IR.Func(`and`, [
+            new IR.Func(`or`, [
+              new IR.Func(`like`, [
+                new IR.PropRef([`title`]),
+                new IR.Value(`%Task%`),
+              ]),
+              new IR.Func(`in`, [new IR.PropRef([`id`]), new IR.Value([`3`])]),
             ]),
-            new IR.Func(`in`, [new IR.PropRef([`id`]), new IR.Value([`3`])]),
+            new IR.Func(`eq`, [
+              new IR.Func(`date`, [new IR.PropRef([`createdAt`])]),
+              new IR.Value(`2026-01-02`),
+            ]),
           ]),
-          new IR.Func(`eq`, [
-            new IR.Func(`date`, [new IR.PropRef([`createdAt`])]),
-            new IR.Value(`2026-01-02`),
-          ]),
-        ]),
-        orderBy: [
-          {
-            expression: new IR.PropRef([`score`]),
-            compareOptions: {
-              direction: `desc`,
-              nulls: `last`,
+          orderBy: [
+            {
+              expression: new IR.PropRef([`score`]),
+              compareOptions: {
+                direction: `desc`,
+                nulls: `last`,
+              },
             },
-          },
-        ],
-      })
+          ],
+        },
+      )
 
       expect(filtered).toEqual([
         {
@@ -1802,12 +2028,15 @@ export function runSQLiteCoreAdapterContractSuite(
         },
       ])
 
-      const withInEmpty = await adapter.loadSubset(collectionId, {
-        where: new IR.Func(`in`, [
-          new IR.PropRef([`id`]),
-          new IR.Value([] as Array<string>),
-        ]),
-      })
+      const withInEmpty = await adapter.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          where: new IR.Func(`in`, [
+            new IR.PropRef([`id`]),
+            new IR.Value([] as Array<string>),
+          ]),
+        },
+      )
       expect(withInEmpty).toEqual([])
     })
 
@@ -1839,31 +2068,37 @@ export function runSQLiteCoreAdapterContractSuite(
         const { adapter } = registerContractHarness()
         const collectionId = `custom-collation-order-${caseName}`
 
-        await adapter.applyCommittedTx(collectionId, {
-          txId: `seed-custom-collation`,
-          term: 1,
-          seq: 1,
-          rowVersion: 1,
-          mutations: [`zeta`, `alpha`, `middle`].map((title, index) => ({
-            type: `insert` as const,
-            key: String(index),
-            value: { id: String(index), title, createdAt: ``, score: index },
-          })),
-        })
+        await adapter.applyCommittedTx(
+          { kind: `eager`, collectionId: collectionId },
+          {
+            txId: `seed-custom-collation`,
+            term: 1,
+            seq: 1,
+            rowVersion: 1,
+            mutations: [`zeta`, `alpha`, `middle`].map((title, index) => ({
+              type: `insert` as const,
+              key: String(index),
+              value: { id: String(index), title, createdAt: ``, score: index },
+            })),
+          },
+        )
 
-        const rows = await adapter.loadSubset(collectionId, {
-          orderBy: [
-            {
-              expression: new IR.PropRef([`title`]),
-              compareOptions: {
-                direction,
-                nulls: `last`,
-                stringSort: `custom`,
-                compare,
+        const rows = await adapter.loadSubset(
+          { kind: `eager`, collectionId: collectionId },
+          {
+            orderBy: [
+              {
+                expression: new IR.PropRef([`title`]),
+                compareOptions: {
+                  direction,
+                  nulls: `last`,
+                  stringSort: `custom`,
+                  compare,
+                },
               },
-            },
-          ],
-        })
+            ],
+          },
+        )
 
         expect(rows.map(({ value }) => value.title)).toEqual(expected)
       },
@@ -1873,50 +2108,56 @@ export function runSQLiteCoreAdapterContractSuite(
       const { adapter } = registerContractHarness()
       const collectionId = `date-pushdown`
 
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `seed-date`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [
-          {
-            type: `insert`,
-            key: `1`,
-            value: {
-              id: `1`,
-              title: `Start`,
-              createdAt: `2026-01-02T00:00:00.000Z`,
-              score: 1,
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `seed-date`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [
+            {
+              type: `insert`,
+              key: `1`,
+              value: {
+                id: `1`,
+                title: `Start`,
+                createdAt: `2026-01-02T00:00:00.000Z`,
+                score: 1,
+              },
             },
-          },
-          {
-            type: `insert`,
-            key: `2`,
-            value: {
-              id: `2`,
-              title: `Other`,
-              createdAt: `2026-01-03T00:00:00.000Z`,
-              score: 2,
+            {
+              type: `insert`,
+              key: `2`,
+              value: {
+                id: `2`,
+                title: `Other`,
+                createdAt: `2026-01-03T00:00:00.000Z`,
+                score: 2,
+              },
             },
-          },
-        ],
-      })
+          ],
+        },
+      )
 
-      const rows = await adapter.loadSubset(collectionId, {
-        where: new IR.Func(`and`, [
-          new IR.Func(`eq`, [
-            new IR.Func(`strftime`, [
-              new IR.Value(`%Y-%m-%d`),
-              new IR.Func(`datetime`, [new IR.PropRef([`createdAt`])]),
+      const rows = await adapter.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          where: new IR.Func(`and`, [
+            new IR.Func(`eq`, [
+              new IR.Func(`strftime`, [
+                new IR.Value(`%Y-%m-%d`),
+                new IR.Func(`datetime`, [new IR.PropRef([`createdAt`])]),
+              ]),
+              new IR.Value(`2026-01-02`),
             ]),
-            new IR.Value(`2026-01-02`),
+            new IR.Func(`eq`, [
+              new IR.Func(`date`, [new IR.PropRef([`createdAt`])]),
+              new IR.Value(`2026-01-02`),
+            ]),
           ]),
-          new IR.Func(`eq`, [
-            new IR.Func(`date`, [new IR.PropRef([`createdAt`])]),
-            new IR.Value(`2026-01-02`),
-          ]),
-        ]),
-      })
+        },
+      )
 
       expect(rows.map((row) => row.key)).toEqual([`1`])
     })
@@ -1928,57 +2169,69 @@ export function runSQLiteCoreAdapterContractSuite(
       const firstBigInt = BigInt(`9007199254740992`)
       const secondBigInt = BigInt(`9007199254740997`)
 
-      await typedAdapter.applyCommittedTx(collectionId, {
-        txId: `seed-typed-values`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [
-          {
-            type: `insert`,
-            key: `1`,
-            value: {
-              id: `1`,
-              title: `Alpha`,
-              createdAt: new Date(`2026-01-02T00:00:00.000Z`),
-              largeViewCount: firstBigInt,
+      await typedAdapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `seed-typed-values`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [
+            {
+              type: `insert`,
+              key: `1`,
+              value: {
+                id: `1`,
+                title: `Alpha`,
+                createdAt: new Date(`2026-01-02T00:00:00.000Z`),
+                largeViewCount: firstBigInt,
+              },
             },
-          },
-          {
-            type: `insert`,
-            key: `2`,
-            value: {
-              id: `2`,
-              title: `Beta`,
-              createdAt: new Date(`2026-01-03T00:00:00.000Z`),
-              largeViewCount: secondBigInt,
+            {
+              type: `insert`,
+              key: `2`,
+              value: {
+                id: `2`,
+                title: `Beta`,
+                createdAt: new Date(`2026-01-03T00:00:00.000Z`),
+                largeViewCount: secondBigInt,
+              },
             },
-          },
-        ],
-      })
+          ],
+        },
+      )
 
-      const bigintRows = await typedAdapter.loadSubset(collectionId, {
-        where: new IR.Func(`gt`, [
-          new IR.PropRef([`largeViewCount`]),
-          new IR.Value(BigInt(`9007199254740993`)),
-        ]),
-      })
+      const bigintRows = await typedAdapter.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          where: new IR.Func(`gt`, [
+            new IR.PropRef([`largeViewCount`]),
+            new IR.Value(BigInt(`9007199254740993`)),
+          ]),
+        },
+      )
       expect(bigintRows.map((row) => row.key)).toEqual([`2`])
 
-      const dateRows = await typedAdapter.loadSubset(collectionId, {
-        where: new IR.Func(`gt`, [
-          new IR.PropRef([`createdAt`]),
-          new IR.Value(new Date(`2026-01-02T12:00:00.000Z`)),
-        ]),
-      })
+      const dateRows = await typedAdapter.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          where: new IR.Func(`gt`, [
+            new IR.PropRef([`createdAt`]),
+            new IR.Value(new Date(`2026-01-02T12:00:00.000Z`)),
+          ]),
+        },
+      )
       expect(dateRows.map((row) => row.key)).toEqual([`2`])
 
-      const restoredRows = await typedAdapter.loadSubset(collectionId, {
-        where: new IR.Func(`eq`, [
-          new IR.Func(`date`, [new IR.PropRef([`createdAt`])]),
-          new IR.Value(`2026-01-02`),
-        ]),
-      })
+      const restoredRows = await typedAdapter.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          where: new IR.Func(`eq`, [
+            new IR.Func(`date`, [new IR.PropRef([`createdAt`])]),
+            new IR.Value(`2026-01-02`),
+          ]),
+        },
+      )
       const firstRow = restoredRows[0]?.value
       expect(firstRow?.createdAt).toBeInstanceOf(Date)
       expect(firstRow?.largeViewCount).toBe(firstBigInt)
@@ -1988,77 +2241,83 @@ export function runSQLiteCoreAdapterContractSuite(
       const { adapter } = registerContractHarness()
       const collectionId = `todos`
 
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `seed-cursor`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [
-          {
-            type: `insert`,
-            key: `a`,
-            value: {
-              id: `a`,
-              title: `A`,
-              createdAt: `2026-01-01T00:00:00.000Z`,
-              score: 10,
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `seed-cursor`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [
+            {
+              type: `insert`,
+              key: `a`,
+              value: {
+                id: `a`,
+                title: `A`,
+                createdAt: `2026-01-01T00:00:00.000Z`,
+                score: 10,
+              },
             },
-          },
-          {
-            type: `insert`,
-            key: `b`,
-            value: {
-              id: `b`,
-              title: `B`,
-              createdAt: `2026-01-02T00:00:00.000Z`,
-              score: 10,
+            {
+              type: `insert`,
+              key: `b`,
+              value: {
+                id: `b`,
+                title: `B`,
+                createdAt: `2026-01-02T00:00:00.000Z`,
+                score: 10,
+              },
             },
-          },
-          {
-            type: `insert`,
-            key: `c`,
-            value: {
-              id: `c`,
-              title: `C`,
-              createdAt: `2026-01-03T00:00:00.000Z`,
-              score: 12,
+            {
+              type: `insert`,
+              key: `c`,
+              value: {
+                id: `c`,
+                title: `C`,
+                createdAt: `2026-01-03T00:00:00.000Z`,
+                score: 12,
+              },
             },
-          },
-          {
-            type: `insert`,
-            key: `d`,
-            value: {
-              id: `d`,
-              title: `D`,
-              createdAt: `2026-01-04T00:00:00.000Z`,
-              score: 13,
+            {
+              type: `insert`,
+              key: `d`,
+              value: {
+                id: `d`,
+                title: `D`,
+                createdAt: `2026-01-04T00:00:00.000Z`,
+                score: 13,
+              },
             },
-          },
-        ],
-      })
-
-      const rows = await adapter.loadSubset(collectionId, {
-        orderBy: [
-          {
-            expression: new IR.PropRef([`score`]),
-            compareOptions: {
-              direction: `asc`,
-              nulls: `last`,
-            },
-          },
-        ],
-        limit: 1,
-        cursor: {
-          whereCurrent: new IR.Func(`eq`, [
-            new IR.PropRef([`score`]),
-            new IR.Value(10),
-          ]),
-          whereFrom: new IR.Func(`gt`, [
-            new IR.PropRef([`score`]),
-            new IR.Value(10),
-          ]),
+          ],
         },
-      })
+      )
+
+      const rows = await adapter.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          orderBy: [
+            {
+              expression: new IR.PropRef([`score`]),
+              compareOptions: {
+                direction: `asc`,
+                nulls: `last`,
+              },
+            },
+          ],
+          limit: 1,
+          cursor: {
+            whereCurrent: new IR.Func(`eq`, [
+              new IR.PropRef([`score`]),
+              new IR.Value(10),
+            ]),
+            whereFrom: new IR.Func(`gt`, [
+              new IR.PropRef([`score`]),
+              new IR.Value(10),
+            ]),
+          },
+        },
+      )
 
       expect(rows.map((row) => row.key)).toEqual([`a`, `b`, `c`])
     })
@@ -2068,12 +2327,20 @@ export function runSQLiteCoreAdapterContractSuite(
       const collectionId = `todos`
       const signature = `idx-title`
 
-      await adapter.ensureIndex(collectionId, signature, {
-        expressionSql: [`json_extract(value, '$.title')`],
-      })
-      await adapter.ensureIndex(collectionId, signature, {
-        expressionSql: [`json_extract(value, '$.title')`],
-      })
+      await adapter.ensureIndex(
+        { kind: `eager`, collectionId: collectionId },
+        signature,
+        {
+          expressionSql: [`json_extract(value, '$.title')`],
+        },
+      )
+      await adapter.ensureIndex(
+        { kind: `eager`, collectionId: collectionId },
+        signature,
+        {
+          expressionSql: [`json_extract(value, '$.title')`],
+        },
+      )
 
       const registryRows = await driver.query<{
         removed: number
@@ -2099,7 +2366,10 @@ export function runSQLiteCoreAdapterContractSuite(
           `Adapter must implement markIndexRemoved for this contract suite`,
         )
       }
-      await adapter.markIndexRemoved(collectionId, signature)
+      await adapter.markIndexRemoved(
+        { kind: `eager`, collectionId: collectionId },
+        signature,
+      )
 
       const registryRowsAfter = await driver.query<{ removed: number }>(
         `SELECT removed
@@ -2121,9 +2391,13 @@ export function runSQLiteCoreAdapterContractSuite(
       const collectionId = `todos`
       const signature = `idx-upgraded-expression`
 
-      await adapter.ensureIndex(collectionId, signature, {
-        expressionSql: [`json_extract(value, '$.title')`],
-      })
+      await adapter.ensureIndex(
+        { kind: `eager`, collectionId: collectionId },
+        signature,
+        {
+          expressionSql: [`json_extract(value, '$.title')`],
+        },
+      )
 
       const registryRows = await driver.query<{ index_name: string }>(
         `SELECT index_name
@@ -2134,9 +2408,13 @@ export function runSQLiteCoreAdapterContractSuite(
       const indexName = registryRows[0]?.index_name
       expect(indexName).toBeTruthy()
 
-      await adapter.ensureIndex(collectionId, signature, {
-        expressionSql: [`json_extract(value, '$.score')`],
-      })
+      await adapter.ensureIndex(
+        { kind: `eager`, collectionId: collectionId },
+        signature,
+        {
+          expressionSql: [`json_extract(value, '$.score')`],
+        },
+      )
 
       const sqliteMasterRows = await driver.query<{ sql: string }>(
         `SELECT sql
@@ -2159,40 +2437,49 @@ export function runSQLiteCoreAdapterContractSuite(
         schemaMismatchPolicy: `reset`,
       })
       const collectionId = `todos`
-      await baseHarness.adapter.applyCommittedTx(collectionId, {
-        txId: `seed-schema`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [
-          {
-            type: `insert`,
-            key: `1`,
-            value: {
-              id: `1`,
-              title: `Before mismatch`,
-              createdAt: `2026-01-01T00:00:00.000Z`,
-              score: 1,
+      await baseHarness.adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `seed-schema`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [
+            {
+              type: `insert`,
+              key: `1`,
+              value: {
+                id: `1`,
+                title: `Before mismatch`,
+                createdAt: `2026-01-01T00:00:00.000Z`,
+                score: 1,
+              },
             },
-          },
-        ],
-      })
+          ],
+        },
+      )
 
       const strictAdapter = new SQLiteCorePersistenceAdapter({
         driver: baseHarness.driver,
         schemaVersion: 2,
         schemaMismatchPolicy: `sync-absent-error`,
       })
-      await expect(strictAdapter.loadSubset(collectionId, {})).rejects.toThrow(
-        /Schema version mismatch/,
-      )
+      await expect(
+        strictAdapter.loadSubset(
+          { kind: `eager`, collectionId: collectionId },
+          {},
+        ),
+      ).rejects.toThrow(/Schema version mismatch/)
 
       const resetAdapter = new SQLiteCorePersistenceAdapter({
         driver: baseHarness.driver,
         schemaVersion: 2,
         schemaMismatchPolicy: `sync-present-reset`,
       })
-      const resetRows = await resetAdapter.loadSubset(collectionId, {})
+      const resetRows = await resetAdapter.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {},
+      )
       expect(resetRows).toEqual([])
     })
 
@@ -2473,54 +2760,60 @@ export function runSQLiteCoreAdapterContractSuite(
       })
       const collectionId = `todos`
 
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `seed-pull`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [
-          {
-            type: `insert`,
-            key: `1`,
-            value: {
-              id: `1`,
-              title: `One`,
-              createdAt: `2026-01-01T00:00:00.000Z`,
-              score: 1,
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `seed-pull`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [
+            {
+              type: `insert`,
+              key: `1`,
+              value: {
+                id: `1`,
+                title: `One`,
+                createdAt: `2026-01-01T00:00:00.000Z`,
+                score: 1,
+              },
             },
-          },
-          {
-            type: `insert`,
-            key: `2`,
-            value: {
-              id: `2`,
-              title: `Two`,
-              createdAt: `2026-01-02T00:00:00.000Z`,
-              score: 2,
+            {
+              type: `insert`,
+              key: `2`,
+              value: {
+                id: `2`,
+                title: `Two`,
+                createdAt: `2026-01-02T00:00:00.000Z`,
+                score: 2,
+              },
             },
-          },
-        ],
-      })
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `seed-pull-2`,
-        term: 1,
-        seq: 2,
-        rowVersion: 2,
-        mutations: [
-          {
-            type: `delete`,
-            key: `1`,
-            value: {
-              id: `1`,
-              title: `One`,
-              createdAt: `2026-01-01T00:00:00.000Z`,
-              score: 1,
+          ],
+        },
+      )
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `seed-pull-2`,
+          term: 1,
+          seq: 2,
+          rowVersion: 2,
+          mutations: [
+            {
+              type: `delete`,
+              key: `1`,
+              value: {
+                id: `1`,
+                title: `One`,
+                createdAt: `2026-01-01T00:00:00.000Z`,
+                score: 1,
+              },
             },
-          },
-        ],
-      })
+          ],
+        },
+      )
 
-      const delta = await adapter.pullSince(collectionId, 1)
+      const delta = await adapter.pullSince({ kind: `eager`, collectionId }, 1)
       if (delta.requiresFullReload) {
         throw new Error(`Expected key-level delta, received full reload`)
       }
@@ -2537,7 +2830,10 @@ export function runSQLiteCoreAdapterContractSuite(
         },
       ])
 
-      const fullReload = await adapter.pullSince(collectionId, 0)
+      const fullReload = await adapter.pullSince(
+        { kind: `eager`, collectionId },
+        0,
+      )
       expect(fullReload.requiresFullReload).toBe(true)
     })
 
@@ -2545,36 +2841,42 @@ export function runSQLiteCoreAdapterContractSuite(
       const { adapter } = registerContractHarness()
       const collectionId = `scan-and-replay`
 
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `scan-seed-1`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [
-          {
-            type: `insert`,
-            key: `1`,
-            value: {
-              id: `1`,
-              title: `Tracked`,
-              createdAt: `2026-01-01T00:00:00.000Z`,
-              score: 1,
-            },
-            metadata: {
-              queryCollection: {
-                owners: {
-                  q1: true,
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `scan-seed-1`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [
+            {
+              type: `insert`,
+              key: `1`,
+              value: {
+                id: `1`,
+                title: `Tracked`,
+                createdAt: `2026-01-01T00:00:00.000Z`,
+                score: 1,
+              },
+              metadata: {
+                queryCollection: {
+                  owners: {
+                    q1: true,
+                  },
                 },
               },
+              metadataChanged: true,
             },
-            metadataChanged: true,
-          },
-        ],
-      })
+          ],
+        },
+      )
 
-      const scannedRows = await adapter.scanRows?.(collectionId, {
-        metadataOnly: true,
-      })
+      const scannedRows = await adapter.scanRows?.(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          metadataOnly: true,
+        },
+      )
       expect(scannedRows).toEqual([
         {
           key: `1`,
@@ -2594,38 +2896,44 @@ export function runSQLiteCoreAdapterContractSuite(
         },
       ])
 
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `scan-seed-2`,
-        term: 1,
-        seq: 2,
-        rowVersion: 2,
-        mutations: [],
-        rowMetadataMutations: [
-          {
-            type: `set`,
-            key: `1`,
-            value: {
-              queryCollection: {
-                owners: {
-                  q2: true,
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `scan-seed-2`,
+          term: 1,
+          seq: 2,
+          rowVersion: 2,
+          mutations: [],
+          rowMetadataMutations: [
+            {
+              type: `set`,
+              key: `1`,
+              value: {
+                queryCollection: {
+                  owners: {
+                    q2: true,
+                  },
                 },
               },
             },
-          },
-        ],
-        collectionMetadataMutations: [
-          {
-            type: `set`,
-            key: `electric:resume`,
-            value: {
-              kind: `reset`,
-              updatedAt: 2,
+          ],
+          collectionMetadataMutations: [
+            {
+              type: `set`,
+              key: `electric:resume`,
+              value: {
+                kind: `reset`,
+                updatedAt: 2,
+              },
             },
-          },
-        ],
-      })
+          ],
+        },
+      )
 
-      const replayDelta = await adapter.pullSince(collectionId, 1)
+      const replayDelta = await adapter.pullSince(
+        { kind: `eager`, collectionId },
+        1,
+      )
       if (replayDelta.requiresFullReload) {
         throw new Error(`Expected replay delta, received full reload`)
       }
@@ -2670,36 +2978,42 @@ export function runSQLiteCoreAdapterContractSuite(
       })
       const collectionId = `mixed-keys`
 
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `mixed-1`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [
-          {
-            type: `insert`,
-            key: 1,
-            value: {
-              id: 1,
-              title: `Numeric`,
-              createdAt: `2026-01-01T00:00:00.000Z`,
-              score: 1,
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `mixed-1`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [
+            {
+              type: `insert`,
+              key: 1,
+              value: {
+                id: 1,
+                title: `Numeric`,
+                createdAt: `2026-01-01T00:00:00.000Z`,
+                score: 1,
+              },
             },
-          },
-          {
-            type: `insert`,
-            key: `1`,
-            value: {
-              id: `1`,
-              title: `String`,
-              createdAt: `2026-01-01T00:00:00.000Z`,
-              score: 2,
+            {
+              type: `insert`,
+              key: `1`,
+              value: {
+                id: `1`,
+                title: `String`,
+                createdAt: `2026-01-01T00:00:00.000Z`,
+                score: 2,
+              },
             },
-          },
-        ],
-      })
+          ],
+        },
+      )
 
-      const rows = await adapter.loadSubset(collectionId, {})
+      const rows = await adapter.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {},
+      )
       expect(rows).toHaveLength(2)
       expect(rows.some((row) => row.key === 1)).toBe(true)
       expect(rows.some((row) => row.key === `1`)).toBe(true)
@@ -2709,24 +3023,27 @@ export function runSQLiteCoreAdapterContractSuite(
       const { adapter, driver } = registerContractHarness()
       const hostileCollectionId = `todos"; DROP TABLE applied_tx; --`
 
-      await adapter.applyCommittedTx(hostileCollectionId, {
-        txId: `hostile-1`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [
-          {
-            type: `insert`,
-            key: `safe`,
-            value: {
-              id: `safe`,
-              title: `Safe`,
-              createdAt: `2026-01-01T00:00:00.000Z`,
-              score: 1,
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: hostileCollectionId },
+        {
+          txId: `hostile-1`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [
+            {
+              type: `insert`,
+              key: `safe`,
+              value: {
+                id: `safe`,
+                title: `Safe`,
+                createdAt: `2026-01-01T00:00:00.000Z`,
+                score: 1,
+              },
             },
-          },
-        ],
-      })
+          ],
+        },
+      )
 
       const registryRows = await driver.query<{ table_name: string }>(
         `SELECT table_name
@@ -2737,7 +3054,10 @@ export function runSQLiteCoreAdapterContractSuite(
       expect(registryRows).toHaveLength(1)
       expect(registryRows[0]?.table_name).toMatch(/^c_[a-z2-7]+_[0-9a-z]+$/)
 
-      const loadedRows = await adapter.loadSubset(hostileCollectionId, {})
+      const loadedRows = await adapter.loadSubset(
+        { kind: `eager`, collectionId: hostileCollectionId },
+        {},
+      )
       expect(loadedRows).toHaveLength(1)
       expect(loadedRows[0]?.key).toBe(`safe`)
     })
@@ -2747,33 +3067,39 @@ export function runSQLiteCoreAdapterContractSuite(
       const collectionId = `concurrent-startup`
 
       const [rowsA, rowsB] = await Promise.all([
-        adapter.loadSubset(collectionId, {}),
-        adapter.loadSubset(collectionId, {}),
+        adapter.loadSubset({ kind: `eager`, collectionId: collectionId }, {}),
+        adapter.loadSubset({ kind: `eager`, collectionId: collectionId }, {}),
       ])
 
       expect(rowsA).toEqual([])
       expect(rowsB).toEqual([])
 
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `concurrent-startup-seed`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [
-          {
-            type: `insert`,
-            key: `1`,
-            value: {
-              id: `1`,
-              title: `Seeded`,
-              createdAt: `2026-01-01T00:00:00.000Z`,
-              score: 1,
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `concurrent-startup-seed`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [
+            {
+              type: `insert`,
+              key: `1`,
+              value: {
+                id: `1`,
+                title: `Seeded`,
+                createdAt: `2026-01-01T00:00:00.000Z`,
+                score: 1,
+              },
             },
-          },
-        ],
-      })
+          ],
+        },
+      )
 
-      const loadedRows = await adapter.loadSubset(collectionId, {})
+      const loadedRows = await adapter.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {},
+      )
       expect(loadedRows).toHaveLength(1)
       expect(loadedRows[0]?.key).toBe(`1`)
     })
@@ -2785,24 +3111,27 @@ export function runSQLiteCoreAdapterContractSuite(
       const collectionId = `pruning`
 
       for (let seq = 1; seq <= 4; seq++) {
-        await adapter.applyCommittedTx(collectionId, {
-          txId: `prune-${seq}`,
-          term: 1,
-          seq,
-          rowVersion: seq,
-          mutations: [
-            {
-              type: `insert`,
-              key: `k-${seq}`,
-              value: {
-                id: `k-${seq}`,
-                title: `Row ${seq}`,
-                createdAt: `2026-01-01T00:00:00.000Z`,
-                score: seq,
+        await adapter.applyCommittedTx(
+          { kind: `eager`, collectionId: collectionId },
+          {
+            txId: `prune-${seq}`,
+            term: 1,
+            seq,
+            rowVersion: seq,
+            mutations: [
+              {
+                type: `insert`,
+                key: `k-${seq}`,
+                value: {
+                  id: `k-${seq}`,
+                  title: `Row ${seq}`,
+                  createdAt: `2026-01-01T00:00:00.000Z`,
+                  score: seq,
+                },
               },
-            },
-          ],
-        })
+            ],
+          },
+        )
       }
 
       const appliedRows = await driver.query<{ seq: number }>(
@@ -2821,24 +3150,27 @@ export function runSQLiteCoreAdapterContractSuite(
       })
       const collectionId = `pruning-by-age`
 
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `age-1`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [
-          {
-            type: `insert`,
-            key: `old`,
-            value: {
-              id: `old`,
-              title: `Old`,
-              createdAt: `2026-01-01T00:00:00.000Z`,
-              score: 1,
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `age-1`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [
+            {
+              type: `insert`,
+              key: `old`,
+              value: {
+                id: `old`,
+                title: `Old`,
+                createdAt: `2026-01-01T00:00:00.000Z`,
+                score: 1,
+              },
             },
-          },
-        ],
-      })
+          ],
+        },
+      )
 
       await driver.run(
         `UPDATE applied_tx
@@ -2847,24 +3179,27 @@ export function runSQLiteCoreAdapterContractSuite(
         [collectionId],
       )
 
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `age-2`,
-        term: 1,
-        seq: 2,
-        rowVersion: 2,
-        mutations: [
-          {
-            type: `insert`,
-            key: `new`,
-            value: {
-              id: `new`,
-              title: `New`,
-              createdAt: `2026-01-01T00:00:00.000Z`,
-              score: 2,
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `age-2`,
+          term: 1,
+          seq: 2,
+          rowVersion: 2,
+          mutations: [
+            {
+              type: `insert`,
+              key: `new`,
+              value: {
+                id: `new`,
+                title: `New`,
+                createdAt: `2026-01-01T00:00:00.000Z`,
+                score: 2,
+              },
             },
-          },
-        ],
-      })
+          ],
+        },
+      )
 
       const appliedRows = await driver.query<{ seq: number }>(
         `SELECT seq
@@ -2880,34 +3215,37 @@ export function runSQLiteCoreAdapterContractSuite(
       const { adapter } = registerContractHarness()
       const collectionId = `large-in`
 
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `seed-large-in`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [
-          {
-            type: `insert`,
-            key: `2`,
-            value: {
-              id: `2`,
-              title: `Two`,
-              createdAt: `2026-01-02T00:00:00.000Z`,
-              score: 2,
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `seed-large-in`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [
+            {
+              type: `insert`,
+              key: `2`,
+              value: {
+                id: `2`,
+                title: `Two`,
+                createdAt: `2026-01-02T00:00:00.000Z`,
+                score: 2,
+              },
             },
-          },
-          {
-            type: `insert`,
-            key: `4`,
-            value: {
-              id: `4`,
-              title: `Four`,
-              createdAt: `2026-01-04T00:00:00.000Z`,
-              score: 4,
+            {
+              type: `insert`,
+              key: `4`,
+              value: {
+                id: `4`,
+                title: `Four`,
+                createdAt: `2026-01-04T00:00:00.000Z`,
+                score: 4,
+              },
             },
-          },
-        ],
-      })
+          ],
+        },
+      )
 
       const largeIds = Array.from(
         { length: 1200 },
@@ -2916,21 +3254,24 @@ export function runSQLiteCoreAdapterContractSuite(
       largeIds[100] = `2`
       largeIds[1100] = `4`
 
-      const rows = await adapter.loadSubset(collectionId, {
-        where: new IR.Func(`in`, [
-          new IR.PropRef([`id`]),
-          new IR.Value(largeIds),
-        ]),
-        orderBy: [
-          {
-            expression: new IR.PropRef([`id`]),
-            compareOptions: {
-              direction: `asc`,
-              nulls: `last`,
+      const rows = await adapter.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          where: new IR.Func(`in`, [
+            new IR.PropRef([`id`]),
+            new IR.Value(largeIds),
+          ]),
+          orderBy: [
+            {
+              expression: new IR.PropRef([`id`]),
+              compareOptions: {
+                direction: `asc`,
+                nulls: `last`,
+              },
             },
-          },
-        ],
-      })
+          ],
+        },
+      )
 
       expect(rows.map((row) => row.key)).toEqual([`2`, `4`])
     })
@@ -2942,43 +3283,49 @@ export function runSQLiteCoreAdapterContractSuite(
       })
       const collectionId = `fallback-where`
 
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `seed-fallback`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [
-          {
-            type: `insert`,
-            key: `1`,
-            value: {
-              id: `1`,
-              title: `Keep`,
-              createdAt: `2026-01-01T00:00:00.000Z`,
-              score: 1,
-              [`meta-field`]: `alpha`,
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `seed-fallback`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [
+            {
+              type: `insert`,
+              key: `1`,
+              value: {
+                id: `1`,
+                title: `Keep`,
+                createdAt: `2026-01-01T00:00:00.000Z`,
+                score: 1,
+                [`meta-field`]: `alpha`,
+              },
             },
-          },
-          {
-            type: `insert`,
-            key: `2`,
-            value: {
-              id: `2`,
-              title: `Drop`,
-              createdAt: `2026-01-01T00:00:00.000Z`,
-              score: 2,
-              [`meta-field`]: `beta`,
+            {
+              type: `insert`,
+              key: `2`,
+              value: {
+                id: `2`,
+                title: `Drop`,
+                createdAt: `2026-01-01T00:00:00.000Z`,
+                score: 2,
+                [`meta-field`]: `beta`,
+              },
             },
-          },
-        ],
-      })
+          ],
+        },
+      )
 
-      const rows = await adapter.loadSubset(collectionId, {
-        where: new IR.Func(`eq`, [
-          new IR.PropRef([`meta-field`]),
-          new IR.Value(`alpha`),
-        ]),
-      })
+      const rows = await adapter.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          where: new IR.Func(`eq`, [
+            new IR.PropRef([`meta-field`]),
+            new IR.Value(`alpha`),
+          ]),
+        },
+      )
 
       expect(rows.map((row) => row.key)).toEqual([`1`])
     })
@@ -2990,46 +3337,52 @@ export function runSQLiteCoreAdapterContractSuite(
       })
       const collectionId = `fallback-alias-qualified-ref`
 
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `seed-alias-fallback`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [
-          {
-            type: `insert`,
-            key: `1`,
-            value: {
-              id: `1`,
-              title: `Keep`,
-              createdAt: `2026-01-01T00:00:00.000Z`,
-              score: 1,
-              [`meta-field`]: `alpha`,
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `seed-alias-fallback`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [
+            {
+              type: `insert`,
+              key: `1`,
+              value: {
+                id: `1`,
+                title: `Keep`,
+                createdAt: `2026-01-01T00:00:00.000Z`,
+                score: 1,
+                [`meta-field`]: `alpha`,
+              },
             },
-          },
-          {
-            type: `insert`,
-            key: `2`,
-            value: {
-              id: `2`,
-              title: `Drop`,
-              createdAt: `2026-01-01T00:00:00.000Z`,
-              score: 2,
-              [`meta-field`]: `beta`,
+            {
+              type: `insert`,
+              key: `2`,
+              value: {
+                id: `2`,
+                title: `Drop`,
+                createdAt: `2026-01-01T00:00:00.000Z`,
+                score: 2,
+                [`meta-field`]: `beta`,
+              },
             },
-          },
-        ],
-      })
+          ],
+        },
+      )
 
       // `meta-field` makes SQL pushdown unsupported, so filter correctness comes
       // from the in-memory evaluator. The explicit source alias is the only
       // signal that the leading `todos` segment is qualification.
-      const rows = await adapter.loadSubset(collectionId, {
-        where: new IR.Func(`eq`, [
-          new IR.PropRef([`todos`, `meta-field`], `todos`),
-          new IR.Value(`alpha`),
-        ]),
-      })
+      const rows = await adapter.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          where: new IR.Func(`eq`, [
+            new IR.PropRef([`todos`, `meta-field`], `todos`),
+            new IR.Value(`alpha`),
+          ]),
+        },
+      )
 
       expect(rows.map((row) => row.key)).toEqual([`1`])
     })
@@ -3039,34 +3392,40 @@ export function runSQLiteCoreAdapterContractSuite(
       const adapter = new SQLiteCorePersistenceAdapter({ driver })
       const collectionId = `fallback-legacy-nested-ref`
 
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `seed-legacy-nested-fallback`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [
-          {
-            type: `insert`,
-            key: `nested-match`,
-            value: {
-              profile: { [`meta-field`]: `alpha` },
-              [`meta-field`]: `flat-other`,
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `seed-legacy-nested-fallback`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [
+            {
+              type: `insert`,
+              key: `nested-match`,
+              value: {
+                profile: { [`meta-field`]: `alpha` },
+                [`meta-field`]: `flat-other`,
+              },
             },
-          },
-          {
-            type: `insert`,
-            key: `flat-only`,
-            value: { [`meta-field`]: `alpha` },
-          },
-        ],
-      })
+            {
+              type: `insert`,
+              key: `flat-only`,
+              value: { [`meta-field`]: `alpha` },
+            },
+          ],
+        },
+      )
 
-      const rows = await adapter.loadSubset(collectionId, {
-        where: new IR.Func(`eq`, [
-          new IR.PropRef([`profile`, `meta-field`]),
-          new IR.Value(`alpha`),
-        ]),
-      })
+      const rows = await adapter.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          where: new IR.Func(`eq`, [
+            new IR.PropRef([`profile`, `meta-field`]),
+            new IR.Value(`alpha`),
+          ]),
+        },
+      )
 
       expect(rows.map((row) => row.key)).toEqual([`nested-match`])
     })
@@ -3076,14 +3435,18 @@ export function runSQLiteCoreAdapterContractSuite(
       const collectionId = `serialized-index`
       const signature = `serialized-title`
 
-      await adapter.ensureIndex(collectionId, signature, {
-        expressionSql: [
-          JSON.stringify({
-            type: `ref`,
-            path: [`title`],
-          }),
-        ],
-      })
+      await adapter.ensureIndex(
+        { kind: `eager`, collectionId: collectionId },
+        signature,
+        {
+          expressionSql: [
+            JSON.stringify({
+              type: `ref`,
+              path: [`title`],
+            }),
+          ],
+        },
+      )
 
       const registryRows = await driver.query<{ index_name: string }>(
         `SELECT index_name
@@ -3110,11 +3473,15 @@ export function runSQLiteCoreAdapterContractSuite(
       const { adapter } = registerContractHarness()
 
       await expect(
-        adapter.ensureIndex(`unsafe-index`, `unsafe`, {
-          expressionSql: [
-            `json_extract(value, '$.title'); DROP TABLE applied_tx`,
-          ],
-        }),
+        adapter.ensureIndex(
+          { kind: `eager`, collectionId: `unsafe-index` },
+          `unsafe`,
+          {
+            expressionSql: [
+              `json_extract(value, '$.title'); DROP TABLE applied_tx`,
+            ],
+          },
+        ),
       ).rejects.toThrow(/Invalid persisted index SQL fragment/)
     })
   })
@@ -3460,35 +3827,41 @@ async function observe(
       const row = rows.find((candidate) => candidate.key === key)!
       return { key, value: row.value }
     })
-    await adapter.applyCommittedTx('oracle-1993', {
-      txId: 'seed',
-      term: 1,
-      seq: 1,
-      rowVersion: 1,
-      mutations: rows.map((row) => ({
-        type: 'insert' as const,
-        key: row.key,
-        value: row.value,
-      })),
-    })
+    await adapter.applyCommittedTx(
+      { kind: `eager`, collectionId: 'oracle-1993' },
+      {
+        txId: 'seed',
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: rows.map((row) => ({
+          type: 'insert' as const,
+          key: row.key,
+          value: row.value,
+        })),
+      },
+    )
     driver.startObservation()
     try {
-      const result = await adapter.loadSubset('oracle-1993', {
-        where: predicate(spec),
-        ...(spec.ordered
-          ? {
-              orderBy: [
-                {
-                  expression: new IR.PropRef(['a']),
-                  compareOptions: {
-                    direction: 'asc' as const,
-                    nulls: 'last' as const,
+      const result = await adapter.loadSubset(
+        { kind: `eager`, collectionId: 'oracle-1993' },
+        {
+          where: predicate(spec),
+          ...(spec.ordered
+            ? {
+                orderBy: [
+                  {
+                    expression: new IR.PropRef(['a']),
+                    compareOptions: {
+                      direction: 'asc' as const,
+                      nulls: 'last' as const,
+                    },
                   },
-                },
-              ],
-            }
-          : {}),
-      })
+                ],
+              }
+            : {}),
+        },
+      )
       const actualValues = result.map((row) => ({
         key: String(row.key),
         value: row.value as Row['value'],
@@ -3754,39 +4127,54 @@ async function runIndexContext() {
   try {
     const driver = preparedDriver(db, attempts)
     const adapter = new SQLiteCorePersistenceAdapter({ driver })
-    await adapter.applyCommittedTx('oracle-index', {
-      txId: 'seed',
-      term: 1,
-      seq: 1,
-      rowVersion: 1,
-      mutations: [
-        { type: 'insert', key: 'target', value: { a: 'target', b: 'target' } },
-      ],
-    })
-    driver.startObservation()
-    await adapter.ensureIndex('oracle-index', 'small-in-partial', {
-      expressionSql: [JSON.stringify({ type: 'ref', path: ['a'] })],
-      whereSql: JSON.stringify({
-        type: 'func',
-        name: 'in',
-        args: [
-          { type: 'ref', path: ['b'] },
-          { type: 'val', value: ['target', 'other'] },
+    await adapter.applyCommittedTx(
+      { kind: `eager`, collectionId: 'oracle-index' },
+      {
+        txId: 'seed',
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [
+          {
+            type: 'insert',
+            key: 'target',
+            value: { a: 'target', b: 'target' },
+          },
         ],
-      }),
-    })
-    await adapter.ensureIndex('oracle-index', 'small-in-expression', {
-      expressionSql: [
-        JSON.stringify({
+      },
+    )
+    driver.startObservation()
+    await adapter.ensureIndex(
+      { kind: `eager`, collectionId: 'oracle-index' },
+      'small-in-partial',
+      {
+        expressionSql: [JSON.stringify({ type: 'ref', path: ['a'] })],
+        whereSql: JSON.stringify({
           type: 'func',
           name: 'in',
           args: [
-            { type: 'ref', path: ['a'] },
+            { type: 'ref', path: ['b'] },
             { type: 'val', value: ['target', 'other'] },
           ],
         }),
-      ],
-    })
+      },
+    )
+    await adapter.ensureIndex(
+      { kind: `eager`, collectionId: 'oracle-index' },
+      'small-in-expression',
+      {
+        expressionSql: [
+          JSON.stringify({
+            type: 'func',
+            name: 'in',
+            args: [
+              { type: 'ref', path: ['a'] },
+              { type: 'val', value: ['target', 'other'] },
+            ],
+          }),
+        ],
+      },
+    )
     const ddl = attempts.filter(
       (entry) => entry.method === 'exec' && entry.sql.includes('CREATE INDEX'),
     )
@@ -3811,30 +4199,40 @@ async function runCursorContext(): Promise<string | undefined> {
   try {
     const driver = preparedDriver(db, attempts, true)
     const adapter = new SQLiteCorePersistenceAdapter({ driver })
-    await adapter.applyCommittedTx('oracle-cursor', {
-      txId: 'seed',
-      term: 1,
-      seq: 1,
-      rowVersion: 1,
-      mutations: [
-        { type: 'insert', key: 'target', value: { a: 'target', b: 'target' } },
-      ],
-    })
+    await adapter.applyCommittedTx(
+      { kind: `eager`, collectionId: 'oracle-cursor' },
+      {
+        txId: 'seed',
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [
+          {
+            type: 'insert',
+            key: 'target',
+            value: { a: 'target', b: 'target' },
+          },
+        ],
+      },
+    )
     driver.startObservation()
     try {
-      const rows = await adapter.loadSubset('oracle-cursor', {
-        where: predicate(single('string', 999)),
-        cursor: {
-          whereCurrent: new IR.Func('eq', [
-            new IR.PropRef(['a']),
-            new IR.Value('target'),
-          ]),
-          whereFrom: new IR.Func('eq', [
-            new IR.PropRef(['b']),
-            new IR.Value('target'),
-          ]),
+      const rows = await adapter.loadSubset(
+        { kind: `eager`, collectionId: 'oracle-cursor' },
+        {
+          where: predicate(single('string', 999)),
+          cursor: {
+            whereCurrent: new IR.Func('eq', [
+              new IR.PropRef(['a']),
+              new IR.Value('target'),
+            ]),
+            whereFrom: new IR.Func('eq', [
+              new IR.PropRef(['b']),
+              new IR.Value('target'),
+            ]),
+          },
         },
-      })
+      )
       actual = rows.map((row) => String(row.key))
     } catch (cause) {
       error = String(cause)

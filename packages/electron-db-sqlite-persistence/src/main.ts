@@ -1,10 +1,14 @@
-import { InvalidPersistedCollectionConfigError } from '@tanstack/db-sqlite-persistence-core'
+import {
+  InvalidPersistedCollectionConfigError,
+  resolvePersistedStorageTarget,
+} from '@tanstack/db-sqlite-persistence-core'
 import {
   DEFAULT_ELECTRON_PERSISTENCE_CHANNEL,
   ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
 } from './protocol'
 import type {
   PersistedCollectionPersistence,
+  PersistedStorageTarget,
   PersistenceAdapter,
   SQLitePullSinceResult,
 } from '@tanstack/db-sqlite-persistence-core'
@@ -18,11 +22,11 @@ import type {
 
 type ElectronMainPersistenceAdapter = PersistenceAdapter & {
   loadCollectionMetadata?: (
-    collectionId: string,
+    target: PersistedStorageTarget,
     ctx?: { cacheGenerationClaimId?: string },
   ) => Promise<Array<{ key: string; value: unknown }>>
   scanRows?: (
-    collectionId: string,
+    target: PersistedStorageTarget,
     options?: { metadataOnly?: boolean },
     ctx?: { cacheGenerationClaimId?: string },
   ) => Promise<
@@ -33,12 +37,12 @@ type ElectronMainPersistenceAdapter = PersistenceAdapter & {
     }>
   >
   pullSince?: (
-    collectionId: string,
+    target: PersistedStorageTarget,
     fromRowVersion: number,
     ctx?: { cacheGenerationClaimId?: string },
   ) => Promise<SQLitePullSinceResult<ElectronPersistedKey>>
   getStreamPosition?: (
-    collectionId: string,
+    target: PersistedStorageTarget,
     ctx?: { cacheGenerationClaimId?: string },
   ) => Promise<{
     latestTerm: number
@@ -120,6 +124,25 @@ function assertValidRequest(request: ElectronPersistenceRequestEnvelope): void {
   }
 }
 
+function requireStorageTarget(
+  request: ElectronPersistenceRequestEnvelope,
+): PersistedStorageTarget {
+  const target = request.storageTarget
+  if (!target) {
+    throw new InvalidPersistedCollectionConfigError(
+      `Electron persistence data request requires an explicit storage target`,
+    )
+  }
+  if (
+    resolvePersistedStorageTarget(target).collectionId !== request.collectionId
+  ) {
+    throw new InvalidPersistedCollectionConfigError(
+      `Electron persistence storage target does not match its collectionId`,
+    )
+  }
+  return target
+}
+
 async function executeRequestAgainstAdapter(
   request: ElectronPersistenceRequestEnvelope,
   adapter: ElectronMainPersistenceAdapter,
@@ -127,7 +150,7 @@ async function executeRequestAgainstAdapter(
   switch (request.method) {
     case `loadSubset`: {
       const result = await adapter.loadSubset(
-        request.collectionId,
+        requireStorageTarget(request),
         request.payload.options,
         request.payload.ctx,
       )
@@ -142,7 +165,7 @@ async function executeRequestAgainstAdapter(
 
     case `loadResumeSnapshot`: {
       const result = await adapter.loadResumeSnapshot(
-        request.collectionId,
+        requireStorageTarget(request),
         request.payload.ctx,
       )
       return {
@@ -161,7 +184,7 @@ async function executeRequestAgainstAdapter(
         )
       }
       const result = await adapter.loadCollectionMetadata(
-        request.collectionId,
+        requireStorageTarget(request),
         request.payload.ctx,
       )
       return {
@@ -180,7 +203,7 @@ async function executeRequestAgainstAdapter(
         )
       }
       const result = await adapter.scanRows(
-        request.collectionId,
+        requireStorageTarget(request),
         request.payload.options,
         request.payload.ctx,
       )
@@ -194,7 +217,10 @@ async function executeRequestAgainstAdapter(
     }
 
     case `applyCommittedTx`: {
-      await adapter.applyCommittedTx(request.collectionId, request.payload.tx)
+      await adapter.applyCommittedTx(
+        requireStorageTarget(request),
+        request.payload.tx,
+      )
       return {
         v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
         requestId: request.requestId,
@@ -207,7 +233,7 @@ async function executeRequestAgainstAdapter(
     case `reconcileCommittedTx`: {
       const result = adapter.reconcileCommittedTx
         ? await adapter.reconcileCommittedTx(
-            request.collectionId,
+            requireStorageTarget(request),
             request.payload.tx,
             request.payload.anchor,
           )
@@ -223,7 +249,7 @@ async function executeRequestAgainstAdapter(
 
     case `ensureIndex`: {
       await adapter.ensureIndex(
-        request.collectionId,
+        requireStorageTarget(request),
         request.payload.signature,
         request.payload.spec,
         request.payload.ctx,
@@ -244,7 +270,7 @@ async function executeRequestAgainstAdapter(
         )
       }
       await adapter.markIndexRemoved(
-        request.collectionId,
+        requireStorageTarget(request),
         request.payload.signature,
         request.payload.ctx,
       )
@@ -264,7 +290,7 @@ async function executeRequestAgainstAdapter(
         )
       }
       const result = await adapter.pullSince(
-        request.collectionId,
+        requireStorageTarget(request),
         request.payload.fromRowVersion,
         request.payload.ctx,
       )
@@ -284,7 +310,7 @@ async function executeRequestAgainstAdapter(
         )
       }
       const position = await adapter.reserveLeadershipTerm(
-        request.collectionId,
+        requireStorageTarget(request),
         request.payload.observedTerm,
         request.payload.ctx,
       )
@@ -304,7 +330,7 @@ async function executeRequestAgainstAdapter(
         )
       }
       const position = await adapter.getStreamPosition(
-        request.collectionId,
+        requireStorageTarget(request),
         request.payload.ctx,
       )
       return {

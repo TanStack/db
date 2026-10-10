@@ -307,9 +307,16 @@ window.__cacheClaimNoticeProbe = {
     }).adapter
     const snapshots = await Promise.all(
       claims.map(async ({ physical_id, claim_id }) => {
-        const snapshot = await adapter.loadResumeSnapshot(physical_id, {
-          cacheGenerationClaimId: claim_id,
-        })
+        const snapshot = await adapter.loadResumeSnapshot(
+          {
+            kind: `managed`,
+            storageCollectionId: physical_id,
+            claimId: claim_id,
+          },
+          {
+            cacheGenerationClaimId: claim_id,
+          },
+        )
         return {
           physicalId: physical_id,
           ids: snapshot.rows.map(({ key }) => String(key)).sort(),

@@ -183,33 +183,36 @@ async function runRace(
       driver,
       schemaVersion: 1,
     })
-    await seedAdapter.applyCommittedTx(collectionId, {
-      txId: `seed`,
-      term: 1,
-      seq: 1,
-      rowVersion: 1,
-      mutations: [
-        { type: `insert`, key: 1, value: { id: 1, name: `one` } },
-        { type: `insert`, key: 2, value: { id: 2, name: `two` } },
-      ],
-      collectionMetadataMutations: [
-        {
-          type: `set`,
-          key: `electric:resume`,
-          value: {
-            kind: `resume`,
-            requiresTagState: startupReset === `tag-state`,
-            offset: `10_0`,
-            handle: `shape-old`,
-            shapeId:
-              startupReset === `shape-identity`
-                ? `{"params":{"table":"other_table"},"url":"http://test-url"}`
-                : `{"params":{"table":"test_table"},"url":"http://test-url"}`,
-            updatedAt: 1,
+    await seedAdapter.applyCommittedTx(
+      { kind: `eager`, collectionId: collectionId },
+      {
+        txId: `seed`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [
+          { type: `insert`, key: 1, value: { id: 1, name: `one` } },
+          { type: `insert`, key: 2, value: { id: 2, name: `two` } },
+        ],
+        collectionMetadataMutations: [
+          {
+            type: `set`,
+            key: `electric:resume`,
+            value: {
+              kind: `resume`,
+              requiresTagState: startupReset === `tag-state`,
+              offset: `10_0`,
+              handle: `shape-old`,
+              shapeId:
+                startupReset === `shape-identity`
+                  ? `{"params":{"table":"other_table"},"url":"http://test-url"}`
+                  : `{"params":{"table":"test_table"},"url":"http://test-url"}`,
+              updatedAt: 1,
+            },
           },
-        },
-      ],
-    })
+        ],
+      },
+    )
     if (legacyUnknown) {
       if (syncMode !== `on-demand`) {
         const tableName = createPersistedTableName(collectionId, `c`)
@@ -227,7 +230,12 @@ async function runRace(
         [collectionId],
       )
       expect(
-        (await seedAdapter.loadResumeSnapshot(collectionId)).keySet,
+        (
+          await seedAdapter.loadResumeSnapshot({
+            kind: `eager`,
+            collectionId: collectionId,
+          })
+        ).keySet,
       ).toEqual({ status: `unknown` })
     }
 
@@ -296,7 +304,10 @@ async function runRace(
                     )
                   }
                   resumeStateAtLaterSnapshot = (
-                    await target.loadCollectionMetadata(collectionId)
+                    await target.loadCollectionMetadata({
+                      kind: `eager`,
+                      collectionId: collectionId,
+                    })
                   ).find(({ key }) => key === `electric:resume`)?.value
                 }
                 laterSnapshotEntered.resolve()
@@ -439,18 +450,29 @@ async function runRace(
       )
     }
     if (transition === `no-write-term-reservation`) {
-      const before = await seedAdapter.loadResumeSnapshot(collectionId, {
-        includeRows: false,
-      })
+      const before = await seedAdapter.loadResumeSnapshot(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          includeRows: false,
+        },
+      )
       expect(before.keySet).toEqual({ status: `consistent` })
-      expect(await seedAdapter.reserveLeadershipTerm(collectionId, 1)).toEqual({
+      expect(
+        await seedAdapter.reserveLeadershipTerm(
+          { kind: `eager`, collectionId: collectionId },
+          1,
+        ),
+      ).toEqual({
         latestTerm: 2,
         latestSeq: 0,
         latestRowVersion: 1,
       })
-      const after = await seedAdapter.loadResumeSnapshot(collectionId, {
-        includeRows: false,
-      })
+      const after = await seedAdapter.loadResumeSnapshot(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          includeRows: false,
+        },
+      )
       expect(after).toMatchObject({
         latestTerm: 2,
         latestSeq: 0,
@@ -469,30 +491,39 @@ async function runRace(
         driver,
         schemaVersion: 2,
       })
-      await resettingAdapter.loadSubset(collectionId, {})
+      await resettingAdapter.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {},
+      )
       durableObserverAdapter = resettingAdapter
     } else if (transition === `committed-write`) {
-      await seedAdapter.applyCommittedTx(collectionId, {
-        txId: `concurrent-writer`,
-        term: 1,
-        seq: 2,
-        rowVersion: 2,
-        mutations: [
-          { type: `insert`, key: 3, value: { id: 3, name: `three` } },
-        ],
-      })
+      await seedAdapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `concurrent-writer`,
+          term: 1,
+          seq: 2,
+          rowVersion: 2,
+          mutations: [
+            { type: `insert`, key: 3, value: { id: 3, name: `three` } },
+          ],
+        },
+      )
     } else if (transition === `committed-replacement`) {
-      await seedAdapter.applyCommittedTx(collectionId, {
-        txId: `concurrent-replacement`,
-        term: 2,
-        seq: 1,
-        rowVersion: 2,
-        truncate: true,
-        mutations: [
-          { type: `insert`, key: 1, value: { id: 1, name: `one` } },
-          { type: `insert`, key: 2, value: { id: 2, name: `two` } },
-        ],
-      })
+      await seedAdapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `concurrent-replacement`,
+          term: 2,
+          seq: 1,
+          rowVersion: 2,
+          truncate: true,
+          mutations: [
+            { type: `insert`, key: 1, value: { id: 1, name: `one` } },
+            { type: `insert`, key: 2, value: { id: 2, name: `two` } },
+          ],
+        },
+      )
     }
     releaseLaterSnapshot.resolve()
 
@@ -513,9 +544,12 @@ async function runRace(
           : [],
       )
       expect(
-        (await durableObserverAdapter.loadSubset(collectionId, {})).map(
-          ({ value }) => value,
-        ),
+        (
+          await durableObserverAdapter.loadSubset(
+            { kind: `eager`, collectionId: collectionId },
+            {},
+          )
+        ).map(({ value }) => value),
       ).toEqual([
         { id: 1, name: `one` },
         { id: 2, name: `two` },
@@ -523,7 +557,10 @@ async function runRace(
       if (startupReset !== `none`) {
         await vi.waitFor(async () => {
           const resumeState = (
-            await durableObserverAdapter.loadCollectionMetadata(collectionId)
+            await durableObserverAdapter.loadCollectionMetadata({
+              kind: `eager`,
+              collectionId: collectionId,
+            })
           ).find(({ key }) => key === `electric:resume`)?.value
           expect(resumeState).toMatchObject({
             kind: `resume`,
@@ -546,8 +583,10 @@ async function runRace(
         )
       }
       await vi.waitFor(async () => {
-        const metadata =
-          await durableObserverAdapter.loadCollectionMetadata(collectionId)
+        const metadata = await durableObserverAdapter.loadCollectionMetadata({
+          kind: `eager`,
+          collectionId: collectionId,
+        })
         const resumeState = metadata.find(
           ({ key }) => key === `electric:resume`,
         )?.value
@@ -577,7 +616,10 @@ async function runRace(
         expect(publicationsBeforeLateDelivery).toBe(0)
       }
       const durableRowsBeforeLateDelivery =
-        await durableObserverAdapter.loadSubset(collectionId, {})
+        await durableObserverAdapter.loadSubset(
+          { kind: `eager`, collectionId: collectionId },
+          {},
+        )
       expect(durableRowsBeforeLateDelivery.map(({ value }) => value)).toEqual(
         transition === `external-row-loss`
           ? [{ id: 2, name: `two` }]
@@ -602,9 +644,12 @@ async function runRace(
       expect(
         Array.from(collection.values(), ({ id, name }) => ({ id, name })),
       ).toEqual(expectedErroredRows)
-      expect(await durableObserverAdapter.loadSubset(collectionId, {})).toEqual(
-        durableRowsBeforeLateDelivery,
-      )
+      expect(
+        await durableObserverAdapter.loadSubset(
+          { kind: `eager`, collectionId: collectionId },
+          {},
+        ),
+      ).toEqual(durableRowsBeforeLateDelivery)
       expect(publications).toBe(publicationsBeforeLateDelivery)
     }
     if (replacesUncertifiedBaseline) {
@@ -719,31 +764,34 @@ async function observeLegacyUnknownResume(): Promise<LegacyUnknownResumeObservat
     // Produce the persisted row/metadata encodings through the real adapter,
     // then reduce only the key-evidence schema to its pre-ledger form.
     const legacyAdapter = new SQLiteCorePersistenceAdapter({ driver })
-    await legacyAdapter.applyCommittedTx(collectionId, {
-      txId: `legacy-snapshot-at-10`,
-      term: 1,
-      seq: 1,
-      rowVersion: 1,
-      mutations: [rowLostBeforeMigration, survivingRow].map((row) => ({
-        type: `insert` as const,
-        key: row.id,
-        value: structuredClone(row),
-      })),
-      collectionMetadataMutations: [
-        {
-          type: `set`,
-          key: `electric:resume`,
-          value: {
-            kind: `resume`,
-            requiresTagState: false,
-            offset: `10_0`,
-            handle: `shape-old`,
-            shapeId: `{"params":{"table":"test_table"},"url":"http://test-url"}`,
-            updatedAt: 1,
+    await legacyAdapter.applyCommittedTx(
+      { kind: `eager`, collectionId: collectionId },
+      {
+        txId: `legacy-snapshot-at-10`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [rowLostBeforeMigration, survivingRow].map((row) => ({
+          type: `insert` as const,
+          key: row.id,
+          value: structuredClone(row),
+        })),
+        collectionMetadataMutations: [
+          {
+            type: `set`,
+            key: `electric:resume`,
+            value: {
+              kind: `resume`,
+              requiresTagState: false,
+              offset: `10_0`,
+              handle: `shape-old`,
+              shapeId: `{"params":{"table":"test_table"},"url":"http://test-url"}`,
+              updatedAt: 1,
+            },
           },
-        },
-      ],
-    })
+        ],
+      },
+    )
 
     const collectionTable = createPersistedTableName(collectionId, `c`)
     await driver.run(
@@ -773,8 +821,10 @@ async function observeLegacyUnknownResume(): Promise<LegacyUnknownResumeObservat
     await driver.exec(`DROP TABLE collection_version_with_ledger`)
 
     const migratedAdapter = new SQLiteCorePersistenceAdapter({ driver })
-    const migratedSnapshot =
-      await migratedAdapter.loadResumeSnapshot(collectionId)
+    const migratedSnapshot = await migratedAdapter.loadResumeSnapshot({
+      kind: `eager`,
+      collectionId: collectionId,
+    })
 
     collection = createCollection(
       persistedCollectionOptions<
@@ -834,7 +884,12 @@ async function observeLegacyUnknownResume(): Promise<LegacyUnknownResumeObservat
         id,
         name,
       })).sort((left, right) => left.id - right.id),
-      durableRows: (await migratedAdapter.loadSubset(collectionId, {}))
+      durableRows: (
+        await migratedAdapter.loadSubset(
+          { kind: `eager`, collectionId: collectionId },
+          {},
+        )
+      )
         .map(({ value }) => value as Item)
         .sort((left, right) => left.id - right.id),
       status: collection.status,
@@ -980,17 +1035,24 @@ describe(`Electric resume snapshot races`, () => {
     const cleanupFailures: Array<unknown> = []
     try {
       const seed = await adapter.claimCacheGeneration(logicalId)
-      await adapter.applyCommittedTx(seed.storageCollectionId, {
-        txId: `warm-seed`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        cacheGenerationClaimId: seed.claimId,
-        mutations: [{ type: `insert`, key: oldRow.id, value: oldRow }],
-        collectionMetadataMutations: [
-          { type: `set`, key: `electric:resume`, value: oldResume },
-        ],
-      })
+      await adapter.applyCommittedTx(
+        {
+          kind: `managed`,
+          storageCollectionId: seed.storageCollectionId,
+          claimId: seed.claimId,
+        },
+        {
+          txId: `warm-seed`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          cacheGenerationClaimId: seed.claimId,
+          mutations: [{ type: `insert`, key: oldRow.id, value: oldRow }],
+          collectionMetadataMutations: [
+            { type: `set`, key: `electric:resume`, value: oldResume },
+          ],
+        },
+      )
       await adapter.releaseCacheGenerationClaim(seed.claimId)
       warm = createCollection(
         persistedCollectionOptions<Item, number>({
@@ -1063,9 +1125,16 @@ describe(`Electric resume snapshot races`, () => {
       expect(recoveringClaim.physical_id).toBe(warmClaim.physical_id)
       expect(
         (
-          await adapter.loadResumeSnapshot(warmClaim.physical_id, {
-            cacheGenerationClaimId: warmClaim.claim_id,
-          })
+          await adapter.loadResumeSnapshot(
+            {
+              kind: `managed`,
+              storageCollectionId: warmClaim.physical_id,
+              claimId: warmClaim.claim_id,
+            },
+            {
+              cacheGenerationClaimId: warmClaim.claim_id,
+            },
+          )
         ).collectionMetadata,
       ).toEqual([{ key: `electric:resume`, value: oldResume }])
 
@@ -1113,9 +1182,16 @@ describe(`Electric resume snapshot races`, () => {
       expect(privateClaim.physical_id).not.toBe(warmClaim.physical_id)
       expect(
         (
-          await adapter.loadResumeSnapshot(privateClaim.physical_id, {
-            cacheGenerationClaimId: recoveringClaim.claim_id,
-          })
+          await adapter.loadResumeSnapshot(
+            {
+              kind: `managed`,
+              storageCollectionId: privateClaim.physical_id,
+              claimId: recoveringClaim.claim_id,
+            },
+            {
+              cacheGenerationClaimId: recoveringClaim.claim_id,
+            },
+          )
         ).rows,
       ).toEqual([])
       subscribers[0]!([
@@ -1130,11 +1206,19 @@ describe(`Electric resume snapshot races`, () => {
       laterClaimId = laterClaim.claimId
       expect(laterClaim.storageCollectionId).toBe(warmClaim.physical_id)
       const privateSnapshot = await adapter.loadResumeSnapshot(
-        privateClaim.physical_id,
+        {
+          kind: `managed`,
+          storageCollectionId: privateClaim.physical_id,
+          claimId: recoveringClaim.claim_id,
+        },
         { cacheGenerationClaimId: recoveringClaim.claim_id },
       )
       const warmSnapshot = await adapter.loadResumeSnapshot(
-        warmClaim.physical_id,
+        {
+          kind: `managed`,
+          storageCollectionId: warmClaim.physical_id,
+          claimId: warmClaim.claim_id,
+        },
         { cacheGenerationClaimId: warmClaim.claim_id },
       )
       expect(privateSnapshot.rows.map(({ key }) => key)).toEqual([2])
@@ -1223,14 +1307,21 @@ describe(`Electric resume snapshot races`, () => {
     const cleanupFailures: Array<unknown> = []
     try {
       const seed = await adapter.claimCacheGeneration(logicalId)
-      await adapter.applyCommittedTx(seed.storageCollectionId, {
-        txId: `old-row`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        cacheGenerationClaimId: seed.claimId,
-        mutations: [{ type: `insert`, key: oldRow.id, value: oldRow }],
-      })
+      await adapter.applyCommittedTx(
+        {
+          kind: `managed`,
+          storageCollectionId: seed.storageCollectionId,
+          claimId: seed.claimId,
+        },
+        {
+          txId: `old-row`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          cacheGenerationClaimId: seed.claimId,
+          mutations: [{ type: `insert`, key: oldRow.id, value: oldRow }],
+        },
+      )
       await adapter.releaseCacheGenerationClaim(seed.claimId)
       const electric = electricCollectionOptions<Item>({
         id: logicalId,
@@ -1304,7 +1395,11 @@ describe(`Electric resume snapshot races`, () => {
       expect(privateClaim.physical_id).not.toBe(initialClaim.physical_id)
       expect(collection.get(oldRow.id)).toMatchObject(oldRow)
       const privateBeforeTruncate = await adapter.loadResumeSnapshot(
-        privateClaim.physical_id,
+        {
+          kind: `managed`,
+          storageCollectionId: privateClaim.physical_id,
+          claimId: privateClaim.claim_id,
+        },
         { cacheGenerationClaimId: privateClaim.claim_id },
       )
       expect(privateBeforeTruncate.rows).toEqual([])
@@ -1335,9 +1430,16 @@ describe(`Electric resume snapshot races`, () => {
       expect(durableWrites).not.toHaveBeenCalled()
       expect(
         (
-          await adapter.loadResumeSnapshot(privateClaim.physical_id, {
-            cacheGenerationClaimId: privateClaim.claim_id,
-          })
+          await adapter.loadResumeSnapshot(
+            {
+              kind: `managed`,
+              storageCollectionId: privateClaim.physical_id,
+              claimId: privateClaim.claim_id,
+            },
+            {
+              cacheGenerationClaimId: privateClaim.claim_id,
+            },
+          )
         ).rows,
       ).toEqual([])
 
@@ -1351,9 +1453,16 @@ describe(`Electric resume snapshot races`, () => {
       expect(collection.get(9)).toBeUndefined()
       expect(
         (
-          await adapter.loadResumeSnapshot(privateClaim.physical_id, {
-            cacheGenerationClaimId: privateClaim.claim_id,
-          })
+          await adapter.loadResumeSnapshot(
+            {
+              kind: `managed`,
+              storageCollectionId: privateClaim.physical_id,
+              claimId: privateClaim.claim_id,
+            },
+            {
+              cacheGenerationClaimId: privateClaim.claim_id,
+            },
+          )
         ).rows,
       ).toEqual([])
       await vi.waitFor(() => {
@@ -1410,9 +1519,16 @@ describe(`Electric resume snapshot races`, () => {
       expect(Array.from(collection.values(), ({ id }) => id)).toEqual([2, 3])
       expect(
         (
-          await adapter.loadResumeSnapshot(privateClaim.physical_id, {
-            cacheGenerationClaimId: privateClaim.claim_id,
-          })
+          await adapter.loadResumeSnapshot(
+            {
+              kind: `managed`,
+              storageCollectionId: privateClaim.physical_id,
+              claimId: privateClaim.claim_id,
+            },
+            {
+              cacheGenerationClaimId: privateClaim.claim_id,
+            },
+          )
         ).rows.map(({ key }) => key),
       ).toEqual([2, 3])
     } catch (error) {

@@ -10,6 +10,7 @@ import {
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { electricCollectionOptions, isChangeMessage } from '../src/electric'
 import { stripVirtualProps } from '../../db/tests/utils'
+import type { PersistedStorageTarget } from '../../db-sqlite-persistence-core/src'
 import type { ElectricCollectionUtils } from '../src/electric'
 import type {
   Collection,
@@ -119,7 +120,7 @@ describe(`Electric Integration`, () => {
         Array.from(rows.entries()).map(([key, value]) => ({ key, value })),
       ),
     loadResumeSnapshot: (
-      _collectionId: string,
+      _target: PersistedStorageTarget,
       options?: { includeRows?: boolean },
     ) =>
       Promise.resolve({
@@ -149,7 +150,7 @@ describe(`Electric Integration`, () => {
           }),
         ),
       ),
-    applyCommittedTx: (_collectionId: string, tx: any) => {
+    applyCommittedTx: (_target: PersistedStorageTarget, tx: any) => {
       for (const mutation of tx.collectionMetadataMutations ?? []) {
         if (mutation.type === `delete`) {
           collectionMetadata?.delete(mutation.key)

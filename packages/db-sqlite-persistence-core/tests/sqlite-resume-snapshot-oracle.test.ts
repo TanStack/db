@@ -169,7 +169,10 @@ async function observeCachedSchemaState(
   driver: SQLiteDriver,
   collectionId: string,
 ): Promise<CachedSchemaState> {
-  const snapshot = await adapter.loadResumeSnapshot(collectionId)
+  const snapshot = await adapter.loadResumeSnapshot({
+    kind: `eager`,
+    collectionId: collectionId,
+  })
   const registryRows = await driver.query<{ schema_version: number }>(
     `SELECT schema_version FROM collection_registry WHERE collection_id = ?`,
     [collectionId],
@@ -270,12 +273,216 @@ async function observeCachedSchemaState(
  * Known omissions: this narrow fixture supplies the same-connection
  * concurrency seam that the serialized copy-on-commit CLI harness cannot. It
  * uses a controlled clock and one shared real SQLite connection for claim races.
- * does not claim native host execution or judge whether a consumer such as
+ * It does not claim native host execution or judge whether a consumer such as
  * Electric may use the certified cursor; those remain separate driver-contract
  * and Electric recovery owners. The work bound is a driver-call measure in
  * node:sqlite, not an elapsed-time or browser OPFS latency guarantee.
  */
 describe(`SQLite resume snapshots`, () => {
+  // A storage target states whether the caller owns an eager Collection or a
+  // claimed cache generation. The independent rule is simple: collection of a
+  // generation ends that claim's authority, so its target cannot read or write
+  // even after SQLite removes the catalog row that identified the physical ID.
+  // The same string may still name an eager Collection when the caller chooses
+  // that target explicitly. This fixed history drives real SQLite through
+  // claim, write, rotation, collection, and late adapter operations. At
+  // each rejected-operation checkpoint, no old table or registry may reappear.
+  it(`keeps a collected managed target from becoming eager storage`, async () => {
+    const database = new DatabaseSync(`:memory:`)
+    let primaryFailure: unknown
+    try {
+      const adapter = new SQLiteCorePersistenceAdapter({
+        driver: createDriver(database),
+      })
+      const claim = await adapter.claimCacheGeneration(
+        `target-after-collection`,
+      )
+      const managed = {
+        kind: `managed` as const,
+        storageCollectionId: claim.storageCollectionId,
+        claimId: claim.claimId,
+      }
+      const oldTable = createPersistedTableName(claim.storageCollectionId, `c`)
+      const oldTombstones = createPersistedTableName(
+        claim.storageCollectionId,
+        `t`,
+      )
+      const footprint = () => {
+        const catalog = [
+          `collection_registry`,
+          `persisted_index_registry`,
+          `applied_tx`,
+          `collection_version`,
+          `collection_expected_keys`,
+          `collection_metadata`,
+          `leader_term`,
+          `collection_reset_epoch`,
+        ]
+        return {
+          tables: database
+            .prepare(
+              `SELECT name FROM sqlite_master WHERE name IN (?, ?) ORDER BY name`,
+            )
+            .all(oldTable, oldTombstones),
+          catalog: catalog.map((table) => ({
+            table,
+            count: (
+              database
+                .prepare(
+                  `SELECT COUNT(*) AS count FROM ${table} WHERE collection_id = ?`,
+                )
+                .get(claim.storageCollectionId) as { count: number }
+            ).count,
+          })),
+          generations: database
+            .prepare(`SELECT * FROM cache_generation WHERE physical_id = ?`)
+            .all(claim.storageCollectionId),
+          claims: database
+            .prepare(
+              `SELECT * FROM cache_generation_claim WHERE physical_id = ?`,
+            )
+            .all(claim.storageCollectionId),
+        }
+      }
+      await adapter.applyCommittedTx(managed, {
+        txId: `seed`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [{ type: `insert`, key: `seed`, value: { id: `seed` } }],
+      })
+      expect((await adapter.loadResumeSnapshot(managed)).rows).toMatchObject([
+        { key: `seed`, value: { id: `seed` } },
+      ])
+      await adapter.rotateCacheGeneration(
+        `target-after-collection`,
+        claim.claimId,
+      )
+
+      const collectedFootprint = footprint()
+      expect(collectedFootprint.tables).toEqual([])
+      expect(collectedFootprint.catalog.every(({ count }) => count === 0)).toBe(
+        true,
+      )
+      expect(collectedFootprint.generations).toEqual([])
+      expect(collectedFootprint.claims).toEqual([])
+      // A JavaScript caller can still pass an old bare ID. It must not be
+      // silently promoted to an eager target after the catalog row is gone.
+      await expect(
+        adapter.loadResumeSnapshot(claim.storageCollectionId as never),
+      ).rejects.toThrow(`explicit eager or managed storage target`)
+      await expect(
+        adapter.applyCommittedTx(claim.storageCollectionId as never, {
+          txId: `bare-late`,
+          term: 2,
+          seq: 1,
+          rowVersion: 2,
+          mutations: [{ type: `insert`, key: `bare`, value: { id: `bare` } }],
+        }),
+      ).rejects.toThrow(`explicit eager or managed storage target`)
+      await expect(
+        adapter.loadResumeSnapshot(`ordinary-bare-id` as never),
+      ).rejects.toThrow(`explicit eager or managed storage target`)
+      await expect(
+        adapter.applyCommittedTx(`ordinary-bare-id` as never, {
+          txId: `ordinary-bare`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [],
+        }),
+      ).rejects.toThrow(`explicit eager or managed storage target`)
+      await expect(
+        adapter.loadResumeSnapshot({
+          kind: `managed`,
+          storageCollectionId: claim.storageCollectionId,
+        } as never),
+      ).rejects.toThrow(
+        `requires a storageCollectionId and persisted cache claim`,
+      )
+      await expect(
+        adapter.loadResumeSnapshot({
+          kind: `eager`,
+          collectionId: claim.storageCollectionId,
+          claimId: claim.claimId,
+        } as never),
+      ).rejects.toThrow(`cannot carry a persisted cache claim`)
+      const lateTx = {
+        txId: `late`,
+        term: 2,
+        seq: 1,
+        rowVersion: 2,
+        mutations: [
+          { type: `insert` as const, key: `late`, value: { id: `late` } },
+        ],
+      }
+      const lateOperations: Array<() => Promise<unknown>> = [
+        () => adapter.loadSubset(managed, {}),
+        () => adapter.loadResumeSnapshot(managed),
+        () => adapter.loadCollectionMetadata(managed),
+        () => adapter.scanRows(managed),
+        () => adapter.getStreamPosition(managed),
+        () => adapter.pullSince(managed, 0),
+        () => adapter.applyCommittedTx(managed, lateTx),
+        () =>
+          adapter.reconcileCommittedTx(managed, lateTx, {
+            latestRowVersion: 1,
+            resetEpoch: 0,
+          }),
+        () =>
+          adapter.ensureIndex(managed, `late-index`, {
+            expressionSql: [`json_extract(value, '$.id')`],
+          }),
+        () => adapter.markIndexRemoved(managed, `late-index`),
+        () => adapter.reserveLeadershipTerm(managed, 1),
+      ]
+      for (const operation of lateOperations) {
+        await expect(operation()).rejects.toThrow(`no longer active`)
+        expect(footprint()).toEqual(collectedFootprint)
+      }
+      const reopened = new SQLiteCorePersistenceAdapter({
+        driver: createDriver(database),
+      })
+      await expect(reopened.loadResumeSnapshot(managed)).rejects.toThrow(
+        `no longer active`,
+      )
+      await expect(reopened.applyCommittedTx(managed, lateTx)).rejects.toThrow(
+        `no longer active`,
+      )
+
+      // Explicit eager reuse is a different legal operation with the same
+      // bytes. The managed target's rejection must not reserve every prefix.
+      const eager = {
+        kind: `eager` as const,
+        collectionId: claim.storageCollectionId,
+      }
+      await reopened.applyCommittedTx(eager, {
+        txId: `eager`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [{ type: `insert`, key: `eager`, value: { id: `eager` } }],
+      })
+      expect(
+        (await reopened.loadResumeSnapshot(eager)).rows.map(({ key }) => key),
+      ).toEqual([`eager`])
+      await expect(reopened.loadResumeSnapshot(managed)).rejects.toThrow(
+        `no longer active`,
+      )
+      await expect(reopened.applyCommittedTx(managed, lateTx)).rejects.toThrow(
+        `no longer active`,
+      )
+      expect(
+        (await reopened.loadResumeSnapshot(eager)).rows.map(({ key }) => key),
+      ).toEqual([`eager`])
+    } catch (error) {
+      primaryFailure = error
+      throw error
+    } finally {
+      closeDatabasePreservingPrimary(database, primaryFailure)
+    }
+  })
+
   // A physical cache ID is a catalog entry, not a string prefix. Public
   // Collection IDs are arbitrary nonempty strings, including one that starts
   // with the internal physical-ID prefix. An eager Collection never claims a
@@ -299,17 +506,23 @@ describe(`SQLite resume snapshots`, () => {
           driver: createDriver(database),
         })
         const row = { id: `row`, title: `Eager row` }
-        await adapter.applyCommittedTx(collectionId, {
-          txId: `eager-source`,
-          term: 1,
-          seq: 1,
-          rowVersion: 1,
-          mutations: [{ type: `insert`, key: row.id, value: row }],
-        })
+        await adapter.applyCommittedTx(
+          { kind: `eager`, collectionId: collectionId },
+          {
+            txId: `eager-source`,
+            term: 1,
+            seq: 1,
+            rowVersion: 1,
+            mutations: [{ type: `insert`, key: row.id, value: row }],
+          },
+        )
         expect(
-          (await adapter.loadResumeSnapshot(collectionId)).rows.map(
-            ({ value }) => value,
-          ),
+          (
+            await adapter.loadResumeSnapshot({
+              kind: `eager`,
+              collectionId: collectionId,
+            })
+          ).rows.map(({ value }) => value),
         ).toEqual([row])
         const collection = createCollection(
           persistedCollectionOptions<typeof row, string>({
@@ -350,22 +563,28 @@ describe(`SQLite resume snapshots`, () => {
       })
       const collectionId = `on-demand-cache-generation`
       const oldRow = { id: `old`, title: `Old source row` }
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `seed`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [{ type: `insert`, key: oldRow.id, value: oldRow }],
-      })
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `seed`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [{ type: `insert`, key: oldRow.id, value: oldRow }],
+        },
+      )
 
       const claim = await adapter.claimCacheGeneration(collectionId)
       expect(claim.storageCollectionId).not.toBe(collectionId)
       const warmClaim = await adapter.claimCacheGeneration(collectionId)
       expect(warmClaim.storageCollectionId).toBe(claim.storageCollectionId)
       const readClaimed = (storageId: string, claimId: string) =>
-        adapter.loadResumeSnapshot(storageId, {
-          cacheGenerationClaimId: claimId,
-        })
+        adapter.loadResumeSnapshot(
+          { kind: `managed`, storageCollectionId: storageId, claimId: claimId },
+          {
+            cacheGenerationClaimId: claimId,
+          },
+        )
       expect(
         (await readClaimed(claim.storageCollectionId, claim.claimId)).rows,
       ).toEqual([])
@@ -377,7 +596,10 @@ describe(`SQLite resume snapshots`, () => {
       )
       expect(rotated.storageCollectionId).not.toBe(claim.storageCollectionId)
 
-      const oldSnapshot = await adapter.loadResumeSnapshot(collectionId)
+      const oldSnapshot = await adapter.loadResumeSnapshot({
+        kind: `eager`,
+        collectionId: collectionId,
+      })
       const initialSnapshot = await readClaimed(
         claim.storageCollectionId,
         warmClaim.claimId,
@@ -395,37 +617,50 @@ describe(`SQLite resume snapshots`, () => {
         { key: `electric:resume`, value: resetMarker },
       ])
       await expect(
-        adapter.loadResumeSnapshot(rotated.storageCollectionId),
+        adapter.loadResumeSnapshot({
+          kind: `eager`,
+          collectionId: rotated.storageCollectionId,
+        }),
       ).rejects.toThrow(`Persisted cache claim is required`)
       await expect(
-        adapter.applyCommittedTx(rotated.storageCollectionId, {
-          txId: `unclaimed-write`,
-          term: 1,
-          seq: 1,
-          rowVersion: 1,
-          mutations: [
-            { type: `insert`, key: `unclaimed`, value: { id: `unclaimed` } },
-          ],
-        }),
+        adapter.applyCommittedTx(
+          { kind: `eager`, collectionId: rotated.storageCollectionId },
+          {
+            txId: `unclaimed-write`,
+            term: 1,
+            seq: 1,
+            rowVersion: 1,
+            mutations: [
+              { type: `insert`, key: `unclaimed`, value: { id: `unclaimed` } },
+            ],
+          },
+        ),
       ).rejects.toThrow(`Persisted cache claim is required`)
       expect(nextClaim.storageCollectionId).toBe(rotated.storageCollectionId)
 
       // An existing run keeps its old generation. Its source-backed writes
       // remain separate from the recovering run's new uncertified cache.
-      await adapter.applyCommittedTx(warmClaim.storageCollectionId, {
-        txId: `warm-source-write`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        cacheGenerationClaimId: warmClaim.claimId,
-        mutations: [
-          {
-            type: `insert`,
-            key: `warm`,
-            value: { id: `warm`, title: `Still source backed` },
-          },
-        ],
-      })
+      await adapter.applyCommittedTx(
+        {
+          kind: `managed`,
+          storageCollectionId: warmClaim.storageCollectionId,
+          claimId: warmClaim.claimId,
+        },
+        {
+          txId: `warm-source-write`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          cacheGenerationClaimId: warmClaim.claimId,
+          mutations: [
+            {
+              type: `insert`,
+              key: `warm`,
+              value: { id: `warm`, title: `Still source backed` },
+            },
+          ],
+        },
+      )
       expect(
         (await readClaimed(rotated.storageCollectionId, rotated.claimId)).rows,
       ).toEqual([])
@@ -433,46 +668,59 @@ describe(`SQLite resume snapshots`, () => {
       // A writer from the previous library version knows only the public
       // Collection ID. It may still change that legacy cache, but it cannot
       // change either new-format generation or add rows to the current one.
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `legacy-late-write`,
-        term: 1,
-        seq: 2,
-        rowVersion: 2,
-        mutations: [
-          {
-            type: `insert`,
-            key: `legacy-late`,
-            value: { id: `legacy-late`, title: `Legacy writer` },
-          },
-        ],
-      })
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `legacy-late-write`,
+          term: 1,
+          seq: 2,
+          rowVersion: 2,
+          mutations: [
+            {
+              type: `insert`,
+              key: `legacy-late`,
+              value: { id: `legacy-late`, title: `Legacy writer` },
+            },
+          ],
+        },
+      )
       expect(
         (await readClaimed(rotated.storageCollectionId, rotated.claimId)).rows,
       ).toEqual([])
       await expect(
-        adapter.applyCommittedTx(rotated.storageCollectionId, {
-          txId: `unclaimed-new-write`,
+        adapter.applyCommittedTx(
+          { kind: `eager`, collectionId: rotated.storageCollectionId },
+          {
+            txId: `unclaimed-new-write`,
+            term: 1,
+            seq: 1,
+            rowVersion: 1,
+            mutations: [
+              {
+                type: `insert`,
+                key: `unclaimed`,
+                value: { id: `unclaimed`, title: `No claim` },
+              },
+            ],
+          },
+        ),
+      ).rejects.toThrow(`Persisted cache claim is required`)
+      const freshRow = { id: `fresh`, title: `Demanded source row` }
+      await adapter.applyCommittedTx(
+        {
+          kind: `managed`,
+          storageCollectionId: rotated.storageCollectionId,
+          claimId: claim.claimId,
+        },
+        {
+          txId: `fresh-subset-write`,
           term: 1,
           seq: 1,
           rowVersion: 1,
-          mutations: [
-            {
-              type: `insert`,
-              key: `unclaimed`,
-              value: { id: `unclaimed`, title: `No claim` },
-            },
-          ],
-        }),
-      ).rejects.toThrow(`Persisted cache claim is required`)
-      const freshRow = { id: `fresh`, title: `Demanded source row` }
-      await adapter.applyCommittedTx(rotated.storageCollectionId, {
-        txId: `fresh-subset-write`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        cacheGenerationClaimId: claim.claimId,
-        mutations: [{ type: `insert`, key: freshRow.id, value: freshRow }],
-      })
+          cacheGenerationClaimId: claim.claimId,
+          mutations: [{ type: `insert`, key: freshRow.id, value: freshRow }],
+        },
+      )
       const partialSnapshot = await readClaimed(
         rotated.storageCollectionId,
         rotated.claimId,
@@ -481,20 +729,30 @@ describe(`SQLite resume snapshots`, () => {
       expect(partialSnapshot.keySet).toEqual({ status: `incompatible` })
 
       await expect(
-        adapter.applyCommittedTx(claim.storageCollectionId, {
-          txId: `late-old-write`,
-          term: 1,
-          seq: 2,
-          rowVersion: 2,
-          cacheGenerationClaimId: claim.claimId,
-          mutations: [
-            {
-              type: `insert`,
-              key: `late`,
-              value: { id: `late`, title: `Must stay outside new generation` },
-            },
-          ],
-        }),
+        adapter.applyCommittedTx(
+          {
+            kind: `managed`,
+            storageCollectionId: claim.storageCollectionId,
+            claimId: claim.claimId,
+          },
+          {
+            txId: `late-old-write`,
+            term: 1,
+            seq: 2,
+            rowVersion: 2,
+            cacheGenerationClaimId: claim.claimId,
+            mutations: [
+              {
+                type: `insert`,
+                key: `late`,
+                value: {
+                  id: `late`,
+                  title: `Must stay outside new generation`,
+                },
+              },
+            ],
+          },
+        ),
       ).rejects.toThrow(`Persisted cache claim`)
 
       // A complete replacement can certify the new head for later runs.
@@ -502,15 +760,22 @@ describe(`SQLite resume snapshots`, () => {
       // authority, but that loss says nothing about the certified head. Its
       // replacement must stay private to that run instead of retiring the
       // other run's valid cache.
-      await adapter.applyCommittedTx(rotated.storageCollectionId, {
-        txId: `certify-new-head`,
-        term: 1,
-        seq: 2,
-        rowVersion: 2,
-        cacheGenerationClaimId: claim.claimId,
-        truncate: true,
-        mutations: [{ type: `insert`, key: freshRow.id, value: freshRow }],
-      })
+      await adapter.applyCommittedTx(
+        {
+          kind: `managed`,
+          storageCollectionId: rotated.storageCollectionId,
+          claimId: claim.claimId,
+        },
+        {
+          txId: `certify-new-head`,
+          term: 1,
+          seq: 2,
+          rowVersion: 2,
+          cacheGenerationClaimId: claim.claimId,
+          truncate: true,
+          mutations: [{ type: `insert`, key: freshRow.id, value: freshRow }],
+        },
+      )
       expect(
         (await readClaimed(rotated.storageCollectionId, rotated.claimId))
           .keySet,
@@ -538,20 +803,27 @@ describe(`SQLite resume snapshots`, () => {
       ).toEqual([])
       const latestClaim = await adapter.claimCacheGeneration(collectionId)
       expect(latestClaim.storageCollectionId).toBe(rotated.storageCollectionId)
-      await adapter.applyCommittedTx(secondRecovery.storageCollectionId, {
-        txId: `private-source-write`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        cacheGenerationClaimId: warmClaim.claimId,
-        mutations: [
-          {
-            type: `insert`,
-            key: `private`,
-            value: { id: `private`, title: `Private source row` },
-          },
-        ],
-      })
+      await adapter.applyCommittedTx(
+        {
+          kind: `managed`,
+          storageCollectionId: secondRecovery.storageCollectionId,
+          claimId: warmClaim.claimId,
+        },
+        {
+          txId: `private-source-write`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          cacheGenerationClaimId: warmClaim.claimId,
+          mutations: [
+            {
+              type: `insert`,
+              key: `private`,
+              value: { id: `private`, title: `Private source row` },
+            },
+          ],
+        },
+      )
       expect(
         (
           await readClaimed(rotated.storageCollectionId, latestClaim.claimId)
@@ -602,13 +874,24 @@ describe(`SQLite resume snapshots`, () => {
       // supplies the claim it used at admission, and SQLite checks it inside
       // the read transaction before returning even an empty snapshot.
       await expect(
-        adapter.loadResumeSnapshot(thirdRecovery.storageCollectionId, {
-          cacheGenerationClaimId: claim.claimId,
-        }),
+        adapter.loadResumeSnapshot(
+          {
+            kind: `managed`,
+            storageCollectionId: thirdRecovery.storageCollectionId,
+            claimId: claim.claimId,
+          },
+          {
+            cacheGenerationClaimId: claim.claimId,
+          },
+        ),
       ).rejects.toThrow(`Persisted cache claim`)
       await expect(
         adapter.loadSubset(
-          thirdRecovery.storageCollectionId,
+          {
+            kind: `managed`,
+            storageCollectionId: thirdRecovery.storageCollectionId,
+            claimId: claim.claimId,
+          },
           {},
           {
             cacheGenerationClaimId: claim.claimId,
@@ -616,14 +899,29 @@ describe(`SQLite resume snapshots`, () => {
         ),
       ).rejects.toThrow(`Persisted cache claim`)
       await expect(
-        adapter.scanRows(thirdRecovery.storageCollectionId, undefined, {
-          cacheGenerationClaimId: claim.claimId,
-        }),
+        adapter.scanRows(
+          {
+            kind: `managed`,
+            storageCollectionId: thirdRecovery.storageCollectionId,
+            claimId: claim.claimId,
+          },
+          undefined,
+          {
+            cacheGenerationClaimId: claim.claimId,
+          },
+        ),
       ).rejects.toThrow(`Persisted cache claim`)
       await expect(
-        adapter.loadCollectionMetadata(thirdRecovery.storageCollectionId, {
-          cacheGenerationClaimId: claim.claimId,
-        }),
+        adapter.loadCollectionMetadata(
+          {
+            kind: `managed`,
+            storageCollectionId: thirdRecovery.storageCollectionId,
+            claimId: claim.claimId,
+          },
+          {
+            cacheGenerationClaimId: claim.claimId,
+          },
+        ),
       ).rejects.toThrow(`Persisted cache claim`)
     } catch (error) {
       primaryFailure = error
@@ -660,18 +958,32 @@ describe(`SQLite resume snapshots`, () => {
     let primaryFailure: unknown
     try {
       const claim = await writer.claimCacheGeneration(`revoked-cache-read`)
-      await writer.applyCommittedTx(claim.storageCollectionId, {
-        txId: `seed-row`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        cacheGenerationClaimId: claim.claimId,
-        mutations: [{ type: `insert`, key: `row`, value: { id: `row` } }],
-      })
+      await writer.applyCommittedTx(
+        {
+          kind: `managed`,
+          storageCollectionId: claim.storageCollectionId,
+          claimId: claim.claimId,
+        },
+        {
+          txId: `seed-row`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          cacheGenerationClaimId: claim.claimId,
+          mutations: [{ type: `insert`, key: `row`, value: { id: `row` } }],
+        },
+      )
       holdRegistration = true
-      read = reader.loadResumeSnapshot(claim.storageCollectionId, {
-        cacheGenerationClaimId: claim.claimId,
-      })
+      read = reader.loadResumeSnapshot(
+        {
+          kind: `managed`,
+          storageCollectionId: claim.storageCollectionId,
+          claimId: claim.claimId,
+        },
+        {
+          cacheGenerationClaimId: claim.claimId,
+        },
+      )
       void read.catch(() => undefined)
       await reachCheckpoint(registrationEntered.promise, `registration lookup`)
       await writer.releaseCacheGenerationClaim(claim.claimId)
@@ -703,28 +1015,42 @@ describe(`SQLite resume snapshots`, () => {
       const logicalId = `retired-cache-collection`
       const first = await adapter.claimCacheGeneration(logicalId)
       const warm = await adapter.claimCacheGeneration(logicalId)
-      await adapter.applyCommittedTx(first.storageCollectionId, {
-        txId: `old-row`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        cacheGenerationClaimId: first.claimId,
-        mutations: [{ type: `insert`, key: `old`, value: { id: `old` } }],
-      })
+      await adapter.applyCommittedTx(
+        {
+          kind: `managed`,
+          storageCollectionId: first.storageCollectionId,
+          claimId: first.claimId,
+        },
+        {
+          txId: `old-row`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          cacheGenerationClaimId: first.claimId,
+          mutations: [{ type: `insert`, key: `old`, value: { id: `old` } }],
+        },
+      )
       const current = await adapter.rotateCacheGeneration(
         logicalId,
         first.claimId,
       )
-      await adapter.applyCommittedTx(current.storageCollectionId, {
-        txId: `current-row`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        cacheGenerationClaimId: current.claimId,
-        mutations: [
-          { type: `insert`, key: `current`, value: { id: `current` } },
-        ],
-      })
+      await adapter.applyCommittedTx(
+        {
+          kind: `managed`,
+          storageCollectionId: current.storageCollectionId,
+          claimId: current.claimId,
+        },
+        {
+          txId: `current-row`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          cacheGenerationClaimId: current.claimId,
+          mutations: [
+            { type: `insert`, key: `current`, value: { id: `current` } },
+          ],
+        },
+      )
       const oldTable = createPersistedTableName(first.storageCollectionId, `c`)
       const countOld = () =>
         (
@@ -743,9 +1069,16 @@ describe(`SQLite resume snapshots`, () => {
       ).toBeUndefined()
       expect(
         (
-          await adapter.loadResumeSnapshot(current.storageCollectionId, {
-            cacheGenerationClaimId: current.claimId,
-          })
+          await adapter.loadResumeSnapshot(
+            {
+              kind: `managed`,
+              storageCollectionId: current.storageCollectionId,
+              claimId: current.claimId,
+            },
+            {
+              cacheGenerationClaimId: current.claimId,
+            },
+          )
         ).rows.map(({ key }) => key),
       ).toEqual([`current`])
       const next = await adapter.claimCacheGeneration(logicalId)
@@ -810,32 +1143,43 @@ describe(`SQLite resume snapshots`, () => {
         const rows = Array.from({ length: history.rowCount }, (_, index) => ({
           id: `g${generation}-row-${index}`,
         }))
-        await adapter.applyCommittedTx(claim.storageCollectionId, {
-          txId: `g${generation}-seed`,
-          term: generation + 1,
-          seq: 1,
-          rowVersion: 1,
-          cacheGenerationClaimId: claim.claimId,
-          truncate: true,
-          mutations: [
-            ...rows.map((row) => ({
-              type: `insert` as const,
-              key: row.id,
-              value: row,
-            })),
-            {
-              type: `delete` as const,
-              key: `g${generation}-gone`,
-              value: { id: `g${generation}-gone` },
-            },
-          ],
-          collectionMetadataMutations: [
-            { type: `set`, key: `resume`, value: `g${generation}-cursor` },
-          ],
-        })
+        await adapter.applyCommittedTx(
+          {
+            kind: `managed`,
+            storageCollectionId: claim.storageCollectionId,
+            claimId: claim.claimId,
+          },
+          {
+            txId: `g${generation}-seed`,
+            term: generation + 1,
+            seq: 1,
+            rowVersion: 1,
+            cacheGenerationClaimId: claim.claimId,
+            truncate: true,
+            mutations: [
+              ...rows.map((row) => ({
+                type: `insert` as const,
+                key: row.id,
+                value: row,
+              })),
+              {
+                type: `delete` as const,
+                key: `g${generation}-gone`,
+                value: { id: `g${generation}-gone` },
+              },
+            ],
+            collectionMetadataMutations: [
+              { type: `set`, key: `resume`, value: `g${generation}-cursor` },
+            ],
+          },
+        )
         const signature = `g${generation}-index`
         await adapter.ensureIndex(
-          claim.storageCollectionId,
+          {
+            kind: `managed`,
+            storageCollectionId: claim.storageCollectionId,
+            claimId: claim.claimId,
+          },
           signature,
           { expressionSql: [`row_version`] },
           { cacheGenerationClaimId: claim.claimId },
@@ -1121,19 +1465,33 @@ describe(`SQLite resume snapshots`, () => {
       const rotating = await writer.claimCacheGeneration(logicalId)
       const warm = await writer.claimCacheGeneration(logicalId)
       oldTable = createPersistedTableName(rotating.storageCollectionId, `c`)
-      await writer.applyCommittedTx(rotating.storageCollectionId, {
-        txId: `old`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        cacheGenerationClaimId: rotating.claimId,
-        mutations: [{ type: `insert`, key: `old`, value: { id: `old` } }],
-      })
+      await writer.applyCommittedTx(
+        {
+          kind: `managed`,
+          storageCollectionId: rotating.storageCollectionId,
+          claimId: rotating.claimId,
+        },
+        {
+          txId: `old`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          cacheGenerationClaimId: rotating.claimId,
+          mutations: [{ type: `insert`, key: `old`, value: { id: `old` } }],
+        },
+      )
       await writer.rotateCacheGeneration(logicalId, rotating.claimId)
       holdCreate = true
-      read = reader.loadResumeSnapshot(rotating.storageCollectionId, {
-        cacheGenerationClaimId: warm.claimId,
-      })
+      read = reader.loadResumeSnapshot(
+        {
+          kind: `managed`,
+          storageCollectionId: rotating.storageCollectionId,
+          claimId: warm.claimId,
+        },
+        {
+          cacheGenerationClaimId: warm.claimId,
+        },
+      )
       void read.catch(() => undefined)
       await reachCheckpoint(createEntered.promise, `held registration DDL`)
       await writer.releaseCacheGenerationClaim(warm.claimId)
@@ -1195,23 +1553,37 @@ describe(`SQLite resume snapshots`, () => {
       const logicalId = `held-managed-catalog-lookup`
       const rotating = await writer.claimCacheGeneration(logicalId)
       const warm = await writer.claimCacheGeneration(logicalId)
-      await writer.applyCommittedTx(rotating.storageCollectionId, {
-        txId: `old`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        cacheGenerationClaimId: rotating.claimId,
-        mutations: [{ type: `insert`, key: `old`, value: { id: `old` } }],
-      })
+      await writer.applyCommittedTx(
+        {
+          kind: `managed`,
+          storageCollectionId: rotating.storageCollectionId,
+          claimId: rotating.claimId,
+        },
+        {
+          txId: `old`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          cacheGenerationClaimId: rotating.claimId,
+          mutations: [{ type: `insert`, key: `old`, value: { id: `old` } }],
+        },
+      )
       await writer.rotateCacheGeneration(logicalId, rotating.claimId)
       const oldTable = createPersistedTableName(
         rotating.storageCollectionId,
         `c`,
       )
       holdLookup = true
-      read = reader.loadResumeSnapshot(rotating.storageCollectionId, {
-        cacheGenerationClaimId: warm.claimId,
-      })
+      read = reader.loadResumeSnapshot(
+        {
+          kind: `managed`,
+          storageCollectionId: rotating.storageCollectionId,
+          claimId: warm.claimId,
+        },
+        {
+          cacheGenerationClaimId: warm.claimId,
+        },
+      )
       void read.catch(() => undefined)
       await reachCheckpoint(lookupEntered.promise, `managed catalog lookup`)
       await writer.releaseCacheGenerationClaim(warm.claimId)
@@ -1276,19 +1648,33 @@ describe(`SQLite resume snapshots`, () => {
       const warm = await writer.claimCacheGeneration(logicalId)
       const oldId = moving.storageCollectionId
       const oldTable = createPersistedTableName(oldId, `c`)
-      await writer.applyCommittedTx(oldId, {
-        txId: `warm-row`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        cacheGenerationClaimId: moving.claimId,
-        mutations: [{ type: `insert`, key: `row`, value: { id: `row` } }],
-      })
+      await writer.applyCommittedTx(
+        {
+          kind: `managed`,
+          storageCollectionId: oldId,
+          claimId: moving.claimId,
+        },
+        {
+          txId: `warm-row`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          cacheGenerationClaimId: moving.claimId,
+          mutations: [{ type: `insert`, key: `row`, value: { id: `row` } }],
+        },
+      )
 
       holdRegistration = true
-      read = staleReader.loadResumeSnapshot(oldId, {
-        cacheGenerationClaimId: moving.claimId,
-      })
+      read = staleReader.loadResumeSnapshot(
+        {
+          kind: `managed`,
+          storageCollectionId: oldId,
+          claimId: moving.claimId,
+        },
+        {
+          cacheGenerationClaimId: moving.claimId,
+        },
+      )
       void read.catch(() => undefined)
       await reachCheckpoint(
         registrationEntered.promise,
@@ -1326,9 +1712,16 @@ describe(`SQLite resume snapshots`, () => {
       ).toEqual({ reset_epoch: 0 })
       expect(
         (
-          await writer.loadResumeSnapshot(oldId, {
-            cacheGenerationClaimId: warm.claimId,
-          })
+          await writer.loadResumeSnapshot(
+            {
+              kind: `managed`,
+              storageCollectionId: oldId,
+              claimId: warm.claimId,
+            },
+            {
+              cacheGenerationClaimId: warm.claimId,
+            },
+          )
         ).rows.map(({ key }) => key),
       ).toEqual([`row`])
     } catch (error) {
@@ -1391,9 +1784,16 @@ describe(`SQLite resume snapshots`, () => {
       const oldId = moving.storageCollectionId
 
       holdRegistration = true
-      read = staleReader.loadResumeSnapshot(oldId, {
-        cacheGenerationClaimId: moving.claimId,
-      })
+      read = staleReader.loadResumeSnapshot(
+        {
+          kind: `managed`,
+          storageCollectionId: oldId,
+          claimId: moving.claimId,
+        },
+        {
+          cacheGenerationClaimId: moving.claimId,
+        },
+      )
       void read.catch(() => undefined)
       await reachCheckpoint(
         registrationEntered.promise,
@@ -1416,9 +1816,16 @@ describe(`SQLite resume snapshots`, () => {
       ).toBeUndefined()
       expect(
         (
-          await writer.loadResumeSnapshot(oldId, {
-            cacheGenerationClaimId: warm.claimId,
-          })
+          await writer.loadResumeSnapshot(
+            {
+              kind: `managed`,
+              storageCollectionId: oldId,
+              claimId: warm.claimId,
+            },
+            {
+              cacheGenerationClaimId: warm.claimId,
+            },
+          )
         ).collectionMetadata,
       ).toEqual([{ key: `resume`, value: `must-survive` }])
     } catch (error) {
@@ -1449,24 +1856,38 @@ describe(`SQLite resume snapshots`, () => {
       const logicalId = `expired-cache-claim`
       const old = await adapter.claimCacheGeneration(logicalId)
       const paused = await adapter.claimCacheGeneration(logicalId)
-      await adapter.applyCommittedTx(old.storageCollectionId, {
-        txId: `old`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        cacheGenerationClaimId: old.claimId,
-        mutations: [{ type: `insert`, key: `old`, value: { id: `old` } }],
-      })
+      await adapter.applyCommittedTx(
+        {
+          kind: `managed`,
+          storageCollectionId: old.storageCollectionId,
+          claimId: old.claimId,
+        },
+        {
+          txId: `old`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          cacheGenerationClaimId: old.claimId,
+          mutations: [{ type: `insert`, key: `old`, value: { id: `old` } }],
+        },
+      )
       const head = await adapter.rotateCacheGeneration(logicalId, old.claimId)
       const headTable = createPersistedTableName(head.storageCollectionId, `c`)
-      await adapter.applyCommittedTx(head.storageCollectionId, {
-        txId: `head`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        cacheGenerationClaimId: head.claimId,
-        mutations: [{ type: `insert`, key: `head`, value: { id: `head` } }],
-      })
+      await adapter.applyCommittedTx(
+        {
+          kind: `managed`,
+          storageCollectionId: head.storageCollectionId,
+          claimId: head.claimId,
+        },
+        {
+          txId: `head`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          cacheGenerationClaimId: head.claimId,
+          mutations: [{ type: `insert`, key: `head`, value: { id: `head` } }],
+        },
+      )
       now = 1_090
       expect(
         await adapter.renewCacheGenerationClaim(
@@ -1478,9 +1899,16 @@ describe(`SQLite resume snapshots`, () => {
       const next = await adapter.claimCacheGeneration(logicalId)
       expect(next.storageCollectionId).toBe(head.storageCollectionId)
       await expect(
-        adapter.loadResumeSnapshot(old.storageCollectionId, {
-          cacheGenerationClaimId: paused.claimId,
-        }),
+        adapter.loadResumeSnapshot(
+          {
+            kind: `managed`,
+            storageCollectionId: old.storageCollectionId,
+            claimId: paused.claimId,
+          },
+          {
+            cacheGenerationClaimId: paused.claimId,
+          },
+        ),
       ).rejects.toThrow(`Persisted cache claim`)
       const oldTable = createPersistedTableName(old.storageCollectionId, `c`)
       expect(
@@ -1498,14 +1926,21 @@ describe(`SQLite resume snapshots`, () => {
       expect(
         (await adapter.claimCacheGeneration(logicalId)).storageCollectionId,
       ).toBe(head.storageCollectionId)
-      await adapter.applyCommittedTx(privateRecovery.storageCollectionId, {
-        txId: `fresh-subset`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        cacheGenerationClaimId: privateRecovery.claimId,
-        mutations: [{ type: `insert`, key: `fresh`, value: { id: `fresh` } }],
-      })
+      await adapter.applyCommittedTx(
+        {
+          kind: `managed`,
+          storageCollectionId: privateRecovery.storageCollectionId,
+          claimId: privateRecovery.claimId,
+        },
+        {
+          txId: `fresh-subset`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          cacheGenerationClaimId: privateRecovery.claimId,
+          mutations: [{ type: `insert`, key: `fresh`, value: { id: `fresh` } }],
+        },
+      )
       expect(
         (
           database
@@ -1518,7 +1953,11 @@ describe(`SQLite resume snapshots`, () => {
       expect(
         (
           await adapter.loadResumeSnapshot(
-            privateRecovery.storageCollectionId,
+            {
+              kind: `managed`,
+              storageCollectionId: privateRecovery.storageCollectionId,
+              claimId: privateRecovery.claimId,
+            },
             { cacheGenerationClaimId: privateRecovery.claimId },
           )
         ).rows.map(({ key }) => key),
@@ -1560,14 +1999,21 @@ describe(`SQLite resume snapshots`, () => {
       })
       const logicalId = `expired-head-recovery`
       const old = await adapter.claimCacheGeneration(logicalId)
-      await adapter.applyCommittedTx(old.storageCollectionId, {
-        txId: `old`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        cacheGenerationClaimId: old.claimId,
-        mutations: [{ type: `insert`, key: `old`, value: { id: `old` } }],
-      })
+      await adapter.applyCommittedTx(
+        {
+          kind: `managed`,
+          storageCollectionId: old.storageCollectionId,
+          claimId: old.claimId,
+        },
+        {
+          txId: `old`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          cacheGenerationClaimId: old.claimId,
+          mutations: [{ type: `insert`, key: `old`, value: { id: `old` } }],
+        },
+      )
       now = 1_101
       expect(
         await adapter.renewCacheGenerationClaim(
@@ -1586,15 +2032,29 @@ describe(`SQLite resume snapshots`, () => {
       expect(repaired.storageCollectionId).not.toBe(old.storageCollectionId)
       expect(
         (
-          await adapter.loadResumeSnapshot(next.storageCollectionId, {
-            cacheGenerationClaimId: next.claimId,
-          })
+          await adapter.loadResumeSnapshot(
+            {
+              kind: `managed`,
+              storageCollectionId: next.storageCollectionId,
+              claimId: next.claimId,
+            },
+            {
+              cacheGenerationClaimId: next.claimId,
+            },
+          )
         ).rows.map(({ key }) => key),
       ).toEqual([`old`])
       await expect(
-        adapter.loadResumeSnapshot(old.storageCollectionId, {
-          cacheGenerationClaimId: old.claimId,
-        }),
+        adapter.loadResumeSnapshot(
+          {
+            kind: `managed`,
+            storageCollectionId: old.storageCollectionId,
+            claimId: old.claimId,
+          },
+          {
+            cacheGenerationClaimId: old.claimId,
+          },
+        ),
       ).rejects.toThrow(`Persisted cache claim`)
       await adapter.releaseCacheGenerationClaim(next.claimId)
       await adapter.releaseCacheGenerationClaim(repaired.claimId)
@@ -1684,17 +2144,24 @@ describe(`SQLite resume snapshots`, () => {
     let primaryFailure: unknown
     try {
       const seed = await adapter.claimCacheGeneration(logicalId)
-      await adapter.applyCommittedTx(seed.storageCollectionId, {
-        txId: `old-source-row`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        cacheGenerationClaimId: seed.claimId,
-        mutations: [{ type: `insert`, key: oldRow.id, value: oldRow }],
-        collectionMetadataMutations: [
-          { type: `set`, key: `electric:resume`, value: warmResume },
-        ],
-      })
+      await adapter.applyCommittedTx(
+        {
+          kind: `managed`,
+          storageCollectionId: seed.storageCollectionId,
+          claimId: seed.claimId,
+        },
+        {
+          txId: `old-source-row`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          cacheGenerationClaimId: seed.claimId,
+          mutations: [{ type: `insert`, key: oldRow.id, value: oldRow }],
+          collectionMetadataMutations: [
+            { type: `set`, key: `electric:resume`, value: warmResume },
+          ],
+        },
+      )
       await adapter.releaseCacheGenerationClaim(seed.claimId)
 
       recovering = createPeer(true)
@@ -1765,9 +2232,16 @@ describe(`SQLite resume snapshots`, () => {
       expect(Array.from(recovering.values())).toEqual([])
       expect(
         (
-          await adapter.loadResumeSnapshot(recoveringClaim.physical_id, {
-            cacheGenerationClaimId: initialClaim.claim_id,
-          })
+          await adapter.loadResumeSnapshot(
+            {
+              kind: `managed`,
+              storageCollectionId: recoveringClaim.physical_id,
+              claimId: initialClaim.claim_id,
+            },
+            {
+              cacheGenerationClaimId: initialClaim.claim_id,
+            },
+          )
         ).rows,
       ).toEqual([])
 
@@ -1781,11 +2255,19 @@ describe(`SQLite resume snapshots`, () => {
       ])
       expect(Array.from(warm.values(), ({ id }) => id)).toEqual([oldRow.id])
       const privateSnapshot = await adapter.loadResumeSnapshot(
-        recoveringClaim.physical_id,
+        {
+          kind: `managed`,
+          storageCollectionId: recoveringClaim.physical_id,
+          claimId: initialClaim.claim_id,
+        },
         { cacheGenerationClaimId: initialClaim.claim_id },
       )
       const warmSnapshot = await adapter.loadResumeSnapshot(
-        warmClaim.physical_id,
+        {
+          kind: `managed`,
+          storageCollectionId: warmClaim.physical_id,
+          claimId: warmClaim.claim_id,
+        },
         { cacheGenerationClaimId: warmClaim.claim_id },
       )
       expect(privateSnapshot.rows.map(({ key }) => key)).toEqual([freshRow.id])
@@ -1849,16 +2331,24 @@ describe(`SQLite resume snapshots`, () => {
       const claim = await adapter.claimCacheGeneration(`coordinator-claim`)
       const id = claim.storageCollectionId
       const claimCtx = { cacheGenerationClaimId: claim.claimId }
-      await adapter.applyCommittedTx(id, {
-        txId: `seed`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        cacheGenerationClaimId: claim.claimId,
-        mutations: [{ type: `insert`, key: `row`, value: { id: `row` } }],
-      })
+      const claimTarget = {
+        kind: `managed` as const,
+        storageCollectionId: id,
+        claimId: claim.claimId,
+      }
+      await adapter.applyCommittedTx(
+        { kind: `managed`, storageCollectionId: id, claimId: claim.claimId },
+        {
+          txId: `seed`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          cacheGenerationClaimId: claim.claimId,
+          mutations: [{ type: `insert`, key: `row`, value: { id: `row` } }],
+        },
+      )
       await adapter.ensureIndex(
-        id,
+        claimTarget,
         `existing`,
         { expressionSql: [`json_extract(value, '$.id')`] },
         claimCtx,
@@ -1866,43 +2356,50 @@ describe(`SQLite resume snapshots`, () => {
       now = 1_050
       const peer = await adapter.claimCacheGeneration(`coordinator-claim`)
       const peerCtx = { cacheGenerationClaimId: peer.claimId }
+      const peerTarget = {
+        kind: `managed` as const,
+        storageCollectionId: id,
+        claimId: peer.claimId,
+      }
       now = 1_101
       expect(adapter.getCacheGenerationNow()).toBe(now)
-      await expect(adapter.getStreamPosition(id, claimCtx)).rejects.toThrow(
-        `Persisted cache claim`,
-      )
-      await expect(adapter.pullSince(id, 0, claimCtx)).rejects.toThrow(
+      await expect(
+        adapter.getStreamPosition(claimTarget, claimCtx),
+      ).rejects.toThrow(`Persisted cache claim`)
+      await expect(adapter.pullSince(claimTarget, 0, claimCtx)).rejects.toThrow(
         `Persisted cache claim`,
       )
       await expect(
         adapter.ensureIndex(
-          id,
+          claimTarget,
           `late`,
           { expressionSql: [`json_extract(value, '$.id')`] },
           claimCtx,
         ),
       ).rejects.toThrow(`Persisted cache claim`)
       await expect(
-        adapter.markIndexRemoved(id, `existing`, claimCtx),
+        adapter.markIndexRemoved(claimTarget, `existing`, claimCtx),
       ).rejects.toThrow(`Persisted cache claim`)
-      await expect(adapter.getStreamPosition(id)).rejects.toThrow(
-        `Persisted cache claim`,
-      )
+      await expect(
+        adapter.getStreamPosition({ kind: `eager`, collectionId: id }),
+      ).rejects.toThrow(`Persisted cache claim`)
 
-      expect(await adapter.getStreamPosition(id, peerCtx)).toMatchObject({
+      expect(
+        await adapter.getStreamPosition(peerTarget, peerCtx),
+      ).toMatchObject({
         latestTerm: 1,
         latestSeq: 1,
       })
-      expect(await adapter.pullSince(id, 0, peerCtx)).toMatchObject({
+      expect(await adapter.pullSince(peerTarget, 0, peerCtx)).toMatchObject({
         changedKeys: [`row`],
       })
       await adapter.ensureIndex(
-        id,
+        peerTarget,
         `peer`,
         { expressionSql: [`json_extract(value, '$.id')`] },
         peerCtx,
       )
-      await adapter.markIndexRemoved(id, `peer`, peerCtx)
+      await adapter.markIndexRemoved(peerTarget, `peer`, peerCtx)
       expect(
         database
           .prepare(
@@ -1915,15 +2412,18 @@ describe(`SQLite resume snapshots`, () => {
         { signature: `peer`, removed: 1 },
       ])
       await adapter.releaseCacheGenerationClaim(peer.claimId)
-      await expect(adapter.getStreamPosition(id, peerCtx)).rejects.toThrow(
-        `Persisted cache claim`,
-      )
+      await expect(
+        adapter.getStreamPosition(peerTarget, peerCtx),
+      ).rejects.toThrow(`Persisted cache claim`)
       const next = await adapter.claimCacheGeneration(`coordinator-claim`)
       expect(next.storageCollectionId).toBe(id)
       expect(
-        await adapter.getStreamPosition(id, {
-          cacheGenerationClaimId: next.claimId,
-        }),
+        await adapter.getStreamPosition(
+          { kind: `managed`, storageCollectionId: id, claimId: next.claimId },
+          {
+            cacheGenerationClaimId: next.claimId,
+          },
+        ),
       ).toMatchObject({ latestRowVersion: 1 })
       await adapter.releaseCacheGenerationClaim(next.claimId)
     } catch (error) {
@@ -2163,21 +2663,28 @@ describe(`SQLite resume snapshots`, () => {
       expect(first.expiresAtMs).toBe(firstExpiresAtMs)
       rowTable = createPersistedTableName(storageId, `c`)
       const resume = { offset: `warm-peer-offset` }
-      await adapter.applyCommittedTx(storageId, {
-        txId: `seed`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        cacheGenerationClaimId: first.claimId,
-        mutations: rows.map((row) => ({
-          type: `insert` as const,
-          key: row.id,
-          value: row,
-        })),
-        collectionMetadataMutations: [
-          { type: `set`, key: `resume`, value: resume },
-        ],
-      })
+      await adapter.applyCommittedTx(
+        {
+          kind: `managed`,
+          storageCollectionId: storageId,
+          claimId: first.claimId,
+        },
+        {
+          txId: `seed`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          cacheGenerationClaimId: first.claimId,
+          mutations: rows.map((row) => ({
+            type: `insert` as const,
+            key: row.id,
+            value: row,
+          })),
+          collectionMetadataMutations: [
+            { type: `set`, key: `resume`, value: resume },
+          ],
+        },
+      )
       now = peerClaimsAtMs
       const warm = await adapter.claimCacheGeneration(logicalId)
       expect(warm.storageCollectionId).toBe(storageId)
@@ -2186,10 +2693,17 @@ describe(`SQLite resume snapshots`, () => {
 
       holdTransaction = true
       observeHeldRead = true
-      read = adapter.loadResumeSnapshot(storageId, {
-        includeRows,
-        cacheGenerationClaimId: first.claimId,
-      })
+      read = adapter.loadResumeSnapshot(
+        {
+          kind: `managed`,
+          storageCollectionId: storageId,
+          claimId: first.claimId,
+        },
+        {
+          includeRows,
+          cacheGenerationClaimId: first.claimId,
+        },
+      )
       void read.catch(() => undefined)
       await reachCheckpoint(
         transactionEntered.promise,
@@ -2235,9 +2749,16 @@ describe(`SQLite resume snapshots`, () => {
         }
       }
       observeHeldRead = false
-      const peerSnapshot = await adapter.loadResumeSnapshot(storageId, {
-        cacheGenerationClaimId: warm.claimId,
-      })
+      const peerSnapshot = await adapter.loadResumeSnapshot(
+        {
+          kind: `managed`,
+          storageCollectionId: storageId,
+          claimId: warm.claimId,
+        },
+        {
+          cacheGenerationClaimId: warm.claimId,
+        },
+      )
       expect(peerSnapshot.rows.map(({ value }) => value)).toEqual(rows)
       expect(peerSnapshot.collectionMetadata).toEqual([
         { key: `resume`, value: resume },
@@ -2335,23 +2856,37 @@ describe(`SQLite resume snapshots`, () => {
     let collection: Collection<{ id: string }, string> | undefined
     try {
       const seed = await adapter.claimCacheGeneration(logicalId)
-      await adapter.applyCommittedTx(seed.storageCollectionId, {
-        txId: `seed-resume`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        cacheGenerationClaimId: seed.claimId,
-        mutations: [],
-        collectionMetadataMutations: [
-          { type: `set`, key: `resume`, value: `old-resume` },
-        ],
-      })
+      await adapter.applyCommittedTx(
+        {
+          kind: `managed`,
+          storageCollectionId: seed.storageCollectionId,
+          claimId: seed.claimId,
+        },
+        {
+          txId: `seed-resume`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          cacheGenerationClaimId: seed.claimId,
+          mutations: [],
+          collectionMetadataMutations: [
+            { type: `set`, key: `resume`, value: `old-resume` },
+          ],
+        },
+      )
       expect(
         (
-          await adapter.loadResumeSnapshot(seed.storageCollectionId, {
-            includeRows: false,
-            cacheGenerationClaimId: seed.claimId,
-          })
+          await adapter.loadResumeSnapshot(
+            {
+              kind: `managed`,
+              storageCollectionId: seed.storageCollectionId,
+              claimId: seed.claimId,
+            },
+            {
+              includeRows: false,
+              cacheGenerationClaimId: seed.claimId,
+            },
+          )
         ).collectionMetadata,
       ).toContainEqual({ key: `resume`, value: `old-resume` })
       await adapter.releaseCacheGenerationClaim(seed.claimId)
@@ -2469,17 +3004,24 @@ describe(`SQLite resume snapshots`, () => {
     try {
       const seed = await peerAdapter.claimCacheGeneration(logicalId)
       seedClaimId = seed.claimId
-      await peerAdapter.applyCommittedTx(seed.storageCollectionId, {
-        txId: `seed-old`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        cacheGenerationClaimId: seed.claimId,
-        mutations: [{ type: `insert`, key: old.id, value: old }],
-        collectionMetadataMutations: [
-          { type: `set`, key: `resume`, value: `old-cursor` },
-        ],
-      })
+      await peerAdapter.applyCommittedTx(
+        {
+          kind: `managed`,
+          storageCollectionId: seed.storageCollectionId,
+          claimId: seed.claimId,
+        },
+        {
+          txId: `seed-old`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          cacheGenerationClaimId: seed.claimId,
+          mutations: [{ type: `insert`, key: old.id, value: old }],
+          collectionMetadataMutations: [
+            { type: `set`, key: `resume`, value: `old-cursor` },
+          ],
+        },
+      )
       await peerAdapter.releaseCacheGenerationClaim(seed.claimId)
       seedClaimId = undefined
 
@@ -2587,18 +3129,32 @@ describe(`SQLite resume snapshots`, () => {
       expect(peerClaim).toBeDefined()
       expect(privateClaim).toBeDefined()
       expect(
-        await peerAdapter.loadResumeSnapshot(seed.storageCollectionId, {
-          cacheGenerationClaimId: peerClaim!.claim_id,
-        }),
+        await peerAdapter.loadResumeSnapshot(
+          {
+            kind: `managed`,
+            storageCollectionId: seed.storageCollectionId,
+            claimId: peerClaim!.claim_id,
+          },
+          {
+            cacheGenerationClaimId: peerClaim!.claim_id,
+          },
+        ),
       ).toMatchObject({
         rows: [{ key: old.id, value: old }],
         collectionMetadata: [{ key: `resume`, value: `old-cursor` }],
       })
       expect(
         (
-          await firstAdapter.loadResumeSnapshot(privateClaim!.physical_id, {
-            cacheGenerationClaimId: privateClaim!.claim_id,
-          })
+          await firstAdapter.loadResumeSnapshot(
+            {
+              kind: `managed`,
+              storageCollectionId: privateClaim!.physical_id,
+              claimId: privateClaim!.claim_id,
+            },
+            {
+              cacheGenerationClaimId: privateClaim!.claim_id,
+            },
+          )
         ).rows.map(({ value }) => value),
       ).toEqual([fresh])
     } catch (error) {
@@ -2706,9 +3262,17 @@ describe(`SQLite resume snapshots`, () => {
       expect(claims).toHaveLength(1)
       expect(
         (
-          await adapter.scanRows(claims[0]!.physical_id, undefined, {
-            cacheGenerationClaimId: claims[0]!.claim_id,
-          })
+          await adapter.scanRows(
+            {
+              kind: `managed`,
+              storageCollectionId: claims[0]!.physical_id,
+              claimId: claims[0]!.claim_id,
+            },
+            undefined,
+            {
+              cacheGenerationClaimId: claims[0]!.claim_id,
+            },
+          )
         ).map(({ key }) => key),
       ).toEqual([`fresh`])
     } catch (error) {
@@ -2748,14 +3312,21 @@ describe(`SQLite resume snapshots`, () => {
       const staleRow: Row = { id: `stale`, title: `Old cached row` }
       const seedClaim = await adapter.claimCacheGeneration(collectionId)
       seedClaimId = seedClaim.claimId
-      await adapter.applyCommittedTx(seedClaim.storageCollectionId, {
-        txId: `seed-stale-row`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        cacheGenerationClaimId: seedClaim.claimId,
-        mutations: [{ type: `insert`, key: staleRow.id, value: staleRow }],
-      })
+      await adapter.applyCommittedTx(
+        {
+          kind: `managed`,
+          storageCollectionId: seedClaim.storageCollectionId,
+          claimId: seedClaim.claimId,
+        },
+        {
+          txId: `seed-stale-row`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          cacheGenerationClaimId: seedClaim.claimId,
+          mutations: [{ type: `insert`, key: staleRow.id, value: staleRow }],
+        },
+      )
 
       let source: Parameters<SyncConfig<Row, string>[`sync`]>[0] | undefined
       const sourceReady = deferred()
@@ -2799,11 +3370,19 @@ describe(`SQLite resume snapshots`, () => {
       await whenSyncAccepted(source!.commit())
 
       const oldSnapshot = await adapter.loadResumeSnapshot(
-        seedClaim.storageCollectionId,
+        {
+          kind: `managed`,
+          storageCollectionId: seedClaim.storageCollectionId,
+          claimId: seedClaim.claimId,
+        },
         { cacheGenerationClaimId: seedClaim.claimId },
       )
       const currentSnapshot = await adapter.loadResumeSnapshot(
-        currentClaim.storageCollectionId,
+        {
+          kind: `managed`,
+          storageCollectionId: currentClaim.storageCollectionId,
+          claimId: currentClaim.claimId,
+        },
         { cacheGenerationClaimId: currentClaim.claimId },
       )
       expect(oldSnapshot.rows.map(({ value }) => value)).toEqual([staleRow])
@@ -2874,18 +3453,21 @@ describe(`SQLite resume snapshots`, () => {
           title: `baseline-${index}`,
         }),
       )
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `seed`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        truncate: true,
-        mutations: baselineRows.map((row) => ({
-          type: `insert` as const,
-          key: row.id,
-          value: row,
-        })),
-      })
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `seed`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          truncate: true,
+          mutations: baselineRows.map((row) => ({
+            type: `insert` as const,
+            key: row.id,
+            value: row,
+          })),
+        },
+      )
 
       const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
       const reachedInitialSnapshot = deferred()
@@ -2974,7 +3556,12 @@ describe(`SQLite resume snapshots`, () => {
 
       expectStartupRows(visibleRows, expectedRows)
       if (history.transition === `managed-insert`) {
-        const durableRows = (await loadResumeSnapshot(collectionId)).rows
+        const durableRows = (
+          await loadResumeSnapshot({
+            kind: `eager`,
+            collectionId: collectionId,
+          })
+        ).rows
           .map(({ value }) => value)
           .sort((left, right) =>
             String(left.id).localeCompare(String(right.id)),
@@ -2982,7 +3569,14 @@ describe(`SQLite resume snapshots`, () => {
         expect(durableRows).toEqual(expectedRows)
       }
       if (history.transition === `raw-delete`) {
-        expect((await loadResumeSnapshot(collectionId)).keySet).toEqual({
+        expect(
+          (
+            await loadResumeSnapshot({
+              kind: `eager`,
+              collectionId: collectionId,
+            })
+          ).keySet,
+        ).toEqual({
           status: `incompatible`,
         })
       }
@@ -3049,13 +3643,18 @@ describe(`SQLite resume snapshots`, () => {
         }
       })
       const adapter = new SQLiteCorePersistenceAdapter({ driver })
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `seed`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [{ type: `insert`, key: 1, value: { id: 1, name: `one` } }],
-      })
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `seed`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [
+            { type: `insert`, key: 1, value: { id: 1, name: `one` } },
+          ],
+        },
+      )
 
       const observeWork = () => ({ keyEvidenceReads, keyMembershipScans })
       const resetWork = () => {
@@ -3072,20 +3671,29 @@ describe(`SQLite resume snapshots`, () => {
       expect(observeWork().keyMembershipScans).toBe(1)
 
       resetWork()
-      const position = await adapter.getStreamPosition(collectionId)
+      const position = await adapter.getStreamPosition({
+        kind: `eager`,
+        collectionId: collectionId,
+      })
       const leadershipClaim = observeWork()
 
       resetWork()
-      const consistent = await adapter.loadResumeSnapshot(collectionId, {
-        includeRows: false,
-      })
+      const consistent = await adapter.loadResumeSnapshot(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          includeRows: false,
+        },
+      )
       const consistentSnapshot = observeWork()
 
       await driver.run(`DELETE FROM "${tableName}"`)
       resetWork()
-      const incompatible = await adapter.loadResumeSnapshot(collectionId, {
-        includeRows: false,
-      })
+      const incompatible = await adapter.loadResumeSnapshot(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          includeRows: false,
+        },
+      )
       const incompatibleSnapshot = observeWork()
 
       expect({
@@ -3132,7 +3740,10 @@ describe(`SQLite resume snapshots`, () => {
       const driver = createDriver(database)
       const adapter = new SQLiteCorePersistenceAdapter({ driver })
 
-      await adapter.loadResumeSnapshot(collectionId, { includeRows: false })
+      await adapter.loadResumeSnapshot(
+        { kind: `eager`, collectionId: collectionId },
+        { includeRows: false },
+      )
       await driver.run(
         `UPDATE collection_version
          SET key_set_evidence_available = 0,
@@ -3189,8 +3800,12 @@ describe(`SQLite resume snapshots`, () => {
         `collection_registry`,
       )
       expect(
-        (await adapter.loadResumeSnapshot(collectionId, { includeRows: false }))
-          .keySet,
+        (
+          await adapter.loadResumeSnapshot(
+            { kind: `eager`, collectionId: collectionId },
+            { includeRows: false },
+          )
+        ).keySet,
       ).toEqual({ status: `unknown` })
     } catch (error) {
       primaryFailure = error
@@ -3212,73 +3827,104 @@ describe(`SQLite resume snapshots`, () => {
           rejectCollectionInsert && sql.includes(`INSERT INTO "${tableName}"`),
       )
       const adapter = new SQLiteCorePersistenceAdapter({ driver })
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `seed`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [
-          { type: `insert`, key: 1, value: { id: 1, name: `one` } },
-          { type: `insert`, key: 2, value: { id: 2, name: `two` } },
-        ],
-        collectionMetadataMutations: [
-          { type: `set`, key: `cursor`, value: `10_0` },
-        ],
-      })
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `seed`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [
+            { type: `insert`, key: 1, value: { id: 1, name: `one` } },
+            { type: `insert`, key: 2, value: { id: 2, name: `two` } },
+          ],
+          collectionMetadataMutations: [
+            { type: `set`, key: `cursor`, value: `10_0` },
+          ],
+        },
+      )
 
-      const initial = await adapter.loadResumeSnapshot(collectionId)
+      const initial = await adapter.loadResumeSnapshot({
+        kind: `eager`,
+        collectionId: collectionId,
+      })
       expect(initial.keySet).toEqual({ status: `consistent` })
       expect(initial.rows.map(({ key }) => key)).toEqual([1, 2])
       expect(initial.collectionMetadata).toEqual([
         { key: `cursor`, value: `10_0` },
       ])
 
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `normal-update`,
-        term: 1,
-        seq: 2,
-        rowVersion: 2,
-        mutations: [
-          { type: `update`, key: 1, value: { id: 1, name: `updated-one` } },
-        ],
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `normal-update`,
+          term: 1,
+          seq: 2,
+          rowVersion: 2,
+          mutations: [
+            { type: `update`, key: 1, value: { id: 1, name: `updated-one` } },
+          ],
+        },
+      )
+      const updated = await adapter.loadResumeSnapshot({
+        kind: `eager`,
+        collectionId: collectionId,
       })
-      const updated = await adapter.loadResumeSnapshot(collectionId)
       expect(updated.rows.find(({ key }) => key === 1)?.value).toEqual({
         id: 1,
         name: `updated-one`,
       })
       expect(updated.keySet).toEqual({ status: `consistent` })
 
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `normal-delete`,
-        term: 1,
-        seq: 3,
-        rowVersion: 3,
-        mutations: [{ type: `delete`, key: 2, value: { id: 2, name: `two` } }],
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `normal-delete`,
+          term: 1,
+          seq: 3,
+          rowVersion: 3,
+          mutations: [
+            { type: `delete`, key: 2, value: { id: 2, name: `two` } },
+          ],
+        },
+      )
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `normal-delete`,
+          term: 1,
+          seq: 3,
+          rowVersion: 3,
+          mutations: [
+            { type: `delete`, key: 2, value: { id: 2, name: `two` } },
+          ],
+        },
+      )
+      const deleted = await adapter.loadResumeSnapshot({
+        kind: `eager`,
+        collectionId: collectionId,
       })
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `normal-delete`,
-        term: 1,
-        seq: 3,
-        rowVersion: 3,
-        mutations: [{ type: `delete`, key: 2, value: { id: 2, name: `two` } }],
-      })
-      const deleted = await adapter.loadResumeSnapshot(collectionId)
       expect(deleted.rows.map(({ key }) => key)).toEqual([1])
       expect(deleted.keySet).toEqual({ status: `consistent` })
 
       rejectCollectionInsert = true
       await expect(
-        adapter.applyCommittedTx(collectionId, {
-          txId: `rolled-back-insert`,
-          term: 1,
-          seq: 4,
-          rowVersion: 4,
-          mutations: [{ type: `insert`, key: 3, value: { id: 3 } }],
-        }),
+        adapter.applyCommittedTx(
+          { kind: `eager`, collectionId: collectionId },
+          {
+            txId: `rolled-back-insert`,
+            term: 1,
+            seq: 4,
+            rowVersion: 4,
+            mutations: [{ type: `insert`, key: 3, value: { id: 3 } }],
+          },
+        ),
       ).rejects.toThrow(`injected transaction failure`)
       rejectCollectionInsert = false
-      const rolledBack = await adapter.loadResumeSnapshot(collectionId)
+      const rolledBack = await adapter.loadResumeSnapshot({
+        kind: `eager`,
+        collectionId: collectionId,
+      })
       expect(rolledBack.rows.map(({ key }) => key)).toEqual([1])
       expect(rolledBack.keySet).toEqual({ status: `consistent` })
       expect(
@@ -3294,52 +3940,80 @@ describe(`SQLite resume snapshots`, () => {
         ),
       ).toEqual([{ count: 1 }])
 
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `restore-second-row`,
-        term: 1,
-        seq: 5,
-        rowVersion: 5,
-        mutations: [{ type: `insert`, key: 2, value: { id: 2, name: `two` } }],
-      })
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `restore-second-row`,
+          term: 1,
+          seq: 5,
+          rowVersion: 5,
+          mutations: [
+            { type: `insert`, key: 2, value: { id: 2, name: `two` } },
+          ],
+        },
+      )
 
       await driver.run(`DELETE FROM "${tableName}" WHERE key = ?`, [
         database
           .prepare(`SELECT key FROM "${tableName}" ORDER BY key LIMIT 1`)
           .get()!.key,
       ])
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `metadata-after-loss`,
-        term: 1,
-        seq: 6,
-        rowVersion: 6,
-        mutations: [],
-        collectionMetadataMutations: [
-          { type: `set`, key: `cursor`, value: `11_0` },
-        ],
-      })
-      expect((await adapter.loadResumeSnapshot(collectionId)).keySet).toEqual({
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `metadata-after-loss`,
+          term: 1,
+          seq: 6,
+          rowVersion: 6,
+          mutations: [],
+          collectionMetadataMutations: [
+            { type: `set`, key: `cursor`, value: `11_0` },
+          ],
+        },
+      )
+      expect(
+        (
+          await adapter.loadResumeSnapshot({
+            kind: `eager`,
+            collectionId: collectionId,
+          })
+        ).keySet,
+      ).toEqual({
         status: `incompatible`,
       })
 
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `full-replacement`,
-        term: 1,
-        seq: 7,
-        rowVersion: 7,
-        truncate: true,
-        mutations: [
-          { type: `insert`, key: 1, value: { id: 1, name: `one` } },
-          { type: `insert`, key: 2, value: { id: 2, name: `two` } },
-        ],
-      })
-      expect((await adapter.loadResumeSnapshot(collectionId)).keySet).toEqual({
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `full-replacement`,
+          term: 1,
+          seq: 7,
+          rowVersion: 7,
+          truncate: true,
+          mutations: [
+            { type: `insert`, key: 1, value: { id: 1, name: `one` } },
+            { type: `insert`, key: 2, value: { id: 2, name: `two` } },
+          ],
+        },
+      )
+      expect(
+        (
+          await adapter.loadResumeSnapshot({
+            kind: `eager`,
+            collectionId: collectionId,
+          })
+        ).keySet,
+      ).toEqual({
         status: `consistent`,
       })
 
       await driver.run(
         `UPDATE "${tableName}" SET key = key || '-replacement' WHERE rowid = (SELECT MIN(rowid) FROM "${tableName}")`,
       )
-      const substituted = await adapter.loadResumeSnapshot(collectionId)
+      const substituted = await adapter.loadResumeSnapshot({
+        kind: `eager`,
+        collectionId: collectionId,
+      })
       expect(substituted.rows).toHaveLength(2)
       expect(substituted.keySet).toEqual({ status: `incompatible` })
     } catch (error) {
@@ -3369,18 +4043,21 @@ describe(`SQLite resume snapshots`, () => {
       )
       const adapter = new SQLiteCorePersistenceAdapter({ driver })
       const collectionId = `cold-replacement-work`
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `previous-generation`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [
-          { type: `insert`, key: `old`, value: { id: `old`, title: `old` } },
-        ],
-        collectionMetadataMutations: [
-          { type: `set`, key: `electric:resume`, value: { offset: `old` } },
-        ],
-      })
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `previous-generation`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [
+            { type: `insert`, key: `old`, value: { id: `old`, title: `old` } },
+          ],
+          collectionMetadataMutations: [
+            { type: `set`, key: `electric:resume`, value: { offset: `old` } },
+          ],
+        },
+      )
 
       const rows = Array.from({ length: 205 }, (_, index) => {
         const id = `row-${String(index).padStart(3, `0`)}`
@@ -3388,37 +4065,43 @@ describe(`SQLite resume snapshots`, () => {
       })
       databaseCalls = 0
       maxReplacementBoundParameters = 0
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `cold-replacement`,
-        term: 1,
-        seq: 2,
-        rowVersion: 2,
-        truncate: true,
-        mutations: rows.map((row) => ({
-          type: `update` as const,
-          key: row.id,
-          value: row,
-          metadataChanged: true,
-          metadata: { source: `row-write` },
-        })),
-        rowMetadataMutations: [
-          ...rows
-            .filter((_, index) => index % 2 === 0)
-            .map((row) => ({
-              type: `set` as const,
-              key: row.id,
-              value: { source: `electric`, operation: `insert` },
-            })),
-          { type: `delete`, key: rows[0]!.id },
-          { type: `set`, key: `absent`, value: { ignored: true } },
-        ],
-        collectionMetadataMutations: [
-          { type: `set`, key: `electric:resume`, value: { offset: `2_0` } },
-        ],
-      })
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `cold-replacement`,
+          term: 1,
+          seq: 2,
+          rowVersion: 2,
+          truncate: true,
+          mutations: rows.map((row) => ({
+            type: `update` as const,
+            key: row.id,
+            value: row,
+            metadataChanged: true,
+            metadata: { source: `row-write` },
+          })),
+          rowMetadataMutations: [
+            ...rows
+              .filter((_, index) => index % 2 === 0)
+              .map((row) => ({
+                type: `set` as const,
+                key: row.id,
+                value: { source: `electric`, operation: `insert` },
+              })),
+            { type: `delete`, key: rows[0]!.id },
+            { type: `set`, key: `absent`, value: { ignored: true } },
+          ],
+          collectionMetadataMutations: [
+            { type: `set`, key: `electric:resume`, value: { offset: `2_0` } },
+          ],
+        },
+      )
       const replacementCalls = databaseCalls
 
-      const snapshot = await adapter.loadResumeSnapshot(collectionId)
+      const snapshot = await adapter.loadResumeSnapshot({
+        kind: `eager`,
+        collectionId: collectionId,
+      })
       const expectedRows = rows.map((row, index) => ({
         key: row.id,
         value: row,
@@ -3491,56 +4174,68 @@ describe(`SQLite resume snapshots`, () => {
         return bulkRowInserts === 2
       })
       const adapter = new SQLiteCorePersistenceAdapter({ driver })
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `seed`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [
-          {
-            type: `insert`,
-            key: `old`,
-            value: { id: `old` },
-            metadataChanged: true,
-            metadata: { source: `previous-generation` },
-          },
-        ],
-        collectionMetadataMutations: [
-          { type: `set`, key: `electric:resume`, value: { offset: `old` } },
-        ],
-      })
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `seed`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [
+            {
+              type: `insert`,
+              key: `old`,
+              value: { id: `old` },
+              metadataChanged: true,
+              metadata: { source: `previous-generation` },
+            },
+          ],
+          collectionMetadataMutations: [
+            { type: `set`, key: `electric:resume`, value: { offset: `old` } },
+          ],
+        },
+      )
       const before = await observeCachedSchemaState(
         adapter,
         driver,
         collectionId,
       )
-      const beforeSnapshot = await adapter.loadResumeSnapshot(collectionId)
+      const beforeSnapshot = await adapter.loadResumeSnapshot({
+        kind: `eager`,
+        collectionId: collectionId,
+      })
       injectFailure = true
       await expect(
-        adapter.applyCommittedTx(collectionId, {
-          txId: `failed-replacement`,
-          term: 1,
-          seq: 2,
-          rowVersion: 2,
-          truncate: true,
-          mutations: Array.from({ length: 205 }, (_, index) => ({
-            type: `update` as const,
-            key: `row-${index}`,
-            value: { id: `row-${index}` },
-          })),
-          collectionMetadataMutations: [
-            { type: `set`, key: `electric:resume`, value: { offset: `2_0` } },
-          ],
-        }),
+        adapter.applyCommittedTx(
+          { kind: `eager`, collectionId: collectionId },
+          {
+            txId: `failed-replacement`,
+            term: 1,
+            seq: 2,
+            rowVersion: 2,
+            truncate: true,
+            mutations: Array.from({ length: 205 }, (_, index) => ({
+              type: `update` as const,
+              key: `row-${index}`,
+              value: { id: `row-${index}` },
+            })),
+            collectionMetadataMutations: [
+              { type: `set`, key: `electric:resume`, value: { offset: `2_0` } },
+            ],
+          },
+        ),
       ).rejects.toThrow(`injected transaction failure`)
       injectFailure = false
       expect(bulkRowInserts).toBe(2)
       expect(
         await observeCachedSchemaState(adapter, driver, collectionId),
       ).toEqual(before)
-      expect(await adapter.loadResumeSnapshot(collectionId)).toEqual(
-        beforeSnapshot,
-      )
+      expect(
+        await adapter.loadResumeSnapshot({
+          kind: `eager`,
+          collectionId: collectionId,
+        }),
+      ).toEqual(beforeSnapshot)
     } catch (error) {
       primaryFailure = error
     } finally {
@@ -3554,20 +4249,24 @@ describe(`SQLite resume snapshots`, () => {
     try {
       const driver = createDriver(database)
       const adapter = new SQLiteCorePersistenceAdapter({ driver })
-      await adapter.applyCommittedTx(`duplicate-replacement`, {
-        txId: `duplicate`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        truncate: true,
-        mutations: [
-          { type: `insert`, key: `same`, value: { id: `same`, first: true } },
-          { type: `update`, key: `same`, value: { last: true } },
-        ],
-      })
-      const duplicate = await adapter.loadResumeSnapshot(
-        `duplicate-replacement`,
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: `duplicate-replacement` },
+        {
+          txId: `duplicate`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          truncate: true,
+          mutations: [
+            { type: `insert`, key: `same`, value: { id: `same`, first: true } },
+            { type: `update`, key: `same`, value: { last: true } },
+          ],
+        },
       )
+      const duplicate = await adapter.loadResumeSnapshot({
+        kind: `eager`,
+        collectionId: `duplicate-replacement`,
+      })
       expect(duplicate.rows).toEqual([
         {
           key: `same`,
@@ -3577,19 +4276,25 @@ describe(`SQLite resume snapshots`, () => {
       ])
       expect(duplicate.keySet).toEqual({ status: `consistent` })
 
-      await adapter.applyCommittedTx(`delete-replacement`, {
-        txId: `delete`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        truncate: true,
-        mutations: [
-          { type: `insert`, key: `removed`, value: { id: `removed` } },
-          { type: `delete`, key: `removed`, value: { id: `removed` } },
-          { type: `insert`, key: `kept`, value: { id: `kept` } },
-        ],
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: `delete-replacement` },
+        {
+          txId: `delete`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          truncate: true,
+          mutations: [
+            { type: `insert`, key: `removed`, value: { id: `removed` } },
+            { type: `delete`, key: `removed`, value: { id: `removed` } },
+            { type: `insert`, key: `kept`, value: { id: `kept` } },
+          ],
+        },
+      )
+      const deleted = await adapter.loadResumeSnapshot({
+        kind: `eager`,
+        collectionId: `delete-replacement`,
       })
-      const deleted = await adapter.loadResumeSnapshot(`delete-replacement`)
       expect(deleted.rows).toEqual([
         { key: `kept`, value: { id: `kept` }, metadata: undefined },
       ])
@@ -3714,8 +4419,10 @@ describe(`SQLite resume snapshots`, () => {
         ]),
       )
 
-      const migratedLegacySnapshot =
-        await migrated.loadResumeSnapshot(collectionId)
+      const migratedLegacySnapshot = await migrated.loadResumeSnapshot({
+        kind: `eager`,
+        collectionId: collectionId,
+      })
       expect(migratedLegacySnapshot.keySet).toEqual({ status: `unknown` })
       expect(migratedLegacySnapshot.rows).toEqual([
         {
@@ -3724,26 +4431,46 @@ describe(`SQLite resume snapshots`, () => {
           metadata: { source: `legacy` },
         },
       ])
-      await migrated.applyCommittedTx(collectionId, {
-        txId: `legacy-insert`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [{ type: `insert`, key: 1, value: { id: 1, n: 1 } }],
-      })
-      expect((await migrated.loadResumeSnapshot(collectionId)).keySet).toEqual({
+      await migrated.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `legacy-insert`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [{ type: `insert`, key: 1, value: { id: 1, n: 1 } }],
+        },
+      )
+      expect(
+        (
+          await migrated.loadResumeSnapshot({
+            kind: `eager`,
+            collectionId: collectionId,
+          })
+        ).keySet,
+      ).toEqual({
         status: `unknown`,
       })
 
-      await migrated.applyCommittedTx(collectionId, {
-        txId: `legacy-replacement`,
-        term: 1,
-        seq: 2,
-        rowVersion: 2,
-        truncate: true,
-        mutations: [{ type: `insert`, key: 1, value: { id: 1, n: 2 } }],
-      })
-      expect((await migrated.loadResumeSnapshot(collectionId)).keySet).toEqual({
+      await migrated.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `legacy-replacement`,
+          term: 1,
+          seq: 2,
+          rowVersion: 2,
+          truncate: true,
+          mutations: [{ type: `insert`, key: 1, value: { id: 1, n: 2 } }],
+        },
+      )
+      expect(
+        (
+          await migrated.loadResumeSnapshot({
+            kind: `eager`,
+            collectionId: collectionId,
+          })
+        ).keySet,
+      ).toEqual({
         status: `consistent`,
       })
     } catch (error) {
@@ -3765,16 +4492,19 @@ describe(`SQLite resume snapshots`, () => {
         driver,
         schemaVersion: 1,
       })
-      await original.applyCommittedTx(collectionId, {
-        txId: `seed`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [{ type: `insert`, key: 1, value: { id: 1 } }],
-        collectionMetadataMutations: [
-          { type: `set`, key: `cursor`, value: `old` },
-        ],
-      })
+      await original.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `seed`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [{ type: `insert`, key: 1, value: { id: 1 } }],
+          collectionMetadataMutations: [
+            { type: `set`, key: `cursor`, value: `old` },
+          ],
+        },
+      )
 
       const staleRead = deferred()
       const releaseStaleRead = deferred()
@@ -3796,7 +4526,10 @@ describe(`SQLite resume snapshots`, () => {
         driver: gatedDriver,
         schemaVersion: 2,
       })
-      const staleLoad = staleAdapter.loadSubset(collectionId, {})
+      const staleLoad = staleAdapter.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {},
+      )
       await reachCheckpoint(
         staleRead.promise,
         `stale schema-v1 registry read before competing reset`,
@@ -3806,21 +4539,27 @@ describe(`SQLite resume snapshots`, () => {
         driver,
         schemaVersion: 2,
       })
-      await winner.loadSubset(collectionId, {})
-      await winner.applyCommittedTx(collectionId, {
-        txId: `recovery-write`,
-        term: 2,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [{ type: `insert`, key: 2, value: { id: 2 } }],
-        collectionMetadataMutations: [
-          { type: `set`, key: `cursor`, value: `new` },
-        ],
-      })
+      await winner.loadSubset({ kind: `eager`, collectionId: collectionId }, {})
+      await winner.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `recovery-write`,
+          term: 2,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [{ type: `insert`, key: 2, value: { id: 2 } }],
+          collectionMetadataMutations: [
+            { type: `set`, key: `cursor`, value: `new` },
+          ],
+        },
+      )
 
       releaseStaleRead.resolve()
       await staleLoad
-      const snapshot = await winner.loadResumeSnapshot(collectionId)
+      const snapshot = await winner.loadResumeSnapshot({
+        kind: `eager`,
+        collectionId: collectionId,
+      })
       expect(snapshot.resetEpoch).toBe(1)
       expect(snapshot.rows.map(({ key }) => key)).toEqual([2])
       expect(snapshot.collectionMetadata).toEqual([
@@ -3845,13 +4584,16 @@ describe(`SQLite resume snapshots`, () => {
         driver,
         schemaVersion: 1,
       })
-      await original.applyCommittedTx(collectionId, {
-        txId: `seed`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [{ type: `insert`, key: 1, value: { id: 1 } }],
-      })
+      await original.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `seed`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [{ type: `insert`, key: 1, value: { id: 1 } }],
+        },
+      )
 
       const staleRead = deferred()
       const releaseStaleRead = deferred()
@@ -3873,7 +4615,10 @@ describe(`SQLite resume snapshots`, () => {
         driver: staleDriver,
         schemaVersion: 2,
       })
-      const staleLoad = staleV2.loadSubset(collectionId, {})
+      const staleLoad = staleV2.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {},
+      )
       await reachCheckpoint(
         staleRead.promise,
         `stale schema-v1 registry read before schema-v3 reset`,
@@ -3883,23 +4628,32 @@ describe(`SQLite resume snapshots`, () => {
         driver,
         schemaVersion: 3,
       })
-      await winnerV3.loadSubset(collectionId, {})
-      await winnerV3.applyCommittedTx(collectionId, {
-        txId: `winner-write`,
-        term: 3,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [{ type: `insert`, key: 3, value: { id: 3 } }],
-        collectionMetadataMutations: [
-          { type: `set`, key: `cursor`, value: `v3` },
-        ],
-      })
+      await winnerV3.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {},
+      )
+      await winnerV3.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `winner-write`,
+          term: 3,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [{ type: `insert`, key: 3, value: { id: 3 } }],
+          collectionMetadataMutations: [
+            { type: `set`, key: `cursor`, value: `v3` },
+          ],
+        },
+      )
 
       releaseStaleRead.resolve()
       await expect(staleLoad).rejects.toThrow(
         `Schema version changed concurrently`,
       )
-      const snapshot = await winnerV3.loadResumeSnapshot(collectionId)
+      const snapshot = await winnerV3.loadResumeSnapshot({
+        kind: `eager`,
+        collectionId: collectionId,
+      })
       expect(snapshot.resetEpoch).toBe(1)
       expect(snapshot.rows.map(({ key }) => key)).toEqual([3])
       expect(snapshot.collectionMetadata).toEqual([
@@ -3929,32 +4683,41 @@ describe(`SQLite resume snapshots`, () => {
         driver,
         schemaVersion: 1,
       })
-      await staleV1.applyCommittedTx(collectionId, {
-        txId: `seed-v1`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [{ type: `insert`, key: 1, value: { id: 1 } }],
-        collectionMetadataMutations: [
-          { type: `set`, key: `cursor`, value: `v1` },
-        ],
-      })
+      await staleV1.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `seed-v1`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [{ type: `insert`, key: 1, value: { id: 1 } }],
+          collectionMetadataMutations: [
+            { type: `set`, key: `cursor`, value: `v1` },
+          ],
+        },
+      )
 
       const currentV2 = new SQLiteCorePersistenceAdapter({
         driver,
         schemaVersion: 2,
       })
-      await currentV2.loadSubset(collectionId, {})
-      await currentV2.applyCommittedTx(collectionId, {
-        txId: `seed-v2`,
-        term: 2,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [{ type: `insert`, key: 2, value: { id: 2 } }],
-        collectionMetadataMutations: [
-          { type: `set`, key: `cursor`, value: `v2` },
-        ],
-      })
+      await currentV2.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {},
+      )
+      await currentV2.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `seed-v2`,
+          term: 2,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [{ type: `insert`, key: 2, value: { id: 2 } }],
+          collectionMetadataMutations: [
+            { type: `set`, key: `cursor`, value: `v2` },
+          ],
+        },
+      )
       const before = await observeCachedSchemaState(
         currentV2,
         driver,
@@ -3963,18 +4726,21 @@ describe(`SQLite resume snapshots`, () => {
 
       let lateWriteError: unknown
       try {
-        await staleV1.applyCommittedTx(collectionId, {
-          txId: `late-v1`,
-          term: 3,
-          seq: 1,
-          rowVersion: 2,
-          truncate: true,
-          mutations: [{ type: `insert`, key: 3, value: { id: 3 } }],
-          collectionMetadataMutations: [
-            { type: `set`, key: `cursor`, value: `late-v1` },
-            { type: `set`, key: `late`, value: true },
-          ],
-        })
+        await staleV1.applyCommittedTx(
+          { kind: `eager`, collectionId: collectionId },
+          {
+            txId: `late-v1`,
+            term: 3,
+            seq: 1,
+            rowVersion: 2,
+            truncate: true,
+            mutations: [{ type: `insert`, key: 3, value: { id: 3 } }],
+            collectionMetadataMutations: [
+              { type: `set`, key: `cursor`, value: `late-v1` },
+              { type: `set`, key: `late`, value: true },
+            ],
+          },
+        )
       } catch (error) {
         lateWriteError = error
       }
@@ -4021,35 +4787,55 @@ describe(`SQLite resume snapshots`, () => {
         driver,
         schemaVersion: 1,
       })
-      await staleV1.applyCommittedTx(collectionId, {
-        txId: `seed-v1`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [{ type: `insert`, key: 1, value: { id: 1 } }],
+      await staleV1.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `seed-v1`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [{ type: `insert`, key: 1, value: { id: 1 } }],
+        },
+      )
+      await staleV1.loadResumeSnapshot({
+        kind: `eager`,
+        collectionId: collectionId,
       })
-      await staleV1.loadResumeSnapshot(collectionId)
 
       const currentV2 = new SQLiteCorePersistenceAdapter({
         driver,
         schemaVersion: 2,
       })
-      await currentV2.loadSubset(collectionId, {})
-      await currentV2.applyCommittedTx(collectionId, {
-        txId: `seed-v2`,
-        term: 2,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [{ type: `insert`, key: 2, value: { id: 2 } }],
-        collectionMetadataMutations: [
-          { type: `set`, key: `cursor`, value: `v2` },
-        ],
-      })
-
-      await expect(staleV1.loadResumeSnapshot(collectionId)).rejects.toThrow(
-        `Schema version mismatch`,
+      await currentV2.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {},
       )
-      expect(await currentV2.loadResumeSnapshot(collectionId)).toMatchObject({
+      await currentV2.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `seed-v2`,
+          term: 2,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [{ type: `insert`, key: 2, value: { id: 2 } }],
+          collectionMetadataMutations: [
+            { type: `set`, key: `cursor`, value: `v2` },
+          ],
+        },
+      )
+
+      await expect(
+        staleV1.loadResumeSnapshot({
+          kind: `eager`,
+          collectionId: collectionId,
+        }),
+      ).rejects.toThrow(`Schema version mismatch`)
+      expect(
+        await currentV2.loadResumeSnapshot({
+          kind: `eager`,
+          collectionId: collectionId,
+        }),
+      ).toMatchObject({
         rows: [{ key: 2, value: { id: 2 } }],
         collectionMetadata: [{ key: `cursor`, value: `v2` }],
       })
@@ -4070,41 +4856,56 @@ describe(`SQLite resume snapshots`, () => {
         driver,
         schemaVersion: 1,
       })
-      await staleV1.applyCommittedTx(collectionId, {
-        txId: `seed-v1`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [{ type: `insert`, key: 1, value: { id: 1 } }],
-      })
-      await staleV1.loadSubset(collectionId, {})
+      await staleV1.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `seed-v1`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [{ type: `insert`, key: 1, value: { id: 1 } }],
+        },
+      )
+      await staleV1.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {},
+      )
 
       const currentV2 = new SQLiteCorePersistenceAdapter({
         driver,
         schemaVersion: 2,
       })
-      await currentV2.loadSubset(collectionId, {})
-      await currentV2.applyCommittedTx(collectionId, {
-        txId: `seed-v2`,
-        term: 2,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [{ type: `insert`, key: 2, value: { id: 2 } }],
-      })
+      await currentV2.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {},
+      )
+      await currentV2.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `seed-v2`,
+          term: 2,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [{ type: `insert`, key: 2, value: { id: 2 } }],
+        },
+      )
 
       const staleReads = await Promise.allSettled([
-        staleV1.loadSubset(collectionId, {}),
-        staleV1.scanRows(collectionId),
-        staleV1.pullSince(collectionId, 0),
+        staleV1.loadSubset({ kind: `eager`, collectionId: collectionId }, {}),
+        staleV1.scanRows({ kind: `eager`, collectionId: collectionId }),
+        staleV1.pullSince({ kind: `eager`, collectionId: collectionId }, 0),
       ])
       expect(staleReads.map(({ status }) => status)).toEqual([
         `rejected`,
         `rejected`,
         `rejected`,
       ])
-      expect(await currentV2.loadSubset(collectionId, {})).toMatchObject([
-        { key: 2, value: { id: 2 } },
-      ])
+      expect(
+        await currentV2.loadSubset(
+          { kind: `eager`, collectionId: collectionId },
+          {},
+        ),
+      ).toMatchObject([{ key: 2, value: { id: 2 } }])
     } catch (error) {
       primaryFailure = error
     } finally {
@@ -4122,40 +4923,58 @@ describe(`SQLite resume snapshots`, () => {
         driver,
         schemaVersion: 1,
       })
-      await staleV1.applyCommittedTx(collectionId, {
-        txId: `seed-v1`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [],
-        collectionMetadataMutations: [
-          { type: `set`, key: `cursor`, value: `v1` },
-        ],
-      })
-      await staleV1.loadSubset(collectionId, {})
+      await staleV1.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `seed-v1`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [],
+          collectionMetadataMutations: [
+            { type: `set`, key: `cursor`, value: `v1` },
+          ],
+        },
+      )
+      await staleV1.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {},
+      )
 
       const currentV2 = new SQLiteCorePersistenceAdapter({
         driver,
         schemaVersion: 2,
       })
-      await currentV2.loadSubset(collectionId, {})
-      await currentV2.applyCommittedTx(collectionId, {
-        txId: `seed-v2`,
-        term: 2,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [],
-        collectionMetadataMutations: [
-          { type: `set`, key: `cursor`, value: `v2` },
-        ],
-      })
+      await currentV2.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {},
+      )
+      await currentV2.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `seed-v2`,
+          term: 2,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [],
+          collectionMetadataMutations: [
+            { type: `set`, key: `cursor`, value: `v2` },
+          ],
+        },
+      )
 
       await expect(
-        staleV1.loadCollectionMetadata(collectionId),
+        staleV1.loadCollectionMetadata({
+          kind: `eager`,
+          collectionId: collectionId,
+        }),
       ).rejects.toThrow(`Schema version mismatch`)
-      expect(await currentV2.loadCollectionMetadata(collectionId)).toEqual([
-        { key: `cursor`, value: `v2` },
-      ])
+      expect(
+        await currentV2.loadCollectionMetadata({
+          kind: `eager`,
+          collectionId: collectionId,
+        }),
+      ).toEqual([{ key: `cursor`, value: `v2` }])
     } catch (error) {
       primaryFailure = error
     } finally {
@@ -4173,22 +4992,39 @@ describe(`SQLite resume snapshots`, () => {
         driver,
         schemaVersion: 1,
       })
-      await staleV1.loadSubset(collectionId, {})
+      await staleV1.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {},
+      )
 
       const currentV2 = new SQLiteCorePersistenceAdapter({
         driver,
         schemaVersion: 2,
       })
-      await currentV2.loadSubset(collectionId, {})
-      await currentV2.ensureIndex(collectionId, `v2-index`, {
-        expressionSql: [`json_extract(value, '$.id')`],
-      })
+      await currentV2.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {},
+      )
+      await currentV2.ensureIndex(
+        { kind: `eager`, collectionId: collectionId },
+        `v2-index`,
+        {
+          expressionSql: [`json_extract(value, '$.id')`],
+        },
+      )
 
       const staleWrites = await Promise.allSettled([
-        staleV1.ensureIndex(collectionId, `stale-v1-index`, {
-          expressionSql: [`json_extract(value, '$.legacy')`],
-        }),
-        staleV1.markIndexRemoved(collectionId, `v2-index`),
+        staleV1.ensureIndex(
+          { kind: `eager`, collectionId: collectionId },
+          `stale-v1-index`,
+          {
+            expressionSql: [`json_extract(value, '$.legacy')`],
+          },
+        ),
+        staleV1.markIndexRemoved(
+          { kind: `eager`, collectionId: collectionId },
+          `v2-index`,
+        ),
       ])
       expect(staleWrites.map(({ status }) => status)).toEqual([
         `rejected`,
@@ -4232,20 +5068,25 @@ it(`resets ambiguous legacy values and obsolete indexes before reading a new sch
     const table = createPersistedTableName(collectionId, `c`)
     const old = new SQLiteCorePersistenceAdapter({ driver, schemaVersion: 1 })
     for (const id of [collectionId, `unrelated-cache`]) {
-      await old.applyCommittedTx(id, {
-        txId: `seed`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [
-          { type: `insert`, key: `old`, value: { id: `old`, stamp: 1 } },
-        ],
-      })
+      await old.applyCommittedTx(
+        { kind: `eager`, collectionId: id },
+        {
+          txId: `seed`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [
+            { type: `insert`, key: `old`, value: { id: `old`, stamp: 1 } },
+          ],
+        },
+      )
       for (const signature of [
         `old-native-signature`,
         `current-native-signature`,
       ]) {
-        await old.ensureIndex(id, signature, { expressionSql: [`row_version`] })
+        await old.ensureIndex({ kind: `eager`, collectionId: id }, signature, {
+          expressionSql: [`row_version`],
+        })
       }
     }
     const marker = {
@@ -4266,7 +5107,9 @@ it(`resets ambiguous legacy values and obsolete indexes before reading a new sch
       schemaVersion: 2,
       schemaMismatchPolicy: `reset`,
     })
-    expect(await next.loadSubset(collectionId, {})).toEqual([])
+    expect(
+      await next.loadSubset({ kind: `eager`, collectionId: collectionId }, {}),
+    ).toEqual([])
     expect(
       database
         .prepare(
@@ -4291,24 +5134,43 @@ it(`resets ambiguous legacy values and obsolete indexes before reading a new sch
         .all(`unrelated-cache`),
     ).toHaveLength(2)
     expect(
-      (await old.loadSubset(`unrelated-cache`, {})).map(({ key }) => key),
+      (
+        await old.loadSubset(
+          { kind: `eager`, collectionId: `unrelated-cache` },
+          {},
+        )
+      ).map(({ key }) => key),
     ).toEqual([`old`])
-    await next.applyCommittedTx(collectionId, {
-      txId: `reseed`,
-      term: 2,
-      seq: 1,
-      rowVersion: 1,
-      mutations: [{ type: `insert`, key: `new`, value: { id: `new`, marker } }],
-    })
-    await next.ensureIndex(collectionId, `replacement`, {
-      expressionSql: [`row_version`],
-    })
+    await next.applyCommittedTx(
+      { kind: `eager`, collectionId: collectionId },
+      {
+        txId: `reseed`,
+        term: 2,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [
+          { type: `insert`, key: `new`, value: { id: `new`, marker } },
+        ],
+      },
+    )
+    await next.ensureIndex(
+      { kind: `eager`, collectionId: collectionId },
+      `replacement`,
+      {
+        expressionSql: [`row_version`],
+      },
+    )
     const reopened = new SQLiteCorePersistenceAdapter({
       driver,
       schemaVersion: 2,
     })
     expect(
-      (await reopened.loadSubset(collectionId, {})).map(({ value }) => value),
+      (
+        await reopened.loadSubset(
+          { kind: `eager`, collectionId: collectionId },
+          {},
+        )
+      ).map(({ value }) => value),
     ).toEqual([{ id: `new`, marker }])
     expect(
       database

@@ -1,5 +1,14 @@
 import { compileSingleRowExpression, toBooleanPredicate } from '@tanstack/db'
-import type { PersistenceAdapter } from '../../db-sqlite-persistence-core/src'
+import type {
+  PersistedStorageTarget,
+  PersistenceAdapter,
+} from '../../db-sqlite-persistence-core/src'
+
+export function storageTargetId(target: PersistedStorageTarget): string {
+  return target.kind === `managed`
+    ? target.storageCollectionId
+    : target.collectionId
+}
 
 export type TestRow = { id: number; name: string; stable: string }
 
@@ -111,7 +120,8 @@ export function managedTagPersistence() {
   let claimSequence = 0
   let currentStorageId = `managed-tag-generation-0`
   storage.set(currentStorageId, tagPersistence())
-  const store = (id: string) => {
+  const store = (target: string | PersistedStorageTarget) => {
+    const id = typeof target === `string` ? target : storageTargetId(target)
     const selected = storage.get(
       id.startsWith(`managed-tag-generation-`) ? id : currentStorageId,
     )

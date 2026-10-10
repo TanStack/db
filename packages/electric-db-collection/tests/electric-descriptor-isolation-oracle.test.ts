@@ -12,7 +12,7 @@ import {
   readOracleRunConfig,
 } from '../../db/tests/oracle-config'
 import { atCheckpoint } from './electric-oracle-lifecycle'
-import { tagPersistence } from './electric-persistence-fixture'
+import { storageTargetId, tagPersistence } from './electric-persistence-fixture'
 import type { TestRow } from './electric-persistence-fixture'
 import type { Message } from '@electric-sql/client'
 import type { PersistenceAdapter } from '../../db-sqlite-persistence-core/src'
@@ -65,21 +65,24 @@ fixedCase(`replaces stale durable columns and metadata on insert`, async () => {
     metadata: { tags: [`stale`] },
   })
 
-  await adapter.applyCommittedTx(`fixture-insert-law`, {
-    txId: `fresh-insert`,
-    term: 1,
-    seq: 1,
-    rowVersion: 1,
-    mutations: [
-      {
-        type: `insert`,
-        key: 1,
-        value: { id: 1, name: `fresh`, stable: `fresh-stable` },
-        metadataChanged: true,
-        metadata: undefined,
-      },
-    ],
-  })
+  await adapter.applyCommittedTx(
+    { kind: `eager`, collectionId: `fixture-insert-law` },
+    {
+      txId: `fresh-insert`,
+      term: 1,
+      seq: 1,
+      rowVersion: 1,
+      mutations: [
+        {
+          type: `insert`,
+          key: 1,
+          value: { id: 1, name: `fresh`, stable: `fresh-stable` },
+          metadataChanged: true,
+          metadata: undefined,
+        },
+      ],
+    },
+  )
 
   expect(rows.get(1)).toEqual({
     value: { id: 1, name: `fresh`, stable: `fresh-stable` },
@@ -687,16 +690,25 @@ fixedCase(
       releaseCacheGenerationClaim: () => Promise.resolve(),
       loadSubset: (id) =>
         Promise.resolve(
-          Array.from(durable.get(id) ?? [], ([key, value]) => ({ key, value })),
+          Array.from(
+            durable.get(storageTargetId(id)) ?? [],
+            ([key, value]) => ({ key, value }),
+          ),
         ),
       loadResumeSnapshot: (id) =>
         Promise.resolve({
-          rows: Array.from(durable.get(id) ?? [], ([key, value]) => ({
-            key,
-            value,
-          })),
+          rows: Array.from(
+            durable.get(storageTargetId(id)) ?? [],
+            ([key, value]) => ({
+              key,
+              value,
+            }),
+          ),
           keySet: {
-            status: id === `cache-old` ? `consistent` : `incompatible`,
+            status:
+              storageTargetId(id) === `cache-old`
+                ? `consistent`
+                : `incompatible`,
           },
           collectionMetadata: [],
           latestTerm: 0,
@@ -705,8 +717,8 @@ fixedCase(
           resetEpoch: 0,
         }),
       applyCommittedTx: (id, tx) => {
-        expect(id).toBe(claimedStorageId)
-        const rows = durable.get(id)!
+        expect(storageTargetId(id)).toBe(claimedStorageId)
+        const rows = durable.get(storageTargetId(id))!
         if (tx.truncate) rows.clear()
         for (const mutation of tx.mutations) {
           if (mutation.type === `delete`) rows.delete(Number(mutation.key))
@@ -1418,19 +1430,28 @@ fixedCase(
       releaseCacheGenerationClaim: () => Promise.resolve(),
       loadSubset: (id) =>
         Promise.resolve(
-          Array.from(durable.get(id) ?? [], ([key, value]) => ({
-            key,
-            value,
-          })),
+          Array.from(
+            durable.get(storageTargetId(id)) ?? [],
+            ([key, value]) => ({
+              key,
+              value,
+            }),
+          ),
         ),
       loadResumeSnapshot: (id) =>
         Promise.resolve({
-          rows: Array.from(durable.get(id) ?? [], ([key, value]) => ({
-            key,
-            value,
-          })),
+          rows: Array.from(
+            durable.get(storageTargetId(id)) ?? [],
+            ([key, value]) => ({
+              key,
+              value,
+            }),
+          ),
           keySet: {
-            status: id === `cache-old` ? `consistent` : `incompatible`,
+            status:
+              storageTargetId(id) === `cache-old`
+                ? `consistent`
+                : `incompatible`,
           },
           collectionMetadata: [],
           latestTerm: 0,
@@ -1439,7 +1460,7 @@ fixedCase(
           resetEpoch: 0,
         }),
       applyCommittedTx: (id, tx) => {
-        const rows = durable.get(id)!
+        const rows = durable.get(storageTargetId(id))!
         if (tx.truncate) rows.clear()
         for (const mutation of tx.mutations) {
           if (mutation.type === `delete`) rows.delete(Number(mutation.key))

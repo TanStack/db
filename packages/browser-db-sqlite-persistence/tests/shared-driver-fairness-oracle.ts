@@ -564,20 +564,26 @@ export async function observeSharedDriverFairness(
   try {
     for (const work of hydrateWork) {
       const collectionId = collectionIdFor(scenario, work)
-      await seed.persistence.adapter.applyCommittedTx(collectionId, {
-        txId: `${collectionId}-seed`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: work.seededRows.map((row) => ({
-          type: `insert` as const,
-          key: row.id,
-          value: { ...row },
-        })),
-      })
+      await seed.persistence.adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `${collectionId}-seed`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: work.seededRows.map((row) => ({
+            type: `insert` as const,
+            key: row.id,
+            value: { ...row },
+          })),
+        },
+      )
     }
     for (const collectionId of persistIds) {
-      await seed.persistence.adapter.loadSubset(collectionId, {})
+      await seed.persistence.adapter.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {},
+      )
     }
   } catch (error) {
     seedPrimaryFailure = error
@@ -622,7 +628,10 @@ export async function observeSharedDriverFairness(
   try {
     // Cache only the unrelated persist tables. Hydrate tables remain cold.
     for (const collectionId of persistIds) {
-      await persistence.adapter.loadSubset(collectionId, {})
+      await persistence.adapter.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {},
+      )
     }
 
     observedDatabase.clearTrace()
@@ -644,7 +653,7 @@ export async function observeSharedDriverFairness(
         const sequence = persistSequence
         const persist = persistence.adapter
           .applyCommittedTx(
-            collectionId,
+            { kind: `eager`, collectionId: collectionId },
             createPersistedTx(collectionId, sequence, work.mutationsPerPersist),
           )
           .then(() => {

@@ -143,8 +143,9 @@ idempotent.
 ## Notes
 
 - The renderer API mirrors other runtimes: one shared `create...Persistence`.
-- IPC protocol v5 forwards managed on-demand cache claims, rotation, renewal,
-  release, claim checks on SQLite reads and writes, exact transaction-ID
+- IPC protocol v6 forwards explicit eager or managed storage targets,
+  on-demand cache claims, rotation, renewal, release, claim checks on SQLite
+  reads and writes, exact transaction-ID
   reconciliation, and claim-scoped leadership-term reservation. Upgrade main
   and renderer together.
   If a custom main-process adapter does not implement these operations, pass

@@ -15,6 +15,7 @@ import {
   createPersistedTableName,
   decodePersistedStorageKey,
   encodePersistedStorageKey,
+  resolvePersistedStorageTarget,
 } from './persisted'
 import {
   PERSISTED_TYPE_TAG,
@@ -35,6 +36,7 @@ import type {
   PersistedKeySetEvidence,
   PersistedRowScanOptions,
   PersistedScannedRow,
+  PersistedStorageTarget,
   PersistedTx,
   PersistenceAdapter,
   ReconciledCommittedTx,
@@ -263,6 +265,7 @@ function hasCacheGenerationIdPrefix(collectionId: string): boolean {
     collectionId.startsWith(LEGACY_CACHE_GENERATION_ID_PREFIX)
   )
 }
+
 export const DEFAULT_CACHE_GENERATION_CLAIM_TTL_MS = 5 * 60_000
 const DEFAULT_PULL_SINCE_RELOAD_THRESHOLD = 128
 
@@ -2161,7 +2164,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
   }
 
   loadSubset(
-    collectionId: string,
+    target: PersistedStorageTarget,
     options: LoadSubsetOptions,
     ctx?: {
       requiredIndexSignatures?: ReadonlyArray<string>
@@ -2175,12 +2178,12 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     }>
   > {
     return this.runRegular(() =>
-      this.loadSubsetUnscheduled(collectionId, options, ctx),
+      this.loadSubsetUnscheduled(target, options, ctx),
     )
   }
 
   private async loadSubsetUnscheduled(
-    collectionId: string,
+    target: PersistedStorageTarget,
     options: LoadSubsetOptions,
     ctx?: {
       requiredIndexSignatures?: ReadonlyArray<string>
@@ -2193,6 +2196,14 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       metadata?: unknown
     }>
   > {
+    const access = resolvePersistedStorageTarget(
+      target,
+      ctx?.cacheGenerationClaimId,
+    )
+    const collectionId = access.collectionId
+    ctx = access.claimId
+      ? { ...ctx, cacheGenerationClaimId: access.claimId }
+      : ctx
     await this.assertCacheGenerationReadClaim(
       this.driver,
       collectionId,
@@ -2281,7 +2292,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
   }
 
   loadResumeSnapshot(
-    collectionId: string,
+    target: PersistedStorageTarget,
     ctx?: {
       requiredIndexSignatures?: ReadonlyArray<string>
       includeRows?: boolean
@@ -2289,12 +2300,12 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     },
   ) {
     return this.runRegular(() =>
-      this.loadResumeSnapshotUnscheduled(collectionId, ctx),
+      this.loadResumeSnapshotUnscheduled(target, ctx),
     )
   }
 
   private async loadResumeSnapshotUnscheduled(
-    collectionId: string,
+    target: PersistedStorageTarget,
     ctx?: {
       requiredIndexSignatures?: ReadonlyArray<string>
       includeRows?: boolean
@@ -2313,6 +2324,14 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     latestRowVersion: number
     resetEpoch: number
   }> {
+    const access = resolvePersistedStorageTarget(
+      target,
+      ctx?.cacheGenerationClaimId,
+    )
+    const collectionId = access.collectionId
+    ctx = access.claimId
+      ? { ...ctx, cacheGenerationClaimId: access.claimId }
+      : ctx
     await this.assertCacheGenerationReadClaim(
       this.driver,
       collectionId,
@@ -2390,31 +2409,32 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     })
   }
 
-  applyCommittedTx(collectionId: string, tx: PersistedTx): Promise<void> {
-    return this.runRegular(() =>
-      this.applyCommittedTxUnscheduled(collectionId, tx),
-    )
+  applyCommittedTx(
+    target: PersistedStorageTarget,
+    tx: PersistedTx,
+  ): Promise<void> {
+    return this.runRegular(() => this.applyCommittedTxUnscheduled(target, tx))
   }
 
   reconcileCommittedTx(
-    collectionId: string,
+    target: PersistedStorageTarget,
     tx: PersistedTx,
     anchor: CommittedTxAnchor,
   ): Promise<ReconciledCommittedTx> {
     return this.runRegular(() =>
-      this.reconcileCommittedTxUnscheduled(collectionId, tx, anchor),
+      this.reconcileCommittedTxUnscheduled(target, tx, anchor),
     )
   }
 
   private async applyCommittedTxUnscheduled(
-    collectionId: string,
+    target: PersistedStorageTarget,
     tx: PersistedTx,
   ): Promise<void> {
-    await this.applyCommittedTxInternal(collectionId, tx)
+    await this.applyCommittedTxInternal(target, tx)
   }
 
   private reconcileCommittedTxUnscheduled(
-    collectionId: string,
+    target: PersistedStorageTarget,
     tx: PersistedTx,
     anchor: CommittedTxAnchor,
   ): Promise<ReconciledCommittedTx> {
@@ -2423,14 +2443,20 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
         `Cannot reconcile a committed transaction without a valid durable anchor`,
       )
     }
-    return this.applyCommittedTxInternal(collectionId, tx, anchor)
+    return this.applyCommittedTxInternal(target, tx, anchor)
   }
 
   private async applyCommittedTxInternal(
-    collectionId: string,
+    target: PersistedStorageTarget,
     tx: PersistedTx,
     anchor?: CommittedTxAnchor,
   ): Promise<ReconciledCommittedTx> {
+    const access = resolvePersistedStorageTarget(
+      target,
+      tx.cacheGenerationClaimId,
+    )
+    const collectionId = access.collectionId
+    tx = { ...tx, cacheGenerationClaimId: access.claimId }
     await this.assertCacheGenerationReadClaim(
       this.driver,
       collectionId,
@@ -2862,18 +2888,26 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
   }
 
   loadCollectionMetadata(
-    collectionId: string,
+    target: PersistedStorageTarget,
     ctx?: { cacheGenerationClaimId?: string },
   ): Promise<Array<{ key: string; value: unknown }>> {
     return this.runRegular(() =>
-      this.loadCollectionMetadataUnscheduled(collectionId, ctx),
+      this.loadCollectionMetadataUnscheduled(target, ctx),
     )
   }
 
   private async loadCollectionMetadataUnscheduled(
-    collectionId: string,
+    target: PersistedStorageTarget,
     ctx?: { cacheGenerationClaimId?: string },
   ): Promise<Array<{ key: string; value: unknown }>> {
+    const access = resolvePersistedStorageTarget(
+      target,
+      ctx?.cacheGenerationClaimId,
+    )
+    const collectionId = access.collectionId
+    ctx = access.claimId
+      ? { ...ctx, cacheGenerationClaimId: access.claimId }
+      : ctx
     await this.assertCacheGenerationReadClaim(
       this.driver,
       collectionId,
@@ -2909,20 +2943,26 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
   }
 
   scanRows(
-    collectionId: string,
+    target: PersistedStorageTarget,
     options?: PersistedRowScanOptions,
     ctx?: { cacheGenerationClaimId?: string },
   ): Promise<Array<PersistedScannedRow>> {
-    return this.runRegular(() =>
-      this.scanRowsUnscheduled(collectionId, options, ctx),
-    )
+    return this.runRegular(() => this.scanRowsUnscheduled(target, options, ctx))
   }
 
   private async scanRowsUnscheduled(
-    collectionId: string,
+    target: PersistedStorageTarget,
     options?: PersistedRowScanOptions,
     ctx?: { cacheGenerationClaimId?: string },
   ): Promise<Array<PersistedScannedRow>> {
+    const access = resolvePersistedStorageTarget(
+      target,
+      ctx?.cacheGenerationClaimId,
+    )
+    const collectionId = access.collectionId
+    ctx = access.claimId
+      ? { ...ctx, cacheGenerationClaimId: access.claimId }
+      : ctx
     await this.assertCacheGenerationReadClaim(
       this.driver,
       collectionId,
@@ -2962,22 +3002,30 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
   }
 
   ensureIndex(
-    collectionId: string,
+    target: PersistedStorageTarget,
     signature: string,
     spec: PersistedIndexSpec,
     ctx?: { cacheGenerationClaimId?: string },
   ): Promise<void> {
     return this.runRegular(() =>
-      this.ensureIndexUnscheduled(collectionId, signature, spec, ctx),
+      this.ensureIndexUnscheduled(target, signature, spec, ctx),
     )
   }
 
   private async ensureIndexUnscheduled(
-    collectionId: string,
+    target: PersistedStorageTarget,
     signature: string,
     spec: PersistedIndexSpec,
     ctx?: { cacheGenerationClaimId?: string },
   ): Promise<void> {
+    const access = resolvePersistedStorageTarget(
+      target,
+      ctx?.cacheGenerationClaimId,
+    )
+    const collectionId = access.collectionId
+    ctx = access.claimId
+      ? { ...ctx, cacheGenerationClaimId: access.claimId }
+      : ctx
     await this.assertCacheGenerationReadClaim(
       this.driver,
       collectionId,
@@ -3080,20 +3128,28 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
   }
 
   markIndexRemoved(
-    collectionId: string,
+    target: PersistedStorageTarget,
     signature: string,
     ctx?: { cacheGenerationClaimId?: string },
   ): Promise<void> {
     return this.runRegular(() =>
-      this.markIndexRemovedUnscheduled(collectionId, signature, ctx),
+      this.markIndexRemovedUnscheduled(target, signature, ctx),
     )
   }
 
   private async markIndexRemovedUnscheduled(
-    collectionId: string,
+    target: PersistedStorageTarget,
     signature: string,
     ctx?: { cacheGenerationClaimId?: string },
   ): Promise<void> {
+    const access = resolvePersistedStorageTarget(
+      target,
+      ctx?.cacheGenerationClaimId,
+    )
+    const collectionId = access.collectionId
+    ctx = access.claimId
+      ? { ...ctx, cacheGenerationClaimId: access.claimId }
+      : ctx
     await this.assertCacheGenerationReadClaim(
       this.driver,
       collectionId,
@@ -3138,7 +3194,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
   }
 
   reserveLeadershipTerm(
-    collectionId: string,
+    target: PersistedStorageTarget,
     observedTerm: number,
     ctx?: { cacheGenerationClaimId?: string },
   ): Promise<{
@@ -3147,15 +3203,11 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     latestRowVersion: number
   }> {
     // Election may run while hydration waits for its first writer route.
-    return this.reserveLeadershipTermUnscheduled(
-      collectionId,
-      observedTerm,
-      ctx,
-    )
+    return this.reserveLeadershipTermUnscheduled(target, observedTerm, ctx)
   }
 
   private async reserveLeadershipTermUnscheduled(
-    collectionId: string,
+    target: PersistedStorageTarget,
     observedTerm: number,
     ctx?: { cacheGenerationClaimId?: string },
   ): Promise<{
@@ -3163,6 +3215,14 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     latestSeq: number
     latestRowVersion: number
   }> {
+    const access = resolvePersistedStorageTarget(
+      target,
+      ctx?.cacheGenerationClaimId,
+    )
+    const collectionId = access.collectionId
+    ctx = access.claimId
+      ? { ...ctx, cacheGenerationClaimId: access.claimId }
+      : ctx
     await this.assertCacheGenerationReadClaim(
       this.driver,
       collectionId,
@@ -3196,7 +3256,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
   }
 
   getStreamPosition(
-    collectionId: string,
+    target: PersistedStorageTarget,
     ctx?: { cacheGenerationClaimId?: string },
   ): Promise<{
     latestTerm: number
@@ -3205,17 +3265,25 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
   }> {
     // Election must not queue behind a hydrate awaiting its first writer route.
     // The stream-position snapshot still uses the driver's transaction admission.
-    return this.getStreamPositionUnscheduled(collectionId, ctx)
+    return this.getStreamPositionUnscheduled(target, ctx)
   }
 
   private async getStreamPositionUnscheduled(
-    collectionId: string,
+    target: PersistedStorageTarget,
     ctx?: { cacheGenerationClaimId?: string },
   ): Promise<{
     latestTerm: number
     latestSeq: number
     latestRowVersion: number
   }> {
+    const access = resolvePersistedStorageTarget(
+      target,
+      ctx?.cacheGenerationClaimId,
+    )
+    const collectionId = access.collectionId
+    ctx = access.claimId
+      ? { ...ctx, cacheGenerationClaimId: access.claimId }
+      : ctx
     await this.assertCacheGenerationReadClaim(
       this.driver,
       collectionId,
@@ -3324,20 +3392,28 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
   }
 
   pullSince(
-    collectionId: string,
+    target: PersistedStorageTarget,
     fromRowVersion: number,
     ctx?: { cacheGenerationClaimId?: string },
   ): Promise<SQLitePullSinceResult<string | number>> {
     return this.runRegular(() =>
-      this.pullSinceUnscheduled(collectionId, fromRowVersion, ctx),
+      this.pullSinceUnscheduled(target, fromRowVersion, ctx),
     )
   }
 
   private async pullSinceUnscheduled(
-    collectionId: string,
+    target: PersistedStorageTarget,
     fromRowVersion: number,
     ctx?: { cacheGenerationClaimId?: string },
   ): Promise<SQLitePullSinceResult<string | number>> {
+    const access = resolvePersistedStorageTarget(
+      target,
+      ctx?.cacheGenerationClaimId,
+    )
+    const collectionId = access.collectionId
+    ctx = access.claimId
+      ? { ...ctx, cacheGenerationClaimId: access.claimId }
+      : ctx
     await this.assertCacheGenerationReadClaim(
       this.driver,
       collectionId,

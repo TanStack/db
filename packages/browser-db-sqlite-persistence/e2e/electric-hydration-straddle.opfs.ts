@@ -275,7 +275,9 @@ try {
             if (
               controlArmed &&
               !reach.hydrationLoadReturned &&
-              args[0] === storageCollectionId
+              (args[0].kind === `managed`
+                ? args[0].storageCollectionId
+                : args[0].collectionId) === storageCollectionId
             ) {
               heldThisScope.value = true
               reach.hydrationLoadReturned = true
@@ -306,9 +308,16 @@ try {
     if (!cacheClaimId || storageCollectionId === collectionId) {
       throw new Error(`On-demand Electric has no claimed storage Collection`)
     }
-    const snapshot = await adapter.loadResumeSnapshot(storageCollectionId, {
-      cacheGenerationClaimId: cacheClaimId,
-    })
+    const snapshot = await adapter.loadResumeSnapshot(
+      {
+        kind: `managed`,
+        storageCollectionId: storageCollectionId,
+        claimId: cacheClaimId,
+      },
+      {
+        cacheGenerationClaimId: cacheClaimId,
+      },
+    )
     return sortedRows(snapshot.rows.map(({ value }) => value as Item))
   }
   stage = `preloading collection`

@@ -302,7 +302,7 @@ function createPersistedAdapter(
           value: structuredClone(value),
         })),
       ),
-    applyCommittedTx: (_collectionId: string, tx: PersistedTx) => {
+    applyCommittedTx: (_target, tx: PersistedTx) => {
       for (const mutation of tx.collectionMetadataMutations ?? []) {
         if (mutation.type === `delete`) {
           collectionMetadata.delete(mutation.key)

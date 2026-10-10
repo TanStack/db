@@ -42,6 +42,7 @@ import type {
   CollectionReset,
   PersistedCollectionCoordinator,
   PersistedCollectionPersistence,
+  PersistedStorageTarget,
   PersistedSyncWrappedOptions,
   PersistedTx,
   PersistenceAdapter,
@@ -222,6 +223,14 @@ type RecordingAdapter = PersistenceAdapter & {
   collectionMetadata: Map<string, unknown>
 }
 
+// This fixture records the addressed storage name; it does not decide whether
+// the target's managed claim is valid. The SQLite owner judges that boundary.
+function recordedStorageId(target: PersistedStorageTarget): string {
+  return target.kind === `eager`
+    ? target.collectionId
+    : target.storageCollectionId
+}
+
 function createRecordingAdapter(
   initialRows: Array<Todo> = [],
 ): RecordingAdapter {
@@ -240,7 +249,7 @@ function createRecordingAdapter(
     loadResumeSnapshotCalls: [],
     loadSubset: (collectionId, options, ctx) => {
       adapter.loadSubsetCalls.push({
-        collectionId,
+        collectionId: recordedStorageId(collectionId),
         options,
         requiredIndexSignatures: ctx?.requiredIndexSignatures ?? [],
       })
@@ -254,7 +263,7 @@ function createRecordingAdapter(
     },
     loadResumeSnapshot: (collectionId, options) => {
       adapter.loadResumeSnapshotCalls.push({
-        collectionId,
+        collectionId: recordedStorageId(collectionId),
         includeRows: options?.includeRows,
         requiredIndexSignatures: options?.requiredIndexSignatures ?? [],
       })
@@ -280,7 +289,7 @@ function createRecordingAdapter(
       })
     },
     loadCollectionMetadata: (collectionId) => {
-      adapter.loadCollectionMetadataCalls.push(collectionId)
+      adapter.loadCollectionMetadataCalls.push(recordedStorageId(collectionId))
       return Promise.resolve(
         Array.from(adapter.collectionMetadata.entries()).map(
           ([key, value]) => ({
@@ -300,7 +309,7 @@ function createRecordingAdapter(
       ),
     applyCommittedTx: (collectionId, tx) => {
       adapter.applyCommittedTxCalls.push({
-        collectionId,
+        collectionId: recordedStorageId(collectionId),
         tx: {
           term: tx.term,
           seq: tx.seq,
@@ -360,11 +369,17 @@ function createRecordingAdapter(
       return Promise.resolve()
     },
     ensureIndex: (collectionId, signature) => {
-      adapter.ensureIndexCalls.push({ collectionId, signature })
+      adapter.ensureIndexCalls.push({
+        collectionId: recordedStorageId(collectionId),
+        signature,
+      })
       return Promise.resolve()
     },
     markIndexRemoved: (collectionId, signature) => {
-      adapter.markIndexRemovedCalls.push({ collectionId, signature })
+      adapter.markIndexRemovedCalls.push({
+        collectionId: recordedStorageId(collectionId),
+        signature,
+      })
       return Promise.resolve()
     },
   }
@@ -803,12 +818,18 @@ it.each([false, true])(
       if (first) {
         first = false
         if (committedBeforeClose) {
-          await adapter.applyCommittedTx(collectionId, tx)
+          await adapter.applyCommittedTx(
+            { kind: `eager`, collectionId: collectionId },
+            tx,
+          )
           durableFirstTx = tx
         }
         throw error
       }
-      await adapter.applyCommittedTx(collectionId, tx)
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        tx,
+      )
       return {
         type: `rpc:applyCommittedTx:res`,
         rpcId: tx.txId,
@@ -827,7 +848,10 @@ it.each([false, true])(
         ? durableFirstTx!
         : { ...tx, term: 2, seq: 1, rowVersion: 1 }
       if (!alreadyApplied)
-        await adapter.applyCommittedTx(collectionId, committed)
+        await adapter.applyCommittedTx(
+          { kind: `eager`, collectionId: collectionId },
+          committed,
+        )
       return {
         type: `rpc:reconcileCommittedTx:res`,
         rpcId: `controlled-reconciliation`,
@@ -974,7 +998,10 @@ it(`keeps the original receipt position after a peer write and fails closed on r
 
   coordinator.requestApplyCommittedTx = async (id, tx) => {
     originalTx = { ...tx, term: 1, seq: 1, rowVersion: 1 }
-    await adapter.applyCommittedTx(id, originalTx)
+    await adapter.applyCommittedTx(
+      { kind: `eager`, collectionId: id },
+      originalTx,
+    )
     const peerTx: PersistedTx = {
       ...tx,
       txId: `peer-after-original`,
@@ -993,7 +1020,7 @@ it(`keeps the original receipt position after a peer write and fails closed on r
         { type: `set`, key: `cursor`, value: `peer` },
       ],
     }
-    await adapter.applyCommittedTx(id, peerTx)
+    await adapter.applyCommittedTx({ kind: `eager`, collectionId: id }, peerTx)
     throw error
   }
   coordinator.reconcileCommittedTx = (id, tx, anchor) => {
@@ -1300,13 +1327,16 @@ it(`publishes a durable gap reload without an empty intermediate snapshot`, asyn
   coordinator.pullSince = undefined
   const collectionId = `source-atomic-gap-fallback`
   const durableWrite = (id: string, term: number, rowVersion: number) =>
-    adapter.applyCommittedTx(collectionId, {
-      txId: id,
-      term,
-      seq: 1,
-      rowVersion,
-      mutations: [{ type: `insert`, key: id, value: { id, title: id } }],
-    })
+    adapter.applyCommittedTx(
+      { kind: `eager`, collectionId: collectionId },
+      {
+        txId: id,
+        term,
+        seq: 1,
+        rowVersion,
+        mutations: [{ type: `insert`, key: id, value: { id, title: id } }],
+      },
+    )
   await durableWrite(`old`, 1, 1)
   const collection = createCollection(
     persistedCollectionOptions<Todo, string>({
@@ -1398,15 +1428,18 @@ it(`recovers a missed commit across a no-write election`, async () => {
       term: number,
       rowVersion: number,
     ) => {
-      await adapter.applyCommittedTx(collectionId, {
-        txId,
-        term,
-        seq: 1,
-        rowVersion,
-        mutations: [
-          { type: `insert`, key: txId, value: { id: txId, title: txId } },
-        ],
-      })
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId,
+          term,
+          seq: 1,
+          rowVersion,
+          mutations: [
+            { type: `insert`, key: txId, value: { id: txId, title: txId } },
+          ],
+        },
+      )
     }
     await durableWrite(`missed`, 1, 1)
     // The controlled ledger jumps over term 2 without simulating its election.
@@ -1484,15 +1517,18 @@ it(`recovers missed rows after position-only resume certification`, async () => 
       term: number,
       rowVersion: number,
     ) =>
-      adapter.applyCommittedTx(collectionId, {
-        txId,
-        term,
-        seq: 1,
-        rowVersion,
-        mutations: [
-          { type: `insert`, key: txId, value: { id: txId, title: txId } },
-        ],
-      })
+      adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId,
+          term,
+          seq: 1,
+          rowVersion,
+          mutations: [
+            { type: `insert`, key: txId, value: { id: txId, title: txId } },
+          ],
+        },
+      )
     await durableWrite(`missed`, 1, 1)
     await durableWrite(`received`, 3, 2)
     await atPersistedOracleCheckpoint(
@@ -2099,7 +2135,10 @@ it(`reconciles a source receipt queued behind persisted hydration`, async () => 
       expect(scopedAdapter).toBeDefined()
       throw uncertain
     }
-    await (scopedAdapter ?? adapter).applyCommittedTx(collectionId, tx)
+    await (scopedAdapter ?? adapter).applyCommittedTx(
+      { kind: `eager`, collectionId: collectionId },
+      tx,
+    )
     return {
       type: `rpc:applyCommittedTx:res`,
       rpcId: tx.txId,
@@ -2120,7 +2159,10 @@ it(`reconciles a source receipt queued behind persisted hydration`, async () => 
     reconcileEntered.resolve()
     await releaseReconcile.promise
     const committed = { ...tx, term: 2, seq: 1, rowVersion: 1 }
-    await (scopedAdapter ?? adapter).applyCommittedTx(collectionId, committed)
+    await (scopedAdapter ?? adapter).applyCommittedTx(
+      { kind: `eager`, collectionId: collectionId },
+      committed,
+    )
     return {
       type: `rpc:reconcileCommittedTx:res`,
       rpcId: tx.txId,
@@ -9636,7 +9678,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     const publishCallsBefore = coordinator.publishCalls.length
     adapter.loadSubset = (collectionId, options, context) => {
       adapter.loadSubsetCalls.push({
-        collectionId,
+        collectionId: recordedStorageId(collectionId),
         options,
         requiredIndexSignatures: context?.requiredIndexSignatures ?? [],
       })
@@ -9881,7 +9923,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       const loadCallsBefore = adapter.loadSubsetCalls.length
       adapter.loadSubset = (collectionId, options, context) => {
         adapter.loadSubsetCalls.push({
-          collectionId,
+          collectionId: recordedStorageId(collectionId),
           options,
           requiredIndexSignatures: context?.requiredIndexSignatures ?? [],
         })
@@ -11307,7 +11349,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         entry === `reset` ? createCoordinatorHarness() : undefined
       if (coordinator) {
         coordinator.requestApplyCommittedTx = async (collectionId, tx) => {
-          await adapter.applyCommittedTx(collectionId, tx)
+          await adapter.applyCommittedTx(
+            { kind: `eager`, collectionId: collectionId },
+            tx,
+          )
           return {
             type: `rpc:applyCommittedTx:res`,
             rpcId: tx.txId,
@@ -12948,7 +12993,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         await releaseFirstDurability.promise
         return { ...persistenceResponse, rpcId: tx.txId }
       }
-      await adapter.applyCommittedTx(collectionId, tx)
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        tx,
+      )
       return {
         type: `rpc:applyCommittedTx:res`,
         rpcId: tx.txId,
@@ -14388,7 +14436,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         }
       }
       coordinator.requestApplyCommittedTx = async (id, tx) => {
-        await adapter.applyCommittedTx(id, tx)
+        await adapter.applyCommittedTx({ kind: `eager`, collectionId: id }, tx)
         return {
           type: `rpc:applyCommittedTx:res`,
           rpcId: tx.txId,
@@ -14790,7 +14838,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       `full-reload-hydration-owned-metadata`,
     )
     coordinator.requestApplyCommittedTx = async (collectionId, tx) => {
-      await adapter.applyCommittedTx(collectionId, tx)
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        tx,
+      )
       return {
         type: `rpc:applyCommittedTx:res`,
         rpcId: tx.txId,
@@ -20430,7 +20481,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       adapter.releaseCacheGenerationClaim = async () => {}
       const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
       adapter.loadResumeSnapshot = async (id, options) => {
-        if (id === storageId) {
+        if (recordedStorageId(id) === storageId) {
           readEntered.resolve()
           await releaseRead.promise
           throw expires ? claimFailure : ioFailure
@@ -20586,7 +20637,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
     adapter.releaseCacheGenerationClaim = async () => {}
     adapter.ensureIndex = async (id, signature) => {
-      indexRoutes.push({ storageId: id, signature })
+      indexRoutes.push({ storageId: recordedStorageId(id), signature })
       if (++indexCalls === 1) {
         firstIndexEntered.resolve()
         await releaseFirstIndex.promise
@@ -20694,8 +20745,11 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
     adapter.releaseCacheGenerationClaim = async () => {}
     adapter.ensureIndex = async (id, signature) => {
-      indexRoutes.push({ storageId: id, signature })
-      if (id === `active-index-new` && signature === initialSignature) {
+      indexRoutes.push({ storageId: recordedStorageId(id), signature })
+      if (
+        recordedStorageId(id) === `active-index-new` &&
+        signature === initialSignature
+      ) {
         bootstrapEntered.resolve()
         await releaseBootstrap.promise
       }
@@ -20957,14 +21011,14 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     })
     adapter.releaseCacheGenerationClaim = async () => {}
     adapter.ensureIndex = async (id, signature) => {
-      if (id === `bootstrap-removal-new`) {
+      if (recordedStorageId(id) === `bootstrap-removal-new`) {
         bootstrapEntered.resolve()
         await releaseBootstrap.promise
       }
-      durableIndexes.set(`${id}:${signature}`, true)
+      durableIndexes.set(`${recordedStorageId(id)}:${signature}`, true)
     }
     adapter.markIndexRemoved = async (id, signature) => {
-      durableIndexes.set(`${id}:${signature}`, false)
+      durableIndexes.set(`${recordedStorageId(id)}:${signature}`, false)
       removalSettled.resolve()
     }
     const collection = createCollection(
@@ -21055,18 +21109,21 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     })
     adapter.releaseCacheGenerationClaim = async () => {}
     adapter.ensureIndex = async (id, signature) => {
-      if (id === `bootstrap-readd-new` && ++newStorageEnsures === 1) {
+      if (
+        recordedStorageId(id) === `bootstrap-readd-new` &&
+        ++newStorageEnsures === 1
+      ) {
         firstEnsureEntered.resolve()
         await releaseFirstEnsure.promise
       }
-      durableIndexes.set(`${id}:${signature}`, true)
+      durableIndexes.set(`${recordedStorageId(id)}:${signature}`, true)
     }
     adapter.markIndexRemoved = async (id, signature) => {
       if (++removals === 2) {
         secondRemovalEntered.resolve()
         await releaseSecondRemoval.promise
       }
-      durableIndexes.set(`${id}:${signature}`, false)
+      durableIndexes.set(`${recordedStorageId(id)}:${signature}`, false)
       firstRemovalSettled.resolve()
     }
     const collection = createCollection(
@@ -21160,7 +21217,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
     adapter.releaseCacheGenerationClaim = async () => {}
     adapter.ensureIndex = async (id) => {
-      if (id === `overlap-new-1`) {
+      if (recordedStorageId(id) === `overlap-new-1`) {
         firstIndexEntered.resolve()
         await releaseFirstIndex.promise
       }
@@ -21652,9 +21709,11 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         const snapshot = await originalLoadResumeSnapshot(id, context)
         return {
           ...snapshot,
-          latestTerm: id === oldStorageId ? 1 : 0,
-          latestSeq: id === oldStorageId ? retiredRowVersion : 0,
-          latestRowVersion: id === oldStorageId ? retiredRowVersion : 0,
+          latestTerm: recordedStorageId(id) === oldStorageId ? 1 : 0,
+          latestSeq:
+            recordedStorageId(id) === oldStorageId ? retiredRowVersion : 0,
+          latestRowVersion:
+            recordedStorageId(id) === oldStorageId ? retiredRowVersion : 0,
         }
       }
       adapter.claimCacheGeneration = async () => ({
@@ -21810,16 +21869,18 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     let wrongGenerationReads = 0
     const originalLoadResumeSnapshot = adapter.loadResumeSnapshot
     adapter.loadResumeSnapshot = async (id, context) => {
-      if (id === logicalId) {
+      if (recordedStorageId(id) === logicalId) {
         wrongGenerationReads++
         throw new Error(`Retired reset must not read the logical cache ID`)
       }
       const snapshot = await originalLoadResumeSnapshot(id, context)
       return {
         ...snapshot,
-        latestTerm: id === oldStorageId ? 1 : 0,
-        latestSeq: id === oldStorageId ? retiredRowVersion : 0,
-        latestRowVersion: id === oldStorageId ? retiredRowVersion : 0,
+        latestTerm: recordedStorageId(id) === oldStorageId ? 1 : 0,
+        latestSeq:
+          recordedStorageId(id) === oldStorageId ? retiredRowVersion : 0,
+        latestRowVersion:
+          recordedStorageId(id) === oldStorageId ? retiredRowVersion : 0,
       }
     }
     adapter.claimCacheGeneration = async () => ({
@@ -22180,7 +22241,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       }
       adapter.releaseCacheGenerationClaim = async () => {}
       adapter.loadSubset = async (id) => {
-        if (id === `read-expiry-old`) {
+        if (recordedStorageId(id) === `read-expiry-old`) {
           readEntered.resolve()
           await releaseRead.promise
           if (outcome === `claim check rejected`) {
@@ -22312,7 +22373,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
       adapter.loadResumeSnapshot = async (...args) => {
         const snapshot = await loadResumeSnapshot(...args)
-        if (holdCertification && args[0] === oldStorageId) {
+        if (holdCertification && recordedStorageId(args[0]) === oldStorageId) {
           readEntered.resolve()
           await releaseRead.promise
           if (failure === `claim`) {
@@ -22432,7 +22493,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       }
       adapter.releaseCacheGenerationClaim = async () => {}
       adapter.loadSubset = async (storageId) => {
-        if (storageId !== oldStorageId) return []
+        if (recordedStorageId(storageId) !== oldStorageId) return []
         if (++readCount === 1) {
           return [{ key: `old`, value: { id: `old`, title: `Initial row` } }]
         }
@@ -22550,17 +22611,19 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     adapter.releaseCacheGenerationClaim = async () => {}
     adapter.scanRows = async (storageId, _options, context) => {
       scanRoutes.push({
-        storageId,
+        storageId: recordedStorageId(storageId),
         claimId: context?.cacheGenerationClaimId,
       })
       if (
-        storageId === `scan-old-storage` &&
+        recordedStorageId(storageId) === `scan-old-storage` &&
         context?.cacheGenerationClaimId === `scan-expiring-claim`
       ) {
         scanEntered.resolve()
         await releaseScan.promise
       }
-      return storageId === `scan-private-storage` ? [freshRow] : [oldRow]
+      return recordedStorageId(storageId) === `scan-private-storage`
+        ? [freshRow]
+        : [oldRow]
     }
 
     let warmSource!: TodoSyncParams
@@ -23532,7 +23595,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     const publishCallsBefore = coordinator.publishCalls.length
     adapter.loadSubset = (collectionId, options, context) => {
       adapter.loadSubsetCalls.push({
-        collectionId,
+        collectionId: recordedStorageId(collectionId),
         options,
         requiredIndexSignatures: context?.requiredIndexSignatures ?? [],
       })
@@ -24149,6 +24212,70 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   // hydration scope. The adapter makes an interleaved v2 write possible only
   // outside that scope, so the public v1 metadata and row are the independent
   // coherence checkpoint. This fixed history does not model arbitrary resets.
+  it(`rebases a managed reset from its claimed physical storage`, async () => {
+    const adapter = createRecordingAdapter()
+    const coordinator = createCoordinatorHarness()
+    const physicalId = `managed-reset-physical`
+    const claimId = `managed-reset-claim`
+    const reads: Array<PersistedStorageTarget> = []
+    const load = adapter.loadResumeSnapshot.bind(adapter)
+    adapter.loadResumeSnapshot = (target, context) => {
+      reads.push(target)
+      return load(target, context)
+    }
+    adapter.claimCacheGeneration = async () => ({
+      storageCollectionId: physicalId,
+      claimId,
+      expiresAtMs: Date.now() + 60_000,
+    })
+    adapter.rotateCacheGeneration = async () => ({
+      storageCollectionId: physicalId,
+      claimId,
+      expiresAtMs: Date.now() + 60_000,
+    })
+    adapter.renewCacheGenerationClaim = async () => Date.now() + 60_000
+    adapter.releaseCacheGenerationClaim = async () => {}
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `managed-reset-logical`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              restartAfterScopedRecovery: () => {},
+              loadSubset: async () => {},
+            }
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    try {
+      collection.startSyncImmediate()
+      await collection.stateWhenReady()
+      const before = reads.length
+      coordinator.emit(
+        { type: `collection:reset`, schemaVersion: 1, resetEpoch: 1 },
+        `peer`,
+        physicalId,
+      )
+      await vi.waitFor(() => expect(reads.length).toBeGreaterThan(before))
+      expect(reads.slice(before)).toContainEqual({
+        kind: `managed`,
+        storageCollectionId: physicalId,
+        claimId,
+      })
+      expect(reads.slice(before)).not.toContainEqual({
+        kind: `eager`,
+        collectionId: `managed-reset-logical`,
+      })
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
   it(`keeps a collection-reset reload inside one hydration scope`, async () => {
     const adapter = createRecordingAdapter([{ id: `1`, title: `Initial row` }])
     adapter.collectionMetadata.set(`snapshot`, `initial`)
@@ -24891,7 +25018,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
 
     adapter.ensureIndex = async (collectionId, signature) => {
-      adapter.ensureIndexCalls.push({ collectionId, signature })
+      adapter.ensureIndexCalls.push({
+        collectionId: recordedStorageId(collectionId),
+        signature,
+      })
       throw localFailure
     }
     coordinator.requestEnsurePersistedIndex = async (
@@ -24969,7 +25099,11 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       coordinatorEntered.resolve()
       // Deliberately ignore the optional scoped adapter, as existing public
       // coordinator implementations are allowed to do.
-      await adapter.ensureIndex(collectionId, signature, spec)
+      await adapter.ensureIndex(
+        { kind: `eager`, collectionId: collectionId },
+        signature,
+        spec,
+      )
     }
 
     const collection = createCollection(
@@ -25054,12 +25188,22 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       collectionId,
       signature,
       spec,
-    ) => tab2.adapter.ensureIndex(collectionId, signature, spec)
+    ) =>
+      tab2.adapter.ensureIndex(
+        { kind: `eager`, collectionId: collectionId },
+        signature,
+        spec,
+      )
     coordinator2.requestEnsurePersistedIndex = (
       collectionId,
       signature,
       spec,
-    ) => tab1.adapter.ensureIndex(collectionId, signature, spec)
+    ) =>
+      tab1.adapter.ensureIndex(
+        { kind: `eager`, collectionId: collectionId },
+        signature,
+        spec,
+      )
 
     const createFollowerCollection = (
       id: string,
@@ -25166,7 +25310,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
               spec,
             ) =>
               tabs[remoteIndex]!.adapter.ensureIndex(
-                collectionId,
+                { kind: `eager`, collectionId: collectionId },
                 signature,
                 spec,
               )
@@ -25857,7 +26001,7 @@ function installHydrationRoutingProbe(adapter: PersistenceAdapter) {
       route: `public`,
       scope: [...active].at(-1),
       live: active.size === 0,
-      collectionId,
+      collectionId: recordedStorageId(collectionId),
     })
     return direct(collectionId, tx)
   }
@@ -25871,7 +26015,7 @@ function installHydrationRoutingProbe(adapter: PersistenceAdapter) {
           route: `scoped`,
           scope,
           live: active.has(scope),
-          collectionId,
+          collectionId: recordedStorageId(collectionId),
         })
         return direct(collectionId, tx)
       },
@@ -25919,7 +26063,7 @@ describeUnlessAnyOracleReplay(`hydration routing probe calibration`, () => {
         mutations: [],
       }
       const apply = (target: PersistenceAdapter) =>
-        target.applyCommittedTx(`probe`, tx)
+        target.applyCommittedTx({ kind: `eager`, collectionId: `probe` }, tx)
       try {
         await apply(loans[0]!)
         await apply(loans[1]!)
