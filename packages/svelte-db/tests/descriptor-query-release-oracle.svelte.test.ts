@@ -13,8 +13,11 @@
  * zero until a direct reader preloads that source, then becomes one. The
  * checkpoints are the public hook error and the source Collection's start
  * count and ready status. The grammar covers two eager union sources with
- * synchronous starts; it does not model asynchronous source failures or
- * reactive replacement of the query.
+ * synchronous starts. A neighboring remount consumes an independent healthy
+ * query after the failed effect is retired. Its row comes from the healthy
+ * source alone. A synchronous unhandled effect error does not rerun that same
+ * Svelte effect when its query changes; recovery in place is not promised.
+ * Asynchronous source failures remain outside this model.
  */
 import { describe, expect, it } from 'vitest'
 import { DbClient, Query, collectionOptions } from '@tanstack/db'
@@ -24,6 +27,66 @@ import { useLiveQuery } from '../src/useLiveQuery.svelte.js'
 type Row = { id: string }
 
 describe(`Svelte descriptor source release`, () => {
+  it(`a fresh effect can observe a healthy query after a failed source start`, async () => {
+    const failure = new Error(`failed query source`)
+    let failedStarts = 0
+    let healthyStarts = 0
+    const failed = collectionOptions(`svelte-reactive-failed`, () => ({
+      id: `svelte-reactive-failed`,
+      getKey: (row: Row) => row.id,
+      startSync: true,
+      sync: {
+        sync: () => {
+          failedStarts++
+          throw failure
+        },
+      },
+    }))
+    const healthy = collectionOptions(`svelte-reactive-healthy`, () => ({
+      id: `svelte-reactive-healthy`,
+      getKey: (row: Row) => row.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          healthyStarts++
+          begin()
+          write({ type: `insert`, value: { id: `healthy` } })
+          commit()
+          markReady()
+        },
+      },
+    }))
+    const failedQuery = new Query().from({ row: failed })
+    const healthyQuery = new Query().from({ row: healthy })
+    const client = new DbClient()
+    let read!: () => Array<Row>
+    let dispose: (() => void) | undefined
+    let disposeHealthy: (() => void) | undefined
+
+    try {
+      dispose = $effect.root(() => {
+        useLiveQuery({ client, query: failedQuery })
+      })
+      expect(() => flushSync()).toThrow(failure)
+      expect(failedStarts).toBe(1)
+      expect(healthyStarts).toBe(0)
+
+      dispose()
+      dispose = undefined
+      disposeHealthy = $effect.root(() => {
+        const result = useLiveQuery({ client, query: healthyQuery })
+        read = () => result.data as Array<Row>
+      })
+      flushSync()
+      expect(healthyStarts).toBe(1)
+      expect(read().map((row) => row.id)).toEqual([`healthy`])
+    } finally {
+      dispose?.()
+      disposeHealthy?.()
+      await client.cleanup()
+    }
+  })
+
   it(`releases the second union source after the first start throws`, async () => {
     const failure = new Error(`first source failed`)
     let firstStarts = 0

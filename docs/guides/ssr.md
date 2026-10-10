@@ -216,6 +216,15 @@ external-store subscription, so the initial markup still matches the server.
 The snapshot remains visible while the source is loading. Once the browser live
 query is ready, DB publishes one handoff from the snapshot to the live result.
 
+A hydrated query hash identifies a portable result, but the payload does not
+contain the server's Collection objects. The first browser hook that commits a
+subscription, or the first browser `preloadLiveQuery()` call, claims the local
+source Collections for that hash. Later local consumers with the same hash must
+use those same Collection objects in the same query positions. A different
+source object with the same ID is rejected; give a genuinely different query a
+distinct `queryKey`. A newer hydration chunk updates the result without
+changing an established browser source claim.
+
 ### Server
 
 Create a fresh `DbClient` for each request. Materialize descriptors through that

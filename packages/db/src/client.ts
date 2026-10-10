@@ -714,9 +714,9 @@ export class DbClient {
     queryHash: string,
     sources: ReadonlyArray<AnyCollection>,
   ): void {
+    const record = this.liveQueries.get(queryHash)
     const priorSources =
-      this.liveQueries.get(queryHash)?.sources ??
-      this.preloadedLiveQueries.get(queryHash)?.sources
+      record?.sources ?? this.preloadedLiveQueries.get(queryHash)?.sources
     if (priorSources && !sameSourcesAtEachPosition(priorSources, sources)) {
       throw new Error(
         devBuild() && process.env.NODE_ENV !== `production`
@@ -724,6 +724,9 @@ export class DbClient {
           : codedMessage(234, { queryHash }),
       )
     }
+    // Hydration has a portable hash but no server-side Collection objects.
+    // The first local consumer claims them for later same-hash requests.
+    if (record && !record.sources) record.sources = [...sources]
   }
 
   /** @internal */
@@ -840,6 +843,7 @@ export class DbClient {
       dehydratedQuery.queryHash,
       dehydratedQuery.dehydratedAt,
     )
+    record.sources = existing?.sources
     this.liveQueries.set(record.queryHash, record)
     if (existing?.status === `pending`) {
       void record.resultPromise.then(existing.succeed, existing.fail)

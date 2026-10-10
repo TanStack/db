@@ -693,9 +693,94 @@ describe(`preload answered by a DbClient stream`, () => {
  * that source's row; the failed attempt has no result to reuse.
  * The same options can be retried, but the failed source Collection remains
  * in error until explicitly restarted. That retry must report the source error
- * rather than wait on the failed query's former pending stream.
+ * rather than wait on the failed query's former pending stream. A controlled
+ * later `markError` crosses the asynchronous failure cut: the pending preload
+ * rejects, its stream disappears, and a healthy replacement of the same
+ * query hash can publish its own row while the peer source remains ready.
  */
 describe(`DbClient preload releases independent source starts`, () => {
+  it(`retire a pending stream after asynchronous source startup failure`, async () => {
+    const failure = new Error(`late source startup failure`)
+    let failFirst!: () => void
+    let firstStarts = 0
+    let secondStarts = 0
+    const first = collectionOptions(`preload-async-first`, () => ({
+      id: `preload-async-first`,
+      getKey: (row: { id: string }) => row.id,
+      startSync: true,
+      sync: {
+        sync: ({ markError }) => {
+          firstStarts++
+          failFirst = () => markError(failure)
+        },
+      },
+    }))
+    const second = collectionOptions(`preload-async-second`, () => ({
+      id: `preload-async-second`,
+      getKey: (row: { id: string }) => row.id,
+      startSync: true,
+      sync: {
+        sync: ({ markReady }) => {
+          secondStarts++
+          markReady()
+        },
+      },
+    }))
+    const replacement = createCollection({
+      id: `preload-async-first`,
+      getKey: (row: { id: string }) => row.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          write({ type: `insert`, value: { id: `recovered` } })
+          commit()
+          markReady()
+        },
+      },
+    })
+    const secondBranch = () =>
+      new Query().from({ second }).select(({ second: row }) => ({ id: row.id }))
+    const failedQuery = new Query().unionAll(
+      new Query().from({ first }).select(({ first: row }) => ({ id: row.id })),
+      secondBranch(),
+    )
+    const recoveredQuery = new Query().unionAll(
+      new Query()
+        .from({ first: replacement })
+        .select(({ first: row }) => ({ id: row.id })),
+      secondBranch(),
+    )
+    const client = new DbClient()
+
+    try {
+      const pending = client.preloadLiveQuery({ query: failedQuery })
+      expect([firstStarts, secondStarts]).toEqual([1, 1])
+      expect(
+        client.dehydrate({ shouldDehydrateLiveQuery: () => true }).liveQueries,
+      ).toHaveLength(1)
+
+      failFirst()
+      await expect(pending).rejects.toThrow(/entered error state/)
+      expect(
+        client.dehydrate({ shouldDehydrateLiveQuery: () => true }).liveQueries,
+      ).toBeUndefined()
+      expect(client.collection(second).status).toBe(`ready`)
+
+      await client.preloadLiveQuery({ query: recoveredQuery })
+      expect(
+        client
+          .dehydrate()
+          .liveQueries?.[0]?.snapshot?.rows.map(
+            ({ value }) => (value as { id: string }).id,
+          ),
+      ).toEqual([`recovered`])
+    } finally {
+      await client.cleanup()
+      await replacement.cleanup()
+    }
+  })
+
   it(`reports source error instead of reusing a failed query stream`, async () => {
     const failure = new Error(`source start failed`)
     let starts = 0

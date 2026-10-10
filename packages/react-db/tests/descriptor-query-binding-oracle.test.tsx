@@ -34,7 +34,13 @@
  * then preloads a descriptor with the same query hash over another source
  * object. The client must reject that local source substitution before the
  * stream's result can answer the second preload. This is one local hook-first
- * order; hydration from another process has no comparable object identity.
+ * order. A separate hydration-first history receives a server result whose
+ * Collection objects cannot cross the wire. The first committed browser hook
+ * claims its local source objects while the browser source is still loading;
+ * a later same-hash preload over another object must reject. The model expects
+ * the server row before browser readiness and the browser row after handoff.
+ * A hostile observer that omits the committed claim fails at the conflicting
+ * preload assertion while the source remains unready.
  * A finite two-source grammar places the same standalone parent and child
  * descriptors in a join, nested FROM, union, or include. Two clients supply
  * different values under equal row keys. A plain per-client value model
@@ -48,6 +54,14 @@
  * observable field even when the correlation still admits the child. Its
  * stable identity must also survive descriptor binding: changing source
  * binding IDs while retaining captured references changes the public hash.
+ * A second receiving history combines descriptor binding with RIGHT/FULL
+ * outer joins, both correlation sides, shadowed and renamed aliases, and
+ * eager/on-demand source modes. Plain per-client maps predict joined rows,
+ * including an undefined missing side. Both clients use equal row IDs but
+ * distinct values. The public check runs after initial acquisition and each
+ * authored source write; source starts and on-demand requests are observed
+ * after acquisition. The finite grammar does not cover every join chain or
+ * arbitrary write order.
  *
  * A prepared query is a bound snapshot, not a lasting render resolver. Adding
  * a descriptor source later changes the plan without starting a sync run. The
@@ -70,6 +84,7 @@ import {
   createCollection,
   eq,
   getStableQueryBuilderHash,
+  isUndefined,
   prepareLiveQueryValue,
   toArray,
 } from '@tanstack/db'
@@ -386,6 +401,91 @@ describe(`standalone descriptor query binding`, () => {
       mounted.unmount()
       await client.cleanup()
       await first.cleanup()
+    }
+  })
+
+  it(`keeps a hydration-first hook's local source claim for later preloads`, async () => {
+    const id = `hydration-first-hook-source`
+    let finishBrowser!: () => void
+    const descriptor = collectionOptions(id, (client) => ({
+      id,
+      getKey: (row: Row) => row.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          const publish = () => {
+            begin()
+            for (const row of client.requireDependency<Array<Row>>(`rows`)) {
+              write({ type: `insert`, value: row })
+            }
+            commit()
+            markReady()
+          }
+          if (client.getDependency<boolean>(`deferReady`)) {
+            finishBrowser = publish
+          } else {
+            publish()
+          }
+        },
+      },
+    }))
+    const query = new Query()
+      .from({ item: descriptor })
+      .select(({ item }) => ({ id: item.id, value: item.value }))
+    const server = new DbClient({
+      rows: [{ id: `one`, value: `server` }],
+    })
+    const browser = new DbClient({
+      rows: [{ id: `one`, value: `browser` }],
+      deferReady: true,
+    })
+    const other = createCollection(
+      mockSyncCollectionOptions<Row>({
+        id,
+        getKey: (row) => row.id,
+        initialData: [{ id: `one`, value: `other` }],
+      }),
+    )
+    const otherQuery = new Query()
+      .from({ item: other })
+      .select(({ item }) => ({ id: item.id, value: item.value }))
+    let mounted: ReturnType<typeof renderHook> | undefined
+    const browserRows = () =>
+      (mounted!.result.current as { data: Array<Row> }).data.map((row) => ({
+        id: row.id,
+        value: row.value,
+      }))
+
+    try {
+      await server.preloadLiveQuery({ query })
+      browser.hydrate(server.dehydrate())
+      expect(getStableQueryBuilderHash(query)).toBe(
+        getStableQueryBuilderHash(otherQuery),
+      )
+
+      mounted = renderHook(() => useLiveQuery({ query }), {
+        wrapper: ({ children }: { children: ReactNode }) => (
+          <DbProvider client={browser}>{children}</DbProvider>
+        ),
+      })
+      await waitFor(() => {
+        expect(browserRows()).toEqual([{ id: `one`, value: `server` }])
+      })
+      expect(
+        browser.dehydrate({ shouldDehydrateLiveQuery: () => true }).liveQueries,
+      ).toHaveLength(1)
+      expect(() => browser.preloadLiveQuery({ query: otherQuery })).toThrow(
+        /different source Collections/,
+      )
+      act(() => finishBrowser())
+      await waitFor(() => {
+        expect(browserRows()).toEqual([{ id: `one`, value: `browser` }])
+      })
+    } finally {
+      mounted?.unmount()
+      await browser.cleanup()
+      await server.cleanup()
+      await other.cleanup()
     }
   })
 
@@ -964,4 +1064,375 @@ describe(`standalone descriptor query binding`, () => {
       }
     },
   )
+
+  /**
+   * A descriptor plan keeps both its receiving client and each source's
+   * lexical binding. The plain model pairs main and joined rows by ID, then
+   * restricts the pair to its parent. A missing join side stays undefined even
+   * when the parent and local main sources both spell their alias `issue`.
+   * RIGHT/FULL, correlation side, alias spelling, and source mode are legal
+   * dimensions. Two clients have the same row IDs but distinct values. The
+   * public comparison runs after initial acquisition and every authored write;
+   * on-demand cells also observe each client's provider requests.
+   */
+  const outerJoinHistories = [
+    { kind: `right`, correlation: `joined` },
+    { kind: `right`, correlation: `main` },
+    { kind: `full`, correlation: `joined` },
+    { kind: `full`, correlation: `main` },
+  ] as const
+  for (const { kind, correlation } of outerJoinHistories) {
+    for (const mode of [`eager`, `onDemand`] as const) {
+      it(`${kind} join with ${correlation} correlation binds shadowed and renamed descriptors per client in ${mode} mode`, async () => {
+        type Parent = { id: number; marker: string }
+        type Main = {
+          id: number
+          parentId: number
+          anchorId: number
+          label: string
+        }
+        type Anchor = { id: number; parentId: number }
+        type Sources = {
+          parents: Map<number, Parent>
+          mains: Map<number, Main>
+          anchors: Map<number, Anchor>
+        }
+        type Role = keyof Sources
+        type Expected = {
+          parentId: number
+          mainId: number | undefined
+          anchorId: number | undefined
+          label: string | undefined
+          marker: string
+          missingMain: boolean
+          missingAnchor: boolean
+        }
+
+        const initial = (marker: string): Sources => ({
+          parents: new Map([[1, { id: 1, marker }]]),
+          mains: new Map([
+            [
+              10,
+              { id: 10, parentId: 1, anchorId: 7, label: `${marker} MATCH` },
+            ],
+            [
+              11,
+              {
+                id: 11,
+                parentId: 1,
+                anchorId: 9,
+                label: `${marker} MAIN ONLY`,
+              },
+            ],
+          ]),
+          anchors: new Map([
+            [7, { id: 7, parentId: 1 }],
+            [8, { id: 8, parentId: 1 }],
+          ]),
+        })
+        const first = new DbClient({ marker: `FIRST` })
+        const second = new DbClient({ marker: `SECOND` })
+        const models = new Map<DbClient, Sources>([
+          [first, initial(`FIRST`)],
+          [second, initial(`SECOND`)],
+        ])
+        const counters = new Map<
+          DbClient,
+          Map<Role, { starts: number; requests: number }>
+        >()
+        const writers = new Map<
+          DbClient,
+          Map<
+            Role,
+            (type: `insert` | `update` | `delete`, row: unknown) => void
+          >
+        >()
+
+        /** The adapter reads authored source rows; expected rows use only maps. */
+        const descriptor = <T extends { id: number }>(
+          role: Role,
+          suffix: string,
+        ) =>
+          collectionOptions(
+            `combined-outer-${kind}-${correlation}-${mode}-${suffix}`,
+            (client) => ({
+              id: `combined-outer-${kind}-${correlation}-${mode}-${suffix}`,
+              getKey: (row: T) => row.id,
+              startSync: true,
+              ...(role !== `parents` && mode === `onDemand`
+                ? { syncMode: `on-demand` as const }
+                : {}),
+              sync: {
+                sync: ({ begin, write, commit, markReady }) => {
+                  const clientCounters = counters.get(client) ?? new Map()
+                  counters.set(client, clientCounters)
+                  const count = clientCounters.get(role) ?? {
+                    starts: 0,
+                    requests: 0,
+                  }
+                  clientCounters.set(role, count)
+                  count.starts++
+                  const installed = new Set<number>()
+                  const send = (
+                    type: `insert` | `update` | `delete`,
+                    row: T,
+                  ) => {
+                    begin()
+                    write({ type, value: { ...row } })
+                    commit()
+                    if (type === `delete`) installed.delete(row.id)
+                    else installed.add(row.id)
+                  }
+                  const clientWriters =
+                    writers.get(client) ??
+                    new Map<
+                      Role,
+                      (
+                        type: `insert` | `update` | `delete`,
+                        row: unknown,
+                      ) => void
+                    >()
+                  writers.set(client, clientWriters)
+                  clientWriters.set(role, (type, row) => send(type, row as T))
+                  const rows = () =>
+                    [
+                      ...models.get(client)![role].values(),
+                    ] as unknown as Array<T>
+                  if (role === `parents` || mode === `eager`) {
+                    for (const row of rows()) send(`insert`, row)
+                  }
+                  markReady()
+                  if (role !== `parents` && mode === `onDemand`) {
+                    return {
+                      loadSubset: () => {
+                        count.requests++
+                        for (const row of rows()) {
+                          if (!installed.has(row.id)) send(`insert`, row)
+                        }
+                        return Promise.resolve()
+                      },
+                    }
+                  }
+                  return undefined
+                },
+              },
+            }),
+          )
+
+        const parents = descriptor<Parent>(`parents`, `parent`)
+        const mains = descriptor<Main>(`mains`, `main`)
+        const anchors = descriptor<Anchor>(`anchors`, `anchor`)
+        const cases = ([`issue`, `child`] as const).map((alias) => {
+          const query = new Query()
+            .from({ issue: parents })
+            .select(({ issue: parent }) => {
+              const joinedSource =
+                correlation === `joined`
+                  ? new Query()
+                      .from({ source: anchors })
+                      .where(({ source }) => eq(source.parentId, parent.id))
+                      .select(({ source }) => ({
+                        id: source.id,
+                        parentId: source.parentId,
+                      }))
+                  : anchors
+              const child = new Query()
+                .from({ [alias]: mains })
+                .join(
+                  { anchor: joinedSource },
+                  (context: Record<string, unknown>) =>
+                    eq(
+                      (context[alias] as Main).anchorId,
+                      (context.anchor as Anchor).id,
+                    ),
+                  kind,
+                )
+                .where((context: Record<string, unknown>) =>
+                  correlation === `joined`
+                    ? eq((context.anchor as Anchor).parentId, parent.id)
+                    : eq((context[alias] as Main).parentId, parent.id),
+                )
+                .select((context: Record<string, unknown>) => ({
+                  mainId: (context[alias] as Main).id,
+                  anchorId: (context.anchor as Anchor).id,
+                  label: (context[alias] as Main).label,
+                  marker: parent.marker,
+                  missingMain: isUndefined((context[alias] as Main).id),
+                  missingAnchor: isUndefined((context.anchor as Anchor).id),
+                }))
+              return { id: parent.id, rows: toArray(child) }
+            })
+          return {
+            alias,
+            query,
+            mounted: [first, second].map((client) => ({
+              client,
+              hook: renderHook(
+                () => useLiveQuery({ query: query as QueryBuilder<Context> }),
+                {
+                  wrapper: ({ children }: { children: ReactNode }) => (
+                    <DbProvider client={client}>{children}</DbProvider>
+                  ),
+                },
+              ),
+            })),
+          }
+        })
+
+        /** The model uses source roles and values, never lexical alias text. */
+        const expected = (sources: Sources): Array<Expected> => {
+          const mainsNow = [...sources.mains.values()]
+          const anchorsNow = [...sources.anchors.values()]
+          const pairs: Array<[Main | undefined, Anchor | undefined]> = []
+          for (const anchor of anchorsNow) {
+            const matches = mainsNow.filter(
+              (main) => main.anchorId === anchor.id,
+            )
+            if (matches.length === 0) pairs.push([undefined, anchor])
+            else for (const main of matches) pairs.push([main, anchor])
+          }
+          if (kind === `full`) {
+            for (const main of mainsNow) {
+              if (!anchorsNow.some((anchor) => anchor.id === main.anchorId)) {
+                pairs.push([main, undefined])
+              }
+            }
+          }
+          return [...sources.parents.values()]
+            .flatMap((parent) =>
+              pairs
+                .filter(([main, anchor]) =>
+                  correlation === `joined`
+                    ? anchor?.parentId === parent.id
+                    : main?.parentId === parent.id,
+                )
+                .map(([main, anchor]) => ({
+                  parentId: parent.id,
+                  mainId: main?.id,
+                  anchorId: anchor?.id,
+                  label: main?.label,
+                  marker: parent.marker,
+                  missingMain: main === undefined,
+                  missingAnchor: anchor === undefined,
+                })),
+            )
+            .sort(
+              (a, b) =>
+                a.parentId - b.parentId ||
+                (a.anchorId ?? Infinity) - (b.anchorId ?? Infinity) ||
+                (a.mainId ?? Infinity) - (b.mainId ?? Infinity),
+            )
+        }
+        const observe = (
+          data: ReadonlyArray<{
+            id: number
+            rows: Array<Omit<Expected, `parentId`>>
+          }>,
+        ): Array<Expected> =>
+          data
+            .flatMap((parent) =>
+              parent.rows.map((row) => ({ parentId: parent.id, ...row })),
+            )
+            .sort(
+              (a, b) =>
+                a.parentId - b.parentId ||
+                (a.anchorId ?? Infinity) - (b.anchorId ?? Infinity) ||
+                (a.mainId ?? Infinity) - (b.mainId ?? Infinity),
+            )
+        const check = async (cut: string) => {
+          await waitFor(() => {
+            for (const entry of cases) {
+              for (const { client, hook } of entry.mounted) {
+                const rows = hook.result.current.data as unknown as Array<{
+                  id: number
+                  rows: Array<Omit<Expected, `parentId`>>
+                }>
+                expect(observe(rows), `${entry.alias}, ${cut}`).toEqual(
+                  expected(models.get(client)!),
+                )
+              }
+            }
+          })
+        }
+        const change = <T extends { id: number }>(
+          client: DbClient,
+          role: Role,
+          type: `insert` | `update` | `delete`,
+          row: T,
+        ) => {
+          const source = models.get(client)![role] as unknown as Map<number, T>
+          if (type === `delete`) source.delete(row.id)
+          else source.set(row.id, row)
+          act(() => {
+            writers.get(client)!.get(role)!(type, row)
+          })
+        }
+
+        try {
+          await check(`initial acquisition`)
+          for (const client of [first, second]) {
+            for (const role of [`parents`, `mains`, `anchors`] as const) {
+              expect(counters.get(client)?.get(role)?.starts).toBe(1)
+              if (role !== `parents` && mode === `onDemand`) {
+                expect(
+                  counters.get(client)?.get(role)?.requests,
+                ).toBeGreaterThan(0)
+              }
+            }
+          }
+          for (const entry of cases) {
+            expect(
+              getStableQueryBuilderHash(
+                prepareLiveQueryValue(
+                  entry.query,
+                  first,
+                ) as QueryBuilder<Context>,
+              ),
+            ).toBe(getStableQueryBuilderHash(entry.query))
+            expect(
+              getStableQueryBuilderHash(
+                prepareLiveQueryValue(
+                  entry.query,
+                  second,
+                ) as QueryBuilder<Context>,
+              ),
+            ).toBe(getStableQueryBuilderHash(entry.query))
+          }
+
+          change(first, `mains`, `update`, {
+            id: 10,
+            parentId: 1,
+            anchorId: 7,
+            label: `FIRST UPDATED`,
+          })
+          await check(`first client main update`)
+          change(second, `mains`, `delete`, models.get(second)!.mains.get(10)!)
+          await check(`second client main becomes absent`)
+          change(second, `mains`, `insert`, {
+            id: 10,
+            parentId: 1,
+            anchorId: 7,
+            label: `SECOND RETURNED`,
+          })
+          await check(`second client main returns`)
+          change(first, `anchors`, `delete`, models.get(first)!.anchors.get(7)!)
+          await check(`first client joined side becomes absent`)
+          change(second, `parents`, `update`, {
+            id: 1,
+            marker: `SECOND UPDATED`,
+          })
+          await check(`second client parent update`)
+        } finally {
+          for (const entry of cases) {
+            for (const { hook } of entry.mounted) {
+              hook.unmount()
+              await hook.result.current.collection.cleanup()
+            }
+          }
+          await first.cleanup()
+          await second.cleanup()
+        }
+      })
+    }
+  }
 })

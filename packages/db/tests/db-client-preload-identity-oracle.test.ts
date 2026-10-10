@@ -27,7 +27,12 @@
  * runs after the first preload and after the second attempted preload. The
  * pooled path also checks its observer snapshot after same-source reuse. This
  * does not define how a hydrated stream from another process matches a local
- * source, or how different explicit query keys share one hash.
+ * source, or how different explicit query keys share one hash. A separate
+ * hydration-first history below gives the first local consumer authority to
+ * claim a hydrated hash's runtime source objects. The stream's portable hash
+ * cannot carry server-side object identity; a later local consumer must use
+ * the claimed objects. This is checked while the hydrated stream is settled
+ * and while its result promise is pending.
  */
 import { describe, expect, it } from 'vitest'
 import {
@@ -76,6 +81,92 @@ function rows(client: DbClient): Array<Row> | undefined {
 }
 
 describe(`DbClient preload source identity`, () => {
+  it.each([`settled`, `pending`] as const)(
+    `a %s hydrated stream keeps the first local source claim`,
+    async (streamState) => {
+      const id = `hydrated-first-source-claim-${streamState}`
+      const serverSource = createCollection(sourceConfig(id, `server`))
+      const firstLocal = createCollection(sourceConfig(id, `local-first`))
+      const otherLocal = createCollection(sourceConfig(id, `local-other`))
+      const queryFor = (source: typeof serverSource) =>
+        new Query()
+          .from({ item: source })
+          .select(({ item }) => ({ id: item.id, value: item.value }))
+      const server = new DbClient()
+      const browser = new DbClient()
+      let settle!: (value: { rows: Array<{ key: string; value: Row }> }) => void
+
+      try {
+        await server.preloadLiveQuery({ query: queryFor(serverSource) })
+        const state = server.dehydrate()
+        const stream = state.liveQueries![0]!
+        const firstQuery = queryFor(firstLocal)
+        const otherQuery = queryFor(otherLocal)
+        expect(getStableQueryBuilderHash(firstQuery)).toBe(
+          getStableQueryBuilderHash(otherQuery),
+        )
+        if (streamState === `pending`) {
+          const pending = new Promise<{
+            rows: Array<{ key: string; value: Row }>
+          }>((resolve) => {
+            settle = resolve
+          })
+          browser.hydrate({
+            collections: state.collections,
+            liveQueries: [
+              {
+                queryHash: stream.queryHash,
+                dehydratedAt: stream.dehydratedAt,
+                promise: pending,
+              },
+            ],
+          })
+        } else {
+          browser.hydrate(state)
+        }
+
+        const firstRead = browser.preloadLiveQuery({ query: firstQuery })
+        expect(() => browser.preloadLiveQuery({ query: otherQuery })).toThrow(
+          /different source Collections/,
+        )
+
+        if (streamState === `pending`)
+          settle(
+            stream.snapshot! as { rows: Array<{ key: string; value: Row }> },
+          )
+        await firstRead
+        expect(rows(browser)).toEqual([{ id: `one`, value: `server` }])
+
+        // A newer hydration chunk updates the result, but cannot revoke the
+        // browser client's already established runtime source claim.
+        browser.hydrate({
+          collections: [],
+          liveQueries: [
+            {
+              queryHash: stream.queryHash,
+              dehydratedAt: stream.dehydratedAt + 1,
+              snapshot: {
+                rows: [
+                  { key: `one`, value: { id: `one`, value: `newer server` } },
+                ],
+              },
+            },
+          ],
+        })
+        expect(() => browser.preloadLiveQuery({ query: otherQuery })).toThrow(
+          /different source Collections/,
+        )
+        expect(rows(browser)).toEqual([{ id: `one`, value: `newer server` }])
+      } finally {
+        await browser.cleanup()
+        await server.cleanup()
+        await serverSource.cleanup()
+        await firstLocal.cleanup()
+        await otherLocal.cleanup()
+      }
+    },
+  )
+
   for (const order of [
     `concrete then descriptor`,
     `descriptor then concrete`,

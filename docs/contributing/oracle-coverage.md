@@ -260,6 +260,16 @@ the same three cuts. An alias-only parent lookup fails the shadowed initial row
 while the renamed control passes. Dropping binding IDs during descriptor
 materialization fails the bound-versus-unbound public hash comparison in both
 alias forms. More include depths remain outside this cell.
+The receiving outer-join history crosses RIGHT/FULL, correlation on the main or
+joined source, shadowed/renamed aliases, eager/on-demand sources, and two clients
+with equal keys and different values. Plain per-client maps predict complete
+public rows after initial acquisition and five source writes, including an
+absent main side, an absent joined side, and return of the main side. It also
+checks each client's source starts, on-demand requests, and descriptor-binding
+hash. An absent-main join-route mutant fails the public-row check at initial
+acquisition. Multi-join receiving histories and arbitrary write interleavings
+remain outside this finite matrix; the core alias owner covers its own bounded
+multi-join grammar.
 The same owner also checks a prebuilt Query consumed by `useLiveQueryEffect`:
 two clients with the same row key report their own initial enter events, and
 one mounted Effect reports the new client's row after a provider switch.
@@ -277,10 +287,13 @@ not a general concurrent-render schedule.
 Its no-client diagnostic also covers explicit `queryKey` and legacy dependency
 identity at first consumption. A local hook-first SSR stream over a concrete
 source rejects a later same-hash descriptor preload over a different source;
-the same source is accepted. Hydration-first source provenance remains open:
-server and browser Collection objects differ, and a hydrated stream carries no
-local source-object list. This owner does not claim that a failed Svelte effect
-can recover in place after a reactive query replacement.
+the same source is accepted. A hydration-first stream has no server Collection
+objects in its payload. The first committed browser hook claims its local source
+objects for the hash before source readiness; a later conflicting preload
+rejects, and the public row changes from the server result to the browser
+result after readiness. Removing the hook's attach claim fails the conflict
+assertion while readiness is held. This owner does not claim that a failed
+Svelte effect can recover in place after a reactive query replacement.
 `packages/db/tests/db-client.test.ts` supplies a
 focused nested-query preload witness across two clients, including equal query
 hashes and distinct dehydrated rows.
@@ -291,8 +304,11 @@ position. Concrete then
 descriptor, descriptor then concrete, and two concrete same-ID sources must
 reject a conflicting second request without changing the first dehydrated row;
 a same-ID pair swapped between union branches also rejects. A descriptor and
-its own materialized Collection may reuse it. Hydrated streams
-from another process and different explicit query keys remain open.
+its own materialized Collection may reuse it. For a hydrated hash, the first
+local preload claims ordered source-object identity; a later conflicting
+preload rejects for settled and pending streams. A newer hydration chunk keeps
+that claim. Different explicit query keys and concurrent first local claims
+remain outside this finite history.
 An adapter observer over a pooled view crosses the same-source and different-
 source cases for an existing stream hash. The former completes its own preload
 and reads the first source; the latter rejects before borrowing the first
@@ -305,7 +321,11 @@ primary if a deferred source also throws during release. The controlled sources
 start synchronously. At the synchronous preload error cut, even a caller that
 opts to stream pending queries cannot dehydrate the failed query; a later
 same-hash preload over a healthy replacement publishes its own row. Asynchronous
-failure and larger source sets remain open. Retrying the same options after the
+failure is also exercised with a later controlled `markError`: the pending
+stream rejects and disappears from dehydration, the peer source is ready, and
+a healthy same-hash replacement publishes its row. A mutant that dehydrates
+errored records fails at that cut. Other asynchronous schedules and larger
+source sets remain open. Retrying the same options after the
 source entered terminal error reports that source error instead of reusing the
 failed query's pending stream; it does not restart the source.
 An observer preload over a config-free pooled view is also explicit demand: it
@@ -316,8 +336,12 @@ sources.
 `packages/svelte-db/tests/descriptor-query-release-oracle.svelte.test.ts`
 checks Svelte's two-source release after a first startup error and a direct
 reader after a second descriptor factory fails. It observes source start counts,
-ready status, and failed-hook subscription release. It does not establish
-two-client Svelte provider binding or reactive query replacement. Concrete-
+ready status, and failed-hook subscription release. A fresh effect root after
+the failed root is retired consumes an independent healthy query and its row.
+A controlled Svelte runtime probe showed that an uncaught effect error does not
+rerun the same effect when its reactive query changes; in-place recovery after
+that error is not promised. This owner does not establish two-client Svelte
+provider binding or ordinary reactive query replacement. Concrete-
 config descriptors, on-demand acquisition, and those Svelte paths remain open
 for this binding law; a
 receiving oracle needs the relevant public observation for each. Vue, Solid,

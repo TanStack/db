@@ -659,6 +659,10 @@ class LiveQueryObserverImpl<
   private attach(): void {
     const collection = this.collection
     if (!collection || this.disposed) return
+    if (this.client && this.queryHash) {
+      const { sources } = this.getSourceInfo()
+      if (sources) this.client._assertLiveQuerySources(this.queryHash, sources)
+    }
     this.registerClientResource()
     this.syncHydrationState()
     this.refreshDetachedState(collection)
@@ -950,23 +954,31 @@ class LiveQueryObserverImpl<
     if (failure) throw failure.error
   }
 
-  preload(): Promise<void> {
-    if (this.preloadPromise) return this.preloadPromise
-
-    const config = this.collection?.config
-    const pooledSource =
-      this.collection && getPooledLiveQuerySource(this.collection)
+  private getSourceInfo(): {
+    sources: ReadonlyArray<Collection<any, any, any>> | undefined
+    pooledSource: Collection<any, any, any> | undefined
+  } {
+    const collection = this.collection
+    const config = collection?.config
+    const pooledSource = collection && getPooledLiveQuerySource(collection)
     const sources = config
       ? getBuilderFromConfig(config)?.getSourceCollections()
       : pooledSource
         ? [pooledSource]
         : undefined
+    return { sources, pooledSource: pooledSource || undefined }
+  }
+
+  preload(): Promise<void> {
+    if (this.preloadPromise) return this.preloadPromise
+
+    const { sources, pooledSource } = this.getSourceInfo()
     if (this.client && this.queryHash) {
       const query = this.client._getLiveQuery(this.queryHash)
       if (query?.status === `pending` || query?.status === `success`) {
         if (sources)
           this.client._assertLiveQuerySources(this.queryHash, sources)
-        if (pooledSource) {
+        if (pooledSource && this.collection) {
           try {
             return Promise.all([query.promise, this.collection.preload()]).then(
               () => {},
