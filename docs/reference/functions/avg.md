@@ -9,7 +9,7 @@ title: avg
 function avg<T>(arg): Aggregate<number>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:653](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L653)
+Defined in: [packages/db/src/query/builder/functions.ts:664](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L664)
 
 ### Type Parameters
 
@@ -33,7 +33,7 @@ Defined in: [packages/db/src/query/builder/functions.ts:653](https://github.com/
 function avg<T>(arg): Aggregate<number>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:654](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L654)
+Defined in: [packages/db/src/query/builder/functions.ts:665](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L665)
 
 ### Type Parameters
 
@@ -57,7 +57,7 @@ Defined in: [packages/db/src/query/builder/functions.ts:654](https://github.com/
 function avg<T>(arg): Aggregate<number>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:657](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L657)
+Defined in: [packages/db/src/query/builder/functions.ts:668](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L668)
 
 ### Type Parameters
 

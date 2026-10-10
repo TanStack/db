@@ -7,7 +7,7 @@ title: UseLiveQueryConfig
 type UseLiveQueryConfig<TContext> = UseLiveQueryConfigOptions<TContext> & Pick<LiveQueryCollectionConfig<TContext>, "query">;
 ```
 
-Defined in: [useLiveQuery.ts:149](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L149)
+Defined in: [useLiveQuery.ts:124](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L124)
 
 ## Type Parameters
 

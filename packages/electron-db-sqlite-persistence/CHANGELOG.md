@@ -1,5 +1,16 @@
 # @tanstack/electron-db-sqlite-persistence
 
+## 0.2.9
+
+### Patch Changes
+
+- Keep source-backed persisted Collections usable when a writer tab closes after a commit but before its reply. Certify the original transaction with the new writer and reload peers without duplicating unchanged row events. ([#2088](https://github.com/TanStack/db/pull/2088))
+
+  Forward exact-ID reconciliation through the Electron persistence bridge and require matching protocol v4 peers.
+
+- Updated dependencies [[`8b0e1de`](https://github.com/TanStack/db/commit/8b0e1defb0ecf98ead912b3a906995398a30b510)]:
+  - @tanstack/db-sqlite-persistence-core@0.4.8
+
 ## 0.2.8
 
 ### Patch Changes

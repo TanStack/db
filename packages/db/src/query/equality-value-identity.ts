@@ -10,8 +10,13 @@ const PARENT_CONTEXT = Symbol(`tanstack_db_parent_context`)
 type ParentContext = {
   [PARENT_CONTEXT]: true
   value: Record<string, unknown>
+  projectedBindings: Record<string, unknown>
   identity: unknown
 }
+
+export const PARENT_PROJECTION_NOT_FOUND = Symbol(
+  `tanstack_db_parent_projection_not_found`,
+)
 
 type ReferenceIdentity = typeof getRuntimeReferenceIdentity
 
@@ -74,8 +79,25 @@ export function getEqualityValueIdentity(value: unknown): unknown {
 export function createParentContext(
   value: Record<string, unknown>,
   identity: unknown,
+  projectedBindings: Record<string, unknown> = {},
 ): ParentContext {
-  return { [PARENT_CONTEXT]: true, value, identity }
+  return { [PARENT_CONTEXT]: true, value, projectedBindings, identity }
+}
+
+export function getParentContextProjectedBindings(
+  context: unknown,
+): Record<string, unknown> | undefined {
+  return isParentContext(context) ? context.projectedBindings : undefined
+}
+
+export function getParentContextProjectedValue(
+  context: unknown,
+  bindingKey: string,
+): unknown {
+  const bindings = getParentContextProjectedBindings(context)
+  return bindings && Object.prototype.hasOwnProperty.call(bindings, bindingKey)
+    ? bindings[bindingKey]
+    : PARENT_PROJECTION_NOT_FOUND
 }
 
 function isParentContext(context: unknown): context is ParentContext {

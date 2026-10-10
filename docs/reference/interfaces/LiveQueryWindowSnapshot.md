@@ -3,7 +3,7 @@ id: LiveQueryWindowSnapshot
 title: LiveQueryWindowSnapshot
 ---
 
-Defined in: [packages/db/src/live-query-window-controller.ts:477](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L477)
+Defined in: [packages/db/src/live-query-window-controller.ts:513](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L513)
 
 **`Internal`**
 
@@ -31,7 +31,7 @@ collection:
   | undefined;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:493](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L493)
+Defined in: [packages/db/src/live-query-window-controller.ts:529](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L529)
 
 ***
 
@@ -41,7 +41,7 @@ Defined in: [packages/db/src/live-query-window-controller.ts:493](https://github
 data: readonly T[];
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:482](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L482)
+Defined in: [packages/db/src/live-query-window-controller.ts:518](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L518)
 
 Rows across all committed pages, with the peek-ahead row removed.
 
@@ -53,7 +53,7 @@ Rows across all committed pages, with the peek-ahead row removed.
 error: unknown;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:490](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L490)
+Defined in: [packages/db/src/live-query-window-controller.ts:526](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L526)
 
 Last pagination failure, retained through an earlier-started success until recovery begins.
 
@@ -65,7 +65,7 @@ Last pagination failure, retained through an earlier-started success until recov
 hasNextPage: boolean;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:487](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L487)
+Defined in: [packages/db/src/live-query-window-controller.ts:523](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L523)
 
 ***
 
@@ -75,7 +75,7 @@ Defined in: [packages/db/src/live-query-window-controller.ts:487](https://github
 isCleanedUp: boolean;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:502](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L502)
+Defined in: [packages/db/src/live-query-window-controller.ts:538](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L538)
 
 ***
 
@@ -85,7 +85,7 @@ Defined in: [packages/db/src/live-query-window-controller.ts:502](https://github
 isEnabled: boolean;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:503](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L503)
+Defined in: [packages/db/src/live-query-window-controller.ts:539](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L539)
 
 ***
 
@@ -95,7 +95,7 @@ Defined in: [packages/db/src/live-query-window-controller.ts:503](https://github
 isError: boolean;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:501](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L501)
+Defined in: [packages/db/src/live-query-window-controller.ts:537](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L537)
 
 ***
 
@@ -105,7 +105,7 @@ Defined in: [packages/db/src/live-query-window-controller.ts:501](https://github
 isFetchingNextPage: boolean;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:488](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L488)
+Defined in: [packages/db/src/live-query-window-controller.ts:524](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L524)
 
 ***
 
@@ -115,7 +115,7 @@ Defined in: [packages/db/src/live-query-window-controller.ts:488](https://github
 isIdle: boolean;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:500](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L500)
+Defined in: [packages/db/src/live-query-window-controller.ts:536](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L536)
 
 ***
 
@@ -125,7 +125,7 @@ Defined in: [packages/db/src/live-query-window-controller.ts:500](https://github
 isLoading: boolean;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:495](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L495)
+Defined in: [packages/db/src/live-query-window-controller.ts:531](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L531)
 
 ***
 
@@ -135,7 +135,7 @@ Defined in: [packages/db/src/live-query-window-controller.ts:495](https://github
 isPersistedReady: boolean;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:498](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L498)
+Defined in: [packages/db/src/live-query-window-controller.ts:534](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L534)
 
 ***
 
@@ -145,7 +145,7 @@ Defined in: [packages/db/src/live-query-window-controller.ts:498](https://github
 isReady: boolean;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:496](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L496)
+Defined in: [packages/db/src/live-query-window-controller.ts:532](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L532)
 
 ***
 
@@ -155,7 +155,7 @@ Defined in: [packages/db/src/live-query-window-controller.ts:496](https://github
 pageParams: readonly number[];
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:486](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L486)
+Defined in: [packages/db/src/live-query-window-controller.ts:522](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L522)
 
 `initialPageParam + i` for each committed page.
 
@@ -167,7 +167,7 @@ Defined in: [packages/db/src/live-query-window-controller.ts:486](https://github
 pages: readonly readonly T[][];
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:484](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L484)
+Defined in: [packages/db/src/live-query-window-controller.ts:520](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L520)
 
 Rows grouped into committed pages of `pageSize`.
 
@@ -179,7 +179,7 @@ Rows grouped into committed pages of `pageSize`.
 persistedError: unknown;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:499](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L499)
+Defined in: [packages/db/src/live-query-window-controller.ts:535](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L535)
 
 ***
 
@@ -189,7 +189,7 @@ Defined in: [packages/db/src/live-query-window-controller.ts:499](https://github
 persistedStatus: LiveQueryPersistedStatus;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:497](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L497)
+Defined in: [packages/db/src/live-query-window-controller.ts:533](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L533)
 
 ***
 
@@ -199,7 +199,7 @@ Defined in: [packages/db/src/live-query-window-controller.ts:497](https://github
 state: ReadonlyMap<TKey, T> | undefined;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:492](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L492)
+Defined in: [packages/db/src/live-query-window-controller.ts:528](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L528)
 
 Keyed results for the physical window, or `undefined` when disabled.
 
@@ -211,4 +211,4 @@ Keyed results for the physical window, or `undefined` when disabled.
 status: CollectionStatus | "disabled";
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:494](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L494)
+Defined in: [packages/db/src/live-query-window-controller.ts:530](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L530)

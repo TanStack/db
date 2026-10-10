@@ -21,9 +21,9 @@ import type { ChangeMessage, SyncConfig } from '../src/types'
  *
  * The public change-message contract and issue #1901 require a consumer that
  * applies every delivered insert, update, and delete to agree with the
- * Collection after the corresponding optimistic transactions persist. Each
- * message must also be valid for that consumer's state: an insert names an
- * absent key, and an update or delete names a present one.
+ * Collection after the corresponding write settles. Each message must also be
+ * valid for that consumer's state: an insert names an absent key, and an
+ * update or delete names a present one.
  *
  * A plain Map is the independent reference model. The history grammar inserts
  * only while a key is absent and updates or deletes only while it is present.
@@ -32,16 +32,16 @@ import type { ChangeMessage, SyncConfig } from '../src/types'
  * presence state. Fixed-seed and seedless campaigns add histories of up to
  * twenty actions across four keys. The production driver applies each history
  * through a local-only Collection, either in one same-turn batch or
- * sequentially. After optimistic-transaction persistence, the public rows
- * and a change-message mirror must equal the reference rows. An eager-index
- * lane additionally builds an index before the history and compares both its
- * equality buckets after each settled prefix and each synchronous operation
- * in the batched lane, plus fresh indexed live queries at the final checkpoint
- * against the same Map model. The indexed field stays
- * stable when a key is reused. Sequential histories check every settled prefix.
- * Every delivered batch records
- * the public rows visible during its callback and the mirror after applying
- * that batch.
+ * sequentially. After all batched writes settle, or after each sequential
+ * write settles, public rows and a change-message mirror must equal the
+ * reference rows. An eager-index lane also builds an index before the history
+ * and compares both equality buckets after each settled prefix in sequential
+ * histories. In batched histories it compares them after each synchronous
+ * operation before settlement, then once after all writes settle. At the
+ * final checkpoint, fresh indexed live queries are compared with the same Map
+ * model. The indexed field stays stable when a key is reused. Every delivered
+ * batch records the public rows visible during its callback and the mirror
+ * after applying it.
  * A maintainer decision permits either order for different keys in one
  * callback. Changes to the same key retain their causal order. A deferred
  * sync history checks this by comparing one ordered trace per key, including

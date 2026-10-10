@@ -5,12 +5,12 @@ title: put
 
 ```ts
 function put<T>(
-   objectStore,
-   value,
+   objectStore, 
+   value, 
 key?): Promise<IDBValidKey>;
 ```
 
-Defined in: packages/db/src/indexed-db-wrapper.ts:429
+Defined in: [packages/db/src/indexed-db-wrapper.ts:470](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db-wrapper.ts#L470)
 
 Writes an item to an object store using upsert semantics.
 
