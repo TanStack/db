@@ -1,6 +1,6 @@
 {
   "name": "todos",
-  "version": "0.0.24",
+  "version": "0.0.25",
   "scripts": {
     "ng": "ng",
     "start": "ng serve",
@@ -27,8 +27,8 @@
     "@angular/forms": "^20.3.16",
     "@angular/platform-browser": "^20.3.16",
     "@angular/router": "^20.3.16",
-    "@tanstack/angular-db": "^0.2.7",
-    "@tanstack/db": "^0.12.3",
+    "@tanstack/angular-db": "^0.2.8",
+    "@tanstack/db": "^0.13.0",
     "rxjs": "^7.8.2",
     "tslib": "^2.8.1",
     "zone.js": "~0.15.0"
