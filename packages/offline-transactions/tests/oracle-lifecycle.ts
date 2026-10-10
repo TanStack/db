@@ -29,6 +29,29 @@ export async function atOracleCheckpoint<T>(
   }
 }
 
+/**
+ * Capture unhandled promise rejections during a test.
+ *
+ * Returns an object with the array of captured rejections and a cleanup
+ * function that must be called in a finally block to remove the listener.
+ * This ensures no rejections escape as unhandled process rejections,
+ * particularly important for offline transaction oracle tests.
+ */
+export function captureUnhandledRejections(): {
+  rejections: Array<unknown>
+  cleanup: () => void
+} {
+  const rejections: Array<unknown> = []
+  const onUnhandled = (reason: unknown) => rejections.push(reason)
+  process.on(`unhandledRejection`, onUnhandled)
+  return {
+    rejections,
+    cleanup: () => {
+      process.off(`unhandledRejection`, onUnhandled)
+    },
+  }
+}
+
 export async function cleanupOfflineOracle(
   actions: Array<() => void | Promise<unknown>>,
   hasPrimaryFailure: boolean,
