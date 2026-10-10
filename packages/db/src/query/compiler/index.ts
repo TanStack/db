@@ -1405,7 +1405,7 @@ function validateQueryStructure(
   if (query.join) {
     for (const joinClause of query.join) {
       if (joinClause.from.type === `queryRef`) {
-        validateQueryStructure(joinClause.from.query, availableBindings)
+        validateQueryStructure(joinClause.from.query, ancestorBindings)
       }
       const joinBindings = new Set(availableBindings)
       joinBindings.add(joinClause.from.bindingId)

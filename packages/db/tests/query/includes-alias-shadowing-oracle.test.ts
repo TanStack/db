@@ -3602,6 +3602,206 @@ describe(`include joins reject sources hidden inside parent operands`, () => {
 })
 
 /**
+ * # A joined QueryRef cannot read an enclosing query's sibling source
+ *
+ * A joined QueryRef receives its own source stream and any actual ancestor
+ * route. The enclosing query's preceding FROM source is not part of that
+ * stream. Capturing that sibling's ref inside the QueryRef's join condition
+ * must reject before preload can accept public rows. The independent scope
+ * model calls the sibling unavailable even when its alias matches the
+ * QueryRef's local alias. The finite grammar crosses root or include
+ * placement, matching or renamed alias, and eager or on-demand sources. The
+ * neighboring control below puts a real ancestor in the same nested join and
+ * compares its public rows with plain relational recomputation.
+ */
+describe(`joined subqueries reject captured sibling sources`, () => {
+  type Row = { id: number }
+
+  for (const placement of [`root`, `include`] as const) {
+    for (const mode of [`eager`, `onDemand`] as const) {
+      for (const alias of [`local`, `inner`] as const) {
+        test(`${placement}, ${mode}, inner alias ${alias} rejects a sibling capture`, async () => {
+          const main = createScopedSource<Row>(
+            `sibling-main-${placement}-${mode}-${alias}`,
+            [{ id: 1 }],
+            mode,
+          )
+          const inner = createScopedSource<Row>(
+            `sibling-inner-${placement}-${mode}-${alias}`,
+            [{ id: 1 }],
+            mode,
+          )
+          const probe = createScopedSource<Row>(
+            `sibling-probe-${placement}-${mode}-${alias}`,
+            [{ id: 1 }],
+            mode,
+          )
+          const parent = createScopedSource<Row>(
+            `sibling-parent-${placement}-${mode}-${alias}`,
+            [{ id: 1 }],
+            `eager`,
+          )
+          const invalidCleanups: Array<() => unknown | Promise<unknown>> = []
+
+          const preloadSibling = async () => {
+            let siblingRef!: number
+            const base = new Query()
+              .from({ local: main.collection })
+              .where((context: Context) => {
+                const row = context.local as Row
+                siblingRef = row.id
+                return eq(row.id, 1)
+              })
+            const joinedQuery = new Query()
+              .from({ [alias]: inner.collection })
+              .innerJoin({ probe: probe.collection }, ({ probe: row }) =>
+                eq(siblingRef, row.id),
+              )
+              .select((context: Context) => ({
+                id: (context[alias] as Row).id,
+              }))
+            const child = base
+              .innerJoin({ nested: joinedQuery }, ({ local: row, nested }) =>
+                eq(row.id, nested.id),
+              )
+              .select(({ local: row, nested }) => ({
+                localId: row.id,
+                joinedId: nested.id,
+              }))
+            const live =
+              placement === `root`
+                ? createLiveQueryCollection({ query: child })
+                : createLiveQueryCollection({
+                    query: new Query()
+                      .from({ parent: parent.collection })
+                      .select(({ parent: row }) => ({
+                        id: row.id,
+                        rows: toArray(
+                          child.where(({ local: own }) => eq(own.id, row.id)),
+                        ),
+                      })),
+                  })
+            invalidCleanups.push(() => live.cleanup())
+            await live.preload()
+          }
+
+          await withHistoryCleanup(
+            async () => {
+              await expect(() => preloadSibling()).rejects.toThrow(
+                /out of scope/,
+              )
+            },
+            () => [
+              ...invalidCleanups,
+              () => main.collection.cleanup(),
+              () => inner.collection.cleanup(),
+              () => probe.collection.cleanup(),
+              () => parent.collection.cleanup(),
+            ],
+          )
+        })
+      }
+    }
+  }
+
+  for (const mode of [`eager`, `onDemand`] as const) {
+    for (const alias of [`issue`, `inner`] as const) {
+      test(`${mode} joined subquery may capture an actual ancestor with inner alias ${alias}`, async () => {
+        const parentRows = [{ id: 1 }]
+        const mainRows = [{ id: 1 }]
+        const innerRows = [{ id: 1 }]
+        const probeRows = [{ id: 1 }]
+        const expected = parentRows.map((parent) => ({
+          id: parent.id,
+          rows: mainRows.flatMap((main) =>
+            innerRows
+              .filter(
+                (inner) =>
+                  main.id === inner.id &&
+                  main.id === parent.id &&
+                  probeRows.some((probe) => probe.id === parent.id),
+              )
+              .map((inner) => ({ localId: main.id, joinedId: inner.id })),
+          ),
+        }))
+        const parent = createScopedSource(
+          `sibling-control-parent-${mode}-${alias}`,
+          parentRows,
+          `eager`,
+        )
+        const main = createScopedSource(
+          `sibling-control-main-${mode}-${alias}`,
+          mainRows,
+          mode,
+        )
+        const inner = createScopedSource(
+          `sibling-control-inner-${mode}-${alias}`,
+          innerRows,
+          mode,
+        )
+        const probe = createScopedSource(
+          `sibling-control-probe-${mode}-${alias}`,
+          probeRows,
+          mode,
+        )
+        const live = createLiveQueryCollection({
+          query: new Query()
+            .from({ issue: parent.collection })
+            .select(({ issue: ancestor }) => {
+              const joinedQuery = new Query()
+                .from({ [alias]: inner.collection })
+                .innerJoin({ probe: probe.collection }, ({ probe: row }) =>
+                  eq(ancestor.id, row.id),
+                )
+                .select((context: Context) => ({
+                  id: (context[alias] as Row).id,
+                }))
+              return {
+                id: ancestor.id,
+                rows: toArray(
+                  new Query()
+                    .from({ local: main.collection })
+                    .innerJoin(
+                      { nested: joinedQuery },
+                      ({ local: row, nested }) => eq(row.id, nested.id),
+                    )
+                    .where(({ local: row }) => eq(row.id, ancestor.id))
+                    .select(({ local: row, nested }) => ({
+                      localId: row.id,
+                      joinedId: nested.id,
+                    })),
+                ),
+              }
+            }),
+        })
+
+        await withHistoryCleanup(
+          async () => {
+            await live.preload()
+            expect(
+              live.toArray.map(({ id, rows }) => ({
+                id,
+                rows: rows.map(({ localId, joinedId }) => ({
+                  localId,
+                  joinedId,
+                })),
+              })),
+            ).toEqual(expected)
+          },
+          () => [
+            () => live.cleanup(),
+            () => parent.collection.cleanup(),
+            () => main.collection.cleanup(),
+            () => inner.collection.cleanup(),
+            () => probe.collection.cleanup(),
+          ],
+        )
+      })
+    }
+  }
+})
+
+/**
  * A bound ancestor reference and an unbound raw-IR reference to the child's
  * joined alias name different declarations. The small public-row control
  * checks admission at preload; it does not model arbitrary raw-IR expressions.

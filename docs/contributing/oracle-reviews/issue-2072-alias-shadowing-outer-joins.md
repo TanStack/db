@@ -244,3 +244,46 @@ Those remain under the alias-scope owner in `oracle-coverage.md`.
 | ORC-012 | This table records the applicable guide requirements and the finite boundary above. |
 | ORC-013 | The original recursive source-tree collector is the rejected wrong design; valid captures rule out a blanket ban. |
 | ORC-014 | Both controlled source modes reach public preload. Real-provider scheduling is not claimed. |
+
+## Joined source scope — 2026-10-10 follow-up
+
+CodeRabbit review `5479690200` covered `6bd64e86f` and reported that a
+joined `QueryRef` could capture a source declared beside it in the enclosing
+query. This remained reachable after the include-scope repair. The compiler
+compiles the joined `QueryRef` as a separate source stream; it receives any
+actual ancestor route, but not the enclosing query's sibling rows. The law in
+`ARCHITECTURE.md` §Identity therefore requires rejection of a bound sibling
+reference inside the joined source. Only the enclosing join condition can
+combine those two sources. The previous validator passed preceding sibling
+bindings to the joined `QueryRef` and admitted the invalid capture.
+
+The primary oracle now crosses root/include placement, a joined source whose
+inner alias matches or differs from the sibling's alias, and eager/on-demand
+source mode. Each of eight invalid cells captures the sibling through a public
+builder callback, places that reference inside the joined `QueryRef`'s own
+join condition, and asserts rejection at construction or preload before public
+rows are accepted. Four neighboring cells instead capture a true include
+ancestor in the same nested join and compare exact public rows with plain
+relational recomputation. These expected results come from source roles and
+input rows, not compiler binding IDs or route metadata.
+
+On the pre-repair `e7ad3be2f` head, all eight invalid cells failed at their
+rejection assertion because preload resolved. Restoring only the permissive
+validator on the final oracle made the same eight fail while all four valid
+ancestor controls passed. Passing actual `ancestorBindings` to joined-source
+validation made all twelve cells pass. The visible-binding set remains in use
+for the enclosing join condition and include children. This is bounded
+admission and row evidence: it does not prove every expression position,
+deeper recursive source form, or real-provider schedule.
+
+The final query-directory run passed 4,605 tests in 110 files with Vitest's
+inline typecheck disabled. Separate TypeScript, ESLint, Prettier, and whitespace
+checks passed. The linked test-runner cache limitation described above still
+applies to inline typechecking in this local checkout.
+
+| Oracle responsibility | Evidence |
+| --- | --- |
+| Contract and model | §Identity names which declarations a joined source receives; plain source roles predict rejection or joined rows. |
+| Grammar and driver | Root/include × matching/renamed alias × eager/on-demand mode; public Query and live Collection preload. |
+| Observations and refinement | Eight rejection assertions before accepted rows; four true-ancestor controls compare exact public rows after preload. |
+| Sensitivity and limits | A one-line permissive validator mutant fails all eight invalid cells and passes all four controls; the recursive and provider limits remain with the alias-scope owner. |

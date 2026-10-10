@@ -152,6 +152,11 @@ include. Those scopes need distinct binding IDs. Start the descendant with a
 fresh `new Query().from(...)`, even when it reads the same Collection.
 A join operand captured from an unrelated query is outside the lexical scope,
 even when its alias matches a local source, and must be rejected.
+A `QueryRef` or union branch exports its result, not its internal source
+declarations, to the containing query or an include. A joined `QueryRef` may
+read actual ancestor route context, but it does not receive the enclosing
+query's sibling source rows. A captured sibling reference inside that joined
+source must be rejected; the enclosing join condition combines the two sources.
 
 ```ts
 type SourceId = Brand<string, 'SourceId'>
