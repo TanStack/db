@@ -193,14 +193,30 @@ it.each(oracleSeeds(20260913, settlementOracle))(
   async (seed) => {
     await fc.assert(
       fc.asyncProperty(
-        fc.record({
-          sharedKeys: fc.boolean(),
-          width: fc.integer({ min: 1, max: 3 }),
-          outcomes: fc.array(fc.boolean(), { minLength: 2, maxLength: 5 }),
-          // A transaction may commit itself after its mutate() callback.
-          autoCommits: fc.array(fc.boolean(), { maxLength: 5 }),
-        }),
-        async ({ sharedKeys, width, outcomes, autoCommits }) => {
+        // One record per transaction, so auto-commit and an unread receipt
+        // are as likely at every position.
+        fc
+          .record({
+            sharedKeys: fc.boolean(),
+            width: fc.integer({ min: 1, max: 3 }),
+            transactions: fc.array(
+              fc.record({
+                succeeds: fc.boolean(),
+                autoCommit: fc.boolean(),
+                readReceipt: fc.boolean(),
+              }),
+              { minLength: 2, maxLength: 5 },
+            ),
+          })
+          .map(({ sharedKeys, width, transactions }) => ({
+            sharedKeys,
+            width,
+            outcomes: transactions.map((tx) => tx.succeeds),
+            autoCommits: transactions.map((tx) => tx.autoCommit),
+            // An auto-commit's receipt may go unread, as a caller may.
+            unread: transactions.map((tx) => tx.autoCommit && !tx.readReceipt),
+          })),
+        async ({ sharedKeys, width, outcomes, autoCommits, unread }) => {
           const succeeds = outcomes
           const failures = succeeds.map(
             (_value, index) => new NonRetriableError(`failed-${index}`),
@@ -275,7 +291,7 @@ it.each(oracleSeeds(20260913, settlementOracle))(
                       : failures[index]!.message
                     : `pending`
                 return [
-                  [`commit-${index}`, status],
+                  ...(unread[index] ? [] : [[`commit-${index}`, status]]),
                   [`wait-${index}`, status],
                 ]
               }),
@@ -292,7 +308,8 @@ it.each(oracleSeeds(20260913, settlementOracle))(
             }
             for (let index = 0; index < completed; index++) {
               if (!succeeds[index]) {
-                expect(statuses[`commit-${index}`]).toBe(failures[index])
+                if (!unread[index])
+                  expect(statuses[`commit-${index}`]).toBe(failures[index])
                 expect(statuses[`wait-${index}`]).toBe(failures[index])
               }
             }
@@ -348,10 +365,11 @@ it.each(oracleSeeds(20260913, settlementOracle))(
               })
               // An auto-commit has no commit() caller; its receipt is
               // isPersisted, which settles like a manual commit's.
-              observe(
-                `commit-${index}`,
-                autoCommit ? transaction.isPersisted.promise : tx.commit(),
-              )
+              if (!unread[index])
+                observe(
+                  `commit-${index}`,
+                  autoCommit ? transaction.isPersisted.promise : tx.commit(),
+                )
               if (index === 0)
                 await atOracleCheckpoint(
                   entered[0]!.promise,
@@ -407,6 +425,7 @@ it.each(oracleSeeds(20260913, settlementOracle))(
               width: 1,
               outcomes: [true, true],
               autoCommits: [],
+              unread: [false, false, false, false, false],
             },
           ],
           [
@@ -415,6 +434,7 @@ it.each(oracleSeeds(20260913, settlementOracle))(
               width: 2,
               outcomes: [true, false, true],
               autoCommits: [],
+              unread: [false, false, false, false, false],
             },
           ],
           [
@@ -423,6 +443,7 @@ it.each(oracleSeeds(20260913, settlementOracle))(
               width: 2,
               outcomes: [false, false, false],
               autoCommits: [],
+              unread: [false, false, false, false, false],
             },
           ],
           [
@@ -431,6 +452,7 @@ it.each(oracleSeeds(20260913, settlementOracle))(
               width: 1,
               outcomes: [false, true, false],
               autoCommits: [],
+              unread: [false, false, false, false, false],
             },
           ],
           [
@@ -439,6 +461,7 @@ it.each(oracleSeeds(20260913, settlementOracle))(
               width: 1,
               outcomes: [false, true, false],
               autoCommits: [true, false, true],
+              unread: [true, false, false],
             },
           ],
         ],
@@ -1416,6 +1439,11 @@ it(`settles a failed auto-commit through isPersisted without an unhandled reject
     await expect(transaction.isPersisted.promise).rejects.toBe(providerError)
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(unhandled).toEqual([])
+    // The failure is reported through isPersisted, not logged again.
+    expect(logged).not.toHaveBeenCalledWith(
+      `Auto-commit failed:`,
+      expect.anything(),
+    )
     expect(env.collection.get(`auto`)).toBeUndefined()
   } finally {
     process.off(`unhandledRejection`, onUnhandled)
