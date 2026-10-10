@@ -135,6 +135,8 @@ type Step =
        * during that Collection's own direct insert of key 4.
        */
       nested: boolean
+      /** A nested write's outer Collection also has a throwing subscriber. */
+      outerThrows: boolean
     }
 
 type ModelState = `pending` | `persisting` | `completed` | `failed`
@@ -290,6 +292,7 @@ const step: fc.Arbitrary<Step> = fc.oneof(
       throws: fc.boolean(),
       seen: fc.boolean(),
       nested: fc.boolean(),
+      outerThrows: fc.boolean(),
     }),
   },
   {
@@ -554,6 +557,7 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
           captureCreatedTransactions(collection)
         const settled = new Set<Transaction<any>>()
         const handledBefore = collections[current.on].handled.calls
+        let checkOuter: (() => void) | undefined
         const { result, raised } = await withThrowingSubscribers(
           label,
           current.throws ? current.on : undefined,
@@ -572,11 +576,23 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
               else {
                 // The write's outcome belongs to the write, even inside the
                 // other Collection's publication: its caller sees its error,
-                // and the outer write, whose subscriber catches it, succeeds.
-                const outer =
-                  collections[current.on === `A` ? `B` : `A`].collection
+                // and the outer write, whose subscriber catches it, has only
+                // its own outcome. It fails exactly when its own subscriber
+                // throws, and otherwise reaches its handler once.
+                const outerName = current.on === `A` ? `B` : `A`
+                const outer = collections[outerName].collection
+                const outerHandledBefore = collections[outerName].handled.calls
+                const outerFailure = new Error(`outer subscriber failed`)
+                const outerCreated = captureCreatedTransactions(outer)
                 let inner: { error: unknown } | undefined
                 let ran = false
+                // The outer failure is recorded before the nested write runs,
+                // so taking the nested failure must keep it.
+                const outerThrowing = current.outerThrows
+                  ? outer.subscribeChanges(() => {
+                      throw outerFailure
+                    })
+                  : undefined
                 const subscription = outer.subscribeChanges(() => {
                   if (ran) return
                   ran = true
@@ -593,11 +609,24 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
                   outerError = error
                 } finally {
                   subscription.unsubscribe()
+                  outerThrowing?.unsubscribe()
+                  outerCreated.restore()
                 }
                 expect(ran, `${label}: nested write ran`).toBe(true)
-                expect(outerError, `${label}: outer write unaffected`).toBe(
-                  undefined,
+                expect(outerError, `${label}: outer write outcome`).toBe(
+                  current.outerThrows ? outerFailure : undefined,
                 )
+                // The outer handler settles after promises flush.
+                checkOuter = () => {
+                  expect(
+                    outerCreated.created.map((tx) => tx.state),
+                    `${label}: outer transaction`,
+                  ).toEqual([current.outerThrows ? `failed` : `completed`])
+                  expect(
+                    collections[outerName].handled.calls - outerHandledBefore,
+                    `${label}: outer handler calls`,
+                  ).toBe(current.outerThrows ? 0 : 1)
+                }
                 if (inner) throw inner.error
               }
             } finally {
@@ -612,6 +641,7 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
           () => {},
           current.seen,
         )
+        checkOuter?.()
         // The throwing subscriber must reach the admission of an insert or an
         // update, so the write fails rather than passing unnoticed. A
         // subscriber is not told of a delete of a row it was never sent, so

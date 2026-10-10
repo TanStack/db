@@ -221,9 +221,11 @@ export class CollectionMutationsManager<
     })
     transaction.applyMutations(mutations)
     // The rows are stored when `write` publishes, so a throwing subscriber
-    // cannot undo them; the transaction still settles.
+    // cannot undo them; the transaction still settles. Inside another
+    // publication, the subscriber failure is still this write's.
     try {
-      direct.write(mutations)
+      const failure = takePublicationFailure(() => direct.write(mutations))
+      if (failure) throw failure.error
     } finally {
       transaction.setState(`completed`)
       transaction.isPersisted.resolve(transaction)

@@ -94,6 +94,11 @@ type GeneratedHistory = {
   mode: `batched` | `sequential`
   /** The operation whose publication meets a throwing subscriber. */
   throwOn?: number
+  /**
+   * The throwing operation runs inside a subscriber of another Collection,
+   * during that Collection's own write.
+   */
+  nested?: boolean
 }
 
 type GeneratedStep = { key: Key; deleteWhenPresent: boolean }
@@ -370,6 +375,7 @@ async function runHistory(
   id: string,
   indexType?: IndexType,
   throwOn?: number,
+  nested = false,
 ): Promise<void> {
   const initialRows = [...expectedRowsAfter(initialKeys, [])].map(
     ([, row]) => row,
@@ -451,6 +457,8 @@ async function runHistory(
     // publishes. A local-only direct write stores its rows as it publishes
     // them, so the throw cannot undo the write: the call rethrows, and its
     // transaction still settles. The rows and the mirror follow the model.
+    // When the operation runs inside another Collection's subscriber, the
+    // failure is still this call's, and the outer write succeeds.
     const injected = new Error(`subscriber failed`)
     let armed = false
     const throwing =
@@ -464,12 +472,46 @@ async function runHistory(
           )
     const { created, restore: restoreCreate } =
       captureCreatedTransactions(collection)
+    // A nested write's failure belongs to that write, even inside another
+    // Collection's publication: the outer write, whose subscriber catches
+    // the inner error, succeeds.
+    const outer = createCollection(
+      localOnlyCollectionOptions<TestItem, number>({
+        id: `${id}-outer`,
+        getKey: (item: TestItem) => item.id,
+      }),
+    )
+    const applyNested = (op: Op) => {
+      let inner: { error: unknown } | undefined
+      let ran = false
+      const subscription = outer.subscribeChanges(() => {
+        if (ran) return
+        ran = true
+        try {
+          applyOp(collection, op)
+        } catch (error) {
+          inner = { error }
+        }
+      })
+      let outerError: unknown
+      try {
+        outer.insert({ id: outer.size + 1, name: `outer`, fileId: `f1` })
+      } catch (error) {
+        outerError = error
+      } finally {
+        subscription.unsubscribe()
+      }
+      expect(ran, `nested write ran`).toBe(true)
+      expect(outerError, `outer write unaffected`).toBe(undefined)
+      if (inner) throw inner.error
+    }
     const applyAt = (op: Op, operationIndex: number) => {
       if (operationIndex !== throwOn) return applyOp(collection, op)
       armed = true
       const before = created.length
       try {
-        applyOp(collection, op)
+        if (nested) applyNested(op)
+        else applyOp(collection, op)
       } catch (error) {
         expect(error, `operation ${operationIndex} rethrows`).toBe(injected)
         expect(created.length, `one transaction`).toBe(before + 1)
@@ -560,6 +602,7 @@ async function verifyGeneratedHistory({
   sequence,
   mode,
   throwOn,
+  nested,
 }: GeneratedHistory): Promise<void> {
   await runHistory(
     sequence,
@@ -568,6 +611,7 @@ async function verifyGeneratedHistory({
     `history-oracle-generated-${initialKeys.join(``)}-${mode}-${describeSequence(sequence)}`,
     undefined,
     throwOn === undefined ? undefined : throwOn % sequence.length,
+    nested,
   )
 }
 
@@ -715,10 +759,11 @@ describe(`change-event history oracle`, () => {
       mode: fc.constantFrom(`batched` as const, `sequential` as const),
       // About one history in three meets a throwing subscriber.
       throwOn: fc.option(fc.nat(19), { nil: undefined, freq: 2 }),
+      nested: fc.boolean(),
     })
-    .map(({ initialKeys, steps, mode, throwOn }) => {
+    .map(({ initialKeys, steps, mode, throwOn, nested }) => {
       const sequence = opsFromPresence(initialKeys, steps, 1)
-      return { initialKeys, sequence, mode, throwOn }
+      return { initialKeys, sequence, mode, throwOn, nested }
     })
 
   // The fixed prefix forces reused keys through an already-built index.
