@@ -13,6 +13,7 @@ import {
 } from '../../src/operators/groupBy.js'
 import { output } from '../../src/operators/index.js'
 import { serializeValue } from '../../src/utils.js'
+import { hash } from '../../src/hashing/hash.js'
 
 describe(`Operators`, () => {
   describe(`GroupBy operation`, () => {
@@ -626,14 +627,19 @@ describe(`Operators`, () => {
 
     // Contract for callers, not a replay witness: the generated groupBy law in
     // incrementalization-law-oracle.property.test.ts compares JSON values and
-    // does not cover -0 or Date identity. groupBy consolidates values by their
-    // hash, which treats -0 as 0 and equal Dates as one value. So after a
-    // delete, min and max return a value hash-equal to a remaining member, but
-    // not necessarily the remaining instance; the group is retracted and
-    // inserted again with that value. A caller that needs the exact remaining
-    // value, such as the query compiler's group representatives, must keep its
-    // own exact inputs. A distinct remaining value is returned as is.
+    // cannot see -0 or Date identity. groupBy's Index merges rows whose whole
+    // tuple of pre-mapped aggregate inputs hashes equal, and the hash treats -0
+    // as 0 and equal Dates as one value. So after a delete, min and max return
+    // a value hash-equal to a remaining member's, and not necessarily that
+    // member's instance: when nothing else in the tuple differs, the instance
+    // that comes back can be the one just deleted, in either direction. An
+    // aggregate that differs per row (such as the query compiler's exact
+    // inputs) keeps the rows apart. A caller that needs the exact remaining
+    // value must therefore keep its own exact inputs, as the compiler's group
+    // representatives do. A distinct remaining value is returned as is.
     test(`min and max after a delete return a hash-equal value, not a particular instance`, () => {
+      // The group's row after the delete, read from the consolidated output:
+      // whether a hash-equal row is published again is not part of this.
       const extremes = (first: number | Date, second: number | Date) => {
         const graph = new D2()
         const input = graph.newInput<{
@@ -641,7 +647,7 @@ describe(`Operators`, () => {
           id: number
           v: number | Date
         }>()
-        let latest: { lo: unknown; hi: unknown } | undefined
+        let current: { lo: unknown; hi: unknown } | undefined
         input.pipe(
           groupBy((row) => ({ g: row.g }), {
             lo: min((row) => row.v),
@@ -649,7 +655,7 @@ describe(`Operators`, () => {
           }),
           output((message) => {
             for (const [[, row], multiplicity] of message.getInner())
-              if (multiplicity > 0) latest = row as typeof latest
+              if (multiplicity > 0) current = row as typeof current
           }),
         )
         graph.finalize()
@@ -661,23 +667,34 @@ describe(`Operators`, () => {
           ]),
         )
         graph.run()
-        // Only the output of the delete counts.
-        latest = undefined
         input.sendData(new MultiSet([[deleted, -1]]))
         graph.run()
-        expect(latest, `the delete publishes the group again`).toBeDefined()
-        return latest!
+        expect(current, `the group has a row`).toBeDefined()
+        return current!
       }
 
-      const zero = extremes(-0, 0)
-      expect(serializeValue(zero.lo)).toBe(serializeValue(0))
-      expect(serializeValue(zero.hi)).toBe(serializeValue(0))
+      // The contract: hash-equal, by the hash the Index merges with.
+      for (const [first, second] of [
+        [-0, 0],
+        [0, -0],
+      ] as const) {
+        const zero = extremes(first, second)
+        expect(hash(zero.lo)).toBe(hash(second))
+        expect(hash(zero.hi)).toBe(hash(second))
+      }
+      const deletedDate = new Date(5)
+      const keptDate = new Date(5)
+      const date = extremes(deletedDate, keptDate)
+      expect(hash(date.lo)).toBe(hash(keptDate))
 
-      const kept = new Date(5)
-      const date = extremes(new Date(5), kept)
-      expect((date.lo as Date).getTime()).toBe(kept.getTime())
-      expect((date.hi as Date).getTime()).toBe(kept.getTime())
+      // Current behavior, pinned so a db-ivm change alerts the compiler owner:
+      // the deleted value comes back, not the remaining one.
+      expect(Object.is(extremes(-0, 0).lo, -0)).toBe(true)
+      expect(Object.is(extremes(0, -0).lo, 0)).toBe(true)
+      expect(date.lo).toBe(deletedDate)
+      expect(date.hi).toBe(deletedDate)
 
+      // A distinct remaining value is returned as is.
       expect(extremes(1, 2)).toMatchObject({ lo: 2, hi: 2 })
       const distinct = new Date(6)
       const distinctDates = extremes(new Date(5), distinct)
