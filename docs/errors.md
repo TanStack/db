@@ -2399,3 +2399,13 @@ Development builds show this message, with `${...}` replaced by values:
 ```text
 Query must resolve to a QueryBuilder; received ${received}.
 ```
+
+<a id="error-238"></a>
+
+## Error 238: `query/compiler/index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Query reference "${ref.path.join(`.`)}" is out of scope. Use a source from this query or a containing query.
+```

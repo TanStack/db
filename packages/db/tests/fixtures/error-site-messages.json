@@ -893,5 +893,13 @@
     "file": "query/builder/query-ir.ts",
     "template": "Query must resolve to a QueryBuilder; received ${received}.",
     "literals": ["Query must resolve to a QueryBuilder; received "]
+  },
+  "238": {
+    "file": "query/compiler/index.ts",
+    "template": "Query reference \"${ref.path.join(`.`)}\" is out of scope. Use a source from this query or a containing query.",
+    "literals": [
+      "Query reference \"",
+      "\" is out of scope. Use a source from this query or a containing query."
+    ]
   }
 }

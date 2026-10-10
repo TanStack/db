@@ -153,6 +153,7 @@ export function createRefProxy<T extends Record<string, any>>(
 
   function createProxy(path: Array<string>): any {
     let children: Map<string, any> | undefined
+    let spreadSentinel: { key: string; ref: PropRef } | undefined
     const proxy = new Proxy({} as any, {
       get(target, prop, receiver) {
         if (prop === `__refProxy`) return true
@@ -163,6 +164,7 @@ export function createRefProxy<T extends Record<string, any>>(
         // Answers with the path so toExpression reads it in one trap.
         if (prop === REF_PROXY_BRAND) return path
         if (typeof prop === `symbol`) return Reflect.get(target, prop, receiver)
+        if (prop === spreadSentinel?.key) return spreadSentinel.ref
         if (Object.prototype.hasOwnProperty.call(target, prop)) {
           return Reflect.get(target, prop, receiver)
         }
@@ -177,6 +179,7 @@ export function createRefProxy<T extends Record<string, any>>(
       },
 
       has(target, prop) {
+        if (prop === spreadSentinel?.key) return true
         if (
           prop === `__refProxy` ||
           prop === `__path` ||
@@ -191,17 +194,23 @@ export function createRefProxy<T extends Record<string, any>>(
       ownKeys(target) {
         const id = ++nextSpreadSentinelId
         const sentinelKey = `__SPREAD_SENTINEL__${path.join(`.`)}__${id}`
-        if (!Object.prototype.hasOwnProperty.call(target, sentinelKey)) {
-          Object.defineProperty(target, sentinelKey, {
-            enumerable: true,
-            configurable: true,
-            value: new PropRef(path, path[0], bindings?.get(path[0] ?? ``)),
-          })
+        // One enumeration contributes one marker. Retaining older markers on
+        // the proxy would make later spreads depend on earlier discarded ones.
+        spreadSentinel = {
+          key: sentinelKey,
+          ref: new PropRef(path, path[0], bindings?.get(path[0] ?? ``)),
         }
-        return Reflect.ownKeys(target)
+        return [...Reflect.ownKeys(target), sentinelKey]
       },
 
       getOwnPropertyDescriptor(target, prop) {
+        if (prop === spreadSentinel?.key) {
+          return {
+            enumerable: true,
+            configurable: true,
+            value: spreadSentinel.ref,
+          }
+        }
         if (
           prop === `__refProxy` ||
           prop === `__path` ||
