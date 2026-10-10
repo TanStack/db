@@ -13,8 +13,8 @@ import {
   QueryRef,
   UnionAll,
   UnionFrom,
-  collectSourceRefs,
   collectPropRefs,
+  collectSourceRefs,
   isExpressionLike,
 } from '../ir.js'
 import {
