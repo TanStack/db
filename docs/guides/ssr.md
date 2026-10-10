@@ -78,12 +78,19 @@ replacement.
 | Stream render-time results | none | `routerWithDbClient(router, dbClient)` |
 | React query identity | dependency array | derived IR, or `queryKey` when needed |
 
+Building or extending a Query keeps descriptors in its plan without starting
+their source Collections. The client-aware hook or `dbClient.preloadLiveQuery()`
+binds the finished plan when it consumes it. Reuse the original unbound Query
+across clients; a prepared Query contains Collections from the client that
+prepared it.
+
 ### Minimal React Pattern
 
 ```tsx
 import {
   DbClient,
   DbProvider,
+  Query,
   collectionOptions,
   eq,
   useDbClient,
@@ -139,6 +146,26 @@ root.render(
 )
 ```
 
+A descriptor query can also be defined outside React, without a `DbClient` at
+definition time:
+
+```tsx
+const openTodosQuery = new Query()
+  .from({ todo: todoCollection })
+  .where(({ todo }) => eq(todo.status, 'open'))
+
+function OpenTodos() {
+  const { data } = useLiveQuery({ query: openTodosQuery })
+  return <span>{data.length} open todos</span>
+}
+```
+
+The consuming hook binds this query to its `DbProvider` client. The same query
+can be used with `dbClient.preloadLiveQuery({ query: openTodosQuery })` on the
+server, or under another provider with a different client. For that reuse, the
+descriptor must have a reusable factory. Executing a descriptor query without
+a client throws when the source Collection is needed.
+
 The factory matters when config contains mutable adapter state or closures.
 Every `DbClient` gets a fresh config and collection instance. First-party
 adapter option creators already attach an equivalent factory, so this is also
@@ -188,6 +215,15 @@ render. Adapter sync and queued on-demand loads start when React commits the
 external-store subscription, so the initial markup still matches the server.
 The snapshot remains visible while the source is loading. Once the browser live
 query is ready, DB publishes one handoff from the snapshot to the live result.
+
+A hydrated query hash identifies a portable result, but the payload does not
+contain the server's Collection objects. The first browser hook that commits a
+subscription, or the first browser `preloadLiveQuery()` call, claims the local
+source Collections for that hash. Later local consumers with the same hash must
+use those same Collection objects in the same query positions. A different
+source object with the same ID is rejected; give a genuinely different query a
+distinct `queryKey`. A newer hydration chunk updates the result without
+changing an established browser source claim.
 
 ### Server
 
@@ -374,7 +410,7 @@ result, and pass that state to a client hydration boundary:
 ```tsx
 export default function Page() {
   const dbClient = new DbClient()
-  void dbClient.preloadLiveQuery(openTodosQuery)
+  void dbClient.preloadLiveQuery({ query: openTodosQuery })
 
   const state = dbClient.dehydrate({
     shouldDehydrateCollection: () => false,
@@ -694,7 +730,7 @@ Preload a live query when the browser only needs the rendered result:
 
 ```tsx
 const dbClient = new DbClient()
-await dbClient.preloadLiveQuery(openTodosQuery)
+await dbClient.preloadLiveQuery({ query: openTodosQuery })
 
 return {
   dbState: dbClient.dehydrate(),

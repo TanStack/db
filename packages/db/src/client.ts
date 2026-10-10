@@ -11,7 +11,9 @@ import { createLiveQueryObserver } from './live-query-observer.js'
 import { createDeferred } from './deferred.js'
 import {
   getLiveQueryHash,
+  getPreparedLiveQuerySources,
   prepareLiveQueryValue,
+  resumeDeferredLiveQueryCollections,
 } from './live-query-options.js'
 import { codedMessage, devBuild } from './error-message.js'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
@@ -47,6 +49,16 @@ export type CollectionOptions<
 
 type AnyCollectionOptions = CollectionOptions<any, any, any, any>
 type AnyCollection = Collection<any, any, any, any, any>
+
+function sameSourcesAtEachPosition(
+  left: ReadonlyArray<AnyCollection>,
+  right: ReadonlyArray<AnyCollection>,
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((source, index) => source === right[index])
+  )
+}
 
 type DescriptorFromConfig<TConfig extends AnyCollectionConfig> =
   TConfig extends {
@@ -167,6 +179,7 @@ type CollectionRecord = {
 
 type LiveQueryRecord = {
   queryHash: string
+  sources?: ReadonlyArray<AnyCollection>
   dehydratedAt: number
   status: DbClientLiveQueryState
   promise: Promise<void>
@@ -322,6 +335,7 @@ export class DbClient {
     {
       collection: AnyCollection
       observer: { dispose: () => void }
+      sources: ReadonlyArray<AnyCollection>
     }
   >()
   private liveQueryResources = new Map<object, () => Promise<void>>()
@@ -361,37 +375,90 @@ export class DbClient {
 
   preloadLiveQuery(options: LiveQueryOptions): Promise<void> {
     const deferredCollections: DeferredLiveQueryCollections = new Set()
+    let started:
+      | {
+          result: Promise<void>
+          registration?: { queryHash: string; record: LiveQueryRecord }
+        }
+      | undefined
+    let primaryFailure: { error: unknown } | undefined
     try {
-      const prepared = prepareLiveQueryValue(options, this, deferredCollections)
-      const queryHash = getLiveQueryHash(prepared, options.queryKey)
-      const existing = this.liveQueries.get(queryHash)
-      if (existing && existing.status !== `error`) return existing.promise
+      started = this.startLiveQueryPreload(options, deferredCollections)
+    } catch (error) {
+      primaryFailure = { error }
+    }
 
-      const failedPreload = this.preloadedLiveQueries.get(queryHash)
-      if (failedPreload) {
-        failedPreload.observer.dispose()
-        void failedPreload.collection.cleanup().catch(() => {})
-        this.preloadedLiveQueries.delete(queryHash)
+    let resumeFailure: { error: unknown } | undefined
+    try {
+      resumeDeferredLiveQueryCollections(deferredCollections)
+    } catch (error) {
+      resumeFailure = { error }
+    }
+    if (primaryFailure) throw primaryFailure.error
+    if (resumeFailure) {
+      const registration = started?.registration
+      if (
+        registration &&
+        this.liveQueries.get(registration.queryHash) === registration.record
+      ) {
+        registration.record.fail(resumeFailure.error)
+        this.discardPreloadedLiveQuery(registration.queryHash)
       }
+      void started?.result.catch(() => {})
+      throw resumeFailure.error
+    }
+    return started!.result
+  }
 
-      const collection = createLiveQueryCollection({
-        ...(prepared as LiveQueryOptions),
-        startSync: true,
-      }) as AnyCollection
-      const observer = createLiveQueryObserver(collection, {
-        client: this,
-        queryHash,
-        mode: `wholesale`,
-      })
-      this.preloadedLiveQueries.set(queryHash, { collection, observer })
+  private discardPreloadedLiveQuery(queryHash: string): void {
+    const preloaded = this.preloadedLiveQueries.get(queryHash)
+    if (!preloaded) return
+    preloaded.observer.dispose()
+    void preloaded.collection.cleanup().catch(() => {})
+    this.preloadedLiveQueries.delete(queryHash)
+  }
 
-      return this._registerLiveQuery(
-        queryHash,
-        collection.preload().then(() => observer.dehydrate()),
-      )
-    } finally {
-      for (const source of deferredCollections) source._resumeSyncStart()
-      deferredCollections.clear()
+  private startLiveQueryPreload(
+    options: LiveQueryOptions,
+    deferredCollections: DeferredLiveQueryCollections,
+  ): {
+    result: Promise<void>
+    registration?: { queryHash: string; record: LiveQueryRecord }
+  } {
+    const prepared = prepareLiveQueryValue(options, this, deferredCollections)
+    const queryHash = getLiveQueryHash(prepared, options.queryKey)
+    const sources = getPreparedLiveQuerySources(prepared)
+    const existing = this.liveQueries.get(queryHash)
+    if (existing && existing.status !== `error`) {
+      this._assertLiveQuerySources(queryHash, sources)
+      return { result: existing.promise }
+    }
+
+    this.discardPreloadedLiveQuery(queryHash)
+
+    const collection = createLiveQueryCollection({
+      ...(prepared as LiveQueryOptions),
+      startSync: true,
+    }) as AnyCollection
+    const observer = createLiveQueryObserver(collection, {
+      client: this,
+      queryHash,
+      mode: `wholesale`,
+    })
+    this.preloadedLiveQueries.set(queryHash, {
+      collection,
+      observer,
+      sources,
+    })
+
+    const result = this._registerLiveQuery(
+      queryHash,
+      collection.preload().then(() => observer.dehydrate()),
+      sources,
+    )
+    return {
+      result,
+      registration: { queryHash, record: this.liveQueries.get(queryHash)! },
     }
   }
 
@@ -642,6 +709,28 @@ export class DbClient {
     return this.liveQueries.get(queryHash)
   }
 
+  /** @internal Reject a local stream whose hash already names different sources. */
+  _assertLiveQuerySources(
+    queryHash: string,
+    sources: ReadonlyArray<AnyCollection>,
+  ): void {
+    const record = this.liveQueries.get(queryHash)
+    // A failed stream has no result to reuse and claims no source objects.
+    if (record?.status === `error`) return
+    const priorSources =
+      record?.sources ?? this.preloadedLiveQueries.get(queryHash)?.sources
+    if (priorSources && !sameSourcesAtEachPosition(priorSources, sources)) {
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `DbClient cannot reuse live query "${queryHash}" with different source Collections. Use the same Collection objects or a distinct query key.`
+          : codedMessage(234, { queryHash }),
+      )
+    }
+    // Hydration has a portable hash but no server-side Collection objects.
+    // The first local consumer claims them for later same-hash requests.
+    if (record && !record.sources) record.sources = [...sources]
+  }
+
   /** @internal */
   _consumeLiveQueryResult(queryHash: string, dehydratedAt: number): void {
     const record = this.liveQueries.get(queryHash)
@@ -654,9 +743,11 @@ export class DbClient {
   _registerLiveQuery(
     queryHash: string,
     promise: Promise<DehydratedLiveQueryResult>,
+    sources?: ReadonlyArray<AnyCollection>,
   ): Promise<void> {
     const existing = this.liveQueries.get(queryHash)
     if (existing && existing.status !== `error`) {
+      if (sources) this._assertLiveQuerySources(queryHash, sources)
       void Promise.resolve(promise).catch(() => {})
       return existing.promise
     }
@@ -665,6 +756,7 @@ export class DbClient {
       queryHash,
       this.nextLiveQueryTimestamp(),
     )
+    record.sources = sources
 
     this.liveQueries.set(queryHash, record)
     this.emit({ type: `liveQueryAdded`, query: record })
@@ -753,6 +845,7 @@ export class DbClient {
       dehydratedQuery.queryHash,
       dehydratedQuery.dehydratedAt,
     )
+    record.sources = existing?.sources
     this.liveQueries.set(record.queryHash, record)
     if (existing?.status === `pending`) {
       void record.resultPromise.then(existing.succeed, existing.fail)

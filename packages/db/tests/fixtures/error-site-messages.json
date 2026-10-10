@@ -167,11 +167,11 @@
     "literals": ["caseWhen() conditions must be expression-like values"]
   },
   "113": {
-    "file": "query/builder/index.ts",
-    "template": "Cannot use collection descriptor \"${alias}\" as a query source without a DbClient resolver. In React, wrap your tree in <DbProvider>.",
+    "file": "query/ir.ts",
+    "template": "Collection descriptor \"${source.alias}\" requires a DbClient when the query is consumed. Bind the query through a client-aware API or use a concrete Collection.",
     "literals": [
-      "Cannot use collection descriptor \"",
-      "\" as a query source without a DbClient resolver. In React, wrap your tree in <DbProvider>."
+      "Collection descriptor \"",
+      "\" requires a DbClient when the query is consumed. Bind the query through a client-aware API or use a concrete Collection."
     ]
   },
   "114": {
@@ -866,6 +866,14 @@
     ],
     "kind": "warning"
   },
+  "234": {
+    "file": "client.ts",
+    "template": "DbClient cannot reuse live query \"${queryHash}\" with different source Collections. Use the same Collection objects or a distinct query key.",
+    "literals": [
+      "DbClient cannot reuse live query \"",
+      "\" with different source Collections. Use the same Collection objects or a distinct query key."
+    ]
+  },
   "235": {
     "file": "query/live/bucket-facade-adapter.ts",
     "template": "Bucket facade received graph output between a flush and its rollback",
@@ -880,5 +888,23 @@
       "Includes subquery for \"",
       "\" reuses an ancestor's source declaration. Use new Query().from({ alias: collection }) in the child instead of passing the ancestor builder to from()."
     ]
+  },
+  "237": {
+    "file": "query/builder/query-ir.ts",
+    "template": "Query must resolve to a QueryBuilder; received ${received}.",
+    "literals": ["Query must resolve to a QueryBuilder; received "]
+  },
+  "238": {
+    "file": "query/compiler/index.ts",
+    "template": "Query reference \"${ref.path.join(`.`)}\" is out of scope. Use a source from this query or a containing query.",
+    "literals": [
+      "Query reference \"",
+      "\" is out of scope. Use a source from this query or a containing query."
+    ]
+  },
+  "239": {
+    "file": "query/compiler/index.ts",
+    "template": "Include query is missing a captured parent projection for \"${ref.path.join(`.`)}\".",
+    "literals": ["Include query is missing a captured parent projection for \""]
   }
 }

@@ -1,4 +1,5 @@
 import { BaseQueryBuilder } from './query/builder/index.js'
+import { collectSourceRefs, requireCollectionSource } from './query/ir.js'
 import { isCollection } from './live-query-adapter.js'
 import { createLiveQueryCollection } from './query/live-query-collection.js'
 import {
@@ -31,6 +32,23 @@ export type DeferredLiveQueryCollections = Set<
   CollectionImpl<any, string | number, any, any, any>
 >
 
+/** Release every deferred source, then report the first startup failure. */
+export function resumeDeferredLiveQueryCollections(
+  collections: DeferredLiveQueryCollections,
+): void {
+  const pending = Array.from(collections)
+  collections.clear()
+  let firstFailure: { error: unknown } | undefined
+  for (const collection of pending) {
+    try {
+      collection._resumeSyncStart()
+    } catch (error) {
+      firstFailure ??= { error }
+    }
+  }
+  if (firstFailure) throw firstFailure.error
+}
+
 type PreparedLiveQueryConfigInput = Omit<
   LiveQueryCollectionConfig<Context>,
   `query`
@@ -42,42 +60,48 @@ type PreparedLiveQueryConfigInput = Omit<
   client?: DbClient
 }
 
-function createInitialQueryBuilder(
+function createInitialQueryBuilder(): InitialQueryBuilder {
+  // Query construction does not materialize descriptor Collections.
+  return new BaseQueryBuilder() as InitialQueryBuilder
+}
+
+function createCollectionResolver(
   dbClient: DbClient | undefined,
-  deferredCollections: DeferredLiveQueryCollections,
-): InitialQueryBuilder {
-  return new BaseQueryBuilder(
-    {},
-    dbClient
-      ? (
-          options: CollectionOptionsIdentity<
-            any,
-            string | number,
-            any,
-            any,
-            any
-          >,
-        ) => {
-          const collection = dbClient._materializeCollectionForRender(
-            options as CollectionOptions<any, string | number, any, any>,
-          ) as CollectionImpl<any, string | number, any, any, any>
-          if (collection._deferSyncStart()) deferredCollections.add(collection)
-          return collection
-        }
-      : undefined,
-  ) as InitialQueryBuilder
+  deferredCollections?: DeferredLiveQueryCollections,
+) {
+  if (!dbClient) return undefined
+  return (
+    options: CollectionOptionsIdentity<any, string | number, any, any, any>,
+  ): CollectionImpl<any, string | number, any, any, any> => {
+    if (!deferredCollections) {
+      return dbClient.collection(
+        options as CollectionOptions<any, string | number, any, any>,
+      ) as CollectionImpl<any, string | number, any, any, any>
+    }
+    const collection = dbClient._materializeCollectionForRender(
+      options as CollectionOptions<any, string | number, any, any>,
+    ) as CollectionImpl<any, string | number, any, any, any>
+    if (collection._deferSyncStart()) deferredCollections.add(collection)
+    return collection
+  }
 }
 
 export function prepareLiveQueryValue(
   value: unknown,
   dbClient: DbClient | undefined,
-  deferredCollections: DeferredLiveQueryCollections,
+  deferredCollections?: DeferredLiveQueryCollections,
 ): unknown {
   if (typeof value === `function`) {
     return prepareLiveQueryValue(
-      value(createInitialQueryBuilder(dbClient, deferredCollections)),
+      value(createInitialQueryBuilder()),
       dbClient,
       deferredCollections,
+    )
+  }
+
+  if (value instanceof BaseQueryBuilder) {
+    return value._bindCollectionSources(
+      createCollectionResolver(dbClient, deferredCollections),
     )
   }
 
@@ -95,10 +119,11 @@ export function prepareLiveQueryValue(
       ...config
     } = value as PreparedLiveQueryConfigInput
 
-    const preparedQuery =
-      typeof query === `function`
-        ? query(createInitialQueryBuilder(dbClient, deferredCollections))
-        : query
+    const preparedQuery = prepareLiveQueryValue(
+      query,
+      dbClient,
+      deferredCollections,
+    )
 
     if (preparedQuery === undefined || preparedQuery === null) {
       return preparedQuery
@@ -111,6 +136,30 @@ export function prepareLiveQueryValue(
   }
 
   return value
+}
+
+/** Concrete source objects in query-position order for a prepared value. */
+export function getPreparedLiveQuerySources(
+  value: unknown,
+  onUnboundDescriptor?: (alias: string) => never,
+): Array<Collection> {
+  if (isCollection(value)) return [value]
+  const query =
+    value instanceof BaseQueryBuilder
+      ? value
+      : value && typeof value === `object` && `query` in value
+        ? value.query
+        : value
+  if (query instanceof BaseQueryBuilder) {
+    return collectSourceRefs(query._getQuery()).map((source) =>
+      source.type === `descriptorRef`
+        ? onUnboundDescriptor
+          ? onUnboundDescriptor(source.alias)
+          : requireCollectionSource(source)
+        : source.collection,
+    )
+  }
+  return isCollection(query) ? [query] : []
 }
 
 export function getPreparedLiveQueryIdentity(value: unknown): unknown {

@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react'
-import { createEffect } from '@tanstack/db'
-import type { Effect, EffectConfig } from '@tanstack/db'
+import { createEffect, prepareLiveQueryValue } from '@tanstack/db'
+import { useOptionalDbClient } from './DbProvider'
+import { getPreparedSources } from './source-id-bindings'
+import type { EffectConfig } from '@tanstack/db'
 
 /**
  * React hook for creating a reactive effect that fires handlers when rows
@@ -31,13 +33,16 @@ export function useLiveQueryEffect<
   TRow extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
 >(config: EffectConfig<TRow, TKey>, deps: React.DependencyList = []): void {
+  const client = useOptionalDbClient()
   const configRef = useRef<EffectConfig<TRow, TKey>>(config)
   configRef.current = config
 
   useEffect(() => {
-    const effect: Effect = createEffect<TRow, TKey>({
+    const query = prepareLiveQueryValue(config.query, client)
+    if (!client) getPreparedSources(query, client, `useLiveQueryEffect`)
+    const effect = createEffect<TRow, TKey>({
       id: config.id,
-      query: config.query,
+      query: query as EffectConfig<TRow, TKey>[`query`],
       skipInitial: config.skipInitial,
       onEnter: (event, ctx) => configRef.current.onEnter?.(event, ctx),
       onUpdate: (event, ctx) => configRef.current.onUpdate?.(event, ctx),
@@ -52,8 +57,10 @@ export function useLiveQueryEffect<
     })
 
     return () => {
-      // Fire-and-forget disposal; AbortSignal cancels in-flight work
-      effect.dispose()
+      // React cannot await cleanup. Report a failed source release.
+      void effect.dispose().catch((error) => {
+        console.error(`[useLiveQueryEffect] failed to dispose effect:`, error)
+      })
     }
-  }, deps)
+  }, [...deps, client])
 }

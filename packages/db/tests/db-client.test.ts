@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import {
   DbClient,
+  Query,
   collectionOptions,
   createLiveQueryCollection,
   createTransaction,
@@ -793,6 +794,40 @@ describe(`DbClient`, () => {
     expect(
       client.dehydrate({ shouldDehydrateLiveQuery: () => false }).liveQueries,
     ).toBeUndefined()
+  })
+
+  it(`preloads one standalone descriptor Query in separate clients`, async () => {
+    const descriptor = collectionOptions(`prebuilt-preload-people`, (client) =>
+      mockSyncCollectionOptions<Person>({
+        id: `prebuilt-preload-people`,
+        getKey: (person) => person.id,
+        initialData: client.requireDependency<Array<Person>>(`people`),
+      }),
+    )
+    const sourceQuery = new Query()
+      .from({ person: descriptor })
+      .select(({ person }) => ({ id: person.id, name: person.name }))
+    const query = new Query()
+      .from({ source: sourceQuery })
+      .select(({ source }) => ({ id: source.id, name: source.name }))
+    const first = new DbClient({ people: [{ id: `a`, name: `first` }] })
+    const second = new DbClient({ people: [{ id: `b`, name: `second` }] })
+
+    await Promise.all([
+      first.preloadLiveQuery({ query }),
+      second.preloadLiveQuery({ query }),
+    ])
+
+    const rows = (client: DbClient) =>
+      client.dehydrate().liveQueries?.[0]?.snapshot?.rows.map(({ value }) => ({
+        id: (value as Person).id,
+        name: (value as Person).name,
+      }))
+    expect(rows(first)).toEqual([{ id: `a`, name: `first` }])
+    expect(rows(second)).toEqual([{ id: `b`, name: `second` }])
+    expect(first.dehydrate().liveQueries?.[0]?.queryHash).toBe(
+      second.dehydrate().liveQueries?.[0]?.queryHash,
+    )
   })
 
   it(`cleans up a failed live-query preload before retrying it`, async () => {

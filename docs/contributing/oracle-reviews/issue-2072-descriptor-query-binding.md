@@ -1,0 +1,331 @@
+# Standalone descriptor Query binding oracle review
+
+Reviewed semantic head: e4a002a046a8f2d99a6155cf63f1f897e8633909
+
+## Claim and boundary
+
+The standalone Query contract in the SSR guide permits a Query built before any DbClient exists to use a reusable factory Collection descriptor. A consuming hook binds that plan to its current DbProvider client. Two clients using the same descriptor ID and plan must see their own source rows. A descriptor made from an arbitrary concrete config has a narrower one-client contract and is outside this claim.
+
+The React owner is packages/react-db/tests/descriptor-query-binding-oracle.test.tsx. Its reference model is one plain row map per client; a write changes only that map. Two fixed legal histories use disjoint IDs with inserts, or one shared ID with different values and updates. Each builds one Query before the clients, mounts it under two providers, writes to each client, and switches one mounted hook A→B→A. At each settled publication, the refinement check compares the complete public projected rows, each row's $key, and the exact public field set against the map for the current client. Query-plan identity is also compared with direct Collection formulations. Model seed rows are copied before entering production.
+
+The separate core witness in packages/db/tests/db-client.test.ts preloads a nested form of one Query in two clients and compares distinct dehydrated rows with equal query hashes. The React witness establishes the bounded hook behavior above. Neither witness establishes on-demand acquisition, joins, union sources, concrete-config descriptor reuse, or non-React adapters. The coverage map assigns those open cells to the React owner or a receiving owner for the relevant adapter and public observation.
+
+## Guide audit
+
+| Requirement | Outcome |
+| --- | --- |
+| ORC-001 authority and limits | Pass. The SSR guide states the standalone Query and factory-descriptor contract; the oracle and coverage map bound the claim. |
+| ORC-002 independent judgment | Pass. Plain per-client maps predict rows without importing the query builder, materializer, binding cache, or live-query engine. Production receives copies of the model's seed rows. |
+| ORC-003 visible responsibilities | Pass. The opening prose states law, model, histories, observation, and limits; the driver and comparison sit beside the executable history. |
+| ORC-004 generated grammar | Not applicable. Two fixed histories are claimed, with no generated-history coverage claim. |
+| ORC-005 production path and observation | Pass. The driver uses the public useLiveQuery hook under DbProvider, and compares public rows and $key after each settled publication and provider switch. Both cases execute and pass. |
+| ORC-006 calibration | Pass. Three temporary mutants reached the intended comparisons and failed by assertion, as detailed below. None remains in the branch. |
+| ORC-007 fixed and random campaigns | Not applicable. The oracle has no important generated property. |
+| ORC-008 stateful-model minimality | Not triggered by this change. The existing two-map model retains the same state; the new history varies key collision and write kind. Separate maps are necessary because a write to A must leave B's expected rows unchanged. |
+| ORC-009 vocabulary mapping | Pass. Each map is a model-only projection of one client's expected public rows. A model write corresponds to a Collection insert or update; the comparison cut is the settled public hook result, not a sync transaction or source snapshot. |
+| ORC-010 failure fidelity and cleanup | Not triggered by shrinking or failure normalization. The fixed tests assert before unmount and use the React test harness for cleanup. |
+| ORC-011 independent second formulation | No named shared semantic fault requires a second result model. The direct Collection formulation checks plan identity; it is not presented as a second row oracle. |
+| ORC-012 review evidence | Pass for this bounded claim. This record names the exact semantic head, all guide outcomes, mutant outcomes, witness boundary, and open cells. |
+| ORC-013 distinguishing boundary witness | Pass. The disjoint history rejects binding to the first client. The colliding history rejects a global row-ID cache that the disjoint history accepts. The $key comparison rejects a separate global public-key cache. |
+| ORC-014 controlled-premise handoff | No real-provider claim is made. The mock sync factory supplies independent initial rows and local writes; real adapter timing and persistence remain outside this controlled React witness. |
+
+## Distinguishing evidence and closeout
+
+The first-client bound-query mutant returned A's row where the disjoint history expected B's row. It failed at the public row assertion. The colliding case also failed in that run, but the mutant's global cache carried state from the earlier case, so the disjoint case is the clean witness. A global row-ID cache passed the disjoint case and failed the colliding case at B's value: first instead of second. A global public-key cache failed the $key assertion: a instead of b. All three outcomes were assertion failures at the intended checkpoint, not setup failures or timeouts; the temporary mutants were restored.
+
+This evidence covers reusable factory descriptors, one prebuilt basic projection Query, two controlled React clients, independent insert or same-key update, and a mounted A→B→A switch at settled public-row checkpoints. No reachable counterexample was found in that bounded domain. The broader descriptor-binding law remains open for the cells listed in the coverage map; each needs a receiving oracle with its own public observation before a broader closure claim.
+
+The React oracle and existing useLiveQuery suite passed 62 tests in two files. ESLint, Prettier, and git diff --check passed. The SSR guide's two bare preloadLiveQuery calls were corrected to the documented config-object form in the reviewed semantic head.
+
+## Follow-up audit: React Effects and preparation
+
+Reviewed semantic head: a037c605221fa458e06796dd85ef81774b41c314 (2026-10-08). This entry supplements the earlier e4a002a0 audit; it does not revise that earlier verdict.
+
+The added Effect history uses the same prebuilt factory-descriptor Query under two DbClients with the same row key and different values. At initial publication, each `useLiveQueryEffect` must report its own client's public row. Switching one mounted Effect to the second provider must report the second row. The model is the pair of plain input rows, copied before seeding production; it does not use the query compiler to predict values. The public observation is the ordered `onEnter` row sequence at the settled test cut. The Effect witness covers initial enters and one A→B switch. It does not establish later source writes, on-demand loading, joins, unions, or non-React Effects.
+
+The new witness failed on the prior code head 8361d12ad during Effect setup with the unbound descriptor error. On a037c6052 it passed. A temporary hostile fixture made both clients supply the first client's row while retaining the second client's expected row; the oracle failed at its initial public-event comparison (`first` observed where `second` was expected). That was an assertion failure at the intended checkpoint. The fixture was restored. This checks that a wrong cross-client row result cannot pass merely because the two rows share a key.
+
+| Requirement | Follow-up outcome |
+| --- | --- |
+| ORC-001 authority and limits | Pass. The standalone descriptor contract and the existing two-client law also govern a client-aware React Effect; the new fixed history and open cells are stated above and in the coverage map. |
+| ORC-002 independent judgment | Pass. Plain expected rows are copied before entering production and compared with callback values. |
+| ORC-003 visible responsibilities | Pass. The oracle opening prose now names the Effect law, model, fixed history, callback observation, settled cut, and limits beside the executable witness. |
+| ORC-004 generated grammar | Not applicable; this follow-up adds a fixed history. |
+| ORC-005 production path and observation | Pass. The driver mounts the public hook under `DbProvider` and compares complete projected `onEnter` values after initial publication and a provider switch. |
+| ORC-006 checker calibration | Pass. The hostile first-client-row fixture failed by assertion at the public-event checkpoint; the previous production code failed earlier during Effect setup. |
+| ORC-007 fixed and random campaigns | Not applicable; no generated property was added. |
+| ORC-008 stateful-model minimality | Not triggered; the two independent client inputs remain distinct because a provider switch changes the required event value. |
+| ORC-009 vocabulary mapping | Pass. A model row is one client's expected projected public row; an `onEnter` event is the Effect's public observation, not a source change message. |
+| ORC-010 failure fidelity and cleanup | Not triggered by shrinking. The fixed test unmounts both hooks after its comparisons. |
+| ORC-011 independent second formulation | No additional shared-fault hypothesis is claimed for the fixed Effect history; the existing `useLiveQuery` two-client result is a separate consumer path. |
+| ORC-012 review evidence | Pass for the bounded follow-up claim. This entry names the reviewed semantic head, all guide outcomes, the negative controls, and open cells. |
+| ORC-013 distinguishing boundary witness | Pass. Same-key, different-value clients and the hostile first-client-row fixture distinguish the required client binding from a wrong cross-client row. |
+| ORC-014 controlled-premise handoff | No real-provider claim is made. The controlled sync fixture supplies each client's initial row. |
+
+Two focused core tests also failed before the fix and pass on a037c6052: preparation of an unfinished builder without a client now returns the builder unchanged, and the core unbound-descriptor error no longer recommends React's `DbProvider` to callers in other frameworks. The focused core and React runs passed 16 tests across three files, with no type errors. React package build, ESLint, Prettier, and `git diff --check` passed.
+
+## Public IR compatibility follow-up
+
+Reviewed semantic head: 368bcbca1f8b94cd3d7e4e08537198c7c890a5ac (2026-10-08). The prior `IR.CollectionRef` exposed `collection` as an enumerable, writable own field for a concrete Collection. The descriptor implementation at c99228736 instead exposed an enumerable `source` field and a prototype `collection` getter. A spread lost `collection`, and assignment failed.
+
+The focused public-API test `packages/db/tests/query/collection-ref-compatibility.test.ts` failed on c99228736 at the own-key comparison. It passes on 368bcbca1. A concrete ref again exposes and permits assignment to its own `collection` field. Its `source` getter follows an assigned Collection. An unbound descriptor ref still keeps its descriptor until a receiving client binds a cloned plan, and reading its `collection` fails with the intended missing-client error. This fixed shape check is sufficient for the finite own-field contract; it makes no general oracle claim about arbitrary IR walkers over unbound plans.
+
+The focused DB and React runs passed 116 tests with no type errors. DB package build, the private-member minification check, changed-file ESLint and Prettier, and `git diff --check` passed. Generic traversal of unbound descriptor refs remains outside this compatibility claim; callers can distinguish those refs through `descriptor` before reading `collection`.
+
+## Distinct descriptor IR follow-up
+
+Reviewed semantic head: ad49d7427f76c4e9dae5d25b24f14d09dd3e07fe (2026-10-08). This entry supersedes the descriptor representation described in the prior public IR compatibility follow-up. It does not change that follow-up's concrete Collection shape result or the earlier React oracle verdicts.
+
+An unbound descriptor is now an `IR.DescriptorRef` with type `descriptorRef`, an own `descriptor` field, and no `collection` field. `IR.CollectionRef` again represents only a concrete Collection and retains its enumerable, writable own `collection` field. Placement cloning turns each descriptor ref into a concrete ref when a resolver is supplied. `IR.collectSourceRefs` traverses either source kind. The existing `IR.collectCollectionSources` return type remains concrete and reports the missing client if a descriptor is still unbound. Compilation makes the same check before optimization.
+
+The focused shape test was written first. On the prior head bfa4d1ffa, its builder observation failed by assertion: `collectionRef` appeared where `descriptorRef` was expected. On ad49d7427, it passes. The test checks the concrete own-field shape, the unbound discriminant and absence of `collection`, the bound clone's new source ID, and a finite IR position matrix for nested query, `unionFrom`, `unionAll`, join, and include sources. Each matrix case names its expected aliases independently of the traversal function, then checks unbound collection traversal rejects and bound traversal returns all concrete refs with distinct source IDs. It does not execute those query forms or compare their public rows.
+
+The React two-client oracle's contract, model, histories, driver, and public-row comparisons did not change. Its three tests pass on this head. The focused DB descriptor and identity run passed 115 tests, and the nearby optimizer, union, join, include, and identity run passed 447 tests, each with no Vitest type errors. DB and React builds, DB and React TypeScript checks, the private-member minification check, changed-file ESLint and Prettier, and `git diff --check` passed. The changeset is minor because exported `IR.From` now includes `descriptorRef`. Public row behavior for descriptor joins, unions, includes, on-demand sources, and other frameworks remains assigned to the coverage map's receiving owners.
+
+## Follow-up audit: committed Effects and nested placement
+
+Reviewed semantic head: 1413277f11f0fb51e44a9d3688ab0c780b350169 (2026-10-08). This entry records bounded evidence for the subsequent review and follow-up changes; it does not revise the earlier heads' observations.
+
+A committed `useLiveQueryEffect` may acquire a descriptor Collection without render deferral. The existing Effect row model still compares two clients at initial enter and a provider switch. A new fixed history uses one client's plain expected row, waits for its public `onEnter` event, then checks that `DbClient.dehydrate()` contains the source row and key. Before the change, the dehydration assertion received no Collection chunk. After the change, it passes. The effect now uses ordinary client materialization in its post-commit setup and has no deferred-source resume or rollback path. A controlled probe of the former setup reached a query-start error followed by a different resume error, showing why that cleanup could replace the original exception. Removing the resume path eliminates that second throw from Effect setup; the probe does not establish error ordering for unrelated source factories.
+
+A fixed same-hash history mounts a concrete query without a client, then changes that mounted hook to an unbound descriptor query with the same stable plan hash. It checks the public missing-client error at the attempted consumption cut, before any prior row can be returned. The test passes. Hash equality itself is intentional: the earlier two-client oracle and nested preload witness require one descriptor plan and each client's concrete form to share semantic identity. This witness covers the ordinary derived-identity hook path, not an explicit caller-provided `queryKey`.
+
+A focused core placement witness checks the inner source's IR immediately after a client-aware builder places a standalone descriptor Query. Before the change it observed `descriptorRef`; afterward it observes `collectionRef`. The existing two-client nested preload witness checks public rows at a later consumption cut. The placement witness does not claim public-row coverage for every nested form. A separate focused React regression checks that an Effect query function returning `undefined` reports a clear invalid-query error; before the change it threw a property-access TypeError. Both DB and React packages build, 54 focused DB tests, 253 neighboring subquery/union/join/include tests, and the full 376-test React suite pass with no Vitest type errors.
+
+The review's repeated-preparation work is real: a controlled three-prepare probe observed three source materialization calls. The ordinary React path prepares once per render, so the claim of several preparations per render is too broad. A bound-builder cache would have to preserve per-render source deferral and account for mutable exported IR; this audit does not establish a safe cache law or implement one. Compiler entry collects concrete sources before later `descriptorRef` branches, while direct IR traversal and Effect source extraction can still reach their own missing-client checks. The generic core error deliberately omits a React-only provider instruction; the existing core test protects that cross-framework wording. Public row behavior for descriptor joins, unions, and includes remains open.
+
+## Scope and preparation-work follow-up
+
+User decision on 2026-10-08: descriptor binding in Vue, Solid, and Angular adapters is outside this work's contract. Those adapters have no DbClient input. Their callers use concrete Collections. Svelte has a DbProvider path and remains an open receiving-adapter witness in the coverage map. This decision changes the coverage classification, not the current adapter behavior.
+
+The warm-client preparation probe on Node 24.19.0 used seven timed batches per shape. It called `prepareLiveQueryValue` with a new deferred set on each iteration. A concrete-Collection plan provided the same-shape comparison. Median prepare times were 0.61 versus 0.43 microseconds for one source, 0.98 versus 0.45 for one source under 16 nested queries, and 5.22 versus 2.99 for a 64-source union. Adding prepared-query identity gave 0.86 versus 0.73, 5.21 versus 4.57, and 13.57 versus 10.58 microseconds for those shapes. A counter observed one resolver call per descriptor source per preparation; the warm client reused its Collections. This isolated microbenchmark does not measure a React render or provider work. The measured extra work does not justify a bound-builder cache in this PR. A representative application profile showing material render cost would reopen that optimization and require a render-abandonment witness.
+
+## Follow-up audit: placement, React diagnostics, and resolver lifetime
+
+Reviewed semantic head: 34c600230 (2026-10-08); the fixes below began from ebe0dcc6d. A client-aware builder must bind every descriptor that it places before returning that query clause. The focused placement driver observes source-ref kinds inside the query callback, before `prepareLiveQueryValue` can rebind the returned tree. Its independent expected list names two union branches and direct, nested, materialized, and conditional include positions. Before the fix, union placement yielded two `descriptorRef` sources and includes retained a descriptor child. After the fix, all named positions yield `collectionRef`; the original standalone union builders remain unbound. This is a finite IR-placement check, not a public-row oracle. The two-client descriptor oracle and nested preload witness retain their public-row authority. Union and include rows under separate clients remain open in the coverage map.
+
+The React descriptor oracle's no-client history now requires the thrown message to name `DbProvider` at the attempted consumption cut, before a same-hash concrete query's prior rows can be reused. The previous message failed that assertion. A separate `useLiveQueryEffect` test reaches the same no-provider boundary after commit. The core missing-client test still requires framework-neutral wording. These checks cover the React remedy and core boundary, not every adapter diagnostic.
+
+An on-demand source whose `unloadSubset` throws supplies a controlled Effect cleanup failure. Before the hook change, cleanup discarded the rejected `dispose()` result without reporting the source error; after the change, React logs that exact error. `Effect.dispose()` already attaches an internal rejection handler, so the review's unhandled-rejection claim is stronger than the evidence supports. The focused test checks one unmount and one failing release callback; it does not claim a general disposal-history oracle.
+
+The resolver-lifetime issue remains open. A controlled public-path probe prepared a descriptor Query with a render deferral set, drained that set, then added a new descriptor join and subscribed to the resulting live query. The new source stayed `idle` and its sync callback ran zero times while the live query stayed `loading`. A candidate change that made the returned builder retain a normal client resolver started that source after release, but a distinguishing probe added the join *before* release and showed provider sync starting while the render was still abandonable. The candidate was removed. The design must define when a prepared builder's continuation stops using render deferral, with a witness for source start before release, after release, and after an abandoned render. The descriptor-binding owner and the live-query deferred-acquisition owner are the receiving boundaries; the current finite oracle does not encode that transition.
+
+The hash/equivalence difference is deliberate: stable query identity uses descriptor and concrete Collection IDs alike, while compiler subquery cache comparison inspects bound structure only after concrete-source collection. The same-hash, no-client React witness rejects reuse of old rows. The exported `IR.From` descriptor variant is covered by the minor changeset. The exported compiler's both-invalid input can report alias reuse before the missing-client error, while normal live-query construction reports the missing client first; no error-precedence contract selects one result for that mixed-invalid input. The lazy-target descriptor guard is unreachable from normal compilation after source collection, but keeps direct calls on the exported `From` type fail-fast and narrows that union for the remaining code.
+
+## Consumption-bound continuation follow-up
+
+Reviewed implementation head: f2f0bd94890dd27bfd1d2e8b9f6920186e01efd7 (2026-10-08). The user chose consumption-bound descriptor binding. This supersedes the earlier requirement in this record that a client-aware builder bind descriptors during `from`, `join`, `unionAll`, or include placement. Those earlier observations remain historical evidence for their reviewed heads.
+
+The law is that query construction and chaining keep descriptor sources in the plan and start no source sync run. A client-aware consumer binds the finished query to concrete Collections for that consumption. Its returned builder is a bound snapshot without a retained resolver. A later descriptor clause remains unbound until another client-aware consumption; a direct core consumer without a client reports the missing-client error. Reuse the original standalone Query across clients, not a prepared snapshot containing one client's Collections. The prior placement law predicted concrete refs inside the query callback; the new law predicts descriptor refs there and concrete refs after final preparation. The nested, union, and direct, nested, materialized, and conditional include placement tests now check both cuts.
+
+The source-start model predicts zero starts while a continuation is unconsumed or its React render remains abandonable, and one start for the eager fixture after a committed client-aware consumer acquires it. The core driver prepares a descriptor Query with a render deferral set, drains that set, adds a descriptor join, then preloads the continued query through `DbClient`. It checks that chaining neither materializes nor starts the new source, direct consumption without a client fails, and preload starts it once. A neighboring core history consumes the continuation before draining its deferral set: preparation binds the new source but starts it only after release. A captured intermediate builder from a query callback also retains no resolver. The React owner checks the continued query's public joined row after a committed `useLiveQuery` hook and observes zero materializations and sync starts when a Suspense render extends a prepared builder but never commits.
+
+Before the change, the new core after-release test failed by assertion at the planned ref-kind checkpoint: the new join was already a `collectionRef`, rather than a `descriptorRef`. The earlier public probe then saw that source stay `idle` and its live query stay `loading`. The rejected ordinary-client-resolver candidate started provider work before release. For checker calibration, a temporary hostile line materialized the late descriptor during the abandoned React render; the new comparison failed by assertion with one materialization where zero was expected. That line was removed, and the same test passed. These are distinct checks of the stale-deferral and premature-start wrong designs.
+
+| Requirement | Continuation follow-up outcome |
+| --- | --- |
+| ORC-001 authority and limits | Pass. The user selected consumption-bound binding; the standalone Query and React render contracts supply the client and commit boundaries. The bounded histories and open cells appear here and in the coverage map. |
+| ORC-002 independent judgment | Pass. Expected rows come from fixed source input values; expected start counts come from whether a consumer committed. Neither expectation calls the resolver, builder, or source-start implementation. |
+| ORC-003 visible responsibilities | Pass. The React oracle opening prose names the law, simple start model, legal histories, public observations, checkpoints, and limits beside the drivers and checks. Core placement tests supplement that public owner. |
+| ORC-004 generated grammar | Not applicable. These are fixed histories, with no generated-history claim. |
+| ORC-005 production path and observation | Pass. The drivers use public `prepareLiveQueryValue`, `DbClient.preloadLiveQuery`, and `useLiveQuery`; they compare sync callback counts and the public row at release, commit, and abandoned-render cuts. |
+| ORC-006 calibration | Pass. The old implementation failed the late-ref assertion; the temporary premature-materialization fixture failed the abandoned-render comparison. The prior public probe and rejected plain-resolver candidate supply the adjacent lifecycle counterexamples. |
+| ORC-007 campaigns and replay | Not applicable. No generated property was added. |
+| ORC-008 stateful-model minimality | Not triggered. The added start model predicts counts at three fixed cuts and does not introduce a stateful reference machine. |
+| ORC-009 vocabulary mapping | Pass. A model start is one source Collection sync callback invocation; a committed consumer is the public hook or preload path. The test does not equate render deferral with deferred acquisition. |
+| ORC-010 failure fidelity and cleanup | No shrinking or failure normalization occurs. Assertions precede hook unmount; the temporary hostile fixture was removed after its intended failure. |
+| ORC-011 second formulation | No additional shared-fault hypothesis requires another expected-result model. Core preload and React hook are different receiving paths but share preparation, so their agreement is not claimed as an independent semantic oracle. |
+| ORC-012 review evidence | Pass for the bounded claim. This entry names the implementation head, old and new predictions, wrong-design outcomes, production paths, public observations, and open cells. |
+| ORC-013 boundary witness | Pass. Before-release preparation and after-release continuation distinguish a stale set from a live one; the abandoned render and hostile fixture distinguish deferral from immediate startup. |
+| ORC-014 controlled-premise handoff | No real-provider or all-render-schedules claim is made. The controlled eager sync fixture supplies the named start and row premise. |
+
+The full core run executed 11,638 runtime tests without an assertion failure; its first type check found test annotations and an older builder-constructor test that used the removed resolver parameter. After updating those tests, the full core TypeScript check and the focused 22-test DB run passed. The full React suite passed 380 tests, the Svelte suite passed 122 tests, and DB, React, and Svelte builds passed. Changed-file ESLint, Prettier, and `git diff --check` passed. This evidence covers a prepared builder continued before and after deferral release, an abandoned Suspense render, one committed React hook, and one DbClient preload. Concurrent React render schedules, union/include public rows under distinct clients, and consumption of one prepared snapshot under a different client remain outside the claim and in the coverage map's receiving cells.
+
+## Follow-up audit: independent readers, release failures, and preload identity
+
+Reviewed implementation head: d3d938f60 (2026-10-09), based on 270716d6d. This entry evaluates the new finite histories against that exact implementation. It does not promote the earlier two-client oracle to a claim about all adapter or render schedules.
+
+The first law is that an abandoned descriptor render starts no provider work, while a later direct `Collection.preload()` is independent demand and can start its source. The React Suspense driver observes zero sync starts before commit or direct demand, then one start and `ready` after the direct preload. On 270716d6d it failed at the latter checkpoint with zero starts. On d3d938f60 it passes. Its model is a start count governed by the two demand cuts, not a copy of the sync deferral code. Arbitrary concurrent render schedules remain open.
+
+The second law is that one failed deferred source start does not withhold another source's release. A `DbClient.preloadLiveQuery` union of two descriptor sources reports the first source's exact error and still starts the healthy second source, whose direct preload reaches `ready`. If preparation also fails, that preparation error remains primary after the deferred release attempts. The core owner states these predictions beside its fixed two-source history. The first history failed on 270716d6d at the second source's start count, then passed on d3d938f60. The Svelte receiving oracle runs the same release ordering through `$effect.root` and `flushSync`; its original path also left the second count at zero. The repair starts it and detaches the failed hook subscription. A temporary mutant that omitted the error-path observer release failed the public query Collection's `subscriberCount` assertion, one instead of zero. After a descriptor factory failure, a separate Svelte history checks that a later direct source preload starts once and reaches `ready`. These fixtures use synchronous eager sources; asynchronous failures and larger source sets remain open.
+
+The third law is local preload ownership: equal query hashes can reuse one preloaded result only when the concrete source Collection object at each query position is the same. The independent model assigns distinct source values before building plans. The driver checks the hash equality, first dehydrated row, second request's rejection, and unchanged first row. Concrete→descriptor, descriptor→concrete, and concrete→concrete collisions failed on 270716d6d because the second request succeeded; a descriptor and its own materialized Collection passed as the same-object control. An interim set-based repair passed those four histories but failed a swapped two-source union: it returned the first result although both source objects had exchanged query positions. Comparing source objects in traversal order rejects that mutant, and all five cases pass on d3d938f60. This law covers local preloads in one `DbClient`, not hydrated streams from another process or the semantics of different explicit query keys.
+
+The React Effect provider-switch history now writes to the old provider after the switch and expects no update, then writes to the new provider and expects one update with its value. A temporary mutant that skipped `effect.dispose()` failed at the old-provider update checkpoint. The production disposal path passes. This strengthens the existing Effect oracle without claiming a new production fix or a general Effect history model.
+
+The full core run passed 11,390 tests; its only 21 failures were in `oracle-replay.test.ts`, whose child processes could not write Vitest's cache through this worktree's borrowed dependency directory. The same file passed all 36 tests when that cache was accessible. Focused core oracles passed 228 tests before the final swapped-position addition, and its five identity cases passed afterward. The full React and Svelte suites passed 360 and 117 tests with local source aliases. DB, React, and Svelte type checks, changed-file ESLint and Prettier, the DB build, generated-error-doc check, production-error bundle check, and `git diff --check` passed. The temporary mutants and local test aliases were removed. The coverage map names the remaining legal histories and receiving owners; the bounded cases above have no known reachable counterexample.
+
+## Follow-up audit: failed preload and hook-first source identity
+
+Reviewed semantic head: e22a2bbf4 (2026-10-09), based on c2370424b. The external ten-finding review reported code-reading observations without execution evidence. This entry records the independently checked behavior, the repairs, and the remaining policy questions. It does not claim that hydration-first provenance or Svelte recovery after a thrown effect has been specified.
+
+The failed-preload law is that a query whose deferred source start throws has no result to stream or reuse. At the synchronous error cut, `DbClient.dehydrate({ shouldDehydrateLiveQuery: () => true })` must omit it. A later equal-hash query with a healthy replacement source must publish that source's row. The deferred-acquisition oracle's independent model predicts no result for the first attempt and one `recovered` row for the replacement. Its public driver calls `preloadLiveQuery` and observes the exact thrown error, both sources' start counts, dehydration at the error cut, and the replacement row after a later successful preload. On c2370424b the new dehydration assertion failed because a pending query remained streamable; on e22a2bbf4 it passes. A same-options retry reaches the failed source Collection's terminal error rather than waiting on the old pending stream. It does not automatically restart that source, as the live-query architecture specifies for dependent queries after source failure. These witnesses cover synchronous eager starts and a two-source union. Asynchronous startup failure and larger source sets remain with the deferred-acquisition owner in the coverage map.
+
+The local stream-identity law is that one `DbClient` may reuse an equal-hash result only when its concrete source Collection objects match in query order. The earlier core preload oracle already rejected concrete/descriptor collisions, source swaps across union branches, and accepted the same object. This review exposed a missing registration origin: a pending React Suspense hook stream followed by a core preload. The React descriptor oracle now builds two same-ID sources with equal plan hashes, starts the hook stream over the first, and asserts that the second source rejects before the stream can answer it; preloading the first source is the neighboring legal case. On c2370424b the different-source call returned the first stream's promise instead of throwing. On e22a2bbf4 the different-source assertion and same-source control pass. A hydration-first record is different: its source Collection lived in another process, and the received snapshot has no local source-object list. The SSR guide promises matching semantic hashes across server and browser objects. Whether an explicit browser preload with a colliding hash should reuse or replace that hydrated record requires an API rule and a receiving hydration-first oracle; the local object-identity check cannot decide it.
+
+The React diagnostic law requires a missing `DbProvider` remedy when a descriptor query is consumed without a client, regardless of query identity mode. The prior oracle covered derived identity. The new `queryKey` assertion failed on c2370424b with generic core error 113. The repaired `queryKey` and legacy `deps` histories report the provider hint before building a live-query Collection. The core error remains framework neutral. A focused source-extraction test separately found that a bare builder yielded no sources before repair, while a `{ query }` config did; both now yield the same concrete Collection. The review's proposed development/production explanation is unsupported because `query` is absent from `packages/db/mangle-cache.json`.
+
+The Svelte catch still points `currentObserver` at a disposed observer, but `dispose()` is idempotent. A public hook probe changed the reactive query after the thrown effect and observed no resumed subscription. A separate minimal Svelte effect probe showed that an effect which throws does not rerun when its tracked state changes. Thus the claimed later read through that observer and second disposal were not established. Recovery within the same effect root would need an explicit Svelte contract and a public row/subscription oracle. The coverage map keeps that path open. Normal compilation rejects an unbound `DescriptorRef` before optimization; directly invoked `optimizeQuery(QueryIR)` can still receive one, so descriptor branches there are not universally dead. A bound-IR redesign and the measured repeated-preparation cost remain separate design and performance work. The earlier recorded user decision waits for an application render profile before introducing a binding cache; this repair removes one unused Effect source walk without claiming a render-level speedup.
+
+| Requirement | Outcome for the repaired oracle claims |
+| --- | --- |
+| ORC-001 authority and limits | Pass for the bounded laws above. `DbClient` preload/SSR semantics, the SSR guide, the live-query architecture, and the existing React diagnostic contract supply authority. Hydration provenance and Svelte recovery are explicitly unselected rules. |
+| ORC-002 independent judgment | Pass. Expected stream presence, source identity, rows, start counts, and provider remedy come from the stated contracts and fixed source values, not the registration map or resolver under test. |
+| ORC-003 visible responsibilities | Pass. The deferred-acquisition and React oracle prose names the law, finite histories, simple model, public path, observation cuts, and limits beside the tests. |
+| ORC-004 generated grammar | Not applicable: these additions are fixed legal histories, with no generated-history claim. |
+| ORC-005 production path and observation | Pass for the named cuts. The tests call public preload, dehydration, and React hooks; assertions observe thrown errors, stream presence, rows, and source starts. They do not claim hydration-first or recovery after a thrown Svelte effect. |
+| ORC-006 checker calibration | Pass. Original c2370424b fails at the pending-stream dehydration, hook-first collision, `queryKey` diagnostic, and bare-builder source checkpoints; e22a2bbf4 passes those same checks. The same-source stream and config-form source checks distinguish overbroad rejection. |
+| ORC-007 campaigns and replay | Not applicable: no generated property was added. |
+| ORC-008 stateful-model minimality | Not triggered: fixed rows, source object identities, and expected start counts need no stateful reference machine. |
+| ORC-009 vocabulary mapping | Pass. A source position is one ordered Collection source in the query; a stream is one `DbClient` live-query record; a source start is one sync callback. The tests keep a failed query distinct from its still-errored source Collection. |
+| ORC-010 failure fidelity and cleanup | Pass for these fixtures. The exact source error is asserted; callbacks and promises are not normalized into success. Clients, Collections, and React hooks are released in `finally` or unmount. |
+| ORC-011 second formulation | No separate shared-fault semantic hypothesis was named. The core preload and hook-first React paths share source extraction, so their agreement is not claimed as an independent model. |
+| ORC-012 review evidence | This entry ties the old and repaired observations to exact commits and names the unresolved law cells and owners. It claims closure only for the bounded failure, local source-identity, and diagnostic histories. |
+| ORC-013 boundary witness | Pass for those bounded laws: failed versus healthy replacement, same versus different local source object, and derived versus explicit React identity reach and distinguish the relevant premises at their stated cuts. Hydration-first remains outside that boundary. |
+| ORC-014 controlled-premise handoff | The eager synchronous fixtures supply source-start behavior. No real-provider or all-render-schedules claim is made, so no provider handoff is asserted. |
+
+On the repair commit, 227 focused DB tests, nine React descriptor oracle tests, and two Svelte release oracle tests pass; the new same-options check is included in the DB count. Changed-file ESLint, Prettier, and `git diff --check` pass. Earlier neighboring core, React, Svelte, and type checks are recorded in the working audit; they were not rerun for this documentation entry. The new helper also combines the three deferred-source release loops, React source extraction delegates to core with its framework-specific message, and the changeset now names React and Svelte patch releases. The remaining review decisions are hydration-first preload provenance and whether a failed Svelte hook should recover in place. The coverage map assigns both receiving witnesses; repeated preparation retains its prior profile trigger.
+
+## Main merge validation
+
+Reviewed merge head: 56b1cf5765ddfd4180e595ae47847f44d0234fd7, combining 86a0446ca3ddd54076922019e282ab369a70e8bf with origin/main db7ff28d36f122b40594b4437cafbad6c93164aa. The generated error files were the only textual conflicts. Main assigned error-class code 233 to `DuplicateTransactionIdError`, which collided with this PR's query-builder error site. The merged tree preserves main's 233, this PR's preload collision code 234, and main's bucket-facade code 235; the query-builder site uses 236. The site fixture and generated documentation agree. This code-number resolution changes no development message or descriptor query behavior.
+
+After the merge, 246 focused DB tests passed across production error messages, preload identity, deferred acquisition, and preparation, with no TypeScript errors. The React descriptor and source-ID suites passed 28 tests; the Svelte descriptor release suite passed two. The DB build, generated error-document check, and ESM/CommonJS production error-text check passed. These runs validate the reviewed paths on the merge head. They do not settle hydration-first provenance, Svelte recovery after a thrown effect, asynchronous source-start failure, or an application-level preparation-cost budget.
+
+## Two-source placement and pooled observer follow-up
+
+This local audit starts from `d117215ea8644fa27b54df6075f5efff8bdbff02`, before reconciling PR #2079. The descriptor law is that one standalone plan consumed under two `DbProvider` clients reads each client's own sources, even when those sources appear in different query positions. The React primary oracle now crosses join, nested FROM, union, and include placements of parent and child descriptors. A plain per-client value map predicts complete selected rows for equal row keys with different values. The public hook is checked after initial publication, a child write in the first client, and a parent write in the second. All four forms pass. A temporary resolver mutant that reused the first client for every binding made all four fail at the second client's initial public-row comparison: `FIRST PARENT`/`FIRST CHILD` appeared where `SECOND PARENT`/`SECOND CHILD` were required. The mutant was removed. The `waitFor` comparison eventually reported the exact row mismatch; this was neither a setup failure nor proof about arbitrary scheduling. This expansion found no new production defect in those four placements. On-demand requests, more sources, and other write interleavings remain outside this finite matrix.
+
+The deferred-acquisition law also covers an observer's public preload of a config-free pooled view. Its independent model predicts one new source start for an idle eager source, none for an already running eager source, and a ready snapshot containing the source rows in either case. The primary deferred-acquisition oracle crosses those source states with an observer that has no client and one with an SSR cleanup client. On the original `d117215ea8` implementation, all four cells failed at the intended public boundary: the no-client preload rejected with `TypeError: Cannot read properties of undefined (reading 'utils')`, while the SSR-client observer failed its construction assertion with the same error. A pooled view has no query-Collection config, but the observer passed that absent value to the builder lookup. Guarding both the preload source lookup and SSR resource registration makes all four cells pass. This is a new production bug found while expanding #2077 coverage; it is separate from the #2079 alias-scope matrix. The witness covers synchronous eager sources, not on-demand or asynchronous source acquisition.
+
+The 13-test React descriptor suite and full 210-test deferred-acquisition oracle, including all four pooled-observer cases, pass on the repaired local tree. DB and React TypeScript checks, changed-file ESLint, Prettier, and `git diff --check` pass too. The final combined-tree validation and CI remain to be recorded after PR #2079 is integrated.
+
+## Receiving the merged alias-scope work
+
+PR #2079 entered main as squash commit `f7ac2c63a3cabc864caf38b7a4e966088cfe73bb`. This integration combines its lexical binding IDs with descriptor materialization. Source clones keep their binding IDs when a descriptor becomes a Collection, and the compiler uses #2079's per-scope alias validation. The merge assigns code 236 to #2079's reused-source admission error and code 237 to the descriptor query's invalid-builder result; generated error documentation and the site fixture agree.
+
+The React primary oracle now has a receiving include with a descriptor parent and child under two clients. Its shadowed and renamed child-alias variants compare full selected rows after initial publication, a first-client child write, and a second-client parent write. The child projects the captured parent's value. Disabling lexical parent projection in a temporary alias-only evaluator made the shadowed variant fail at the initial public-row assertion: `FIRST CHILD` replaced `FIRST PARENT`; the renamed control passed. Dropping binding-ID transfer during descriptor materialization left those rows green but failed both variants' public stable-hash comparison after binding. Both mutants were restored. This separates row correctness from plan-identity enforcement; it does not claim arbitrary include depth, lazy joins, or write order.
+
+The existing #2077 preload-identity owner gained an adapter observer path for config-free pooled views. Its model predicts that an existing stream hash may be reused only for the same source object, and that the pooled view still completes its own preload. With the old observer path, both same-source and different-source cells failed at preload: it called `_markPreload()` on a pooled view, which has no such method. A separate mutant that skipped only the new pooled source check made the different-source cell resolve instead of rejecting, while the same-source control passed. The repaired observer obtains the pooled view's single source without materializing its public Collection, checks the existing stream's source identity, and awaits both the stream and the pooled source preload. Both cells now pass. This is a newly found #2077 integration bug, not a #2079 alias-scope failure. Hydrated streams without local source provenance remain outside this bounded local-identity law.
+
+On the reconciled worktree, nine focused DB files passed 661 tests, including the #2079 primary and generated scope oracles, the #2077 deferred-acquisition oracle, and the expanded preload-identity owner. The React descriptor and `useLiveQuery` suites passed 75 tests. DB source and test TypeScript, React TypeScript, changed-file ESLint and Prettier, the DB build, generated error-document check, minified public API, and ESM/CommonJS production error-text checks passed. The Svelte descriptor release oracle passed two tests when its local runner resolved `@tanstack/db` to this worktree's source; its borrowed dependency link otherwise loaded an older DB package without `resumeDeferredLiveQueryCollections`. The temporary alias config was removed. The first simultaneous DB test attempt failed in coverage-file output because two Vitest runs shared one coverage directory; rerunning with coverage disabled passed at the assertions. CI still needs to run on the committed combined head.
+
+## Combined receiving gate for outer joins and hydrated streams
+
+This local integration starts from #2077 `6e581eb5a9708feb0785f368d22cf0011abc40ed` and combines #2095 `a8edee4a2d038ff9e0af1530a92abc32721fbb27`. Neither published branch was changed during the experiment. The semantic authority is the descriptor contract in `docs/guides/ssr.md`, the lexical alias law in the primary alias oracle, and the live-query source failure rules in `packages/db/src/query/live/ARCHITECTURE.md`. A portable hydrated hash carries result rows, not server Collection object identity. The first local committed hook or explicit preload therefore claims its ordered browser source objects; later local same-hash consumers must use those objects. A newer hydration chunk updates the result without revoking that local claim.
+
+The React primary owner now receives the lexical outer-join behavior through descriptor materialization. Its independent model is plain per-client maps: pair main and joined rows by ID, retain the unmatched side required by RIGHT or FULL, then apply parent correlation on the selected main or joined side. Neither alias text nor compiler routing computes the expected rows. Eight cells cross RIGHT/FULL, correlation side, and eager/on-demand sources; each runs shadowed and renamed child aliases under two clients with equal IDs and distinct values. The public hook rows are compared after initial acquisition, a main update, main removal and return, joined removal, and parent update. Source starts, on-demand request presence, and prepared/unbound stable identity are observed separately. A temporary absent-main merge mutant initially survived a direct joined-source cell: that source did not carry the parent route. The receiving driver then used a legal parent-dependent joined QueryRef. On that path the mutant failed at the shadowed on-demand cell's initial public-row comparison; restored production passed. This evidence is bounded to one join in the receiving adapter. The core alias owner separately covers its multi-join histories.
+
+The core preload-identity owner adds settled and pending hydration-first streams. Its simple model gives the first local preload source ownership, then predicts rejection for a different same-ID source at the same hash. It also predicts that a later hydration chunk changes the result row without changing that claim. Both cells failed before the source-claim repair: the conflicting request reused the first stream. Preserving `record.sources` through a newer hydration chunk was needed for the second cut. The React receiving test holds browser source readiness after it hydrates a server row, commits an ordinary hook, checks that row, rejects a conflicting preload, then releases readiness and checks the browser row. Removing the observer's attach-time claim as a temporary mutant made the conflicting-preload assertion fail while the source was still unready; restoring the claim made the same test pass. These are public observations at the ownership and handoff cuts, not an inference from internal registration state.
+
+The deferred-acquisition owner now controls a later `markError` from the first of two descriptor sources. Before that call, the query stream is pending and both sync runs have started. After it, the preload rejects, dehydration omits the failed stream even when asked to include pending streams, the peer source remains ready, and a healthy same-hash replacement publishes its own row. A temporary mutant that allowed errored records into dehydration failed at the stream-omission assertion; restored production passed. The test exercises one later failure order, not arbitrary asynchronous schedules or larger source sets.
+
+A controlled Svelte probe changed a reactive query after an uncaught synchronous `$effect` error and saw no effect rerun or healthy source start. A minimal Svelte effect behaved the same way. The Svelte receiving oracle now retires the failed root and proves that a fresh effect root reads an independent healthy query. The accepted lifecycle boundary is that an uncaught effect error terminates that effect; in-place reactive recovery is not promised. Ordinary reactive replacement that does not throw remains a separate coverage cell.
+
+On the initially resolved combined tree, the focused DB owners passed 398 tests, the wider DB query runtime suite passed 4,903, the full React runtime suite passed 397, and the full Svelte runtime suite passed 125. Standalone DB and React TypeScript checks, Svelte checking, and the DB build passed. The new held-readiness and later-failure mutants were run after those wider suites: both failed by assertion at their intended checkpoints and passed after restoration. These results establish a bounded local integration; the final formatted tree, pushed head, CI, and external review still require separate verification.
+
+## Suspense preload on a pending hydrated stream
+
+The follow-up starts from pushed combined head `712e572bf`. A normal
+`useLiveQuery` render waits until its committed subscription to claim a
+hydrated stream's local source objects. `useLiveSuspenseQuery` has a different
+request boundary: it preloads during render so React receives a promise to
+retry. That preload counts as local demand even if the render is abandoned.
+The first source object therefore claims the pending hydrated hash; a later
+same-source preload is accepted and a different same-hash source rejects.
+This is the existing `DbClient` source-identity rule applied at the Suspense
+preload cut, not a claim that every React render starts provider work.
+
+The primary React descriptor oracle holds a hydrated stream result, renders a
+Suspense component that never commits, observes the fallback and one source
+sync start, then calls public `DbClient.preloadLiveQuery` with the conflicting
+and same-source plans before releasing the result. The two plans have equal
+stable hashes and different Collection objects. A temporary mutant that
+removed the observer's existing-stream source claim made the conflicting
+preload resolve; the assertion failed at that cut. Restored code passed. The
+same-source control initially ran first and masked the mutant by claiming the
+source itself; the oracle was corrected before this RED result was counted.
+The test does not cover arbitrary concurrent Suspense renders or cancellation
+of already started provider work.
+
+On this repaired combined tree, the primary React owner passed 25 tests and
+the broader React runtime suite passed 377. React TypeScript, changed-code
+lint, and formatting checks passed. The runtime run disabled Vitest's built-in
+typecheck because its cross-package test imports fall outside the configured
+runner root; the separate TypeScript check passed. Final pushed-head CI and a
+fresh external review remain distinct gates.
+
+## Failed stream followed by a replacement observer
+
+CodeRabbit review 5480955302 covered combined head `c70142812` and found a
+receiving path missing from the controlled asynchronous failure history. The
+law is that a failed client stream has no result to reuse and no source-object
+claim. A new observer for a healthy replacement Collection may subscribe with
+the same hash. An active or successful stream still rejects a different source
+object, as the separate preload-identity owner checks. This is the existing
+same-hash result rule at a new consumer boundary, not a new retry policy for a
+source Collection that entered terminal error.
+
+The deferred-acquisition owner's plain-row model predicts `recovered` from
+the replacement source. Its legal history now starts two descriptor sources,
+fails the first after startup through controlled `markError`, checks that the
+pending client stream rejects and disappears from dehydration, then subscribes
+a prepared replacement observer before any new client preload. At the attach
+cut it must not throw a source-mismatch error; after preload its public snapshot
+must be ready, contain only the replacement row, and expose no stale stream
+error. The existing later same-hash client preload checks that the replacement
+also publishes through `DbClient`. This adds observer subscription to the
+failure history's consumer dimension. The active-stream same-source and
+different-source controls remain in the preload-identity owner.
+
+On the reviewed head, the new attach assertion was RED: `_assertLiveQuerySources`
+compared the replacement against the failed record's old sources and threw
+`different source Collections`. This was an assertion failure at the intended
+attach cut, not a timeout or setup failure. Treating an error record as
+non-claiming before consulting the old preload entry made the focused test
+GREEN. Both primary owners then passed 220 tests. The witness covers one later
+failure, one observer, an eager replacement, the attach cut, settled public
+rows, and subsequent client dehydration. Concurrent replacement observers,
+other asynchronous orders, and later conflicting preloads while no reusable
+client stream exists remain outside this finite history.
+
+## Failed-stream boundary sensitivity follow-up
+
+This self-review starts from pushed head `d99a068c6`. The prior observer witness
+used a controlled later `markError`; the primary deferred-acquisition owner now
+also observes a synchronous source-start throw. The expected result comes from
+the same source-ownership rule, not from the shape of `DbClient`'s maps: while a
+pending stream can return the original sources' rows, a different same-hash
+source must be rejected. Once that stream fails, it has no result to lend and
+no source-object claim. A healthy replacement observer can attach before a
+new client preload and show only `recovered` at its settled public snapshot.
+The separate peer source must still reach `ready` after the throw.
+
+Two temporary production mutants reached their intended comparisons. Returning
+from `_assertLiveQuerySources` for every existing record let the conflicting
+preload through and failed the pending-stream `toThrow` assertion. Removing the
+error-record guard made the synchronous replacement observer throw `different
+source Collections` at its attach assertion. Both mutants were restored. The
+unaltered `d99a068c6` implementation passed all four fixed failure histories.
+The earlier suspected stale-preload-entry bug was therefore not reproduced;
+deferred-source release retires the failed registration at this cut. This new
+history strengthens the observer recovery boundary but does not establish
+arbitrary failure schedules, concurrent replacement observers, or a provider
+outside the controlled source fixture.
+
+| Requirement | Follow-up outcome |
+| --- | --- |
+| ORC-001 authority and limits | Pass. The source-ownership and failed-stream laws are stated beside the fixed histories; the finite limits appear above and in the coverage map. |
+| ORC-002 independent judgment | Pass. The expected single row is the replacement fixture's input, and the rejection boundary follows whether the old stream can still return a result. No client lookup or status classifier computes the expectation. |
+| ORC-003 visible responsibilities | Pass. The owner's prose names the law, two failure orders, real preload and observer paths, public rejection, readiness, row and dehydration cuts, and their comparisons. |
+| ORC-004 generated grammar | Not applicable. These are fixed histories, not a generated-history claim. |
+| ORC-005 production path and observation | Pass. `DbClient.preloadLiveQuery`, observer subscription and preload, source Collection readiness, snapshots, and dehydration are exercised at the stated cuts. |
+| ORC-006 checker calibration | Pass. Both temporary mutants failed by assertion at their intended boundary, rather than by setup failure or timeout. |
+| ORC-007 campaigns and replay | Not applicable. No generated property was added. |
+| ORC-008 model minimality | Not triggered. The fixed expected-result rule adds no state to the independent grammar model. |
+| ORC-009 vocabulary mapping | Pass. A pending stream means a client live-query result that can still settle; the source Collection and public snapshot keep their glossary meanings. |
+| ORC-010 failure fidelity and cleanup | Pass. The observer histories preserve their assertion as the primary failure and dispose the observer, live-query Collection, and client in `finally`; no shrinking or failure normalization occurs. |
+| ORC-011 second formulation | Not triggered. No shared-fault hypothesis in the row expectation was identified; the pending and failed cuts distinguish source-claim lifetime. |
+| ORC-012 review evidence | Pass for this bounded self-review: it records the base head, model prediction, paths, cuts, mutant outcomes, and unresolved cells. |
+| ORC-013 boundary witness | Pass. The pending same-hash conflict and the failed-stream replacement are adjacent legal cuts; the two mutants distinguish overly broad and overly persistent source claims. |
+| ORC-014 controlled-premise handoff | No real-provider claim is made. The synchronous throw and later `markError` are controlled source Collection premises. |

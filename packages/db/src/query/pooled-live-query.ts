@@ -487,7 +487,7 @@ class PooledLiveQuery {
   private collectionHold: { unsubscribe: () => void } | undefined = undefined
 
   constructor(
-    private readonly source: CollectionImpl<any, any, any, any, any>,
+    readonly source: CollectionImpl<any, any, any, any, any>,
     private readonly query: BaseQueryBuilder,
     private readonly partition: Partition,
     private readonly groupKey: string,
@@ -625,6 +625,13 @@ class PooledLiveQuery {
     }
     return this.collection
   }
+}
+
+/** The one source of an adapter's pooled view, without materializing it. */
+export function getPooledLiveQuerySource(
+  value: unknown,
+): CollectionImpl<any, any, any, any, any> | undefined {
+  return value instanceof PooledLiveQuery ? value.source : undefined
 }
 
 // The observer reads the view itself; users get the live-query Collection.

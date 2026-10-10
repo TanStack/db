@@ -2,7 +2,11 @@ import { MultiSet } from '@tanstack/db-ivm'
 import { UnsupportedRootScalarSelectError } from '../../errors.js'
 import { normalizeOrderByPaths } from '../compiler/expressions.js'
 import { buildQuery, getQueryIR } from '../builder/index.js'
-import { collectCollectionSources, isExpressionLike } from '../ir.js'
+import {
+  collectCollectionSources,
+  isExpressionLike,
+  requireCollectionSource,
+} from '../ir.js'
 import { isRefProxy } from '../builder/ref-proxy-identity.js'
 import { codedMessage, devBuild } from '../../error-message.js'
 import type { MultiSetArray, RootStreamBuilder } from '@tanstack/db-ivm'
@@ -40,6 +44,8 @@ export function extractCollectionFromSource(query: {
 
   if (from.type === `collectionRef`) {
     return from.collection
+  } else if (from.type === `descriptorRef`) {
+    return requireCollectionSource(from)
   } else if (from.type === `queryRef`) {
     // Recursively extract from subquery
     return extractCollectionFromSource(from.query)

@@ -1,6 +1,7 @@
 import {
   CollectionRef,
   ConditionalSelect,
+  DescriptorRef,
   IncludesSubquery,
   QueryRef,
   UnionAll,
@@ -8,21 +9,46 @@ import {
   isExpressionLike,
 } from '../ir.js'
 import { isRefProxy } from './ref-proxy-identity.js'
-import type { From, QueryIR, Select, SelectValueExpression } from '../ir.js'
+import type { CollectionImpl } from '../../collection/index.js'
+import type { CollectionOptionsIdentity } from '../../collection-options.js'
+import type {
+  CollectionSourceRef,
+  From,
+  QueryIR,
+  Select,
+  SelectValueExpression,
+} from '../ir.js'
+
+export type CollectionResolver = (
+  options: CollectionOptionsIdentity<any, string | number, any, any, any>,
+) => CollectionImpl<any, string | number, any, any, any>
+
+type CloneContext = {
+  clones: WeakMap<object, object>
+  resolveDescriptor?: CollectionResolver
+}
 
 /**
  * Gives every query-source placement its own runtime source identities.
  *
  * A reused builder describes the same query meaning, but each FROM, JOIN,
  * UNION, or include placement owns an independent position in the dataflow
- * graph. Expressions are immutable and can remain shared; CollectionRefs
- * cannot because their sourceId identifies that lexical position.
+ * graph. Expressions are immutable and can remain shared; source refs cannot
+ * because their sourceId identifies that lexical position. A supplied
+ * resolver also binds any retained descriptors while cloning the plan.
  */
-export function cloneQueryForPlacement(query: QueryIR): QueryIR {
-  return cloneQuery(query, new WeakMap())
+export function cloneQueryForPlacement(
+  query: QueryIR,
+  resolveCollection?: CollectionResolver,
+): QueryIR {
+  return cloneQuery(query, {
+    clones: new WeakMap(),
+    resolveDescriptor: resolveCollection,
+  })
 }
 
-function cloneQuery(query: QueryIR, clones: WeakMap<object, object>): QueryIR {
+function cloneQuery(query: QueryIR, context: CloneContext): QueryIR {
+  const { clones } = context
   const existing = clones.get(query)
   if (existing) return existing as QueryIR
 
@@ -31,45 +57,52 @@ function cloneQuery(query: QueryIR, clones: WeakMap<object, object>): QueryIR {
   }
   clones.set(query, cloned)
 
-  cloned.from = cloneFromForPlacement(query.from, clones)
+  cloned.from = cloneFromForPlacement(query.from, context)
   cloned.join = query.join?.map((join) => ({
     ...join,
-    from: cloneSourceForPlacement(join.from, clones),
+    from: cloneSourceForPlacement(join.from, context),
   }))
   cloned.select =
     query.select === undefined || isExpressionLike(query.select)
       ? query.select
-      : cloneSelectForPlacement(query.select, clones)
+      : cloneSelectForPlacement(query.select, context)
   return cloned
 }
 
-function cloneFromForPlacement(
-  from: From,
-  clones: WeakMap<object, object>,
-): From {
+function cloneFromForPlacement(from: From, context: CloneContext): From {
   if (from.type === `unionFrom`) {
     return new UnionFrom(
-      from.sources.map((source) => cloneSourceForPlacement(source, clones)),
+      from.sources.map((source) => cloneSourceForPlacement(source, context)),
     )
   }
 
   if (from.type === `unionAll`) {
-    return new UnionAll(from.queries.map((query) => cloneQuery(query, clones)))
+    return new UnionAll(from.queries.map((query) => cloneQuery(query, context)))
   }
 
-  return cloneSourceForPlacement(from, clones)
+  return cloneSourceForPlacement(from, context)
 }
 
 function cloneSourceForPlacement(
-  source: CollectionRef | QueryRef,
-  clones: WeakMap<object, object>,
-): CollectionRef | QueryRef {
+  source: CollectionSourceRef | QueryRef,
+  context: CloneContext,
+): CollectionSourceRef | QueryRef {
   if (source.type === `collectionRef`) {
     return new CollectionRef(source.collection, source.alias, source.bindingId)
   }
 
+  if (source.type === `descriptorRef`) {
+    return context.resolveDescriptor
+      ? new CollectionRef(
+          context.resolveDescriptor(source.descriptor),
+          source.alias,
+          source.bindingId,
+        )
+      : new DescriptorRef(source.descriptor, source.alias, source.bindingId)
+  }
+
   return new QueryRef(
-    cloneQuery(source.query, clones),
+    cloneQuery(source.query, context),
     source.alias,
     source.bindingId,
   )
@@ -77,29 +110,31 @@ function cloneSourceForPlacement(
 
 function cloneSelectForPlacement(
   select: Select,
-  clones: WeakMap<object, object>,
+  context: CloneContext,
 ): Select {
+  const { clones } = context
   const existing = clones.get(select)
   if (existing) return existing as Select
 
   const cloned: Select = {}
   clones.set(select, cloned)
   for (const [field, value] of Object.entries(select)) {
-    cloned[field] = cloneSelectValueForPlacement(value, clones)
+    cloned[field] = cloneSelectValueForPlacement(value, context)
   }
   return cloned
 }
 
 function cloneSelectValueForPlacement(
   value: unknown,
-  clones: WeakMap<object, object>,
+  context: CloneContext,
 ): SelectValueExpression {
+  const { clones } = context
   if (value instanceof IncludesSubquery) {
     const existing = clones.get(value)
     if (existing) return existing as IncludesSubquery
 
     const cloned = new IncludesSubquery(
-      cloneQuery(value.query, clones),
+      cloneQuery(value.query, context),
       value.correlationField,
       value.childCorrelationField,
       value.fieldName,
@@ -119,10 +154,10 @@ function cloneSelectValueForPlacement(
     const cloned = new ConditionalSelect(
       value.branches.map((branch) => ({
         ...branch,
-        value: cloneSelectValueForPlacement(branch.value, clones),
+        value: cloneSelectValueForPlacement(branch.value, context),
       })),
       value.defaultValue !== undefined
-        ? cloneSelectValueForPlacement(value.defaultValue, clones)
+        ? cloneSelectValueForPlacement(value.defaultValue, context)
         : undefined,
     )
     clones.set(value, cloned)
@@ -139,5 +174,5 @@ function cloneSelectValueForPlacement(
 
   return isExpressionLike(value)
     ? (value as SelectValueExpression)
-    : cloneSelectForPlacement(value as Select, clones)
+    : cloneSelectForPlacement(value as Select, context)
 }
