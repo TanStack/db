@@ -33,7 +33,8 @@ import { createScopedSource } from './includes-scope-identity-oracle.js'
  * This finite oracle covers eager and on-demand children, direct and recursive
  * child plans, an implicit join, and writes after initial publication. Each
  * ancestor/descendant source declaration starts from a fresh Query; a builder
- * may still be placed in two sibling include fields. The
+ * may be placed in sibling include, QueryRef, union-branch, or joined-QueryRef
+ * scopes without changing the rows. The
  * QueryRef and union paths use an inner captured name predicate beside a
  * required outer key correlation. Neither predicate implies the other. The
  * union has a nonempty right branch. It does not claim arbitrary expression
@@ -386,6 +387,143 @@ describe(`captured alias scope oracle`, () => {
   })
 
   /**
+   * A QueryRef, union branch, or joined QueryRef used by the containing query
+   * is a sibling of that query's include child. ARCHITECTURE.md §Identity
+   * permits placing one builder in both sibling scopes. The plain-row model
+   * gives each visible manager the current employees whose managerId equals
+   * that manager's id. Reusing the builder cannot change admission or rows.
+   *
+   * The finite grammar crosses the three parent operand positions and two
+   * controlled source modes. Construction must accept the plan; preload and
+   * a managerId update must publish exact report IDs. The adjacent rejection
+   * cells below retain the actual ancestor/descendant boundary.
+   */
+  for (const placement of [`queryRef`, `union`, `joined`] as const) {
+    for (const mode of [`eager`, `onDemand`] as const) {
+      test(`a shared ${placement} builder remains legal in a sibling include with ${mode} sources`, async () => {
+        type Employee = { id: number; managerId: number }
+        const employeeRows = new Map<number, Employee>([
+          [1, { id: 1, managerId: 0 }],
+          [2, { id: 2, managerId: 1 }],
+          [3, { id: 3, managerId: 1 }],
+        ])
+        const employees = createScopedSource(
+          `sibling-employee-${placement}-${mode}`,
+          [...employeeRows.values()],
+          mode,
+        )
+        const extra = createScopedSource(
+          `sibling-extra-${placement}-${mode}`,
+          [{ id: 4, managerId: 0 }],
+          mode,
+        )
+        const managers = createScopedSource(
+          `sibling-manager-${placement}-${mode}`,
+          [{ id: 1 }, { id: 2 }, { id: 3 }],
+          `eager`,
+        )
+        employees.collection.createIndex((row) => row.managerId, {
+          indexType: BasicIndex,
+        })
+        const shared = new Query()
+          .from({ employee: employees.collection })
+          .select(({ employee }) => ({
+            id: employee.id,
+            managerId: employee.managerId,
+          }))
+        const reportsFor = (manager: { id: number }) => ({
+          id: manager.id,
+          reports: toArray(
+            new Query()
+              .from({ report: shared })
+              .where(({ report }) => eq(report.managerId, manager.id))
+              .select(({ report }) => ({ id: report.id })),
+          ),
+        })
+        const build = () => {
+          if (placement === `union`) {
+            const other = new Query()
+              .from({ other: extra.collection })
+              .select(({ other: row }) => ({
+                id: row.id,
+                managerId: row.managerId,
+              }))
+            return createLiveQueryCollection({
+              query: new Query()
+                .from({ manager: new Query().unionAll(shared, other) })
+                .select(({ manager }) =>
+                  reportsFor(manager as unknown as Employee),
+                ),
+            })
+          }
+          if (placement === `joined`) {
+            return createLiveQueryCollection({
+              query: new Query()
+                .from({ manager: managers.collection })
+                .innerJoin({ helper: shared }, ({ manager, helper }) =>
+                  eq(manager.id, helper.id),
+                )
+                .select(({ manager }) =>
+                  reportsFor(manager as unknown as Employee),
+                ),
+            })
+          }
+          return createLiveQueryCollection({
+            query: new Query()
+              .from({ manager: shared })
+              .select(({ manager }) =>
+                reportsFor(manager as unknown as Employee),
+              ),
+          })
+        }
+
+        const observe = (live: ReturnType<typeof build>) =>
+          live.toArray
+            .map(({ id, reports }) => ({
+              id,
+              reports: reports.map(({ id: reportId }) => reportId).sort(),
+            }))
+            .sort((a, b) => a.id - b.id)
+        const model = () =>
+          [
+            ...employeeRows.values(),
+            ...(placement === `union` ? [{ id: 4, managerId: 0 }] : []),
+          ]
+            .map(({ id }) => ({
+              id,
+              reports: [...employeeRows.values()]
+                .filter((row) => row.managerId === id)
+                .map((row) => row.id)
+                .sort(),
+            }))
+            .sort((a, b) => a.id - b.id)
+        let live: ReturnType<typeof build> | undefined
+        await withHistoryCleanup(
+          async () => {
+            expect(() => {
+              live = build()
+            }).not.toThrow()
+            await live!.preload()
+            expect(observe(live!), `initial publication`).toEqual(model())
+
+            const moved = { id: 3, managerId: 2 }
+            employeeRows.set(3, moved)
+            employees.put(moved)
+            await flushPromises()
+            expect(observe(live!), `employee changes manager`).toEqual(model())
+          },
+          () => [
+            () => live?.cleanup(),
+            () => employees.collection.cleanup(),
+            () => extra.collection.cleanup(),
+            () => managers.collection.cleanup(),
+          ],
+        )
+      })
+    }
+  }
+
+  /**
    * One source declaration cannot play both the ancestor and descendant role.
    * The same binding ID would make the required equality ambiguous before any
    * live row is published. Sibling placement above remains legal because the
@@ -465,13 +603,9 @@ describe(`captured alias scope oracle`, () => {
     }
   })
 
-  /**
-   * A union branch or wrapped QueryRef feeds the parent even though its source
-   * alias is not visible in the parent's callback. Reusing that declaration
-   * inside an include must fail at construction. Fresh child declarations and
-   * sibling reuse remain legal in the neighboring checks.
-   */
-  test(`an include cannot reuse a branch of its ancestor union`, async () => {
+  /** A union branch and an include child are siblings, even when the union
+   * feeds the parent row. The branch's private source is not an ancestor. */
+  test(`an include may reuse a builder inside a sibling union branch`, async () => {
     const source = createScopedSource(
       `ancestor-union-branch-reuse`,
       [{ id: 1, parentId: 1 }],
@@ -484,26 +618,39 @@ describe(`captured alias scope oracle`, () => {
       .from({ second: source.collection })
       .select(({ second: row }) => ({ id: row.id, parentId: row.parentId }))
 
-    try {
-      expect(() =>
-        new Query()
-          .unionAll(first, second)
-          .innerJoin({ anchor: source.collection }, ({ id, anchor }) =>
-            eq(id, anchor.id),
-          )
-          .select(({ anchor }) => ({
-            id: anchor.id,
-            children: toArray(
-              first.where(({ first: child }) => eq(child.parentId, anchor.id)),
-            ),
+    const live = createLiveQueryCollection({
+      query: new Query()
+        .unionAll(first, second)
+        .innerJoin({ anchor: source.collection }, ({ id, anchor }) =>
+          eq(id, anchor.id),
+        )
+        .select(({ anchor }) => ({
+          id: anchor.id,
+          children: toArray(
+            first
+              .where(({ first: child }) => eq(child.parentId, anchor.id))
+              .select(({ first: child }) => ({ id: child.id })),
+          ),
+        })),
+    })
+    await withHistoryCleanup(
+      async () => {
+        await live.preload()
+        expect(
+          live.toArray.map(({ id, children }) => ({
+            id,
+            children: children.map(({ id: childId }) => ({ id: childId })),
           })),
-      ).toThrow(/new Query\(\).*instead of passing the ancestor builder/)
-    } finally {
-      await source.collection.cleanup()
-    }
+        ).toEqual([
+          { id: 1, children: [{ id: 1 }] },
+          { id: 1, children: [{ id: 1 }] },
+        ])
+      },
+      () => [() => live.cleanup(), () => source.collection.cleanup()],
+    )
   })
 
-  test(`an include cannot reuse a source inside its ancestor QueryRef`, async () => {
+  test(`an include may reuse a builder inside a sibling QueryRef`, async () => {
     const source = createScopedSource(
       `ancestor-queryref-source-reuse`,
       [{ id: 1, parentId: 1 }],
@@ -513,23 +660,33 @@ describe(`captured alias scope oracle`, () => {
       .from({ inner: source.collection })
       .select(({ inner: row }) => ({ id: row.id, parentId: row.parentId }))
 
-    try {
-      expect(() =>
-        new Query()
-          .from({ wrapped: inner })
-          .innerJoin({ anchor: source.collection }, ({ wrapped, anchor }) =>
-            eq(wrapped.id, anchor.id),
-          )
-          .select(({ anchor }) => ({
-            id: anchor.id,
-            children: toArray(
-              inner.where(({ inner: child }) => eq(child.parentId, anchor.id)),
-            ),
+    const live = createLiveQueryCollection({
+      query: new Query()
+        .from({ wrapped: inner })
+        .innerJoin({ anchor: source.collection }, ({ wrapped, anchor }) =>
+          eq(wrapped.id, anchor.id),
+        )
+        .select(({ anchor }) => ({
+          id: anchor.id,
+          children: toArray(
+            inner
+              .where(({ inner: child }) => eq(child.parentId, anchor.id))
+              .select(({ inner: child }) => ({ id: child.id })),
+          ),
+        })),
+    })
+    await withHistoryCleanup(
+      async () => {
+        await live.preload()
+        expect(
+          live.toArray.map(({ id, children }) => ({
+            id,
+            children: children.map(({ id: childId }) => ({ id: childId })),
           })),
-      ).toThrow(/new Query\(\).*instead of passing the ancestor builder/)
-    } finally {
-      await source.collection.cleanup()
-    }
+        ).toEqual([{ id: 1, children: [{ id: 1 }] }])
+      },
+      () => [() => live.cleanup(), () => source.collection.cleanup()],
+    )
   })
 
   test(`an ancestor binding inside a nested include asks for a new Query`, async () => {
@@ -2316,6 +2473,77 @@ describe(`lexical bindings through recursive joins and selections`, () => {
       await parents.collection.cleanup()
       await children.collection.cleanup()
     }
+  })
+
+  /** A discarded spread may enumerate a captured proxy, but it contributes
+   * no field to the selected plan. The independent relation still joins each
+   * child to its parent once, and equivalent selected plans have one identity.
+   * This challenges whether spread bookkeeping leaks across two enumerations
+   * of the same proxy before the public row and identity checkpoints. */
+  test(`discarded proxy spreads do not change rows or query identity`, async () => {
+    const parents = createScopedSource(
+      `discarded-spread-parent`,
+      [{ id: 1, name: `PARENT` }],
+      `eager`,
+    )
+    const children = createScopedSource(
+      `discarded-spread-child`,
+      [{ id: 10, parentId: 1, name: `CHILD` }],
+      `eager`,
+    )
+    const build = (discard: boolean) =>
+      new Query()
+        .from({ issue: parents.collection })
+        .select(({ issue: parent }) => {
+          if (discard) {
+            const ignored = { ...parent }
+            void ignored
+          }
+          return {
+            id: parent.id,
+            children: toArray(
+              new Query()
+                .from({ issue: children.collection })
+                .where(({ issue: child }) => eq(child.parentId, parent.id))
+                .select(({ issue: child }) => ({ ...parent, ...child })),
+            ),
+          }
+        })
+    const ordinary = build(false)
+    const enumerated = build(true)
+    const first = createLiveQueryCollection({ query: ordinary })
+    const second = createLiveQueryCollection({ query: enumerated })
+    await withHistoryCleanup(
+      async () => {
+        expect(getQueryIdentity(getQueryIR(ordinary))).toBe(
+          getQueryIdentity(getQueryIR(enumerated)),
+        )
+        await first.preload()
+        await second.preload()
+        const observe = (live: typeof first) =>
+          live.toArray.map(({ id, children: rows }) => ({
+            id,
+            children: rows.map(({ id: childId, name }) => ({
+              id: childId,
+              name,
+            })),
+          }))
+        const expected = [{ id: 1, children: [{ id: 10, name: `CHILD` }] }]
+        expect(observe(first)).toEqual(expected)
+        expect(observe(second)).toEqual(expected)
+        children.put({ id: 10, parentId: 1, name: `UPDATED` })
+        await flushPromises()
+        const changed = [{ id: 1, children: [{ id: 10, name: `UPDATED` }] }]
+        expect(observe(first)).toEqual(changed)
+        expect(observe(second)).toEqual(changed)
+      },
+      () => [
+        () => first.cleanup(),
+        () => second.cleanup(),
+        () => parents.collection.cleanup(),
+        () => children.collection.cleanup(),
+      ],
+    )
   })
 })
 

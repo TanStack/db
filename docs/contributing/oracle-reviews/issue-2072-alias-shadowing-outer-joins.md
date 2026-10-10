@@ -359,3 +359,55 @@ alias-scope coverage-map owner.
 | Public path and comparison (ORC-005, 010–011) | Public Query and live Collection preload or writes reach compilation. Exact rows, rejection before accepted rows, and bounded route work are checked at their stated cuts; cleanup preserves the primary failure. Valid local and ancestor controls provide opposite formulations. |
 | Calibration (ORC-006, 013) | The five temporary mistakes above fail at intended assertions; none survived or failed only in setup. |
 | Handoff and record (ORC-012, 014) | The coverage-map owner states remaining paths. Controlled on-demand sources do not establish external-provider scheduling or work bounds. |
+
+## Sibling builder reuse and spread identity — 2026-10-10 review
+
+The merged #2079 review targeted `84dc3601c`. Its shared-builder finding
+distinguishes **placing** a query builder twice from **capturing** a reference
+declared inside a sibling query. `ARCHITECTURE.md` §Identity and law 1 allow
+sibling reuse. The existing hidden-source oracle correctly rejects a bound
+reference *into* the parent's QueryRef or union branch; it does not require
+rejecting the same builder when that builder is independently placed in the
+include child. Two older tests conflated the two acts and expected error 236
+for legal sibling placement.
+
+The primary oracle now places one builder both inside a parent QueryRef,
+`unionAll` branch, or joined QueryRef and inside a sibling include. Six cells
+cross these positions with eager or controlled on-demand sources. The plain
+row model pairs current employees with their current manager; construction,
+public rows after preload, and rows after a manager change are the asserted
+cuts. The original source-tree guard failed all six cells at construction with
+error 236. Restricting the guard to declarations in the containing query's
+lexical scope makes them pass; the existing actual ancestor/descendant reuse
+cells still reject before publication. This is admission and row evidence for
+those three placements and one update, not an arbitrary recursion proof.
+
+The same review found that each enumeration of a captured reference proxy left
+a spread marker behind. An independent selected-plan control now discards one
+enumeration, then selects the same parent and child fields as a plan without
+that discarded enumeration. It asserts equal query identity before preload and
+exact public rows before and after a child update. The retained-marker
+implementation failed at the identity assertion. A proxy now offers only the
+marker for the current enumeration; the unchanged control and repaired plan
+pass the same checks. Other spread layouts remain covered by neighboring
+field, whole-row, nested-path, and alias-renaming cells rather than this one
+identity control alone.
+
+The review's optimizer and work observations require narrower conclusions.
+A scratch public-path probe of a pure same-alias QueryRef wrapper with an
+indexed on-demand source observed a full-source request and two installed rows
+for an outer equality selecting one row; the direct-source control requested
+only that key. This confirms extra work in the current wrapper shape, but the
+pre-merge optimizer extracted source predicates before wrapper collapse too,
+so this probe does not establish that #2079 introduced the full-source request.
+The wrapper's extra stage is real; its exact work budget and a safe binding
+remap remain unproved. A nested `unionAll` ordered wrapper with the minimum
+row in its second on-demand source published that row and requested both
+sources; direct union sources are excluded from ordered-prefix optimization.
+That probe does not prove every union shape safe. A bound root reference caused
+an extra route-metadata check relative to an unbound reference, and a
+function-form query failed `queriesMatchForCaching` even when compared with
+itself. Those are deterministic mechanism observations, without a measured
+public work bound. All scratch probes were removed; their evidence is kept in
+the task-local review ledger, while the primary owner and coverage map retain
+the behavior witnesses and their limits.
