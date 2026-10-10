@@ -391,10 +391,12 @@ without scoped recovery support continues to use full-shape recovery. An
 interrupted recovery keeps the reset marker for the next start.
 Until a complete baseline is certified, each later cold start repeats scoped
 recovery. Uncertified cached rows from earlier starts are not shown offline.
-Retired new-format storage is reclaimed after its claims release or expire; a
-paused run whose claim expires must reload its demanded subsets from the source
-when it resumes. Pre-upgrade on-demand storage is isolated but needs a separate
-cross-version cleanup policy while older tabs may still use it. Scoped recovery
+Retired new-format storage is reclaimed by the next cache-claim collection
+operation after its claims release or expire; clock passage alone does not
+run SQLite work. A paused run whose claim expires must reload its demanded
+subsets from the source when it resumes. Pre-upgrade on-demand storage is
+isolated but needs a separate cross-version cleanup policy while older tabs
+may still use it. Scoped recovery
 does not certify the new generation for offline reuse.
 
 During scoped recovery, coordinator notifications about SQLite changes do not

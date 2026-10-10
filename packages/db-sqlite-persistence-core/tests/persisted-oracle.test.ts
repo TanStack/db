@@ -21754,7 +21754,14 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
    * notice; row versions on both sides; and an absent or present new notice.
    * No old notice and no new notice are work-count controls. This driver holds
    * rotation, queues any old notice before the physical ID changes, and checks
-   * source requests after the old callback has crossed the apply mutex.
+   * source requests after the old callback has crossed the apply mutex. A
+   * persisting optimistic mutation holds the new source snapshot's applied
+   * receipt. A constrained demand already pending at the coordinator must
+   * remain pending until that receipt publishes the source row. Until then,
+   * the refresh acquisition remains owned and the distinct notice-only row
+   * cannot become public during scoped recovery. The controlled coordinator
+   * supplies the receipt wait; the wrapper's settlement and publication are
+   * the observations at this boundary.
    */
   type GenerationNoticeHistory = {
     retiredNotice: `none` | `commit` | `reset`
@@ -21778,6 +21785,28 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     const rotationEntered = createEventGate()
     const releaseRotation = createEventGate()
     const remoteEnsures: Array<string> = []
+    const remoteEnsureOptions: Array<{
+      id: string
+      options: LoadSubsetOptions
+    }> = []
+    const demandEnsureEntered = createEventGate()
+    const demandOptions: LoadSubsetOptions = {
+      limit: 2,
+      where: new IR.Func(`eq`, [new IR.PropRef([`id`]), new IR.Value(`fresh`)]),
+    }
+    const sourceCommitReturned = createEventGate()
+    const mutationEntered = createEventGate()
+    const releaseMutation = createEventGate()
+    let refreshReceipt: Promise<void> | undefined
+    let refreshApplied = false
+    const releaseCalls: Array<{
+      id: string
+      options: LoadSubsetOptions
+      appliedAtRelease: boolean
+    }> = []
+    let freshRequestOptions: LoadSubsetOptions | undefined
+    let newNoticeDelivered = false
+    let freshWorkStarted = false
     let wrongGenerationReads = 0
     const originalLoadResumeSnapshot = adapter.loadResumeSnapshot
     adapter.loadResumeSnapshot = async (id, context) => {
@@ -21809,8 +21838,38 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       }
     }
     adapter.releaseCacheGenerationClaim = async () => {}
-    coordinator.requestEnsureRemoteSubset = async (id) => {
+    coordinator.requestEnsureRemoteSubset = async (id, options) => {
       remoteEnsures.push(id)
+      remoteEnsureOptions.push({ id, options })
+      if (options === demandOptions) {
+        demandEnsureEntered.resolve()
+        await sourceCommitReturned.promise
+        await refreshReceipt
+        return
+      }
+      if (
+        newNoticeDelivered &&
+        !freshWorkStarted &&
+        options.refetch === true &&
+        options.limit === demandOptions.limit
+      ) {
+        freshWorkStarted = true
+        freshRequestOptions = options
+        source.begin()
+        source.write({
+          type: `insert`,
+          value: { id: `fresh`, title: `Fresh source row` },
+        })
+        const receipt = source.commit()
+        if (receipt === true) throw new Error(`Source receipt was untracked`)
+        refreshReceipt = receipt
+        sourceCommitReturned.resolve()
+        await receipt
+        refreshApplied = true
+      }
+    }
+    coordinator.requestReleaseRemoteSubset = async (id, options) => {
+      releaseCalls.push({ id, options, appliedAtRelease: refreshApplied })
     }
 
     let source!: TodoSyncParams
@@ -21833,9 +21892,24 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           },
         },
         persistence: { adapter, coordinator },
+        onInsert: async () => {
+          mutationEntered.resolve()
+          await releaseMutation.promise
+        },
       }),
     )
+    let mutation: ReturnType<typeof collection.insert> | undefined
     let recovery: Promise<void> | undefined
+    let demand: Promise<void> | undefined
+    const publishedFreshTitles: Array<string | undefined> = []
+    const publication = collection.subscribeChanges(
+      (changes) => {
+        if (changes.some((change) => change.key === `fresh`)) {
+          publishedFreshTitles.push(collection.get(`fresh`)?.title)
+        }
+      },
+      { includeInitialState: false },
+    )
     let hasPrimaryFailure = false
     try {
       collection.startSyncImmediate()
@@ -21891,6 +21965,30 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       expect(remoteEnsures).toEqual([newStorageId])
 
       if (newNotice) {
+        const pendingDemand = Promise.resolve(
+          collection._sync.loadSubset(demandOptions),
+        ).then(() => undefined)
+        demand = pendingDemand
+        void pendingDemand.catch(() => undefined)
+        await atPersistedOracleCheckpoint(
+          demandEnsureEntered.promise,
+          `constrained demand entered source coordinator`,
+        )
+        expect(
+          remoteEnsureOptions.filter(
+            ({ options }) => options === demandOptions,
+          ),
+        ).toEqual([{ id: newStorageId, options: demandOptions }])
+        const demandSettlement = observeSettlement(pendingDemand)
+        await flushAsyncWork()
+        expect(demandSettlement.read()).toEqual({ status: `pending` })
+        const ensuresBeforeNotice = remoteEnsures.length
+        mutation = collection.insert({ id: `local`, title: `Pending` })
+        await atPersistedOracleCheckpoint(
+          mutationEntered.promise,
+          `optimistic publication hold before new notice`,
+        )
+        newNoticeDelivered = true
         coordinator.emit(
           {
             type: `tx:committed`,
@@ -21902,7 +22000,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
             changedRows: [
               {
                 key: `fresh`,
-                value: { id: `fresh`, title: `Fresh source row` },
+                value: { id: `fresh`, title: `Notice-only row` },
               },
             ],
             deletedKeys: [],
@@ -21911,10 +22009,70 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           newStorageId,
         )
         await atPersistedOracleCheckpoint(
-          vi.waitFor(() => expect(remoteEnsures.length).toBeGreaterThan(1)),
+          vi.waitFor(() =>
+            expect(remoteEnsures.length).toBeGreaterThan(ensuresBeforeNotice),
+          ),
           `new-generation source reacquisition after an old notice`,
         )
         expect(remoteEnsures.at(-1)).toBe(newStorageId)
+        await atPersistedOracleCheckpoint(
+          sourceCommitReturned.promise,
+          `new-generation source receipt returned`,
+        )
+        expect(remoteEnsureOptions).toContainEqual({
+          id: newStorageId,
+          options: { ...demandOptions, refetch: true },
+        })
+        const applied = observeSettlement(refreshReceipt!)
+        await flushAsyncWork()
+        expect(freshRequestOptions).toBeDefined()
+        expect(applied.read()).toEqual({ status: `pending` })
+        expect(demandSettlement.read()).toEqual({ status: `pending` })
+        expect(refreshApplied).toBe(false)
+        expect(
+          releaseCalls.filter(({ options }) => options === freshRequestOptions),
+        ).toEqual([])
+        expect(collection.get(`retired`)).toBeUndefined()
+        expect(collection.get(`fresh`)).toBeUndefined()
+        expect(publishedFreshTitles).toEqual([])
+        releaseMutation.resolve()
+        await atPersistedOracleCheckpoint(
+          mutation.isPersisted.promise,
+          `optimistic publication released`,
+        )
+        await atPersistedOracleCheckpoint(
+          vi.waitFor(() => expect(refreshApplied).toBe(true)),
+          `fresh source snapshot applied`,
+        )
+        await atPersistedOracleCheckpoint(
+          vi.waitFor(() =>
+            expect(
+              releaseCalls.filter(
+                ({ options }) => options === freshRequestOptions,
+              ),
+            ).toHaveLength(1),
+          ),
+          `refresh acquisition released after application`,
+        )
+        expect(
+          releaseCalls.filter(({ options }) => options === freshRequestOptions),
+        ).toEqual([
+          {
+            id: newStorageId,
+            options: freshRequestOptions,
+            appliedAtRelease: true,
+          },
+        ])
+        expect(collection.get(`fresh`)).toMatchObject({
+          id: `fresh`,
+          title: `Fresh source row`,
+        })
+        await atPersistedOracleCheckpoint(
+          pendingDemand,
+          `constrained demand settled`,
+        )
+        expect(demandSettlement.read()).toEqual({ status: `fulfilled` })
+        expect(publishedFreshTitles).toEqual([`Fresh source row`])
       } else {
         await persistence.scanPersistedRows()
         expect(remoteEnsures).toEqual([newStorageId])
@@ -21924,8 +22082,15 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       throw error
     } finally {
       releaseRotation.resolve()
+      releaseMutation.resolve()
+      publication.unsubscribe()
       await cleanupPersistedOracle(
-        [() => recovery, () => collection.cleanup()],
+        [
+          () => recovery,
+          () => mutation?.isPersisted.promise.catch(() => undefined),
+          () => demand?.catch(() => undefined),
+          () => collection.cleanup(),
+        ],
         hasPrimaryFailure,
       )
     }

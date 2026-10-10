@@ -124,6 +124,7 @@ async function reachCheckpoint(
 function closeDatabasePreservingPrimary(
   database: DatabaseSync,
   primaryFailure: unknown,
+  secondaryFailures: ReadonlyArray<unknown> = [],
 ): never | void {
   let cleanupFailure: unknown
   try {
@@ -137,15 +138,30 @@ function closeDatabasePreservingPrimary(
       primaryFailure instanceof Error
         ? primaryFailure
         : new Error(`SQLite resume snapshot failed`, { cause: primaryFailure })
-    if (cleanupFailure !== undefined) {
+    const cleanupFailures = [
+      ...secondaryFailures,
+      ...(cleanupFailure !== undefined ? [cleanupFailure] : []),
+    ]
+    if (cleanupFailures.length > 0) {
       Object.defineProperty(failure, `cleanupFailures`, {
-        value: [cleanupFailure],
+        value: cleanupFailures,
         enumerable: true,
       })
     }
     throw failure
   }
-  if (cleanupFailure !== undefined) throw cleanupFailure
+  if (secondaryFailures.length === 0 && cleanupFailure !== undefined) {
+    throw cleanupFailure
+  }
+  if (secondaryFailures.length > 0) {
+    throw new AggregateError(
+      [
+        ...secondaryFailures,
+        ...(cleanupFailure !== undefined ? [cleanupFailure] : []),
+      ],
+      `SQLite resume snapshot cleanup failed`,
+    )
+  }
 }
 
 async function observeCachedSchemaState(
@@ -743,6 +759,331 @@ describe(`SQLite resume snapshots`, () => {
       closeDatabasePreservingPrimary(database, primaryFailure)
     }
   })
+
+  // Retired storage is reachable from live cache claims; the current head is
+  // always reachable even after its last claim expires. The independent model
+  // treats release as removal and expiry as a half-open time cut. A collection
+  // operation is the GC checkpoint: wall-clock passage alone does no SQLite
+  // work. The bounded grammar makes three generations, varies zero/two rows,
+  // and independently releases, expires, or renews claims on both retired
+  // generations. Cuts immediately before and at each renewed expiry enforce
+  // half-open claim lifetimes. It excludes concurrent writes and a fourth
+  // rotation. The comparison checks exact retained row, tombstone, resume,
+  // and key contents; physical tables and native indexes; every
+  // generation-scoped catalog; and surviving claim identities.
+  type RetiredStorageHistory = {
+    oldClaim: `release` | `expire` | `renew`
+    middleClaim: `release` | `expire` | `renew`
+    rowCount: 0 | 2
+    checkAtMs: 1_170 | 1_190 | 1_209 | 1_210 | 1_229 | 1_230
+  }
+  const expectedRetainedGenerations = (
+    history: RetiredStorageHistory,
+  ): ReadonlyArray<number> => [
+    ...(history.oldClaim === `renew` && history.checkAtMs < 1_210 ? [0] : []),
+    ...(history.middleClaim === `renew` && history.checkAtMs < 1_230
+      ? [1]
+      : []),
+    2,
+  ]
+  const assertRetiredStorageHistory = async (
+    history: RetiredStorageHistory,
+  ): Promise<void> => {
+    const database = new DatabaseSync(`:memory:`)
+    let primaryFailure: unknown
+    let now = 1_000
+    try {
+      const adapter = new SQLiteCorePersistenceAdapter({
+        driver: createDriver(database),
+        cacheGenerationClaimTtlMs: 100,
+        now: () => now,
+      })
+      const logicalId = `bounded-retired-storage`
+      const first = await adapter.claimCacheGeneration(logicalId)
+      now = 1_020
+      const oldPeer = await adapter.claimCacheGeneration(logicalId)
+      const generations = [first]
+      const seedStorage = async (
+        generation: number,
+        claim: typeof first,
+      ): Promise<string> => {
+        const rows = Array.from({ length: history.rowCount }, (_, index) => ({
+          id: `g${generation}-row-${index}`,
+        }))
+        await adapter.applyCommittedTx(claim.storageCollectionId, {
+          txId: `g${generation}-seed`,
+          term: generation + 1,
+          seq: 1,
+          rowVersion: 1,
+          cacheGenerationClaimId: claim.claimId,
+          truncate: true,
+          mutations: [
+            ...rows.map((row) => ({
+              type: `insert` as const,
+              key: row.id,
+              value: row,
+            })),
+            {
+              type: `delete` as const,
+              key: `g${generation}-gone`,
+              value: { id: `g${generation}-gone` },
+            },
+          ],
+          collectionMetadataMutations: [
+            { type: `set`, key: `resume`, value: `g${generation}-cursor` },
+          ],
+        })
+        const signature = `g${generation}-index`
+        await adapter.ensureIndex(
+          claim.storageCollectionId,
+          signature,
+          { expressionSql: [`row_version`] },
+          { cacheGenerationClaimId: claim.claimId },
+        )
+        const index = database
+          .prepare(
+            `SELECT index_name FROM persisted_index_registry
+             WHERE collection_id = ? AND signature = ?`,
+          )
+          .get(claim.storageCollectionId, signature) as { index_name: string }
+        return index.index_name
+      }
+      const indexes = [await seedStorage(0, first)]
+      const seededContents: Array<{
+        rows: Array<Record<string, unknown>>
+        tombstones: Array<Record<string, unknown>>
+        metadata: Array<Record<string, unknown>>
+        expectedKeys: Array<Record<string, unknown>>
+      }> = []
+      const captureContents = (physicalId: string) => ({
+        rows: database
+          .prepare(
+            `SELECT key, value, metadata, row_version FROM "${createPersistedTableName(physicalId, `c`)}" ORDER BY key`,
+          )
+          .all() as Array<Record<string, unknown>>,
+        tombstones: database
+          .prepare(
+            `SELECT key, value, row_version, deleted_at FROM "${createPersistedTableName(physicalId, `t`)}" ORDER BY key`,
+          )
+          .all() as Array<Record<string, unknown>>,
+        metadata: database
+          .prepare(
+            `SELECT key, value FROM collection_metadata WHERE collection_id = ? ORDER BY key`,
+          )
+          .all(physicalId) as Array<Record<string, unknown>>,
+        expectedKeys: database
+          .prepare(
+            `SELECT key FROM collection_expected_keys WHERE collection_id = ? ORDER BY key`,
+          )
+          .all(physicalId) as Array<Record<string, unknown>>,
+      })
+      seededContents.push(captureContents(first.storageCollectionId))
+      now = 1_040
+      const middle = await adapter.rotateCacheGeneration(
+        logicalId,
+        first.claimId,
+      )
+      generations.push(middle)
+      now = 1_060
+      const middlePeer = await adapter.claimCacheGeneration(logicalId)
+      indexes.push(await seedStorage(1, middle))
+      seededContents.push(captureContents(middle.storageCollectionId))
+      now = 1_080
+      const current = await adapter.rotateCacheGeneration(
+        logicalId,
+        middle.claimId,
+      )
+      generations.push(current)
+      indexes.push(await seedStorage(2, current))
+      seededContents.push(captureContents(current.storageCollectionId))
+
+      now = 1_110
+      if (history.oldClaim === `release`) {
+        await adapter.releaseCacheGenerationClaim(oldPeer.claimId)
+      } else if (history.oldClaim === `renew`) {
+        expect(
+          await adapter.renewCacheGenerationClaim(
+            oldPeer.storageCollectionId,
+            oldPeer.claimId,
+          ),
+        ).toBe(1_210)
+      }
+      now = 1_130
+      if (history.middleClaim === `release`) {
+        await adapter.releaseCacheGenerationClaim(middlePeer.claimId)
+      } else if (history.middleClaim === `renew`) {
+        expect(
+          await adapter.renewCacheGenerationClaim(
+            middlePeer.storageCollectionId,
+            middlePeer.claimId,
+          ),
+        ).toBe(1_230)
+      }
+      now = history.checkAtMs
+      // Any collection operation may sweep. The new claim also proves that
+      // collection of retired storage cannot displace the current head.
+      const checkpointClaim = await adapter.claimCacheGeneration(logicalId)
+      expect(checkpointClaim.storageCollectionId).toBe(
+        current.storageCollectionId,
+      )
+      const retained = new Set(expectedRetainedGenerations(history))
+      const expectedClaims = [
+        ...(history.oldClaim === `renew` && now < 1_210
+          ? [
+              {
+                claimId: oldPeer.claimId,
+                physicalId: first.storageCollectionId,
+              },
+            ]
+          : []),
+        ...(history.middleClaim === `renew` && now < 1_230
+          ? [
+              {
+                claimId: middlePeer.claimId,
+                physicalId: middle.storageCollectionId,
+              },
+            ]
+          : []),
+        ...(now < 1_180
+          ? [
+              {
+                claimId: current.claimId,
+                physicalId: current.storageCollectionId,
+              },
+            ]
+          : []),
+        {
+          claimId: checkpointClaim.claimId,
+          physicalId: current.storageCollectionId,
+        },
+      ].sort((left, right) => left.claimId.localeCompare(right.claimId))
+      const actualClaims = database
+        .prepare(
+          `SELECT claim_id AS claimId, physical_id AS physicalId
+           FROM cache_generation_claim WHERE logical_id = ? ORDER BY claim_id`,
+        )
+        .all(logicalId)
+      expect(actualClaims).toEqual(expectedClaims)
+      const scopedCatalogs = [
+        `cache_generation`,
+        `collection_registry`,
+        `collection_version`,
+        `collection_reset_epoch`,
+        `applied_tx`,
+        `collection_metadata`,
+        `collection_expected_keys`,
+        `persisted_index_registry`,
+        `leader_term`,
+      ]
+      for (const [generation, claim] of generations.entries()) {
+        const physicalId = claim.storageCollectionId
+        const shouldExist = retained.has(generation)
+        const rowTable = createPersistedTableName(physicalId, `c`)
+        const tombstoneTable = createPersistedTableName(physicalId, `t`)
+        for (const name of [
+          rowTable,
+          tombstoneTable,
+          `${rowTable}_row_version_idx`,
+          `${tombstoneTable}_row_version_idx`,
+          indexes[generation]!,
+        ]) {
+          expect(
+            database
+              .prepare(`SELECT name FROM sqlite_master WHERE name = ?`)
+              .get(name),
+            `generation ${generation}: physical ${name}`,
+          ).toEqual(shouldExist ? { name } : undefined)
+        }
+        for (const catalog of scopedCatalogs) {
+          const column =
+            catalog === `cache_generation` ? `physical_id` : `collection_id`
+          const count = database
+            .prepare(
+              `SELECT COUNT(*) AS count FROM ${catalog} WHERE ${column} = ?`,
+            )
+            .get(physicalId) as { count: number }
+          expect(count.count, `generation ${generation}: ${catalog}`).toBe(
+            shouldExist
+              ? catalog === `collection_expected_keys`
+                ? history.rowCount
+                : 1
+              : 0,
+          )
+        }
+        if (shouldExist) {
+          expect(captureContents(physicalId)).toEqual(
+            seededContents[generation],
+          )
+        }
+      }
+      await adapter.releaseCacheGenerationClaim(checkpointClaim.claimId)
+    } catch (error) {
+      primaryFailure = error
+      throw error
+    } finally {
+      closeDatabasePreservingPrimary(database, primaryFailure)
+    }
+  }
+  it.each([
+    { oldClaim: `renew`, middleClaim: `renew`, rowCount: 2, checkAtMs: 1_170 },
+    {
+      oldClaim: `release`,
+      middleClaim: `renew`,
+      rowCount: 0,
+      checkAtMs: 1_170,
+    },
+    {
+      oldClaim: `renew`,
+      middleClaim: `release`,
+      rowCount: 2,
+      checkAtMs: 1_190,
+    },
+    {
+      oldClaim: `expire`,
+      middleClaim: `expire`,
+      rowCount: 0,
+      checkAtMs: 1_190,
+    },
+    { oldClaim: `renew`, middleClaim: `renew`, rowCount: 2, checkAtMs: 1_209 },
+    { oldClaim: `renew`, middleClaim: `renew`, rowCount: 2, checkAtMs: 1_210 },
+    { oldClaim: `renew`, middleClaim: `renew`, rowCount: 2, checkAtMs: 1_229 },
+    { oldClaim: `renew`, middleClaim: `renew`, rowCount: 2, checkAtMs: 1_230 },
+  ] as const)(
+    `collects only unclaimed retired storage after $oldClaim and $middleClaim`,
+    assertRetiredStorageHistory,
+  )
+  const retiredStorageHistory = fc.record({
+    oldClaim: fc.constantFrom<RetiredStorageHistory[`oldClaim`]>(
+      `release`,
+      `expire`,
+      `renew`,
+    ),
+    middleClaim: fc.constantFrom<RetiredStorageHistory[`middleClaim`]>(
+      `release`,
+      `expire`,
+      `renew`,
+    ),
+    rowCount: fc.constantFrom<RetiredStorageHistory[`rowCount`]>(0, 2),
+    checkAtMs: fc.constantFrom<RetiredStorageHistory[`checkAtMs`]>(
+      1_170,
+      1_190,
+      1_209,
+      1_210,
+      1_229,
+      1_230,
+    ),
+  })
+  fcTest.prop([retiredStorageHistory], {
+    seed: 2069,
+    numRuns: oracleRuns(24),
+  })(`checks retired storage reachability (fixed)`, assertRetiredStorageHistory)
+  fcTest.prop(
+    [retiredStorageHistory],
+    oraclePropertyOptions(24, `sqlite-resume.retired-storage`),
+  )(
+    `checks retired storage reachability (random or replayed)`,
+    assertRetiredStorageHistory,
+  )
 
   // Schema registration can pause before its first CREATE TABLE while another
   // adapter collects the retired generation. A late registration may finish
@@ -1486,30 +1827,7 @@ describe(`SQLite resume snapshots`, () => {
           cleanupFailures.push(error)
         }
       }
-      const failure =
-        primaryFailure === undefined
-          ? undefined
-          : primaryFailure instanceof Error
-            ? primaryFailure
-            : new Error(`Peer recovery oracle failed`, {
-                cause: primaryFailure,
-              })
-      if (failure && cleanupFailures.length > 0) {
-        Object.defineProperty(failure, `cleanupFailures`, {
-          value: cleanupFailures,
-          enumerable: true,
-        })
-      }
-      closeDatabasePreservingPrimary(
-        database,
-        failure ??
-          (cleanupFailures.length > 0
-            ? new AggregateError(
-                cleanupFailures,
-                `Peer recovery cleanup failed`,
-              )
-            : undefined),
-      )
+      closeDatabasePreservingPrimary(database, primaryFailure, cleanupFailures)
     }
   })
 
@@ -2085,6 +2403,228 @@ describe(`SQLite resume snapshots`, () => {
     }
   })
 
+  // The SQLite claim rule and the wrapper recovery rule meet at startup.
+  // One run pauses before dispatching its real SQLite resume read; a later peer claims the
+  // same physical generation and remains live when the first claim expires.
+  // The model has two independent authorities: the peer may keep the old row
+  // and cursor, while the expired run must bind private storage and settle a
+  // demand only from a fresh source row. The held read entry is outside a
+  // write transaction so the peer can make its legal later claim. The real
+  // SQLite adapter then supplies the rejection; the separate transaction
+  // oracle owns its later in-transaction claim check.
+  // This receiving history does not model arbitrary browser scheduling.
+  it(`composes SQLite startup claim rejection with private subset recovery`, async () => {
+    type Row = { id: string; title: string }
+    const database = new DatabaseSync(`:memory:`)
+    const baseDriver = createDriver(database)
+    const readEntered = deferred()
+    const releaseRead = deferred()
+    let holdRead = false
+    let now = 1_000
+    // Keep the real renewal timer outside this controlled-clock history.
+    // Only the test's virtual time jump may expire the held claim.
+    const claimTtlMs = 1_000_000
+    const firstAdapter = new SQLiteCorePersistenceAdapter({
+      driver: baseDriver,
+      cacheGenerationClaimTtlMs: claimTtlMs,
+      now: () => now,
+    })
+    const sqliteReadRejections: Array<string> = []
+    const realHydrationScope =
+      firstAdapter.runInHydrationScope.bind(firstAdapter)
+    firstAdapter.runInHydrationScope = (task) =>
+      realHydrationScope((hydrationAdapter) =>
+        task({
+          ...hydrationAdapter,
+          loadResumeSnapshot: async (...args) => {
+            if (holdRead) {
+              holdRead = false
+              readEntered.resolve()
+              await releaseRead.promise
+            }
+            try {
+              return await hydrationAdapter.loadResumeSnapshot(...args)
+            } catch (error) {
+              sqliteReadRejections.push(String(error))
+              throw error
+            }
+          },
+        }),
+      )
+    const peerAdapter = new SQLiteCorePersistenceAdapter({
+      driver: baseDriver,
+      cacheGenerationClaimTtlMs: claimTtlMs,
+      now: () => now,
+    })
+    const logicalId = `composed-startup-claim-rejection`
+    const old: Row = { id: `old`, title: `Peer row` }
+    const fresh: Row = { id: `fresh`, title: `New source row` }
+    let expired: Collection<Row, string> | undefined
+    let peer: Collection<Row, string> | undefined
+    let seedClaimId: string | undefined
+    let firstSource: Parameters<SyncConfig<Row, string>[`sync`]>[0] | undefined
+    const firstSourceStarted = deferred()
+    const sourceLoads: Array<boolean | undefined> = []
+    let primaryFailure: unknown
+    try {
+      const seed = await peerAdapter.claimCacheGeneration(logicalId)
+      seedClaimId = seed.claimId
+      await peerAdapter.applyCommittedTx(seed.storageCollectionId, {
+        txId: `seed-old`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        cacheGenerationClaimId: seed.claimId,
+        mutations: [{ type: `insert`, key: old.id, value: old }],
+        collectionMetadataMutations: [
+          { type: `set`, key: `resume`, value: `old-cursor` },
+        ],
+      })
+      await peerAdapter.releaseCacheGenerationClaim(seed.claimId)
+      seedClaimId = undefined
+
+      expired = createCollection(
+        persistedCollectionOptions<Row, string>({
+          id: logicalId,
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: (params) => {
+              firstSource = params
+              expect(params.metadata?.collection.get(`resume`)).toBeUndefined()
+              params.markReady()
+              firstSourceStarted.resolve()
+              return {
+                restartAfterScopedRecovery: () => {},
+                loadSubset: async (options) => {
+                  sourceLoads.push(options.refetch)
+                  params.begin()
+                  params.write({ type: `insert`, value: fresh })
+                  await whenSyncAccepted(params.commit())
+                },
+              }
+            },
+          },
+          persistence: { adapter: firstAdapter },
+        }),
+      )
+      holdRead = true
+      expired.startSyncImmediate()
+      await reachCheckpoint(readEntered.promise, `first SQLite claim read`)
+      expect(firstSource).toBeUndefined()
+
+      now = 501_000
+      peer = createCollection(
+        persistedCollectionOptions<Row, string>({
+          id: logicalId,
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: (params) => {
+              params.markReady()
+              return {
+                restartAfterScopedRecovery: () => {},
+                loadSubset: async () => {},
+              }
+            },
+          },
+          persistence: { adapter: peerAdapter },
+        }),
+      )
+      peer.startSyncImmediate()
+      await peer.stateWhenReady()
+      await peer._sync.loadSubset({ limit: 1 })
+      expect(peer.get(old.id)).toMatchObject(old)
+
+      now = 1_001_001
+      releaseRead.resolve()
+      await reachCheckpoint(
+        firstSourceStarted.promise,
+        `source after claim loss`,
+      )
+      await expired.stateWhenReady()
+      const headAfterStartup = database
+        .prepare(
+          `SELECT physical_id FROM cache_generation
+           WHERE logical_id = ? AND retired = 0`,
+        )
+        .get(logicalId) as { physical_id: string }
+      expect(headAfterStartup.physical_id).toBe(seed.storageCollectionId)
+      expect(sqliteReadRejections).toHaveLength(1)
+      expect(sqliteReadRejections[0]).toContain(
+        `Persisted cache claim is no longer active`,
+      )
+      expect(expired.get(old.id)).toBeUndefined()
+      await expired._sync.loadSubset({ limit: 1 })
+      // This is the first demand against empty private storage, so it is an
+      // ordinary source load. The fresh row and private durable destination,
+      // not a refetch flag, establish the recovery obligation.
+      expect(sourceLoads).toEqual([undefined])
+      expect(expired.get(old.id)).toBeUndefined()
+      expect(expired.get(fresh.id)).toMatchObject(fresh)
+      expect(peer.get(old.id)).toMatchObject(old)
+      expect(peer.get(fresh.id)).toBeUndefined()
+
+      const head = database
+        .prepare(
+          `SELECT physical_id FROM cache_generation
+           WHERE logical_id = ? AND retired = 0`,
+        )
+        .get(logicalId) as { physical_id: string }
+      expect(head.physical_id).toBe(seed.storageCollectionId)
+      const claims = database
+        .prepare(
+          `SELECT physical_id, claim_id FROM cache_generation_claim
+           WHERE logical_id = ? ORDER BY physical_id`,
+        )
+        .all(logicalId) as Array<{ physical_id: string; claim_id: string }>
+      const peerClaim = claims.find(
+        ({ physical_id }) => physical_id === seed.storageCollectionId,
+      )
+      const privateClaim = claims.find(
+        ({ physical_id }) => physical_id !== seed.storageCollectionId,
+      )
+      expect(peerClaim).toBeDefined()
+      expect(privateClaim).toBeDefined()
+      expect(
+        await peerAdapter.loadResumeSnapshot(seed.storageCollectionId, {
+          cacheGenerationClaimId: peerClaim!.claim_id,
+        }),
+      ).toMatchObject({
+        rows: [{ key: old.id, value: old }],
+        collectionMetadata: [{ key: `resume`, value: `old-cursor` }],
+      })
+      expect(
+        (
+          await firstAdapter.loadResumeSnapshot(privateClaim!.physical_id, {
+            cacheGenerationClaimId: privateClaim!.claim_id,
+          })
+        ).rows.map(({ value }) => value),
+      ).toEqual([fresh])
+    } catch (error) {
+      primaryFailure = error
+      throw error
+    } finally {
+      releaseRead.resolve()
+      const cleanupFailures: Array<unknown> = []
+      for (const cleanup of [
+        () => expired?.cleanup(),
+        () => peer?.cleanup(),
+        () =>
+          seedClaimId
+            ? peerAdapter.releaseCacheGenerationClaim(seedClaimId)
+            : undefined,
+      ]) {
+        try {
+          await cleanup()
+        } catch (error) {
+          cleanupFailures.push(error)
+        }
+      }
+      closeDatabasePreservingPrimary(database, primaryFailure, cleanupFailures)
+    }
+  })
+
   // The adapter-level expiry law must reach the real persisted wrapper. A
   // source commit after a long pause is admitted before any timer callback;
   // it must reject without publishing under the expired claim. The same sync
@@ -2295,19 +2835,7 @@ describe(`SQLite resume snapshots`, () => {
       } catch (error) {
         cleanupFailures.push(error)
       }
-      if (primaryFailure instanceof Error && cleanupFailures.length > 0) {
-        Object.defineProperty(primaryFailure, `cleanupFailures`, {
-          value: cleanupFailures,
-          enumerable: true,
-        })
-      }
-      closeDatabasePreservingPrimary(
-        database,
-        primaryFailure ??
-          (cleanupFailures.length > 0
-            ? new AggregateError(cleanupFailures, `Recovery cleanup failed`)
-            : undefined),
-      )
+      closeDatabasePreservingPrimary(database, primaryFailure, cleanupFailures)
     }
   })
 

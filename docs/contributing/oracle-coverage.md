@@ -2212,9 +2212,8 @@ confirmed the row can remain public without becoming durable. The ordinary
 durability-failure law permits that fail-stop, while automatic expiry reload
 covers admission before publication. The first new-format
 claim isolates but does not reclaim legacy storage. The present tests do not
-establish native multi-tab or OPFS receiving, release retry after a timed-out
-old-leader RPC, full retired-metadata collection, or claimless direct-adapter
-access to a physical ID after its catalog row is collected. The Browser owner
+establish release retry after a timed-out old-leader RPC or claimless
+direct-adapter access to a physical ID after its catalog row is collected. The Browser owner
 now has a combined receiving history over real wa-sqlite and the controlled
 Browser coordinator wire. Two runs hold distinct claims on one generation;
 only the earlier claim expires before its renewal timer. A real durable peer
@@ -2223,8 +2222,33 @@ into private storage while the warm peer retains its exact public and durable
 row, live claim, and source ownership for another demand. The current head
 remains unchanged. An always-rotate-head mutant failed at the head-ID
 comparison. Native coordinator emission, multi-tab or OPFS scheduling, and a
-composed SQLite-to-wrapper startup rejection remain unproved before the whole
-cache-eviction class can be closed.
+composed SQLite-to-wrapper startup rejection were open at that review head.
+The SQLite owner now composes a real claim rejection during startup with the
+persisted wrapper: the expired run gets a private cache and a fresh demanded
+row, while a later live peer keeps its public row, durable row, and resume
+metadata under the unchanged head. Its separate three-generation reachability
+model varies release, expiry, renewal, zero or two rows, and collection
+checkpoints immediately before and at both renewed expiries. It compares
+retained row, tombstone, resume, and key contents; both physical tables;
+native indexes; every generation-scoped catalog; and claim identities.
+Wall-clock passage alone is not a sweep checkpoint. The persisted notice
+grammar now holds the fresh source receipt behind an optimistic transaction
+and checks a pending constrained demand, stale-row quarantine, the public
+publication trace, and release of the exact `(storage ID, options)` refresh
+acquisition. Its controlled coordinator supplies the receipt wait. The fixed
+Browser receiving cut below supplies that premise with a real coordinator on
+one schedule.
+The Browser OPFS owner now has a fixed two-context receiving history in which a
+real source commit makes the coordinator emit a physical-ID notice over native
+BroadcastChannel. One receiver callback is held until its claim expires;
+its private reload leaves the warm peer's public and durable rows and current
+head intact. An explicit demand stays pending until the fresh source receipt
+applies. The renewal timer lies beyond the fixed test window, and the receiver
+checks no refetch before releasing the delivered callback. Arbitrary native
+scheduling, a live Electric provider in this same two-context history, and
+claimless direct-adapter access after collection
+remain separate unproved cuts; these fixed receivers do not close every
+cache-eviction interleaving.
 
 The [cache-generation oracle audit](oracle-reviews/issue-2069-cache-generation-oracle-audit-53ded62d8.md)
 records the generated grammar controls, killed mutants, direct replays, and
