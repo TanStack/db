@@ -113,7 +113,7 @@ unknown initial route or any leader/term change rejects the direct RPC with
 wrapper can certify the original transaction ID through the replacement leader
 and the main-process SQLite adapter. Application-issued mutations still need
 caller reconciliation. Main and renderer must use matching persistence protocol
-v4 peers for this IPC operation. A main-process adapter used by an
+v5 peers for this IPC operation. A main-process adapter used by an
 `ElectronCollectionCoordinator` must implement `reserveLeadershipTerm` so each
 election reserves a durable term before publishing a route. An adapter without
 that capability can still serve single-renderer persistence through
@@ -143,6 +143,14 @@ idempotent.
 ## Notes
 
 - The renderer API mirrors other runtimes: one shared `create...Persistence`.
+- IPC protocol v6 forwards explicit eager or managed storage targets,
+  on-demand cache claims, rotation, renewal, release, claim checks on SQLite
+  reads and writes, exact transaction-ID
+  reconciliation, and claim-scoped leadership-term reservation. Upgrade main
+  and renderer together.
+  If a custom main-process adapter does not implement these operations, pass
+  `managedCacheGenerations: false` to `createElectronSQLitePersistence` to keep
+  the full-shape recovery fallback.
 - Collection mode (`sync-present` vs `sync-absent`) and `schemaVersion` are
   resolved per collection and forwarded across IPC automatically.
 - Without an `ElectronCollectionCoordinator`, single-renderer mode uses

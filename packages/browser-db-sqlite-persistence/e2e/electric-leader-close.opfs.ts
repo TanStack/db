@@ -199,7 +199,10 @@ try {
   })
   let collectionAdapter = persistence.adapter
   observeDurable = async () => {
-    const snapshot = await collectionAdapter.loadResumeSnapshot(collectionId)
+    const snapshot = await collectionAdapter.loadResumeSnapshot({
+      kind: `eager`,
+      collectionId: collectionId,
+    })
     return {
       rows: sortedRows(snapshot.rows.map(({ value }) => value as Item)),
       resume: snapshot.collectionMetadata.find(

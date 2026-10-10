@@ -65,23 +65,53 @@ describe(`durable cache and upstream ownership histories`, () => {
           score,
         }))
       try {
-        await persistence.adapter.applyCommittedTx(id, {
-          txId: `seed`,
-          term: 1,
-          seq: 1,
-          rowVersion: 1,
-          mutations: [{ type: `insert`, key: cached.id, value: cached }],
-        })
+        // This history tests a cache written by the current managed format.
+        // The public-ID table represents pre-upgrade on-demand storage and is
+        // deliberately isolated from new cache generations.
+        const seedClaim = await persistence.adapter.claimCacheGeneration?.(id)
+        if (!seedClaim)
+          throw new Error(`Node adapter must support cache claims`)
+        await persistence.adapter.applyCommittedTx(
+          {
+            kind: `managed`,
+            storageCollectionId: seedClaim.storageCollectionId,
+            claimId: seedClaim.claimId,
+          },
+          {
+            txId: `seed`,
+            term: 1,
+            seq: 1,
+            rowVersion: 1,
+            cacheGenerationClaimId: seedClaim.claimId,
+            mutations: [{ type: `insert`, key: cached.id, value: cached }],
+          },
+        )
+        await persistence.adapter.releaseCacheGenerationClaim?.(
+          seedClaim.claimId,
+        )
         collection.startSyncImmediate()
         await collection._sync.loadSubset(peer)
         await expect(collection._sync.loadSubset(failed)).rejects.toBe(failure)
         expect(observe()).toEqual([cached])
         const cacheReader = new BetterSqlite3(filename)
         try {
-          const cachedRows = await createNodeSQLitePersistence({
+          const reader = createNodeSQLitePersistence({
             database: cacheReader,
-          }).adapter.loadSubset(id, {})
+          }).adapter
+          const readerClaim = await reader.claimCacheGeneration?.(id)
+          if (!readerClaim)
+            throw new Error(`Node adapter must support cache claims`)
+          const cachedRows = await reader.loadSubset(
+            {
+              kind: `managed`,
+              storageCollectionId: readerClaim.storageCollectionId,
+              claimId: readerClaim.claimId,
+            },
+            {},
+            { cacheGenerationClaimId: readerClaim.claimId },
+          )
           expect(cachedRows.map(({ value }) => value)).toEqual([cached])
+          await reader.releaseCacheGenerationClaim?.(readerClaim.claimId)
         } finally {
           cacheReader.close()
         }
@@ -99,22 +129,58 @@ describe(`durable cache and upstream ownership histories`, () => {
         database.close()
         database = new BetterSqlite3(filename)
         const reopened = createNodeSQLitePersistence({ database }).adapter
+        const reopenedClaim = await reopened.claimCacheGeneration?.(id)
+        if (!reopenedClaim)
+          throw new Error(`Node adapter must support cache claims`)
         expect(
-          (await reopened.loadSubset(id, {})).map(({ value }) => value),
+          (
+            await reopened.loadSubset(
+              {
+                kind: `managed`,
+                storageCollectionId: reopenedClaim.storageCollectionId,
+                claimId: reopenedClaim.claimId,
+              },
+              {},
+              {
+                cacheGenerationClaimId: reopenedClaim.claimId,
+              },
+            )
+          ).map(({ value }) => value),
         ).toEqual([next])
         const fresh: Row = { id: `fresh`, title: `Next use`, score: 99 }
-        await reopened.applyCommittedTx(id, {
-          txId: `after-reopen`,
-          term: 2,
-          seq: 1,
-          rowVersion: 2,
-          mutations: [{ type: `insert`, key: fresh.id, value: fresh }],
-        })
+        await reopened.applyCommittedTx(
+          {
+            kind: `managed`,
+            storageCollectionId: reopenedClaim.storageCollectionId,
+            claimId: reopenedClaim.claimId,
+          },
+          {
+            txId: `after-reopen`,
+            term: 2,
+            seq: 1,
+            rowVersion: 2,
+            cacheGenerationClaimId: reopenedClaim.claimId,
+            mutations: [{ type: `insert`, key: fresh.id, value: fresh }],
+          },
+        )
         expect(
-          (await reopened.loadSubset(id, {}))
+          (
+            await reopened.loadSubset(
+              {
+                kind: `managed`,
+                storageCollectionId: reopenedClaim.storageCollectionId,
+                claimId: reopenedClaim.claimId,
+              },
+              {},
+              {
+                cacheGenerationClaimId: reopenedClaim.claimId,
+              },
+            )
+          )
             .map(({ value }) => value)
             .sort((a, b) => String(a.id).localeCompare(String(b.id))),
         ).toEqual([next, fresh])
+        await reopened.releaseCacheGenerationClaim?.(reopenedClaim.claimId)
       } finally {
         try {
           await collection.cleanup()
@@ -136,16 +202,24 @@ describe(`durable cache and upstream ownership histories`, () => {
       await assertRuntimeRestartHistory({
         writeTodoFromClient: async (value) => {
           seq++
-          await adapter.applyCommittedTx(`restart`, {
-            txId: `write-${seq}`,
-            term: 1,
-            seq,
-            rowVersion: seq,
-            mutations: [{ type: `insert`, key: value.id, value }],
-          })
+          await adapter.applyCommittedTx(
+            { kind: `eager`, collectionId: `restart` },
+            {
+              txId: `write-${seq}`,
+              term: 1,
+              seq,
+              rowVersion: seq,
+              mutations: [{ type: `insert`, key: value.id, value }],
+            },
+          )
         },
         loadTodosFromClient: async () =>
-          (await adapter.loadSubset(`restart`, {})).map(({ key, value }) => ({
+          (
+            await adapter.loadSubset(
+              { kind: `eager`, collectionId: `restart` },
+              {},
+            )
+          ).map(({ key, value }) => ({
             key: key as string,
             value: value as Row,
           })),

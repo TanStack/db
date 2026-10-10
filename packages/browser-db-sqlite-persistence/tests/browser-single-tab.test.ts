@@ -96,25 +96,31 @@ it(`works without browser election primitives`, async () => {
     database,
   })
 
-  await persistence.adapter.applyCommittedTx(`todos`, {
-    txId: `tx-1`,
-    term: 1,
-    seq: 1,
-    rowVersion: 1,
-    mutations: [
-      {
-        type: `insert`,
-        key: `1`,
-        value: {
-          id: `1`,
-          title: `single-tab`,
-          score: 1,
+  await persistence.adapter.applyCommittedTx(
+    { kind: `eager`, collectionId: `todos` },
+    {
+      txId: `tx-1`,
+      term: 1,
+      seq: 1,
+      rowVersion: 1,
+      mutations: [
+        {
+          type: `insert`,
+          key: `1`,
+          value: {
+            id: `1`,
+            title: `single-tab`,
+            score: 1,
+          },
         },
-      },
-    ],
-  })
+      ],
+    },
+  )
 
-  const rows = await persistence.adapter.loadSubset(`todos`, {})
+  const rows = await persistence.adapter.loadSubset(
+    { kind: `eager`, collectionId: `todos` },
+    {},
+  )
   expect(rows).toEqual([
     {
       key: `1`,

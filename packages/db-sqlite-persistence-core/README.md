@@ -291,12 +291,21 @@ separate from the accepted-transaction precedence rule.
 ### Atomic resume snapshots
 
 Persistence adapters implement
-`loadResumeSnapshot(collectionId, options)` to let a sync source certify a
+`loadResumeSnapshot(target, options)` to let a sync source certify a
 persisted resume baseline. One call must read rows, collection metadata, stream
 position, reset epoch, and key-set evidence from the same atomic database
 snapshot. `includeRows: false` requests the same certification data without
 materializing rows; `requiredIndexSignatures` carries the indexes needed by a
 row-bearing snapshot.
+
+The adapter's data methods require an explicit `PersistedStorageTarget`. Use
+`{ kind: 'eager', collectionId }` for an eager Collection, or
+`{ kind: 'managed', storageCollectionId, claimId }` for a claimed on-demand
+persisted cache generation. A bare string ID is rejected. The managed target
+checks the claim even after its generation has been collected from SQLite;
+choosing an eager target explicitly may reuse the same ID. Claim and
+rotation methods take the logical Collection ID; renewal takes the physical
+storage ID and release takes the claim ID.
 
 `PersistedKeySetEvidence.status` has three states:
 

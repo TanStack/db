@@ -249,7 +249,10 @@ function fixture(
   const collectionId = `persisted-recovery-${syncMode}`
   if (coordinator) {
     coordinator.requestApplyCommittedTx = async (requestedCollectionId, tx) => {
-      await adapter.applyCommittedTx(requestedCollectionId, tx)
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: requestedCollectionId },
+        tx,
+      )
       return {
         type: `rpc:applyCommittedTx:res`,
         rpcId: tx.txId,
@@ -314,7 +317,10 @@ function fixture(
     subsetLoadCount: () => subsetLoads,
     latestDurableRowVersion: () => latestRowVersion,
     commitExternalTx: (tx: PersistedTx) =>
-      adapter.applyCommittedTx(collectionId, tx),
+      adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        tx,
+      ),
     start,
     stopObserving: () => stopObserving(),
     pauseHydration: (gate: Promise<void>) => {
@@ -533,18 +539,21 @@ async function observePersistedRestart(
       driver,
       schemaVersion: 1,
     })
-    await originalAdapter.applyCommittedTx(collectionId, {
-      txId: `seed-electric-baseline`,
-      term: 1,
-      seq: 1,
-      rowVersion: 1,
-      mutations: productionSeedRows.map((row) => ({
-        type: `insert` as const,
-        key: row.id,
-        value: cloneItem(row),
-      })),
-      collectionMetadataMutations: resumeState,
-    })
+    await originalAdapter.applyCommittedTx(
+      { kind: `eager`, collectionId: collectionId },
+      {
+        txId: `seed-electric-baseline`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: productionSeedRows.map((row) => ({
+          type: `insert` as const,
+          key: row.id,
+          value: cloneItem(row),
+        })),
+        collectionMetadataMutations: resumeState,
+      },
+    )
 
     const usesSchemaReset =
       scenario.transition === `schema-reset` ||
@@ -555,17 +564,23 @@ async function observePersistedRestart(
       schemaVersion,
       schemaMismatchPolicy: `sync-present-reset`,
     })
-    await restartedAdapter.loadSubset(collectionId, {})
+    await restartedAdapter.loadSubset(
+      { kind: `eager`, collectionId: collectionId },
+      {},
+    )
     if (scenario.transition === `partial-restore`) {
-      await restartedAdapter.applyCommittedTx(collectionId, {
-        txId: `partial-electric-restore`,
-        term: 2,
-        seq: 1,
-        rowVersion: 2,
-        mutations: [
-          { type: `insert`, key: oldRow.id, value: cloneItem(oldRow) },
-        ],
-      })
+      await restartedAdapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `partial-electric-restore`,
+          term: 2,
+          seq: 1,
+          rowVersion: 2,
+          mutations: [
+            { type: `insert`, key: oldRow.id, value: cloneItem(oldRow) },
+          ],
+        },
+      )
     } else if (scenario.transition === `external-row-loss`) {
       const collectionTable = createPersistedTableName(collectionId, `c`)
       await driver.run(
@@ -636,9 +651,14 @@ async function observePersistedRestart(
       await new Promise((resolve) => setTimeout(resolve, 0))
       await new Promise((resolve) => setTimeout(resolve, 0))
 
-      const durableRows = await restartedAdapter.loadSubset(collectionId, {})
-      const durableMetadata =
-        await restartedAdapter.loadCollectionMetadata(collectionId)
+      const durableRows = await restartedAdapter.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {},
+      )
+      const durableMetadata = await restartedAdapter.loadCollectionMetadata({
+        kind: `eager`,
+        collectionId: collectionId,
+      })
       observation = {
         checkpoint: `post-restart-up-to-date`,
         requestedOffset: request.offset,
@@ -693,11 +713,14 @@ async function observePersistedRestart(
               ({ committed }) => committed,
             )
           const beforeLateRows = await restartedAdapter.loadSubset(
-            collectionId,
+            { kind: `eager`, collectionId: collectionId },
             {},
           )
           const beforeLateMetadata =
-            await restartedAdapter.loadCollectionMetadata(collectionId)
+            await restartedAdapter.loadCollectionMetadata({
+              kind: `eager`,
+              collectionId: collectionId,
+            })
           const beforeLateApplied = await driver.query<{
             term: number
             seq: number
@@ -720,11 +743,14 @@ async function observePersistedRestart(
             ({ id, name, stable }) => ({ id, name, stable }),
           ).sort((left, right) => left.id - right.id)
           const afterLateRows = await restartedAdapter.loadSubset(
-            collectionId,
+            { kind: `eager`, collectionId: collectionId },
             {},
           )
           const afterLateMetadata =
-            await restartedAdapter.loadCollectionMetadata(collectionId)
+            await restartedAdapter.loadCollectionMetadata({
+              kind: `eager`,
+              collectionId: collectionId,
+            })
           const afterLateApplied = await driver.query<{
             term: number
             seq: number

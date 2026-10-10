@@ -728,14 +728,20 @@ or treating the later position read
 as published rows fails those assertions. The SQLite adapter owner checks exact
 IDs, row versions, reset epochs, pruning,
 unchanged anchors, same-key peer writes, cursor metadata, durable no-write term
-reservation, and the exact-ID index plan against real SQLite transactions. The
-Browser coordinator owner checks writer-lock stream advancement, changed
+reservation, and the exact-ID index plan against real SQLite transactions. It
+also checks that a live claim on a retired physical generation can proceed,
+that live claims cannot cross physical generations, that expiry fences
+reconciliation and term reservation before a durable write,
+and that a new claim remains usable. The Browser coordinator owner checks
+writer-lock stream advancement, changed
 routes, and invalid wire anchors. It delays a former owner's captured heartbeat
 past a no-write Web Lock takeover and checks both the new owner and a passive
 follower retain the newer route after the delayed heartbeat. Distinct durable
-terms protect the later routed source write. The Electron IPC bridge runs the
+terms protect the later routed source write. Its election witness checks that
+the registered physical storage ID and claim reach term reservation. The
+Electron IPC bridge runs the
 SQLite adapter contract through its renderer and main-process handlers,
-including exact-ID reconciliation and protocol-v4 term reservation. Its
+including exact-ID reconciliation and protocol-v5 claim-scoped term reservation. Its
 resolved-adapter witness checks that reconciliation carries each Collection's
 mode and schema version, and its absent-capability witness checks that an
 unknown result leaves durable state unchanged. The real-process witness runs
@@ -830,7 +836,9 @@ an OPFS subset hydration is held after its local read; a PostgreSQL update
 begins an Electric source transaction during that hold; and the row-bearing
 commit is released only after the hydration scope exits. It checks the old row
 before release and the exact new public and durable row afterward, then after
-follower takeover and reopen. A late-buffer mutant leaves the old row in both
+follower takeover and reopen. The fixture observes the on-demand run's claimed
+storage ID and claim at coordinator registration; PostgreSQL supplies the
+expected row independently. A late-buffer mutant leaves the old row in both
 observations. The [core persistence tests](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/persisted-oracle.test.ts)
 own the adjacent during/straddling/after settlement, FIFO, abort, and failure
 histories. The live oracle does not prove eager-startup overlap, other mutation
@@ -2027,6 +2035,447 @@ Atomic cross-Collection read-modify-write remains a separate API proposal.
 Native durability remains the current receipt. These are accepted design limits,
 not deferred implementations of the approved follow-up.
 
+## Electric recovery demand and scoped persisted restore
+
+[The cache-eviction design](oracle-reviews/issue-2056-cache-eviction-design.md)
+records the generation and expiry laws and their unresolved cuts. The
+[PR #2069 review at 51563046](oracle-reviews/issue-2069-review-51563046.md)
+records the Query startup handoff, index reverse-order challenge, all review
+dispositions, and the repair commit's ORC-012 audit. The
+[review of code head `7f1df5c82`](oracle-reviews/issue-2056-cache-generation-audit-7f1df5c82.md)
+records the ORC-012 outcomes, RED/GREEN witnesses, and evidence gaps. The
+[receiving-gap audit at `87aead1be`](oracle-reviews/issue-2069-receiving-gap-audit-87aead1be.md)
+records the native Electric, shared-QueryClient, and old-leader timeout
+histories, their mutant outcomes, and remaining cuts. The
+real-SQLite owner checks generation rotation, legacy-writer isolation,
+warm-run claims, rejection of moved or expired claims, uncertified key-set
+evidence after partial writes, and physical collection of a retired row table.
+A held registration test rejects a read after collection and removes its late
+DDL and metadata. Two further real-SQLite held-registration histories move one
+claim while a warm peer retains the physical generation. They require both an
+initial registry insert and a destructive schema reset to check that claim
+inside their SQLite transactions; the warm peer keeps its schema, rows, applied
+transaction, and resume metadata. The persisted owner checks demand-triggered
+and timer-triggered expiry recovery, queued old source commits, and an
+optimistic mutation held through the accepted truncate. It also holds
+hydration, row-scan, and replay results across claim expiry and checks
+publication or returned rows after recovery. A startup history holds private
+rotation during index bootstrap and checks that the source cannot enter until
+new storage is bound. The real-SQLite
+owner rejects an expired startup resume record and checks that a public index
+event from an expired Collection cannot remove a warm peer's persisted index.
+The persisted owner also holds cleanup across cache rotation and requires the
+late private claim to release. It holds a peer full-reload read across claim
+expiry, checking both returned old rows and SQLite-style rejection at its
+second claim check; a live-claim I/O failure remains terminal. The real-SQLite
+owner accepts a valid eager Collection ID with the internal cache prefix and
+rejects late managed registration that tries to recreate collected storage
+after the first claim check.
+Its explicit-storage-target history rejects bare IDs of both ordinary and
+cache-generated form. It checks all eleven adapter data operations after a
+managed generation is collected, compares every per-ID catalog and physical
+table after each rejection, reopens the adapter, and retries the old managed
+target after explicit eager reuse of the same ID. The contract is claim
+authority, not a reserved naming prefix: an application that explicitly
+declares an eager Collection with those bytes may create eager storage. The
+bare-ID fallback mutant fails at the first post-collection read. The
+[explicit-storage-target review](oracle-reviews/pr-2069-explicit-storage-targets-6b0192c19.md)
+records the checked paths, mutants, and remaining native-host limits.
+The persisted owner also keeps a subset demand through rotation from an old
+row version 10 to a new version 1 and requires the new peer notice to request
+source reacquisition. Four held-rotation histories cross old row versions 1 and 10
+with an old physical cache's commit or reset before rotation binds. The new
+notice has row version 3 or 1, so the old notice can have a lower or higher
+version. A fixed and random bounded grammar also varies absent, commit, and
+reset old notices, both row versions, and absent or present new notices. The
+queued old callback cannot add a source request; the new notice must request
+source reacquisition. These use a controlled in-process coordinator whose recording
+adapter shares row storage across physical IDs. Exact durable row isolation,
+arbitrary interleavings, and native multi-tab delivery remain separate checks.
+The persisted owner also rejects a startup resume read after its claim expires,
+including two successive claim losses, then enters the source only after a live
+read under the replacement claim. A live-claim read error stays terminal. The
+real-SQLite owner now holds a resume transaction before its second claim check.
+Its fixed and generated histories cross clock cuts before, at, and after expiry;
+row inclusion; zero-to-three rows; and a later peer-claim time. An expired
+read makes no generation-specific durable access beyond claim validation; the live peer retains exact rows
+and metadata. Removing the transaction-local check and moving it after payload
+access fail at separate comparisons. The wrapper's response to that rejection
+remains a controlled adapter history, not a composed SQLite startup receiving
+history.
+The persisted owner holds resume certification across claim expiry: an old
+answer or a second claim-check rejection starts private recovery, while a
+live-claim I/O failure remains terminal. It also holds initial scoped rotation
+while aborting one demand and checks prompt rejection with a sibling still
+pending. The CLI owner writes a claimed physical ID through sqlite3, and its
+subset-failure cases seed the claimed storage while preserving their public
+and durable assertions.
+The Browser owner checks two concurrent runs:
+the recovering demand reaches its own source owner while the warm run keeps
+its source-backed row. Another controlled receiving test delivers a peer
+notification to an expired claimant before its renewal timer runs and checks
+subset reload. Both coordinator owners offer unload before a held source load
+settles.
+The Browser coordinator owner also checks that a managed local mutation carries
+its exact claim into the coordinator-created transaction. Its recording-adapter
+law failed before the repair at the target-kind comparison. A follower-RPC
+claim-loss mutant fails at its success checkpoint. A real SQLite
+receiving history accepts that write and rejects a late local mutation after
+rotation without recreating the retired table or registry. Direct coordinator
+callers that omit a claim remain outside this adapter law; the coordinator
+interface still accepts eager Collection IDs.
+The Electron IPC receiving owner forwards claim, renewal, rotation, release,
+cache-claim read contexts, exact-ID reconciliation, and durable term reservation
+through protocol v6. Its in-process main adapter
+witness keeps the logical Collection ID for adapter selection while reads
+address the claimed physical storage ID. The shared SQLite adapter contract
+runs its claimed-cache cases over that bridge. A custom main-process adapter
+can explicitly disable managed cache generations and retain the full-shape
+fallback. The local Electron binary is unavailable, so an actual
+main/renderer process receiving cut remains with the Electron runtime-bridge
+owner.
+
+The Electric descriptor owner now holds an old SDK snapshot across claim
+expiry. The replacement provider session settles both demands from fresh
+snapshots, rejects a pending old txid wait, and excludes a late old row from
+public and durable state. A second delivery lands during rotation, before the
+replacement stream starts; it rejects old callback admission into the new
+cache. Initial scoped recovery also forgets imported old txid evidence, and
+retiring an incomplete old stream transaction releases its commit turn so a
+new demand can start. These histories killed the one-phase restart, retained
+acknowledgement, and open-transaction designs at their named checkpoints. The
+Electric descriptor owner also holds rotation while aborting one old demand:
+that demand rejects promptly and a sibling later applies fresh source rows.
+Its overlapping-rotation history rejects a callback from the retired middle
+provider session, then requires the final provider session to apply a fresh
+subset demand after the second gate opens.
+The unabortable restart wait failed at this settlement checkpoint before the
+repair. The SQLite owner rejects coordinator stream-position, replay, and
+index work from a specific expired claim even while a peer claim is live. An
+expired run recovers privately while the healthy current cache remains
+claimable. The older Electric resume-race owner explicitly exercises adapters
+without managed generations; its unknown and missing on-demand evidence cases
+now require full-log replacement. The scoped reset settlement owner uses an
+abstract managed claim for that one applied-receipt law; the SQLite owner
+checks physical generation separation.
+The [bounded cache-authority design grammar](../../review-evidence/cache-authority-tla/README.md)
+also checks incompatible resume evidence followed by claim expiry. SQLite's
+transaction-time claim test makes that rotation private. The SQLite receiving
+owner now holds the real adapter's rotation after a controlled source starts
+scoped recovery, expires that run's claim while a peer remains live, then
+checks the peer's public and durable rows and unchanged resume metadata, an
+empty then fresh subset in the private generation, its reset marker, the
+recovering claim's storage ID, and a later claim of the unchanged head. A
+mutant that uses the expired claim's remembered storage ID advances the head
+and fails at that comparison. The controlled source supplies the recovery
+decision. The Electric resume-race owner now supplies an incompatible stored
+shape identity, reaches Electric's own scoped-recovery decision, expires its
+claim before SQLite's rotation transaction, and checks that a warm peer keeps
+its rows and resume metadata while the recovering run gets private storage.
+This witness failed before Electric stopped writing a reset marker into the
+shared generation. A second real-SQLite witness holds rotation after the
+storage transaction but before public truncate. It delivers a retired Electric
+callback and starts a distinct demand in that interval. The replacement
+session refetches the active empty subset and applies fresh rows for both
+explicit demands. Only those rows reach public and durable state. A deliberate
+wrong row in the rotated storage fails the held private-cache assertion. The
+grammar combines those actions; these fixed receiving cuts supply the missing
+implementation evidence.
+It does not model physical garbage collection or arbitrary callback schedules.
+The separate [receipt-settlement grammar](../../review-evidence/cache-receipt-tla/README.md)
+checks the accepted-versus-visible distinction during scoped recovery with a
+persisting optimistic transaction. It is bounded model evidence; the
+optimistic-history and Electric owners remain the production checks for those
+receipt laws.
+The installed-SDK delivery owner now holds an old HTTP subset response across
+managed rotation and observes fresh demand settlement, public rows, and the
+new cache's durable rows after that old response arrives. Its adapter is a
+controlled Map; real SQLite and native multi-tab delivery are separate cuts.
+The same owner uses real SQLite and the installed SDK for a cold restart after
+expiry rotation left a partial row and no reset marker. It observes the row
+absent before and after an empty source subset snapshot, including with an
+explicit Electric offset or handle. The explicit-cursor cases were RED at the
+pre-response public-row checkpoint before the cache-trust predicate changed.
+This rules out both early cache hydration and relying on source completion to
+delete that row.
+The descriptor owner also checks that cleanup during a held rotation fulfills
+after rotation settles. It does not establish a prompt cleanup bound while the
+adapter rotation remains held.
+The Query ownership owner now pairs a real QueryClient with managed Node SQLite.
+It advances a cache claim beyond expiry, uses a disjoint demand to trigger
+rotation, and requires an already active subset to reacquire its distinct row
+without another caller request. A later demand with stale QueryClient data
+waits for a new fetch; an old fetch and a public utility refetch cannot publish
+or return their retired result. A held real SQLite retention scan cannot delete
+a same-key row reacquired in the replacement generation. A released acquisition
+cannot launch another fetch after its held old result settles. These are fixed
+histories at public-row, request-count, and caller-settlement cuts. A paired-Collection real-SQLite history now gives two on-demand Query
+Collections one QueryClient and prefix-overlapping but distinct Query keys.
+Only the earlier claim expires; its rotation and fresh fetch must leave the
+warm peer's public row, Query cache entry, durable row, current storage ID,
+and fetch count intact. A broad prefix-eviction mutant failed at the peer
+cache-entry comparison. Shared exact-key cleanup follows the documented Query
+cache contract; arbitrary retention schedules and custom provider restart
+implementations remain outside these histories.
+The expiry and late-fetch histories also read the tested run's claimed physical
+SQLite generation after fresh settlement and after the retired fetch resolves;
+both cuts require the fresh rows and exclude old rows. A separate active-head
+claim would inspect a different generation when an expired run rotates privately.
+The same owner distinguishes a private startup rotation from a warm startup:
+only the rotated run must refetch a cached QueryClient success. It also holds a
+peer Query fetch that began before source entry through that rotation. Both its
+late success and late error require a new fetch before demand fulfillment.
+Two queued rotations have a separate held-second-rotation cut: the first
+recovery cannot reacquire an active Query subset or start a provider fetch.
+After the second rotation, that demand must fetch and apply a fresh row.
+The persisted owner also holds active rotation across index bootstrap and checks
+that an index added during the hold targets new storage. Its adapter call log
+does not prove native SQLite DDL completion. A virtual-clock history holds the
+provider restart after rotation and requires claim renewal once it resumes;
+index creation and renewal failures stay best-effort without changing public
+readiness. A held bootstrap lets index removal settle before the earlier
+creation completes; the wrapper reconciles the final durable index with the
+Collection's declaration. Re-adding that index during reconciliation has a
+separate fixed witness. The SQLite resume-snapshot owner now runs both
+reverse-order histories through the persisted wrapper and real `node:sqlite`
+DDL. It holds the first new-generation ensure until removal settles, then
+checks the Collection declaration, index registry, and `sqlite_master` after
+rotation. Its re-add history makes the replacement ensure finish before the
+held reconciliation removal, so a missed final re-ensure leaves the real index
+absent. Host-specific native DDL scheduling remains outside these Node cuts.
+The persisted Electric interleaving owner holds an uncancelable local cache
+read after demand abort. It requires the returned load to remain pending until
+the cached row is public, then reject with `AbortError`; both fixed and random
+campaigns were RED at the early-settlement checkpoint before the wrapper
+separated pre-hydration abort from in-flight baseline settlement. A separate
+composed Electric probe confirms prompt abort while a later source snapshot is
+held after local hydration. These cuts do not establish cancellation of an SDK
+request that has already delivered its rows through the shared stream.
+
+The persisted owner refuses a managed custom adapter that lacks rotation,
+renewal, or release, and refuses recovery from a managed source without a
+provider-session restart capability. The Browser owner holds the old leader's
+release message while the new generation starts its own source demand. Its
+host factory owner checks that configured claim lifetime and clock reach the
+SQLite adapter. A composed receiving history advances that clock past expiry
+and rejects a peer update before reloading the demanded subset. Cross-package
+Browser runs require freshly built core package
+artifacts because package exports otherwise resolve stale `dist` files.
+
+Reachable limits remain. A source that declares a restart capability must
+itself retire callbacks synchronously when recovery calls it. Claim expiry
+after core publication but before SQLite accepts the write rejects the receipt
+and leaves the Collection in terminal error; a real-SQLite hostile probe
+confirmed the row can remain public without becoming durable. The ordinary
+durability-failure law permits that fail-stop, while automatic expiry reload
+covers admission before publication. The first new-format
+claim isolates but does not reclaim legacy storage.
+The Browser coordinator owner now drops an old leader's release reply after
+its adapter unload, transfers leadership, lets the real RPC timer expire, and
+checks that retry retires the outbound acquisition without replaying demand or
+unloading twice. A release-without-retirement mutant failed at the new owner's
+unexpected load. Claimless direct-adapter access to a physical ID after its
+catalog row is collected remains unproved and has a reproduced orphan-write
+probe; rejecting it while retaining arbitrary eager Collection IDs requires a
+durable distinction for former physical IDs.
+The Browser owner
+now has a combined receiving history over real wa-sqlite and the controlled
+Browser coordinator wire. Two runs hold distinct claims on one generation;
+only the earlier claim expires before its renewal timer. A real durable peer
+write precedes a matching, manually delivered notice. The expired run reloads
+into private storage while the warm peer retains its exact public and durable
+row, live claim, and source ownership for another demand. The current head
+remains unchanged. An always-rotate-head mutant failed at the head-ID
+comparison. Native coordinator emission, multi-tab or OPFS scheduling, and a
+composed SQLite-to-wrapper startup rejection were open at that review head.
+The SQLite owner now composes a real claim rejection during startup with the
+persisted wrapper: the expired run gets a private cache and a fresh demanded
+row, while a later live peer keeps its public row, durable row, and resume
+metadata under the unchanged head. Its separate three-generation reachability
+model varies release, expiry, renewal, zero or two rows, and collection
+checkpoints immediately before and at both renewed expiries. It compares
+retained row, tombstone, resume, and key contents; both physical tables;
+native indexes; every generation-scoped catalog; and claim identities.
+Wall-clock passage alone is not a sweep checkpoint. The persisted notice
+grammar now holds the fresh source receipt behind an optimistic transaction
+and checks a pending constrained demand, stale-row quarantine, the public
+publication trace, and release of the exact `(storage ID, options)` refresh
+acquisition. Its controlled coordinator supplies the receipt wait. The fixed
+Browser receiving cut below supplies that premise with a real coordinator on
+one schedule.
+The Browser OPFS owner now has a fixed two-context receiving history in which a
+real source commit makes the coordinator emit a physical-ID notice over native
+BroadcastChannel. One receiver callback is held until its claim expires;
+its private reload leaves the warm peer's public and durable rows and current
+head intact. An explicit demand stays pending until the fresh source receipt
+applies. The renewal timer lies beyond the fixed test window, and the receiver
+checks no refetch before releasing the delivered callback. The same fixed
+two-context history now also runs the installed Electric SDK
+in the expired tab against controlled HTTP source snapshots. It holds an old
+subset request and the new source response across the native notice, then
+checks pending demand, public and durable rows, and the warm peer. Dropping the
+held native callback fails at the refetch-entry checkpoint. Arbitrary native
+scheduling and a live Electric service rather than controlled HTTP remain
+separate unproved cuts; these
+fixed receivers do not close every cache-eviction interleaving.
+
+The [cache-generation oracle audit](oracle-reviews/issue-2069-cache-generation-oracle-audit-53ded62d8.md)
+records the generated grammar controls, killed mutants, direct replays, and
+the remaining handoff limits for code commit `53ded62d8ef70ccd63b75d0e6dbc0a964f14b17c`.
+The [cache-claim gap audit](oracle-reviews/issue-2069-cache-claim-gap-audit-575fb9473.md)
+records the added receiving witnesses, hostile checks, direct replay, and
+remaining limits for code commit `575fb9473dd7d8eccbe469d0831dc9f71cffddd4`.
+The [native SQLite index receiving audit](oracle-reviews/issue-2069-native-ddl-receiver-b4d57ced6.md)
+records the two reverse-order DDL witnesses, hostile checks, and remaining
+host-specific limit for code commit `b4d57ced63d513dd0dcb794b8e8bb2a840577758`.
+The [follow-up review audit](oracle-reviews/issue-2069-native-ddl-review-followup-b42b94b73.md)
+records the exact recovery-settlement and target-table assertion repairs for
+code commit `b42b94b73ddba79a6a87fa93e71787dd126ea1bd`.
+
+[Issue #2056 evaluation](oracle-reviews/issue-2056-full-mode-recovery.md) records
+the original RED and candidate comparisons on head
+`f43a16522c990134ae993235a312d2d5e433dc8a`. The later scoped design
+revises the Electric guide's on-demand cold-recovery contract. The earlier
+“Complete” literacy status is not a claim that every recovery law or provider
+assumption is enforced.
+
+Primary owner: `packages/electric-db-collection/tests/electric-descriptor-isolation-oracle.test.ts`.
+Its tag-history fixture has no managed cache claim, so an incompatible on-demand
+resume waits for a full source replacement while cached rows remain visible
+until the source transaction begins. The controlled ShapeStream rejects snapshot
+requests in full mode. Tagged cold, legacy, explicit reset, warm resume,
+interruption, partial replacement, and late demand have named cuts. Managed
+scoped recovery has separate descriptor and installed-SDK histories. The
+fixed/random tag campaigns share budget and grammar; a direct seed/path replay
+runs only the selected property. An unconstrained subset demand can fetch all
+rows because the caller requested all rows; it does not prove bounded network
+work.
+
+Receiver: `packages/electric-db-collection/tests/electric-sdk-delivery-oracle.property.test.ts`.
+A real installed SDK receives two launches through the Electric adapter and
+persistence wrapper with controlled HTTP and durable storage. Direct demand and
+public live-query preload settle through changes-only scoped snapshots in a
+managed fixture with separate durable stores for retired and current cache
+generations. The receiver verifies `id = 1` and its bound parameter on both
+launches. It permits one snapshot to satisfy the live query's active demand
+and checks its public and durable row after settlement.
+It does not require a second physical request for the same subset. Lost tags,
+changed shape, and malformed resume state keep stale B in the retired store
+without exposing it after an A snapshot or an empty B
+snapshot. The changed-shape case makes B's empty snapshot first. A third launch
+with no demand starts no full-shape transport or unrestricted local subset
+read. The fixture models generation routing, while real SQLite independently
+checks claim enforcement and physical tables. Another receiving witness rejects
+concurrent SDK snapshot invocation on the shared cursor. Compatible untagged
+resumes and the unmanaged full-log fallback remain separate controls.
+An installed-SDK abort witness holds subset HTTP across external stream
+retirement, then returns a valid row. The demand rejects, the row stays absent,
+and an identical demand is not certified as loaded.
+The two-launch receiver also delivers a coordinator invalidation after a
+paginated scoped snapshot. The persistence owner crosses targeted, paginated,
+full-reload, and reset notifications after an active source row. Its
+post-invalidation public-row checks distinguish source authority from durable
+cache; the non-scoped paginated reload remains a neighboring control.
+The persistence owner also checks that a scoped cache clear preserves initial
+Collection loading until the source marks ready. A held optimistic handler
+checks that the same clear settles before the handler releases: core applies a
+truncate immediately, so the proposed accepted-versus-applied deadlock does
+not arise on this path. Its subset settlement law remains separate.
+The persistence owner now calls baseline hydration after starting scoped
+recovery with a stale durable row. It requires that no row enter the public
+Collection and that no full-row resume snapshot be read. This is a direct
+capability-ordering witness; ordinary Electric startup does not call baseline
+hydration after choosing scoped recovery. The buffered partial-update recovery
+read has a gated failed-local-load history: a partial source update may appear,
+but it cannot inherit stale durable fields. Removing the scoped read guard
+fails at that public-field checkpoint.
+`electric-resume-snapshot-races.test.ts` also holds a real SQLite metadata
+read across row loss or a committed replacement. Unknown and missing key-set
+evidence start changes-only without publishing the cached rows; a row-1 demand
+then applies only its source snapshot. This is a fixed Node SQLite receiving
+witness, not a generated-history claim or a native Expo result.
+Its two cache-generation receiving histories use Electric's real resume
+classifier and wrapper with real SQLite. An incompatible stored shape reaches
+private rotation after claim expiry without overwriting a warm peer's resume
+metadata. A later active-session claim expiry holds the boundary after SQLite
+rotation and before public truncate; a retired callback cannot write there,
+and a demand started in that interval settles after its replacement subset
+applies. The ShapeStream callback schedule is controlled. An installed-SDK HTTP delivery
+at this exact intermediate cut and native-host execution are not established.
+
+Applied-settlement owner: `packages/electric-db-collection/tests/electric-oracle.property.test.ts`.
+Held optimistic application distinguishes readiness from subset completion for
+demand both before and after readiness. A later same-run reset distinguishes a
+current replacement obligation from a permanently fulfilled startup gate.
+Concurrent initial-error and cleanup cuts observe settlement and lifecycle
+authority; cleanup quietly settles in-flight adapter loads. A sibling-demand
+abort cut requires one canceled demand to reject promptly while its sibling
+and a replacement of the canceled demand wait for the full source snapshot and
+succeed after its row applies. A separate external stream abort rejects its
+current full-log demand and never certifies an identical later demand as loaded.
+These full-log wait obligations still apply when scoped recovery is unavailable;
+the scoped path uses SDK snapshots and applied receipts.
+The changes-only path has the same refusal both when a subset transport returns
+after stream retirement and when an applied receipt is held across that
+retirement.
+The full-mode retry histories now reject their pre-error demand, then require a
+new demand to succeed after a same-run recovered snapshot, both with and
+without a held applied receipt. An installed-SDK controlled-HTTP receiver
+exhausts 503 backoff, invokes the user's retry
+handler, and acquires a new demand while the retry HTTP request is open. It
+requires that demand to wait, then succeed after the new full-log up-to-date.
+A missing-header response checks that the SDK's refusal to retry rejects later
+demands rather than leaving a renewed gate pending. The
+scoped reset history acquires a snapshot before must-refetch, then requires
+subset-end to apply its row before demand success without waiting for a full
+up-to-date. The neighboring full-mode reset retains that stronger wait. The
+Electric durable fixture has an adversarial insert check that rejects retained
+old columns or tag metadata; it is driver validation, not a new model owner.
+The Electric adapter owner now holds an asynchronous user retry decision and
+checks that a new full-recovery demand remains pending until source replacement,
+while the pre-error demand rejects. It also checks caller abort before subset
+transport settlement, while a request is queued behind the SDK cursor, and
+while an applied receipt is held. Each original behavior failed at the caller
+settlement cut; the fixed driver requires prompt `AbortError` without certifying
+that demand. The explicit-resume neighbor keeps malformed durable metadata
+untouched until source evidence arrives. The persistence owner now invokes a
+retired scoped-recovery capability after cleanup and restart; the original
+cleared the replacement Collection, and the lifecycle guard preserves its row.
+These fixed schedules do not prove arbitrary overlapping retry decisions or
+all failure paths through `startScopedRecovery`. A valid scoped-clear commit
+failure with an exact public sync-error observation still needs a witness;
+an attempted subscriber-throw fixture did not reach that callback during the
+local clear and supplies no evidence for the review's error-report claim.
+
+Remaining witnesses before broader closure:
+
+- Electric tag/history owners: unknown or missing key-set evidence combined
+  with tagged scoped demand, multiple resets overlapping held application,
+  and partial updates arriving before a scoped baseline. Repeated provider
+  errors, SDK retry-loop exhaustion, and a
+  scoped reset overlapping a held applied receipt also need witnesses. The
+  untagged SQLite metadata-read race is covered above.
+- Persistence/coordinator owners: native SQLite reads, browser/electron
+  cross-tab transport delivering an invalidation during cache quarantine, and
+  source versus local-only truncate durability. Controlled coordinator
+  delivery and installed-SDK receipt cover the wrapper response, not the
+  multiprocess transport premise. Scoped recovery also needs an explicit
+  durable-cache eviction or certification policy: the current reset marker
+  makes later uncertified starts repeat quarantine, and deleted durable rows
+  can remain on disk. Neither a safe offline subset certificate nor bounded
+  storage growth is proved here.
+- Installed-SDK delivery and Electric service E2E owners: actual subquery/tag
+  emission, overlapping provider responses, and the scoped restart schedule
+  against a live service.
+- Expo `expo-persisted-collection.e2e.test.ts` and emulator owners: the offered
+  node:sqlite fixture, native storage, and actual process relaunch.
+- Descriptor/tag and SDK DNF owners, if durable tags are selected: complete
+  selected membership and silent active-condition changes persisted atomically
+  with rows and the resume certificate, including migration/reset admission.
+
+No individual maintainer assignment or approved deferral is implied by these
+executable ownership destinations. The bounded controlled-HTTP and Map-backed
+persistence witnesses do not establish class closure across those hosts.
 
 ## Paced persistence serialization
 

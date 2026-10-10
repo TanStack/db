@@ -4,7 +4,9 @@
  * starts one OPFS tab, then opens a follower on the same database and requests
  * one ID through a filtered live-query Collection. The independent expected
  * result is exactly that ID and its fixture label. After follower preload, we
- * check the public row, the remote route, and the absence of clone failures.
+ * check the public row, the remote route to the claimed physical storage ID,
+ * and the absence of clone failures. The claim is observed at coordinator
+ * registration, rather than guessed from the storage naming scheme.
  * The finite warning window catches the reported 50 ms retry flood, not
  * arbitrary future failures.
  */
@@ -37,6 +39,8 @@ test(`two real OPFS tabs transport a filtered subset without a clone retry`, asy
     await leader.goto(url)
     const first = await observe(leader)
     if (first.phase === `failed`) throw new Error(first.failure)
+    expect(first.storageCollectionId).toBeTruthy()
+    expect(first.storageCollectionId).not.toBe(`repro-items`)
     expect(first.isLeader).toBe(true)
     expect(first.upstreamLoads).toBeGreaterThan(0)
     expect(first.rows).toHaveLength(1)
@@ -56,9 +60,11 @@ test(`two real OPFS tabs transport a filtered subset without a clone retry`, asy
         `${second.failure}; wire post failures: ${JSON.stringify(second.remoteSubsetPostFailures)}`,
       )
     }
+    expect(second.storageCollectionId).toBe(first.storageCollectionId)
     expect(second.isLeader).toBe(false)
     expect(second.upstreamLoads).toBe(0)
     expect(second.ensureRequests).toContainEqual({
+      collectionId: first.storageCollectionId,
       hasWhere: true,
       hasSignal: true,
       hasSubscriptionCallback: true,

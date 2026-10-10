@@ -1,0 +1,105 @@
+diff --git a/packages/electric-db-collection/src/electric.ts b/packages/electric-db-collection/src/electric.ts
+index d491c4b78..859e35e8a 100644
+--- a/packages/electric-db-collection/src/electric.ts
++++ b/packages/electric-db-collection/src/electric.ts
+@@ -648,6 +648,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
+   stream,
+   syncMode,
+   isBufferingInitialSync,
++  waitForFullSnapshot,
+   begin,
+   write,
+   commit,
+@@ -661,6 +662,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
+   stream: ShapeStream<T>
+   syncMode: ElectricSyncMode
+   isBufferingInitialSync: () => boolean
++  waitForFullSnapshot?: () => Promise<void>
+   begin: () => void
+   write: (mutation: {
+     type: `insert` | `update` | `delete`
+@@ -714,6 +716,12 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
+     }
+     throwIfAborted()
+
++    if (waitForFullSnapshot) {
++      await waitForFullSnapshot()
++      throwIfAborted()
++      return
++    }
++
+     if (isBufferingInitialSync()) {
+       const snapshotParams = compileSQL<T>(opts, compileOptions)
+       try {
+@@ -1742,6 +1750,21 @@ function createElectricSync<T extends Row<unknown>>(
+         (persistedResumeState.kind === `reset` ||
+           lacksCompletePersistedKeySet ||
+           (!retainsTagState && persistedResumeState.requiresTagState !== false))
++      // Evaluation prototype: one completion obligation per full replay.
++      const usesFullLog = syncMode === `on-demand` && needsFullSnapshot
++      let resolveFullSnapshot: (receipt: SyncAppliedReceipt) => void = () => {}
++      let rejectFullSnapshot: (error: unknown) => void = () => {}
++      let fullSnapshotReady = Promise.resolve()
++      const resetFullSnapshot = () => {
++        if (!usesFullLog) return
++        fullSnapshotReady = new Promise<void>((resolve, reject) => {
++          resolveFullSnapshot = (receipt) =>
++            resolve(receipt === true ? undefined : receipt)
++          rejectFullSnapshot = reject
++        })
++        void fullSnapshotReady.catch(() => undefined)
++      }
++      resetFullSnapshot()
+       const canUsePersistedResume =
+         shapeOptions.offset === undefined &&
+         shapeOptions.handle === undefined &&
+@@ -1814,6 +1837,7 @@ function createElectricSync<T extends Row<unknown>>(
+       }
+
+       abortController.signal.addEventListener(`abort`, () => {
++        rejectFullSnapshot(new StreamAbortedError(collectionId))
+         lifecycle.retire(lifecycleEpoch)
+       })
+
+@@ -1839,6 +1863,7 @@ function createElectricSync<T extends Row<unknown>>(
+           (canUsePersistedResume ? persistedResumeState.handle : undefined),
+         signal: abortController.signal,
+         onError: (errorParams) => {
++          rejectFullSnapshot(errorParams)
+           streamErrorVersion++
+           // Note that Electric sends a 409 error on a `must-refetch` message, but the
+           // ShapeStream handled this and it will not reach this handler, therefor
+@@ -2055,6 +2080,7 @@ function createElectricSync<T extends Row<unknown>>(
+         stream,
+         syncMode,
+         isBufferingInitialSync,
++        waitForFullSnapshot: usesFullLog ? () => fullSnapshotReady : undefined,
+         begin,
+         write,
+         commit,
+@@ -2287,6 +2313,9 @@ function createElectricSync<T extends Row<unknown>>(
+               processMoveInEvent(message.headers.patterns)
+             }
+           } else if (isMustRefetchMessage(message)) {
++            // Initial pending demand follows the replacement. Once a prior
++            // full snapshot completed, new demand needs a new obligation.
++            if (hasReceivedUpToDate) resetFullSnapshot()
+             debug(
+               `${collectionId ? `[${collectionId}] ` : ``}Received must-refetch message, starting transaction with truncate`,
+             )
+@@ -2424,6 +2453,7 @@ function createElectricSync<T extends Row<unknown>>(
+           const readyErrorVersion = streamErrorVersion
+           // Readiness counts accepted rows.
+           const accepted = whenSyncAccepted(applied)
++          if (commitPoint === `up-to-date`) resolveFullSnapshot(applied)
+           if (accepted === true) {
+             wrappedMarkReady(wasBufferingInitialSync, readyErrorVersion)
+           } else {
+@@ -2511,6 +2541,7 @@ function createElectricSync<T extends Row<unknown>>(
+
+             pendingResumeBatches.length = 0
+             resumeInvalid = true
++            rejectFullSnapshot(error)
+             commitResetResumeMetadataImmediately()
+             streamErrorVersion++
+             unsubscribeStream()

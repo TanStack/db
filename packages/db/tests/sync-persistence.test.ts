@@ -58,4 +58,43 @@ describe(`sync persistence capability`, () => {
       }),
     ).toThrow(/resumeSnapshot\.expectCurrentCommit.*forward/i)
   })
+
+  it(`accepts scoped recovery only when the optional capability is callable`, () => {
+    const resumeSnapshot = {
+      certify: () => Promise.resolve(),
+      getKeySetEvidence: () => ({ status: `consistent` as const }),
+      expectCurrentCommit: () => {},
+    }
+    const capability = {
+      ...baseCapability,
+      resumeSnapshot,
+      startScopedRecovery: () => Promise.resolve(),
+    }
+    expect(validateSyncPersistenceCapability(capability)).toBe(capability)
+    expect(() =>
+      validateSyncPersistenceCapability({
+        ...capability,
+        startScopedRecovery: true,
+      }),
+    ).toThrow(/startScopedRecovery must be a function/)
+  })
+
+  it(`validates the optional startup cache-generation rotation signal`, () => {
+    const capability = {
+      ...baseCapability,
+      startupCacheGenerationRotated: true,
+      resumeSnapshot: {
+        certify: () => Promise.resolve(),
+        getKeySetEvidence: () => ({ status: `consistent` as const }),
+        expectCurrentCommit: () => {},
+      },
+    }
+    expect(validateSyncPersistenceCapability(capability)).toBe(capability)
+    expect(() =>
+      validateSyncPersistenceCapability({
+        ...capability,
+        startupCacheGenerationRotated: `yes`,
+      }),
+    ).toThrow(/startupCacheGenerationRotated must be a boolean/)
+  })
 })

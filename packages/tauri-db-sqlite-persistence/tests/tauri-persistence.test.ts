@@ -37,6 +37,33 @@ function createTempSqlitePath(): string {
   return dbPath
 }
 
+it(`uses the configured cache-claim lifetime and clock`, async () => {
+  const database = createTauriSQLiteTestDatabase({
+    filename: createTempSqlitePath(),
+  })
+  registerDatabaseCleanup(database)
+  let now = 1_000
+  const persistence = createTauriPersistence({
+    database,
+    cacheGenerationClaimTtlMs: 1_234,
+    now: () => now,
+  })
+  const adapter = persistence.resolvePersistenceForCollection!({
+    collectionId: `claim-options`,
+    mode: `sync-present`,
+    schemaVersion: undefined,
+  }).adapter
+  const claim = await adapter.claimCacheGeneration!(`claim-options`)
+  expect(claim.expiresAtMs).toBe(2_234)
+  now = 2_234
+  expect(
+    await adapter.renewCacheGenerationClaim!(
+      claim.storageCollectionId,
+      claim.claimId,
+    ),
+  ).toBeUndefined()
+})
+
 function rethrowDatabaseErrorsAsStrings(
   database: TauriSQLiteDatabaseLike,
 ): TauriSQLiteDatabaseLike {
@@ -125,23 +152,26 @@ it(`migrates and reopens a legacy database when Tauri reports duplicate columns 
     database: migrationDatabase,
   })
 
-  await migrationPersistence.adapter.applyCommittedTx(collectionId, {
-    txId: `post-migration-tx`,
-    term: 1,
-    seq: 2,
-    rowVersion: 2,
-    mutations: [
-      {
-        type: `insert`,
-        key: `1`,
-        value: {
-          id: `1`,
-          title: `Survives migration`,
-          score: 1,
+  await migrationPersistence.adapter.applyCommittedTx(
+    { kind: `eager`, collectionId: collectionId },
+    {
+      txId: `post-migration-tx`,
+      term: 1,
+      seq: 2,
+      rowVersion: 2,
+      mutations: [
+        {
+          type: `insert`,
+          key: `1`,
+          value: {
+            id: `1`,
+            title: `Survives migration`,
+            score: 1,
+          },
         },
-      },
-    ],
-  })
+      ],
+    },
+  )
 
   const migratedColumns = await migrationDatabase.select<
     Array<{ name: string }>
@@ -169,7 +199,10 @@ it(`migrates and reopens a legacy database when Tauri reports duplicate columns 
   })
 
   await expect(
-    reopenedPersistence.adapter.loadSubset(collectionId, {}),
+    reopenedPersistence.adapter.loadSubset(
+      { kind: `eager`, collectionId: collectionId },
+      {},
+    ),
   ).resolves.toEqual([
     {
       key: `1`,
@@ -207,7 +240,10 @@ it(`propagates unrelated string failures from a Tauri migration`, async () => {
   const persistence = createTauriPersistence({ database: failingDatabase })
 
   await expect(
-    persistence.adapter.loadSubset(`todos-unrelated-migration-error`, {}),
+    persistence.adapter.loadSubset(
+      { kind: `eager`, collectionId: `todos-unrelated-migration-error` },
+      {},
+    ),
   ).rejects.toBe(`database is locked`)
 })
 
@@ -221,23 +257,26 @@ it(`persists data across app restart (close and reopen)`, async () => {
   })
   const firstAdapter = firstPersistence.adapter
 
-  await firstAdapter.applyCommittedTx(collectionId, {
-    txId: `tx-restart-1`,
-    term: 1,
-    seq: 1,
-    rowVersion: 1,
-    mutations: [
-      {
-        type: `insert`,
-        key: `1`,
-        value: {
-          id: `1`,
-          title: `Survives restart`,
-          score: 10,
+  await firstAdapter.applyCommittedTx(
+    { kind: `eager`, collectionId: collectionId },
+    {
+      txId: `tx-restart-1`,
+      term: 1,
+      seq: 1,
+      rowVersion: 1,
+      mutations: [
+        {
+          type: `insert`,
+          key: `1`,
+          value: {
+            id: `1`,
+            title: `Survives restart`,
+            score: 10,
+          },
         },
-      },
-    ],
-  })
+      ],
+    },
+  )
   await Promise.resolve(firstDatabase.close())
 
   const secondDatabase = createTauriSQLiteTestDatabase({ filename: dbPath })
@@ -249,7 +288,10 @@ it(`persists data across app restart (close and reopen)`, async () => {
   })
   const secondAdapter = secondPersistence.adapter
 
-  const rows = await secondAdapter.loadSubset(collectionId, {})
+  const rows = await secondAdapter.loadSubset(
+    { kind: `eager`, collectionId: collectionId },
+    {},
+  )
   expect(rows).toEqual([
     {
       key: `1`,
@@ -273,25 +315,31 @@ it(`shares the same runtime behavior through index and tauri entrypoints`, async
   const indexPersistence = createIndexPersistence({ database })
   const tauriPersistence = createTauriPersistence({ database })
 
-  await indexPersistence.adapter.applyCommittedTx(collectionId, {
-    txId: `tx-entrypoint-1`,
-    term: 1,
-    seq: 1,
-    rowVersion: 1,
-    mutations: [
-      {
-        type: `insert`,
-        key: `1`,
-        value: {
-          id: `1`,
-          title: `Entry point parity`,
-          score: 1,
+  await indexPersistence.adapter.applyCommittedTx(
+    { kind: `eager`, collectionId: collectionId },
+    {
+      txId: `tx-entrypoint-1`,
+      term: 1,
+      seq: 1,
+      rowVersion: 1,
+      mutations: [
+        {
+          type: `insert`,
+          key: `1`,
+          value: {
+            id: `1`,
+            title: `Entry point parity`,
+            score: 1,
+          },
         },
-      },
-    ],
-  })
+      ],
+    },
+  )
 
-  const rows = await tauriPersistence.adapter.loadSubset(collectionId, {})
+  const rows = await tauriPersistence.adapter.loadSubset(
+    { kind: `eager`, collectionId: collectionId },
+    {},
+  )
   expect(rows[0]?.value.title).toBe(`Entry point parity`)
 })
 
@@ -337,7 +385,10 @@ it(`resumes persisted sync after cleanup and restart`, async () => {
   await resumedInsert.isPersisted.promise
   expect(collection.get(`2`)?.title).toBe(`After restart`)
 
-  const persistedRows = await persistence.adapter.loadSubset(collectionId, {})
+  const persistedRows = await persistence.adapter.loadSubset(
+    { kind: `eager`, collectionId: collectionId },
+    {},
+  )
   expect(persistedRows).toEqual(
     expect.arrayContaining([
       expect.objectContaining({

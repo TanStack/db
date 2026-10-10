@@ -3,6 +3,7 @@ import { isValidCommittedTxAnchor } from './committed-tx-anchor'
 import {
   DuplicateRemoteSubsetOwnerError,
   IndeterminateCommitError,
+  InvalidPersistedCollectionConfigError,
   InvalidPersistenceAdapterError,
   PersistedCollectionDurabilityError,
   RetryableRemoteSubsetAcquisitionError,
@@ -13,6 +14,7 @@ import {
   toTransportedLoadSubsetOptions,
 } from './remote-subset-wire'
 import { unloadRemoteSubsetOwner } from './remote-subset-owner'
+import { eagerStorageTarget, managedStorageTarget } from './persisted'
 import type { LoadSubsetOptions } from '@tanstack/db'
 import type { IndeterminateCommitRequestType } from './errors'
 import type { TransportedLoadSubsetOptions } from './remote-subset-wire'
@@ -28,6 +30,7 @@ import type {
   PersistedIndexSpec,
   PersistedMutationEnvelope,
   PersistedRowMetadataMutation,
+  PersistedStorageTarget,
   PersistedTx,
   PersistenceAdapter,
   ProtocolEnvelope,
@@ -64,12 +67,14 @@ type RPCRequest =
       rpcId: string
       signature: string
       spec: PersistedIndexSpec
+      cacheGenerationClaimId?: string
     }
   | {
       type: `rpc:applyLocalMutations:req`
       rpcId: string
       envelopeId: string
       mutations: Array<PersistedMutationEnvelope>
+      cacheGenerationClaimId?: string
     }
   | {
       type: `rpc:applyCommittedTx:req`
@@ -87,6 +92,7 @@ type RPCRequest =
       type: `rpc:pullSince:req`
       rpcId: string
       fromRowVersion: number
+      cacheGenerationClaimId?: string
     }
 
 type RPCResponse =
@@ -133,8 +139,9 @@ type CoordinatorAdapter = Pick<
   | `runInRegularScope`
 > & {
   pullSince?: (
-    collectionId: string,
+    target: PersistedStorageTarget,
     fromRowVersion: number,
+    ctx?: { cacheGenerationClaimId?: string },
   ) => Promise<
     | {
         latestRowVersion: number
@@ -147,14 +154,18 @@ type CoordinatorAdapter = Pick<
         deletedKeys: Array<string | number>
       }
   >
-  getStreamPosition?: (collectionId: string) => Promise<{
+  getStreamPosition?: (
+    target: PersistedStorageTarget,
+    ctx?: { cacheGenerationClaimId?: string },
+  ) => Promise<{
     latestTerm: number
     latestSeq: number
     latestRowVersion: number
   }>
   reserveLeadershipTerm?: (
-    collectionId: string,
+    target: PersistedStorageTarget,
     observedTerm: number,
+    ctx?: { cacheGenerationClaimId?: string },
   ) => Promise<{
     latestTerm: number
     latestSeq: number
@@ -175,6 +186,7 @@ type ActiveRemoteSubsetAcquisition = {
   owner: RemoteSubsetOwner
   options: TransportedLoadSubsetOptions
   load: Promise<void>
+  admitted: Promise<void>
   transferred: boolean
   released: boolean
   terminalRelease: boolean
@@ -259,6 +271,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
   private readonly coordinatorName: string
   private defaultAdapter: CoordinatorAdapter | null
   private readonly collectionAdapters = new Map<string, CoordinatorAdapter>()
+  private readonly collectionClaimIds = new Map<string, string>()
   private readonly remoteSubsetOwners = new Map<string, RemoteSubsetOwner>()
   private readonly remoteSubsetIds = new Map<
     string,
@@ -338,9 +351,15 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
   setAdapterForCollection(
     collectionId: string,
     adapter: CoordinatorAdapter,
+    cacheGenerationClaimId?: string,
   ): void {
     requireDurableElection(adapter)
     this.collectionAdapters.set(collectionId, adapter)
+    if (cacheGenerationClaimId) {
+      this.collectionClaimIds.set(collectionId, cacheGenerationClaimId)
+    } else {
+      this.collectionClaimIds.delete(collectionId)
+    }
   }
 
   registerRemoteSubsetOwner(
@@ -523,9 +542,36 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     }
     try {
       await acquisition.release
+    } catch (error) {
+      this.scheduleRemoteSubsetReleaseRetry(acquisition, options)
+      throw error
     } finally {
       acquisition.release = null
     }
+  }
+
+  private scheduleRemoteSubsetReleaseRetry(
+    acquisition: OutboundRemoteSubsetAcquisition,
+    options: LoadSubsetOptions,
+  ): void {
+    const key = remoteSubsetAcquisitionKey(
+      acquisition.collectionId,
+      acquisition.acquisitionId,
+    )
+    if (
+      this.isDisposed() ||
+      this.outboundRemoteSubsetAcquisitions.get(key) !== acquisition ||
+      acquisition.retryTimer !== null
+    ) {
+      return
+    }
+    acquisition.retryTimer = setTimeout(() => {
+      acquisition.retryTimer = null
+      void this.requestReleaseRemoteSubset(
+        acquisition.collectionId,
+        options,
+      ).catch(() => undefined)
+    }, RPC_RETRY_DELAY_MS)
   }
 
   private async acquireRemoteSubset(
@@ -636,14 +682,27 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     spec: PersistedIndexSpec,
     scopedAdapter?: HydrationPersistenceAdapter,
     localEnsureCompleted = false,
+    cacheGenerationClaimId?: string,
   ): Promise<void> {
     if (this.isLeader(collectionId)) {
       if (localEnsureCompleted) return
-      await (scopedAdapter ?? this.requireAdapter(collectionId)).ensureIndex(
-        collectionId,
-        signature,
-        spec,
-      )
+      const adapter = scopedAdapter ?? this.requireAdapter(collectionId)
+      if (cacheGenerationClaimId) {
+        await adapter.ensureIndex(
+          managedStorageTarget(collectionId, cacheGenerationClaimId),
+          signature,
+          spec,
+          {
+            cacheGenerationClaimId,
+          },
+        )
+      } else {
+        await adapter.ensureIndex(
+          eagerStorageTarget(collectionId),
+          signature,
+          spec,
+        )
+      }
       return
     }
 
@@ -657,6 +716,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       rpcId: safeRandomUUID(),
       signature,
       spec,
+      cacheGenerationClaimId,
     })
 
     if (!response.ok) {
@@ -669,6 +729,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
   async requestApplyLocalMutations(
     collectionId: string,
     mutations: Array<PersistedMutationEnvelope>,
+    cacheGenerationClaimId?: string,
   ): Promise<ApplyLocalMutationsResponse> {
     const initialRoute = this.waitForInitialRoute(collectionId)
     if (initialRoute) await initialRoute
@@ -678,6 +739,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
         rpcId: safeRandomUUID(),
         envelopeId: safeRandomUUID(),
         mutations,
+        cacheGenerationClaimId,
       })
     }
 
@@ -686,6 +748,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       rpcId: safeRandomUUID(),
       envelopeId: safeRandomUUID(),
       mutations,
+      cacheGenerationClaimId,
     })
   }
 
@@ -750,6 +813,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     collectionId: string,
     fromRowVersion: number,
     scopedAdapter?: HydrationPersistenceAdapter,
+    cacheGenerationClaimId?: string,
   ): Promise<PullSinceResponse> {
     if (this.isLeader(collectionId)) {
       return this.handlePullSince(
@@ -758,6 +822,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
           type: `rpc:pullSince:req`,
           rpcId: safeRandomUUID(),
           fromRowVersion,
+          cacheGenerationClaimId,
         },
         scopedAdapter,
       )
@@ -767,6 +832,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       type: `rpc:pullSince:req`,
       rpcId: safeRandomUUID(),
       fromRowVersion,
+      cacheGenerationClaimId,
     })
   }
 
@@ -805,6 +871,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     this.channel.close()
     this.collections.clear()
     this.collectionAdapters.clear()
+    this.collectionClaimIds.clear()
     for (const collectionId of this.remoteSubsetOwners.keys()) {
       this.releaseInboundRemoteSubsetAcquisitions(collectionId)
     }
@@ -883,9 +950,17 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
             const reserveTerm = adapter.reserveLeadershipTerm
             if (!reserveTerm)
               throw new InvalidPersistenceAdapterError(`reserveLeadershipTerm`)
-            const pos = await this.withWriterLock(() =>
-              reserveTerm.call(adapter, collectionId, state.latestTerm),
-            )
+            const pos = await this.withWriterLock(() => {
+              const claimId = this.collectionClaimIds.get(collectionId)
+              return reserveTerm.call(
+                adapter,
+                claimId
+                  ? managedStorageTarget(collectionId, claimId)
+                  : eagerStorageTarget(collectionId),
+                state.latestTerm,
+                { cacheGenerationClaimId: claimId },
+              )
+            })
             state.latestTerm = pos.latestTerm
             state.latestSeq = pos.latestSeq
             state.latestRowVersion = pos.latestRowVersion
@@ -1079,6 +1154,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     this.releaseLeadership(collectionId, state)
     this.collections.delete(collectionId)
     this.collectionAdapters.delete(collectionId)
+    this.collectionClaimIds.delete(collectionId)
     const prefix = `${JSON.stringify([collectionId]).slice(0, -1)},`
     for (const key of this.appliedEnvelopes.keys()) {
       if (key.startsWith(prefix)) this.appliedEnvelopes.delete(key)
@@ -1625,12 +1701,11 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     acquisition.released = true
     acquisition.release = (async () => {
       try {
-        await acquisition.load
-      } catch {
-        // A returned promise transfers the lease even when initial loading fails.
-      }
-      try {
+        await acquisition.admitted
         if (acquisition.transferred) {
+          // The owner may require unload to settle its load. Invocation of the
+          // owner already transferred this lease; source settlement is not a
+          // prerequisite for giving it the cancellation opportunity.
           await unloadRemoteSubsetOwner(acquisition.owner, acquisition.options)
         }
       } finally {
@@ -1790,6 +1865,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       owner: options.owner,
       options: options.options,
       load: Promise.resolve(),
+      admitted: Promise.resolve(),
       transferred: false,
       released: false,
       terminalRelease: false,
@@ -1797,6 +1873,10 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     }
     this.releasedRemoteSubsetAcquisitionTimes.delete(key)
     this.inboundRemoteSubsetAcquisitions.set(key, acquisition)
+    let resolveAdmission!: () => void
+    acquisition.admitted = new Promise<void>((resolve) => {
+      resolveAdmission = resolve
+    })
     let resolveLoad!: () => void
     let rejectLoad!: (error: unknown) => void
     acquisition.load = new Promise<void>((resolve, reject) => {
@@ -1809,6 +1889,8 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       void Promise.resolve(load).then(resolveLoad, rejectLoad)
     } catch (error) {
       rejectLoad(error)
+    } finally {
+      resolveAdmission()
     }
 
     try {
@@ -1844,11 +1926,26 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       rpcId: string
       signature: string
       spec: PersistedIndexSpec
+      cacheGenerationClaimId?: string
     },
   ): Promise<RPCResponse> {
-    await this.withScheduledWriterLock(collectionId, (adapter) =>
-      adapter.ensureIndex(collectionId, request.signature, request.spec),
-    )
+    await this.withScheduledWriterLock(collectionId, (adapter) => {
+      if (request.cacheGenerationClaimId) {
+        return adapter.ensureIndex(
+          managedStorageTarget(collectionId, request.cacheGenerationClaimId),
+          request.signature,
+          request.spec,
+          {
+            cacheGenerationClaimId: request.cacheGenerationClaimId,
+          },
+        )
+      }
+      return adapter.ensureIndex(
+        eagerStorageTarget(collectionId),
+        request.signature,
+        request.spec,
+      )
+    })
     return {
       type: `rpc:ensurePersistedIndex:res`,
       rpcId: request.rpcId,
@@ -1863,6 +1960,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       rpcId: string
       envelopeId: string
       mutations: Array<PersistedMutationEnvelope>
+      cacheGenerationClaimId?: string
     },
   ): Promise<ApplyLocalMutationsResponse> {
     const envelopeKey = appliedEnvelopeKey(collectionId, request.envelopeId)
@@ -1896,6 +1994,14 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     collectionId: string,
     request: Extract<RPCRequest, { type: `rpc:applyLocalMutations:req` }>,
   ): Promise<ApplyLocalMutationsResponse> {
+    if (
+      this.collectionClaimIds.has(collectionId) &&
+      !request.cacheGenerationClaimId
+    ) {
+      throw new InvalidPersistedCollectionConfigError(
+        `A managed local mutation requires a persisted cache claim`,
+      )
+    }
     const state = this.collections.get(collectionId)
     if (!state || !state.isLeader) {
       return {
@@ -1925,6 +2031,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     }
     const pendingTx = {
       txId: safeRandomUUID(),
+      cacheGenerationClaimId: request.cacheGenerationClaimId,
       mutations: request.mutations.map((m) => ({
         type: m.type,
         key: m.key,
@@ -2230,7 +2337,12 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
         if (!adapter.reconcileCommittedTx) return { kind: `unknown` as const }
         try {
           const reconciled = await adapter.reconcileCommittedTx(
-            collectionId,
+            candidate.cacheGenerationClaimId
+              ? managedStorageTarget(
+                  collectionId,
+                  candidate.cacheGenerationClaimId,
+                )
+              : eagerStorageTarget(collectionId),
             candidate,
             request.anchor,
           )
@@ -2327,7 +2439,12 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
         )
         if (tx === null) return null
         try {
-          await adapter.applyCommittedTx(collectionId, tx)
+          await adapter.applyCommittedTx(
+            tx.cacheGenerationClaimId
+              ? managedStorageTarget(collectionId, tx.cacheGenerationClaimId)
+              : eagerStorageTarget(collectionId),
+            tx,
+          )
         } catch (error) {
           throw toPersistedCollectionDurabilityError(collectionId, error)
         }
@@ -2345,6 +2462,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       type: `rpc:pullSince:req`
       rpcId: string
       fromRowVersion: number
+      cacheGenerationClaimId?: string
     },
     scopedAdapter?: HydrationPersistenceAdapter,
   ): Promise<PullSinceResponse> {
@@ -2363,7 +2481,15 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       }
     }
 
-    const result = await adapter.pullSince(collectionId, request.fromRowVersion)
+    const result = await adapter.pullSince(
+      request.cacheGenerationClaimId
+        ? managedStorageTarget(collectionId, request.cacheGenerationClaimId)
+        : eagerStorageTarget(collectionId),
+      request.fromRowVersion,
+      {
+        cacheGenerationClaimId: request.cacheGenerationClaimId,
+      },
+    )
 
     if (result.requiresFullReload) {
       return {

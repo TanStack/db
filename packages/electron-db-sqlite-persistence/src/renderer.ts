@@ -1,6 +1,7 @@
 import {
   InvalidPersistedCollectionConfigError,
   SingleProcessCoordinator,
+  resolvePersistedStorageTarget,
 } from '@tanstack/db-sqlite-persistence-core'
 import { ElectronCollectionCoordinator } from './electron-coordinator'
 import {
@@ -9,10 +10,12 @@ import {
 } from './protocol'
 import type {
   CommittedTxAnchor,
+  PersistedCacheGenerationClaim,
   PersistedCollectionCoordinator,
   PersistedCollectionMode,
   PersistedCollectionPersistence,
   PersistedIndexSpec,
+  PersistedStorageTarget,
   PersistedTx,
   ReconciledCommittedTx,
   SQLitePullSinceResult,
@@ -99,7 +102,7 @@ function createSerializableLoadSubsetOptions(
 
 type RendererRequestExecutor = <TMethod extends ElectronPersistenceMethod>(
   method: TMethod,
-  collectionId: string,
+  target: string | PersistedStorageTarget,
   payload: ElectronPersistencePayloadMap[TMethod],
   resolution?: ElectronPersistenceResolution,
 ) => Promise<ElectronPersistenceResultMap[TMethod]>
@@ -114,14 +117,19 @@ function createRendererRequestExecutor(options: {
 
   return async <TMethod extends ElectronPersistenceMethod>(
     method: TMethod,
-    collectionId: string,
+    target: string | PersistedStorageTarget,
     payload: ElectronPersistencePayloadMap[TMethod],
     resolution?: ElectronPersistenceResolution,
   ) => {
+    const storageTarget = typeof target === `string` ? undefined : target
+    const collectionId = storageTarget
+      ? resolvePersistedStorageTarget(storageTarget).collectionId
+      : target
     const request = {
       v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
       requestId: createRequestId(),
       collectionId,
+      storageTarget,
       method,
       resolution,
       payload,
@@ -165,11 +173,13 @@ function createRendererRequestExecutor(options: {
 type ElectronRendererResolvedAdapter =
   PersistedCollectionPersistence[`adapter`] & {
     loadCollectionMetadata: (
-      collectionId: string,
+      target: PersistedStorageTarget,
+      ctx?: { cacheGenerationClaimId?: string },
     ) => Promise<Array<{ key: string; value: unknown }>>
     scanRows: (
-      collectionId: string,
+      target: PersistedStorageTarget,
       options?: { metadataOnly?: boolean },
+      ctx?: { cacheGenerationClaimId?: string },
     ) => Promise<
       Array<{
         key: string | number
@@ -178,17 +188,22 @@ type ElectronRendererResolvedAdapter =
       }>
     >
     pullSince: (
-      collectionId: string,
+      target: PersistedStorageTarget,
       fromRowVersion: number,
+      ctx?: { cacheGenerationClaimId?: string },
     ) => Promise<SQLitePullSinceResult<string | number>>
-    getStreamPosition: (collectionId: string) => Promise<{
+    getStreamPosition: (
+      target: PersistedStorageTarget,
+      ctx?: { cacheGenerationClaimId?: string },
+    ) => Promise<{
       latestTerm: number
       latestSeq: number
       latestRowVersion: number
     }>
     reserveLeadershipTerm: (
-      collectionId: string,
+      target: PersistedStorageTarget,
       observedTerm: number,
+      ctx?: { cacheGenerationClaimId?: string },
     ) => Promise<{
       latestTerm: number
       latestSeq: number
@@ -198,20 +213,29 @@ type ElectronRendererResolvedAdapter =
 
 function createResolvedRendererAdapter(
   executeRequest: RendererRequestExecutor,
+  claimCollections: Map<string, string>,
+  managedCacheGenerations: boolean,
   resolution?: ElectronPersistenceResolution,
 ): ElectronRendererResolvedAdapter {
-  return {
+  const adapter: ElectronRendererResolvedAdapter = {
     loadSubset: async (
-      collectionId: string,
+      target: PersistedStorageTarget,
       subsetOptions: LoadSubsetOptions,
-      ctx?: { requiredIndexSignatures?: ReadonlyArray<string> },
+      ctx?: {
+        requiredIndexSignatures?: ReadonlyArray<string>
+        cacheGenerationClaimId?: string
+      },
     ) => {
+      const access = resolvePersistedStorageTarget(
+        target,
+        ctx?.cacheGenerationClaimId,
+      )
       const result = await executeRequest(
         `loadSubset`,
-        collectionId,
+        target,
         {
           options: createSerializableLoadSubsetOptions(subsetOptions),
-          ctx,
+          ctx: { ...ctx, cacheGenerationClaimId: access.claimId },
         },
         resolution,
       )
@@ -222,57 +246,79 @@ function createResolvedRendererAdapter(
       }>
     },
     loadResumeSnapshot: async (
-      collectionId: string,
+      target: PersistedStorageTarget,
       ctx?: {
         requiredIndexSignatures?: ReadonlyArray<string>
         includeRows?: boolean
+        cacheGenerationClaimId?: string
       },
     ) => {
+      const access = resolvePersistedStorageTarget(
+        target,
+        ctx?.cacheGenerationClaimId,
+      )
       return executeRequest(
         `loadResumeSnapshot`,
-        collectionId,
-        { ctx },
+        target,
+        { ctx: { ...ctx, cacheGenerationClaimId: access.claimId } },
         resolution,
       )
     },
     applyCommittedTx: async (
-      collectionId: string,
+      target: PersistedStorageTarget,
       tx: PersistedTx<Record<string, unknown>, string | number>,
     ): Promise<void> => {
+      const access = resolvePersistedStorageTarget(
+        target,
+        tx.cacheGenerationClaimId,
+      )
       await executeRequest(
         `applyCommittedTx`,
-        collectionId,
+        target,
         {
-          tx: tx as PersistedTx<ElectronPersistedRow, ElectronPersistedKey>,
+          tx: { ...tx, cacheGenerationClaimId: access.claimId } as PersistedTx<
+            ElectronPersistedRow,
+            ElectronPersistedKey
+          >,
         },
         resolution,
       )
     },
     reconcileCommittedTx: async (
-      collectionId: string,
+      target: PersistedStorageTarget,
       tx: PersistedTx<Record<string, unknown>, string | number>,
       anchor: CommittedTxAnchor,
     ): Promise<ReconciledCommittedTx> => {
+      const access = resolvePersistedStorageTarget(
+        target,
+        tx.cacheGenerationClaimId,
+      )
       return executeRequest(
         `reconcileCommittedTx`,
-        collectionId,
-        { tx, anchor },
+        target,
+        { tx: { ...tx, cacheGenerationClaimId: access.claimId }, anchor },
         resolution,
       )
     },
     loadCollectionMetadata: async (
-      collectionId: string,
+      target: PersistedStorageTarget,
+      ctx?: { cacheGenerationClaimId?: string },
     ): Promise<Array<{ key: string; value: unknown }>> => {
+      const access = resolvePersistedStorageTarget(
+        target,
+        ctx?.cacheGenerationClaimId,
+      )
       return executeRequest(
         `loadCollectionMetadata`,
-        collectionId,
-        {},
+        target,
+        { ctx: { ...ctx, cacheGenerationClaimId: access.claimId } },
         resolution,
       )
     },
     scanRows: async (
-      collectionId: string,
+      target: PersistedStorageTarget,
       options?: { metadataOnly?: boolean },
+      ctx?: { cacheGenerationClaimId?: string },
     ): Promise<
       Array<{
         key: string | number
@@ -280,10 +326,14 @@ function createResolvedRendererAdapter(
         metadata?: unknown
       }>
     > => {
+      const access = resolvePersistedStorageTarget(
+        target,
+        ctx?.cacheGenerationClaimId,
+      )
       const result = await executeRequest(
         `scanRows`,
-        collectionId,
-        { options },
+        target,
+        { options, ctx: { ...ctx, cacheGenerationClaimId: access.claimId } },
         resolution,
       )
       return result as Array<{
@@ -293,64 +343,167 @@ function createResolvedRendererAdapter(
       }>
     },
     ensureIndex: async (
-      collectionId: string,
+      target: PersistedStorageTarget,
       signature: string,
       spec: PersistedIndexSpec,
+      ctx?: { cacheGenerationClaimId?: string },
     ): Promise<void> => {
+      const access = resolvePersistedStorageTarget(
+        target,
+        ctx?.cacheGenerationClaimId,
+      )
       await executeRequest(
         `ensureIndex`,
-        collectionId,
+        target,
         {
           signature,
           spec,
+          ctx: { ...ctx, cacheGenerationClaimId: access.claimId },
         },
         resolution,
       )
     },
     markIndexRemoved: async (
-      collectionId: string,
+      target: PersistedStorageTarget,
       signature: string,
+      ctx?: { cacheGenerationClaimId?: string },
     ): Promise<void> => {
+      const access = resolvePersistedStorageTarget(
+        target,
+        ctx?.cacheGenerationClaimId,
+      )
       await executeRequest(
         `markIndexRemoved`,
-        collectionId,
+        target,
         {
           signature,
+          ctx: { ...ctx, cacheGenerationClaimId: access.claimId },
         },
         resolution,
       )
     },
     pullSince: async (
-      collectionId: string,
+      target: PersistedStorageTarget,
       fromRowVersion: number,
+      ctx?: { cacheGenerationClaimId?: string },
     ): Promise<SQLitePullSinceResult<string | number>> => {
+      const access = resolvePersistedStorageTarget(
+        target,
+        ctx?.cacheGenerationClaimId,
+      )
       const result = await executeRequest(
         `pullSince`,
-        collectionId,
+        target,
         {
           fromRowVersion,
+          ctx: { ...ctx, cacheGenerationClaimId: access.claimId },
         },
         resolution,
       )
       return result as SQLitePullSinceResult<string | number>
     },
     getStreamPosition: async (
-      collectionId: string,
+      target: PersistedStorageTarget,
+      ctx?: { cacheGenerationClaimId?: string },
     ): Promise<{
       latestTerm: number
       latestSeq: number
       latestRowVersion: number
     }> => {
-      return executeRequest(`getStreamPosition`, collectionId, {}, resolution)
-    },
-    reserveLeadershipTerm: async (collectionId, observedTerm) =>
-      executeRequest(
-        `reserveLeadershipTerm`,
-        collectionId,
-        { observedTerm },
+      const access = resolvePersistedStorageTarget(
+        target,
+        ctx?.cacheGenerationClaimId,
+      )
+      return executeRequest(
+        `getStreamPosition`,
+        target,
+        { ctx: { ...ctx, cacheGenerationClaimId: access.claimId } },
         resolution,
-      ),
+      )
+    },
+    claimCacheGeneration: async (
+      collectionId: string,
+    ): Promise<PersistedCacheGenerationClaim> => {
+      const claim = await executeRequest(
+        `claimCacheGeneration`,
+        collectionId,
+        {},
+        resolution,
+      )
+      claimCollections.set(claim.claimId, collectionId)
+      return claim
+    },
+    rotateCacheGeneration: async (
+      collectionId: string,
+      claimId: string,
+      resetMetadata?: { key: string; value: unknown },
+      expectedStorageCollectionId?: string,
+    ): Promise<PersistedCacheGenerationClaim> => {
+      const claim = await executeRequest(
+        `rotateCacheGeneration`,
+        collectionId,
+        { claimId, resetMetadata, expectedStorageCollectionId },
+        resolution,
+      )
+      claimCollections.delete(claimId)
+      claimCollections.set(claim.claimId, collectionId)
+      return claim
+    },
+    renewCacheGenerationClaim: (
+      storageCollectionId: string,
+      claimId: string,
+    ): Promise<number | undefined> => {
+      const collectionId = claimCollections.get(claimId)
+      if (!collectionId) {
+        throw new InvalidPersistedCollectionConfigError(
+          `Unknown electron persisted cache claim "${claimId}"`,
+        )
+      }
+      return executeRequest(
+        `renewCacheGenerationClaim`,
+        collectionId,
+        { storageCollectionId, claimId },
+        resolution,
+      )
+    },
+    releaseCacheGenerationClaim: async (claimId: string): Promise<void> => {
+      const collectionId = claimCollections.get(claimId)
+      if (!collectionId) {
+        throw new InvalidPersistedCollectionConfigError(
+          `Unknown electron persisted cache claim "${claimId}"`,
+        )
+      }
+      await executeRequest(
+        `releaseCacheGenerationClaim`,
+        collectionId,
+        { claimId },
+        resolution,
+      )
+      claimCollections.delete(claimId)
+    },
+    reserveLeadershipTerm: async (target, observedTerm, ctx) => {
+      const access = resolvePersistedStorageTarget(
+        target,
+        ctx?.cacheGenerationClaimId,
+      )
+      return executeRequest(
+        `reserveLeadershipTerm`,
+        target,
+        {
+          observedTerm,
+          ctx: { ...ctx, cacheGenerationClaimId: access.claimId },
+        },
+        resolution,
+      )
+    },
   }
+  if (!managedCacheGenerations) {
+    adapter.claimCacheGeneration = undefined
+    adapter.rotateCacheGeneration = undefined
+    adapter.renewCacheGenerationClaim = undefined
+    adapter.releaseCacheGenerationClaim = undefined
+  }
+  return adapter
 }
 
 export type ElectronIpcRendererLike = {
@@ -366,6 +519,8 @@ export type ElectronSQLitePersistenceOptions = {
   channel?: string
   timeoutMs?: number
   coordinator?: PersistedCollectionCoordinator
+  /** Set false when a custom main-process adapter does not manage cache generations. */
+  managedCacheGenerations?: boolean
 }
 
 function resolveInvoke(
@@ -395,23 +550,25 @@ export function createElectronSQLitePersistence(
     timeoutMs: options.timeoutMs,
   })
   const adapterCache = new Map<string, ElectronRendererResolvedAdapter>()
+  const claimCollections = new Map<string, string>()
 
   const getAdapterForCollection = (
+    collectionId: string | undefined,
     mode: PersistedCollectionMode,
     schemaVersion: number | undefined,
   ) => {
-    const schemaVersionKey =
-      schemaVersion === undefined ? `schema:default` : `schema:${schemaVersion}`
-    const cacheKey = `mode:${mode}|${schemaVersionKey}`
+    const cacheKey = JSON.stringify([collectionId, mode, schemaVersion])
     const cachedAdapter = adapterCache.get(cacheKey)
     if (cachedAdapter) {
       return cachedAdapter
     }
 
-    const adapter = createResolvedRendererAdapter(executeRequest, {
-      mode,
-      schemaVersion,
-    })
+    const adapter = createResolvedRendererAdapter(
+      executeRequest,
+      claimCollections,
+      options.managedCacheGenerations ?? true,
+      { mode, schemaVersion, logicalCollectionId: collectionId },
+    )
     adapterCache.set(cacheKey, adapter)
     return adapter
   }
@@ -421,7 +578,7 @@ export function createElectronSQLitePersistence(
     mode: PersistedCollectionMode,
     schemaVersion: number | undefined,
   ): PersistedCollectionPersistence => {
-    const adapter = getAdapterForCollection(mode, schemaVersion)
+    const adapter = getAdapterForCollection(collectionId, mode, schemaVersion)
     if (coordinator instanceof ElectronCollectionCoordinator) {
       if (collectionId === undefined) {
         coordinator.setAdapter(adapter)

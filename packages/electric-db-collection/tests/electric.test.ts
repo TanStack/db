@@ -10,6 +10,7 @@ import {
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { electricCollectionOptions, isChangeMessage } from '../src/electric'
 import { stripVirtualProps } from '../../db/tests/utils'
+import type { PersistedStorageTarget } from '../../db-sqlite-persistence-core/src'
 import type { ElectricCollectionUtils } from '../src/electric'
 import type {
   Collection,
@@ -119,7 +120,7 @@ describe(`Electric Integration`, () => {
         Array.from(rows.entries()).map(([key, value]) => ({ key, value })),
       ),
     loadResumeSnapshot: (
-      _collectionId: string,
+      _target: PersistedStorageTarget,
       options?: { includeRows?: boolean },
     ) =>
       Promise.resolve({
@@ -149,7 +150,7 @@ describe(`Electric Integration`, () => {
           }),
         ),
       ),
-    applyCommittedTx: (_collectionId: string, tx: any) => {
+    applyCommittedTx: (_target: PersistedStorageTarget, tx: any) => {
       for (const mutation of tx.collectionMetadataMutations ?? []) {
         if (mutation.type === `delete`) {
           collectionMetadata?.delete(mutation.key)
@@ -3026,7 +3027,7 @@ describe(`Electric Integration`, () => {
       }
     })
 
-    it(`waits for both physical requests of one cursor demand`, async () => {
+    it(`serializes and waits for both physical requests of one cursor demand`, async () => {
       const whereCurrent = createDeferred<void>()
       const whereFrom = createDeferred<void>()
       mockRequestSnapshot
@@ -3059,10 +3060,13 @@ describe(`Electric Integration`, () => {
           }),
         )
         await vi.waitFor(() =>
-          expect(mockRequestSnapshot).toHaveBeenCalledTimes(2),
+          expect(mockRequestSnapshot).toHaveBeenCalledOnce(),
         )
 
         whereCurrent.resolve()
+        await vi.waitFor(() =>
+          expect(mockRequestSnapshot).toHaveBeenCalledTimes(2),
+        )
         const nextTurn = new Promise<`next-turn`>((resolve) =>
           setTimeout(() => resolve(`next-turn`), 0),
         )
@@ -4187,7 +4191,7 @@ describe(`Electric Integration`, () => {
       )
     })
 
-    it(`should honor persisted reset resume metadata through the persisted wrapper`, async () => {
+    it(`uses full-log recovery for unmanaged persisted reset metadata`, async () => {
       vi.clearAllMocks()
 
       const { ShapeStream } = await import(`@electric-sql/client`)
@@ -4438,7 +4442,7 @@ describe(`Electric Integration`, () => {
       )
     })
 
-    it(`should ignore malformed persisted resume metadata`, async () => {
+    it(`uses a full fallback for malformed resume metadata without scoped persistence`, async () => {
       vi.clearAllMocks()
 
       const { ShapeStream } = await import(`@electric-sql/client`)
@@ -4483,13 +4487,17 @@ describe(`Electric Integration`, () => {
 
       expect(ShapeStream).toHaveBeenCalledWith(
         expect.objectContaining({
-          offset: `now`,
+          offset: undefined,
+          log: undefined,
           handle: undefined,
         }),
       )
+      expect(metadataHarness.collectionMetadata.get(`electric:resume`)).toEqual(
+        expect.objectContaining({ kind: `reset` }),
+      )
     })
 
-    it(`should reset and fall back when persisted resume identity is incompatible`, async () => {
+    it(`uses a full fallback for incompatible identity without scoped persistence`, async () => {
       vi.clearAllMocks()
 
       const { ShapeStream } = await import(`@electric-sql/client`)
@@ -4536,7 +4544,8 @@ describe(`Electric Integration`, () => {
 
       expect(ShapeStream).toHaveBeenCalledWith(
         expect.objectContaining({
-          offset: `now`,
+          offset: undefined,
+          log: undefined,
           handle: undefined,
         }),
       )

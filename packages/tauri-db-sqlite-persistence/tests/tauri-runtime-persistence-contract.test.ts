@@ -161,7 +161,7 @@ describe(`tauri runtime persistence helpers`, () => {
       })
 
       await firstCollectionOptions.persistence.adapter.applyCommittedTx(
-        collectionId,
+        { kind: `eager`, collectionId: collectionId },
         {
           txId: `tx-1`,
           term: 1,
@@ -199,7 +199,10 @@ describe(`tauri runtime persistence helpers`, () => {
         persistence: secondPersistence,
       })
       await expect(
-        syncAbsentOptions.persistence.adapter.loadSubset(collectionId, {}),
+        syncAbsentOptions.persistence.adapter.loadSubset(
+          { kind: `eager`, collectionId: collectionId },
+          {},
+        ),
       ).rejects.toThrow(`Schema version mismatch`)
 
       const syncPresentOptions = persistedCollectionOptions<
@@ -217,7 +220,7 @@ describe(`tauri runtime persistence helpers`, () => {
         persistence: secondPersistence,
       })
       const rows = await syncPresentOptions.persistence.adapter.loadSubset(
-        collectionId,
+        { kind: `eager`, collectionId: collectionId },
         {},
       )
       expect(rows).toEqual([])

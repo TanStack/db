@@ -6,6 +6,9 @@
  * second formulation of the core edit-log oracle, not derived from its model.
  * Peer B's schema/data and C's ordinary write must survive A's nested work.
  * A cycle is an assertion at a reached causal boundary, never a timeout waiver.
+ * For on-demand A, the fixture follows its claimed physical storage ID. Its
+ * post-cleanup fresh claim checks durable rows, not offline Collection restore;
+ * a partial on-demand cache has no authority to restore public rows alone.
  */
 import { expect, test } from '@playwright/test'
 import type { HydrationCommitObservation } from './hydration-commit.opfs'
@@ -36,6 +39,11 @@ for (const phase of [`startup`, `subscription`, `after-ready`] as const) {
           ).toBeDefined()
           if (!observed) return
           expect(observed.rowReads).toBeGreaterThan(0)
+          if (phase === `subscription`) {
+            expect(observed.sourceStorageId).not.toBe(`a`)
+          } else {
+            expect(observed.sourceStorageId).toBe(`a`)
+          }
           if (phase !== `after-ready`)
             expect(observed.held).toEqual({
               receipts: Array.from({ length: rich ? 6 : 1 }, () => `pending`),
@@ -97,11 +105,16 @@ for (const phase of [`startup`, `subscription`, `after-ready`] as const) {
             { id: `peer-baseline`, value: 22 },
           ])
           expect(observed.ordinaryRows).toEqual([{ id: `ordinary`, value: 33 }])
-          expect(observed.schemas).toEqual([
-            { collection_id: `a`, schema_version: 11 },
-            { collection_id: `b`, schema_version: 22 },
-            { collection_id: `c`, schema_version: 33 },
-          ])
+          expect(observed.schemas).toEqual(
+            [
+              {
+                collection_id: observed.sourceStorageId,
+                schema_version: 11,
+              },
+              { collection_id: `b`, schema_version: 22 },
+              { collection_id: `c`, schema_version: 33 },
+            ].sort((a, b) => a.collection_id.localeCompare(b.collection_id)),
+          )
           expect(result.error).toBeUndefined()
           expect(result.cleanupErrors).toEqual([])
         })

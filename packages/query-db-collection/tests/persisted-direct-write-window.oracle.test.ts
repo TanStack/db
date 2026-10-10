@@ -6,7 +6,10 @@ import { createNodeSQLitePersistence } from '../../node-db-sqlite-persistence/sr
 import { BetterSqlite3SQLiteDriver } from '../../node-db-sqlite-persistence/src/node-driver'
 import { queryCollectionOptions } from '../src/query'
 import type { QueryCollectionUtils } from '../src/query'
-import type { PersistedTx } from '../../db-sqlite-persistence-core/src'
+import type {
+  PersistedStorageTarget,
+  PersistedTx,
+} from '../../db-sqlite-persistence-core/src'
 
 /**
  * # Does a direct write see the commits that came before it?
@@ -219,7 +222,7 @@ function createAdapter(seed: Array<Row>) {
     rows,
     loadSubset: async () => entries(),
     loadResumeSnapshot: async (
-      _collectionId: string,
+      _target: PersistedStorageTarget,
       options?: { includeRows?: boolean },
     ) => ({
       rows: options?.includeRows === false ? [] : entries(),
@@ -239,7 +242,10 @@ function createAdapter(seed: Array<Row>) {
         value,
       })),
     scanRows: async () => entries(),
-    applyCommittedTx: async (_collectionId: string, tx: PersistedTx) => {
+    applyCommittedTx: async (
+      _target: PersistedStorageTarget,
+      tx: PersistedTx,
+    ) => {
       if (tx.truncate) {
         rows.clear()
         rowMetadata.clear()
@@ -309,15 +315,20 @@ function createStorage(
   const adapter = resolved.adapter as unknown as ReturnType<
     typeof createAdapter
   > & {
-    scanRows: (
-      collectionId: string,
-    ) => Promise<Array<{ key: unknown; value: Row }>>
+    scanRows: (target: {
+      kind: `eager`
+      collectionId: string
+    }) => Promise<Array<{ key: unknown; value: Row }>>
   }
   return {
     adapter,
     persistence,
     storedRows: async (collectionId: string) =>
-      sortRows((await adapter.scanRows(collectionId)).map((row) => row.value)),
+      sortRows(
+        (await adapter.scanRows({ kind: `eager`, collectionId })).map(
+          (row) => row.value,
+        ),
+      ),
     close: () => driver.close(),
   }
 }

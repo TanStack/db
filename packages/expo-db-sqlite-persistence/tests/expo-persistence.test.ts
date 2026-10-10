@@ -40,23 +40,26 @@ it(`persists data across app restart (close and reopen)`, async () => {
   })
   const firstAdapter = firstPersistence.adapter
 
-  await firstAdapter.applyCommittedTx(collectionId, {
-    txId: `tx-restart-1`,
-    term: 1,
-    seq: 1,
-    rowVersion: 1,
-    mutations: [
-      {
-        type: `insert`,
-        key: `1`,
-        value: {
-          id: `1`,
-          title: `Survives restart`,
-          score: 10,
+  await firstAdapter.applyCommittedTx(
+    { kind: `eager`, collectionId: collectionId },
+    {
+      txId: `tx-restart-1`,
+      term: 1,
+      seq: 1,
+      rowVersion: 1,
+      mutations: [
+        {
+          type: `insert`,
+          key: `1`,
+          value: {
+            id: `1`,
+            title: `Survives restart`,
+            score: 10,
+          },
         },
-      },
-    ],
-  })
+      ],
+    },
+  )
   await firstDatabase.closeAsync()
 
   const secondDatabase = createExpoSQLiteTestDatabase({ filename: dbPath })
@@ -66,7 +69,10 @@ it(`persists data across app restart (close and reopen)`, async () => {
   })
   const secondAdapter = secondPersistence.adapter
 
-  const rows = await secondAdapter.loadSubset(collectionId, {})
+  const rows = await secondAdapter.loadSubset(
+    { kind: `eager`, collectionId: collectionId },
+    {},
+  )
   expect(rows).toEqual([
     {
       key: `1`,
@@ -93,26 +99,32 @@ it(`keeps all committed rows under rapid mutation bursts`, async () => {
   const burstSize = 50
   for (let index = 0; index < burstSize; index++) {
     const rowId = String(index + 1)
-    await adapter.applyCommittedTx(collectionId, {
-      txId: `tx-burst-${rowId}`,
-      term: 1,
-      seq: index + 1,
-      rowVersion: index + 1,
-      mutations: [
-        {
-          type: `insert`,
-          key: rowId,
-          value: {
-            id: rowId,
-            title: `Todo ${rowId}`,
-            score: index,
+    await adapter.applyCommittedTx(
+      { kind: `eager`, collectionId: collectionId },
+      {
+        txId: `tx-burst-${rowId}`,
+        term: 1,
+        seq: index + 1,
+        rowVersion: index + 1,
+        mutations: [
+          {
+            type: `insert`,
+            key: rowId,
+            value: {
+              id: rowId,
+              title: `Todo ${rowId}`,
+              score: index,
+            },
           },
-        },
-      ],
-    })
+        ],
+      },
+    )
   }
 
-  const rows = await adapter.loadSubset(collectionId, {})
+  const rows = await adapter.loadSubset(
+    { kind: `eager`, collectionId: collectionId },
+    {},
+  )
   expect(rows).toHaveLength(burstSize)
 })
 
@@ -157,7 +169,10 @@ it(`resumes persisted sync after simulated background/foreground transitions`, a
   await postResumeInsert.isPersisted.promise
   expect(collection.get(`2`)?.title).toBe(`Post resume write`)
 
-  const persistedRows = await persistence.adapter.loadSubset(collectionId, {})
+  const persistedRows = await persistence.adapter.loadSubset(
+    { kind: `eager`, collectionId: collectionId },
+    {},
+  )
   expect(persistedRows).toEqual(
     expect.arrayContaining([
       expect.objectContaining({

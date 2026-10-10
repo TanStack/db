@@ -19,6 +19,7 @@ import type {
   ApplyLocalMutationsResponse,
   IndeterminateCommitError,
   PersistedCollectionDurabilityError,
+  PersistedStorageTarget,
   PersistedTx,
   PersistenceAdapter,
   RemoteSubsetOwner,
@@ -286,9 +287,15 @@ function cleanupGlobals(): void {
 // Adapter stub
 // ---------------------------------------------------------------------------
 
+function storageId(target: PersistedStorageTarget): string {
+  return target.kind === `managed`
+    ? target.storageCollectionId
+    : target.collectionId
+}
+
 function createStubAdapter(): PersistenceAdapter & {
   pullSince: (
-    collectionId: string,
+    target: PersistedStorageTarget,
     fromRowVersion: number,
   ) => Promise<{
     latestRowVersion: number
@@ -296,7 +303,7 @@ function createStubAdapter(): PersistenceAdapter & {
     changedKeys: Array<string | number>
     deletedKeys: Array<string | number>
   }>
-  getStreamPosition: (collectionId: string) => Promise<{
+  getStreamPosition: (target: PersistedStorageTarget) => Promise<{
     latestTerm: number
     latestSeq: number
     latestRowVersion: number
@@ -318,8 +325,8 @@ function createStubAdapter(): PersistenceAdapter & {
         latestRowVersion: 0,
         resetEpoch: 0,
       }),
-    applyCommittedTx: (collectionId, tx) => {
-      appliedTxs.push({ collectionId, tx })
+    applyCommittedTx: (target, tx) => {
+      appliedTxs.push({ collectionId: storageId(target), tx })
       return Promise.resolve()
     },
     ensureIndex: () => Promise.resolve(),
@@ -336,8 +343,9 @@ function createStubAdapter(): PersistenceAdapter & {
         latestSeq: 0,
         latestRowVersion: 0,
       }),
-    async reserveLeadershipTerm(collectionId, observedTerm) {
-      const position = await this.getStreamPosition(collectionId)
+    async reserveLeadershipTerm(target, observedTerm) {
+      const collectionId = storageId(target)
+      const position = await this.getStreamPosition(target)
       const latestTerm =
         Math.max(
           position.latestTerm,
@@ -651,6 +659,112 @@ describe(`BrowserCollectionCoordinator`, () => {
       expect(() => createCoordinator(adapter)).toThrow(/reserveLeadershipTerm/)
     })
 
+    /**
+     * A physical cache generation and its claim are one election authority.
+     * The reference records the claim registered for each physical ID before
+     * election; a term reservation must receive that same pair. A reservation
+     * without the claim could advance a retired generation after expiry.
+     */
+    it(`reserves a physical cache term under its registered claim`, async () => {
+      const adapter = createStubAdapter()
+      const calls: Array<{
+        target: PersistedStorageTarget
+        claimId?: string
+      }> = []
+      const reserve = adapter.reserveLeadershipTerm!.bind(adapter)
+      adapter.reserveLeadershipTerm = (target, observedTerm, ctx) => {
+        calls.push({
+          target,
+          claimId: ctx?.cacheGenerationClaimId,
+        })
+        return reserve(target, observedTerm, ctx)
+      }
+      const coordinator = createCoordinator(adapter)
+      coordinator.setAdapterForCollection(
+        `physical-cache`,
+        adapter,
+        `claim-for-physical-cache`,
+      )
+      coordinator.subscribe(`physical-cache`, () => {})
+      await vi.waitFor(() =>
+        expect(coordinator.isLeader(`physical-cache`)).toBe(true),
+      )
+      expect(calls).toEqual([
+        {
+          target: {
+            kind: `managed`,
+            storageCollectionId: `physical-cache`,
+            claimId: `claim-for-physical-cache`,
+          },
+          claimId: `claim-for-physical-cache`,
+        },
+      ])
+    })
+
+    // A local mutation originates without a persisted tx. Its coordinator
+    // request must carry the Collection's claim across leader and follower
+    // routing before the coordinator creates that tx. Otherwise the adapter sees an eager
+    // write to a physical cache ID and can resurrect it after collection.
+    it(`keeps a managed claim on coordinator local mutations`, async () => {
+      const adapter = createStubAdapter()
+      const targets: Array<PersistedStorageTarget> = []
+      const apply = adapter.applyCommittedTx.bind(adapter)
+      adapter.applyCommittedTx = (target, tx) => {
+        targets.push(target)
+        return apply(target, tx)
+      }
+      const coordinator = createCoordinator(adapter)
+      const storageCollectionId = `local-mutation-cache`
+      const claimId = `claim-for-local-mutation-cache`
+      coordinator.setAdapterForCollection(storageCollectionId, adapter, claimId)
+      coordinator.subscribe(storageCollectionId, () => {})
+      await vi.waitFor(() =>
+        expect(coordinator.isLeader(storageCollectionId)).toBe(true),
+      )
+
+      const mutations = [
+        {
+          mutationId: `local-managed-write`,
+          type: `insert` as const,
+          key: `row`,
+          value: { id: `row` },
+        },
+      ]
+      const response = await coordinator.requestApplyLocalMutations(
+        storageCollectionId,
+        mutations,
+        claimId,
+      )
+      expect(response.ok).toBe(true)
+      expect(targets).toEqual([
+        { kind: `managed`, storageCollectionId, claimId },
+      ])
+      expect(adapter.appliedTxs[0]?.tx.cacheGenerationClaimId).toBe(claimId)
+
+      const follower = createCoordinator(adapter)
+      follower.setAdapterForCollection(storageCollectionId, adapter, claimId)
+      follower.subscribe(storageCollectionId, () => {})
+      await vi.waitFor(() =>
+        expect(follower.isLeader(storageCollectionId)).toBe(false),
+      )
+      const followerResponse = await follower.requestApplyLocalMutations(
+        storageCollectionId,
+        [{ ...mutations[0]!, mutationId: `follower-managed-write` }],
+        claimId,
+      )
+      expect(followerResponse.ok).toBe(true)
+      expect(targets).toEqual([
+        { kind: `managed`, storageCollectionId, claimId },
+        { kind: `managed`, storageCollectionId, claimId },
+      ])
+      expect(adapter.appliedTxs[1]?.tx.cacheGenerationClaimId).toBe(claimId)
+
+      await expect(
+        coordinator.requestApplyLocalMutations(storageCollectionId, mutations),
+      ).rejects.toThrow(`requires a persisted cache claim`)
+      expect(targets).toHaveLength(2)
+    })
+
     it(`first coordinator becomes leader for a collection`, async () => {
       const coord = createCoordinator()
       coord.subscribe(`todos`, () => {})
@@ -885,7 +999,10 @@ describe(`BrowserCollectionCoordinator`, () => {
             getKey: (row) => row.id,
             persistence,
           })
-          await optionsV1.persistence.adapter.loadResumeSnapshot(collectionV1)
+          await optionsV1.persistence.adapter.loadResumeSnapshot({
+            kind: `eager`,
+            collectionId: collectionV1,
+          })
 
           const optionsV2 = persistedCollectionOptions<
             { id: string; title: string },
@@ -896,7 +1013,10 @@ describe(`BrowserCollectionCoordinator`, () => {
             getKey: (row) => row.id,
             persistence,
           })
-          await optionsV2.persistence.adapter.loadResumeSnapshot(collectionV2)
+          await optionsV2.persistence.adapter.loadResumeSnapshot({
+            kind: `eager`,
+            collectionId: collectionV2,
+          })
 
           coordinator.subscribe(collectionV1, () => {})
           coordinator.subscribe(collectionV2, () => {})
@@ -927,12 +1047,18 @@ describe(`BrowserCollectionCoordinator`, () => {
           expect(resultV1.ok).toBe(true)
           expect(resultV2.ok).toBe(true)
           expect(
-            await optionsV1.persistence.adapter.loadSubset(collectionV1, {}),
+            await optionsV1.persistence.adapter.loadSubset(
+              { kind: `eager`, collectionId: collectionV1 },
+              {},
+            ),
           ).toMatchObject([
             { key: `v1`, value: { id: `v1`, title: `schema one` } },
           ])
           expect(
-            await optionsV2.persistence.adapter.loadSubset(collectionV2, {}),
+            await optionsV2.persistence.adapter.loadSubset(
+              { kind: `eager`, collectionId: collectionV2 },
+              {},
+            ),
           ).toMatchObject([
             { key: `v2`, value: { id: `v2`, title: `schema two` } },
           ])
@@ -994,7 +1120,7 @@ describe(`BrowserCollectionCoordinator`, () => {
         latestTerm: state?.latestTerm,
         joinedLeadership: coordinator.isLeader(`notes`),
         streamPositionCollections: getStreamPosition.mock.calls.map(
-          ([collectionId]) => collectionId,
+          ([target]) => storageId(target),
         ),
       }).toEqual({
         leaderId: `notes-owner`,
@@ -2057,7 +2183,7 @@ describe(`BrowserCollectionCoordinator`, () => {
           firstApplyEntered.resolve()
           await releaseFirstApply.promise
         }
-        adapter.appliedTxs.push({ collectionId, tx })
+        adapter.appliedTxs.push({ collectionId: storageId(collectionId), tx })
       }
       const coordinator = createCoordinator(adapter)
       coordinator.subscribe(`todos`, () => {})
@@ -2422,7 +2548,12 @@ describe(`BrowserCollectionCoordinator`, () => {
         ])
         expect(response.ok).toBe(true)
         expect(
-          (await persistence.adapter.loadResumeSnapshot(`first-commit`)).rows,
+          (
+            await persistence.adapter.loadResumeSnapshot({
+              kind: `eager`,
+              collectionId: `first-commit`,
+            })
+          ).rows,
         ).toEqual([{ key: `first`, value: { id: `first` } }])
         expect(
           await database.execute<{ count: number }>(
@@ -2471,7 +2602,7 @@ describe(`BrowserCollectionCoordinator`, () => {
       const sourceCommitStarted = createDeferred()
       const reserveLeadershipTerm = adapter.reserveLeadershipTerm.bind(adapter)
       adapter.reserveLeadershipTerm = async (collectionId, observedTerm) => {
-        if (collectionId === `cold`) {
+        if (storageId(collectionId) === `cold`) {
           electionReadStarted.resolve()
           await releaseElectionRead.promise
         }
@@ -2548,11 +2679,21 @@ describe(`BrowserCollectionCoordinator`, () => {
         ])
         expect(sourceResponse.ok).toBe(true)
         expect(otherResponse.ok).toBe(true)
-        expect((await adapter.loadResumeSnapshot(`cold`)).rows).toEqual([
-          { key: `cold`, value: { id: `cold` } },
-        ])
         expect(
-          (await active.adapter.loadResumeSnapshot(`active`)).rows,
+          (
+            await adapter.loadResumeSnapshot({
+              kind: `eager`,
+              collectionId: `cold`,
+            })
+          ).rows,
+        ).toEqual([{ key: `cold`, value: { id: `cold` } }])
+        expect(
+          (
+            await active.adapter.loadResumeSnapshot({
+              kind: `eager`,
+              collectionId: `active`,
+            })
+          ).rows,
         ).toEqual([{ key: `active`, value: { id: `active` } }])
       } finally {
         if (timeout) clearTimeout(timeout)
@@ -3414,7 +3555,7 @@ describe(`BrowserCollectionCoordinator`, () => {
       adapter.reconcileCommittedTx = async (collectionId, tx) => {
         entered.resolve()
         await release.promise
-        adapter.appliedTxs.push({ collectionId, tx })
+        adapter.appliedTxs.push({ collectionId: storageId(collectionId), tx })
         return {
           kind: `applied-now`,
           committed: {
@@ -4623,7 +4764,10 @@ describe(`BrowserCollectionCoordinator`, () => {
       }
     })
 
-    it(`compacts a terminal same-stack Browser release after the real owner load finishes`, async () => {
+    // The owner can hold a load until unload cancels it. A terminal release
+    // must therefore reach unload before source settlement, even when release
+    // reenters from the owner's load callback on the same stack.
+    it(`compacts a terminal same-stack Browser release before the owner load finishes`, async () => {
       const coordinator = createCoordinator()
       coordinator.subscribe(`todos`, () => {})
       await flush(50)
@@ -4663,10 +4807,10 @@ describe(`BrowserCollectionCoordinator`, () => {
         const terminalRelease = release!.then(() => {
           releaseSettled = true
         })
-        await flush(0)
+        await vi.waitFor(() => expect(releaseSettled).toBe(true))
         expect({ events: [...events], releaseSettled }).toEqual({
-          events: [`load`],
-          releaseSettled: false,
+          events: [`load`, `unload`],
+          releaseSettled: true,
         })
 
         releaseLoad()
@@ -4897,6 +5041,74 @@ describe(`BrowserCollectionCoordinator`, () => {
         }
       },
     )
+
+    // A release may reach the old leader and unload its exact acquisition,
+    // while the reply is lost. The real RPC timer then expires after takeover;
+    // its retry must retire the outbound debt without replaying demand or
+    // unloading the old acquisition twice. The independent expectation is one
+    // old-owner unload, zero replacement-owner loads, and no outbound lease at
+    // the release settlement checkpoint.
+    it(`retries a timed-out old-leader release after takeover without replaying demand`, async () => {
+      const leader = createCoordinator()
+      const follower = createCoordinator()
+      const unsubscribeLeader = leader.subscribe(`todos`, () => {})
+      follower.subscribe(`todos`, () => {})
+      await flush(50)
+      const oldOwner = Object.assign(
+        vi.fn(() => Promise.resolve()),
+        {
+          unloadSubset: vi.fn(() => Promise.resolve()),
+          onError: vi.fn(),
+        },
+      )
+      const newOwner = Object.assign(
+        vi.fn(() => Promise.resolve()),
+        {
+          unloadSubset: vi.fn(() => Promise.resolve()),
+          onError: vi.fn(),
+        },
+      )
+      const unregisterOld = leader.registerRemoteSubsetOwner(`todos`, oldOwner)
+      const unregisterNew = follower.registerRemoteSubsetOwner(
+        `todos`,
+        newOwner,
+      )
+      const options: LoadSubsetOptions = { limit: 1 }
+      const internals = follower as unknown as {
+        outboundRemoteSubsetAcquisitions: Map<string, unknown>
+      }
+      let droppedResponses = 0
+
+      try {
+        await follower.requestEnsureRemoteSubset(`todos`, options)
+        dropNextBroadcastMessage = (data) => {
+          const type = (data as { payload?: { type?: string } }).payload?.type
+          if (type !== `rpc:releaseRemoteSubset:res`) return false
+          droppedResponses++
+          return true
+        }
+        const release = follower.requestReleaseRemoteSubset(`todos`, options)
+        void release.catch(() => undefined)
+        await vi.waitFor(() => expect(droppedResponses).toBe(1))
+        expect(oldOwner.unloadSubset).toHaveBeenCalledTimes(1)
+        expect(internals.outboundRemoteSubsetAcquisitions.size).toBe(1)
+
+        unsubscribeLeader()
+        await vi.waitFor(() => expect(follower.isLeader(`todos`)).toBe(true))
+        await release
+        expect(internals.outboundRemoteSubsetAcquisitions.size).toBe(0)
+        expect(oldOwner.unloadSubset).toHaveBeenCalledTimes(1)
+        expect(newOwner).not.toHaveBeenCalled()
+        expect(newOwner.unloadSubset).not.toHaveBeenCalled()
+      } finally {
+        dropNextBroadcastMessage = undefined
+        unsubscribeLeader()
+        unregisterOld()
+        unregisterNew()
+        leader.dispose()
+        follower.dispose()
+      }
+    }, 20_000)
 
     it(`keeps a Browser release tombstone when a transferred load rejects concurrently`, async () => {
       const coordinator = createCoordinator()
@@ -6865,9 +7077,13 @@ describe(`BrowserCollectionCoordinator`, () => {
         expressionSql: [`title`],
       })
 
-      expect(adapter.ensureIndex).toHaveBeenCalledWith(`todos`, `idx-1`, {
-        expressionSql: [`title`],
-      })
+      expect(adapter.ensureIndex).toHaveBeenCalledWith(
+        { kind: `eager`, collectionId: `todos` },
+        `idx-1`,
+        {
+          expressionSql: [`title`],
+        },
+      )
 
       coord.dispose()
     })
@@ -6912,7 +7128,11 @@ describe(`BrowserCollectionCoordinator`, () => {
         await vi.waitFor(() => expect(coord.isLeader(`todos`)).toBe(true))
 
         const spec = { expressionSql: [`title`] }
-        await adapter.ensureIndex(`todos`, `idx-once`, spec)
+        await adapter.ensureIndex(
+          { kind: `eager`, collectionId: `todos` },
+          `idx-once`,
+          spec,
+        )
         await coord.requestEnsurePersistedIndex(
           `todos`,
           `idx-once`,
@@ -7247,7 +7467,7 @@ describe(`BrowserCollectionCoordinator`, () => {
         expect(defaultAdapter.ensureIndex).toHaveBeenCalledOnce()
         expect(replacementAdapter.ensureIndex).toHaveBeenCalledOnce()
         expect(replacementAdapter.ensureIndex).toHaveBeenCalledWith(
-          `todos`,
+          { kind: `eager`, collectionId: `todos` },
           `idx-replacement`,
           { expressionSql: [`title`] },
         )

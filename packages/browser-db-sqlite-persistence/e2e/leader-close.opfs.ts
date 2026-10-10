@@ -146,7 +146,10 @@ window.__leaderCloseProbe = {
   commitNext: issueSourceCommit,
   durableState: async () => {
     if (!adapter) throw new Error(`adapter unavailable`)
-    const snapshot = await adapter.loadResumeSnapshot(`messages`)
+    const snapshot = await adapter.loadResumeSnapshot({
+      kind: `eager`,
+      collectionId: `messages`,
+    })
     return {
       ids: snapshot.rows.map(({ value }) => String(value.id)).sort(),
       cursor:

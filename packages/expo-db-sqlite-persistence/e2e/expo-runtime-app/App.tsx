@@ -168,7 +168,7 @@ export default function App() {
         await collection.stateWhenReady()
 
         const reloadedRows = await persistence.adapter.loadSubset(
-          collectionId,
+          { kind: `eager`, collectionId },
           {},
         )
         return {

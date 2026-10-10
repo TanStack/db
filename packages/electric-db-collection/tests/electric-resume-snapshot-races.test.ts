@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { createCollection } from '@tanstack/db'
+import { IR, createCollection } from '@tanstack/db'
 import { ShapeStream } from '@electric-sql/client'
 import {
   SQLiteCorePersistenceAdapter,
@@ -22,6 +22,7 @@ type Subscriber = (messages: Array<Message<Item>>) => void
 
 const subscribers: Array<Subscriber> = []
 let synchronousMessages: Array<Message<Item>> | undefined
+let snapshotRequest: (() => Promise<void>) | undefined
 const mockSubscribe = vi.fn((subscriber: Subscriber) => {
   subscribers.push(subscriber)
   if (synchronousMessages) subscriber(synchronousMessages)
@@ -32,7 +33,7 @@ vi.mock(`@electric-sql/client`, async () => ({
   ...(await vi.importActual(`@electric-sql/client`)),
   ShapeStream: vi.fn(() => ({
     subscribe: mockSubscribe,
-    requestSnapshot: vi.fn().mockResolvedValue(undefined),
+    requestSnapshot: vi.fn(() => snapshotRequest?.() ?? Promise.resolve()),
     fetchSnapshot: vi.fn().mockResolvedValue({ metadata: {}, data: [] }),
     forceDisconnectAndRefresh: vi.fn().mockResolvedValue(undefined),
     isUpToDate: false,
@@ -97,6 +98,7 @@ function deferred() {
 async function reachCheckpoint<T>(
   promise: Promise<T>,
   checkpoint: string,
+  timeoutMs = 1_000,
 ): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
@@ -105,12 +107,35 @@ async function reachCheckpoint<T>(
       new Promise<never>((_, reject) => {
         timer = setTimeout(
           () => reject(new Error(`Did not reach checkpoint: ${checkpoint}`)),
-          1_000,
+          timeoutMs,
         )
       }),
     ])
   } finally {
     if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
+function reportReceivingOutcome(
+  primaryFailure: unknown,
+  cleanupFailures: Array<unknown>,
+  context: string,
+): void {
+  if (primaryFailure !== undefined) {
+    const failure =
+      primaryFailure instanceof Error
+        ? primaryFailure
+        : new Error(`${context} failed`, { cause: primaryFailure })
+    if (cleanupFailures.length > 0) {
+      Object.defineProperty(failure, `cleanupFailures`, {
+        value: cleanupFailures,
+        enumerable: true,
+      })
+    }
+    throw failure
+  }
+  if (cleanupFailures.length > 0) {
+    throw new AggregateError(cleanupFailures, `${context} cleanup failed`)
   }
 }
 
@@ -158,33 +183,36 @@ async function runRace(
       driver,
       schemaVersion: 1,
     })
-    await seedAdapter.applyCommittedTx(collectionId, {
-      txId: `seed`,
-      term: 1,
-      seq: 1,
-      rowVersion: 1,
-      mutations: [
-        { type: `insert`, key: 1, value: { id: 1, name: `one` } },
-        { type: `insert`, key: 2, value: { id: 2, name: `two` } },
-      ],
-      collectionMetadataMutations: [
-        {
-          type: `set`,
-          key: `electric:resume`,
-          value: {
-            kind: `resume`,
-            requiresTagState: startupReset === `tag-state`,
-            offset: `10_0`,
-            handle: `shape-old`,
-            shapeId:
-              startupReset === `shape-identity`
-                ? `{"params":{"table":"other_table"},"url":"http://test-url"}`
-                : `{"params":{"table":"test_table"},"url":"http://test-url"}`,
-            updatedAt: 1,
+    await seedAdapter.applyCommittedTx(
+      { kind: `eager`, collectionId: collectionId },
+      {
+        txId: `seed`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [
+          { type: `insert`, key: 1, value: { id: 1, name: `one` } },
+          { type: `insert`, key: 2, value: { id: 2, name: `two` } },
+        ],
+        collectionMetadataMutations: [
+          {
+            type: `set`,
+            key: `electric:resume`,
+            value: {
+              kind: `resume`,
+              requiresTagState: startupReset === `tag-state`,
+              offset: `10_0`,
+              handle: `shape-old`,
+              shapeId:
+                startupReset === `shape-identity`
+                  ? `{"params":{"table":"other_table"},"url":"http://test-url"}`
+                  : `{"params":{"table":"test_table"},"url":"http://test-url"}`,
+              updatedAt: 1,
+            },
           },
-        },
-      ],
-    })
+        ],
+      },
+    )
     if (legacyUnknown) {
       if (syncMode !== `on-demand`) {
         const tableName = createPersistedTableName(collectionId, `c`)
@@ -202,7 +230,12 @@ async function runRace(
         [collectionId],
       )
       expect(
-        (await seedAdapter.loadResumeSnapshot(collectionId)).keySet,
+        (
+          await seedAdapter.loadResumeSnapshot({
+            kind: `eager`,
+            collectionId: collectionId,
+          })
+        ).keySet,
       ).toEqual({ status: `unknown` })
     }
 
@@ -223,6 +256,18 @@ async function runRace(
     ): TAdapter => {
       const gatedAdapter = new Proxy(adapter, {
         get(target, property) {
+          // This owner exercises resume certification on adapters without
+          // managed cache generations. Rotation has separate receiving tests.
+          if (
+            syncMode === `on-demand` &&
+            (property === `claimCacheGeneration` ||
+              property === `rotateCacheGeneration` ||
+              property === `renewCacheGenerationClaim` ||
+              property === `releaseCacheGenerationClaim` ||
+              property === `assertCacheGenerationClaim`)
+          ) {
+            return undefined
+          }
           if (property === `runInHydrationScope`) {
             // Exercise both an adapter without optional hydration scopes and
             // an adapter that forwards its scoped snapshot reads.
@@ -259,7 +304,10 @@ async function runRace(
                     )
                   }
                   resumeStateAtLaterSnapshot = (
-                    await target.loadCollectionMetadata(collectionId)
+                    await target.loadCollectionMetadata({
+                      kind: `eager`,
+                      collectionId: collectionId,
+                    })
                   ).find(({ key }) => key === `electric:resume`)?.value
                 }
                 laterSnapshotEntered.resolve()
@@ -402,18 +450,29 @@ async function runRace(
       )
     }
     if (transition === `no-write-term-reservation`) {
-      const before = await seedAdapter.loadResumeSnapshot(collectionId, {
-        includeRows: false,
-      })
+      const before = await seedAdapter.loadResumeSnapshot(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          includeRows: false,
+        },
+      )
       expect(before.keySet).toEqual({ status: `consistent` })
-      expect(await seedAdapter.reserveLeadershipTerm(collectionId, 1)).toEqual({
+      expect(
+        await seedAdapter.reserveLeadershipTerm(
+          { kind: `eager`, collectionId: collectionId },
+          1,
+        ),
+      ).toEqual({
         latestTerm: 2,
         latestSeq: 0,
         latestRowVersion: 1,
       })
-      const after = await seedAdapter.loadResumeSnapshot(collectionId, {
-        includeRows: false,
-      })
+      const after = await seedAdapter.loadResumeSnapshot(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          includeRows: false,
+        },
+      )
       expect(after).toMatchObject({
         latestTerm: 2,
         latestSeq: 0,
@@ -432,30 +491,39 @@ async function runRace(
         driver,
         schemaVersion: 2,
       })
-      await resettingAdapter.loadSubset(collectionId, {})
+      await resettingAdapter.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {},
+      )
       durableObserverAdapter = resettingAdapter
     } else if (transition === `committed-write`) {
-      await seedAdapter.applyCommittedTx(collectionId, {
-        txId: `concurrent-writer`,
-        term: 1,
-        seq: 2,
-        rowVersion: 2,
-        mutations: [
-          { type: `insert`, key: 3, value: { id: 3, name: `three` } },
-        ],
-      })
+      await seedAdapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `concurrent-writer`,
+          term: 1,
+          seq: 2,
+          rowVersion: 2,
+          mutations: [
+            { type: `insert`, key: 3, value: { id: 3, name: `three` } },
+          ],
+        },
+      )
     } else if (transition === `committed-replacement`) {
-      await seedAdapter.applyCommittedTx(collectionId, {
-        txId: `concurrent-replacement`,
-        term: 2,
-        seq: 1,
-        rowVersion: 2,
-        truncate: true,
-        mutations: [
-          { type: `insert`, key: 1, value: { id: 1, name: `one` } },
-          { type: `insert`, key: 2, value: { id: 2, name: `two` } },
-        ],
-      })
+      await seedAdapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `concurrent-replacement`,
+          term: 2,
+          seq: 1,
+          rowVersion: 2,
+          truncate: true,
+          mutations: [
+            { type: `insert`, key: 1, value: { id: 1, name: `one` } },
+            { type: `insert`, key: 2, value: { id: 2, name: `two` } },
+          ],
+        },
+      )
     }
     releaseLaterSnapshot.resolve()
 
@@ -476,9 +544,12 @@ async function runRace(
           : [],
       )
       expect(
-        (await durableObserverAdapter.loadSubset(collectionId, {})).map(
-          ({ value }) => value,
-        ),
+        (
+          await durableObserverAdapter.loadSubset(
+            { kind: `eager`, collectionId: collectionId },
+            {},
+          )
+        ).map(({ value }) => value),
       ).toEqual([
         { id: 1, name: `one` },
         { id: 2, name: `two` },
@@ -486,7 +557,10 @@ async function runRace(
       if (startupReset !== `none`) {
         await vi.waitFor(async () => {
           const resumeState = (
-            await durableObserverAdapter.loadCollectionMetadata(collectionId)
+            await durableObserverAdapter.loadCollectionMetadata({
+              kind: `eager`,
+              collectionId: collectionId,
+            })
           ).find(({ key }) => key === `electric:resume`)?.value
           expect(resumeState).toMatchObject({
             kind: `resume`,
@@ -509,8 +583,10 @@ async function runRace(
         )
       }
       await vi.waitFor(async () => {
-        const metadata =
-          await durableObserverAdapter.loadCollectionMetadata(collectionId)
+        const metadata = await durableObserverAdapter.loadCollectionMetadata({
+          kind: `eager`,
+          collectionId: collectionId,
+        })
         const resumeState = metadata.find(
           ({ key }) => key === `electric:resume`,
         )?.value
@@ -540,7 +616,10 @@ async function runRace(
         expect(publicationsBeforeLateDelivery).toBe(0)
       }
       const durableRowsBeforeLateDelivery =
-        await durableObserverAdapter.loadSubset(collectionId, {})
+        await durableObserverAdapter.loadSubset(
+          { kind: `eager`, collectionId: collectionId },
+          {},
+        )
       expect(durableRowsBeforeLateDelivery.map(({ value }) => value)).toEqual(
         transition === `external-row-loss`
           ? [{ id: 2, name: `two` }]
@@ -565,9 +644,12 @@ async function runRace(
       expect(
         Array.from(collection.values(), ({ id, name }) => ({ id, name })),
       ).toEqual(expectedErroredRows)
-      expect(await durableObserverAdapter.loadSubset(collectionId, {})).toEqual(
-        durableRowsBeforeLateDelivery,
-      )
+      expect(
+        await durableObserverAdapter.loadSubset(
+          { kind: `eager`, collectionId: collectionId },
+          {},
+        ),
+      ).toEqual(durableRowsBeforeLateDelivery)
       expect(publications).toBe(publicationsBeforeLateDelivery)
     }
     if (replacesUncertifiedBaseline) {
@@ -682,31 +764,34 @@ async function observeLegacyUnknownResume(): Promise<LegacyUnknownResumeObservat
     // Produce the persisted row/metadata encodings through the real adapter,
     // then reduce only the key-evidence schema to its pre-ledger form.
     const legacyAdapter = new SQLiteCorePersistenceAdapter({ driver })
-    await legacyAdapter.applyCommittedTx(collectionId, {
-      txId: `legacy-snapshot-at-10`,
-      term: 1,
-      seq: 1,
-      rowVersion: 1,
-      mutations: [rowLostBeforeMigration, survivingRow].map((row) => ({
-        type: `insert` as const,
-        key: row.id,
-        value: structuredClone(row),
-      })),
-      collectionMetadataMutations: [
-        {
-          type: `set`,
-          key: `electric:resume`,
-          value: {
-            kind: `resume`,
-            requiresTagState: false,
-            offset: `10_0`,
-            handle: `shape-old`,
-            shapeId: `{"params":{"table":"test_table"},"url":"http://test-url"}`,
-            updatedAt: 1,
+    await legacyAdapter.applyCommittedTx(
+      { kind: `eager`, collectionId: collectionId },
+      {
+        txId: `legacy-snapshot-at-10`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [rowLostBeforeMigration, survivingRow].map((row) => ({
+          type: `insert` as const,
+          key: row.id,
+          value: structuredClone(row),
+        })),
+        collectionMetadataMutations: [
+          {
+            type: `set`,
+            key: `electric:resume`,
+            value: {
+              kind: `resume`,
+              requiresTagState: false,
+              offset: `10_0`,
+              handle: `shape-old`,
+              shapeId: `{"params":{"table":"test_table"},"url":"http://test-url"}`,
+              updatedAt: 1,
+            },
           },
-        },
-      ],
-    })
+        ],
+      },
+    )
 
     const collectionTable = createPersistedTableName(collectionId, `c`)
     await driver.run(
@@ -736,8 +821,10 @@ async function observeLegacyUnknownResume(): Promise<LegacyUnknownResumeObservat
     await driver.exec(`DROP TABLE collection_version_with_ledger`)
 
     const migratedAdapter = new SQLiteCorePersistenceAdapter({ driver })
-    const migratedSnapshot =
-      await migratedAdapter.loadResumeSnapshot(collectionId)
+    const migratedSnapshot = await migratedAdapter.loadResumeSnapshot({
+      kind: `eager`,
+      collectionId: collectionId,
+    })
 
     collection = createCollection(
       persistedCollectionOptions<
@@ -797,7 +884,12 @@ async function observeLegacyUnknownResume(): Promise<LegacyUnknownResumeObservat
         id,
         name,
       })).sort((left, right) => left.id - right.id),
-      durableRows: (await migratedAdapter.loadSubset(collectionId, {}))
+      durableRows: (
+        await migratedAdapter.loadSubset(
+          { kind: `eager`, collectionId: collectionId },
+          {},
+        )
+      )
         .map(({ value }) => value as Item)
         .sort((left, right) => left.id - right.id),
       status: collection.status,
@@ -852,8 +944,10 @@ async function observeLegacyUnknownResume(): Promise<LegacyUnknownResumeObservat
  *
  * The persisted resume law requires the rows, resume metadata, stream position,
  * and key-set evidence used for certification to belong to one atomic baseline
- * generation. An unverifiable, externally changed, or reset baseline must start
- * a fresh source snapshot; a compatible baseline may retain its resume cursor.
+ * generation. An unverifiable, externally changed, or reset eager baseline
+ * must start a fresh full source snapshot; a compatible baseline may retain
+ * its resume cursor. Uncertified on-demand startup instead keeps durable rows
+ * cache-only, starts changes-only at `now`, and loads only demanded subsets.
  * This refines the settled recovery law in electric-recovery-oracle.test.ts and
  * the atomic `loadResumeSnapshot` persistence contract.
  *
@@ -870,9 +964,11 @@ async function observeLegacyUnknownResume(): Promise<LegacyUnknownResumeObservat
  * Collection wrapper, and `electricCollectionOptions`. It holds the adapter's
  * later atomic snapshot, injects the selected transition, then compares the
  * ShapeStream offset/handle plus complete public and durable rows at the
- * post-restart up-to-date checkpoint. Entering the held snapshot is the reach
+ * post-restart up-to-date checkpoint. The scoped driver holds its startup
+ * metadata read, then checks no public cache rows before demand and exact row
+ * 1 after its source snapshot applies. Entering each held read is its reach
  * witness; compatible and legacy-unknown controls challenge both resume and
- * fresh-snapshot branches.
+ * fresh-source branches.
  *
  * These deterministic schedules do not model arbitrary external SQL edits,
  * native SQLite hosts, or a live Electric service. Those require their separate
@@ -882,7 +978,589 @@ describe(`Electric resume snapshot races`, () => {
   beforeEach(() => {
     subscribers.length = 0
     synchronousMessages = undefined
+    snapshotRequest = undefined
     vi.clearAllMocks()
+  })
+
+  // The stored cursor is compatible with a warm peer but belongs to a
+  // different Electric shape for the recovering run. The independent rule is
+  // that each sync run's claim owns its durable writes: Electric's decision
+  // cannot replace the peer's resume metadata, and an expired claim can only
+  // rotate into private storage. The driver holds the real SQLite rotation
+  // before its transaction, then after it returns but before public truncate.
+  // A new demand crosses that second interval. At the
+  // fresh subset's settlement cut, only the replacement row belongs to the
+  // recovering Collection; the warm Collection, its rows, metadata, and the
+  // current cache head retain the original generation. The ShapeStream mock
+  // controls callback timing; Electric's classifier and SQLite are real.
+  it(`keeps a warm cache authoritative when Electric recovery crosses expiry`, async () => {
+    const database = new DatabaseSync(`:memory:`)
+    const logicalId = `electric-expired-recovery`
+    let now = Date.now()
+    const adapter = new SQLiteCorePersistenceAdapter({
+      driver: createDriver(database),
+      cacheGenerationClaimTtlMs: 10_000,
+      now: () => now,
+    })
+    const beforeRotation = deferred()
+    const releaseBeforeRotation = deferred()
+    const afterRotation = deferred()
+    const releaseAfterRotation = deferred()
+    const snapshotDone = deferred()
+    const rotate = adapter.rotateCacheGeneration.bind(adapter)
+    adapter.rotateCacheGeneration = async (...args) => {
+      beforeRotation.resolve()
+      await releaseBeforeRotation.promise
+      const rotated = await rotate(...args)
+      afterRotation.resolve()
+      await releaseAfterRotation.promise
+      return rotated
+    }
+    const oldRow: Item = { id: 1, name: `warm` }
+    const freshRow: Item = { id: 2, name: `fresh` }
+    const oldResume = {
+      kind: `resume`,
+      requiresTagState: false,
+      offset: `10_0`,
+      handle: `warm-shape`,
+      shapeId: `{"params":{"table":"test_table"},"url":"http://test-url"}`,
+      updatedAt: 1,
+    }
+    let warm: Collection<Item, number> | undefined
+    let recovering:
+      | Collection<Item, string | number, ElectricCollectionUtils<Item>>
+      | undefined
+    let laterClaimId: string | undefined
+    let primaryFailure: unknown
+    const cleanupFailures: Array<unknown> = []
+    try {
+      const seed = await adapter.claimCacheGeneration(logicalId)
+      await adapter.applyCommittedTx(
+        {
+          kind: `managed`,
+          storageCollectionId: seed.storageCollectionId,
+          claimId: seed.claimId,
+        },
+        {
+          txId: `warm-seed`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          cacheGenerationClaimId: seed.claimId,
+          mutations: [{ type: `insert`, key: oldRow.id, value: oldRow }],
+          collectionMetadataMutations: [
+            { type: `set`, key: `electric:resume`, value: oldResume },
+          ],
+        },
+      )
+      await adapter.releaseCacheGenerationClaim(seed.claimId)
+      warm = createCollection(
+        persistedCollectionOptions<Item, number>({
+          id: logicalId,
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: (source) => {
+              source.markReady()
+              return {
+                restartAfterScopedRecovery: () => {},
+                loadSubset: async () => {},
+              }
+            },
+          },
+          persistence: { adapter },
+        }),
+      )
+      warm.startSyncImmediate()
+      await reachCheckpoint(
+        Promise.resolve(warm._sync.loadSubset({})),
+        `warm cache load`,
+      )
+      expect(warm.get(oldRow.id)).toMatchObject(oldRow)
+      const warmClaim = database
+        .prepare(
+          `SELECT claim_id, physical_id FROM cache_generation_claim
+           WHERE logical_id = ?`,
+        )
+        .get(logicalId) as { claim_id: string; physical_id: string }
+
+      const electric = electricCollectionOptions<Item>({
+        id: logicalId,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `other_table` },
+        },
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        startSync: false,
+      })
+      recovering = createCollection(
+        persistedCollectionOptions<
+          Item,
+          string | number,
+          never,
+          ElectricCollectionUtils<Item>
+        >({ ...electric, persistence: { adapter } }),
+      )
+      recovering.startSyncImmediate()
+      await reachCheckpoint(
+        beforeRotation.promise,
+        `Electric recovery rotation`,
+      )
+      expect(vi.mocked(ShapeStream).mock.calls[0]?.[0]).toMatchObject({
+        log: `changes_only`,
+        offset: `now`,
+      })
+      const recoveringClaim = database
+        .prepare(
+          `SELECT claim_id, physical_id, expires_at_ms
+           FROM cache_generation_claim
+           WHERE logical_id = ? AND claim_id <> ?`,
+        )
+        .get(logicalId, warmClaim.claim_id) as {
+        claim_id: string
+        physical_id: string
+        expires_at_ms: number
+      }
+      expect(recoveringClaim.physical_id).toBe(warmClaim.physical_id)
+      expect(
+        (
+          await adapter.loadResumeSnapshot(
+            {
+              kind: `managed`,
+              storageCollectionId: warmClaim.physical_id,
+              claimId: warmClaim.claim_id,
+            },
+            {
+              cacheGenerationClaimId: warmClaim.claim_id,
+            },
+          )
+        ).collectionMetadata,
+      ).toEqual([{ key: `electric:resume`, value: oldResume }])
+
+      now += 9_000
+      const warmExpiresAt = await adapter.renewCacheGenerationClaim(
+        warmClaim.physical_id,
+        warmClaim.claim_id,
+      )
+      now += 2_000
+      expect(now).toBeGreaterThan(recoveringClaim.expires_at_ms)
+      expect(now).toBeLessThan(warmExpiresAt!)
+      releaseBeforeRotation.resolve()
+      await reachCheckpoint(
+        afterRotation.promise,
+        `SQLite rotation before public truncate`,
+      )
+      expect(subscribers).toHaveLength(1)
+      snapshotRequest = () => snapshotDone.promise
+      const demand = Promise.resolve(recovering._sync.loadSubset({}))
+      void demand.catch(() => undefined)
+      let demandSettled = false
+      void demand
+        .finally(() => {
+          demandSettled = true
+        })
+        .catch(() => undefined)
+      await Promise.resolve()
+      expect(demandSettled).toBe(false)
+
+      releaseAfterRotation.resolve()
+      await vi.waitFor(() => {
+        const startup = vi.mocked(ShapeStream).mock.results[0]?.value as {
+          requestSnapshot: ReturnType<typeof vi.fn>
+        }
+        expect(startup.requestSnapshot).toHaveBeenCalled()
+      })
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect(demandSettled).toBe(false)
+      expect(recovering.get(freshRow.id)).toBeUndefined()
+      const privateClaim = database
+        .prepare(
+          `SELECT physical_id FROM cache_generation_claim WHERE claim_id = ?`,
+        )
+        .get(recoveringClaim.claim_id) as { physical_id: string }
+      expect(privateClaim.physical_id).not.toBe(warmClaim.physical_id)
+      expect(
+        (
+          await adapter.loadResumeSnapshot(
+            {
+              kind: `managed`,
+              storageCollectionId: privateClaim.physical_id,
+              claimId: recoveringClaim.claim_id,
+            },
+            {
+              cacheGenerationClaimId: recoveringClaim.claim_id,
+            },
+          )
+        ).rows,
+      ).toEqual([])
+      subscribers[0]!([
+        change(`insert`, freshRow),
+        { headers: { control: `subset-end` } },
+      ])
+      snapshotDone.resolve()
+      await reachCheckpoint(demand, `fresh Electric subset settlement`)
+      expect(Array.from(recovering.values(), ({ id }) => id)).toEqual([2])
+      expect(Array.from(warm.values(), ({ id }) => id)).toEqual([1])
+      const laterClaim = await adapter.claimCacheGeneration(logicalId)
+      laterClaimId = laterClaim.claimId
+      expect(laterClaim.storageCollectionId).toBe(warmClaim.physical_id)
+      const privateSnapshot = await adapter.loadResumeSnapshot(
+        {
+          kind: `managed`,
+          storageCollectionId: privateClaim.physical_id,
+          claimId: recoveringClaim.claim_id,
+        },
+        { cacheGenerationClaimId: recoveringClaim.claim_id },
+      )
+      const warmSnapshot = await adapter.loadResumeSnapshot(
+        {
+          kind: `managed`,
+          storageCollectionId: warmClaim.physical_id,
+          claimId: warmClaim.claim_id,
+        },
+        { cacheGenerationClaimId: warmClaim.claim_id },
+      )
+      expect(privateSnapshot.rows.map(({ key }) => key)).toEqual([2])
+      expect(privateSnapshot.collectionMetadata).toEqual([
+        {
+          key: `electric:resume`,
+          value: expect.objectContaining({ kind: `reset` }),
+        },
+      ])
+      expect(warmSnapshot.rows.map(({ key }) => key)).toEqual([1])
+      expect(warmSnapshot.collectionMetadata).toEqual([
+        { key: `electric:resume`, value: oldResume },
+      ])
+    } catch (error) {
+      primaryFailure = error
+    } finally {
+      releaseBeforeRotation.resolve()
+      releaseAfterRotation.resolve()
+      snapshotDone.resolve()
+      const cleanupTimeoutMs = primaryFailure === undefined ? 1_000 : 200
+      for (const release of [
+        () => recovering?.cleanup(),
+        () => warm?.cleanup(),
+        () =>
+          laterClaimId
+            ? adapter.releaseCacheGenerationClaim(laterClaimId)
+            : undefined,
+      ]) {
+        try {
+          const settling = release()
+          if (settling) {
+            await reachCheckpoint(
+              settling,
+              `Electric expiry cleanup`,
+              cleanupTimeoutMs,
+            )
+          }
+        } catch (error) {
+          cleanupFailures.push(error)
+        }
+      }
+      try {
+        database.close()
+      } catch (error) {
+        cleanupFailures.push(error)
+      }
+    }
+    reportReceivingOutcome(primaryFailure, cleanupFailures, `Electric expiry`)
+  })
+
+  // A later cache-claim expiry occurs after Electric has installed its
+  // provider session restart callback. SQLite rotates first; public truncate
+  // follows. The independent rule allows the old public snapshot until that
+  // truncate, but a retired provider session cannot put a late row into the
+  // new durable generation. A demand waiting in this interval must settle
+  // from the replacement session's applied source snapshot. This is the
+  // intermediate receiving cut omitted by the atomic authority model.
+  it(`rejects a retired Electric callback between SQLite rotation and public truncate`, async () => {
+    const database = new DatabaseSync(`:memory:`)
+    const logicalId = `electric-post-rotation-gap`
+    let now = Date.now()
+    const adapter = new SQLiteCorePersistenceAdapter({
+      driver: createDriver(database),
+      cacheGenerationClaimTtlMs: 10_000,
+      now: () => now,
+    })
+    const afterRotation = deferred()
+    const releaseRotation = deferred()
+    const snapshotDone = deferred()
+    const secondSnapshotDone = deferred()
+    const thirdSnapshotDone = deferred()
+    const rotate = adapter.rotateCacheGeneration.bind(adapter)
+    adapter.rotateCacheGeneration = async (...args) => {
+      const rotated = await rotate(...args)
+      afterRotation.resolve()
+      await releaseRotation.promise
+      return rotated
+    }
+    const oldRow: Item = { id: 1, name: `old cache row` }
+    const freshRow: Item = { id: 2, name: `fresh source row` }
+    const gapRow: Item = { id: 3, name: `gap demand row` }
+    let collection:
+      | Collection<Item, string | number, ElectricCollectionUtils<Item>>
+      | undefined
+    let primaryFailure: unknown
+    const cleanupFailures: Array<unknown> = []
+    try {
+      const seed = await adapter.claimCacheGeneration(logicalId)
+      await adapter.applyCommittedTx(
+        {
+          kind: `managed`,
+          storageCollectionId: seed.storageCollectionId,
+          claimId: seed.claimId,
+        },
+        {
+          txId: `old-row`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          cacheGenerationClaimId: seed.claimId,
+          mutations: [{ type: `insert`, key: oldRow.id, value: oldRow }],
+        },
+      )
+      await adapter.releaseCacheGenerationClaim(seed.claimId)
+      const electric = electricCollectionOptions<Item>({
+        id: logicalId,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        startSync: false,
+      })
+      collection = createCollection(
+        persistedCollectionOptions<
+          Item,
+          string | number,
+          never,
+          ElectricCollectionUtils<Item>
+        >({ ...electric, persistence: { adapter } }),
+      )
+      collection.startSyncImmediate()
+      await vi.waitFor(() => expect(subscribers).toHaveLength(1))
+      subscribers[0]!([{ headers: { control: `up-to-date` } }])
+      await vi.waitFor(() => expect(collection?.status).toBe(`ready`))
+      await reachCheckpoint(
+        Promise.resolve(collection._sync.loadSubset({})),
+        `warm source cache load`,
+      )
+      expect(collection.get(oldRow.id)).toMatchObject(oldRow)
+      const initialClaim = database
+        .prepare(
+          `SELECT claim_id, physical_id FROM cache_generation_claim
+           WHERE logical_id = ?`,
+        )
+        .get(logicalId) as { claim_id: string; physical_id: string }
+
+      now += 11_000
+      let snapshotCount = 0
+      snapshotRequest = () => {
+        snapshotCount += 1
+        return snapshotCount === 1
+          ? snapshotDone.promise
+          : snapshotCount === 2
+            ? secondSnapshotDone.promise
+            : thirdSnapshotDone.promise
+      }
+      const demand = Promise.resolve(
+        collection._sync.loadSubset({
+          where: new IR.Func(`eq`, [
+            new IR.PropRef([`id`]),
+            new IR.Value(freshRow.id),
+          ]),
+        }),
+      )
+      void demand.catch(() => undefined)
+      let demandSettled = false
+      void demand
+        .finally(() => {
+          demandSettled = true
+        })
+        .catch(() => undefined)
+      await reachCheckpoint(afterRotation.promise, `expired SQLite rotation`)
+      const privateClaim = database
+        .prepare(
+          `SELECT claim_id, physical_id FROM cache_generation_claim
+           WHERE logical_id = ? AND physical_id <> ?`,
+        )
+        .get(logicalId, initialClaim.physical_id) as {
+        claim_id: string
+        physical_id: string
+      }
+      expect(privateClaim.physical_id).not.toBe(initialClaim.physical_id)
+      expect(collection.get(oldRow.id)).toMatchObject(oldRow)
+      const privateBeforeTruncate = await adapter.loadResumeSnapshot(
+        {
+          kind: `managed`,
+          storageCollectionId: privateClaim.physical_id,
+          claimId: privateClaim.claim_id,
+        },
+        { cacheGenerationClaimId: privateClaim.claim_id },
+      )
+      expect(privateBeforeTruncate.rows).toEqual([])
+      const gapDemand = Promise.resolve(
+        collection._sync.loadSubset({
+          where: new IR.Func(`eq`, [
+            new IR.PropRef([`id`]),
+            new IR.Value(gapRow.id),
+          ]),
+        }),
+      )
+      void gapDemand.catch(() => undefined)
+      let gapDemandSettled = false
+      void gapDemand
+        .finally(() => {
+          gapDemandSettled = true
+        })
+        .catch(() => undefined)
+      const durableWrites = vi.spyOn(adapter, `applyCommittedTx`)
+      subscribers[0]!([
+        change(`insert`, { id: 9, name: `retired callback` }),
+        { headers: { control: `subset-end` } },
+      ])
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect(demandSettled).toBe(false)
+      expect(gapDemandSettled).toBe(false)
+      expect(collection.get(9)).toBeUndefined()
+      expect(durableWrites).not.toHaveBeenCalled()
+      expect(
+        (
+          await adapter.loadResumeSnapshot(
+            {
+              kind: `managed`,
+              storageCollectionId: privateClaim.physical_id,
+              claimId: privateClaim.claim_id,
+            },
+            {
+              cacheGenerationClaimId: privateClaim.claim_id,
+            },
+          )
+        ).rows,
+      ).toEqual([])
+
+      releaseRotation.resolve()
+      await vi.waitFor(() => expect(subscribers).toHaveLength(2))
+      subscribers[0]!([
+        change(`insert`, { id: 9, name: `retired callback` }),
+        { headers: { control: `subset-end` } },
+      ])
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect(collection.get(9)).toBeUndefined()
+      expect(
+        (
+          await adapter.loadResumeSnapshot(
+            {
+              kind: `managed`,
+              storageCollectionId: privateClaim.physical_id,
+              claimId: privateClaim.claim_id,
+            },
+            {
+              cacheGenerationClaimId: privateClaim.claim_id,
+            },
+          )
+        ).rows,
+      ).toEqual([])
+      await vi.waitFor(() => {
+        const replacement = vi.mocked(ShapeStream).mock.results[1]?.value as {
+          requestSnapshot: ReturnType<typeof vi.fn>
+        }
+        expect(replacement.requestSnapshot).toHaveBeenCalled()
+      })
+      expect(demandSettled).toBe(false)
+      expect(gapDemandSettled).toBe(false)
+      await vi.waitFor(() => {
+        const replacement = vi.mocked(ShapeStream).mock.results[1]?.value as {
+          requestSnapshot: ReturnType<typeof vi.fn>
+        }
+        expect(replacement.requestSnapshot).toHaveBeenCalledTimes(1)
+        expect(
+          replacement.requestSnapshot.mock.calls.map(([params]) => params),
+        ).toMatchObject([{ params: {} }])
+      })
+      subscribers[1]!([{ headers: { control: `subset-end` } }])
+      snapshotDone.resolve()
+      await vi.waitFor(() => {
+        const replacement = vi.mocked(ShapeStream).mock.results[1]?.value as {
+          requestSnapshot: ReturnType<typeof vi.fn>
+        }
+        expect(replacement.requestSnapshot).toHaveBeenCalledTimes(2)
+        expect(replacement.requestSnapshot.mock.calls[1]?.[0]).toMatchObject({
+          params: { '1': `2` },
+        })
+      })
+      subscribers[1]!([
+        change(`insert`, freshRow),
+        { headers: { control: `subset-end` } },
+      ])
+      secondSnapshotDone.resolve()
+      await vi.waitFor(() => {
+        const replacement = vi.mocked(ShapeStream).mock.results[1]?.value as {
+          requestSnapshot: ReturnType<typeof vi.fn>
+        }
+        expect(replacement.requestSnapshot).toHaveBeenCalledTimes(3)
+        expect(replacement.requestSnapshot.mock.calls[2]?.[0]).toMatchObject({
+          params: { '1': `3` },
+        })
+      })
+      expect(gapDemandSettled).toBe(false)
+      subscribers[1]!([
+        change(`insert`, gapRow),
+        { headers: { control: `subset-end` } },
+      ])
+      thirdSnapshotDone.resolve()
+      await reachCheckpoint(demand, `replacement Electric subset settlement`)
+      await reachCheckpoint(gapDemand, `gap Electric subset settlement`)
+      expect(collection.status).toBe(`ready`)
+      expect(Array.from(collection.values(), ({ id }) => id)).toEqual([2, 3])
+      expect(
+        (
+          await adapter.loadResumeSnapshot(
+            {
+              kind: `managed`,
+              storageCollectionId: privateClaim.physical_id,
+              claimId: privateClaim.claim_id,
+            },
+            {
+              cacheGenerationClaimId: privateClaim.claim_id,
+            },
+          )
+        ).rows.map(({ key }) => key),
+      ).toEqual([2, 3])
+    } catch (error) {
+      primaryFailure = error
+    } finally {
+      releaseRotation.resolve()
+      snapshotDone.resolve()
+      secondSnapshotDone.resolve()
+      thirdSnapshotDone.resolve()
+      const cleanupTimeoutMs = primaryFailure === undefined ? 1_000 : 200
+      try {
+        if (collection) {
+          await reachCheckpoint(
+            collection.cleanup(),
+            `gap collection cleanup`,
+            cleanupTimeoutMs,
+          )
+        }
+      } catch (error) {
+        cleanupFailures.push(error)
+      }
+      try {
+        database.close()
+      } catch (error) {
+        cleanupFailures.push(error)
+      }
+    }
+    reportReceivingOutcome(
+      primaryFailure,
+      cleanupFailures,
+      `Electric rotation gap`,
+    )
   })
 
   it(`keeps a healthy tagged cache when startup invalidates its resume cursor`, async () => {
@@ -960,8 +1638,12 @@ describe(`Electric resume snapshot races`, () => {
     },
   )
 
-  it(`freshly replaces an unknown on-demand resume baseline`, async () => {
+  it(`fully replaces an unknown on-demand resume baseline without managed claims`, async () => {
     await runRace(`none`, `on-demand`, true)
+  })
+
+  it(`fully replaces an on-demand resume baseline with missing key-set evidence without managed claims`, async () => {
+    await runRace(`none`, `on-demand`, false, true)
   })
 
   it(`freshly replaces an unknown eager resume baseline`, async () => {
@@ -977,24 +1659,40 @@ describe(`Electric resume snapshot races`, () => {
   })
 
   it.each(
-    ([`eager`, `on-demand`] as const).flatMap((syncMode) =>
-      ([`unknown`, `missing`] as const).flatMap((initialEvidence) =>
-        ([`external-row-loss`, `committed-replacement`] as const).map(
-          (transition) => ({ syncMode, initialEvidence, transition }),
-        ),
+    ([`unknown`, `missing`] as const).flatMap((initialEvidence) =>
+      ([`external-row-loss`, `committed-replacement`] as const).map(
+        (transition) => ({ initialEvidence, transition }),
       ),
     ),
   )(
-    `freshly replaces a $initialEvidence $syncMode baseline across $transition`,
-    async ({ syncMode, initialEvidence, transition }) => {
+    `freshly replaces a $initialEvidence eager baseline across $transition`,
+    async ({ initialEvidence, transition }) => {
       await runRace(
         transition,
-        syncMode,
+        `eager`,
         initialEvidence === `unknown`,
         initialEvidence === `missing`,
         `none`,
         `none`,
         transition === `external-row-loss` ? `incompatible` : `unchanged`,
+      )
+    },
+  )
+
+  it.each(
+    ([`unknown`, `missing`] as const).flatMap((initialEvidence) =>
+      ([`external-row-loss`, `committed-replacement`] as const).map(
+        (transition) => ({ initialEvidence, transition }),
+      ),
+    ),
+  )(
+    `fully replaces a $initialEvidence on-demand cache without managed claims across $transition`,
+    async ({ initialEvidence, transition }) => {
+      await runRace(
+        transition,
+        `on-demand`,
+        initialEvidence === `unknown`,
+        initialEvidence === `missing`,
       )
     },
   )

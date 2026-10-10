@@ -48,17 +48,20 @@ function createPersistedCollection<T extends PersistableRow>(
       return
     }
     seedTxSequence++
-    await persistence.adapter.applyCommittedTx(id, {
-      txId: `seed-${id}-${seedTxSequence}`,
-      term: 1,
-      seq: seedTxSequence,
-      rowVersion: seedTxSequence,
-      mutations: rows.map((row) => ({
-        type: `insert` as const,
-        key: row.id,
-        value: row,
-      })),
-    })
+    await persistence.adapter.applyCommittedTx(
+      { kind: `eager`, collectionId: id },
+      {
+        txId: `seed-${id}-${seedTxSequence}`,
+        term: 1,
+        seq: seedTxSequence,
+        rowVersion: seedTxSequence,
+        mutations: rows.map((row) => ({
+          type: `insert` as const,
+          key: row.id,
+          value: row,
+        })),
+      },
+    )
   }
 
   const collection = createCollection(

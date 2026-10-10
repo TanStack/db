@@ -156,7 +156,7 @@ for (const suite of runtimePersistenceSuites) {
           persistence: firstPersistence,
         })
         await firstCollectionOptions.persistence.adapter.applyCommittedTx(
-          collectionId,
+          { kind: `eager`, collectionId: collectionId },
           {
             txId: `tx-1`,
             term: 1,
@@ -199,7 +199,10 @@ for (const suite of runtimePersistenceSuites) {
           persistence: secondPersistence,
         })
         await expect(
-          syncAbsentOptions.persistence.adapter.loadSubset(collectionId, {}),
+          syncAbsentOptions.persistence.adapter.loadSubset(
+            { kind: `eager`, collectionId: collectionId },
+            {},
+          ),
         ).rejects.toThrow(`Schema version mismatch`)
 
         const syncPresentOptions = persistedCollectionOptions<
@@ -217,7 +220,7 @@ for (const suite of runtimePersistenceSuites) {
           persistence: secondPersistence,
         })
         const rows = await syncPresentOptions.persistence.adapter.loadSubset(
-          collectionId,
+          { kind: `eager`, collectionId: collectionId },
           {},
         )
         expect(rows).toEqual([])
