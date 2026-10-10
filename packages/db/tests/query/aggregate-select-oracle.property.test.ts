@@ -8,9 +8,9 @@ import {
   createLiveQueryCollection,
   eq,
   max,
-  upper,
   sum,
   toArray,
+  upper,
 } from '../../src/query/index.js'
 import { NonAggregateExpressionNotInGroupByError } from '../../src/errors.js'
 import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
