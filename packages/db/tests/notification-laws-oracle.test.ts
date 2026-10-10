@@ -1,3 +1,19 @@
+/**
+ * For each live-query Collection `subscribeChanges` callback, applying its
+ * change messages to the previous public rows must produce the rows visible
+ * in that callback. Unsubscribing stops delivery. The Collection
+ * change-message contract supplies this law. Its independent Map checker is in
+ * `packages/db-collection-e2e/src/utils/notification-laws-oracle.ts`.
+ *
+ * The production history has one keyed row, an optional initial row, and a
+ * sequence of synchronous source insert, update, or delete transactions.
+ * After preload, the driver subscribes with initial state and checks the
+ * callback trace after each source transaction, then checks silence after
+ * unsubscribe. Synthetic multi-key histories and corruptions calibrate the
+ * checker; they do not add production-path coverage. Row order, multi-key
+ * production batches, and asynchronous providers are outside this owner.
+ * `change-event-history-oracle.test.ts` owns direct source Collection events.
+ */
 import { expect, it } from 'vitest'
 import fc from 'fast-check'
 import { createCollection, createLiveQueryCollection } from '../src'

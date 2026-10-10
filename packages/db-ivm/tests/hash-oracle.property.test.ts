@@ -9,13 +9,17 @@ const { hash } = nativeSession
 
 /**
  * The hash is a deterministic fingerprint of its declared value domain.
+ * `hash-identity-oracle.property.test.ts` owns D2 value identity. This file
+ * checks the equal-hash consequence for flat equivalent constructors and
+ * deterministic hashing of their values.
  *
  * Independent constructors build equivalent values with different allocation,
- * property order, container order, and normalized numeric representations.
- * They must agree. Deliberately different type/value pairs must disagree only
- * where the contract promises separation; a sampled 32-bit collision alone is
- * not a defect. `HashSession` records environment and calls so a failure can be
- * replayed without turning random frequency into a semantic claim.
+ * plain-object property order, and normalized numeric representations.
+ * They must agree. Unlike values may share a 32-bit digest. The
+ * distinct-digest samples below are collision-sensitive failing assertions,
+ * not an injectivity contract. A failure needs diagnosis: a collision alone
+ * is not a value-identity defect. `HashSession` records environment and calls
+ * so the sampled failure can be replayed.
  *
  * Graph reachability, mixed carriers, failed traversal, and retry atomicity are
  * separate owners. Keeping them separate makes this file's flat-value model

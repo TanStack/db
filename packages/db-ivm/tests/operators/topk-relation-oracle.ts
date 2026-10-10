@@ -9,9 +9,11 @@ import type { MultiSet } from '../../src/multiset.js'
  * A negative weight retracts one matching entry. The oracle adds these weights
  * across all messages and keeps nonzero residue.
  *
- * A valid visible result has weight one for every live entry. Numeric indexes
- * must equal the requested offset and position. Fractional string indexes are
- * opaque, so the oracle checks only their strict order.
+ * Fractional-index output has weight one for every live entry. The ordinary
+ * top-K cases using this checker supply unit support; ordinary top-K can
+ * retain higher input multiplicity, which the support-window owner checks.
+ * Numeric indexes must equal the requested offset and position. Fractional
+ * string indexes are opaque, so the oracle checks only their strict order.
  *
  * This model covers finite scalar keys, scalar indexes, and rows with numeric
  * IDs and string values. It does not define identity for rich or cyclic values.
