@@ -1,7 +1,8 @@
 # Core SQLite persistence oracle gaps
 
-The reviewed code and oracle head is `dc42f42e9`, based on `origin/main` at
-`f7ac2c63a`. This record covers direct persisted-options ownership, an on-demand
+The initial reviewed code and oracle head was `dc42f42e9`; the final code and
+oracle follow-up is `dc34b91f6`, based on `origin/main` at `f7ac2c63a`.
+This record covers direct persisted-options ownership, an on-demand
 full reload with no active subset demand, and two-source persisted readiness
 across one source restart. The executable owners are
 `packages/db-sqlite-persistence-core/tests/persisted-oracle.test.ts` and
@@ -116,3 +117,29 @@ The `0b10fa44e` follow-up passed the full core package suite: 1,228 tests,
 two existing todos, and no type errors. Changed-file lint and formatting passed;
 lint retained only existing `require-await` warnings. The sync-present
 wrong-answer control failed both new runtime cases before it was removed.
+
+## Copied sync config and control ownership
+
+CodeRabbit's comment on `75e265ac3` identified a path outside the descriptor
+claim: a caller can select the exposed wrapped `sync` field into a second
+Collection without copying the claim symbol. Both wrapped sync functions called
+`setSyncControls` before `setCollection` rejected that second owner. The
+independent law is that rejected admission leaves the first owner's sync run,
+controls, public rows, and durability path unchanged.
+
+The primary owner now runs that selected-field history through the local-only
+loopback and upstream-sync paths. On the pre-fix code, the local-only first
+owner's subsequent durable insert disappeared from its public Collection; an
+upstream transaction opened before the rejected second start aborted at commit.
+These were assertion and receipt failures after the rejection was reached. The
+repair checks owner identity before registering the new controls, while keeping
+registration before coordinator subscription for a valid owner. Both histories
+then retain the first owner's public and durable row. Ordinary same-owner sync
+restart remains covered by the existing lifecycle histories. Controlled
+Collections and adapters do not prove behavior in every native host.
+
+After the repair, the full core package passed 1,231 tests with two existing
+todos and no type errors. The package build, changed-file lint, formatting,
+and whitespace checks passed; lint retained only existing warnings. The
+repair is production-line neutral: it combines the two control/binding calls
+into one guarded operation without adding lifecycle state.
