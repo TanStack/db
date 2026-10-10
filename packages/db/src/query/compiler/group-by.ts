@@ -13,7 +13,7 @@ import {
   isExpressionLike,
 } from '../ir.js'
 import { isRefProxy } from '../builder/ref-proxy-identity.js'
-import { isTemporal } from '../../utils.js'
+import { deepEquals, isTemporal } from '../../utils.js'
 import {
   AggregateFunctionNotInSelectError,
   NonAggregateExpressionNotInGroupByError,
@@ -296,8 +296,8 @@ export function processGroupBy(
   pipeline: NamespacedAndKeyedStream,
   groupByClause: GroupBy,
   valueIdentity: ValueIdentity,
-  /** The query's own source aliases; a single group rejects their fields. */
-  sourceAliases: ReadonlySet<string>,
+  /** The binding of each of the query's own source aliases. */
+  sourceBindings: ReadonlyMap<string, string>,
   havingClauses?: Array<Having>,
   selectClause?: Select,
   fnHavingClauses?: Array<(row: any) => any>,
@@ -338,7 +338,7 @@ export function processGroupBy(
   // fields the query names.
   if (selectClause) {
     for (const [alias, expr] of Object.entries(selectClause)) {
-      if (lacksGroupValue(alias, expr, sourceAliases, groupByClause))
+      if (lacksGroupValue(alias, expr, sourceBindings, groupByClause))
         throw new NonAggregateExpressionNotInGroupByError(
           alias.startsWith(SPREAD_SENTINEL) ? `...${spreadPath(alias)}` : alias,
         )
@@ -557,15 +557,23 @@ export function processGroupBy(
   if (havingClauses && havingClauses.length > 0) {
     for (const havingClause of havingClauses) {
       const havingExpression = getHavingExpression(havingClause)
-      const transformedHavingClause = replaceAggregatesByRefs(
-        havingExpression,
-        selectClause || {},
+      // HAVING follows the select rule, and reads group keys the same way.
+      if (lacksGroupValue(``, havingExpression, sourceBindings, groupByClause))
+        throw new NonAggregateExpressionNotInGroupByError(`HAVING`)
+      const transformedHavingClause = replaceGroupByRefsInExpression(
+        replaceAggregatesByRefs(havingExpression, selectClause || {}),
+        groupByClause,
+        fields.groupKeyRefs,
       )
       const compiledHaving = compileExpression(transformedHavingClause)
 
       pipeline = pipeline.pipe(
         filter(([, row]) => {
-          const namespacedRow = getGroupEvaluationRow(row, fields)
+          const selected = { ...row.$selected }
+          fields.groupKeyRefs.forEach((ref, i) => {
+            selected[ref] = row[fields.groupValues[i]!]
+          })
+          const namespacedRow = getGroupEvaluationRow(row, fields, selected)
           const result = compiledHaving(namespacedRow)
           // Preserve each path's coercion for unchecked nonboolean IR values.
           return singleGroup ? toBooleanPredicate(result) : result
@@ -609,7 +617,7 @@ function spreadPath(key: string): string {
 function lacksGroupValue(
   key: string,
   value: unknown,
-  sources: ReadonlySet<string>,
+  sources: ReadonlyMap<string, string>,
   groupKeys: GroupBy,
 ): boolean {
   if (key.startsWith(SPREAD_SENTINEL)) return true
@@ -625,7 +633,11 @@ function lacksGroupValue(
     )
   if (isExpressionLike(value)) {
     const node = value as BasicExpression
-    if (node.type === `ref`) return sources.has(node.path[0]!)
+    if (node.type === `ref`) {
+      // A ref bound to an ancestor scope can reuse a source alias.
+      const binding = sources.get(node.path[0]!)
+      return binding !== undefined && (node.bindingId ?? binding) === binding
+    }
     if (node.type === `func`)
       return node.args.some((arg) =>
         lacksGroupValue(``, arg, sources, groupKeys),
@@ -655,7 +667,11 @@ function expressionsEqual(expr1: any, expr2: any): boolean {
         (segment: string, i: number) => segment === expr2.path[i],
       )
     case `val`:
-      return expr1.value === expr2.value
+      // Equal literals are separate objects; -0 and 0 can give different
+      // results.
+      return typeof expr1.value === `number`
+        ? Object.is(expr1.value, expr2.value)
+        : deepEquals(expr1.value, expr2.value)
     case `func`:
       return (
         expr1.name === expr2.name &&

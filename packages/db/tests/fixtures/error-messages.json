@@ -189,7 +189,7 @@
   "UnsupportedJoinSourceTypeError": ["Unsupported join source type: custom"],
   "GroupByError": ["Group error"],
   "NonAggregateExpressionNotInGroupByError": [
-    "Non-aggregate expression 'field' in SELECT must also appear in GROUP BY clause"
+    "Non-aggregate expression 'field' must also appear in GROUP BY clause"
   ],
   "UnsupportedAggregateFunctionError": [
     "Unsupported aggregate function: customAgg"

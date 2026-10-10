@@ -710,13 +710,15 @@ export function compileQuery(
       }
     }
   }
+  const selectHasAggregates =
+    query.select !== undefined && containsAggregate(query.select)
   if (query.select) {
     const includesEntries = extractIncludesFromSelect(query.select)
     // A nested include has one Collection per row, not one value per group,
     // so it cannot sit in a grouped or aggregate select.
     if (
       includesEntries.length > 0 &&
-      ((query.groupBy?.length ?? 0) > 0 || containsAggregate(query.select))
+      ((query.groupBy?.length ?? 0) > 0 || selectHasAggregates)
     )
       throw new NonAggregateExpressionNotInGroupByError(includesEntries[0]!.key)
     if (includesEntries.length > 0) {
@@ -916,8 +918,6 @@ export function compileQuery(
     throw new FnSelectWithGroupByError()
   }
 
-  const selectHasAggregates =
-    query.select !== undefined && containsAggregate(query.select)
   const routingFns = includesRoutingFns
   const getRowIncludesRouting = (row: NamespacedRow) =>
     Object.fromEntries(
@@ -1011,7 +1011,10 @@ export function compileQuery(
     }
     pipeline = pipeline.pipe(map(([key, row]) => [key, projectRow(row)]))
   } else if (query.select) {
-    pipeline = processSelect(pipeline, query.select, allInputs)
+    // An aggregate query computes its select values from each group, so it
+    // does not project rows first.
+    if (!selectHasAggregates && !(query.groupBy && query.groupBy.length > 0))
+      pipeline = processSelect(pipeline, query.select, allInputs)
   } else {
     // If no SELECT clause, create $selected with the main table data
     pipeline = pipeline.pipe(
@@ -1053,15 +1056,15 @@ export function compileQuery(
   // When in includes mode (parentKeyStream), pass mainSource so that groupBy
   // preserves route metadata for per-parent aggregation.
   const groupByMainSource = parentKeyStream ? mainSource : undefined
-  const sourceAliases = new Set(
-    getAllSources(query).map((source) => source.alias),
+  const sourceBindings = new Map(
+    getAllSources(query).map((source) => [source.alias, source.bindingId]),
   )
   if (query.groupBy && query.groupBy.length > 0) {
     pipeline = processGroupBy(
       pipeline,
       query.groupBy,
       valueIdentity,
-      sourceAliases,
+      sourceBindings,
       query.having,
       query.select,
       query.fnHaving,
@@ -1075,7 +1078,7 @@ export function compileQuery(
       pipeline,
       [], // Empty group by means single group
       valueIdentity,
-      sourceAliases,
+      sourceBindings,
       query.having,
       query.select,
       query.fnHaving,

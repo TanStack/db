@@ -4,9 +4,11 @@ import { createCollection } from '../../src/collection/index.js'
 import {
   add,
   caseWhen,
+  coalesce,
   count,
   createLiveQueryCollection,
   eq,
+  inArray,
   max,
   sum,
   toArray,
@@ -55,8 +57,16 @@ import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
  * updates and deletes. After each step the driver compares the published rows
  * with the model, or that compilation threw when the model says it must.
  *
- * Each history also chooses whether both queries group, by the ref `c.k` or
- * by the computed `upper(c.k)`, and a shape may hold a nested include. A
+ * Each history also chooses whether both queries group, by the ref `c.k`, by
+ * the computed `upper(c.k)`, or by `inArray(c.k, ['a', 'b'])`, whose list
+ * literal each use builds again, and a shape may hold a nested include. The
+ * raw field `c.k` is a group key only under `groupBy(c.k)`: under
+ * `upper(c.k)` the keys `a` and `A` share a group. A shape may add a HAVING
+ * condition without aggregates, which follows the select rule and keeps only
+ * the groups for which it holds. The include's source sometimes shadows the
+ * parent alias; a parent ref captured from the outer scope still names the
+ * parent row. A source update can change `k`, which moves the row to another
+ * group and another parent's route. A
  * grouped history favours the group key over source fields, and conditions
  * can compare with key values, so a missing key changes the branch taken. Group order is not part of the law, so rows are
  * compared in a fixed order.
@@ -72,6 +82,8 @@ type Part =
   | { k: `parent` }
   | { k: `source` }
   | { k: `key` }
+  /** The raw field `c.k`: the group key only when the query groups by it. */
+  | { k: `rawKey` }
   | { k: `agg`; fn: `count` | `sum` | `max` }
   | { k: `add`; a: Part; b: Part }
   | { k: `case`; cond: Part; lit: number | string; a: Part; b: Part }
@@ -79,6 +91,12 @@ type Part =
 
 type Shape = {
   fields: Record<string, Part>
+  /**
+   * A HAVING condition `eq(part, lit)` without aggregates. It follows the
+   * select rule: its value outside an aggregate must be constant within the
+   * group.
+   */
+  having?: { part: Part; lit: number | string }
   spread?: `source` | `parent`
   /** A nested include beside the aggregate. */
   include?: boolean
@@ -86,9 +104,10 @@ type Shape = {
 
 /**
  * How a history groups: not at all, by the ref `c.k`, or by the computed
- * expression `upper(c.k)`. The `key` leaf is that group expression.
+ * expression `upper(c.k)` or `inArray(c.k, ['a', 'b'])`. The `key` leaf is
+ * that group expression, built again with a new list literal each time.
  */
-type Grouping = `none` | `key` | `upper`
+type Grouping = `none` | `key` | `upper` | `inList`
 
 type Issue = { id: number; k: string; x: number }
 type Comment = { id: number; k: string; v: number }
@@ -114,13 +133,17 @@ function hasAggregate(part: Part): boolean {
  * A source field outside an aggregate has no value for the group, unless it
  * is the group key of a grouped query.
  */
-function readsSourceOutsideAggregate(part: Part, grouped: boolean): boolean {
-  const reads = (child: Part) => readsSourceOutsideAggregate(child, grouped)
+function readsSourceOutsideAggregate(part: Part, grouping: Grouping): boolean {
+  const reads = (child: Part) => readsSourceOutsideAggregate(child, grouping)
   switch (part.k) {
     case `source`:
       return true
     case `key`:
-      return !grouped
+      return grouping === `none`
+    // Under `upper(c.k)`, `a` and `A` share a group, so `c.k` is a source
+    // field with no single value for it.
+    case `rawKey`:
+      return grouping !== `key`
     case `add`:
       return [part.a, part.b].some(reads)
     case `case`:
@@ -132,17 +155,20 @@ function readsSourceOutsideAggregate(part: Part, grouped: boolean): boolean {
   }
 }
 
-function modelThrows(shape: Shape, grouped: boolean): boolean {
+function modelThrows(shape: Shape, grouping: Grouping): boolean {
   return (
     shape.spread !== undefined ||
+    (shape.having !== undefined &&
+      readsSourceOutsideAggregate(shape.having.part, grouping)) ||
     shape.include === true ||
     Object.values(shape.fields).some((part) =>
-      readsSourceOutsideAggregate(part, grouped),
+      readsSourceOutsideAggregate(part, grouping),
     )
   )
 }
 
-function groupKeyOf(row: Comment, grouping: Grouping): string {
+function groupKeyOf(row: Comment, grouping: Grouping): string | boolean {
+  if (grouping === `inList`) return [`a`, `b`].includes(row.k)
   return grouping === `upper` ? row.k.toUpperCase() : row.k
 }
 
@@ -161,6 +187,8 @@ function evaluate(
       throw new Error(`unreachable: the model throws first`)
     case `key`:
       return groupKeyOf(rows[0]!, grouping)
+    case `rawKey`:
+      return rows[0]!.k
     case `agg`:
       if (part.fn === `count`) return rows.length
       if (part.fn === `sum`) return rows.reduce((t, r) => t + r.v, 0)
@@ -199,8 +227,15 @@ function modelGroup(
       : rows.length === 0
         ? []
         : [rows]
+  const kept = shape.having
+    ? groups.filter(
+        (group) =>
+          evaluate(shape.having!.part, group, parent, grouping) ===
+          shape.having!.lit,
+      )
+    : groups
   return sortRows(
-    groups.map((group) =>
+    kept.map((group) =>
       Object.fromEntries(
         Object.entries(shape.fields).map(([key, part]) => [
           key,
@@ -241,6 +276,7 @@ const leaf = (include: boolean, grouped: boolean): fc.Arbitrary<Part> =>
     ...(include ? [fc.constant<Part>({ k: `parent` })] : []),
     { weight: grouped ? 1 : 2, arbitrary: fc.constant<Part>({ k: `source` }) },
     { weight: grouped ? 4 : 1, arbitrary: fc.constant<Part>({ k: `key` }) },
+    fc.constant<Part>({ k: `rawKey` }),
     fc
       .constantFrom(`count` as const, `sum` as const, `max` as const)
       .map((fn): Part => ({ k: `agg`, fn })),
@@ -324,6 +360,15 @@ const shape = (include: boolean, grouping: Grouping): fc.Arbitrary<Shape> =>
         { nil: undefined, freq: 5 },
       ),
       include: fc.boolean().map((b) => (b ? true : undefined)),
+      having: fc.option(
+        fc.record({
+          part: expression(include, grouping !== `none`, 1).filter(
+            (p) => !hasAggregate(p),
+          ),
+          lit: conditionLiteral,
+        }),
+        { nil: undefined, freq: 3 },
+      ),
     })
     .filter(
       (s) => grouping !== `none` || Object.values(s.fields).some(hasAggregate),
@@ -332,8 +377,10 @@ const shape = (include: boolean, grouping: Grouping): fc.Arbitrary<Shape> =>
 type Step =
   | { t: `parent`; id: number; x: number }
   | { t: `insert`; k: string; v: number }
-  | { t: `update`; pick: number; v: number }
+  | { t: `update`; pick: number; v: number; k?: string }
   | { t: `delete`; pick: number }
+// `A` matches no parent, and shares a group with `a` under `upper(c.k)`.
+const sourceKey = fc.constantFrom(`a`, `b`, `A`)
 const step: fc.Arbitrary<Step> = fc.oneof(
   fc.record({
     t: fc.constant(`parent` as const),
@@ -342,10 +389,16 @@ const step: fc.Arbitrary<Step> = fc.oneof(
   }),
   fc.record({
     t: fc.constant(`insert` as const),
-    k: fc.constantFrom(`a`, `b`),
+    k: sourceKey,
     v: literal,
   }),
-  fc.record({ t: fc.constant(`update` as const), pick: fc.nat(5), v: literal }),
+  // An update can move a source row to another group and parent route.
+  fc.record({
+    t: fc.constant(`update` as const),
+    pick: fc.nat(5),
+    v: literal,
+    k: fc.option(sourceKey, { nil: undefined }),
+  }),
   fc.record({ t: fc.constant(`delete` as const), pick: fc.nat(5) }),
 )
 
@@ -365,6 +418,8 @@ function build(p: Part, c: any, issue: any): any {
       return c.v
     case `key`:
       return keyExpression(c)
+    case `rawKey`:
+      return c.k
     case `agg`:
       return p.fn === `count`
         ? count(c.id)
@@ -415,10 +470,17 @@ async function runHistory(
   top: Shape,
   nested: Shape,
   grouping: Grouping,
+  shadow: boolean,
   steps: ReadonlyArray<Step>,
 ): Promise<void> {
   const grouped = grouping !== `none`
-  keyExpression = grouping === `upper` ? (c) => upper(c.k) : (c) => c.k
+  // Each use builds a new list literal, as separate query callbacks do.
+  keyExpression =
+    grouping === `upper`
+      ? (c) => upper(c.k)
+      : grouping === `inList`
+        ? (c) => inArray(c.k, [`a`, `b`])
+        : (c) => c.k
   const suffix = Math.random().toString(36).slice(2)
   let issues: Array<Issue> = [
     { id: 1, k: `a`, x: 1 },
@@ -455,12 +517,21 @@ async function runHistory(
     }
   }
   // A grouped query groups by `c.k`; its select may read that group key.
-  const group = (query: any) =>
-    grouped ? query.groupBy(({ c }: any) => keyExpression(c)) : query
+  const group = (query: any, alias: string) =>
+    grouped ? query.groupBy((refs: any) => keyExpression(refs[alias])) : query
+  const having = (s: Shape, query: any, alias: string, issue?: any) =>
+    s.having
+      ? query.having((refs: any) =>
+          eq(build(s.having!.part, refs[alias], issue), s.having!.lit),
+        )
+      : query
+  // The include's source may shadow the parent alias. A parent ref captured
+  // from the outer scope still names the parent row.
+  const childAlias = shadow ? `issue` : `c`
   const topQuery = compile(() =>
     createLiveQueryCollection((q) =>
-      group(q.from({ c: commentSource })).select(({ c }: any) =>
-        buildSelect(top, c, undefined, q, issueSource),
+      having(top, group(q.from({ c: commentSource }), `c`), `c`).select(
+        ({ c }: any) => buildSelect(top, c, undefined, q, issueSource),
       ),
     ),
   )
@@ -469,10 +540,18 @@ async function runHistory(
       q.from({ issue: issueSource }).select(({ issue }) => ({
         id: issue.id,
         kids: toArray(
-          group(
-            q.from({ c: commentSource }).where(({ c }) => eq(c.k, issue.k)),
-          ).select(({ c }: any) =>
-            buildSelect(nested, c, issue, q, issueSource),
+          having(
+            nested,
+            group(
+              q
+                .from({ [childAlias]: commentSource })
+                .where((refs: any) => eq(refs[childAlias].k, issue.k)),
+              childAlias,
+            ),
+            childAlias,
+            issue,
+          ).select((refs: any) =>
+            buildSelect(nested, refs[childAlias], issue, q, issueSource),
           ),
         ),
       })),
@@ -483,7 +562,7 @@ async function runHistory(
     [`top`, topQuery, top],
     [`include`, includeQuery, nested],
   ] as const) {
-    if (modelThrows(s, grouped)) {
+    if (modelThrows(s, grouping)) {
       expect(result.ok, `${label} compile throws`).toBe(false)
       if (!result.ok)
         expect(result.error, `${label} error class`).toBeInstanceOf(
@@ -542,7 +621,7 @@ async function runHistory(
         if (comments.length === 0) continue
         const target = comments[s.pick % comments.length]!
         if (s.t === `update`) {
-          const row = { ...target, v: s.v }
+          const row = { ...target, v: s.v, k: s.k ?? target.k }
           comments = comments.map((c) => (c.id === target.id ? row : c))
           commentSource.utils.begin()
           commentSource.utils.write({ type: `update`, value: row })
@@ -565,12 +644,13 @@ async function runHistory(
 }
 
 const history = fc
-  .constantFrom<Grouping>(`none`, `key`, `upper`)
+  .constantFrom<Grouping>(`none`, `key`, `upper`, `inList`)
   .chain((grouping) =>
     fc.tuple(
       shape(false, grouping),
       shape(true, grouping),
       fc.constant(grouping),
+      fc.boolean(),
       fc.array(step, { maxLength: 6 }),
     ),
   )
@@ -579,8 +659,8 @@ describe(`aggregate select shapes`, () => {
   it(`match the model across generated shapes (fixed campaign)`, async () => {
     // A repeatable baseline. Seed 2094 is arbitrary.
     await fc.assert(
-      fc.asyncProperty(history, ([top, nested, grouping, steps]) =>
-        runHistory(top, nested, grouping, steps),
+      fc.asyncProperty(history, ([top, nested, grouping, shadow, steps]) =>
+        runHistory(top, nested, grouping, shadow, steps),
       ),
       { numRuns: oracleRuns(120), seed: 2094 },
     )
@@ -588,8 +668,8 @@ describe(`aggregate select shapes`, () => {
 
   it(`match the model across generated shapes (random or replayed)`, async () => {
     await fc.assert(
-      fc.asyncProperty(history, ([top, nested, grouping, steps]) =>
-        runHistory(top, nested, grouping, steps),
+      fc.asyncProperty(history, ([top, nested, grouping, shadow, steps]) =>
+        runHistory(top, nested, grouping, shadow, steps),
       ),
       oraclePropertyOptions(120, PROPERTY),
     )
@@ -602,7 +682,59 @@ describe(`aggregate select shapes`, () => {
       { fields: { f0: { k: `add`, a: { k: `lit`, n: 0 }, b: { k: `key` } } } },
       { fields: { f0: { k: `agg`, fn: `count` } } },
       `key`,
+      false,
       [],
     )
+  })
+
+  // Pinned replay: a parent field stays legal when the include's source
+  // shadows the parent alias.
+  it(`reads a parent field under a shadowing child alias`, async () => {
+    await runHistory(
+      { fields: { f0: { k: `agg`, fn: `count` } } },
+      {
+        fields: {
+          f0: { k: `parent` },
+          f1: { k: `agg`, fn: `count` },
+        },
+      },
+      `none`,
+      true,
+      [],
+    )
+  })
+
+  // Pinned witness: a group key that holds a literal object or NaN matches a
+  // select value that builds the same literal again.
+  it(`matches group keys holding array, Date and NaN literals`, async () => {
+    const source = createCollection(
+      mockSyncCollectionOptions<{ id: number; v: number; d: Date | null }>({
+        id: `sg-literals-${Math.random().toString(36).slice(2)}`,
+        getKey: (r) => r.id,
+        initialData: [{ id: 1, v: 1, d: null }],
+      }),
+    )
+    const keys: Record<string, (c: any) => any> = {
+      array: (c) => inArray(c.v, [1, 2]),
+      date: (c) => coalesce(c.d, new Date(5)),
+      nan: (c) => add(c.v, NaN),
+    }
+    for (const [name, key] of Object.entries(keys)) {
+      const query = createLiveQueryCollection((q) =>
+        q
+          .from({ c: source })
+          .groupBy(({ c }) => key(c))
+          .select(({ c }) => ({ g: key(c), n: count(c.id) })),
+      )
+      await query.preload()
+      expect(
+        query.toArray.map((row: any) => [row.g, row.n]),
+        name,
+      ).toEqual([
+        [name === `array` ? true : name === `date` ? new Date(5) : NaN, 1],
+      ])
+      await query.cleanup()
+    }
+    await source.cleanup()
   })
 })

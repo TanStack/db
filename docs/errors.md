@@ -753,7 +753,7 @@ Unsupported join source type: custom
 Development builds show the full message. For example:
 
 ```text
-Non-aggregate expression 'field' in SELECT must also appear in GROUP BY clause
+Non-aggregate expression 'field' must also appear in GROUP BY clause
 ```
 
 <a id="error-71"></a>
