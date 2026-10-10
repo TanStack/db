@@ -288,3 +288,44 @@ failure, one observer, an eager replacement, the attach cut, settled public
 rows, and subsequent client dehydration. Concurrent replacement observers,
 other asynchronous orders, and later conflicting preloads while no reusable
 client stream exists remain outside this finite history.
+
+## Failed-stream boundary sensitivity follow-up
+
+This self-review starts from pushed head `d99a068c6`. The prior observer witness
+used a controlled later `markError`; the primary deferred-acquisition owner now
+also observes a synchronous source-start throw. The expected result comes from
+the same source-ownership rule, not from the shape of `DbClient`'s maps: while a
+pending stream can return the original sources' rows, a different same-hash
+source must be rejected. Once that stream fails, it has no result to lend and
+no source-object claim. A healthy replacement observer can attach before a
+new client preload and show only `recovered` at its settled public snapshot.
+The separate peer source must still reach `ready` after the throw.
+
+Two temporary production mutants reached their intended comparisons. Returning
+from `_assertLiveQuerySources` for every existing record let the conflicting
+preload through and failed the pending-stream `toThrow` assertion. Removing the
+error-record guard made the synchronous replacement observer throw `different
+source Collections` at its attach assertion. Both mutants were restored. The
+unaltered `d99a068c6` implementation passed all four fixed failure histories.
+The earlier suspected stale-preload-entry bug was therefore not reproduced;
+deferred-source release retires the failed registration at this cut. This new
+history strengthens the observer recovery boundary but does not establish
+arbitrary failure schedules, concurrent replacement observers, or a provider
+outside the controlled source fixture.
+
+| Requirement | Follow-up outcome |
+| --- | --- |
+| ORC-001 authority and limits | Pass. The source-ownership and failed-stream laws are stated beside the fixed histories; the finite limits appear above and in the coverage map. |
+| ORC-002 independent judgment | Pass. The expected single row is the replacement fixture's input, and the rejection boundary follows whether the old stream can still return a result. No client lookup or status classifier computes the expectation. |
+| ORC-003 visible responsibilities | Pass. The owner's prose names the law, two failure orders, real preload and observer paths, public rejection, readiness, row and dehydration cuts, and their comparisons. |
+| ORC-004 generated grammar | Not applicable. These are fixed histories, not a generated-history claim. |
+| ORC-005 production path and observation | Pass. `DbClient.preloadLiveQuery`, observer subscription and preload, source Collection readiness, snapshots, and dehydration are exercised at the stated cuts. |
+| ORC-006 checker calibration | Pass. Both temporary mutants failed by assertion at their intended boundary, rather than by setup failure or timeout. |
+| ORC-007 campaigns and replay | Not applicable. No generated property was added. |
+| ORC-008 model minimality | Not triggered. The fixed expected-result rule adds no state to the independent grammar model. |
+| ORC-009 vocabulary mapping | Pass. A pending stream means a client live-query result that can still settle; the source Collection and public snapshot keep their glossary meanings. |
+| ORC-010 failure fidelity and cleanup | Pass. The observer histories preserve their assertion as the primary failure and dispose the observer, live-query Collection, and client in `finally`; no shrinking or failure normalization occurs. |
+| ORC-011 second formulation | Not triggered. No shared-fault hypothesis in the row expectation was identified; the pending and failed cuts distinguish source-claim lifetime. |
+| ORC-012 review evidence | Pass for this bounded self-review: it records the base head, model prediction, paths, cuts, mutant outcomes, and unresolved cells. |
+| ORC-013 boundary witness | Pass. The pending same-hash conflict and the failed-stream replacement are adjacent legal cuts; the two mutants distinguish overly broad and overly persistent source claims. |
+| ORC-014 controlled-premise handoff | No real-provider claim is made. The synchronous throw and later `markError` are controlled source Collection premises. |

@@ -702,8 +702,12 @@ describe(`preload answered by a DbClient stream`, () => {
  * failed stream has no reusable result, so a replacement observer may attach
  * through the same hash before a new preload. Its public snapshot must show
  * the replacement row as ready, with no stale stream error. The active-stream
- * identity owner separately rejects a different source while a result remains
- * reusable.
+ * identity rule also applies before that failure: a different same-hash
+ * preload rejects while the original stream is pending. A synchronous source
+ * throw crosses the same recovery law at a different cut. After the peer source
+ * becomes ready, a replacement observer may attach before a new client preload
+ * and must read only the replacement row. These fixed histories do not claim
+ * all failure schedules or concurrent replacement observers.
  */
 describe(`DbClient preload releases independent source starts`, () => {
   it(`retire a pending stream after asynchronous source startup failure`, async () => {
@@ -763,6 +767,14 @@ describe(`DbClient preload releases independent source starts`, () => {
     try {
       const pending = client.preloadLiveQuery({ query: failedQuery })
       expect([firstStarts, secondStarts]).toEqual([1, 1])
+      expect(
+        client.dehydrate({ shouldDehydrateLiveQuery: () => true }).liveQueries,
+      ).toHaveLength(1)
+      // Model: the pending result still belongs to the original sources.
+      // The replacement becomes legal only after this stream fails.
+      expect(() => client.preloadLiveQuery({ query: recoveredQuery })).toThrow(
+        /different source Collections/,
+      )
       expect(
         client.dehydrate({ shouldDehydrateLiveQuery: () => true }).liveQueries,
       ).toHaveLength(1)
@@ -861,7 +873,7 @@ describe(`DbClient preload releases independent source starts`, () => {
     }
   })
 
-  it(`starts a healthy union source after another source throws`, async () => {
+  it(`releases a peer source and permits replacement after a synchronous throw`, async () => {
     const failure = new Error(`first source failed`)
     let firstStarts = 0
     let secondStarts = 0
@@ -932,6 +944,41 @@ describe(`DbClient preload releases independent source starts`, () => {
       const healthy = client.collection(second)
       await healthy.preload()
       expect(healthy.status).toBe(`ready`)
+
+      // The synchronous throw left no reusable result. A replacement observer
+      // may therefore attach under this hash before another client preload.
+      const queryHash = getLiveQueryHash({ query })
+      expect(getLiveQueryHash({ query: recoveredQuery })).toBe(queryHash)
+      const prepared = prepareLiveQueryValue(recoveredQuery, client)
+      const view = createLiveQueryCollection({
+        query: prepared as typeof recoveredQuery,
+        startSync: false,
+      })
+      const observer = createLiveQueryObserver(view, {
+        client,
+        queryHash,
+        mode: `wholesale`,
+      })
+      try {
+        let unsubscribe!: () => void
+        expect(() => {
+          unsubscribe = observer.subscribe(() => {})
+        }, `replacement observer attaches after a synchronous throw`).not.toThrow()
+        try {
+          await observer.preload()
+          expect(observer.getSnapshot().data).toEqual([
+            expect.objectContaining({ id: `recovered` }),
+          ])
+          expect(observer.getSnapshot().status).toBe(`ready`)
+          expect(observer.getError()).toBeUndefined()
+        } finally {
+          unsubscribe()
+        }
+      } finally {
+        observer.dispose()
+        await view.cleanup()
+      }
+
       await client.preloadLiveQuery({ query: recoveredQuery })
       expect(
         client

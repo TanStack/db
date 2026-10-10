@@ -340,10 +340,15 @@ failed query's pending stream; it does not restart the source.
 A replacement observer subscribed after the controlled asynchronous failure
 can attach under the same hash and reads the healthy replacement row as ready,
 without a stale stream error, before a new client preload. The prior
-source-mismatch check fails that attachment assertion; the active-stream
-identity owner retains the contrasting rule: a live result cannot be borrowed
-by a different source object. This witness does not enumerate concurrent
-replacement observers or later conflicting preloads while an observer has no
+source-mismatch check fails that attachment assertion. The same history rejects
+a different-source preload while its original stream is still pending. A second
+fixed history crosses a synchronous source throw and then attaches a healthy
+replacement observer before a new client preload; its settled snapshot contains
+only the replacement row. Removing the failed-record source-claim guard fails
+that observer attachment, while ignoring every existing stream's claim fails
+the pending-stream rejection. The preload-identity owner also checks active
+streams. These histories do not enumerate concurrent replacement observers,
+other failure schedules, or later conflicting preloads while an observer has no
 reusable client stream.
 An observer preload over a config-free pooled view is also explicit demand: it
 starts an idle eager source once, does not restart a running source, and reaches
