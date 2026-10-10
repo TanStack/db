@@ -7,7 +7,7 @@ title: fetchNextLiveQueryWindowPage
 function fetchNextLiveQueryWindowPage(controller): Promise<void>;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:538](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L538)
+Defined in: [packages/db/src/live-query-window-controller.ts:574](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L574)
 
 **`Internal`**
 

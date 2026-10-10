@@ -3,7 +3,7 @@ id: InvalidSchemaError
 title: InvalidSchemaError
 ---
 
-Defined in: [packages/db/src/errors.ts:100](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L100)
+Defined in: [packages/db/src/errors.ts:114](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L114)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:100](https://github.com/TanStack/db/blob/
 new InvalidSchemaError(): InvalidSchemaError;
 ```
 
-Defined in: [packages/db/src/errors.ts:101](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L101)
+Defined in: [packages/db/src/errors.ts:115](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L115)
 
 #### Returns
 

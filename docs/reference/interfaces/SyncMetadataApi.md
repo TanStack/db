@@ -3,7 +3,7 @@ id: SyncMetadataApi
 title: SyncMetadataApi
 ---
 
-Defined in: [packages/db/src/types.ts:482](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L482)
+Defined in: [packages/db/src/types.ts:488](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L488)
 
 ## Type Parameters
 
@@ -19,7 +19,7 @@ Defined in: [packages/db/src/types.ts:482](https://github.com/TanStack/db/blob/m
 collection: object;
 ```
 
-Defined in: [packages/db/src/types.ts:490](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L490)
+Defined in: [packages/db/src/types.ts:496](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L496)
 
 #### delete()
 
@@ -99,7 +99,7 @@ persistence:
   | null;
 ```
 
-Defined in: [packages/db/src/types.ts:508](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L508)
+Defined in: [packages/db/src/types.ts:514](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L514)
 
 **`Internal`**
 
@@ -119,7 +119,7 @@ invalid.
 row: object;
 ```
 
-Defined in: [packages/db/src/types.ts:485](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L485)
+Defined in: [packages/db/src/types.ts:491](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L491)
 
 #### delete()
 

@@ -8,9 +8,9 @@ import type { SyncConfig } from '../src/types.js'
  *
  * A sync source writes row metadata inside one transaction in three ways:
  * through `metadata.row.set` and `metadata.row.delete`, through the `metadata`
- * field of a row message, and through `truncate`. Each write replaces the
- * current value, last write wins. `collection.test.ts` pins that rule for
- * writes that carry metadata. A maintainer decision on 2026-10-05 (recorded in
+ * field of a row message, and through `truncate`. Writes that carry metadata
+ * replace earlier values, so the last such write wins. `collection.test.ts`
+ * pins that rule. A maintainer decision on 2026-10-05 (recorded in
  * `docs/contributing/oracle-reviews/2026-10-05-state-mutation-round-3.md`)
  * fixes the writes that carry none:
  *

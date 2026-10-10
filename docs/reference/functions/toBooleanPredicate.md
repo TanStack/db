@@ -7,7 +7,7 @@ title: toBooleanPredicate
 function toBooleanPredicate(result): boolean;
 ```
 
-Defined in: [packages/db/src/query/compiler/evaluators.ts:79](https://github.com/TanStack/db/blob/main/packages/db/src/query/compiler/evaluators.ts#L79)
+Defined in: [packages/db/src/query/compiler/evaluators.ts:85](https://github.com/TanStack/db/blob/main/packages/db/src/query/compiler/evaluators.ts#L85)
 
 Converts a 3-valued logic result to a boolean for use in WHERE/HAVING filters.
 In SQL, UNKNOWN (null) values in WHERE clauses exclude rows, matching false behavior.

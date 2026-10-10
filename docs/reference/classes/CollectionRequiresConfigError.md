@@ -3,7 +3,7 @@ id: CollectionRequiresConfigError
 title: CollectionRequiresConfigError
 ---
 
-Defined in: [packages/db/src/errors.ts:88](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L88)
+Defined in: [packages/db/src/errors.ts:94](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L94)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:88](https://github.com/TanStack/db/blob/m
 new CollectionRequiresConfigError(): CollectionRequiresConfigError;
 ```
 
-Defined in: [packages/db/src/errors.ts:89](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L89)
+Defined in: [packages/db/src/errors.ts:95](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L95)
 
 #### Returns
 

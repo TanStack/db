@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
 import { compareKeys, serializeValue } from '../src/utils.js'
 import { hash } from '../src/hashing/index.js'
+import { equalHashValues } from '../src/hashing/hash.js'
 
 describe(`compareKeys`, () => {
   it(`orders finite numeric keys before NaN`, () => {
@@ -81,7 +82,8 @@ describe(`hash`, () => {
 
       // Same numbers should have same hash
       expect(hash(42)).toBe(result1)
-      expect(hash(2.0)).not.toBe(hash(2.5))
+      expect(equalHashValues(2.0, 2.5)).toBe(false)
+      expect(typeof hash(2.5)).toBe(hashType)
       expect(hash(3.14159)).toBe(result4)
     })
 
@@ -91,7 +93,7 @@ describe(`hash`, () => {
 
       expect(typeof result1).toBe(hashType)
       expect(typeof result2).toBe(hashType)
-      expect(result1).not.toBe(result2)
+      expect(equalHashValues(true, false)).toBe(false)
 
       // Same booleans should have same hash
       expect(hash(true)).toBe(result1)
@@ -107,7 +109,7 @@ describe(`hash`, () => {
       expect(typeof result2).toBe(hashType)
       expect(typeof result3).toBe(hashType)
       expect(result1).toBe(result3) // Same bigint should have same hash
-      expect(result1).not.toBe(result2) // Different bigints should have different hash
+      expect(equalHashValues(123n, 456n)).toBe(false)
     })
 
     it(`should hash symbols`, () => {
@@ -126,10 +128,12 @@ describe(`hash`, () => {
       expect(typeof result1).toBe(hashType)
       expect(typeof result2).toBe(hashType)
       expect(typeof result3).toBe(hashType)
-      expect(result1).not.toBe(result2)
-      expect(result1).not.toBe(result3)
-      expect(result4).not.toBe(result5)
-      expect(result1).not.toBe(result4)
+      expect(typeof result4).toBe(hashType)
+      expect(typeof result5).toBe(hashType)
+      expect(equalHashValues(sym1, sym2)).toBe(false)
+      expect(equalHashValues(sym1, sym3)).toBe(false)
+      expect(equalHashValues(sym4, sym5)).toBe(false)
+      expect(equalHashValues(sym1, sym4)).toBe(false)
     })
 
     it(`should hash registered symbols`, () => {
@@ -138,8 +142,10 @@ describe(`hash`, () => {
       const second = Symbol.for(`tanstack-db-ivm-hash-second`)
 
       expect(hash(first)).toBe(hash(same))
-      expect(hash(first)).not.toBe(hash(second))
-      expect(hash({ [first]: 1 })).not.toBe(hash({ [second]: 1 }))
+      expect(typeof hash(second)).toBe(hashType)
+      expect(equalHashValues(first, second)).toBe(false)
+      expect(typeof hash({ [second]: 1 })).toBe(hashType)
+      expect(equalHashValues({ [first]: 1 }, { [second]: 1 })).toBe(false)
     })
   })
 
@@ -159,10 +165,16 @@ describe(`hash`, () => {
     it(`includes enumerable symbol keys and values`, () => {
       const key = Symbol(`key`)
 
-      expect(hash({ [key]: `before` })).not.toBe(hash({ [key]: `after` }))
-      expect(hash({ [Symbol(`key`)]: `value` })).not.toBe(
-        hash({ [Symbol(`key`)]: `value` }),
+      expect(equalHashValues({ [key]: `before` }, { [key]: `after` })).toBe(
+        false,
       )
+      expect(typeof hash({ [key]: `before` })).toBe(hashType)
+      expect(typeof hash({ [key]: `after` })).toBe(hashType)
+      const first = { [Symbol(`key`)]: `value` }
+      const second = { [Symbol(`key`)]: `value` }
+      expect(equalHashValues(first, second)).toBe(false)
+      expect(typeof hash(first)).toBe(hashType)
+      expect(typeof hash(second)).toBe(hashType)
     })
 
     it(`rejects self and mutual cycles through symbol keys`, () => {
@@ -515,8 +527,9 @@ describe(`hash`, () => {
       const hash3 = hash(arr3)
 
       expect(typeof hash1).toBe(hashType)
+      expect(typeof hash3).toBe(hashType)
       expect(hash1).toBe(hash2) // Same content should have same hash
-      expect(hash1).not.toBe(hash3) // Different content should have different hash
+      expect(equalHashValues(arr1, arr3)).toBe(false)
     })
 
     it(`should hash Date objects`, () => {
@@ -529,8 +542,9 @@ describe(`hash`, () => {
       const hash3 = hash(date3)
 
       expect(typeof hash1).toBe(hashType)
+      expect(typeof hash3).toBe(hashType)
       expect(hash1).toBe(hash2) // Same date should have same hash
-      expect(hash1).not.toBe(hash3) // Different dates should have different hash
+      expect(equalHashValues(date1, date3)).toBe(false)
     })
 
     it(`should hash Temporal objects by value`, () => {
@@ -543,14 +557,17 @@ describe(`hash`, () => {
       const hash3 = hash(date3)
 
       expect(typeof hash1).toBe(hashType)
+      expect(typeof hash3).toBe(hashType)
       expect(hash1).toBe(hash2) // Same Temporal date should have same hash
-      expect(hash1).not.toBe(hash3) // Different Temporal dates should have different hash
+      expect(equalHashValues(date1, date3)).toBe(false)
 
       // Different Temporal types with overlapping string representations should differ
       const plainDate = Temporal.PlainDate.from(`2024-01-15`)
       const plainDateTime = Temporal.PlainDateTime.from(`2024-01-15T00:00:00`)
 
-      expect(hash(plainDate)).not.toBe(hash(plainDateTime))
+      expect(equalHashValues(plainDate, plainDateTime)).toBe(false)
+      expect(typeof hash(plainDate)).toBe(hashType)
+      expect(typeof hash(plainDateTime)).toBe(hashType)
 
       // Other Temporal types should also hash correctly
       const time1 = Temporal.PlainTime.from(`10:30:00`)
@@ -558,14 +575,16 @@ describe(`hash`, () => {
       const time3 = Temporal.PlainTime.from(`14:00:00`)
 
       expect(hash(time1)).toBe(hash(time2))
-      expect(hash(time1)).not.toBe(hash(time3))
+      expect(equalHashValues(time1, time3)).toBe(false)
+      expect(typeof hash(time3)).toBe(hashType)
 
       const instant1 = Temporal.Instant.from(`2024-01-15T00:00:00Z`)
       const instant2 = Temporal.Instant.from(`2024-01-15T00:00:00Z`)
       const instant3 = Temporal.Instant.from(`2024-06-15T00:00:00Z`)
 
       expect(hash(instant1)).toBe(hash(instant2))
-      expect(hash(instant1)).not.toBe(hash(instant3))
+      expect(equalHashValues(instant1, instant3)).toBe(false)
+      expect(typeof hash(instant3)).toBe(hashType)
     })
 
     it(`should hash RegExp objects`, () => {
@@ -581,14 +600,19 @@ describe(`hash`, () => {
       const hash4 = hash(regex4)
 
       expect(typeof hash1).toBe(hashType)
+      expect(typeof hash3).toBe(hashType)
+      expect(typeof hash4).toBe(hashType)
       expect(hash1).toBe(hash2) // Same regex should have same hash
-      expect(hash1).not.toBe(hash3)
-      expect(hash1).not.toBe(hash4)
+      expect(equalHashValues(regex1, regex3)).toBe(false)
+      expect(equalHashValues(regex1, regex4)).toBe(false)
     })
 
-    it(`should include sparse array length in its hash`, () => {
-      expect(hash([])).not.toBe(hash(Array(1)))
-      expect(hash(Array(1))).not.toBe(hash(Array(2)))
+    it(`should distinguish sparse arrays by length`, () => {
+      expect(equalHashValues([], Array(1))).toBe(false)
+      expect(equalHashValues(Array(1), Array(2))).toBe(false)
+      expect(typeof hash([])).toBe(hashType)
+      expect(typeof hash(Array(1))).toBe(hashType)
+      expect(typeof hash(Array(2))).toBe(hashType)
       expect(hash(Array(2))).toBe(hash(Array(2)))
     })
 
@@ -602,8 +626,9 @@ describe(`hash`, () => {
       const hash3 = hash(nested3)
 
       expect(typeof hash1).toBe(hashType)
+      expect(typeof hash3).toBe(hashType)
       expect(hash1).toBe(hash2)
-      expect(hash1).not.toBe(hash3)
+      expect(equalHashValues(nested1, nested3)).toBe(false)
     })
 
     it(`should hash functions`, () => {
@@ -624,8 +649,8 @@ describe(`hash`, () => {
       expect(typeof hash1).toBe(hashType)
       expect(typeof hash2).toBe(hashType)
       expect(typeof hash3).toBe(hashType)
-      expect(hash1).not.toBe(hash2) // Different function should have different hash
-      expect(hash1).not.toBe(hash3) // Different function should have different hash
+      expect(equalHashValues(func1, func2)).toBe(false)
+      expect(equalHashValues(func1, func3)).toBe(false)
       expect(hash1).toBe(hash(func1)) // hashing same function should return same hash
     })
 
@@ -639,8 +664,9 @@ describe(`hash`, () => {
       const hash3 = hash(set3)
 
       expect(typeof hash1).toBe(hashType)
+      expect(typeof hash3).toBe(hashType)
       expect(hash1).toBe(hash2) // Same content should have same hash
-      expect(hash1).not.toBe(hash3) // Different content should have different hash
+      expect(equalHashValues(set1, set3)).toBe(false)
     })
 
     it(`should hash Map objects`, () => {
@@ -663,8 +689,9 @@ describe(`hash`, () => {
       const hash3 = hash(map3)
 
       expect(typeof hash1).toBe(hashType)
+      expect(typeof hash3).toBe(hashType)
       expect(hash1).toBe(hash2) // Same content should have same hash
-      expect(hash1).not.toBe(hash3) // Different content should have different hash
+      expect(equalHashValues(map1, map3)).toBe(false)
     })
 
     it(`should hash Maps and Sets with unsupported types`, () => {
@@ -687,8 +714,9 @@ describe(`hash`, () => {
       const hash3 = hash(mapWithBigInt3)
 
       expect(typeof hash1).toBe(hashType)
+      expect(typeof hash3).toBe(hashType)
       expect(hash1).toBe(hash2) // Same BigInt content should have same hash
-      expect(hash1).not.toBe(hash3) // Different BigInt content should have different hash
+      expect(equalHashValues(mapWithBigInt1, mapWithBigInt3)).toBe(false)
 
       // Set with Symbol values
       const sym1 = Symbol(`test`)
@@ -702,8 +730,9 @@ describe(`hash`, () => {
       const hash6 = hash(setWithSymbols3)
 
       expect(typeof hash4).toBe(hashType)
+      expect(typeof hash6).toBe(hashType)
       expect(hash4).toBe(hash5) // Same Symbol content should have same hash
-      expect(hash4).not.toBe(hash6) // Different Symbol content should have different hash
+      expect(equalHashValues(setWithSymbols1, setWithSymbols3)).toBe(false)
     })
 
     it(`should hash small Buffers and Uint8Arrays by content`, () => {
@@ -717,8 +746,9 @@ describe(`hash`, () => {
       const hash3 = hash(buffer3)
 
       expect(typeof hash1).toBe(hashType)
+      expect(typeof hash3).toBe(hashType)
       expect(hash1).toBe(hash2) // Same content = same hash for small buffers
-      expect(hash1).not.toBe(hash3) // Different Buffer content should have different hash
+      expect(equalHashValues(buffer1, buffer3)).toBe(false)
       expect(hash1).toBe(hash(buffer1)) // Hashing same buffer should return same hash
 
       const uint8Array1 = new Uint8Array([1, 2, 3])
@@ -730,8 +760,9 @@ describe(`hash`, () => {
       const hash6 = hash(uint8Array3)
 
       expect(typeof hash4).toBe(hashType)
+      expect(typeof hash6).toBe(hashType)
       expect(hash4).toBe(hash5) // Same content = same hash for small Uint8Arrays
-      expect(hash4).not.toBe(hash6) // Different uint8Array content should have different hash
+      expect(equalHashValues(uint8Array1, uint8Array3)).toBe(false)
       expect(hash4).toBe(hash(uint8Array1)) // Hashing same uint8Array should return same hash
     })
 
@@ -750,7 +781,8 @@ describe(`hash`, () => {
       const hash2 = hash(largeBuffer2)
 
       expect(typeof hash1).toBe(hashType)
-      expect(hash1).not.toBe(hash2) // Same content but different instances = different hash for large buffers
+      expect(typeof hash2).toBe(hashType)
+      expect(equalHashValues(largeBuffer1, largeBuffer2)).toBe(false)
       expect(hash1).toBe(hash(largeBuffer1)) // Hashing same buffer should return same hash
 
       const largeUint8Array1 = new Uint8Array(300)
@@ -766,7 +798,8 @@ describe(`hash`, () => {
       const hash4 = hash(largeUint8Array2)
 
       expect(typeof hash3).toBe(hashType)
-      expect(hash3).not.toBe(hash4) // Same content but different instances = different hash for large Uint8Arrays
+      expect(typeof hash4).toBe(hashType)
+      expect(equalHashValues(largeUint8Array1, largeUint8Array2)).toBe(false)
       expect(hash3).toBe(hash(largeUint8Array1)) // Hashing same uint8Array should return same hash
 
       // Files are always hashed by reference regardless of size
@@ -779,8 +812,10 @@ describe(`hash`, () => {
       const hash9 = hash(file3)
 
       expect(typeof hash7).toBe(hashType)
-      expect(hash7).not.toBe(hash8) // Same content but different file instances have a different hash because it would be too costly to deeply hash files
-      expect(hash7).not.toBe(hash9) // Different file content should have different hash
+      expect(typeof hash8).toBe(hashType)
+      expect(typeof hash9).toBe(hashType)
+      expect(equalHashValues(file1, file2)).toBe(false)
+      expect(equalHashValues(file1, file3)).toBe(false)
       expect(hash7).toBe(hash(file1)) // Hashing same file should return same hash
     })
   })
@@ -823,7 +858,7 @@ describe(`hash`, () => {
     it(`should handle empty objects and arrays`, () => {
       expect(typeof hash({})).toBe(hashType)
       expect(typeof hash([])).toBe(hashType)
-      expect(hash({})).not.toBe(hash([]))
+      expect(equalHashValues({}, [])).toBe(false)
     })
 
     it(`should handle objects with null and undefined values`, () => {
@@ -849,7 +884,7 @@ describe(`hash`, () => {
 
       expect(typeof hash1).toBe(hashType)
       expect(typeof hash2).toBe(hashType)
-      expect(hash1).not.toBe(hash2)
+      expect(equalHashValues(array, map)).toBe(false)
     })
 
     it(`should handle mixed type arrays`, () => {

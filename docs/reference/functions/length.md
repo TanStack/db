@@ -7,7 +7,7 @@ title: length
 function length<T>(arg): NumericFunctionReturnType<T>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:301](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L301)
+Defined in: [packages/db/src/query/builder/functions.ts:302](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L302)
 
 ## Type Parameters
 

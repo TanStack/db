@@ -7,7 +7,7 @@ title: DehydratedLiveQuery
 type DehydratedLiveQuery = object;
 ```
 
-Defined in: [packages/db/src/client.ts:116](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L116)
+Defined in: [packages/db/src/client.ts:118](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L118)
 
 ## Properties
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/client.ts:116](https://github.com/TanStack/db/blob/
 dehydratedAt: number;
 ```
 
-Defined in: [packages/db/src/client.ts:118](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L118)
+Defined in: [packages/db/src/client.ts:120](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L120)
 
 ***
 
@@ -27,7 +27,7 @@ Defined in: [packages/db/src/client.ts:118](https://github.com/TanStack/db/blob/
 optional promise: Promise<DehydratedLiveQueryResult>;
 ```
 
-Defined in: [packages/db/src/client.ts:120](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L120)
+Defined in: [packages/db/src/client.ts:122](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L122)
 
 ***
 
@@ -37,7 +37,7 @@ Defined in: [packages/db/src/client.ts:120](https://github.com/TanStack/db/blob/
 queryHash: string;
 ```
 
-Defined in: [packages/db/src/client.ts:117](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L117)
+Defined in: [packages/db/src/client.ts:119](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L119)
 
 ***
 
@@ -47,4 +47,4 @@ Defined in: [packages/db/src/client.ts:117](https://github.com/TanStack/db/blob/
 optional snapshot: DehydratedLiveQueryResult;
 ```
 
-Defined in: [packages/db/src/client.ts:119](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L119)
+Defined in: [packages/db/src/client.ts:121](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L121)

@@ -52,6 +52,11 @@ import type {
  * models equality of request data, not source coverage or row ownership.
  * The identity driver uses a controlled adapter; its result does not establish
  * that an external provider honors an abort or returns complete ordered rows.
+ * `ir-stable-identity-oracle.test.ts` owns demand-key construction. This file
+ * owns runtime sharing, retry, and readiness for equal and distinct demands.
+ * `load-subset-transaction-refinement-oracle.test.ts` owns the precise
+ * abort-versus-acceptance phase law; this campaign checks its effects while
+ * demands are deduplicated or retried.
  */
 
 type PersistedLoadRow = {
