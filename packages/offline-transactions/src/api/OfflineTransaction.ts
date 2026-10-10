@@ -36,6 +36,7 @@ export class OfflineTransaction {
     // live transactions. Repeated calls add to it while it is pending. With
     // autoCommit, it commits after this callback and reports a failure
     // through isPersisted, so a later call throws: it is no longer pending.
+    const created = this.transaction === null
     this.transaction ??= createTransaction({
       id: this.offlineId,
       autoCommit: this.autoCommit,
@@ -80,6 +81,14 @@ export class OfflineTransaction {
       },
       metadata: this.metadata,
     })
+    // A transaction without mutations completes without its mutation
+    // function, so the executor never settles its waiter. Settle it here; the
+    // executor has already settled every other completed transaction.
+    if (created)
+      void this.transaction.isPersisted.promise.then(
+        () => this.executor.resolveTransaction(this.offlineId, undefined),
+        () => {},
+      )
 
     this.transaction.mutate(() => {
       callback()
