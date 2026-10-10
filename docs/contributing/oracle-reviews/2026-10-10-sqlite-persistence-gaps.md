@@ -82,9 +82,10 @@ failed on the original unbounded row read. The original direct-reuse behavior
 failed both ownership cases. These are assertion failures at the intended
 checkpoints, not setup failures or timeouts. No native SQLite or cross-tab host
 claim follows from these controlled adapters. Previously loaded rows after
-demand retirement, reset without demand, atomic multi-subset reload, and
-arbitrary provider schedules remain open under the persisted wrapper and host
-owners named in the coverage map.
+demand retirement remained open at this review head. The follow-up below
+closes the controlled peer-notice history. Reset without demand, atomic
+multi-subset reload, and arbitrary provider schedules remain with the owners
+named in the coverage map.
 
 ## Oracle-guide audit
 
@@ -143,3 +144,70 @@ todos and no type errors. The package build, changed-file lint, formatting,
 and whitespace checks passed; lint retained only existing warnings. The
 repair is production-line neutral: it combines the two control/binding calls
 into one guarded operation without adding lifecycle state.
+
+## Prep review follow-up at `0108e5f2a`
+
+The prep review found one invalid Electric oracle fixture and three persisted
+runtime gaps. The following table preserves the claims in source order.
+
+| ID | Review claim and proposed action | Result |
+| --- | --- | --- |
+| S1 | Name the arguments to `reloadActiveSubsetsUnsafe` for readability. | Refuted as a useful change: it adds a new shape without reducing state or branches. |
+| R1 | One Electric descriptor fixture reuses a persisted wrapper and fails CI. Create a fresh wrapper per Collection. | Fixed in the oracle fixture. |
+| R2 | A row stays public after demand retirement and a peer full-reload deletion. Validate already public rows at the notice. | Fixed in production and the primary oracle. |
+| R3 | A selected wrapped `sync` field can bind another Collection after cleanup. Retain the original owner identity. | Fixed in production and the primary oracle. |
+| R4 | A constrained reacquisition still leaves a deleted public row visible. Validate its scope or cached rows against durable state. | Fixed by R2's immediate validation and asserted after reacquisition. |
+
+**R1, Electric fixture.** The Electric descriptor law permits the same Electric
+descriptor to create independent Collections. The fixture reused one *persisted*
+wrapper around that descriptor, which contradicted the wrapper's single-owner
+law and failed CI. The oracle now creates a fresh persisted wrapper for each
+Collection while reusing the Electric descriptor. Its first-only
+acknowledgement assertion remains. The repaired 30-test descriptor suite and
+630-test Electric package suite pass.
+
+**R3, selected sync ownership.** Cleanup ends a sync run but does not transfer
+the runtime's Collection owner. A caller could copy only the wrapped `sync`
+field, omitting the public claim hook, then bind another Collection after the
+first cleaned up. The two new histories select that field in local-only and
+upstream-sync modes. Both failed at second-owner admission before the repair.
+They now pass: the second Collection rejects, and the first restarts and writes
+publicly and durably. The permanent owner identity outlives cleanup.
+
+**R2 and R4, peer notice after demand retirement.** The user confirmed that
+a row which remains public after a peer deletes it is wrong, even with no
+active subset demand. Demand retirement stops future acquisition work. It does
+not make already public rows exempt from peer changes. A full-reload notice
+with no public rows still reads collection metadata only. If public rows exist,
+the wrapper reads one durable snapshot and corrects only those public keys.
+It deletes missing rows, updates changed rows, and removes obsolete row
+metadata in one sync transaction with collection metadata. It does not expose
+unrelated durable rows without demand.
+
+The primary oracle reaches initial zero demand, an unconstrained demand that
+retires, peer deletion, and a later unconstrained demand. A second history
+reaches peer deletion, row update, and row-metadata removal after demand
+retirement, then acquires a constrained demand. Both histories failed on the
+old metadata-only notification at the intended snapshot-read checkpoint.
+The earlier no-demand history had no previously public row. That missing
+history dimension let the stale-row behavior pass while the narrower law held.
+The final code passes their notice and later-acquisition assertions. The
+constrained continuation needs no second validation read. The existing
+18-cell source-precedence matrix still passes: accepted source transactions
+retain precedence over persisted reads. The full persistence-core suite passes
+879 tests with one existing todo. Standalone TypeScript, the package build,
+changed-file lint, formatting, and whitespace checks pass. Lint reports only
+24 existing `require-await` warnings in the large oracle file.
+
+The controlled adapter proves this law for its emitted notices and the
+observed Collection checkpoints. Browser and Electron delivery remain with
+their host oracles. Arbitrary overlapping retired subsets, live host
+scheduling, and performance with large durable snapshots remain outside these
+bounded histories. A full snapshot is the available adapter read that proves
+absence of an already public key; the wrapper publishes only previously
+visible keys from that read.
+
+The loss audit accounts for all five source-order items: R1–R4 are fixed, and
+S1 was not adopted. The fixed-history and controlled-adapter evidence closes
+these review findings within their stated scope. Final-head CI and host-level
+delivery remain separate PR readiness checks.
