@@ -13,8 +13,9 @@ import type { ElectricCollectionUtils } from '../src/electric'
 /**
  * # Can reused Electric descriptors keep independent owners and tag state?
  *
- * One descriptor may create several Collections, but each Collection must own
- * its sync run, acknowledgement waiters, persisted tag membership, and cleanup.
+ * One Electric descriptor may create several Collections, but each Collection
+ * must own its sync run, acknowledgement waiters, persisted tag membership,
+ * and cleanup. Each persisted Collection has a separate persistence wrapper.
  * A compatible resume restores selected tags; a fresh snapshot replaces them.
  * A `move-out` removes a row only after its modeled tag membership is empty.
  *
@@ -618,7 +619,7 @@ fcTest.prop(
   runOwnerHistory,
 )
 
-it(`keeps insert acknowledgements on the owner of a reused persisted descriptor`, async () => {
+it(`keeps insert acknowledgements on the owner of a reused Electric descriptor`, async () => {
   const adapter: PersistenceAdapter = {
     loadSubset: () => Promise.resolve([]),
     loadResumeSnapshot: () =>
@@ -635,23 +636,23 @@ it(`keeps insert acknowledgements on the owner of a reused persisted descriptor`
     applyCommittedTx: () => Promise.resolve(),
     ensureIndex: () => Promise.resolve(),
   }
-  const options = persistedCollectionOptions<
-    TestRow,
-    string | number,
-    never,
-    ElectricCollectionUtils<TestRow>
-  >({
-    ...electricCollectionOptions<TestRow>({
-      id: `shared-persisted-options`,
-      shapeOptions: { url: `http://test-url`, params: { table: `test_table` } },
-      getKey: (row) => row.id,
-      startSync: false,
-      onInsert: () => Promise.resolve({ txid: 200, timeout: 100 }),
-    }),
-    persistence: { adapter },
+  const electricOptions = electricCollectionOptions<TestRow>({
+    shapeOptions: { url: `http://test-url`, params: { table: `test_table` } },
+    getKey: (row) => row.id,
+    startSync: false,
+    onInsert: () => Promise.resolve({ txid: 200, timeout: 100 }),
   })
-  const first = createCollection(options)
-  const second = createCollection(options)
+  // The Electric descriptor is reusable; each persisted wrapper binds one
+  // Collection so its receipt and sync controls cannot move to another owner.
+  const persistedOptions = (id: string) =>
+    persistedCollectionOptions<
+      TestRow,
+      string | number,
+      never,
+      ElectricCollectionUtils<TestRow>
+    >({ ...electricOptions, id, persistence: { adapter } })
+  const first = createCollection(persistedOptions(`first-persisted-owner`))
+  const second = createCollection(persistedOptions(`second-persisted-owner`))
   try {
     first.startSyncImmediate()
     await vi.waitFor(() => expect(streams).toHaveLength(1))

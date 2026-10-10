@@ -695,14 +695,23 @@ Selecting only the exposed wrapped `sync` config omits the descriptor claim;
 the runtime guard rejects that second Collection before changing control
 callbacks. A local-only write and an in-flight upstream source transaction
 remain with the first owner after the rejection.
-Cleanup does not release that claim. Two DbClients materializing one descriptor
-receive independent runtimes. A no-demand on-demand full-reload notification
-reads collection metadata without fetching every durable row; a later
-unconstrained demand loads the stored row. Eighteen source-precedence histories
+Cleanup does not release that claim. A selected `sync` config also cannot bind
+a second Collection after the first cleans up; the original Collection can
+restart and write through the same runtime in local-only and upstream-sync
+modes. Two DbClients materializing one descriptor receive independent runtimes.
+A no-demand on-demand full-reload notification reads collection metadata
+without fetching durable rows when no row is public. If a retired demand left
+public rows, the notification reads one durable snapshot and corrects only
+those rows. It retracts a peer-deleted row, updates a changed row, and removes
+obsolete row metadata without exposing unrelated stored rows. A later
+constrained demand does not need another validation read. An empty bounded
+page does not retract a row outside its scope. Eighteen source-precedence histories
 for that route preserve accepted source rows across insert/update/delete,
 truncate replay, and queued or serial reads. The original unbounded-read path
 and direct options reuse both failed these new witnesses before repair.
-Previously acquired and retired demand remains outside the no-demand history.
+The notice corrects already public rows even during the idle interval after
+demand retirement. Arbitrary overlapping retired subsets and host scheduling
+remain outside these bounded controlled histories.
 Schema reset still restores an unconstrained baseline to preserve the existing
 accepted-source precedence contract. Avoiding that broad reset read requires a
 separate authority decision and history model.

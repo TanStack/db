@@ -1381,6 +1381,12 @@ class PersistedCollectionRuntime<
 
   private collection: Collection<T, TKey, PersistedCollectionUtils> | null =
     null
+  // Cleanup ends the active sync run, but cannot transfer this runtime's owner.
+  private boundCollection: Collection<
+    T,
+    TKey,
+    PersistedCollectionUtils
+  > | null = null
   private syncControls: SyncControlFns<T, TKey> = {
     begin: null,
     write: null,
@@ -1583,12 +1589,13 @@ class PersistedCollectionRuntime<
     collection: Collection<T, TKey, PersistedCollectionUtils>,
     syncControls: SyncControlFns<T, TKey>,
   ): void {
-    if (this.collection && this.collection !== collection) {
+    if (this.boundCollection && this.boundCollection !== collection) {
       throw new InvalidPersistedCollectionConfigError(
         `Persisted options cannot own more than one Collection`,
       )
     }
 
+    this.boundCollection ??= collection
     this.setSyncControls(syncControls)
     if (this.collection === collection) return
     this.collection = collection
@@ -2454,6 +2461,13 @@ class PersistedCollectionRuntime<
         } else {
           rows = await this.loadSubsetRowsUnsafe(options, adapter)
         }
+        const complete =
+          this.syncMode === `on-demand` &&
+          options.where === undefined &&
+          options.limit === undefined &&
+          options.offset === undefined &&
+          options.cursor === undefined
+        const validationRows = complete ? rows : undefined
         rowsLoaded = true
         if (config.lifecycleGeneration !== this.lifecycleGeneration) return
         if (resetSequence !== this.resetSequence) return
@@ -2465,7 +2479,7 @@ class PersistedCollectionRuntime<
           for (const row of rows) {
             hydrationContext.suppliedRowKeys.add(row.key)
           }
-          const applied = this.applyRowsToCollection(rows)
+          const applied = this.applyRowsToCollection(rows, validationRows)
           await whenSyncAccepted(applied)
           if (boundRowVersion !== undefined) {
             this.publicRowVersion = Math.max(
@@ -2654,6 +2668,8 @@ class PersistedCollectionRuntime<
 
   private applyRowsToCollection(
     rows: Array<{ key: TKey; value: T; metadata?: unknown }>,
+    validationRows?: Array<{ key: TKey; value: T; metadata?: unknown }>,
+    collectionMetadata?: Array<{ key: string; value: unknown }>,
   ): SyncAppliedReceipt {
     if (
       !this.syncControls.begin ||
@@ -2666,8 +2682,46 @@ class PersistedCollectionRuntime<
     return this.withInternalApply(() => {
       this.syncControls.begin?.()
 
+      // A full durable snapshot validates already public keys. Only the
+      // requested subset may add keys to the public Collection.
+      if (validationRows) {
+        const durableRows = new Map(validationRows.map((row) => [row.key, row]))
+        for (const key of this.collection?.base.keys() ?? []) {
+          const durable = durableRows.get(key)
+          if (!durable) {
+            this.syncControls.write?.({ type: `delete`, key })
+          } else {
+            const valueChanged = !equalPersistedSnapshotValues(
+              this.collection?.base.get(key),
+              durable.value,
+            )
+            const metadataChanged = !equalPersistedSnapshotValues(
+              this.syncControls.metadata?.row.get(key),
+              durable.metadata,
+            )
+            if (
+              valueChanged ||
+              (metadataChanged && durable.metadata !== undefined)
+            ) {
+              this.syncControls.write?.({
+                type: `update`,
+                value: durable.value,
+                metadata: durable.metadata as
+                  Record<string, unknown> | undefined,
+              })
+            }
+            if (metadataChanged && durable.metadata === undefined) {
+              this.syncControls.metadata?.row.delete(key)
+            }
+          }
+        }
+      }
+
       for (const row of rows) {
-        if (this.collection?._hasHydratedKey(row.key)) {
+        if (
+          (validationRows && this.collection?.base.has(row.key)) ||
+          this.collection?._hasHydratedKey(row.key)
+        ) {
           continue
         }
         this.syncControls.write?.({
@@ -2675,6 +2729,20 @@ class PersistedCollectionRuntime<
           value: row.value,
           metadata: row.metadata as Record<string, unknown> | undefined,
         })
+      }
+
+      if (collectionMetadata && this.syncControls.metadata) {
+        const nextMetadata = new Map(
+          collectionMetadata.map(({ key, value }) => [key, value]),
+        )
+        for (const { key } of this.syncControls.metadata.collection.list()) {
+          if (!nextMetadata.has(key)) {
+            this.syncControls.metadata.collection.delete(key)
+          }
+        }
+        for (const [key, value] of nextMetadata) {
+          this.syncControls.metadata.collection.set(key, value)
+        }
       }
 
       return this.syncControls.commit?.() ?? true
@@ -3934,8 +4002,16 @@ class PersistedCollectionRuntime<
     this.hydratingGeneration = lifecycleGeneration
     try {
       const mergedRows = new Map<TKey, { value: T; metadata?: unknown }>()
-      const collectionMetadata =
-        await this.loadCollectionMetadataSnapshot(adapter)
+      const validationSnapshot =
+        activeSubsetOptions.length === 0 && this.collection?.base.size
+          ? await adapter.loadResumeSnapshot(this.collectionId, {
+              requiredIndexSignatures: this.getRequiredIndexSignatures(),
+              includeRows: true,
+            })
+          : undefined
+      const collectionMetadata = validationSnapshot
+        ? validationSnapshot.collectionMetadata
+        : await this.loadCollectionMetadataSnapshot(adapter)
       if (lifecycleGeneration !== this.lifecycleGeneration) return
       for (const options of activeSubsetOptions) {
         const subsetRows = await this.loadSubsetRowsUnsafe(options, adapter)
@@ -3953,10 +4029,20 @@ class PersistedCollectionRuntime<
       }
 
       if (activeSubsetOptions.length === 0) {
-        // No query owns persisted row demand. Keep accepted source rows and
-        // refresh only collection metadata; a later demand loads its own rows.
+        // Retired demand does not hide already public rows. Validate only
+        // those keys; do not publish unrelated durable rows without demand.
         await whenSyncAccepted(
-          this.replaceCollectionMetadataSnapshot(collectionMetadata),
+          validationSnapshot
+            ? this.applyRowsToCollection(
+                [],
+                validationSnapshot.rows as Array<{
+                  key: TKey
+                  value: T
+                  metadata?: unknown
+                }>,
+                collectionMetadata,
+              )
+            : this.replaceCollectionMetadataSnapshot(collectionMetadata),
         )
       } else if (
         skipUnchangedReplace &&

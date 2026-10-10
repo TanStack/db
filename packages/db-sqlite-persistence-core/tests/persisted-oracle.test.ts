@@ -4229,6 +4229,87 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     )
   })
 
+  // Cleanup ends a sync run, not the descriptor's permanent Collection claim.
+  // Selecting only the wrapped sync field omits the public claim hook, so this
+  // history checks the runtime guard after cleanup and the original owner's
+  // ability to restart. The two modes cross local and upstream source controls.
+  it.each([`local-only`, `sync-present`] as const)(
+    `rejects a copied sync owner after cleanup and permits the first owner to restart (%s)`,
+    async (mode) => {
+      const adapter = createRecordingAdapter()
+      let source!: TodoSyncParams
+      const base = {
+        id: `cleaned-selected-sync-${mode}`,
+        getKey: (row: Todo) => row.id,
+        persistence: { adapter },
+      }
+      const options =
+        mode === `sync-present`
+          ? persistedCollectionOptions<Todo, string>({
+              ...base,
+              sync: {
+                sync: (params) => {
+                  source = params
+                  params.markReady()
+                },
+              },
+            })
+          : persistedCollectionOptions<Todo, string>(base)
+      const first = createCollection(options)
+      const second = createCollection({
+        id: `post-cleanup-copy-${mode}`,
+        getKey: (row: Todo) => row.id,
+        sync: options.sync,
+        startSync: false,
+      })
+      let hasPrimaryFailure = false
+      try {
+        await first.stateWhenReady()
+        await first.cleanup()
+        expect(() => second.startSyncImmediate()).toThrow(
+          InvalidPersistedCollectionConfigError,
+        )
+
+        const replacementReady = createEventGate()
+        const unsubscribe = first.on(`status:ready`, () =>
+          replacementReady.resolve(),
+        )
+        try {
+          first.startSyncImmediate()
+          await atPersistedOracleCheckpoint(
+            replacementReady.promise,
+            `original persisted owner restarts`,
+          )
+        } finally {
+          unsubscribe()
+        }
+
+        if (mode === `sync-present`) {
+          source.begin()
+          source.write({
+            type: `insert`,
+            value: { id: `after-restart`, title: `First source` },
+          })
+          await Promise.resolve(source.commit())
+        } else {
+          await first.insert({ id: `after-restart`, title: `First owner` })
+            .isPersisted.promise
+        }
+        expect(first.has(`after-restart`)).toBe(true)
+        expect(second.has(`after-restart`)).toBe(false)
+        expect(adapter.rows.get(`after-restart`)?.id).toBe(`after-restart`)
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        await cleanupPersistedOracle(
+          [() => second.cleanup(), () => first.cleanup()],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
   it(`materializes one independent persisted runtime for each DbClient`, async () => {
     const adapter = createRecordingAdapter([{ id: `stored`, title: `Stored` }])
     const descriptor = collectionOptions(
@@ -14512,13 +14593,17 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   // An on-demand Collection has no unconstrained persisted row demand before
   // its first subset request. A coordinator notification changes durable
   // authority but cannot manufacture that demand. The independent model has
-  // zero or one active demand: zero requests no rows and exposes no persisted
-  // row; one unconstrained demand requests and exposes the stored row. This
-  // bounded history checks a full-reload notice at the public Collection and
-  // adapter-call boundaries. Reset has a separate baseline contract.
-  it(`does not widen on-demand storage after full reload without demand`, async () => {
+  // zero or one active demand: zero requests no new rows; one unconstrained
+  // demand requests the durable snapshot. A retired demand may leave its old
+  // public row visible, so a peer full-reload notice must validate that row
+  // immediately. The notice may not add unrelated durable rows. This history
+  // checks both full-reload cuts and the later demand's public Collection and
+  // adapter-call boundaries.
+  // Reset has a separate baseline contract.
+  it(`validates visible rows on a no-demand full reload without adding stored rows`, async () => {
     const stored = { id: `stored`, title: `Durable row` }
-    const adapter = createRecordingAdapter([stored])
+    const retained = { id: `retained`, title: `Still durable` }
+    const adapter = createRecordingAdapter([stored, retained])
     const coordinator = createCoordinatorHarness()
     const collectionId = `zero-demand-full-reload`
     const collection = createCollection(
@@ -14568,6 +14653,162 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       expect(adapter.loadSubsetCalls).toHaveLength(1)
       expect(stripVirtualProps(collection.get(`stored`))).toEqual(stored)
       collection._sync.unloadSubset(demand)
+
+      // A peer removes the row after demand retirement. Its full-reload notice
+      // must retract the visible row without creating a new row demand.
+      adapter.rows.delete(`stored`)
+      const metadataReadsAfterRetirement =
+        adapter.loadCollectionMetadataCalls.length
+      const validationReads = adapter.loadResumeSnapshotCalls.length
+      coordinator.emit(
+        {
+          type: `tx:committed`,
+          term: 1,
+          seq: 2,
+          txId: `retired-demand-reload`,
+          latestRowVersion: 2,
+          requiresFullReload: true,
+        },
+        undefined,
+        collectionId,
+      )
+      await vi.waitFor(() => {
+        expect(adapter.loadResumeSnapshotCalls).toHaveLength(
+          validationReads + 1,
+        )
+        expect(collection.has(`stored`)).toBe(false)
+      })
+      expect(adapter.loadCollectionMetadataCalls).toHaveLength(
+        metadataReadsAfterRetirement,
+      )
+      expect(adapter.loadSubsetCalls).toHaveLength(1)
+      expect(collection.has(`stored`)).toBe(false)
+      expect(stripVirtualProps(collection.get(`retained`))).toEqual(retained)
+      const newDemand = {}
+      await collection._sync.loadSubset(newDemand)
+      expect(adapter.loadSubsetCalls).toHaveLength(2)
+      expect(adapter.loadResumeSnapshotCalls).toHaveLength(validationReads + 1)
+      expect(collection.has(`stored`)).toBe(false)
+      expect(stripVirtualProps(collection.get(`retained`))).toEqual(retained)
+      collection._sync.unloadSubset(newDemand)
+
+      // A bounded subset proves nothing about keys outside that subset.
+      const loadSubset = adapter.loadSubset.bind(adapter)
+      adapter.loadSubset = (id, options, context) =>
+        options.limit === 0
+          ? Promise.resolve([])
+          : loadSubset(id, options, context)
+      const emptyPage = { limit: 0 }
+      await collection._sync.loadSubset(emptyPage)
+      expect(stripVirtualProps(collection.get(`retained`))).toEqual(retained)
+      collection._sync.unloadSubset(emptyPage)
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      await cleanupPersistedOracle(
+        [() => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  // A fresh acquisition of the same constrained demand must not keep a row
+  // that its settled storage result excludes. The peer notice arrives after
+  // demand retirement and must first correct the prior public rows without
+  // publishing unrelated durable rows.
+  // This controlled predicate has exactly one possible matching key.
+  it(`corrects retired rows on a peer notice before constrained reacquisition`, async () => {
+    const stored = { id: `stored`, title: `Durable row` }
+    const retained = { id: `retained`, title: `Old durable value` }
+    const adapter = createRecordingAdapter([stored, retained])
+    adapter.rowMetadata.set(`retained`, { source: `old` })
+    const loadSubset = adapter.loadSubset.bind(adapter)
+    adapter.loadSubset = async (id, options, context) =>
+      (await loadSubset(id, options, context)).filter(
+        (row) => !options.where || row.key === `stored`,
+      )
+    const coordinator = createCoordinatorHarness()
+    const collectionId = `retired-constrained-demand`
+    let source!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: collectionId,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            source = params
+            params.markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    const demand = {
+      where: new IR.Func(`eq`, [
+        new IR.PropRef([`id`]),
+        new IR.Value(`stored`),
+      ]),
+    }
+    let hasPrimaryFailure = false
+    try {
+      await collection.stateWhenReady()
+      const originalDemand = {}
+      await collection._sync.loadSubset(originalDemand)
+      expect(stripVirtualProps(collection.get(`stored`))).toEqual(stored)
+      expect(stripVirtualProps(collection.get(`retained`))).toEqual(retained)
+      expect(source.metadata!.row.get(`retained`)).toEqual({ source: `old` })
+      collection._sync.unloadSubset(originalDemand)
+
+      adapter.rows.delete(`stored`)
+      adapter.rowMetadata.delete(`retained`)
+      adapter.rows.set(`retained`, {
+        id: `retained`,
+        title: `New durable value`,
+      })
+      adapter.rows.set(`unrequested`, {
+        id: `unrequested`,
+        title: `Not in the filtered demand`,
+      })
+      const metadataReads = adapter.loadCollectionMetadataCalls.length
+      const validationReads = adapter.loadResumeSnapshotCalls.length
+      coordinator.emit(
+        {
+          type: `tx:committed`,
+          term: 1,
+          seq: 1,
+          txId: `constrained-peer-delete`,
+          latestRowVersion: 1,
+          requiresFullReload: true,
+        },
+        undefined,
+        collectionId,
+      )
+      await vi.waitFor(() => {
+        expect(adapter.loadResumeSnapshotCalls).toHaveLength(
+          validationReads + 1,
+        )
+        expect(collection.has(`stored`)).toBe(false)
+      })
+      expect(adapter.loadCollectionMetadataCalls).toHaveLength(metadataReads)
+      expect(adapter.loadSubsetCalls).toHaveLength(1)
+      expect(collection.has(`stored`)).toBe(false)
+      expect(collection.get(`retained`)?.title).toBe(`New durable value`)
+      expect(source.metadata!.row.get(`retained`)).toBeUndefined()
+      expect(collection.has(`unrequested`)).toBe(false)
+      await collection._sync.loadSubset(demand)
+      expect(adapter.loadSubsetCalls).toHaveLength(2)
+      expect(adapter.loadResumeSnapshotCalls).toHaveLength(validationReads + 1)
+      expect(collection.has(`stored`)).toBe(false)
+      expect(collection.get(`retained`)?.title).toBe(`New durable value`)
+      expect(collection.has(`unrequested`)).toBe(false)
+      collection._sync.unloadSubset(demand)
+
+      await collection._sync.loadSubset(demand)
+      expect(adapter.loadResumeSnapshotCalls).toHaveLength(validationReads + 1)
+      collection._sync.unloadSubset(demand)
     } catch (error) {
       hasPrimaryFailure = true
       throw error
@@ -14590,10 +14831,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   // that read. Both schedules must satisfy the same independent result below.
   // Eager and on-demand Collections receive reset/full-reload notifications;
   // on-demand Collections also acquire a subset. A full reload with no demand
-  // updates metadata without reading all durable rows, while preserving source
-  // transactions already accepted into the public Collection. Reset retains
-  // its separate baseline reread. The controlled coordinator does not prove
-  // cross-tab transport delivery.
+  // validates already public rows against durable state without publishing
+  // unrelated stored rows. It preserves source transactions already accepted
+  // into the public Collection. Reset retains its separate baseline reread.
+  // The controlled coordinator does not prove cross-tab transport delivery.
   it.each(
     (
       [
