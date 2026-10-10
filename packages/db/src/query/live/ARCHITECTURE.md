@@ -280,7 +280,8 @@ row. A source ref is identified by its lexical binding, so a parent ref keeps
 its meaning when the include's source shadows the parent alias. Group keys
 match by structure, with literals compared by value. A HAVING condition
 follows the same rule: it reads group keys and parent fields, and a source
-field outside an aggregate throws. Recorded limit: parents that
+field outside an aggregate throws. A HAVING aggregate reads the same aggregate
+that the select names as a top-level field. Recorded limit: parents that
 are equal under query equality but differ exactly, such as `x: 0` and `x: -0`,
 share a route, so a parent field can show the other parent's exact value,
 which is equal under query equality.

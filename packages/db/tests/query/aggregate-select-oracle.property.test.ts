@@ -14,7 +14,10 @@ import {
   toArray,
   upper,
 } from '../../src/query/index.js'
-import { NonAggregateExpressionNotInGroupByError } from '../../src/errors.js'
+import {
+  AggregateFunctionNotInSelectError,
+  NonAggregateExpressionNotInGroupByError,
+} from '../../src/errors.js'
 import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
 
@@ -58,12 +61,18 @@ import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
  * with the model, or that compilation threw when the model says it must.
  *
  * Each history also chooses whether both queries group, by the ref `c.k`, by
- * the computed `upper(c.k)`, or by `inArray(c.k, ['a', 'b'])`, whose list
- * literal each use builds again, and a shape may hold a nested include. The
+ * the computed `upper(c.k)`, by `inArray(c.k, ['a', 'b'])`, by
+ * `coalesce(c.d, new Date(5))` (one Date group) or by `add(c.v, NaN)` (one
+ * NaN group). Each use builds its literals again, so a group key matches
+ * only by value. A shape may hold a nested include. The
  * raw field `c.k` is a group key only under `groupBy(c.k)`: under
  * `upper(c.k)` the keys `a` and `A` share a group. A shape may add a HAVING
- * condition without aggregates, which follows the select rule and keeps only
- * the groups for which it holds. The include's source sometimes shadows the
+ * condition, which follows the select rule and keeps only the groups for
+ * which it holds. A HAVING aggregate reads the same aggregate selected as a
+ * top-level field; one that no field selects throws
+ * `AggregateFunctionNotInSelectError` (docs: "Having Clauses"). HAVING is
+ * legal without `groupBy` whenever the select holds an aggregate, wrapped or
+ * not. The include's source sometimes shadows the
  * parent alias; a parent ref captured from the outer scope still names the
  * parent row. A source update can change `k`, which moves the row to another
  * group and another parent's route. A
@@ -107,7 +116,7 @@ type Shape = {
  * expression `upper(c.k)` or `inArray(c.k, ['a', 'b'])`. The `key` leaf is
  * that group expression, built again with a new list literal each time.
  */
-type Grouping = `none` | `key` | `upper` | `inList`
+type Grouping = `none` | `key` | `upper` | `inList` | `date` | `nan`
 
 type Issue = { id: number; k: string; x: number }
 type Comment = { id: number; k: string; v: number }
@@ -155,6 +164,46 @@ function readsSourceOutsideAggregate(part: Part, grouping: Grouping): boolean {
   }
 }
 
+/** The aggregates a part reads, outside or inside other expressions. */
+function aggregatesOf(part: Part): Array<`count` | `sum` | `max`> {
+  switch (part.k) {
+    case `agg`:
+      return [part.fn]
+    case `add`:
+      return [...aggregatesOf(part.a), ...aggregatesOf(part.b)]
+    case `case`:
+      return [part.cond, part.a, part.b].flatMap(aggregatesOf)
+    case `nested`:
+      return Object.values(part.fields).flatMap(aggregatesOf)
+    default:
+      return []
+  }
+}
+
+/**
+ * The compile error the model predicts. A HAVING aggregate reads the value
+ * of the same aggregate selected as a top-level field, so one that no field
+ * selects throws `AggregateFunctionNotInSelectError` (docs: "Having
+ * Clauses"). The group-value rule is checked first.
+ */
+function modelError(
+  shape: Shape,
+  grouping: Grouping,
+): `nonAggregate` | `aggregateNotInSelect` | undefined {
+  if (modelThrows(shape, grouping)) return `nonAggregate`
+  const selected = new Set(
+    Object.values(shape.fields).flatMap((part) =>
+      part.k === `agg` ? [part.fn] : [],
+    ),
+  )
+  if (
+    shape.having &&
+    aggregatesOf(shape.having.part).some((fn) => !selected.has(fn))
+  )
+    return `aggregateNotInSelect`
+  return undefined
+}
+
 function modelThrows(shape: Shape, grouping: Grouping): boolean {
   return (
     shape.spread !== undefined ||
@@ -167,9 +216,23 @@ function modelThrows(shape: Shape, grouping: Grouping): boolean {
   )
 }
 
-function groupKeyOf(row: Comment, grouping: Grouping): string | boolean {
+function groupKeyOf(
+  row: Comment,
+  grouping: Grouping,
+): string | boolean | number | Date {
   if (grouping === `inList`) return [`a`, `b`].includes(row.k)
+  // Comments have no `d`, so `coalesce(c.d, new Date(5))` is one Date group.
+  if (grouping === `date`) return new Date(5)
+  if (grouping === `nan`) return NaN
   return grouping === `upper` ? row.k.toUpperCase() : row.k
+}
+
+/** Group identity by value: equal Dates and NaN each form one group. */
+function groupIdOf(row: Comment, grouping: Grouping): string {
+  const key = groupKeyOf(row, grouping)
+  return key instanceof Date
+    ? `date:${key.getTime()}`
+    : `${typeof key}:${String(key)}`
 }
 
 function evaluate(
@@ -221,8 +284,8 @@ function modelGroup(
 ): Array<Record<string, unknown>> {
   const groups =
     grouping !== `none`
-      ? [...new Set(rows.map((row) => groupKeyOf(row, grouping)))].map((k) =>
-          rows.filter((row) => groupKeyOf(row, grouping) === k),
+      ? [...new Set(rows.map((row) => groupIdOf(row, grouping)))].map((k) =>
+          rows.filter((row) => groupIdOf(row, grouping) === k),
         )
       : rows.length === 0
         ? []
@@ -362,8 +425,13 @@ const shape = (include: boolean, grouping: Grouping): fc.Arbitrary<Shape> =>
       include: fc.boolean().map((b) => (b ? true : undefined)),
       having: fc.option(
         fc.record({
-          part: expression(include, grouping !== `none`, 1).filter(
-            (p) => !hasAggregate(p),
+          // A condition may read aggregates, selected as fields or not. One
+          // in two compares an aggregate directly.
+          part: fc.oneof(
+            expression(include, grouping !== `none`, 1),
+            fc
+              .constantFrom(`count` as const, `sum` as const, `max` as const)
+              .map((fn): Part => ({ k: `agg`, fn })),
           ),
           lit: conditionLiteral,
         }),
@@ -480,7 +548,11 @@ async function runHistory(
       ? (c) => upper(c.k)
       : grouping === `inList`
         ? (c) => inArray(c.k, [`a`, `b`])
-        : (c) => c.k
+        : grouping === `date`
+          ? (c) => coalesce(c.d, new Date(5))
+          : grouping === `nan`
+            ? (c) => add(c.v, NaN)
+            : (c) => c.k
   const suffix = Math.random().toString(36).slice(2)
   let issues: Array<Issue> = [
     { id: 1, k: `a`, x: 1 },
@@ -562,11 +634,14 @@ async function runHistory(
     [`top`, topQuery, top],
     [`include`, includeQuery, nested],
   ] as const) {
-    if (modelThrows(s, grouping)) {
+    const error = modelError(s, grouping)
+    if (error) {
       expect(result.ok, `${label} compile throws`).toBe(false)
       if (!result.ok)
         expect(result.error, `${label} error class`).toBeInstanceOf(
-          NonAggregateExpressionNotInGroupByError,
+          error === `nonAggregate`
+            ? NonAggregateExpressionNotInGroupByError
+            : AggregateFunctionNotInSelectError,
         )
     } else {
       expect(result.ok, `${label} compiles`).toBe(true)
@@ -644,7 +719,7 @@ async function runHistory(
 }
 
 const history = fc
-  .constantFrom<Grouping>(`none`, `key`, `upper`, `inList`)
+  .constantFrom<Grouping>(`none`, `key`, `upper`, `inList`, `date`, `nan`)
   .chain((grouping) =>
     fc.tuple(
       shape(false, grouping),
@@ -682,6 +757,28 @@ describe(`aggregate select shapes`, () => {
       { fields: { f0: { k: `add`, a: { k: `lit`, n: 0 }, b: { k: `key` } } } },
       { fields: { f0: { k: `agg`, fn: `count` } } },
       `key`,
+      false,
+      [],
+    )
+  })
+
+  // Pinned replay of a generated counterexample: an aggregate query without
+  // groupBy whose select wraps its only aggregate still accepts HAVING.
+  it(`accepts HAVING beside a wrapped aggregate without groupBy`, async () => {
+    await runHistory(
+      {
+        fields: {
+          f0: { k: `add`, a: { k: `agg`, fn: `count` }, b: { k: `lit`, n: 1 } },
+        },
+        having: { part: { k: `lit`, n: 0 }, lit: 0 },
+      },
+      {
+        fields: {
+          f0: { k: `add`, a: { k: `agg`, fn: `count` }, b: { k: `parent` } },
+        },
+        having: { part: { k: `parent` }, lit: 1 },
+      },
+      `none`,
       false,
       [],
     )

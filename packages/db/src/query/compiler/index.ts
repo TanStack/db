@@ -1089,15 +1089,13 @@ export function compileQuery(
   }
 
   // Process the HAVING clause if it exists (only applies after GROUP BY)
-  if (query.having && (!query.groupBy || query.groupBy.length === 0)) {
-    // Check if we have aggregates in SELECT that would trigger implicit grouping
-    const hasAggregates = query.select
-      ? Object.values(query.select).some((expr) => expr.type === `agg`)
-      : false
-
-    if (!hasAggregates) {
-      throw new HavingRequiresGroupByError()
-    }
+  // An aggregate anywhere in SELECT, wrapped or not, makes one implicit group.
+  if (
+    query.having &&
+    (!query.groupBy || query.groupBy.length === 0) &&
+    !selectHasAggregates
+  ) {
+    throw new HavingRequiresGroupByError()
   }
 
   // Process functional HAVING clauses outside of GROUP BY (treat as additional WHERE filters)
