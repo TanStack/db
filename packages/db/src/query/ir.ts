@@ -69,6 +69,7 @@ export type Limit = number
 export type Offset = number
 
 let nextCollectionSourceId = 0
+let nextLexicalBindingId = 0
 
 /* Expressions */
 
@@ -82,26 +83,40 @@ export class CollectionRef extends BaseExpression {
   public type = `collectionRef` as const
   // Not an own property, so structural identity and hashing ignore it.
   readonly #sourceId = `source-${++nextCollectionSourceId}`
+  readonly #bindingId: string
   constructor(
     public collection: CollectionImpl,
     public alias: string,
+    bindingId?: string,
   ) {
     super()
+    this.#bindingId = bindingId ?? `binding-${++nextLexicalBindingId}`
   }
 
   /** Opaque runtime identity; aliases are lexical names only. */
   get sourceId(): string {
     return this.#sourceId
   }
+
+  get bindingId(): string {
+    return this.#bindingId
+  }
 }
 
 export class QueryRef extends BaseExpression {
   public type = `queryRef` as const
+  readonly #bindingId: string
   constructor(
     public query: QueryIR,
     public alias: string,
+    bindingId?: string,
   ) {
     super()
+    this.#bindingId = bindingId ?? `binding-${++nextLexicalBindingId}`
+  }
+
+  get bindingId(): string {
+    return this.#bindingId
   }
 }
 
@@ -136,14 +151,23 @@ export class UnionAll extends BaseExpression {
 export class PropRef<T = any> extends BaseExpression<T> {
   public type = `ref` as const
   declare public readonly sourceAlias?: string
+  declare public readonly bindingId?: string
   constructor(
     public path: Array<string>, // path to the property in the collection, with the alias as the first element
     sourceAlias?: string,
+    bindingId?: string,
   ) {
     super()
     // Present only when given, so unqualified refs keep their shape.
     if (sourceAlias !== undefined) {
       ;(this as { sourceAlias?: string }).sourceAlias = sourceAlias
+    }
+    if (bindingId !== undefined) {
+      // Preserve structural IR equality and optional record compatibility.
+      Object.defineProperty(this, `bindingId`, {
+        value: bindingId,
+        enumerable: false,
+      })
     }
   }
 }
@@ -352,15 +376,22 @@ export function getFromSources(from: From): Array<CollectionRef | QueryRef> {
 function getRefFromAlias(
   query: QueryIR,
   alias: string,
+  bindingId?: string,
 ): CollectionRef | QueryRef | void {
   for (const source of getFromSources(query.from)) {
-    if (source.alias === alias) {
+    if (
+      source.alias === alias &&
+      (bindingId === undefined || source.bindingId === bindingId)
+    ) {
       return source
     }
   }
 
   for (const join of query.join || []) {
-    if (join.from.alias === alias) {
+    if (
+      join.from.alias === alias &&
+      (bindingId === undefined || join.from.bindingId === bindingId)
+    ) {
       return join.from
     }
   }
@@ -387,7 +418,7 @@ export function followRef(
 } | void {
   const explicitAlias = getPropRefSourceAlias(ref)
   if (explicitAlias !== undefined) {
-    const aliasRef = getRefFromAlias(query, explicitAlias)
+    const aliasRef = getRefFromAlias(query, explicitAlias, ref.bindingId)
     if (!aliasRef) return
 
     const propertyPath = getPropRefPropertyPath(ref)
@@ -423,13 +454,23 @@ export function followRef(
     }
 
     // Without a projection for this field, it belongs to the source row.
-    return { collection, path: [field] }
+    const from = getFromSources(query.from)[0]
+    if (from?.type === `queryRef`) {
+      return followRef(from.query, new PropRef([field]), collection)
+    }
+    if (from?.type !== `collectionRef`) return
+    return {
+      collection,
+      path: [field],
+      alias: from.alias,
+      sourceId: from.sourceId,
+    }
   }
 
   if (ref.path.length > 1) {
     // This is a nested field
     const [alias, ...rest] = ref.path
-    const aliasRef = getRefFromAlias(query, alias!)
+    const aliasRef = getRefFromAlias(query, alias!, ref.bindingId)
     if (!aliasRef) {
       return
     }

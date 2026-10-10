@@ -3,7 +3,7 @@ id: Parser
 title: Parser
 ---
 
-Defined in: [packages/db/src/local-storage.ts:49](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L49)
+Defined in: [packages/db/src/local-storage.ts:103](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L103)
 
 ## Properties
 
@@ -13,7 +13,7 @@ Defined in: [packages/db/src/local-storage.ts:49](https://github.com/TanStack/db
 parse: (data) => unknown;
 ```
 
-Defined in: [packages/db/src/local-storage.ts:50](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L50)
+Defined in: [packages/db/src/local-storage.ts:104](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L104)
 
 #### Parameters
 
@@ -33,7 +33,7 @@ Defined in: [packages/db/src/local-storage.ts:50](https://github.com/TanStack/db
 stringify: (data) => string;
 ```
 
-Defined in: [packages/db/src/local-storage.ts:51](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L51)
+Defined in: [packages/db/src/local-storage.ts:105](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L105)
 
 #### Parameters
 

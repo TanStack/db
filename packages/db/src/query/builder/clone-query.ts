@@ -65,10 +65,14 @@ function cloneSourceForPlacement(
   clones: WeakMap<object, object>,
 ): CollectionRef | QueryRef {
   if (source.type === `collectionRef`) {
-    return new CollectionRef(source.collection, source.alias)
+    return new CollectionRef(source.collection, source.alias, source.bindingId)
   }
 
-  return new QueryRef(cloneQuery(source.query, clones), source.alias)
+  return new QueryRef(
+    cloneQuery(source.query, clones),
+    source.alias,
+    source.bindingId,
+  )
 }
 
 function cloneSelectForPlacement(

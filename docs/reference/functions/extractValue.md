@@ -7,7 +7,7 @@ title: extractValue
 function extractValue(expr): any;
 ```
 
-Defined in: [packages/db/src/query/expression-helpers.ts:129](https://github.com/TanStack/db/blob/main/packages/db/src/query/expression-helpers.ts#L129)
+Defined in: [packages/db/src/query/expression-helpers.ts:130](https://github.com/TanStack/db/blob/main/packages/db/src/query/expression-helpers.ts#L130)
 
 Extracts the value from a Value expression.
 Returns undefined for non-value expressions.

@@ -23,6 +23,7 @@ import type { BrowserWASQLiteDatabase } from '../src'
 
 const FIXED_SEED = 165902
 const DEFAULT_RUNS = 12
+const durableTerms = new Map<string, number>()
 
 type CoordinatorOracleProperty = `remote-lease` | `routing`
 type CoordinatorOracleEnvironment = Record<string, string | undefined>
@@ -606,6 +607,17 @@ function createRecordingAdapter(options: {
         latestRowVersion: 0,
       })
     },
+    async reserveLeadershipTerm(collectionId, observedTerm) {
+      const position = await this.getStreamPosition(collectionId)
+      const latestTerm =
+        Math.max(
+          position.latestTerm,
+          durableTerms.get(collectionId) ?? 0,
+          observedTerm,
+        ) + 1
+      durableTerms.set(collectionId, latestTerm)
+      return { ...position, latestTerm }
+    },
     ensureRemoteSubset: (collectionId, subsetOptions) => {
       record(`remote-subset`, collectionId, subsetSemantics(subsetOptions))
       if (!options.remoteSubsetOwner) {
@@ -759,6 +771,7 @@ function coordinatorFixtureSnapshot() {
 }
 
 beforeEach(() => {
+  durableTerms.clear()
   installControlledBrowserSeams()
 })
 
@@ -3251,7 +3264,8 @@ describe(`generated collection-route histories`, () => {
               const pullResult = pullResults[collectionId]
               expectedResult = semanticValue({
                 ok: true,
-                latestTerm: 1,
+                // A no-write takeover still reserves a distinct durable term.
+                latestTerm: phase === `initial-owner` ? 1 : 2,
                 latestSeq: 0,
                 latestRowVersion: pullResult.latestRowVersion,
                 requiresFullReload: false,
@@ -3794,6 +3808,12 @@ describe(`sync-ingested write ownership oracle`, () => {
             latestSeq: 0,
             latestRowVersion: 0,
           }),
+        reserveLeadershipTerm: async (collectionId, observedTerm) => {
+          const latestTerm =
+            Math.max(durableTerms.get(collectionId) ?? 0, observedTerm) + 1
+          durableTerms.set(collectionId, latestTerm)
+          return { latestTerm, latestSeq: 0, latestRowVersion: 0 }
+        },
       }
     }
 
@@ -3942,7 +3962,7 @@ describe(`sync-ingested write ownership oracle`, () => {
       const committedTxId = electedAdapter.applied[0]!.txId
       const expectedCommitted = {
         type: `tx:committed`,
-        term: 1,
+        term: 2,
         seq: 1,
         txId: committedTxId,
         latestRowVersion: 1,

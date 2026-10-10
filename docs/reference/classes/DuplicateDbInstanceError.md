@@ -3,7 +3,7 @@ id: DuplicateDbInstanceError
 title: DuplicateDbInstanceError
 ---
 
-Defined in: [packages/db/src/errors.ts:45](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L45)
+Defined in: [packages/db/src/errors.ts:47](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L47)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:45](https://github.com/TanStack/db/blob/m
 new DuplicateDbInstanceError(): DuplicateDbInstanceError;
 ```
 
-Defined in: [packages/db/src/errors.ts:46](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L46)
+Defined in: [packages/db/src/errors.ts:48](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L48)
 
 #### Returns
 

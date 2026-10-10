@@ -5,14 +5,14 @@ title: openDatabase
 
 ```ts
 function openDatabase(
-   name,
-   version,
-   onUpgrade?,
-   idbFactory?,
+   name, 
+   version, 
+   onUpgrade?, 
+   idbFactory?, 
 onBlocked?): Promise<IDBDatabase>;
 ```
 
-Defined in: packages/db/src/indexed-db-wrapper.ts:88
+Defined in: [packages/db/src/indexed-db-wrapper.ts:94](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db-wrapper.ts#L94)
 
 Opens an IndexedDB database with the specified name and version.
 A blocked request stays pending until native success or error. The caller

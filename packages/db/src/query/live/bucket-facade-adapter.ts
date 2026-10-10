@@ -397,7 +397,7 @@ export class BucketFacadeAdapter {
       throw new Error(
         devBuild() && process.env.NODE_ENV !== `production`
           ? `Bucket facade retired with rows the graph did not retract`
-          : codedMessage(236),
+          : codedMessage(237),
       )
     }
 

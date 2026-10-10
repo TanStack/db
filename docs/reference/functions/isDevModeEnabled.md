@@ -7,7 +7,7 @@ title: isDevModeEnabled
 function isDevModeEnabled(): boolean;
 ```
 
-Defined in: [packages/db/src/indexes/index-registry.ts:66](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-registry.ts#L66)
+Defined in: [packages/db/src/indexes/index-registry.ts:68](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-registry.ts#L68)
 
 Check if dev mode is enabled
 
