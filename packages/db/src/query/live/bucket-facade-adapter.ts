@@ -152,12 +152,7 @@ export class BucketFacadeAdapter {
         for (const [bucketKey, multiplicity] of activity ?? []) {
           if (multiplicity >= 0) continue
           active.delete(bucketKey)
-          this.retireEntry(
-            compilation.edgeId,
-            bucketKey,
-            snapshot,
-            publications,
-          )
+          this.retireEntry(compilation.edgeId, bucketKey)
         }
       }
     } catch (error) {
@@ -315,7 +310,11 @@ export class BucketFacadeAdapter {
       const sync = entry.sync
       if (!sync) continue
       const before = new Map(rows.map((row) => [row.key, row]))
-      sync.begin()
+      // A failed write or commit can leave the facade's sync transaction
+      // open with staged writes. Restore into it and commit it, so its
+      // writes cannot reappear in the accepted rows later.
+      const pending = entry.collection._state.pendingSyncedTransactions
+      if (pending[pending.length - 1]?.committed !== false) sync.begin()
       // Undo only the keys the flush wrote, held writes included; a row it did
       // not touch is still the one the facade showed before the flush.
       for (const key of snapshot.written.get(entry)!) {
@@ -368,7 +367,7 @@ export class BucketFacadeAdapter {
   /**
    * Begin a facade write. Copy the facade's rows and defer its events before
    * its first write in the flush, so a rollback reads only the facades the
-   * flush wrote. A bucket written and then retired in one flush copies once.
+   * flush wrote.
    */
   private beginWrite(
     entry: FacadeEntry,
@@ -386,12 +385,7 @@ export class BucketFacadeAdapter {
     sync.begin()
   }
 
-  private retireEntry(
-    edgeId: string,
-    bucketKey: string,
-    snapshot: FacadeSnapshot,
-    publications: Array<PublicationDeferral>,
-  ): void {
+  private retireEntry(edgeId: string, bucketKey: string): void {
     const byBucket = this.entries.get(edgeId)
     const entry = byBucket?.get(bucketKey)
     if (!entry) return
@@ -407,16 +401,9 @@ export class BucketFacadeAdapter {
       )
     }
 
-    // The facade can still show rows the graph never sent: an optimistic row
-    // from a pending transaction, or a sync commit held behind a persisting
-    // one. Retract whatever it still holds.
-    const sync = entry.sync
-    const keys = [...entry.collection.keys()]
-    if (sync && keys.length > 0) {
-      this.beginWrite(entry, sync, snapshot, publications, keys)
-      for (const key of keys) sync.write({ type: `delete`, key })
-      sync.commit()
-    }
+    // The facade can still show rows the graph never sent, such as an
+    // optimistic row or a held sync commit. It has no synced row to retract,
+    // so those rows leave when their transactions settle.
     byBucket!.delete(bucketKey)
     if (byBucket!.size === 0) this.entries.delete(edgeId)
     const retired = getOrCreate(this.retiredEntries, edgeId, () => new Map())

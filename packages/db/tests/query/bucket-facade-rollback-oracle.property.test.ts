@@ -159,7 +159,8 @@ type Op =
   | { type: `delete`; bucket: BucketKey; id: number }
   | { type: `retire`; bucket: BucketKey }
 
-type Outcome = `publish` | `throw` | `throwWrite` | `throwNew` | `rollback`
+type Outcome =
+  `publish` | `throw` | `throwWrite` | `throwStaged` | `throwNew` | `rollback`
 
 type FacadeSync = Parameters<SyncConfig<Record<string, unknown>>[`sync`]>[0]
 type FacadeEntry = {
@@ -204,6 +205,26 @@ function layoutExpectation(
   return previousCommon.some((id, index) => id !== nextCommon[index])
     ? `required`
     : `permitted`
+}
+
+/**
+ * The layout owed to a reader whose facade hides graph rows behind optimistic
+ * deletes. The reader's rows decide what is required. The adapter orders only
+ * graph rows, so a graph reorder that the hidden rows make invisible permits
+ * one revision: a false-positive revision leaves the reader's rows unchanged.
+ */
+function shownLayoutExpectation(
+  before: Map<number, ModelRow>,
+  after: Map<number, ModelRow>,
+  local: Map<number, boolean>,
+): LayoutExpectation {
+  const shown = (rows: Map<number, ModelRow>) =>
+    new Map([...rows].filter(([id]) => local.get(id) !== false))
+  const expectation = layoutExpectation(shown(before), shown(after))
+  return expectation === `forbidden` &&
+    layoutExpectation(before, after) !== `forbidden`
+    ? `permitted`
+    : expectation
 }
 
 /**
@@ -317,7 +338,20 @@ function kidsOf(row: unknown): unknown {
  * failure leaves the facade's sync transaction open, as a validation error
  * from a real write would.
  */
-function injectFailure(sync: FacadeSync, method: `commit` | `write`): void {
+function injectFailure(
+  sync: FacadeSync,
+  method: `commit` | `write` | `staged`,
+): void {
+  if (method === `staged`) {
+    // The facade's writes are staged, then the commit throws before it
+    // commits, so the sync transaction stays open with those writes.
+    const commit = sync.commit
+    sync.commit = () => {
+      sync.commit = commit
+      throw new Error(`injected facade write failure`)
+    }
+    return
+  }
   if (method === `commit`) {
     const commit = sync.commit
     sync.commit = () => {
@@ -346,7 +380,8 @@ class Driver {
   private readonly sent = new Map<BucketKey, Map<number, BucketRow>>()
   // Rows a user transaction inserted into a facade. They are optimistic, so
   // the graph never sent them and the model's synced rows do not hold them.
-  private localIds = new WeakMap<object, Set<number>>()
+  /** Optimistic row ids per facade, and whether the row is visible. */
+  private localIds = new WeakMap<object, Map<number, boolean>>()
   private readonly localTransactions: Array<Transaction> = []
   private nextLocalId = 100
   // Rows of a persisting user transaction that holds a facade's sync commits.
@@ -428,20 +463,24 @@ class Driver {
    * pending, as an application may with a Collection-valued include. The
    * facade then shows an optimistic row the graph never sent.
    */
-  addLocal(bucket: BucketKey, sharedId?: number): void {
+  addLocal(bucket: BucketKey, sharedId?: number, deleteId?: number): void {
     const facade = this.entry(bucket)?.collection
     if (!facade) return
-    const id = sharedId ?? this.nextLocalId++
+    if (deleteId !== undefined && !facade.has(deleteId)) return
+    const id = deleteId ?? sharedId ?? this.nextLocalId++
     const transaction = createTransaction({
       autoCommit: false,
       mutationFn: () => new Promise<void>(() => {}),
     })
+    // An optimistic delete of a graph row makes the visible rows differ from
+    // the accepted rows without any hold.
     transaction.mutate(() => {
-      facade.insert({ id, v: 0, $key: id } as unknown as Row)
+      if (deleteId !== undefined) facade.delete(deleteId)
+      else facade.insert({ id, v: 0, $key: id } as unknown as Row)
     })
     this.localTransactions.push(transaction)
-    const ids = this.localIds.get(facade) ?? new Set()
-    ids.add(id)
+    const ids = this.localIds.get(facade) ?? new Map()
+    ids.set(id, deleteId === undefined)
     this.localIds.set(facade, ids)
   }
 
@@ -509,6 +548,18 @@ class Driver {
       >
       if (this.wrapped.has(stored)) continue
       this.wrapped.add(stored)
+      // The adapter also reads the accepted rows, which include held writes.
+      const state = facade._state as unknown as Record<
+        string,
+        (...args: Array<unknown>) => unknown
+      >
+      for (const method of [`acceptedSyncedEntries`, `getAcceptedSyncedRow`]) {
+        const original = state[method]!.bind(state)
+        state[method] = (...args: Array<unknown>) => {
+          this.reads.set(facade, (this.reads.get(facade) ?? 0) + 1)
+          return original(...args)
+        }
+      }
       // Every read path of the stored rows: iteration, forEach, and lookups.
       for (const method of [
         Symbol.iterator,
@@ -627,6 +678,20 @@ class Driver {
       [...this.entries().keys()].sort(),
       `${label}: facades held by the adapter`,
     ).toEqual([...model.keys()].sort())
+    // A retired or replaced facade shows only its visible optimistic rows,
+    // including one retired while a hold spanned several flushes.
+    const held = new Set([...this.entries().values()].map((e) => e.collection))
+    for (const facade of held) this.shownFacades.add(facade)
+    for (const facade of this.shownFacades) {
+      if (held.has(facade) || this.cleaned.has(facade)) continue
+      const visible = [...this.local(facade)]
+        .filter(([, shown]) => shown)
+        .map(([id]) => id)
+      expect(
+        [...facade.keys()].sort(),
+        `${label}: rows of a retired facade`,
+      ).toEqual(visible.sort())
+    }
     for (const bucket of BUCKETS) {
       const rows = model.get(bucket)
       const facade = this.entry(bucket)?.collection
@@ -645,9 +710,9 @@ class Driver {
           .filter((row) => !local.has(row.id)),
         `${label}: rows of ${bucket}`,
       ).toEqual(expectedRows(rows).filter((row) => !local.has(row.id)))
-      for (const id of local) {
+      for (const [id, visible] of local) {
         expect(facade!.has(id), `${label}: local row ${bucket}/${id}`).toBe(
-          true,
+          visible,
         )
       }
       for (const id of rows.keys()) {
@@ -661,6 +726,9 @@ class Driver {
 
   /** Change messages that were invalid for the subscriber that got them. */
   readonly protocolViolations: Array<string> = []
+
+  /** Every facade a check has seen the adapter hold. */
+  private readonly shownFacades = new Set<Collection<any, any, any>>()
 
   /** Facades that a holder cleaned up; their rows are not compared. */
   readonly cleaned = new WeakSet<object>()
@@ -684,8 +752,8 @@ class Driver {
   }
 
   /** Optimistic row ids on a facade. */
-  local(facade: object): Set<number> {
-    return this.localIds.get(facade) ?? new Set()
+  local(facade: object): Map<number, boolean> {
+    return this.localIds.get(facade) ?? new Map()
   }
 
   async cleanup(): Promise<void> {
@@ -764,7 +832,7 @@ function checkEvents(
           ]),
         )
       : new Map()
-    for (const id of local) {
+    for (const id of local.keys()) {
       replayed.delete(id)
       expected.delete(id)
     }
@@ -789,6 +857,7 @@ async function runHistory(
     throwPick: number
     local?: number
     shareId?: boolean
+    deleteShown?: boolean
     hold?: number
     holdFor?: number
     cleanup?: number
@@ -822,7 +891,9 @@ async function runHistory(
           const after =
             applyOps(published, pending).get(localBucket) ?? new Map()
           const facade = driver.entry(localBucket)?.collection
-          const taken = facade ? driver.local(facade) : new Set<number>()
+          const taken = facade
+            ? driver.local(facade)
+            : new Map<number, boolean>()
           // Under an open hold the facade can still show a row the model has
           // already removed.
           const free = IDS.filter(
@@ -832,10 +903,14 @@ async function runHistory(
               !taken.has(id) &&
               !facade?.has(id),
           )
+          const shownIds = [...shown.keys()]
           driver.addLocal(
             localBucket,
             step.shareId && free.length > 0
               ? free[index % free.length]
+              : undefined,
+            step.deleteShown && shownIds.length > 0
+              ? shownIds[index % shownIds.length]
               : undefined,
           )
         }
@@ -895,17 +970,30 @@ async function runHistory(
         )
         let outcome = step.outcome
         if (
-          (outcome === `throw` || outcome === `throwWrite`) &&
+          (outcome === `throw` ||
+            outcome === `throwWrite` ||
+            outcome === `throwStaged`) &&
           throwTargets.length === 0
         )
           outcome = `publish`
         if (outcome === `throwNew` && newTargets.length === 0)
           outcome = `publish`
-        if (outcome === `throw` || outcome === `throwWrite`) {
+        if (
+          outcome === `throw` ||
+          outcome === `throwWrite` ||
+          outcome === `throwStaged`
+        ) {
           const target = driver.entry(
             throwTargets[step.throwPick % throwTargets.length]!,
           )!
-          injectFailure(target.sync!, outcome === `throw` ? `commit` : `write`)
+          injectFailure(
+            target.sync!,
+            outcome === `throw`
+              ? `commit`
+              : outcome === `throwWrite`
+                ? `write`
+                : `staged`,
+          )
         } else if (outcome === `throwNew`) {
           driver.failNewFacade(newTargets[step.throwPick % newTargets.length]!)
         }
@@ -988,7 +1076,11 @@ async function runHistory(
             if (!previous || !following) continue
             const advanced =
               (layoutsAfter.get(facade) ?? 0) - (layoutsBefore.get(facade) ?? 0)
-            const expectation = layoutExpectation(previous, following)
+            const expectation = shownLayoutExpectation(
+              previous,
+              following,
+              driver.local(facade),
+            )
             if (expectation === `permitted`) {
               expect(
                 advanced,
@@ -1071,6 +1163,10 @@ async function runHistory(
         await open.settle()
         driver.check(published, `end (hold released)`)
       }
+      // Open optimistic rows roll back, so keys they hid are compared too.
+      driver.settleLocals()
+      await Promise.resolve()
+      driver.check(published, `end (optimistic rows settled)`)
     },
     () => driver.cleanup(),
   )
@@ -1090,6 +1186,7 @@ const step = fc.record({
     `publish`,
     `throw`,
     `throwWrite`,
+    `throwStaged`,
     `throwNew`,
     `rollback`,
   ),
@@ -1107,6 +1204,8 @@ const step = fc.record({
   holdFor: fc.integer({ min: 0, max: 2 }),
   // An optimistic row sometimes takes a graph id.
   shareId: fc.boolean(),
+  // The optimistic change is sometimes a delete of a shown graph row.
+  deleteShown: fc.integer({ min: 0, max: 3 }).map((n) => n === 0),
   // About one step in eight cleans up a shown facade from outside.
   cleanup: fc
     .integer({ min: -28, max: BUCKETS.length - 1 })
