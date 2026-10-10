@@ -4,6 +4,7 @@ import { createCollection } from '../src/index'
 import { localOnlyCollectionOptions } from '../src/local-only'
 import { createTransaction } from '../src/transactions'
 import { createDeferred } from '../src/deferred'
+import { captureCreatedTransactions } from './utils'
 
 /**
  * # When does a local-only direct write skip the optimistic stage?
@@ -143,28 +144,15 @@ describe(`local-only direct writes`, () => {
   // still completes instead of staying pending.
   it(`completes a direct write whose subscriber throws`, async () => {
     const orders = createOrders()
-    const created: Array<{
-      state: string
-      isPersisted: { promise: Promise<unknown> }
-    }> = []
-    const manager = (
-      orders as unknown as {
-        _mutations: { createTransaction: (...args: Array<any>) => any }
-      }
-    )._mutations
-    const createTransactionFor = manager.createTransaction
-    manager.createTransaction = (...args) => {
-      const transaction = createTransactionFor.apply(manager, args)
-      created.push(transaction)
-      return transaction
-    }
+    const { created, restore: restoreCreate } =
+      captureCreatedTransactions(orders)
     const failure = new Error(`subscriber failed`)
     const subscription = orders.subscribeChanges(() => {
       throw failure
     })
     expect(() => orders.insert({ id: 2, value: `b` })).toThrow(failure)
     subscription.unsubscribe()
-    manager.createTransaction = createTransactionFor
+    restoreCreate()
 
     expect(orders.get(2)?.value).toBe(`b`)
     expect(created.map((transaction) => transaction.state)).toEqual([

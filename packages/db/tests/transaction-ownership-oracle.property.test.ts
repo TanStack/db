@@ -4,7 +4,10 @@ import { createCollection } from '../src/collection/index.js'
 import { createTransaction } from '../src/transactions.js'
 import { DuplicateTransactionIdError } from '../src/errors.js'
 import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
-import { mockSyncCollectionOptionsNoInitialState } from './utils.js'
+import {
+  captureCreatedTransactions,
+  mockSyncCollectionOptionsNoInitialState,
+} from './utils.js'
 import type { Transaction } from '../src/transactions.js'
 
 /**
@@ -125,6 +128,8 @@ type Step =
       key: Key
       value: number
       throws: boolean
+      /** The throwing subscriber was sent the rows before the write. */
+      seen: boolean
     }
 
 type ModelState = `pending` | `persisting` | `completed` | `failed`
@@ -278,6 +283,7 @@ const step: fc.Arbitrary<Step> = fc.oneof(
       key: fc.constantFrom<Key>(1, 2),
       value: fc.integer({ min: 1, max: 9 }),
       throws: fc.boolean(),
+      seen: fc.boolean(),
     }),
   },
   {
@@ -342,11 +348,17 @@ async function makeCollection(id: string) {
   }>({ id, getKey: (row) => row.id, startSync: true })
   // A direct write's handler resolves at once, so its transaction settles
   // within the step instead of waiting for a sync commit.
+  // Each handler call counts, so a rolled-back direct write can be told from
+  // one that reached its handler.
+  const handled = { calls: 0 }
+  const handler = async () => {
+    handled.calls++
+  }
   const collection = createCollection({
     ...options,
-    onInsert: async () => {},
-    onUpdate: async () => {},
-    onDelete: async () => {},
+    onInsert: handler,
+    onUpdate: handler,
+    onDelete: handler,
   })
   const writeBase = () => {
     options.utils.write({ type: `insert`, value: { id: 1, v: 0 } })
@@ -357,7 +369,19 @@ async function makeCollection(id: string) {
   options.utils.commit()
   options.utils.markReady()
   await collection.stateWhenReady()
-  return { collection, utils: options.utils, writeBase }
+  // A mirror subscriber applies every change message, so a rollback that
+  // restores rows without publishing the revert leaves it behind.
+  const mirror = new Map<number, number>()
+  collection.subscribeChanges(
+    (changes) => {
+      for (const change of changes) {
+        if (change.type === `delete`) mirror.delete(change.key as number)
+        else mirror.set(change.key as number, change.value.v)
+      }
+    },
+    { includeInitialState: true },
+  )
+  return { collection, utils: options.utils, writeBase, handled, mirror }
 }
 
 /** Runs one history against the model and two Collections. */
@@ -387,20 +411,29 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
     throwOn: ThrowOn,
     run: () => void,
     applyModel: () => void,
+    seen = false,
   ) => {
     const targets: Array<CollectionName> =
       throwOn === `both` ? [`A`, `B`] : throwOn ? [throwOn] : []
     const before = targets.map((on) => JSON.stringify(rows(on)))
     const raised: Array<Error> = []
     const calls = new Map<CollectionName, number>()
+    // A subscriber that was sent the rows first is told of every later
+    // change, including a delete; it throws only once armed.
+    let armed = false
     const subscriptions = targets.map((on) =>
-      collections[on].collection.subscribeChanges(() => {
-        calls.set(on, (calls.get(on) ?? 0) + 1)
-        const error = new Error(`subscriber on ${on} failed`)
-        raised.push(error)
-        throw error
-      }),
+      collections[on].collection.subscribeChanges(
+        () => {
+          if (!armed) return
+          calls.set(on, (calls.get(on) ?? 0) + 1)
+          const error = new Error(`subscriber on ${on} failed`)
+          raised.push(error)
+          throw error
+        },
+        seen ? { includeInitialState: true } : undefined,
+      ),
     )
+    armed = true
     let result: { ok: true } | { ok: false; error: unknown } = { ok: true }
     try {
       run()
@@ -453,6 +486,11 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
       }
       expect(collection.has(9), `${label}: ${on} merged-away row`).toBe(false)
       expect(collection.has(3), `${label}: ${on} direct insert`).toBe(false)
+      const { mirror } = collections[on]
+      for (const key of [1, 2, 3, 9] as const)
+        expect(mirror.get(key), `${label}: ${on} mirror of row ${key}`).toBe(
+          collection.get(key)?.v,
+        )
     }
     for (const [index, entry] of driven.entries()) {
       const settled = !model.unsettled(model.transactions[index]!)
@@ -503,19 +541,10 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
         )
           continue
         const { collection } = collections[current.on]
-        const created: Array<Transaction<any>> = []
-        const manager = (
-          collection as unknown as {
-            _mutations: { createTransaction: (...args: Array<any>) => any }
-          }
-        )._mutations
-        const createTransactionFor = manager.createTransaction
-        manager.createTransaction = (...args) => {
-          const tx = createTransactionFor.apply(manager, args)
-          created.push(tx)
-          return tx
-        }
+        const { created, restore: restoreCreate } =
+          captureCreatedTransactions(collection)
         const settled = new Set<Transaction<any>>()
+        const handledBefore = collections[current.on].handled.calls
         const { result, raised } = await withThrowingSubscribers(
           label,
           current.throws ? current.on : undefined,
@@ -529,7 +558,7 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
                   draft.v = current.value
                 })
             } finally {
-              manager.createTransaction = createTransactionFor
+              restoreCreate()
               for (const tx of created)
                 tx.isPersisted.promise.then(
                   () => settled.add(tx),
@@ -538,28 +567,36 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
             }
           },
           () => {},
+          current.seen,
         )
         // The throwing subscriber must reach the admission of an insert or an
         // update, so the write fails rather than passing unnoticed. A
         // subscriber is not told of a delete of a row it was never sent, so
-        // a delete's throwing subscriber runs only when the settled delete
-        // shows the row again, and the write itself succeeds.
-        if (current.throws && current.op !== `delete`) {
+        // such a delete's throwing subscriber runs only when the settled
+        // delete shows the row again, and the write itself succeeds.
+        const rejected =
+          current.throws && (current.op !== `delete` || current.seen)
+        if (rejected) {
           expect(
             raised.length,
             `${label}: throwing subscriber ran`,
           ).toBeGreaterThan(0)
           expect(result.ok, `${label}: direct write rejected`).toBe(false)
         }
-        if (current.throws && current.op === `delete`)
+        if (current.throws && !rejected)
           expect(result.ok, `${label}: direct delete succeeds`).toBe(true)
         else expectErrorShape(`${label} direct write`, result, raised)
+        // A rejected write rolls back before its handler; an accepted one
+        // reaches its handler exactly once.
+        expect(
+          collections[current.on].handled.calls - handledBefore,
+          `${label}: handler calls`,
+        ).toBe(rejected ? 0 : 1)
         expect(created.length, `${label}: one direct transaction`).toBe(1)
         for (const tx of created) {
-          expect(
-            tx.state === `completed` || tx.state === `failed`,
-            `${label}: direct transaction settled`,
-          ).toBe(true)
+          expect(tx.state, `${label}: direct transaction settled`).toBe(
+            rejected ? `failed` : `completed`,
+          )
           expect(settled.has(tx), `${label}: direct isPersisted settled`).toBe(
             true,
           )

@@ -14,6 +14,7 @@ import type { LocalOnlyCollectionUtils } from '../src/local-only'
 import type { Collection } from '../src/index'
 import type { BaseIndex } from '../src/indexes/base-index'
 import type { ChangeMessage, SyncConfig } from '../src/types'
+import { captureCreatedTransactions } from './utils'
 
 /**
  * # Do settled change messages reconstruct the Collection's public rows?
@@ -461,18 +462,8 @@ async function runHistory(
             },
             { includeInitialState: true },
           )
-    const created: Array<{ isPersisted: { promise: Promise<unknown> } }> = []
-    const manager = (
-      collection as unknown as {
-        _mutations: { createTransaction: (...args: Array<any>) => any }
-      }
-    )._mutations
-    const createTransactionFor = manager.createTransaction
-    manager.createTransaction = (...args) => {
-      const transaction = createTransactionFor.apply(manager, args)
-      created.push(transaction)
-      return transaction
-    }
+    const { created, restore: restoreCreate } =
+      captureCreatedTransactions(collection)
     const applyAt = (op: Op, operationIndex: number) => {
       if (operationIndex !== throwOn) return applyOp(collection, op)
       armed = true
@@ -531,7 +522,7 @@ async function runHistory(
       expect(publication.mirrorRows).toEqual(publication.publicRows)
     }
     throwing?.unsubscribe()
-    manager.createTransaction = createTransactionFor
+    restoreCreate()
     expect(protocolViolations, `change-message protocol`).toEqual([])
   } catch (error) {
     primaryFailure = error
