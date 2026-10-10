@@ -2253,6 +2253,9 @@ cache-eviction interleaving.
 The [cache-generation oracle audit](oracle-reviews/issue-2069-cache-generation-oracle-audit-53ded62d8.md)
 records the generated grammar controls, killed mutants, direct replays, and
 the remaining handoff limits for code commit `53ded62d8ef70ccd63b75d0e6dbc0a964f14b17c`.
+The [cache-claim gap audit](oracle-reviews/issue-2069-cache-claim-gap-audit-575fb9473.md)
+records the added receiving witnesses, hostile checks, direct replay, and
+remaining limits for code commit `575fb9473dd7d8eccbe469d0831dc9f71cffddd4`.
 
 [Issue #2056 evaluation](oracle-reviews/issue-2056-full-mode-recovery.md) records
 the original RED and candidate comparisons on head
