@@ -4061,6 +4061,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       })
       const first = createCollection(options)
       let second: typeof first | undefined
+      let hasPrimaryFailure = false
       try {
         await first.stateWhenReady()
         expect(() => {
@@ -4079,9 +4080,14 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           id: `owned`,
           title: `First owner`,
         })
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
       } finally {
-        await second?.cleanup()
-        await first.cleanup()
+        await cleanupPersistedOracle(
+          [() => second?.cleanup(), () => first.cleanup()],
+          hasPrimaryFailure,
+        )
       }
     },
   )
@@ -4110,6 +4116,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     )
     const firstClient = new DbClient()
     const secondClient = new DbClient()
+    let hasPrimaryFailure = false
     try {
       const first = firstClient.collection(descriptor)
       const second = secondClient.collection(descriptor)
@@ -4123,9 +4130,14 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         id: `stored`,
         title: `Stored`,
       })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
     } finally {
-      await secondClient.cleanup()
-      await firstClient.cleanup()
+      await cleanupPersistedOracle(
+        [() => secondClient.cleanup(), () => firstClient.cleanup()],
+        hasPrimaryFailure,
+      )
     }
   })
 
