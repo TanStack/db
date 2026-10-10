@@ -2051,7 +2051,9 @@ table after each rejection, reopens the adapter, and retries the old managed
 target after explicit eager reuse of the same ID. The contract is claim
 authority, not a reserved naming prefix: an application that explicitly
 declares an eager Collection with those bytes may create eager storage. The
-bare-ID fallback mutant fails at the first post-collection read.
+bare-ID fallback mutant fails at the first post-collection read. The
+[explicit-storage-target review](oracle-reviews/pr-2069-explicit-storage-targets-6b0192c19.md)
+records the checked paths, mutants, and remaining native-host limits.
 The persisted owner also keeps a subset demand through rotation from an old
 row version 10 to a new version 1 and requires the new peer notice to request
 source reacquisition. Four held-rotation histories cross old row versions 1 and 10
