@@ -691,6 +691,10 @@ equality would skip it.
 Direct persisted options and their spread copies can create only one Collection,
 both with and without a wrapped upstream sync source. The second creation
 rejects before it redirects the first owner's local or source writes.
+Selecting only the exposed wrapped `sync` config omits the descriptor claim;
+the runtime guard rejects that second Collection before changing control
+callbacks. A local-only write and an in-flight upstream source transaction
+remain with the first owner after the rejection.
 Cleanup does not release that claim. Two DbClients materializing one descriptor
 receive independent runtimes. A no-demand on-demand full-reload notification
 reads collection metadata without fetching every durable row; a later

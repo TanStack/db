@@ -4148,6 +4148,74 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     },
   )
 
+  // Selecting only the public sync config bypasses the descriptor's claim.
+  // The runtime's fallback guard must reject that second Collection before
+  // changing the first owner's controls. This is a legal JavaScript copy of
+  // the exposed config, not a second independent persisted options runtime.
+  it.each([`local-only`, `sync-present`] as const)(
+    `preserves the first owner after a copied sync config is rejected (%s)`,
+    async (mode) => {
+      const adapter = createRecordingAdapter()
+      let source!: TodoSyncParams
+      const base = {
+        id: `selected-sync-${mode}`,
+        getKey: (row: Todo) => row.id,
+        persistence: { adapter },
+      }
+      const options =
+        mode === `sync-present`
+          ? persistedCollectionOptions<Todo, string>({
+              ...base,
+              sync: {
+                sync: (params) => {
+                  source = params
+                  params.markReady()
+                },
+              },
+            })
+          : persistedCollectionOptions<Todo, string>(base)
+      const first = createCollection(options)
+      const second = createCollection({
+        id: `unclaimed-${mode}`,
+        getKey: (row: Todo) => row.id,
+        sync: options.sync,
+        startSync: false,
+      })
+      let hasPrimaryFailure = false
+      try {
+        await first.stateWhenReady()
+        if (mode === `sync-present`) {
+          source.begin()
+          source.write({
+            type: `insert`,
+            value: { id: `owned`, title: `First source` },
+          })
+        }
+        expect(() => second.startSyncImmediate()).toThrow(
+          InvalidPersistedCollectionConfigError,
+        )
+
+        if (mode === `sync-present`) {
+          await Promise.resolve(source.commit())
+        } else {
+          await first.insert({ id: `owned`, title: `First owner` }).isPersisted
+            .promise
+        }
+        expect(first.has(`owned`)).toBe(true)
+        expect(second.has(`owned`)).toBe(false)
+        expect(adapter.rows.get(`owned`)?.id).toBe(`owned`)
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        await cleanupPersistedOracle(
+          [() => second.cleanup(), () => first.cleanup()],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
   it(`does not reuse a persisted runtime after its Collection cleans up`, async () => {
     const options = persistedCollectionOptions<Todo, string>({
       id: `cleaned-up-owner`,

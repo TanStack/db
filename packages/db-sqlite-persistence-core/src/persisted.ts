@@ -1581,16 +1581,16 @@ class PersistedCollectionRuntime<
 
   setCollection(
     collection: Collection<T, TKey, PersistedCollectionUtils>,
+    syncControls: SyncControlFns<T, TKey>,
   ): void {
-    if (this.collection === collection) {
-      return
-    }
-    if (this.collection) {
+    if (this.collection && this.collection !== collection) {
       throw new InvalidPersistedCollectionConfigError(
         `Persisted options cannot own more than one Collection`,
       )
     }
 
+    this.setSyncControls(syncControls)
+    if (this.collection === collection) return
     this.collection = collection
     this.attachCoordinatorSubscription()
   }
@@ -4414,16 +4414,16 @@ function createWrappedSyncConfig<
           throw error
         }
       }
-      runtime.setSyncControls({
-        begin: params.begin,
-        write: params.write as SyncControlFns<T, TKey>[`write`],
-        commit: params.commit,
-        truncate: params.truncate,
-        metadata: params.metadata ?? null,
-        markError: params.markError,
-      })
       runtime.setCollection(
         params.collection as Collection<T, TKey, PersistedCollectionUtils>,
+        {
+          begin: params.begin,
+          write: params.write as SyncControlFns<T, TKey>[`write`],
+          commit: params.commit,
+          truncate: params.truncate,
+          metadata: params.metadata ?? null,
+          markError: params.markError,
+        },
       )
 
       const persistenceCapability: SyncPersistenceCapabilityV1<TKey> = {
@@ -5089,16 +5089,16 @@ function createLoopbackSyncConfig<
 >(runtime: PersistedCollectionRuntime<T, TKey>): SyncConfig<T, TKey> {
   return {
     sync: (params) => {
-      runtime.setSyncControls({
-        begin: params.begin,
-        write: params.write as SyncControlFns<T, TKey>[`write`],
-        commit: params.commit,
-        truncate: params.truncate,
-        metadata: params.metadata ?? null,
-        markError: params.markError,
-      })
       runtime.setCollection(
         params.collection as Collection<T, TKey, PersistedCollectionUtils>,
+        {
+          begin: params.begin,
+          write: params.write as SyncControlFns<T, TKey>[`write`],
+          commit: params.commit,
+          truncate: params.truncate,
+          metadata: params.metadata ?? null,
+          markError: params.markError,
+        },
       )
 
       void runtime
