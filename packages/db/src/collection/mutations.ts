@@ -3,6 +3,7 @@ import {
   withChangeTracking,
   withFlatChangeTracking,
 } from '../proxy'
+import { deepEquals } from '../utils'
 import { safeRandomUUID } from '../utils/uuid'
 import { createTransaction, getActiveTransaction } from '../transactions'
 import { takePublicationFailure } from '../scheduler'
@@ -221,15 +222,30 @@ export class CollectionMutationsManager<
     })
     transaction.applyMutations(mutations)
     // The rows are stored when `write` publishes, so a throwing subscriber
-    // cannot undo them; the transaction still settles. Inside another
-    // publication, the subscriber failure is still this write's.
+    // cannot undo them; the transaction still completes. Inside another
+    // publication, the subscriber failure is still this write's. Any other
+    // failure, which only a contract breach causes, leaves the rows unstored.
+    let failure: { error: unknown } | undefined
     try {
-      const failure = takePublicationFailure(() => direct.write(mutations))
-      if (failure) throw failure.error
-    } finally {
+      failure = takePublicationFailure(() => direct.write(mutations))
+    } catch (error) {
+      failure = { error }
+    }
+    const stored = mutations.every((mutation) => {
+      const row = this.state.getAcceptedSyncedRow(mutation.key)
+      return mutation.type === `delete`
+        ? row === undefined
+        : deepEquals(row, mutation.modified)
+    })
+    if (stored) {
       transaction.setState(`completed`)
       transaction.isPersisted.resolve(transaction)
+    } else {
+      transaction.setState(`failed`)
+      transaction.isPersisted.promise.catch(() => undefined)
+      transaction.isPersisted.reject(failure!.error)
     }
+    if (failure) throw failure.error
     return transaction
   }
 

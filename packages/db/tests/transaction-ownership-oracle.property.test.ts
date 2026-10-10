@@ -56,6 +56,13 @@ import type { Transaction } from '../src/transactions.js'
  *   transaction rolls back without rolling back other transactions, and no
  *   Collection keeps it. Either way the write's own transaction has settled,
  *   with its `isPersisted`. So a direct write never changes the model.
+ * - A direct write can run inside a change subscriber of the other
+ *   Collection, during that Collection's own direct insert of key 4. Its
+ *   subscriber failure belongs to it: it rejects and rolls back, and the
+ *   outer write is not told. The outer write fails exactly when its own
+ *   publication recorded a failure: an outer subscriber threw, or a sync
+ *   commit to a third Collection, made earlier in that publication, met a
+ *   throwing subscriber. The nested write must keep that earlier failure.
  * - Error shape: a settling call that ran no throwing subscriber reports no
  *   subscriber error. Otherwise it throws one of the subscriber errors, as
  *   is. The contract does not say which one, because these failures are rare
@@ -137,6 +144,11 @@ type Step =
       nested: boolean
       /** A nested write's outer Collection also has a throwing subscriber. */
       outerThrows: boolean
+      /**
+       * Before the nested write, the outer publication defers a failure: a
+       * sync commit to a third Collection meets a throwing subscriber.
+       */
+      priorDeferred: boolean
     }
 
 type ModelState = `pending` | `persisting` | `completed` | `failed`
@@ -293,6 +305,7 @@ const step: fc.Arbitrary<Step> = fc.oneof(
       seen: fc.boolean(),
       nested: fc.boolean(),
       outerThrows: fc.boolean(),
+      priorDeferred: fc.boolean(),
     }),
   },
   {
@@ -400,6 +413,15 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
     A: await makeCollection(`ownership-a-${suffix}`),
     B: await makeCollection(`ownership-b-${suffix}`),
   }
+  // A third Collection outside the model. A sync commit to it inside another
+  // publication meets a throwing subscriber, which defers its failure.
+  const deferred = await makeCollection(`ownership-deferred-${suffix}`)
+  const deferredFailure = new Error(`deferred subscriber failed`)
+  let deferredArmed = false
+  deferred.collection.subscribeChanges(() => {
+    if (deferredArmed) throw deferredFailure
+  })
+  let nextDeferredKey = 100
   const model = new OwnershipModel()
   const driven: Array<Driven> = []
   const settle = (entry: Driven) => {
@@ -593,6 +615,24 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
                       throw outerFailure
                     })
                   : undefined
+                let deferredRan = false
+                const deferring = current.priorDeferred
+                  ? outer.subscribeChanges(() => {
+                      if (deferredRan) return
+                      deferredRan = true
+                      deferredArmed = true
+                      try {
+                        deferred.utils.begin()
+                        deferred.utils.write({
+                          type: `insert`,
+                          value: { id: nextDeferredKey++, v: 0 },
+                        })
+                        deferred.utils.commit()
+                      } finally {
+                        deferredArmed = false
+                      }
+                    })
+                  : undefined
                 const subscription = outer.subscribeChanges(() => {
                   if (ran) return
                   ran = true
@@ -609,23 +649,39 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
                   outerError = error
                 } finally {
                   subscription.unsubscribe()
+                  deferring?.unsubscribe()
                   outerThrowing?.unsubscribe()
                   outerCreated.restore()
                 }
                 expect(ran, `${label}: nested write ran`).toBe(true)
-                expect(outerError, `${label}: outer write outcome`).toBe(
-                  current.outerThrows ? outerFailure : undefined,
-                )
+                // The outer write fails with a failure that its publication
+                // recorded; a nested write's own failure is not among them.
+                // When both apply, either error may be reported: precise
+                // errors are not required (maintainer decision).
+                const outerFails = current.outerThrows || current.priorDeferred
+                const outerFailures = [
+                  ...(current.outerThrows ? [outerFailure] : []),
+                  ...(current.priorDeferred ? [deferredFailure] : []),
+                ]
+                if (outerFails)
+                  expect(
+                    outerFailures,
+                    `${label}: outer write outcome`,
+                  ).toContain(outerError)
+                else
+                  expect(outerError, `${label}: outer write outcome`).toBe(
+                    undefined,
+                  )
                 // The outer handler settles after promises flush.
                 checkOuter = () => {
                   expect(
                     outerCreated.created.map((tx) => tx.state),
                     `${label}: outer transaction`,
-                  ).toEqual([current.outerThrows ? `failed` : `completed`])
+                  ).toEqual([outerFails ? `failed` : `completed`])
                   expect(
                     collections[outerName].handled.calls - outerHandledBefore,
                     `${label}: outer handler calls`,
-                  ).toBe(current.outerThrows ? 0 : 1)
+                  ).toBe(outerFails ? 0 : 1)
                 }
                 if (inner) throw inner.error
               }
@@ -809,6 +865,7 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
     await flush()
     await collections.A.collection.cleanup()
     await collections.B.collection.cleanup()
+    await deferred.collection.cleanup()
   }
 }
 

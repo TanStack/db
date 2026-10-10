@@ -163,6 +163,49 @@ describe(`local-only direct writes`, () => {
     expect(orders.insert({ id: 3, value: `c` }).state).toBe(`completed`)
   })
 
+  // Invariant witness, not a generated history: only a contract breach can
+  // make the local-only write throw before it stores its rows, so no legal
+  // history reaches it. The transaction must then report the failure instead
+  // of completing.
+  for (const kind of [`insert`, `update`, `delete`] as const) {
+    it(`fails a direct ${kind} whose rows were not stored`, async () => {
+      const orders = createOrders()
+      const { created, restore: restoreCreate } =
+        captureCreatedTransactions(orders)
+      const direct = (
+        orders._state as unknown as {
+          localOnlyDirectWrite: { write: (mutations: unknown) => void }
+        }
+      ).localOnlyDirectWrite
+      const write = direct.write
+      const breach = new Error(`storage failed`)
+      direct.write = () => {
+        throw breach
+      }
+      try {
+        expect(() => {
+          if (kind === `insert`) orders.insert({ id: 2, value: `b` })
+          else if (kind === `update`)
+            orders.update(1, (draft) => {
+              draft.value = `changed`
+            })
+          else orders.delete(1)
+        }).toThrow(breach)
+      } finally {
+        direct.write = write
+        restoreCreate()
+      }
+
+      // The rows the write would have stored are not there.
+      if (kind === `insert`) expect(orders.has(2)).toBe(false)
+      else expect(orders.get(1)?.value).toBe(`a`)
+      expect(created.map((transaction) => transaction.state)).toEqual([
+        `failed`,
+      ])
+      await expect(created[0]!.isPersisted.promise).rejects.toBe(breach)
+    })
+  }
+
   it(`runs the user's handler for that operation type`, async () => {
     let calls = 0
     const orders = createOrders({
