@@ -4,7 +4,10 @@ import { createCollection } from '../src/collection/index.js'
 import { createTransaction } from '../src/transactions.js'
 import { DuplicateTransactionIdError } from '../src/errors.js'
 import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
-import { mockSyncCollectionOptionsNoInitialState } from './utils.js'
+import {
+  captureCreatedTransactions,
+  mockSyncCollectionOptionsNoInitialState,
+} from './utils.js'
 import type { Transaction } from '../src/transactions.js'
 
 /**
@@ -45,6 +48,21 @@ import type { Transaction } from '../src/transactions.js'
  *   transaction.
  * - A failed `mutate()` callback undoes its writes, but the Collection that
  *   took one still tracked the transaction.
+ * - A direct write (`insert`, `update` or `delete` outside a transaction) runs
+ *   in its own transaction, which settles within its step: its handler
+ *   resolves at once and writes no sync row, so afterwards it shows nothing
+ *   and no Collection tracks it. A subscriber that throws while the write is
+ *   admitted makes the write fail: the call rethrows that error, the write's
+ *   transaction rolls back without rolling back other transactions, and no
+ *   Collection keeps it. Either way the write's own transaction has settled,
+ *   with its `isPersisted`. So a direct write never changes the model.
+ * - A direct write can run inside a change subscriber of the other
+ *   Collection, during that Collection's own direct insert of key 4. Its
+ *   subscriber failure belongs to it: it rejects and rolls back, and the
+ *   outer write is not told. The outer write fails exactly when its own
+ *   publication recorded a failure: an outer subscriber threw, or a sync
+ *   commit to a third Collection, made earlier in that publication, met a
+ *   throwing subscriber. The nested write must keep that earlier failure.
  * - Error shape: a settling call that ran no throwing subscriber reports no
  *   subscriber error. Otherwise it throws one of the subscriber errors, as
  *   is. The contract does not say which one, because these failures are rare
@@ -57,7 +75,10 @@ import type { Transaction } from '../src/transactions.js'
  * state allows that step, so generated steps rarely skip. Steps write a value, write and remove key 9 in one call
  * (a pair that merges away), commit, settle a commit as success or failure,
  * roll back, roll back from a `truncate` listener during a sync commit, and
- * run a `mutate()` callback that writes and then throws. A settling step may
+ * run a `mutate()` callback that writes and then throws. A direct write
+ * inserts key 3, or updates or deletes key 1 or 2, outside any transaction,
+ * optionally with a throwing subscriber on its Collection. The driver
+ * captures the transaction each direct write creates. A settling step may
  * install a throwing subscriber on one Collection or on both. It stays
  * installed until promises flush, because a commit settles in a later
  * microtask, and it must have run whenever the model predicts that the step
@@ -106,6 +127,28 @@ type Step =
       on: CollectionName
       key: Key
       value: number
+    }
+  | {
+      type: `direct`
+      op: `insert` | `update` | `delete`
+      on: CollectionName
+      key: Key
+      value: number
+      throws: boolean
+      /** The throwing subscriber was sent the rows before the write. */
+      seen: boolean
+      /**
+       * The write runs inside a change subscriber of the other Collection,
+       * during that Collection's own direct insert of key 4.
+       */
+      nested: boolean
+      /** A nested write's outer Collection also has a throwing subscriber. */
+      outerThrows: boolean
+      /**
+       * Before the nested write, the outer publication defers a failure: a
+       * sync commit to a third Collection meets a throwing subscriber.
+       */
+      priorDeferred: boolean
     }
 
 type ModelState = `pending` | `persisting` | `completed` | `failed`
@@ -247,6 +290,25 @@ const step: fc.Arbitrary<Step> = fc.oneof(
     }),
   },
   {
+    weight: 2,
+    arbitrary: fc.record({
+      type: fc.constant(`direct` as const),
+      op: fc.constantFrom(
+        `insert` as const,
+        `update` as const,
+        `delete` as const,
+      ),
+      on: name,
+      key: fc.constantFrom<Key>(1, 2),
+      value: fc.integer({ min: 1, max: 9 }),
+      throws: fc.boolean(),
+      seen: fc.boolean(),
+      nested: fc.boolean(),
+      outerThrows: fc.boolean(),
+      priorDeferred: fc.boolean(),
+    }),
+  },
+  {
     weight: 1,
     arbitrary: fc.record({
       type: fc.constant(`mutateThrows` as const),
@@ -306,7 +368,20 @@ async function makeCollection(id: string) {
     id: number
     v: number
   }>({ id, getKey: (row) => row.id, startSync: true })
-  const collection = createCollection(options)
+  // A direct write's handler resolves at once, so its transaction settles
+  // within the step instead of waiting for a sync commit.
+  // Each handler call counts, so a rolled-back direct write can be told from
+  // one that reached its handler.
+  const handled = { calls: 0 }
+  const handler = async () => {
+    handled.calls++
+  }
+  const collection = createCollection({
+    ...options,
+    onInsert: handler,
+    onUpdate: handler,
+    onDelete: handler,
+  })
   const writeBase = () => {
     options.utils.write({ type: `insert`, value: { id: 1, v: 0 } })
     options.utils.write({ type: `insert`, value: { id: 2, v: 0 } })
@@ -316,7 +391,19 @@ async function makeCollection(id: string) {
   options.utils.commit()
   options.utils.markReady()
   await collection.stateWhenReady()
-  return { collection, utils: options.utils, writeBase }
+  // A mirror subscriber applies every change message, so a rollback that
+  // restores rows without publishing the revert leaves it behind.
+  const mirror = new Map<number, number>()
+  collection.subscribeChanges(
+    (changes) => {
+      for (const change of changes) {
+        if (change.type === `delete`) mirror.delete(change.key as number)
+        else mirror.set(change.key as number, change.value.v)
+      }
+    },
+    { includeInitialState: true },
+  )
+  return { collection, utils: options.utils, writeBase, handled, mirror }
 }
 
 /** Runs one history against the model and two Collections. */
@@ -326,6 +413,15 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
     A: await makeCollection(`ownership-a-${suffix}`),
     B: await makeCollection(`ownership-b-${suffix}`),
   }
+  // A third Collection outside the model. A sync commit to it inside another
+  // publication meets a throwing subscriber, which defers its failure.
+  const deferred = await makeCollection(`ownership-deferred-${suffix}`)
+  const deferredFailure = new Error(`deferred subscriber failed`)
+  let deferredArmed = false
+  deferred.collection.subscribeChanges(() => {
+    if (deferredArmed) throw deferredFailure
+  })
+  let nextDeferredKey = 100
   const model = new OwnershipModel()
   const driven: Array<Driven> = []
   const settle = (entry: Driven) => {
@@ -346,20 +442,29 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
     throwOn: ThrowOn,
     run: () => void,
     applyModel: () => void,
+    seen = false,
   ) => {
     const targets: Array<CollectionName> =
       throwOn === `both` ? [`A`, `B`] : throwOn ? [throwOn] : []
     const before = targets.map((on) => JSON.stringify(rows(on)))
     const raised: Array<Error> = []
     const calls = new Map<CollectionName, number>()
+    // A subscriber that was sent the rows first is told of every later
+    // change, including a delete; it throws only once armed.
+    let armed = false
     const subscriptions = targets.map((on) =>
-      collections[on].collection.subscribeChanges(() => {
-        calls.set(on, (calls.get(on) ?? 0) + 1)
-        const error = new Error(`subscriber on ${on} failed`)
-        raised.push(error)
-        throw error
-      }),
+      collections[on].collection.subscribeChanges(
+        () => {
+          if (!armed) return
+          calls.set(on, (calls.get(on) ?? 0) + 1)
+          const error = new Error(`subscriber on ${on} failed`)
+          raised.push(error)
+          throw error
+        },
+        seen ? { includeInitialState: true } : undefined,
+      ),
     )
+    armed = true
     let result: { ok: true } | { ok: false; error: unknown } = { ok: true }
     try {
       run()
@@ -411,6 +516,15 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
         )
       }
       expect(collection.has(9), `${label}: ${on} merged-away row`).toBe(false)
+      expect(collection.has(3), `${label}: ${on} direct insert`).toBe(false)
+      expect(collection.has(4), `${label}: ${on} outer direct insert`).toBe(
+        false,
+      )
+      const { mirror } = collections[on]
+      for (const key of [1, 2, 3, 4, 9] as const)
+        expect(mirror.get(key), `${label}: ${on} mirror of row ${key}`).toBe(
+          collection.get(key)?.v,
+        )
     }
     for (const [index, entry] of driven.entries()) {
       const settled = !model.unsettled(model.transactions[index]!)
@@ -453,6 +567,169 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
         model.open(
           reuse === undefined ? undefined : model.transactions[reuse]!.id,
         )
+      } else if (current.type === `direct`) {
+        // A direct update that leaves the visible row unchanged writes nothing.
+        if (
+          current.op === `update` &&
+          model.row(current.on, current.key) === current.value
+        )
+          continue
+        const { collection } = collections[current.on]
+        const { created, restore: restoreCreate } =
+          captureCreatedTransactions(collection)
+        const settled = new Set<Transaction<any>>()
+        const handledBefore = collections[current.on].handled.calls
+        let checkOuter: (() => void) | undefined
+        const { result, raised } = await withThrowingSubscribers(
+          label,
+          current.throws ? current.on : undefined,
+          () => {
+            const write = () => {
+              if (current.op === `insert`)
+                collection.insert({ id: 3, v: current.value })
+              else if (current.op === `delete`) collection.delete(current.key)
+              else
+                collection.update(current.key, (draft) => {
+                  draft.v = current.value
+                })
+            }
+            try {
+              if (!current.nested) write()
+              else {
+                // The write's outcome belongs to the write, even inside the
+                // other Collection's publication: its caller sees its error,
+                // and the outer write, whose subscriber catches it, has only
+                // its own outcome. It fails exactly when its own subscriber
+                // throws, and otherwise reaches its handler once.
+                const outerName = current.on === `A` ? `B` : `A`
+                const outer = collections[outerName].collection
+                const outerHandledBefore = collections[outerName].handled.calls
+                const outerFailure = new Error(`outer subscriber failed`)
+                const outerCreated = captureCreatedTransactions(outer)
+                let inner: { error: unknown } | undefined
+                let ran = false
+                // The outer failure is recorded before the nested write runs,
+                // so taking the nested failure must keep it.
+                const outerThrowing = current.outerThrows
+                  ? outer.subscribeChanges(() => {
+                      throw outerFailure
+                    })
+                  : undefined
+                let deferredRan = false
+                const deferring = current.priorDeferred
+                  ? outer.subscribeChanges(() => {
+                      if (deferredRan) return
+                      deferredRan = true
+                      deferredArmed = true
+                      try {
+                        deferred.utils.begin()
+                        deferred.utils.write({
+                          type: `insert`,
+                          value: { id: nextDeferredKey++, v: 0 },
+                        })
+                        deferred.utils.commit()
+                      } finally {
+                        deferredArmed = false
+                      }
+                    })
+                  : undefined
+                const subscription = outer.subscribeChanges(() => {
+                  if (ran) return
+                  ran = true
+                  try {
+                    write()
+                  } catch (error) {
+                    inner = { error }
+                  }
+                })
+                let outerError: unknown
+                try {
+                  outer.insert({ id: 4, v: 1 })
+                } catch (error) {
+                  outerError = error
+                } finally {
+                  subscription.unsubscribe()
+                  deferring?.unsubscribe()
+                  outerThrowing?.unsubscribe()
+                  outerCreated.restore()
+                }
+                expect(ran, `${label}: nested write ran`).toBe(true)
+                // The outer write fails with a failure that its publication
+                // recorded; a nested write's own failure is not among them.
+                // When both apply, either error may be reported: precise
+                // errors are not required (maintainer decision).
+                const outerFails = current.outerThrows || current.priorDeferred
+                const outerFailures = [
+                  ...(current.outerThrows ? [outerFailure] : []),
+                  ...(current.priorDeferred ? [deferredFailure] : []),
+                ]
+                if (outerFails)
+                  expect(
+                    outerFailures,
+                    `${label}: outer write outcome`,
+                  ).toContain(outerError)
+                else
+                  expect(outerError, `${label}: outer write outcome`).toBe(
+                    undefined,
+                  )
+                // The outer handler settles after promises flush.
+                checkOuter = () => {
+                  expect(
+                    outerCreated.created.map((tx) => tx.state),
+                    `${label}: outer transaction`,
+                  ).toEqual([outerFails ? `failed` : `completed`])
+                  expect(
+                    collections[outerName].handled.calls - outerHandledBefore,
+                    `${label}: outer handler calls`,
+                  ).toBe(outerFails ? 0 : 1)
+                }
+                if (inner) throw inner.error
+              }
+            } finally {
+              restoreCreate()
+              for (const tx of created)
+                tx.isPersisted.promise.then(
+                  () => settled.add(tx),
+                  () => settled.add(tx),
+                )
+            }
+          },
+          () => {},
+          current.seen,
+        )
+        checkOuter?.()
+        // The throwing subscriber must reach the admission of an insert or an
+        // update, so the write fails rather than passing unnoticed. A
+        // subscriber is not told of a delete of a row it was never sent, so
+        // such a delete's throwing subscriber runs only when the settled
+        // delete shows the row again, and the write itself succeeds.
+        const rejected =
+          current.throws && (current.op !== `delete` || current.seen)
+        if (rejected) {
+          expect(
+            raised.length,
+            `${label}: throwing subscriber ran`,
+          ).toBeGreaterThan(0)
+          expect(result.ok, `${label}: direct write rejected`).toBe(false)
+        }
+        if (current.throws && !rejected)
+          expect(result.ok, `${label}: direct delete succeeds`).toBe(true)
+        else expectErrorShape(`${label} direct write`, result, raised)
+        // A rejected write rolls back before its handler; an accepted one
+        // reaches its handler exactly once.
+        expect(
+          collections[current.on].handled.calls - handledBefore,
+          `${label}: handler calls`,
+        ).toBe(rejected ? 0 : 1)
+        expect(created.length, `${label}: one direct transaction`).toBe(1)
+        for (const tx of created) {
+          expect(tx.state, `${label}: direct transaction settled`).toBe(
+            rejected ? `failed` : `completed`,
+          )
+          expect(settled.has(tx), `${label}: direct isPersisted settled`).toBe(
+            true,
+          )
+        }
       } else {
         const states: ReadonlyArray<ModelState> =
           current.type === `edit` ||
@@ -588,6 +865,7 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
     await flush()
     await collections.A.collection.cleanup()
     await collections.B.collection.cleanup()
+    await deferred.collection.cleanup()
   }
 }
 

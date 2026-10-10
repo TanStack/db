@@ -12,6 +12,8 @@ import type {
 } from '../src/index.js'
 import type { IndexConstructor } from '../src/indexes/base-index'
 import type { WithVirtualProps } from '../src/virtual-props.js'
+import type { Transaction } from '../src/transactions.js'
+import type { Collection } from '../src/collection/index.js'
 
 export type OutputWithVirtual<
   T extends object,
@@ -677,4 +679,37 @@ export function resetCleanupQueue(): void {
   if (holder.instance?.timeoutId != null)
     clearTimeout(holder.instance.timeoutId)
   holder.instance = null
+}
+
+/**
+ * Record each transaction a Collection's mutations manager creates, such as
+ * the one a direct write makes for itself, which the call may not return when
+ * it throws. Call `restore` when done.
+ */
+export function captureCreatedTransactions(
+  collection: Collection<any, any, any>,
+): {
+  created: Array<Transaction<any>>
+  restore: () => void
+} {
+  const manager = (
+    collection as unknown as {
+      _mutations: {
+        createTransaction: (...args: Array<unknown>) => Transaction<any>
+      }
+    }
+  )._mutations
+  const createTransaction = manager.createTransaction
+  const created: Array<Transaction<any>> = []
+  manager.createTransaction = (...args) => {
+    const transaction = createTransaction.apply(manager, args)
+    created.push(transaction)
+    return transaction
+  }
+  return {
+    created,
+    restore: () => {
+      manager.createTransaction = createTransaction
+    },
+  }
 }

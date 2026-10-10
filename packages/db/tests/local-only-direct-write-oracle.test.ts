@@ -4,6 +4,7 @@ import { createCollection } from '../src/index'
 import { localOnlyCollectionOptions } from '../src/local-only'
 import { createTransaction } from '../src/transactions'
 import { createDeferred } from '../src/deferred'
+import { captureCreatedTransactions } from './utils'
 
 /**
  * # When does a local-only direct write skip the optimistic stage?
@@ -137,6 +138,73 @@ describe(`local-only direct writes`, () => {
     ambient.rollback()
     expect(orders.get(1)?.value).toBe(`a`)
   })
+
+  // The direct write stores its rows when it publishes them, so a throwing
+  // subscriber cannot undo the write. The call rethrows, and the transaction
+  // still completes instead of staying pending.
+  it(`completes a direct write whose subscriber throws`, async () => {
+    const orders = createOrders()
+    const { created, restore: restoreCreate } =
+      captureCreatedTransactions(orders)
+    const failure = new Error(`subscriber failed`)
+    const subscription = orders.subscribeChanges(() => {
+      throw failure
+    })
+    expect(() => orders.insert({ id: 2, value: `b` })).toThrow(failure)
+    subscription.unsubscribe()
+    restoreCreate()
+
+    expect(orders.get(2)?.value).toBe(`b`)
+    expect(created.map((transaction) => transaction.state)).toEqual([
+      `completed`,
+    ])
+    await expect(created[0]!.isPersisted.promise).resolves.toBe(created[0])
+    // The next direct write still takes the direct path.
+    expect(orders.insert({ id: 3, value: `c` }).state).toBe(`completed`)
+  })
+
+  // Invariant witness, not a generated history: only a contract breach can
+  // make the local-only write throw before it stores its rows, so no legal
+  // history reaches it. The transaction must then report the failure instead
+  // of completing.
+  for (const kind of [`insert`, `update`, `delete`] as const) {
+    it(`fails a direct ${kind} whose rows were not stored`, async () => {
+      const orders = createOrders()
+      const { created, restore: restoreCreate } =
+        captureCreatedTransactions(orders)
+      const direct = (
+        orders._state as unknown as {
+          localOnlyDirectWrite: { write: (mutations: unknown) => void }
+        }
+      ).localOnlyDirectWrite
+      const write = direct.write
+      const breach = new Error(`storage failed`)
+      direct.write = () => {
+        throw breach
+      }
+      try {
+        expect(() => {
+          if (kind === `insert`) orders.insert({ id: 2, value: `b` })
+          else if (kind === `update`)
+            orders.update(1, (draft) => {
+              draft.value = `changed`
+            })
+          else orders.delete(1)
+        }).toThrow(breach)
+      } finally {
+        direct.write = write
+        restoreCreate()
+      }
+
+      // The rows the write would have stored are not there.
+      if (kind === `insert`) expect(orders.has(2)).toBe(false)
+      else expect(orders.get(1)?.value).toBe(`a`)
+      expect(created.map((transaction) => transaction.state)).toEqual([
+        `failed`,
+      ])
+      await expect(created[0]!.isPersisted.promise).rejects.toBe(breach)
+    })
+  }
 
   it(`runs the user's handler for that operation type`, async () => {
     let calls = 0

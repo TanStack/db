@@ -3,8 +3,10 @@ import {
   withChangeTracking,
   withFlatChangeTracking,
 } from '../proxy'
+import { deepEquals } from '../utils'
 import { safeRandomUUID } from '../utils/uuid'
 import { createTransaction, getActiveTransaction } from '../transactions'
+import { takePublicationFailure } from '../scheduler'
 import {
   DeleteKeyNotFoundError,
   DuplicateKeyError,
@@ -219,9 +221,31 @@ export class CollectionMutationsManager<
       mutationFn: () => Promise.resolve(),
     })
     transaction.applyMutations(mutations)
-    direct.write(mutations)
-    transaction.setState(`completed`)
-    transaction.isPersisted.resolve(transaction)
+    // The rows are stored when `write` publishes, so a throwing subscriber
+    // cannot undo them; the transaction still completes. Inside another
+    // publication, the subscriber failure is still this write's. Any other
+    // failure, which only a contract breach causes, leaves the rows unstored.
+    let failure: { error: unknown } | undefined
+    try {
+      failure = takePublicationFailure(() => direct.write(mutations))
+    } catch (error) {
+      failure = { error }
+    }
+    const stored = mutations.every((mutation) => {
+      const row = this.state.getAcceptedSyncedRow(mutation.key)
+      return mutation.type === `delete`
+        ? row === undefined
+        : deepEquals(row, mutation.modified)
+    })
+    if (stored) {
+      transaction.setState(`completed`)
+      transaction.isPersisted.resolve(transaction)
+    } else {
+      transaction.setState(`failed`)
+      transaction.isPersisted.promise.catch(() => undefined)
+      transaction.isPersisted.reject(failure!.error)
+    }
+    if (failure) throw failure.error
     return transaction
   }
 
@@ -271,7 +295,30 @@ export class CollectionMutationsManager<
           >,
         }),
     })
-    this.applyOwnedMutations(transaction, mutations)
+    try {
+      // Inside another Collection's publication, a subscriber failure is
+      // deferred to that publication. It is this write's failure, so take it.
+      const failure = takePublicationFailure(() =>
+        this.applyOwnedMutations(transaction, mutations),
+      )
+      if (failure) throw failure.error
+    } catch (error) {
+      // A subscriber threw before the handler could run. Roll back only this
+      // write, so no Collection keeps a transaction that nothing will settle.
+      // The admission error is the reported cause, also for the rollback's
+      // own subscriber failures, deferred or not.
+      takePublicationFailure(() => {
+        try {
+          transaction.rollback({
+            isSecondaryRollback: true,
+            error: error instanceof Error ? error : undefined,
+          })
+        } catch {
+          // Settlement still ran every step.
+        }
+      })
+      throw error
+    }
     // Errors still reject `isPersisted.promise`. This catch only prevents an
     // unhandled rejection from the fire-and-forget commit.
     transaction.commit().catch(() => undefined)
