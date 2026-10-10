@@ -22,6 +22,13 @@ the row appeared in the second Collection. Both new rejection witnesses failed
 before the repair and pass afterward. The invariant guard in `setCollection`
 also rejects a manually copied sync closure that bypasses the descriptor hook.
 
+A follow-up oracle at `0b10fa44e` exercises the same-object and spread-copy
+cases with a wrapped upstream sync source. After the second creation rejects,
+the first source commits a row that remains public and durable. Temporarily
+removing the sync-present claim made both cases fail at the intended admission
+assertion; the restored code passes. This checks both option-construction
+branches for this bounded ownership history.
+
 **Demand controls persisted row reads.** The public SQLite persistence guide
 says an on-demand Collection loads rows for active query demand. A plausible
 rival rule treated every coordinator full-reload notice as an implicit
@@ -104,3 +111,8 @@ changed-file lint, formatting, and whitespace checks passed. Lint reported only
 existing `require-await` warnings in the large persistence oracle. Production
 code adds 38 lines and removes 6; oracle tests add 271 and remove 6, counted
 separately from coverage documentation.
+
+The `0b10fa44e` follow-up passed the full core package suite: 1,228 tests,
+two existing todos, and no type errors. Changed-file lint and formatting passed;
+lint retained only existing `require-await` warnings. The sync-present
+wrong-answer control failed both new runtime cases before it was removed.
