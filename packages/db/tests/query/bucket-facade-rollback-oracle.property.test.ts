@@ -116,11 +116,13 @@ import type { BucketRow } from '../../src/query/live/materialized-pipeline.js'
  * - The graph retracts a bucket's synced rows before it retires the bucket,
  *   but a retired facade can still show rows the graph never sent: an
  *   optimistic row from a user transaction on the facade, or a sync commit
- *   held behind a persisting transaction. The grammar adds optimistic rows
- *   (the `local` step field) and the oracle requires the flush to keep them
- *   visible while the facade is held. Retirement retracts every key the facade
- *   still shows through an ordinary facade write, so a failed flush restores
- *   it. A row the graph sent and never retracted is a contradictory graph
+ *   held behind a persisting transaction. The grammar adds optimistic
+ *   inserts and optimistic deletes of shown graph rows (the `local` and
+ *   `deleteShown` step fields). The oracle requires a retired facade to show
+ *   exactly its visible optimistic rows. Those rows have no synced row, so
+ *   they leave when their transactions settle, and every history ends by
+ *   settling them and comparing all rows again. A row the graph sent and
+ *   never retracted is a contradictory graph
  *   signal, so retiring its bucket throws and the flush restores the facade.
  *   That case has a pinned witness only; the grammar retires only after the
  *   graph's retractions, including under a hold, and must not throw. Held
@@ -130,8 +132,8 @@ import type { BucketRow } from '../../src/query/live/materialized-pipeline.js'
  *   cleaned-up facade, and optimistic rows that share a graph id, are not
  *   compared by value.
  * - After a failed flush, each facade the flush created must report
- *   `status === 'cleaned-up'`. The model does not otherwise follow facades
- *   after the adapter drops them.
+ *   `status === 'cleaned-up'`. A facade the adapter retired or replaced is
+ *   followed only for its rows. Its events after retirement are not checked.
  * - The adapter is internal. Its public surface is `flush`, `resolve` and
  *   `cleanup`, and `resolve` creates a facade for a bucket it does not hold.
  *   So the driver reads the adapter's private facade map to see which facades
@@ -473,7 +475,7 @@ class Driver {
       mutationFn: () => new Promise<void>(() => {}),
     })
     // An optimistic delete of a graph row makes the visible rows differ from
-    // the accepted rows without any hold.
+    // the projected synced rows without any hold.
     transaction.mutate(() => {
       if (deleteId !== undefined) facade.delete(deleteId)
       else facade.insert({ id, v: 0, $key: id } as unknown as Row)
@@ -548,7 +550,7 @@ class Driver {
       >
       if (this.wrapped.has(stored)) continue
       this.wrapped.add(stored)
-      // The adapter also reads the accepted rows, which include held writes.
+      // The adapter also reads the projected synced rows, held writes included.
       const state = facade._state as unknown as Record<
         string,
         (...args: Array<unknown>) => unknown

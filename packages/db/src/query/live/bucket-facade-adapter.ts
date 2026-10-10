@@ -256,8 +256,8 @@ export class BucketFacadeAdapter {
   }
 
   private copyRows(entry: FacadeEntry): Array<SnapshotRow> {
-    // The accepted synced rows include writes a persisting transaction
-    // still holds; the visible rows can lag behind them.
+    // The projected synced rows include every queued sync write, held or
+    // still open; the visible rows can lag behind them.
     return [...entry.collection._state.acceptedSyncedEntries()].map(
       ([key, value]) => ({ key, value, order: entry.order.get(value) }),
     )
@@ -312,7 +312,7 @@ export class BucketFacadeAdapter {
       const before = new Map(rows.map((row) => [row.key, row]))
       // A failed write or commit can leave the facade's sync transaction
       // open with staged writes. Restore into it and commit it, so its
-      // writes cannot reappear in the accepted rows later.
+      // writes cannot reappear in the projected synced rows later.
       const pending = entry.collection._state.pendingSyncedTransactions
       if (pending[pending.length - 1]?.committed !== false) sync.begin()
       // Undo only the keys the flush wrote, held writes included; a row it did
@@ -390,7 +390,7 @@ export class BucketFacadeAdapter {
     const entry = byBucket?.get(bucketKey)
     if (!entry) return
     // The graph retracts every row it sent before it retires a bucket, and
-    // the accepted synced rows include that retraction even while a
+    // the projected synced rows include that retraction even while a
     // persisting transaction holds it. A row left there is a contradictory
     // graph signal.
     if (!entry.collection._state.acceptedSyncedEntries().next().done) {

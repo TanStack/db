@@ -595,19 +595,20 @@ It keeps only the deltas a flush consumed until that flush publishes: if the
 root commit fails, the adapter restores them, so the next successful flush
 publishes each pending child change exactly once. The adapter retains a facade
 only while at least one parent route uses its bucket. When the last route
-leaves, it deletes through sync every key the facade still shows and drops its
-strong reference. The graph has already retracted the bucket's rows, but a
-facade is a Collection: a user transaction can show an optimistic row in it, and
-a sync commit can be held behind a persisting transaction. Retirement is
-therefore a legal write to a non-empty facade, not an invariant violation.
-Retirement is a facade write of the flush, so a failed flush restores it. A row
-that the graph sent and never retracted is different. The adapter reads each
-facade's accepted synced rows, which include writes that a persisting
-transaction still holds, and decides inserts, updates and deletes from them
-rather than from the visible rows. An accepted row left at retirement is a
+leaves, it drops its strong reference. The graph has already retracted the
+bucket's rows, but a facade is a Collection: a user transaction can show an
+optimistic row in it, and a sync commit can be held behind a persisting
+transaction. Retiring a facade that still shows such rows is legal, not an
+invariant violation. Those rows have no synced row, so they leave when their
+transactions settle. A row that the graph sent and never retracted is
+different. The adapter reads each facade's projected synced rows: the synced
+rows once every queued sync transaction applies, including a transaction a
+persisting one holds and a transaction still open. It decides inserts, updates
+and deletes from them rather than from the visible rows. A projected row left
+at retirement is a
 contradictory graph signal: the retirement throws, and the flush aborts and
 restores every facade it wrote. A facade whose Collection a holder cleaned up
-holds no accepted rows; if a holder starts it again, it shows only rows the
+holds no projected rows; if a holder starts it again, it shows only rows the
 graph writes afterwards (a recorded limit). A restore undoes only the keys the
 flush wrote, including writes that a persisting transaction still holds, so a
 held write cannot land after the rollback. A facade that `resolve()` created

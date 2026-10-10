@@ -33,6 +33,27 @@ class ThrowingBuildIndex extends BasicIndex<number> {
   }
 }
 
+/**
+ * Each projected synced row's order in a facade entry, keyed by row key, so
+ * iteration order is not compared.
+ */
+function projectedOrders(
+  facadeEntry: unknown,
+): Map<number, string | undefined> {
+  const entry = facadeEntry as {
+    collection: {
+      _state: { acceptedSyncedEntries: () => Iterable<[number, object]> }
+    }
+    order: WeakMap<object, string>
+  }
+  return new Map(
+    [...entry.collection._state.acceptedSyncedEntries()].map(([key, value]) => [
+      key,
+      entry.order.get(value),
+    ]),
+  )
+}
+
 describe(`BucketFacadeAdapter`, () => {
   it.each(
     [false, true].flatMap((present) =>
@@ -337,22 +358,7 @@ describe(`BucketFacadeAdapter`, () => {
 
     expect(() => adapter.flush()).toThrow(`facade flush failed`)
     expect(facade.toArray.map(stripVirtualProps)).toEqual([original, fixed])
-    expect(
-      (() => {
-        const entry = entries.get(`children`)?.get(bucketKey) as unknown as {
-          collection: {
-            _state: { acceptedSyncedEntries: () => Iterable<[number, object]> }
-          }
-          order: WeakMap<object, string>
-        }
-        // Each row's order, keyed by row: iteration order is not compared.
-        return new Map(
-          [...entry.collection._state.acceptedSyncedEntries()].map(
-            ([key, value]) => [key, entry.order.get(value)],
-          ),
-        )
-      })(),
-    ).toEqual(
+    expect(projectedOrders(entries.get(`children`)?.get(bucketKey))).toEqual(
       new Map([
         [original.id, `0`],
         [fixed.id, `1`],
@@ -393,22 +399,7 @@ describe(`BucketFacadeAdapter`, () => {
       replacement.id,
       added.id,
     ])
-    expect(
-      (() => {
-        const entry = entries.get(`children`)?.get(bucketKey) as unknown as {
-          collection: {
-            _state: { acceptedSyncedEntries: () => Iterable<[number, object]> }
-          }
-          order: WeakMap<object, string>
-        }
-        // Each row's order, keyed by row: iteration order is not compared.
-        return new Map(
-          [...entry.collection._state.acceptedSyncedEntries()].map(
-            ([key, value]) => [key, entry.order.get(value)],
-          ),
-        )
-      })(),
-    ).toEqual(
+    expect(projectedOrders(entries.get(`children`)?.get(bucketKey))).toEqual(
       new Map([
         [original.id, `2`],
         [fixed.id, `1`],
