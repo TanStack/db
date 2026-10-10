@@ -8,7 +8,11 @@ import { KeyScheduler } from '../src/executor/KeyScheduler'
 import { TransactionExecutor } from '../src/executor/TransactionExecutor'
 import { DefaultRetryPolicy } from '../src/retry/RetryPolicy'
 import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
-import { atOracleCheckpoint, cleanupOfflineOracle } from './oracle-lifecycle'
+import {
+  atOracleCheckpoint,
+  captureUnhandledRejections,
+  cleanupOfflineOracle,
+} from './oracle-lifecycle'
 import { readOfflineOracleConfig } from './oracle-config'
 import type { TestItem } from './harness'
 import type {
@@ -391,9 +395,8 @@ it.each(oracleSeeds(20260913, settlementOracle))(
           // No failure, manual or auto-committed, escapes as an unhandled
           // process rejection, and none is logged again: isPersisted reports
           // it.
-          const unhandled: Array<unknown> = []
-          const onUnhandled = (reason: unknown) => unhandled.push(reason)
-          process.on(`unhandledRejection`, onUnhandled)
+          const { rejections: unhandled, cleanup: cleanupUnhandled } =
+            captureUnhandledRejections()
           const logged = vi.spyOn(console, `error`).mockImplementation(() => {})
           // Settlement writes no debug output.
           const debug = vi.spyOn(console, `log`).mockImplementation(() => {})
@@ -472,7 +475,7 @@ it.each(oracleSeeds(20260913, settlementOracle))(
             hasPrimaryFailure = true
             throw error
           } finally {
-            process.off(`unhandledRejection`, onUnhandled)
+            cleanupUnhandled()
             logged.mockRestore()
             debug.mockRestore()
             for (const item of release) item.resolve()
@@ -1632,8 +1635,8 @@ it.each([
     const providerError = new Error(`HTTP 401 Unauthorized`)
     const hookError = new Error(`retry decision unavailable`)
     const asyncError = new Error(`async retry decision failed`)
-    const unhandled: Array<unknown> = []
-    const onUnhandled = (reason: unknown) => unhandled.push(reason)
+    const { rejections: unhandled, cleanup: cleanupUnhandled } =
+      captureUnhandledRejections()
     const providerEntered = gate()
     const releaseProvider = gate()
     const terminalMarkerStored = gate()
@@ -1686,7 +1689,6 @@ it.each([
     let commitStatus: unknown = `pending`
     let hasPrimaryFailure = false
     try {
-      process.on(`unhandledRejection`, onUnhandled)
       await env.waitForLeader()
       const tx = env.executor.createOfflineTransaction({
         mutationFnName: env.mutationFnName,
@@ -1789,7 +1791,7 @@ it.each([
           () => env.collection.cleanup(),
           () => restarted?.collection.cleanup(),
           () => warning.mockRestore(),
-          () => process.off(`unhandledRejection`, onUnhandled),
+          () => cleanupUnhandled(),
         ],
         hasPrimaryFailure,
       )
@@ -1835,8 +1837,8 @@ it.each([
     const providerError = new Error(`HTTP 401 Unauthorized`)
     const hookError = new Error(`retry decision failed`)
     const asyncError = new Error(`async retry decision failed`)
-    const unhandled: Array<unknown> = []
-    const onUnhandled = (reason: unknown) => unhandled.push(reason)
+    const { rejections: unhandled, cleanup: cleanupUnhandled } =
+      captureUnhandledRejections()
     const providerEntered = gate()
     const releaseProvider = gate()
     const hookEntered = gate()
@@ -1948,7 +1950,6 @@ it.each([
     }
 
     try {
-      process.on(`unhandledRejection`, onUnhandled)
       await env.waitForLeader()
       const head = createObservedTransaction(`head`, 0)
       headId = head.id
@@ -2049,7 +2050,7 @@ it.each([
           () => env.collection.cleanup(),
           () => warning.mockRestore(),
           () => errorLog.mockRestore(),
-          () => process.off(`unhandledRejection`, onUnhandled),
+          () => cleanupUnhandled(),
         ],
         hasPrimaryFailure,
       )
@@ -3988,3 +3989,71 @@ it(`stops after failed deletion without rerunning the provider`, async () => {
     delay.mockRestore()
   }
 })
+
+// Focused witness, not a generated history: a failed outbox write stops the
+// executor, so a FIFO history cannot continue past it. For every commit path,
+// the admission write fails, the receipt rejects with the storage error, and
+// the failure neither escapes as an unhandled rejection nor is logged again.
+it.each([`manual`, `auto`, `default`, `action`] as const)(
+  `rejects the receipt when the outbox write fails (%s)`,
+  async (commit) => {
+    const storageError = new Error(`outbox write unavailable`)
+    class FailingStorage extends FakeStorageAdapter {
+      override async set(key: string, value: string): Promise<void> {
+        if (key.startsWith(`tx:`)) throw storageError
+        await super.set(key, value)
+      }
+    }
+    const env = createTestOfflineEnvironment({
+      storage: new FailingStorage(),
+      mutationFn: (params) => {
+        env.applyMutations(params.transaction.mutations)
+        return Promise.resolve()
+      },
+    })
+    const { rejections: unhandled, cleanup: cleanupUnhandled } =
+      captureUnhandledRejections()
+    const logged = vi.spyOn(console, `error`).mockImplementation(() => {})
+    try {
+      await env.waitForLeader()
+      const write = () =>
+        env.collection.insert({
+          id: `stored`,
+          value: `v`,
+          completed: false,
+          updatedAt: new Date(0),
+        })
+      let receipt: Promise<unknown>
+      if (commit === `action`) {
+        const transaction = env.executor.createOfflineAction({
+          mutationFnName: env.mutationFnName,
+          onMutate: write,
+        })(undefined)
+        receipt = transaction.isPersisted.promise
+      } else {
+        const tx = env.executor.createOfflineTransaction({
+          mutationFnName: env.mutationFnName,
+          ...(commit === `default` ? {} : { autoCommit: commit === `auto` }),
+        })
+        const transaction = tx.mutate(write)
+        receipt =
+          commit === `manual` ? tx.commit() : transaction.isPersisted.promise
+      }
+      await expect(receipt).rejects.toBe(storageError)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(unhandled, `unhandled rejections`).toEqual([])
+      expect(
+        logged.mock.calls.filter(([message]) =>
+          String(message).includes(`commit failed`),
+        ),
+        `commit failures logged`,
+      ).toEqual([])
+      expect(env.collection.get(`stored`), `optimistic row`).toBeUndefined()
+      expect(env.serverState.size, `provider calls`).toBe(0)
+    } finally {
+      cleanupUnhandled()
+      logged.mockRestore()
+      env.executor.dispose()
+    }
+  },
+)
