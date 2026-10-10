@@ -2236,8 +2236,13 @@ index creation and renewal failures stay best-effort without changing public
 readiness. A held bootstrap lets index removal settle before the earlier
 creation completes; the wrapper reconciles the final durable index with the
 Collection's declaration. Re-adding that index during reconciliation has a
-separate fixed witness. Native SQLite DDL under this reverse ordering remains
-outside the controlled-adapter result.
+separate fixed witness. The SQLite resume-snapshot owner now runs both
+reverse-order histories through the persisted wrapper and real `node:sqlite`
+DDL. It holds the first new-generation ensure until removal settles, then
+checks the Collection declaration, index registry, and `sqlite_master` after
+rotation. Its re-add history makes the replacement ensure finish before the
+held reconciliation removal, so a missed final re-ensure leaves the real index
+absent. Host-specific native DDL scheduling remains outside these Node cuts.
 The persisted Electric interleaving owner holds an uncancelable local cache
 read after demand abort. It requires the returned load to remain pending until
 the cached row is public, then reject with `AbortError`; both fixed and random

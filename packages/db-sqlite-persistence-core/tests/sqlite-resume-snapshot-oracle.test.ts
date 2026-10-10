@@ -2553,6 +2553,208 @@ describe(`SQLite resume snapshots`, () => {
     }
   })
 
+  // The Collection's current index declaration is the independent authority
+  // for the final physical index. A cache rotation may ask SQLite to create an
+  // index, then the Collection may remove that declaration before DDL enters
+  // SQLite. The removal may finish first, and a re-add may occur while the
+  // reconciliation removal is held. These are real-SQLite receiving cuts for
+  // the controlled reverse-order histories in persisted-oracle.test.ts. The
+  // public declaration and SQLite's registry plus sqlite_master are compared
+  // after recovery. Holds control call order, not SQLite's DDL implementation.
+  for (const readdDuringReconciliation of [false, true]) {
+    it(
+      readdDuringReconciliation
+        ? `restores a SQLite index re-added during late-ensure reconciliation`
+        : `removes a late SQLite index after its Collection declaration is removed`,
+      async () => {
+        const database = new DatabaseSync(`:memory:`)
+        let primaryFailure: unknown
+        const logicalId = `late-native-index-removal`
+        const baseDriver = createDriver(database)
+        let transactionTail = Promise.resolve()
+        // One DatabaseSync handle cannot run nested transactions. The host's
+        // transaction queue preserves the deliberate order of these real DDL
+        // operations without introducing a fixture-only SQLite failure.
+        const driver: SQLiteDriver = {
+          ...baseDriver,
+          transaction: async (work) => {
+            const previous = transactionTail
+            let release!: () => void
+            transactionTail = new Promise<void>((resolve) => {
+              release = resolve
+            })
+            await previous
+            try {
+              return await baseDriver.transaction(work)
+            } finally {
+              release()
+            }
+          },
+        }
+        const nativeAdapter = new SQLiteCorePersistenceAdapter({
+          driver,
+        })
+        const ensureEntered = deferred()
+        const releaseEnsure = deferred()
+        const removalSettled = deferred()
+        const secondRemovalEntered = deferred()
+        const releaseSecondRemoval = deferred()
+        const readdEnsureSettled = deferred()
+        let initialStorageId = ``
+        let heldEnsure = false
+        let rotatedRemovals = 0
+        let rotatedEnsures = 0
+        const adapter = new Proxy(nativeAdapter, {
+          get(target, property) {
+            if (property === `ensureIndex`) {
+              return async (...args: Parameters<typeof target.ensureIndex>) => {
+                const storage = args[0]
+                let rotatedEnsureNumber = 0
+                if (
+                  storage.kind === `managed` &&
+                  initialStorageId !== `` &&
+                  storage.storageCollectionId !== initialStorageId
+                ) {
+                  rotatedEnsureNumber = ++rotatedEnsures
+                  if (!heldEnsure) {
+                    heldEnsure = true
+                    ensureEntered.resolve()
+                    await releaseEnsure.promise
+                  }
+                }
+                await target.ensureIndex(...args)
+                if (rotatedEnsureNumber === 2) readdEnsureSettled.resolve()
+              }
+            }
+            if (property === `markIndexRemoved`) {
+              return async (
+                ...args: Parameters<typeof target.markIndexRemoved>
+              ) => {
+                const storage = args[0]
+                if (
+                  storage.kind === `managed` &&
+                  storage.storageCollectionId !== initialStorageId &&
+                  ++rotatedRemovals === 2 &&
+                  readdDuringReconciliation
+                ) {
+                  secondRemovalEntered.resolve()
+                  await releaseSecondRemoval.promise
+                }
+                await target.markIndexRemoved(...args)
+                removalSettled.resolve()
+              }
+            }
+            const value: unknown = Reflect.get(target, property, target)
+            return typeof value === `function` ? value.bind(target) : value
+          },
+        })
+        let recover!: () => Promise<void>
+        const collection = createCollection(
+          persistedCollectionOptions<{ id: string; title: string }, string>({
+            id: logicalId,
+            syncMode: `on-demand`,
+            getKey: (row) => row.id,
+            defaultIndexType: BasicIndex,
+            sync: {
+              sync: (params) => {
+                recover = params.metadata!.persistence!.startScopedRecovery!
+                params.markReady()
+                return { restartAfterScopedRecovery: (gate) => gate }
+              },
+            },
+            persistence: { adapter },
+          }),
+        )
+        const index = collection.createIndex((row) => row.title)
+        const signature = collection
+          .getIndexMetadata()
+          .find((metadata) => metadata.indexId === index.id)?.signature
+        if (!signature) throw new Error(`Missing index signature`)
+        let recovery: Promise<void> | undefined
+        try {
+          await collection.stateWhenReady()
+          const originalClaim = database
+            .prepare(
+              `SELECT physical_id FROM cache_generation_claim WHERE logical_id = ?`,
+            )
+            .get(logicalId) as { physical_id: string }
+          initialStorageId = originalClaim.physical_id
+          recovery = recover()
+          await reachCheckpoint(
+            ensureEntered.promise,
+            `rotated SQLite index ensure`,
+          )
+          expect(collection.removeIndex(index)).toBe(true)
+          expect(collection.getIndexMetadata()).toEqual([])
+          await reachCheckpoint(
+            removalSettled.promise,
+            `SQLite index removal before late ensure`,
+          )
+          releaseEnsure.resolve()
+          if (readdDuringReconciliation) {
+            await reachCheckpoint(
+              secondRemovalEntered.promise,
+              `SQLite reconciliation removal before index re-add`,
+            )
+            const current = collection.createIndex((row) => row.title)
+            expect(
+              collection
+                .getIndexMetadata()
+                .find((metadata) => metadata.indexId === current.id)?.signature,
+            ).toBe(signature)
+            await reachCheckpoint(
+              readdEnsureSettled.promise,
+              `SQLite re-add before reconciliation removal`,
+            )
+            releaseSecondRemoval.resolve()
+          }
+          await reachCheckpoint(recovery, `index reconciliation after rotation`)
+          const currentClaim = database
+            .prepare(
+              `SELECT physical_id FROM cache_generation_claim WHERE logical_id = ?`,
+            )
+            .get(logicalId) as { physical_id: string }
+          expect(currentClaim.physical_id).not.toBe(initialStorageId)
+          await vi.waitFor(() => {
+            const currentIndex = database
+              .prepare(
+                `SELECT index_name, removed FROM persisted_index_registry
+             WHERE collection_id = ? AND signature = ?`,
+              )
+              .get(currentClaim.physical_id, signature) as
+              { index_name: string; removed: number } | undefined
+            if (!currentIndex)
+              throw new Error(`Missing rotated SQLite index row`)
+            expect(currentIndex.removed).toBe(readdDuringReconciliation ? 0 : 1)
+            expect(
+              database
+                .prepare(
+                  `SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?`,
+                )
+                .all(currentIndex.index_name),
+            ).toHaveLength(readdDuringReconciliation ? 1 : 0)
+          })
+          expect(collection.getIndexMetadata()).toHaveLength(
+            readdDuringReconciliation ? 1 : 0,
+          )
+        } catch (error) {
+          primaryFailure = error
+          throw error
+        } finally {
+          releaseEnsure.resolve()
+          releaseSecondRemoval.resolve()
+          try {
+            await Promise.allSettled([recovery])
+            await collection.cleanup()
+          } catch (error) {
+            primaryFailure ??= error
+          }
+          closeDatabasePreservingPrimary(database, primaryFailure)
+        }
+      },
+    )
+  }
+
   // A resume snapshot may pass its preliminary claim check and then wait to
   // enter SQLite's read transaction. The independent claim rule compares the
   // transaction's clock cut with that claim's expiry: a live claim reads its
