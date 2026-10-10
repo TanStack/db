@@ -1598,6 +1598,135 @@ describe(`same-path group keys across alias scopes`, () => {
 })
 
 /**
+ * # Group keys survive filtering through a nested source
+ *
+ * A selected group key must name the same lexical source as its GROUP BY term,
+ * even when an outer predicate is pushed into a joined QueryRef source. The
+ * model below counts plain source rows with a matching tag and category A; it
+ * has no aliases or optimizer rewrite. The grammar crosses an inner source
+ * named like the outer source or renamed, eager/on-demand acquisition, a
+ * source update that adds a matching row, tag removal and insertion, and a
+ * source update that removes a matching row. The inserted tag gives one
+ * source two matches, so the model must retain join multiplicity. The public
+ * driver compares grouped rows after preload and each write. One outer join
+ * makes predicate pushdown reachable;
+ * the same-path group-key cells above separately reject a matcher that erases
+ * lexical binding identity.
+ */
+describe(`group keys through nested source filtering`, () => {
+  type Source = { id: number; category: string }
+  type Tag = { id: number; sourceId: number }
+  const initialSources: Array<Source> = [
+    { id: 1, category: `A` },
+    { id: 2, category: `A` },
+    { id: 3, category: `B` },
+  ]
+  const initialTags: Array<Tag> = [
+    { id: 1, sourceId: 1 },
+    { id: 2, sourceId: 2 },
+    { id: 3, sourceId: 3 },
+  ]
+
+  for (const innerAlias of [`x`, `u`] as const) {
+    for (const mode of [`eager`, `onDemand`] as const) {
+      test(`${mode} groups preserve the ${innerAlias} source through filtered joins and writes`, async () => {
+        const sourceRows = new Map(initialSources.map((row) => [row.id, row]))
+        const tagRows = new Map(initialTags.map((row) => [row.id, row]))
+        const source = createScopedSource(
+          `group-rewrite-source-${innerAlias}-${mode}`,
+          initialSources,
+          mode,
+        )
+        const tags = createScopedSource(
+          `group-rewrite-tags-${innerAlias}-${mode}`,
+          initialTags,
+          mode,
+        )
+
+        const inner = new Query()
+          .from({ [innerAlias]: source.collection })
+          .select((context: Context) => ({
+            id: (context[innerAlias] as Source).id,
+            category: (context[innerAlias] as Source).category,
+          }))
+        const live = createLiveQueryCollection({
+          query: new Query()
+            .from({ x: inner })
+            .innerJoin({ t: tags.collection }, ({ x, t }) =>
+              eq(x.id, t.sourceId),
+            )
+            .where(({ x }) => eq(x.category, `A`))
+            .groupBy(({ x }) => x.category)
+            .select(({ x }) => ({
+              category: x.category,
+              total: count(x.id),
+            })),
+        })
+
+        // The model counts joined matches afresh at each observation cut. It does
+        // not inspect the optimized plan or derive expectations from it.
+        const expected = () => {
+          const total = [...sourceRows.values()].reduce(
+            (sum, row) =>
+              sum +
+              (row.category === `A`
+                ? [...tagRows.values()].filter((tag) => tag.sourceId === row.id)
+                    .length
+                : 0),
+            0,
+          )
+          return total ? [{ category: `A`, total }] : []
+        }
+        const check = (cut: string) =>
+          expect(
+            live.toArray.map(({ category, total }) => ({ category, total })),
+            cut,
+          ).toEqual(expected())
+
+        await withHistoryCleanup(
+          async () => {
+            await live.preload()
+            check(`after preload`)
+            if (mode === `onDemand`) {
+              expect(source.requests.length).toBeGreaterThan(0)
+              expect(tags.requests.length).toBeGreaterThan(0)
+            }
+
+            const added = { id: 3, category: `A` }
+            sourceRows.set(added.id, added)
+            source.put(added)
+            await flushPromises()
+            check(`after source enters the selected group`)
+
+            tagRows.delete(2)
+            tags.remove(2)
+            await flushPromises()
+            check(`after a joined tag is removed`)
+
+            const repeated = { id: 4, sourceId: 3 }
+            tagRows.set(repeated.id, repeated)
+            tags.put(repeated)
+            await flushPromises()
+            check(`after a second tag joins one source`)
+
+            const removed = { id: 1, category: `B` }
+            sourceRows.set(removed.id, removed)
+            source.put(removed)
+            await flushPromises()
+            check(`after source leaves the selected group`)
+          },
+          () => [
+            () => live.cleanup(),
+            () => source.collection.cleanup(),
+            () => tags.collection.cleanup(),
+          ],
+        )
+      })
+    }
+  }
+})
+
+/**
  * # A redundant wrapper does not change alpha-normalized identity
  *
  * ARCHITECTURE.md §Identity makes aliases lexical names and says an explicit

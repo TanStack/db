@@ -415,3 +415,65 @@ itself. Those are deterministic mechanism observations, without a measured
 public work bound. All scratch probes were removed; their evidence is kept in
 the task-local review ledger, while the primary owner and coverage map retain
 the behavior witnesses and their limits.
+
+## Follow-up verification of grouped rewrites and work observations
+
+The reported GROUP BY failure requires a ref rewritten without its binding ID
+to reach group-key matching. A controlled outer grouped query with a nested
+QueryRef and a second joined source reached predicate pushdown: the optimized
+child acquired an unbound `WHERE u.category` ref, while the outer `GROUP BY
+x.category` kept its binding ID. Its public result was `{category: 'A',
+total: 2}`. When the grouped query was the inner QueryRef instead, the safety
+check kept the outer WHERE outside (`outerWhere: 1`, `innerWhere: 0`). The
+optimizer's only new `PropRef` is placed in a pushed WHERE; group-key matching
+compares SELECT and GROUP BY expressions within one query. The suggested
+WHERE-rewrite-to-GROUP-BY-matcher path is therefore not present in these
+controlled shapes.
+
+The primary alias oracle now pairs a plain-row grouping model with four
+outer-grouped histories: shadowed or renamed inner alias, eager or on-demand
+source, and source/tag writes. It compares public groups after preload, after
+a source enters the selected group, after tag removal, after a second tag
+joins one source, and after a source leaves the group. The model counts both
+joined copies. All 20 comparisons passed. A hostile GROUP BY matcher that
+ignored binding IDs failed two existing same-path group cells at the first
+public-row comparison: child ranks were replaced by parent ranks. A second
+mutant dropped the pushed predicate while removing the outer one; all four
+new cells failed at preload by publishing the unselected B group. Both mutants
+were restored and all eight selected group cells passed. This proves the
+lexical group-key law for the named histories; another alleged rewrite into
+group matching needs a concrete path or fixture.
+
+The remaining work findings have narrower measured consequences:
+
+- **Pure wrapper (M3).** At base `8b0e1defb`, a pure same-alias wrapper
+  optimized to a CollectionRef. At `b5313bf00`, it remained a QueryRef over
+  the CollectionRef, confirming one extra stage. On both revisions an indexed
+  on-demand source received `null` (full-source) for the wrapped outer
+  equality, while the direct control received `eq(id, 1)`. A lazy joined
+  wrapper received the same keyed `in(id, [1])` request on both revisions.
+  Public rows agreed. The reported loss of indexed demand is not a new
+  consequence of the retained wrapper in these paths. A stage-count work
+  budget and safe binding remap have not been specified.
+- **Root ref lookup (M7).** Ten evaluations of a bound public-builder ref on
+  proxy rows caused 20 route-metadata symbol checks on `b5313bf00`, versus
+  zero for an unbound control and zero for the base builder ref. Values agreed
+  in all cases. This is deterministic per-row overhead, while the primary
+  oracle's captured-ancestor rows show why removing all projected-binding
+  lookup would be wrong. No root-query lookup budget has been adopted.
+- **Subquery cache (M8).** The same function-form builder placed on both sides
+  of a join compiled two function-query results and invoked its projection
+  four times for two source rows on both base and current heads. A stateful
+  callback produced different left and right sequence fields, so sharing one
+  pipeline can change observable behavior. For one ordinary query,
+  `queriesMatchForCaching(ir, ir)` made 28 watched root-property reads at base
+  and 66 at `b5313bf00`; the current comparator adds stable-identity work to
+  the earlier normalization. A function-form query compares unequal to
+  itself on the current head, but that alone did not increase compilation in
+  the two-placement probe. A callback identity or purity rule is needed before
+  broadening cache reuse. There is no accepted comparison-work budget.
+
+These work probes are diagnostic observations, not permanent work laws. The
+primary oracle keeps the public behavior claim and its hostile-matcher
+calibration. No production repair was made for M3, M6, M7, or M8 in this
+follow-up.
