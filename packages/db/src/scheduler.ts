@@ -181,6 +181,28 @@ export function recordPublicationError(error: unknown): void {
 }
 
 /**
+ * Runs `run` and returns the first listener failure it recorded inside an
+ * outer publication, which then does not report it. Outside a publication a
+ * listener failure is thrown, so there is nothing to take.
+ */
+export function takePublicationFailure(
+  run: () => void,
+): { error: unknown } | undefined {
+  if (activePublicationContext === undefined) {
+    run()
+    return undefined
+  }
+  const outer = activePublicationFailure
+  activePublicationFailure = undefined
+  try {
+    run()
+    return activePublicationFailure
+  } finally {
+    activePublicationFailure = outer
+  }
+}
+
+/**
  * Runs one synchronous Collection publication inside a scheduler context.
  * Nested publications share the outer context, so downstream live queries run
  * only after every subscriber to the original committed batch has observed it.

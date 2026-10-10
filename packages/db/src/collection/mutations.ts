@@ -5,6 +5,7 @@ import {
 } from '../proxy'
 import { safeRandomUUID } from '../utils/uuid'
 import { createTransaction, getActiveTransaction } from '../transactions'
+import { takePublicationFailure } from '../scheduler'
 import {
   DeleteKeyNotFoundError,
   DuplicateKeyError,
@@ -277,18 +278,27 @@ export class CollectionMutationsManager<
         }),
     })
     try {
-      this.applyOwnedMutations(transaction, mutations)
+      // Inside another Collection's publication, a subscriber failure is
+      // deferred to that publication. It is this write's failure, so take it.
+      const failure = takePublicationFailure(() =>
+        this.applyOwnedMutations(transaction, mutations),
+      )
+      if (failure) throw failure.error
     } catch (error) {
       // A subscriber threw before the handler could run. Roll back only this
       // write, so no Collection keeps a transaction that nothing will settle.
-      try {
-        transaction.rollback({
-          isSecondaryRollback: true,
-          error: error instanceof Error ? error : undefined,
-        })
-      } catch {
-        // The admission error is the reported cause.
-      }
+      // The admission error is the reported cause, also for the rollback's
+      // own subscriber failures, deferred or not.
+      takePublicationFailure(() => {
+        try {
+          transaction.rollback({
+            isSecondaryRollback: true,
+            error: error instanceof Error ? error : undefined,
+          })
+        } catch {
+          // Settlement still ran every step.
+        }
+      })
       throw error
     }
     // Errors still reject `isPersisted.promise`. This catch only prevents an

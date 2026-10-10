@@ -130,6 +130,11 @@ type Step =
       throws: boolean
       /** The throwing subscriber was sent the rows before the write. */
       seen: boolean
+      /**
+       * The write runs inside a change subscriber of the other Collection,
+       * during that Collection's own direct insert of key 4.
+       */
+      nested: boolean
     }
 
 type ModelState = `pending` | `persisting` | `completed` | `failed`
@@ -284,6 +289,7 @@ const step: fc.Arbitrary<Step> = fc.oneof(
       value: fc.integer({ min: 1, max: 9 }),
       throws: fc.boolean(),
       seen: fc.boolean(),
+      nested: fc.boolean(),
     }),
   },
   {
@@ -486,8 +492,11 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
       }
       expect(collection.has(9), `${label}: ${on} merged-away row`).toBe(false)
       expect(collection.has(3), `${label}: ${on} direct insert`).toBe(false)
+      expect(collection.has(4), `${label}: ${on} outer direct insert`).toBe(
+        false,
+      )
       const { mirror } = collections[on]
-      for (const key of [1, 2, 3, 9] as const)
+      for (const key of [1, 2, 3, 4, 9] as const)
         expect(mirror.get(key), `${label}: ${on} mirror of row ${key}`).toBe(
           collection.get(key)?.v,
         )
@@ -549,7 +558,7 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
           label,
           current.throws ? current.on : undefined,
           () => {
-            try {
+            const write = () => {
               if (current.op === `insert`)
                 collection.insert({ id: 3, v: current.value })
               else if (current.op === `delete`) collection.delete(current.key)
@@ -557,6 +566,40 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
                 collection.update(current.key, (draft) => {
                   draft.v = current.value
                 })
+            }
+            try {
+              if (!current.nested) write()
+              else {
+                // The write's outcome belongs to the write, even inside the
+                // other Collection's publication: its caller sees its error,
+                // and the outer write, whose subscriber catches it, succeeds.
+                const outer =
+                  collections[current.on === `A` ? `B` : `A`].collection
+                let inner: { error: unknown } | undefined
+                let ran = false
+                const subscription = outer.subscribeChanges(() => {
+                  if (ran) return
+                  ran = true
+                  try {
+                    write()
+                  } catch (error) {
+                    inner = { error }
+                  }
+                })
+                let outerError: unknown
+                try {
+                  outer.insert({ id: 4, v: 1 })
+                } catch (error) {
+                  outerError = error
+                } finally {
+                  subscription.unsubscribe()
+                }
+                expect(ran, `${label}: nested write ran`).toBe(true)
+                expect(outerError, `${label}: outer write unaffected`).toBe(
+                  undefined,
+                )
+                if (inner) throw inner.error
+              }
             } finally {
               restoreCreate()
               for (const tx of created)
