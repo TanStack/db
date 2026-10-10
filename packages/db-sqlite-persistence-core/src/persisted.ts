@@ -1585,6 +1585,11 @@ class PersistedCollectionRuntime<
     if (this.collection === collection) {
       return
     }
+    if (this.collection) {
+      throw new InvalidPersistedCollectionConfigError(
+        `Persisted options cannot own more than one Collection`,
+      )
+    }
 
     this.collection = collection
     this.attachCoordinatorSubscription()
@@ -3813,7 +3818,7 @@ class PersistedCollectionRuntime<
     }
 
     if (lifecycleGeneration !== this.lifecycleGeneration) return
-    await this.reloadActiveSubsetsUnsafe(adapter)
+    await this.reloadActiveSubsetsUnsafe(adapter, false, true)
   }
 
   private async invalidateFromCommittedTxUnsafe(
@@ -3913,13 +3918,14 @@ class PersistedCollectionRuntime<
   private async reloadActiveSubsetsUnsafe(
     adapter: HydrationPersistenceAdapter,
     skipUnchangedReplace = false,
+    restoreResetBaseline = false,
   ): Promise<void> {
     const lifecycleGeneration = this.lifecycleGeneration
     const truncateGeneration = this.sourceTruncateGeneration
-    const activeSubsetOptions =
-      this.activeSubsets.size > 0
-        ? Array.from(this.activeSubsets.values())
-        : [{}]
+    const activeSubsetOptions = Array.from(this.activeSubsets.values())
+    if (restoreResetBaseline && activeSubsetOptions.length === 0) {
+      activeSubsetOptions.push({})
+    }
 
     this.hydratedDemands.clear()
     this.hydrationSequence++
@@ -3946,7 +3952,13 @@ class PersistedCollectionRuntime<
         hydrationContext.suppliedRowKeys.add(key)
       }
 
-      if (
+      if (activeSubsetOptions.length === 0) {
+        // No query owns persisted row demand. Keep accepted source rows and
+        // refresh only collection metadata; a later demand loads its own rows.
+        await whenSyncAccepted(
+          this.replaceCollectionMetadataSnapshot(collectionMetadata),
+        )
+      } else if (
         skipUnchangedReplace &&
         this.matchesCollectionSnapshot(mergedRows, collectionMetadata)
       ) {
@@ -5206,6 +5218,16 @@ export function persistedCollectionOptions<
       ? new PersistedReadinessTracker(networkTimeoutMs)
       : undefined
 
+  let claimed = false
+  const claimOptions = () => {
+    if (claimed) {
+      throw new InvalidPersistedCollectionConfigError(
+        `Persisted options can create only one Collection. Create fresh options for each Collection.`,
+      )
+    }
+    claimed = true
+  }
+
   if (hasOwnSyncKey(options)) {
     if (!isValidSyncConfig(options.sync)) {
       throw new InvalidSyncConfigError(
@@ -5259,6 +5281,7 @@ export function persistedCollectionOptions<
           ...options,
           id: collectionId,
         } as never) as typeof result,
+      claimOptions,
     )
   }
 
@@ -5381,6 +5404,7 @@ export function persistedCollectionOptions<
         ...options,
         id: collectionId,
       } as never) as typeof result,
+    claimOptions,
   )
 }
 

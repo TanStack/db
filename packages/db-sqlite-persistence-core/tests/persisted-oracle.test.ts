@@ -22,6 +22,7 @@ import {
 } from '../../db/tests/oracle-config.js'
 import {
   IndeterminateCommitError,
+  InvalidPersistedCollectionConfigError,
   InvalidPersistedCollectionCoordinatorError,
   InvalidPersistedStorageKeyEncodingError,
   InvalidPersistedStorageKeyError,
@@ -4042,6 +4043,92 @@ async function createTerminalFailureHarness(
 }
 
 describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
+  // A persisted options descriptor owns one mutable runtime. The independent
+  // ownership rule is one Collection per descriptor, including a spread copy:
+  // copying fields cannot create a second runtime. The public creation boundary
+  // must reject the second Collection before it can redirect the first one's
+  // writes. Fresh descriptors remain legal and are covered elsewhere here and
+  // by DbClient materialization. The checkpoint is createCollection itself,
+  // then the first owner's durable receipt and public row after the rejection.
+  it.each([`same object`, `spread copy`] as const)(
+    `keeps one persisted options runtime bound to its first Collection (%s)`,
+    async (reuse) => {
+      const adapter = createRecordingAdapter()
+      const options = persistedCollectionOptions<Todo, string>({
+        id: `one-owner-${reuse}`,
+        getKey: (row) => row.id,
+        persistence: { adapter },
+      })
+      const first = createCollection(options)
+      let second: typeof first | undefined
+      try {
+        await first.stateWhenReady()
+        expect(() => {
+          second = createCollection(
+            reuse === `same object` ? options : { ...options },
+          )
+        }).toThrow(InvalidPersistedCollectionConfigError)
+
+        const receipt = first.insert({ id: `owned`, title: `First owner` })
+        await receipt.isPersisted.promise
+        expect(stripVirtualProps(first.get(`owned`))).toEqual({
+          id: `owned`,
+          title: `First owner`,
+        })
+        expect(adapter.rows.get(`owned`)).toEqual({
+          id: `owned`,
+          title: `First owner`,
+        })
+      } finally {
+        await second?.cleanup()
+        await first.cleanup()
+      }
+    },
+  )
+
+  it(`does not reuse a persisted runtime after its Collection cleans up`, async () => {
+    const options = persistedCollectionOptions<Todo, string>({
+      id: `cleaned-up-owner`,
+      getKey: (row) => row.id,
+      persistence: { adapter: createRecordingAdapter() },
+    })
+    const first = createCollection(options)
+    await first.cleanup()
+    expect(() => createCollection(options)).toThrow(
+      InvalidPersistedCollectionConfigError,
+    )
+  })
+
+  it(`materializes one independent persisted runtime for each DbClient`, async () => {
+    const adapter = createRecordingAdapter([{ id: `stored`, title: `Stored` }])
+    const descriptor = collectionOptions(
+      persistedCollectionOptions<Todo, string>({
+        id: `client-owned-persistence`,
+        getKey: (row) => row.id,
+        persistence: { adapter },
+      }),
+    )
+    const firstClient = new DbClient()
+    const secondClient = new DbClient()
+    try {
+      const first = firstClient.collection(descriptor)
+      const second = secondClient.collection(descriptor)
+      expect(first).not.toBe(second)
+      await Promise.all([first.stateWhenReady(), second.stateWhenReady()])
+      expect(stripVirtualProps(first.get(`stored`))).toEqual({
+        id: `stored`,
+        title: `Stored`,
+      })
+      expect(stripVirtualProps(second.get(`stored`))).toEqual({
+        id: `stored`,
+        title: `Stored`,
+      })
+    } finally {
+      await secondClient.cleanup()
+      await firstClient.cleanup()
+    }
+  })
+
   it(`preserves exact reconciliation context for an indeterminate commit`, () => {
     const cause = new Error(`response channel closed`)
     const error = new IndeterminateCommitError({
@@ -14286,6 +14373,70 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     },
   )
 
+  // An on-demand Collection has no unconstrained persisted row demand before
+  // its first subset request. A coordinator notification changes durable
+  // authority but cannot manufacture that demand. The independent model has
+  // zero or one active demand: zero requests no rows and exposes no persisted
+  // row; one unconstrained demand requests and exposes the stored row. This
+  // bounded history checks a full-reload notice at the public Collection and
+  // adapter-call boundaries. Reset has a separate baseline contract.
+  it(`does not widen on-demand storage after full reload without demand`, async () => {
+    const stored = { id: `stored`, title: `Durable row` }
+    const adapter = createRecordingAdapter([stored])
+    const coordinator = createCoordinatorHarness()
+    const collectionId = `zero-demand-full-reload`
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: collectionId,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    let hasPrimaryFailure = false
+    try {
+      await collection.stateWhenReady()
+      expect(collection.has(`stored`)).toBe(false)
+      expect(adapter.loadSubsetCalls).toHaveLength(0)
+      coordinator.emit(
+        {
+          type: `tx:committed`,
+          term: 1,
+          seq: 1,
+          txId: `zero-demand-reload`,
+          latestRowVersion: 1,
+          requiresFullReload: true,
+        },
+        undefined,
+        collectionId,
+      )
+      await flushAsyncWork()
+      await flushAsyncWork()
+      expect(adapter.loadSubsetCalls).toHaveLength(0)
+      expect(collection.has(`stored`)).toBe(false)
+
+      const demand = {}
+      await collection._sync.loadSubset(demand)
+      expect(adapter.loadSubsetCalls).toHaveLength(1)
+      expect(stripVirtualProps(collection.get(`stored`))).toEqual(stored)
+      collection._sync.unloadSubset(demand)
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      await cleanupPersistedOracle(
+        [() => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
   // Persisted rows are a baseline for newer sync-adapter changes. The maintainer
   // decision recorded in issue-2036-admission-follow-up.md gives accepted sync
   // transactions precedence over that baseline. A persistence read cannot revoke
@@ -14296,9 +14447,11 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   // persistence read already finished and with accepted commits waiting behind
   // that read. Both schedules must satisfy the same independent result below.
   // Eager and on-demand Collections receive reset/full-reload notifications;
-  // on-demand Collections also acquire a subset. Notifications only request a
-  // reread here: schema changes and invalidated resume points are outside this
-  // law. The controlled coordinator does not prove cross-tab transport delivery.
+  // on-demand Collections also acquire a subset. A full reload with no demand
+  // updates metadata without reading all durable rows, while preserving source
+  // transactions already accepted into the public Collection. Reset retains
+  // its separate baseline reread. The controlled coordinator does not prove
+  // cross-tab transport delivery.
   it.each(
     (
       [
@@ -14404,6 +14557,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           : truncateReplay === `before`
             ? [`replacement`, `network`]
             : [`network`, `replacement`]
+      const noDemandFullReload =
+        syncMode === `on-demand` && route === `full-reload`
 
       // Independent snapshot algebra: a later replacement discards everything
       // before it. Otherwise the baseline survives only when there is no
@@ -14419,6 +14574,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
                 : [storedOnly, gateRow]),
               ...(operation === `delete` ? [] : [networkRow]),
             ]
+      const expectedPublicRows =
+        noDemandFullReload && truncateReplay === `none`
+          ? [gateRow, ...(operation === `delete` ? [] : [networkRow])]
+          : expectedRows
       const expectedMetadata = new Map<string, unknown>([
         ...(truncateReplay === `none`
           ? []
@@ -14539,10 +14698,15 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
             status: `fulfilled`,
             value: undefined,
           })),
-          trace: [`persisted read`, ...sourceSteps],
-          readRows: [[storedRow, storedOnly, gateRow]],
+          trace: [
+            ...(noDemandFullReload ? [] : [`persisted read`]),
+            ...sourceSteps,
+          ],
+          readRows: noDemandFullReload
+            ? []
+            : [[storedRow, storedOnly, gateRow]],
           status: `ready`,
-          publicRows: new Map(expectedRows.map((row) => [row.id, row])),
+          publicRows: new Map(expectedPublicRows.map((row) => [row.id, row])),
           durableRows: new Map(expectedRows.map((row) => [row.id, row])),
           publicMetadata: metadataKeys.map((key) => expectedMetadata.get(key)),
           durableMetadata: metadataKeys.map((key) => expectedMetadata.get(key)),
@@ -14750,7 +14914,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
     const hydrationEntered = createEventGate()
     const hydration = createEventGate()
+    let holdReload = false
     adapter.loadSubset = async () => {
+      if (!holdReload) return []
       hydrationEntered.resolve()
       await hydration.promise
       return [
@@ -14791,6 +14957,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       }),
     )
     let receipt: Promise<void> | undefined
+    const demand = { limit: 1 }
     let hasPrimaryFailure = false
 
     try {
@@ -14798,6 +14965,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         collection.stateWhenReady(),
         `full-reload metadata collection ready`,
       )
+      await collection._sync.loadSubset(demand)
+      holdReload = true
       coordinator.emit({
         type: `tx:committed`,
         term: 1,
@@ -14856,6 +15025,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       throw error
     } finally {
       hydration.resolve()
+      collection._sync.unloadSubset(demand)
       await cleanupPersistedOracle(
         [() => receipt?.catch(() => undefined), () => collection.cleanup()],
         hasPrimaryFailure,
@@ -17739,12 +17909,14 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       }),
     )
     let hasPrimaryFailure = false
+    const demand = { limit: 1 }
 
     try {
       await atPersistedOracleCheckpoint(
         collection.stateWhenReady(),
         `terminal hydration collection initially ready`,
       )
+      await collection._sync.loadSubset(demand)
       adapter.loadSubset = () => Promise.reject(hydrationFailure)
       coordinator.emit({
         type: `tx:committed`,
@@ -17800,6 +17972,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       hasPrimaryFailure = true
       throw error
     } finally {
+      collection._sync.unloadSubset(demand)
       await cleanupPersistedOracle(
         [() => collection.cleanup()],
         hasPrimaryFailure,
@@ -17837,12 +18010,14 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       }),
     )
     let hasPrimaryFailure = false
+    const demand = { limit: 1 }
 
     try {
       await atPersistedOracleCheckpoint(
         collection.stateWhenReady(),
         `terminal source hydration collection initially ready`,
       )
+      await collection._sync.loadSubset(demand)
       adapter.loadSubset = () => Promise.reject(hydrationFailure)
       coordinator.emit({
         type: `tx:committed`,
@@ -17897,6 +18072,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       hasPrimaryFailure = true
       throw error
     } finally {
+      collection._sync.unloadSubset(demand)
       await cleanupPersistedOracle(
         [() => collection.cleanup()],
         hasPrimaryFailure,
