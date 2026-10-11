@@ -15,6 +15,7 @@ import {
 } from './oracle-lifecycle'
 import { readOfflineOracleConfig } from './oracle-config'
 import type { TestItem } from './harness'
+import type { Transaction } from '@tanstack/db'
 import type {
   OfflineConfig,
   OfflineTransaction,
@@ -212,26 +213,31 @@ function expectLocalRows(
  */
 type SettlementCommit = `manual` | `auto` | `default` | `action`
 
-const settlementTransaction = fc.record({
-  succeeds: fc.boolean(),
-  commit: fc.constantFrom<SettlementCommit>(
-    `manual`,
-    `auto`,
-    `default`,
-    `action`,
-  ),
-  readReceipt: fc.boolean(),
-  // The caller may wait for completion before the transaction is admitted,
-  // which only a transaction object made before mutate() allows.
-  waitBefore: fc.boolean(),
-  // An empty transaction on the same commit path runs first. Its callback
-  // writes nothing, so it completes without the provider or the outbox.
-  emptyBefore: fc.boolean(),
-  // A manual transaction writes a row of its own and rolls back before it
-  // commits. It also settles without the provider, and its waiter rejects
-  // with an Error that names the rollback.
-  rolledBackBefore: fc.boolean(),
-})
+const settlementTransaction = fc
+  .record({
+    succeeds: fc.boolean(),
+    commit: fc.constantFrom<SettlementCommit>(
+      `manual`,
+      `auto`,
+      `default`,
+      `action`,
+    ),
+    readReceipt: fc.boolean(),
+    // The caller may wait for completion before the transaction is admitted,
+    // which only a transaction object made before mutate() allows.
+    waitBefore: fc.boolean(),
+    // An empty transaction on the same commit path runs first. Its callback
+    // writes nothing, so it completes without the provider or the outbox.
+    emptyBefore: fc.boolean(),
+    // A manual transaction writes a row of its own and rolls back before it
+    // commits. It also settles without the provider, and its waiter rejects
+    // with an Error that names the rollback.
+    rolledBackBefore: fc.boolean(),
+  })
+  .map((tx) =>
+    // An OfflineAction has no transaction object before mutate().
+    tx.commit === `action` ? { ...tx, waitBefore: false } : tx,
+  )
 
 it.each(oracleSeeds(20260913, settlementOracle))(
   `settles each transaction independently while preserving FIFO (seed %s)`,
@@ -307,6 +313,7 @@ it.each(oracleSeeds(20260913, settlementOracle))(
             },
           })
           const ids: Array<string> = []
+          const made: Array<Transaction> = []
           const expectedServer = new Map<string, TestItem>()
           const assertState = async (completed: number) => {
             expect(calls).toEqual(
@@ -490,6 +497,7 @@ it.each(oracleSeeds(20260913, settlementOracle))(
                 transactions[index]!.waitBefore ? waitFor : undefined,
               )
               ids.push(transaction.id)
+              made.push(transaction)
               if (!(`wait-${index}` in statuses)) waitFor(transaction.id)
               if (!unread[index]) observe(`commit-${index}`, receipt())
               if (index === 0)
@@ -521,6 +529,19 @@ it.each(oracleSeeds(20260913, settlementOracle))(
             }
             await turn()
             expect(unhandled, `unhandled rejections`).toEqual([])
+            // A receipt nobody read still settles with its own outcome; read
+            // it only now, after the unhandled-rejection checkpoint.
+            for (const [index, transaction] of made.entries()) {
+              if (!unread[index]) continue
+              if (succeeds[index])
+                await expect(transaction.when(`settled`)).resolves.toBe(
+                  transaction,
+                )
+              else
+                await expect(transaction.when(`settled`)).rejects.toBe(
+                  failures[index],
+                )
+            }
             // A failure of the mutation function is reported through the
             // receipt only; nothing is logged as an error.
             expect(logged.mock.calls, `errors logged`).toEqual([])
@@ -2314,7 +2335,7 @@ it.each([
           outcome.commit = error
         },
       )
-      const persisted = transaction.isPersisted.promise.then(
+      const persisted = transaction.when(`settled`).then(
         () => {
           outcome.persisted = `fulfilled`
         },
@@ -4199,7 +4220,7 @@ it.each([`manual`, `auto`, `default`, `action`] as const)(
           commit === `manual` ? tx.commit() : transaction.when(`settled`)
       }
       await expect(receipt).rejects.toBe(storageError)
-      await new Promise((resolve) => setTimeout(resolve, 0))
+      await turn()
       expect(unhandled, `unhandled rejections`).toEqual([])
       // The executor logs the persist failure once; nothing logs it again.
       expect(
@@ -4216,6 +4237,7 @@ it.each([`manual`, `auto`, `default`, `action`] as const)(
       logged.mockRestore()
       debug.mockRestore()
       env.executor.dispose()
+      await env.collection.cleanup()
     }
   },
 )

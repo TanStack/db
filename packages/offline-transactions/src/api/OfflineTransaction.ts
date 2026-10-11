@@ -9,7 +9,7 @@ import type {
 export class OfflineTransaction {
   private offlineId: string
   private mutationFnName: string
-  private autoCommit: boolean
+  private autoCommit: boolean | undefined
   private idempotencyKey: string
   private metadata: Record<string, any>
   private transaction: Transaction | null = null
@@ -26,7 +26,8 @@ export class OfflineTransaction {
   ) {
     this.offlineId = safeRandomUUID()
     this.mutationFnName = options.mutationFnName
-    this.autoCommit = options.autoCommit ?? true
+    // The TanStack DB transaction applies the default.
+    this.autoCommit = options.autoCommit
     this.idempotencyKey = options.idempotencyKey ?? safeRandomUUID()
     this.metadata = options.metadata ?? {}
     this.persistTransaction = persistTransaction
@@ -38,57 +39,56 @@ export class OfflineTransaction {
     // live transactions. Repeated calls add to it while it is pending. With
     // autoCommit, it commits after this callback and reports a failure
     // through `when('settled')`, so a later call throws: it is no longer pending.
-    const created = this.transaction === null
-    this.transaction ??= createTransaction({
-      id: this.offlineId,
-      autoCommit: this.autoCommit,
-      mutationFn: async () => {
-        this.persisting = true
-        // This is the blocking mutationFn that waits for the executor
-        // First persist the transaction to the outbox
-        const offlineTransaction: OfflineTransactionType = {
-          id: this.offlineId,
-          mutationFnName: this.mutationFnName,
-          mutations: this.transaction!.mutations,
-          keys: this.extractKeys(this.transaction!.mutations),
-          idempotencyKey: this.idempotencyKey,
-          createdAt: new Date(),
-          retryCount: 0,
-          nextAttemptAt: Date.now(),
-          metadata: this.metadata,
-          spanContext: undefined,
-          version: 1,
-        }
+    if (!this.transaction) {
+      this.transaction = createTransaction({
+        id: this.offlineId,
+        autoCommit: this.autoCommit,
+        mutationFn: async () => {
+          this.persisting = true
+          // This is the blocking mutationFn that waits for the executor
+          // First persist the transaction to the outbox
+          const offlineTransaction: OfflineTransactionType = {
+            id: this.offlineId,
+            mutationFnName: this.mutationFnName,
+            mutations: this.transaction!.mutations,
+            keys: this.extractKeys(this.transaction!.mutations),
+            idempotencyKey: this.idempotencyKey,
+            createdAt: new Date(),
+            retryCount: 0,
+            nextAttemptAt: Date.now(),
+            metadata: this.metadata,
+            spanContext: undefined,
+            version: 1,
+          }
 
-        const completionPromise = this.executor.waitForTransactionCompletion(
-          this.offlineId,
-        )
+          const completionPromise = this.executor.waitForTransactionCompletion(
+            this.offlineId,
+          )
 
-        try {
-          // Persistence also drives the shared queue. This transaction can finish
-          // before that queue drains; observe both promises from the outset.
-          await Promise.race([
-            this.persistTransaction(offlineTransaction),
-            completionPromise,
-          ])
-          // A queue pause (offline or retry) is not transaction completion.
-          await completionPromise
-        } catch (error) {
-          const normalizedError =
-            error instanceof Error ? error : new Error(String(error))
-          this.executor.rejectTransaction(this.offlineId, normalizedError)
-          throw error
-        }
+          try {
+            // Persistence also drives the shared queue. This transaction can finish
+            // before that queue drains; observe both promises from the outset.
+            await Promise.race([
+              this.persistTransaction(offlineTransaction),
+              completionPromise,
+            ])
+            // A queue pause (offline or retry) is not transaction completion.
+            await completionPromise
+          } catch (error) {
+            const normalizedError =
+              error instanceof Error ? error : new Error(String(error))
+            this.executor.rejectTransaction(this.offlineId, normalizedError)
+            throw error
+          }
 
-        return
-      },
-      metadata: this.metadata,
-    })
-    // A transaction without mutations completes, and one rolled back before
-    // it commits fails, without its mutation function, so the executor never
-    // settles its waiter. Settle that waiter here with the same outcome. Once
-    // the mutation function runs, only the executor settles it.
-    if (created)
+          return
+        },
+        metadata: this.metadata,
+      })
+      // A transaction without mutations completes, and one rolled back before
+      // it commits fails, without its mutation function, so the executor never
+      // settles its waiter. Settle that waiter here with the same outcome. Once
+      // the mutation function runs, only the executor settles it.
       void this.transaction.when(`settled`).then(
         () => {
           if (!this.persisting)
@@ -104,6 +104,7 @@ export class OfflineTransaction {
             )
         },
       )
+    }
 
     this.transaction.mutate(() => {
       callback()
@@ -118,7 +119,9 @@ export class OfflineTransaction {
     }
 
     // The mutationFn persists the transaction and waits for the executor. A
-    // failed commit has already rolled the transaction back.
+    // commit that rejects has already rolled the transaction back. A sibling's
+    // failure can also roll it back while it waits, and then commit() resolves,
+    // so `when('settled')` is the receipt.
     await this.transaction.commit()
     return this.transaction
   }
