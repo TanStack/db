@@ -329,7 +329,11 @@ An ordinary observer's first subscription also checks an active stream claim
 before retaining its listener. With equal hashes, same-source attachment and
 public row read succeed; a different-source attempt and its retry both reject
 while the first stream remains active. A failed first attach leaving a retained
-listener fails the retry assertion. Other attach failures and concurrent
+listener fails the retry assertion. After the first observer's live result
+becomes authoritative, public dehydration omits the consumed client stream.
+The next observer may then attach with the same or a different source object
+under the same hash and reads its own row; the earlier preload entry cannot
+extend the consumed stream's source claim. Other attach failures and concurrent
 subscription orders remain outside this control.
 An adapter observer over a pooled view crosses the same-source and different-
 source cases for an existing stream hash. The former completes its own preload

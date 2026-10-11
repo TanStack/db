@@ -715,10 +715,10 @@ export class DbClient {
     sources: ReadonlyArray<AnyCollection>,
   ): void {
     const record = this.liveQueries.get(queryHash)
-    // A failed stream has no result to reuse and claims no source objects.
-    if (record?.status === `error`) return
+    // A failed or consumed stream has no result to reuse and claims no sources.
+    if (!record || record.status === `error`) return
     const priorSources =
-      record?.sources ?? this.preloadedLiveQueries.get(queryHash)?.sources
+      record.sources ?? this.preloadedLiveQueries.get(queryHash)?.sources
     if (priorSources && !sameSourcesAtEachPosition(priorSources, sources)) {
       throw new Error(
         devBuild() && process.env.NODE_ENV !== `production`
@@ -728,7 +728,7 @@ export class DbClient {
     }
     // Hydration has a portable hash but no server-side Collection objects.
     // The first local consumer claims them for later same-hash requests.
-    if (record && !record.sources) record.sources = [...sources]
+    if (!record.sources) record.sources = [...sources]
   }
 
   /** @internal */

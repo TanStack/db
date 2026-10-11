@@ -408,3 +408,54 @@ stated beside the tests. The original RED assertions and controlled later
 rejection calibrate the comparisons; no production classifier computes the
 expected source relation. The finite model does not include concurrent first
 claims, another framework's message, or a real server stream.
+
+## A consumed client result releases its source claim
+
+CodeRabbit review 5483867857 covered `da77a744cb7ef0443994732a8e557aae37a7ebc0`
+and found one more source-identity cut. A reusable client result claims its
+ordered source Collections while it can still answer another consumer. Once a
+subscribed observer's live result becomes authoritative, the client consumes
+that result. A retained preload entry cannot extend its source claim. The SSR
+guide now states this lifetime explicitly. The earlier owner correctly checked
+active, failed, and hydration-first streams, but its ordinary-observer grammar
+never consumed a successful result before a second subscription.
+
+The expanded primary owner starts with two same-ID source Collections holding
+different plain rows. It preloads the first query, subscribes and preloads its
+observer, then waits until public `DbClient.dehydrate()` omits the consumed
+stream. While the first observer stays attached, a second observer subscribes
+under the same hash with either the same or the other source object. The
+independent rule predicts acceptance in both cells and the second observer's
+own source row. Existing active-stream cells reject the other source before
+consumption, so the two checkpoints distinguish a claim tied to a reusable
+result from a permanent claim tied to a hash or preload entry.
+
+On the reviewed head, the different-source cell failed at the second public
+`subscribe()` assertion with error 234; the same-source cell passed. This is
+the original implementation failing at the intended comparison, not a setup
+failure. The repair makes `_assertLiveQuerySources` return when no client record
+exists, just as it already returns for a failed record. The fallback to a
+preload entry remains only while a record can be reused. Both new cells and
+the 13 earlier owner cases passed after repair. Seven related DB test files
+and three React receiving test files also passed. This evidence covers one
+settled preload, one authoritative observer, then one same/different observer
+subscription and row read. Concurrent first claims, other adapters, and
+arbitrary handoff schedules remain outside the finite history; the coverage
+map retains these limits.
+
+| Requirement | Consumed-result follow-up |
+| --- | --- |
+| ORC-001 authority and limits | Pass. The SSR guide and owner state the reusable-result source claim and the finite history above. |
+| ORC-002 independent judgment | Pass. Two plain source rows and the active/consumed law predict acceptance and each row without consulting the client's cache classifier. |
+| ORC-003 visible responsibilities | Pass. The owner's opening prose and nearby test name the law, same/different history, public preload/observer path, dehydration cut, subscription call, and row comparison. |
+| ORC-004 generated grammar | Not applicable. The two cases are a bounded enumeration, not a generated-history claim. |
+| ORC-005 production and observation | Pass. Real `DbClient.preloadLiveQuery`, two public observers, `dehydrate()`, subscription, and snapshot data reach the stated cuts. |
+| ORC-006 calibration | Pass. The original reviewed implementation failed the different-source cell by assertion at the second subscription. |
+| ORC-007 campaigns and replay | Not applicable. No important generated property changed. |
+| ORC-008 model minimality | Pass. Active and consumed must remain distinct: the legal different-source subscription rejects before consumption and succeeds after it. |
+| ORC-009 vocabulary | Pass. The model's active/consumed result maps to whether a client stream is reusable, while source Collection and public row keep their glossary meanings. |
+| ORC-010 failure fidelity | Pass. The assertion remains the primary failure, and `finally` releases both observers, live-query Collections, client, and sources. No shrinker replaces the failure. |
+| ORC-011 second formulation | Not triggered. No independently plausible shared error in the two-row expectation was identified; the active/consumed opposite cuts challenge the boundary. |
+| ORC-012 review evidence | Pass for this bounded repair: the original head, RED/GREEN cut, neighboring control, paths, limits, and every applicable requirement are recorded here. |
+| ORC-013 boundary witness | Pass. The active different-source rejection and consumed different-source acceptance distinguish a permanent hash claim from the stated lifetime. |
+| ORC-014 controlled-premise handoff | No real-provider claim is made. The synchronous source fixture establishes the readiness premise for this core API history. |

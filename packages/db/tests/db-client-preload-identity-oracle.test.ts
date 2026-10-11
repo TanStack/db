@@ -10,8 +10,11 @@
  * Returning the first plan's rows would report data from the wrong source.
  *
  * Model: two plain source rows have distinct values. The first successful
- * preload owns the hash. Repeating it with the same source yields that row;
- * asking for the other source rejects and leaves the first result intact.
+ * preload owns the hash while its client result is reusable. Repeating it
+ * with the same source yields that row; asking for the other source rejects
+ * and leaves the first result intact. Once a subscribed live result becomes
+ * authoritative and consumes that client result, the next observer reads its
+ * own source row, regardless of whether it uses the first source object.
  * Swapping two same-ID source objects between query positions also rejects:
  * a set of source objects cannot tell which row belongs to each position.
  * A pooled view has one source even though it has no query Collection config.
@@ -26,14 +29,17 @@
  * The finite history crosses concrete then descriptor, descriptor then
  * concrete, and two concrete source objects, plus a same-object control. The
  * pooled observer path crosses same and different local source objects.
- * An ordinary observer crosses those objects at first subscription and at a
- * retry after rejection. The comparison is the public throw or accepted row
- * at that call and after preload. Other attach failures and concurrent
- * subscription orders remain outside this finite history.
- * Each query is built through the public Query API, and every successful
- * preload is observed through public DbClient.dehydrate(). The comparison
- * runs after the first preload and after the second attempted preload. The
- * pooled path also checks its observer snapshot after same-source reuse. This
+ * An ordinary observer crosses those objects while the result is active, at
+ * a retry after rejection, and after the first result is consumed. The
+ * comparison is the public throw or accepted row at the subscription call
+ * and after preload. The consumed cut observes no client stream in public
+ * dehydration before the next observer attaches. Other attach failures and
+ * concurrent subscription orders remain outside this finite history.
+ * Each query is built through the public Query API. Client preloads are
+ * observed through public DbClient.dehydrate(); after consumption, the next
+ * observer is checked through its snapshot. The comparison runs after the
+ * first preload and after the second attempted preload. The pooled path also
+ * checks its observer snapshot after same-source reuse. This
  * does not define how a hydrated stream from another process matches a local
  * source, or how different explicit query keys share one hash. A separate
  * hydration-first history below gives the first local consumer authority to
@@ -42,7 +48,7 @@
  * the claimed objects. This is checked while the hydrated stream is settled
  * and while its result promise is pending.
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   DbClient,
   Query,
@@ -368,6 +374,83 @@ describe(`DbClient preload source identity`, () => {
       } finally {
         observer?.dispose()
         await view?.cleanup()
+        await client.cleanup()
+        await first.cleanup()
+        await second.cleanup()
+      }
+    },
+  )
+
+  /**
+   * The source claim belongs to a reusable client result. Once a subscribed
+   * live result becomes authoritative, that result is consumed. The next
+   * observer must read its own source row, whether its source object is the
+   * same or different. The active-stream cases above are the opposite cut.
+   */
+  it.each([`same`, `different`] as const)(
+    `%s source: an observer can subscribe after the client result is consumed`,
+    async (sourceRelation) => {
+      const id = `observer-after-consumed-result-${sourceRelation}`
+      const first = createCollection(sourceConfig(id, `first`))
+      const second = createCollection(sourceConfig(id, `second`))
+      const queryFor = (source: typeof first) =>
+        new Query()
+          .from({ item: source })
+          .select(({ item }) => ({ id: item.id, value: item.value }))
+      const firstQuery = queryFor(first)
+      const candidateQuery = queryFor(
+        sourceRelation === `same` ? first : second,
+      )
+      const client = new DbClient()
+      let firstView: ReturnType<typeof resolveLiveQueryValue> | undefined
+      let nextView: ReturnType<typeof resolveLiveQueryValue> | undefined
+      let firstObserver: ReturnType<typeof createLiveQueryObserver> | undefined
+      let nextObserver: ReturnType<typeof createLiveQueryObserver> | undefined
+      let unsubscribeFirst: (() => void) | undefined
+      let unsubscribeNext: (() => void) | undefined
+
+      try {
+        await client.preloadLiveQuery({ query: firstQuery })
+        const queryHash = getLiveQueryHash({ query: firstQuery })
+        expect(getLiveQueryHash({ query: candidateQuery })).toBe(queryHash)
+        expect(rows(client)).toEqual([{ id: `one`, value: `first` }])
+
+        firstView = resolveLiveQueryValue(firstQuery)
+        expect(firstView).not.toBeNull()
+        firstObserver = createLiveQueryObserver(firstView, {
+          client,
+          queryHash,
+        })
+        unsubscribeFirst = firstObserver.subscribe(() => {})
+        await firstObserver.preload()
+        await vi.waitFor(() =>
+          expect(client.dehydrate().liveQueries).toBeUndefined(),
+        )
+        expect(
+          (firstObserver.getSnapshot().data as Array<Row>).map(
+            (row) => row.value,
+          ),
+        ).toEqual([`first`])
+
+        nextView = resolveLiveQueryValue(candidateQuery)
+        expect(nextView).not.toBeNull()
+        nextObserver = createLiveQueryObserver(nextView, { client, queryHash })
+        expect(() => {
+          unsubscribeNext = nextObserver!.subscribe(() => {})
+        }).not.toThrow()
+        await nextObserver.preload()
+        expect(
+          (nextObserver.getSnapshot().data as Array<Row>).map(
+            (row) => row.value,
+          ),
+        ).toEqual([sourceRelation === `same` ? `first` : `second`])
+      } finally {
+        unsubscribeNext?.()
+        unsubscribeFirst?.()
+        nextObserver?.dispose()
+        firstObserver?.dispose()
+        await nextView?.cleanup()
+        await firstView?.cleanup()
         await client.cleanup()
         await first.cleanup()
         await second.cleanup()
