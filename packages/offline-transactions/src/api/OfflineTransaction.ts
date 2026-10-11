@@ -9,7 +9,7 @@ import type {
 export class OfflineTransaction {
   private offlineId: string
   private mutationFnName: string
-  private autoCommit: boolean
+  private autoCommit: boolean | undefined
   private idempotencyKey: string
   private metadata: Record<string, any>
   private transaction: Transaction | null = null
@@ -24,7 +24,8 @@ export class OfflineTransaction {
   ) {
     this.offlineId = safeRandomUUID()
     this.mutationFnName = options.mutationFnName
-    this.autoCommit = options.autoCommit ?? true
+    // The TanStack DB transaction applies the default.
+    this.autoCommit = options.autoCommit
     this.idempotencyKey = options.idempotencyKey ?? safeRandomUUID()
     this.metadata = options.metadata ?? {}
     this.persistTransaction = persistTransaction
@@ -94,7 +95,9 @@ export class OfflineTransaction {
     }
 
     // The mutationFn persists the transaction and waits for the executor. A
-    // failed commit has already rolled the transaction back.
+    // commit that rejects has already rolled the transaction back. A sibling's
+    // failure can also roll it back while it waits, and then commit() resolves,
+    // so `when('settled')` is the receipt.
     await this.transaction.commit()
     return this.transaction
   }
