@@ -163,7 +163,7 @@ type Op =
 
 /**
  * How a flush ends. `contradict` retires a shown bucket without the graph's
- * retractions, a contradictory graph signal: the flush throws code 238 and
+ * retractions, a contradictory graph signal: the flush throws code 240 and
  * restores every facade, as for any failed flush.
  */
 type Outcome =
