@@ -620,6 +620,10 @@ class LiveQueryObserverImpl<
 
   subscribe(listener: LiveQueryObserverListener<T, TKey>): () => void {
     if (this.disposed) throw new LiveQueryObserverDisposedError()
+    if (this.subscriptions.size === 0 && this.client && this.queryHash) {
+      const { sources } = this.getSourceInfo()
+      if (sources) this.client._assertLiveQuerySources(this.queryHash, sources)
+    }
 
     const record: SubscriptionRecord<T, TKey> = { listener, active: true }
     this.subscriptions.add(record)
@@ -659,10 +663,6 @@ class LiveQueryObserverImpl<
   private attach(): void {
     const collection = this.collection
     if (!collection || this.disposed) return
-    if (this.client && this.queryHash) {
-      const { sources } = this.getSourceInfo()
-      if (sources) this.client._assertLiveQuerySources(this.queryHash, sources)
-    }
     this.registerClientResource()
     this.syncHydrationState()
     this.refreshDetachedState(collection)

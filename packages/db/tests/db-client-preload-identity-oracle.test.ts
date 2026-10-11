@@ -17,11 +17,18 @@
  * A pooled view has one source even though it has no query Collection config.
  * Its observer may reuse an existing stream only for that same source, and its
  * preload must finish the view's own source demand.
+ * An ordinary observer checks an active stream's source claim before retaining
+ * its first listener. A conflicting attempt rejects on every retry while the
+ * stream remains active; a same-source observer can attach.
  * This model uses source-object identity, not the query cache implementation.
  *
  * The finite history crosses concrete then descriptor, descriptor then
  * concrete, and two concrete source objects, plus a same-object control. The
  * pooled observer path crosses same and different local source objects.
+ * An ordinary observer crosses those objects at first subscription and at a
+ * retry after rejection. The comparison is the public throw or accepted row
+ * at that call and after preload. Other attach failures and concurrent
+ * subscription orders remain outside this finite history.
  * Each query is built through the public Query API, and every successful
  * preload is observed through public DbClient.dehydrate(). The comparison
  * runs after the first preload and after the second attempted preload. The
@@ -284,6 +291,69 @@ describe(`DbClient preload source identity`, () => {
       await right.cleanup()
     }
   })
+
+  /**
+   * Subscription admission is atomic. A rejected observer cannot retain its
+   * attempted listener: while the active stream still claims the first source,
+   * every attempt using the other source must reject. The same-source neighbor
+   * must attach and read its own row. Both cuts use the public observer API.
+   */
+  it.each([`same`, `different`] as const)(
+    `%s source: an observer subscription respects an active stream claim`,
+    async (sourceRelation) => {
+      const id = `observer-attach-source-identity-${sourceRelation}`
+      const first = createCollection(sourceConfig(id, `first`))
+      const second = createCollection(sourceConfig(id, `second`))
+      const queryFor = (source: typeof first) =>
+        new Query()
+          .from({ item: source })
+          .select(({ item }) => ({ id: item.id, value: item.value }))
+      const firstQuery = queryFor(first)
+      const candidateQuery = queryFor(
+        sourceRelation === `same` ? first : second,
+      )
+      const client = new DbClient()
+      let observer: ReturnType<typeof createLiveQueryObserver> | undefined
+      let view: ReturnType<typeof resolveLiveQueryValue> | undefined
+
+      try {
+        await client.preloadLiveQuery({ query: firstQuery })
+        const queryHash = getLiveQueryHash({ query: firstQuery })
+        expect(getLiveQueryHash({ query: candidateQuery })).toBe(queryHash)
+        view = resolveLiveQueryValue(candidateQuery)
+        expect(view).not.toBeNull()
+        observer = createLiveQueryObserver(view, { client, queryHash })
+
+        if (sourceRelation === `different`) {
+          expect(() => observer!.subscribe(() => {})).toThrow(
+            /different source Collections/,
+          )
+          expect(
+            () => observer!.subscribe(() => {}),
+            `a failed attach must not leave a listener`,
+          ).toThrow(/different source Collections/)
+        } else {
+          const unsubscribe = observer.subscribe(() => {})
+          try {
+            await observer.preload()
+            expect(
+              (observer.getSnapshot().data as Array<Row>).map(
+                (row) => row.value,
+              ),
+            ).toEqual([`first`])
+          } finally {
+            unsubscribe()
+          }
+        }
+      } finally {
+        observer?.dispose()
+        await view?.cleanup()
+        await client.cleanup()
+        await first.cleanup()
+        await second.cleanup()
+      }
+    },
+  )
 
   it.each([`same`, `different`] as const)(
     `%s source: an observer preload respects a pooled view's source identity`,

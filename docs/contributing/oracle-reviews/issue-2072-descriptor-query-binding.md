@@ -329,3 +329,40 @@ outside the controlled source fixture.
 | ORC-012 review evidence | Pass for this bounded self-review: it records the base head, model prediction, paths, cuts, mutant outcomes, and unresolved cells. |
 | ORC-013 boundary witness | Pass. The pending same-hash conflict and the failed-stream replacement are adjacent legal cuts; the two mutants distinguish overly broad and overly persistent source claims. |
 | ORC-014 controlled-premise handoff | No real-provider claim is made. The synchronous throw and later `markError` are controlled source Collection premises. |
+
+## First subscription rejects before retaining a listener
+
+The 2026-10-11 user review examined #2077 at `a1863ab83`. An active client
+stream may be reused only by the same ordered source Collections. A conflicting
+observer's first subscription must reject without retaining its listener, so a
+retry while the stream remains active must reject again. This is the existing
+same-hash source-identity law at the ordinary observer subscription boundary.
+The earlier preload-identity owner checked direct and pooled preloads, but did
+not include an ordinary observer's subscription and retry in its finite
+consumer history.
+
+The owner now uses two plain sources with the same ID and query hash but
+different values. Its independent rule accepts the same source and rejects the
+other. The public driver first preloads one source into a `DbClient`, then
+subscribes an observer over either the same source or the other source. The
+same-source control preloads and reads the `first` row; the conflicting cell
+asserts rejection at both the first subscription and its immediate retry.
+With the old check in `attach()`, the first call threw after adding a listener,
+and the retry returned without throwing. This was an assertion RED at the retry
+cut. Moving the check before listener registration made all 11 owner cases
+GREEN. Five surrounding DB oracle files passed 416 tests, and DB source and
+test TypeScript checks passed. This covers a source conflict on first attach,
+not arbitrary failures later in `attach()` or concurrent subscription orders.
+
+For ORC-001–003 and 005, the owner places the source-identity contract and
+limits beside its plain-row model, finite same/different history, public
+observer driver, and subscription/row comparisons. ORC-004 and 007 do not
+apply because no generated property was added. ORC-006 and 013 are satisfied
+by the original assertion RED and the same-source opposite control. ORC-008
+does not apply because the model gained no state. ORC-009 maps the model's
+source relation to ordered Collection-object identity, rather than a client
+cache status. The `finally` cleanup retains the primary assertion and releases
+the observer, view, client, and sources (ORC-010). There is no named semantic
+shared-fault hypothesis requiring a second formulation (ORC-011), or claim
+about a real external provider (ORC-014). This record gives the bounded
+review evidence and remaining attach paths required by ORC-012.

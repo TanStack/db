@@ -3322,15 +3322,18 @@ describe(`outer joins preserve absent source bindings under shadowing`, () => {
  *
  * The independent model below recomputes two LEFT joins from plain rows. Its
  * legal history changes an absent local issue into a match and back, then
- * removes and restores the second joined side. A second parent route keeps a
- * matched local issue as the opposite control. The QueryRef filters tags by
- * parent; the direct source reads the parent in its equality operand instead.
+ * removes and restores the second joined side. It also changes a parent label
+ * while the joins are matched: that label must survive from the main route,
+ * even when the joined input carries its own inherited context. A second
+ * parent route keeps a matched local issue as the opposite control. The
+ * QueryRef filters tags by parent; the direct source reads the parent in its
+ * equality operand instead.
  * The production driver uses public Query and Collection APIs; after preload
  * and each write, public child rows are compared with the model. Shadowed and
  * renamed aliases, both route causes, and eager and on-demand sources agree.
  */
 describe(`chained joins keep an absent local source absent`, () => {
-  type Issue = { id: number }
+  type Issue = { id: number; label: string }
   type Comment = {
     id: number
     issueId: number
@@ -3340,6 +3343,7 @@ describe(`chained joins keep an absent local source absent`, () => {
   type Tag = { id: number; issueId: number }
   type Expected = {
     parentId: number
+    parentLabel: string
     commentId: number
     localIssueId: number | undefined
     tagId: number | undefined
@@ -3362,6 +3366,7 @@ describe(`chained joins keep an absent local source absent`, () => {
             const tag = tags.get(comment.tagId)
             return {
               parentId: parent.id,
+              parentLabel: parent.label,
               commentId: comment.id,
               localIssueId: localIssue?.id,
               tagId:
@@ -3378,14 +3383,16 @@ describe(`chained joins keep an absent local source absent`, () => {
   for (const mode of [`eager`, `onDemand`] as const) {
     test(`${mode} chained joins preserve absence under shadowing and renaming`, async () => {
       const parentRows = new Map<number, Issue>([
-        [1, { id: 1 }],
-        [2, { id: 2 }],
+        [1, { id: 1, label: `first parent` }],
+        [2, { id: 2, label: `second parent` }],
       ])
       const commentRows = new Map<number, Comment>([
         [10, { id: 10, issueId: 1, localIssueId: 99, tagId: 7 }],
         [20, { id: 20, issueId: 2, localIssueId: 2, tagId: 8 }],
       ])
-      const localIssueRows = new Map<number, Issue>([[2, { id: 2 }]])
+      const localIssueRows = new Map<number, Issue>([
+        [2, { id: 2, label: `local issue` }],
+      ])
       const tagRows = new Map<number, Tag>([
         [7, { id: 7, issueId: 1 }],
         [8, { id: 8, issueId: 2 }],
@@ -3465,6 +3472,7 @@ describe(`chained joins keep an absent local source absent`, () => {
                         eq((context.comment as Comment).issueId, parent.id),
                       )
                       .select((context: Context) => ({
+                        parentLabel: parent.label,
                         commentId: (context.comment as Comment).id,
                         localIssueId: (context[alias] as Issue).id,
                         tagId: (context.tag as Tag).id,
@@ -3516,7 +3524,13 @@ describe(`chained joins keep an absent local source absent`, () => {
           }
           check(`initial publication`)
 
-          const matchedIssue = { id: 99 }
+          const changedParent = { id: 2, label: `changed parent` }
+          parentRows.set(2, changedParent)
+          for (const entry of cases) entry.parents.put(changedParent)
+          await flushPromises()
+          check(`parent label changes`)
+
+          const matchedIssue = { id: 99, label: `new local issue` }
           localIssueRows.set(99, matchedIssue)
           for (const entry of cases) entry.localIssues.put(matchedIssue)
           await flushPromises()

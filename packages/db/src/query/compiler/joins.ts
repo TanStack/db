@@ -327,7 +327,7 @@ function processJoin(
   const { mainExpr, joinedExpr } = conditions[0]!
   const joinedExpressionUsesParent = conditions.some(
     ({ joinedExpr: expression }) =>
-      getJoinReferences(expression).some((ref) => {
+      collectPropRefs(expression).some((ref) => {
         const sourceRole = role(ref)
         return sourceRole === `ancestor` || sourceRole === `unknown`
       }),
@@ -540,8 +540,6 @@ function processJoin(
   )
 }
 
-export const getJoinReferences = collectPropRefs
-
 type JoinRefRole = `joined` | `main` | `ancestor` | `unknown`
 
 function getJoinRefAlias(ref: PropRef): string | undefined {
@@ -558,8 +556,8 @@ function analyzeJoinExpressions(
   joinedSource: string,
   role: (ref: PropRef) => JoinRefRole,
 ): { mainExpr: BasicExpression; joinedExpr: BasicExpression } {
-  const leftRefs = getJoinReferences(left)
-  const rightRefs = getJoinReferences(right)
+  const leftRefs = collectPropRefs(left)
+  const rightRefs = collectPropRefs(right)
   const leftRoles = new Set(leftRefs.map(role))
   const rightRoles = new Set(rightRefs.map(role))
   const leftMain = leftRoles.has(`main`) || leftRoles.has(`ancestor`)

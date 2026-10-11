@@ -166,6 +166,15 @@ The nine-item user review inspected `2d0cbafabddb898d8fadcb7d304ff06fb0154d7e` w
 
 The primary `includes-alias-shadowing-oracle.test.ts` now recomputes two LEFT joins from plain parent, comment, issue, and tag rows. Its legal history has two parent routes: one child issue is absent and the other is matched. It adds and removes the absent issue, then removes and restores the second joined side. Each cut compares exact public child rows, including the local issue ID and `isUndefined`, under shadowed and renamed aliases, eager and on-demand sources, and routing caused by either a parent-dependent QueryRef or a captured ancestor operand. The model uses source roles and plain numeric relations; it does not read compiler namespaces, binding maps, or route metadata. The QueryRef filters tags by parent, while the direct source reads the parent in its equality operand; the model states that distinction explicitly.
 
+A 2026-10-11 review control adds a parent label to this plain-row model and
+selected child result, then changes that label while the two joins have matched
+rows. Both source modes and both route causes preserve the changed parent
+label, including the shadowed local alias. This reaches a matched-join public
+observation that the earlier absence-only assertion did not name. It does not
+settle the reviewer's broader claim about every joined QueryRef shape or every
+extra namespaced key; a concrete contrary query would need its own legal
+history and public-row witness.
+
 With the final oracle in place, restoring the original merge order made both source-mode tests fail at **initial public rows**: child comment 10 had expected local issue `undefined` and `missingLocalIssue: true`, but received ancestor issue ID `1` and `false`. The QueryRef route produced the same RED observation in an earlier calibration run. The repair copies the main row's scope when it exists and only the joined source from the joined row; when the main side is absent, it still retains the joined row's route context and clears local main aliases. The repaired oracle passes both tests and its neighboring single-join matrix.
 
 **Route-work law.** `ARCHITECTURE.md` law 12 says irrelevant rows must not activate unrelated routes when an applicable index exists. A direct joined source in a main-correlated RIGHT or FULL include has no parent-dependent expression. Joined-only output has no main correlation and is removed at the post-join correlation cut, so adding unmatched joined rows cannot increase parent-route assembly for that source. A joined-correlated outer join and a parent-dependent QueryRef remain distinct; the primary row matrix retains both as correctness controls.
