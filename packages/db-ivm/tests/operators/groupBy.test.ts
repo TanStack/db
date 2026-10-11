@@ -634,10 +634,11 @@ describe(`Operators`, () => {
     // last given, a retraction's included. The hash
     // treats -0 as 0 and equal Dates as one value. So after a delete, min and
     // max return a value hash-equal to a remaining member's, not necessarily
-    // that member's instance. An aggregate input that differs per row, such as
-    // the query compiler's exact-value keys, keeps the records apart. A caller
-    // that needs the exact remaining value must keep its own exact inputs, as
-    // the compiler's group representatives do. A distinct remaining value is
+    // that member's instance. This holds while every member has positive
+    // multiplicity: min and max do not look at multiplicities. An aggregate
+    // input that tells the rows apart keeps their records apart. The query
+    // compiler adds one for min and max: an exact-value key that separates -0
+    // from 0 and gives each object its row key. A distinct remaining value is
     // returned as is. For -0/0 and equal Dates, hash equality is all the
     // contract promises, so those cases only show the result stays in the
     // remaining value's class; the distinct and per-row cases are the ones a
@@ -717,12 +718,18 @@ describe(`Operators`, () => {
         expect(hash(date.lo)).toBe(hash(keptDate))
         expect(hash(date.hi)).toBe(hash(keptDate))
 
-        // A distinct remaining value is returned as is.
+        // A distinct remaining value is returned as is, whether the delete
+        // removes the minimum or the maximum.
         expect(extremes(1, 2, { deletedFirst })).toMatchObject({ lo: 2, hi: 2 })
+        expect(extremes(2, 1, { deletedFirst })).toMatchObject({ lo: 1, hi: 1 })
         const distinct = new Date(6)
         const distinctDates = extremes(new Date(5), distinct, { deletedFirst })
         expect(distinctDates.lo).toBe(distinct)
         expect(distinctDates.hi).toBe(distinct)
+        const earlier = new Date(5)
+        const earlierDates = extremes(new Date(6), earlier, { deletedFirst })
+        expect(earlierDates.lo).toBe(earlier)
+        expect(earlierDates.hi).toBe(earlier)
 
         // An input that differs per row keeps the records apart, so the
         // remaining instance comes back.
@@ -733,9 +740,17 @@ describe(`Operators`, () => {
         })
         expect(exact.lo).toBe(exactDate)
         expect(exact.hi).toBe(exactDate)
-        expect(
-          Object.is(extremes(-0, 0, { deletedFirst, perRowInput: true }).lo, 0),
-        ).toBe(true)
+        for (const [deleted, kept] of [
+          [-0, 0],
+          [0, -0],
+        ] as const) {
+          const zero = extremes(deleted, kept, {
+            deletedFirst,
+            perRowInput: true,
+          })
+          expect(Object.is(zero.lo, kept)).toBe(true)
+          expect(Object.is(zero.hi, kept)).toBe(true)
+        }
       }
     })
 

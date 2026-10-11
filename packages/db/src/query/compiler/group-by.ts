@@ -430,8 +430,9 @@ export function processGroupBy(
     }
   }
 
-  // D2 consolidates contributions whose hashes match (db-ivm records this in
-  // packages/db-ivm/tests/operators/groupBy.test.ts), and the hash treats -0
+  // D2 consolidates contributions whose hashes match, keeping the instance it
+  // was last given (db-ivm's groupBy min/max contract test records this),
+  // and the hash treats -0
   // as 0 and equal Dates as one value. A min or max returns one of its
   // inputs, so each contribution carries the exact key of the value it
   // compares, as a group value does. A primitive's key is its exact value, so
