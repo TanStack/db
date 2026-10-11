@@ -500,8 +500,11 @@ class Driver {
     transaction.mutate(() => {
       if (shown?.type === `delete`) facade.delete(id)
       else if (shown?.type === `update`)
+        // A fresh value, so the update always records a mutation: an empty
+        // transaction is tracked by no Collection, and its rollback would
+        // reject with no handler (core behavior, outside this oracle).
         facade.update(id, (draft) => {
-          draft.v = 100
+          draft.v = 100 + this.nextLocalId++
         })
       else facade.insert({ id, v: 0, $key: id } as unknown as Row)
     })
