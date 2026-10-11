@@ -2382,7 +2382,17 @@ Includes subquery for "${fieldName}" reuses an ancestor's source declaration. Us
 
 <a id="error-237"></a>
 
-## Error 237: `query/live/bucket-facade-adapter.ts`
+## Error 237: `query/compiler/index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Query reference "${ref.path.join(`.`)}" is out of scope. Use a source from this query or a containing query.
+```
+
+<a id="error-238"></a>
+
+## Error 238: `query/live/bucket-facade-adapter.ts`
 
 Development builds show this message, with `${...}` replaced by values:
 
@@ -2390,9 +2400,9 @@ Development builds show this message, with `${...}` replaced by values:
 Bucket facade retired with rows the graph did not retract
 ```
 
-<a id="error-238"></a>
+<a id="error-239"></a>
 
-## Error 238: `query/live/bucket-facade-adapter.ts`
+## Error 239: `query/live/bucket-facade-adapter.ts`
 
 Development builds show this message, with `${...}` replaced by values:
 

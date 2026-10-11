@@ -396,7 +396,7 @@ export class BucketFacadeAdapter {
       throw new Error(
         devBuild() && process.env.NODE_ENV !== `production`
           ? `Bucket facade retired with rows the graph did not retract`
-          : codedMessage(237),
+          : codedMessage(238),
       )
     }
 
@@ -457,7 +457,7 @@ export class BucketFacadeAdapter {
       throw new Error(
         devBuild() && process.env.NODE_ENV !== `production`
           ? `A live query's child collection cannot be cleaned up directly. Clean up the live query instead.`
-          : codedMessage(238),
+          : codedMessage(239),
       )
     }
     const entry: FacadeEntry = {

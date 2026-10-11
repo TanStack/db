@@ -131,7 +131,7 @@ describe(`expo runtime persistence helper parity`, () => {
         persistence: firstPersistence,
       })
       await firstCollectionOptions.persistence.adapter.applyCommittedTx(
-        collectionId,
+        { kind: `eager`, collectionId: collectionId },
         {
           txId: `tx-1`,
           term: 1,
@@ -172,7 +172,10 @@ describe(`expo runtime persistence helper parity`, () => {
         persistence: secondPersistence,
       })
       await expect(
-        syncAbsentOptions.persistence.adapter.loadSubset(collectionId, {}),
+        syncAbsentOptions.persistence.adapter.loadSubset(
+          { kind: `eager`, collectionId: collectionId },
+          {},
+        ),
       ).rejects.toThrow(`Schema version mismatch`)
 
       const syncPresentOptions = persistedCollectionOptions<
@@ -190,7 +193,7 @@ describe(`expo runtime persistence helper parity`, () => {
         persistence: secondPersistence,
       })
       const rows = await syncPresentOptions.persistence.adapter.loadSubset(
-        collectionId,
+        { kind: `eager`, collectionId: collectionId },
         {},
       )
       expect(rows).toEqual([])

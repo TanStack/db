@@ -327,7 +327,10 @@ async function observe(
   driver: SQLiteDriver,
   collectionId: string,
 ): Promise<Observation> {
-  const snapshot = await adapter.loadResumeSnapshot(collectionId)
+  const snapshot = await adapter.loadResumeSnapshot({
+    kind: `eager`,
+    collectionId: collectionId,
+  })
   const table = createPersistedTableName(collectionId, 't')
   const [expected, tombstones, applied] = await Promise.all([
     driver.query<{ key: string }>(
@@ -900,18 +903,27 @@ async function assertIndependentWork(
   const collectionId = 'oracle-independent-work'
   let primary: unknown
   try {
-    await host.adapter.loadResumeSnapshot(collectionId)
+    await host.adapter.loadResumeSnapshot({
+      kind: `eager`,
+      collectionId: collectionId,
+    })
     const { seed, candidate } = independentTransactions(input)
     const history: Array<Tx> = []
     if (seed) {
       history.push(clone(seed))
       beginMeasuredWrite(host)
-      await host.adapter.applyCommittedTx(collectionId, seed)
+      await host.adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        seed,
+      )
       finishMeasuredWrite(host, 'independent-key seed checkpoint')
     }
     history.push(clone(candidate))
     beginMeasuredWrite(host)
-    await host.adapter.applyCommittedTx(collectionId, candidate)
+    await host.adapter.applyCommittedTx(
+      { kind: `eager`, collectionId: collectionId },
+      candidate,
+    )
     // The optional increment is a count-perturbation control for the checker.
     host.counts.run += extraMeasuredCalls
     const counts = finishMeasuredWrite(
@@ -1071,9 +1083,15 @@ async function assertGeneratedHistory(
   try {
     const { seed, candidate, followup } = generatedTransactions(input)
     const history = [clone(seed)]
-    await host.adapter.loadResumeSnapshot(collectionId)
+    await host.adapter.loadResumeSnapshot({
+      kind: `eager`,
+      collectionId: collectionId,
+    })
     beginMeasuredWrite(host)
-    await host.adapter.applyCommittedTx(collectionId, seed)
+    await host.adapter.applyCommittedTx(
+      { kind: `eager`, collectionId: collectionId },
+      seed,
+    )
     finishMeasuredWrite(
       host,
       'generated seed checkpoint',
@@ -1087,7 +1105,10 @@ async function assertGeneratedHistory(
       host.failRunMatching(/INSERT INTO applied_tx/)
       beginMeasuredWrite(host)
       await expect(
-        host.adapter.applyCommittedTx(collectionId, candidate),
+        host.adapter.applyCommittedTx(
+          { kind: `eager`, collectionId: collectionId },
+          candidate,
+        ),
       ).rejects.toThrow('injected late bookkeeping failure')
       const counts = finishMeasuredWrite(
         host,
@@ -1104,7 +1125,10 @@ async function assertGeneratedHistory(
       host.corruptRowMetadata(corruptCandidateMetadata)
       history.push(clone(candidate))
       beginMeasuredWrite(host)
-      await host.adapter.applyCommittedTx(collectionId, candidate)
+      await host.adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        candidate,
+      )
       const counts = finishMeasuredWrite(
         host,
         'generated candidate checkpoint',
@@ -1118,7 +1142,10 @@ async function assertGeneratedHistory(
       if (input.followup) {
         history.push(clone(followup))
         beginMeasuredWrite(host)
-        await host.adapter.applyCommittedTx(collectionId, followup)
+        await host.adapter.applyCommittedTx(
+          { kind: `eager`, collectionId: collectionId },
+          followup,
+        )
         finishMeasuredWrite(
           host,
           'generated followup checkpoint',
@@ -1183,11 +1210,14 @@ export function runOrdinaryTransactionWorkOracle(): void {
             [{ type: `set`, key: `a`, value: last }],
             [{ type: `set`, key: `cursor`, value: first }],
           )
-          await host.adapter.applyCommittedTx(`native-actions`, seed)
+          await host.adapter.applyCommittedTx(
+            { kind: `eager`, collectionId: `native-actions` },
+            seed,
+          )
           if (rollback) host.failRunMatching(/INSERT INTO applied_tx/)
           beginMeasuredWrite(host)
           const pending = host.adapter.applyCommittedTx(
-            `native-actions`,
+            { kind: `eager`, collectionId: `native-actions` },
             candidate,
           )
           if (rollback)
@@ -1214,7 +1244,10 @@ export function runOrdinaryTransactionWorkOracle(): void {
             { type: `update`, key: `a`, value: { stamp: `overwritten` } },
           ])
           await expect(
-            host.adapter.applyCommittedTx(`native-actions`, invalid),
+            host.adapter.applyCommittedTx(
+              { kind: `eager`, collectionId: `native-actions` },
+              invalid,
+            ),
           ).rejects.toThrow(/Temporal/)
           vi.stubGlobal(`Temporal`, Temporal)
           expect(
@@ -1442,18 +1475,27 @@ export function runOrdinaryTransactionWorkOracle(): void {
         const collectionId = `oracle-${item.name}`
         let primary: unknown
         try {
-          await host.adapter.loadResumeSnapshot(collectionId) // schema setup outside work count
+          await host.adapter.loadResumeSnapshot({
+            kind: `eager`,
+            collectionId: collectionId,
+          }) // schema setup outside work count
           const history: Array<Tx> = []
           if (item.seed) {
             history.push(clone(item.seed))
-            await host.adapter.applyCommittedTx(collectionId, item.seed)
+            await host.adapter.applyCommittedTx(
+              { kind: `eager`, collectionId: collectionId },
+              item.seed,
+            )
           }
           host.counts.query = 0
           host.counts.run = 0
           host.counts.transactions = 0
           host.counts.maxParams = 0
           history.push(clone(item.candidate))
-          await host.adapter.applyCommittedTx(collectionId, item.candidate)
+          await host.adapter.applyCommittedTx(
+            { kind: `eager`, collectionId: collectionId },
+            item.candidate,
+          )
           const calls = host.counts.query + host.counts.run
           const candidateTransactions = host.counts.transactions
           const maxParams = host.counts.maxParams
@@ -1515,9 +1557,15 @@ export function runOrdinaryTransactionWorkOracle(): void {
       try {
         const item = semanticCases[0]!
         const history = [clone(item.seed!), clone(item.candidate)]
-        await host.adapter.applyCommittedTx(collectionId, item.seed!)
+        await host.adapter.applyCommittedTx(
+          { kind: `eager`, collectionId: collectionId },
+          item.seed!,
+        )
         host.corruptRowMetadata(true)
-        await host.adapter.applyCommittedTx(collectionId, item.candidate)
+        await host.adapter.applyCommittedTx(
+          { kind: `eager`, collectionId: collectionId },
+          item.candidate,
+        )
         const actual = await observe(host.adapter, host.driver, collectionId)
         const expected = modelAfter(history)
         expect(actual.rows[0]?.metadata).toBeUndefined()
@@ -1545,11 +1593,17 @@ export function runOrdinaryTransactionWorkOracle(): void {
       const collectionId = 'oracle-overwritten-invalid-value'
       let primary: unknown
       try {
-        await host.adapter.loadResumeSnapshot(collectionId)
+        await host.adapter.loadResumeSnapshot({
+          kind: `eager`,
+          collectionId: collectionId,
+        })
         const seed = transaction('seed', 1, [
           { type: 'insert', key: 'same', value: { id: 'same' } },
         ])
-        await host.adapter.applyCommittedTx(collectionId, seed)
+        await host.adapter.applyCommittedTx(
+          { kind: `eager`, collectionId: collectionId },
+          seed,
+        )
         const before = await observe(host.adapter, host.driver, collectionId)
         const invalid = new Date(Number.NaN)
         const candidates: Array<PersistedTx> = [
@@ -1637,7 +1691,10 @@ export function runOrdinaryTransactionWorkOracle(): void {
         ]
         for (const candidate of candidates) {
           await expect(
-            host.adapter.applyCommittedTx(collectionId, candidate),
+            host.adapter.applyCommittedTx(
+              { kind: `eager`, collectionId: collectionId },
+              candidate,
+            ),
           ).rejects.toThrow()
           expect(
             await observe(host.adapter, host.driver, collectionId),
@@ -1675,7 +1732,10 @@ export function runOrdinaryTransactionWorkOracle(): void {
             value: { id: `row-${index}`, version: 2 },
           })),
         )
-        await host.adapter.applyCommittedTx(collectionId, seed)
+        await host.adapter.applyCommittedTx(
+          { kind: `eager`, collectionId: collectionId },
+          seed,
+        )
         const table = createPersistedTableName(collectionId, 'c')
         host.counts.run = 0
         // This test-only fast writer uses two legal 100-parameter statements.
@@ -1734,9 +1794,18 @@ export function runOrdinaryTransactionWorkOracle(): void {
           { type: 'delete', key: 'gone', value: { id: 'gone', deleted: 1 } },
         ])
         const history = [clone(seed), clone(candidate), clone(candidate)]
-        await host.adapter.applyCommittedTx(collectionId, seed)
-        await host.adapter.applyCommittedTx(collectionId, candidate)
-        await host.adapter.applyCommittedTx(collectionId, candidate)
+        await host.adapter.applyCommittedTx(
+          { kind: `eager`, collectionId: collectionId },
+          seed,
+        )
+        await host.adapter.applyCommittedTx(
+          { kind: `eager`, collectionId: collectionId },
+          candidate,
+        )
+        await host.adapter.applyCommittedTx(
+          { kind: `eager`, collectionId: collectionId },
+          candidate,
+        )
         expect(await observe(host.adapter, host.driver, collectionId)).toEqual(
           modelAfter(history),
         )
@@ -1769,7 +1838,10 @@ export function runOrdinaryTransactionWorkOracle(): void {
           [],
           [{ type: 'set', key: 'cursor', value: { offset: 1 } }],
         )
-        await host.adapter.applyCommittedTx(collectionId, seed)
+        await host.adapter.applyCommittedTx(
+          { kind: `eager`, collectionId: collectionId },
+          seed,
+        )
         const before = await observe(host.adapter, host.driver, collectionId)
         host.failRunMatching(/INSERT INTO applied_tx/)
         const candidate = transaction(
@@ -1780,7 +1852,10 @@ export function runOrdinaryTransactionWorkOracle(): void {
           [{ type: 'set', key: 'cursor', value: { offset: 2 } }],
         )
         await expect(
-          host.adapter.applyCommittedTx(collectionId, candidate),
+          host.adapter.applyCommittedTx(
+            { kind: `eager`, collectionId: collectionId },
+            candidate,
+          ),
         ).rejects.toThrow('injected late bookkeeping failure')
         host.failRunMatching(undefined)
         expect(await observe(host.adapter, host.driver, collectionId)).toEqual(
@@ -1812,8 +1887,14 @@ export function runOrdinaryTransactionWorkOracle(): void {
         try {
           const candidate = clone(insertRows(size))
           candidate.collectionMetadataMutations = []
-          await host.adapter.applyCommittedTx(collectionId, candidate)
-          const actual = await host.adapter.pullSince(collectionId, 0)
+          await host.adapter.applyCommittedTx(
+            { kind: `eager`, collectionId: collectionId },
+            candidate,
+          )
+          const actual = await host.adapter.pullSince(
+            { kind: `eager`, collectionId: collectionId },
+            0,
+          )
           if (size === 65) {
             expect(actual).toEqual({
               latestRowVersion: 1,
@@ -1868,7 +1949,10 @@ export function runOrdinaryTransactionWorkOracle(): void {
       const collectionId = 'oracle-later-fault'
       let primary: unknown
       try {
-        await host.adapter.loadResumeSnapshot(collectionId)
+        await host.adapter.loadResumeSnapshot({
+          kind: `eager`,
+          collectionId: collectionId,
+        })
         const seed = transaction(
           'seed',
           1,
@@ -1884,7 +1968,10 @@ export function runOrdinaryTransactionWorkOracle(): void {
           [],
           [{ type: 'set', key: 'cursor', value: { offset: 1 } }],
         )
-        await host.adapter.applyCommittedTx(collectionId, seed)
+        await host.adapter.applyCommittedTx(
+          { kind: `eager`, collectionId: collectionId },
+          seed,
+        )
         const before = await observe(host.adapter, host.driver, collectionId)
         host.failAfterRowWriteCount(25)
         const candidate = transaction(
@@ -1899,7 +1986,10 @@ export function runOrdinaryTransactionWorkOracle(): void {
           [{ type: 'set', key: 'cursor', value: { offset: 2 } }],
         )
         await expect(
-          host.adapter.applyCommittedTx(collectionId, candidate),
+          host.adapter.applyCommittedTx(
+            { kind: `eager`, collectionId: collectionId },
+            candidate,
+          ),
         ).rejects.toThrow('injected later row-write failure')
         host.failAfterRowWriteCount(undefined)
         const after = await observe(host.adapter, host.driver, collectionId)
