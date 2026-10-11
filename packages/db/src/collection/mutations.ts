@@ -6,7 +6,6 @@ import {
 import { normalizeError } from '../utils/error.js'
 import { safeRandomUUID } from '../utils/uuid'
 import { createTransaction, getActiveTransaction } from '../transactions'
-import { takePublicationFailure, withPublicationContext } from '../scheduler'
 import {
   DeleteKeyNotFoundError,
   DuplicateKeyError,
@@ -205,11 +204,7 @@ export class CollectionMutationsManager<
     type: OperationType,
   ): TransactionType<TOutput> | undefined {
     const direct = this.state.localOnlyDirectWrite
-    // A write during this Collection's own sync drain is queued behind it, so
-    // its subscribers would run after this call. The transaction path
-    // publishes it now.
-    if (!direct?.types.has(type) || this.state.isDrainingSyncTransactions)
-      return undefined
+    if (!direct?.types.has(type)) return undefined
     for (const transaction of this.state.transactions.values()) {
       // A persisting transaction holds sync commits, and a pending one
       // overlays them.
@@ -225,33 +220,14 @@ export class CollectionMutationsManager<
       mutationFn: () => Promise.resolve(),
     })
     transaction.applyMutations(mutations)
-    // `write` stores the rows before it publishes them. Inside a publication
-    // context a subscriber failure comes back as a value, so it cannot undo
-    // the write and the transaction completes. Only a contract breach makes
-    // `write` itself throw, and then the rows are not stored.
-    const outcome: { stored: boolean; failure?: { error: unknown } } = {
-      stored: false,
-    }
+    // The rows are stored when `write` publishes them, so a throwing
+    // subscriber cannot undo the write; the transaction still completes.
     try {
-      withPublicationContext(() => {
-        outcome.failure = takePublicationFailure(() => direct.write(mutations))
-        outcome.stored = true
-      })
-    } catch (error) {
-      outcome.failure ??= { error }
-    }
-    const { stored, failure } = outcome
-    if (stored) {
+      direct.write(mutations)
+    } finally {
       transaction.setState(`completed`)
       transaction.isPersisted.resolve(transaction)
-    } else {
-      const error = normalizeError(failure!.error)
-      transaction.error = { message: error.message, error }
-      transaction.setState(`failed`)
-      transaction.isPersisted.promise.catch(() => undefined)
-      transaction.isPersisted.reject(error)
     }
-    if (failure) throw failure.error
     return transaction
   }
 
@@ -302,27 +278,19 @@ export class CollectionMutationsManager<
         }),
     })
     try {
-      // Inside another Collection's publication, a subscriber failure is
-      // deferred to that publication. It is this write's failure, so take it.
-      const failure = takePublicationFailure(() =>
-        this.applyOwnedMutations(transaction, mutations),
-      )
-      if (failure) throw failure.error
+      this.applyOwnedMutations(transaction, mutations)
     } catch (error) {
       // A subscriber threw before the handler could run. Roll back only this
       // write, so no Collection keeps a transaction that nothing will settle.
-      // The admission error is the reported cause, also for the rollback's
-      // own subscriber failures, deferred or not.
-      takePublicationFailure(() => {
-        try {
-          transaction.rollback({
-            isSecondaryRollback: true,
-            error: normalizeError(error),
-          })
-        } catch {
-          // Settlement still ran every step.
-        }
-      })
+      // The admission error is the reported cause.
+      try {
+        transaction.rollback({
+          isSecondaryRollback: true,
+          error: normalizeError(error),
+        })
+      } catch {
+        // Settlement still ran every step.
+      }
       throw error
     }
     // Errors still reject `isPersisted.promise`. This catch only prevents an

@@ -189,7 +189,7 @@ export class CollectionStateManager<
   public recentlySyncedKeys = new Set<TKey>()
   public hasReceivedFirstCommit = false
   public isCommittingSyncTransactions = false
-  public isDrainingSyncTransactions = false
+  private isDrainingSyncTransactions = false
   private syncRunGeneration = 0
   public isLocalOnly = false
   /**
