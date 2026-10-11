@@ -761,10 +761,10 @@ class Driver {
    * might. Its live query owns it, so the call throws and the facade keeps
    * receiving the graph's writes.
    */
-  attemptCleanup(bucket: BucketKey): void {
+  async attemptCleanup(bucket: BucketKey): Promise<void> {
     const facade = this.entry(bucket)?.collection
     if (!facade) return
-    expect(() => facade.cleanup(), `holder cleanup`).toThrow(
+    await expect(facade.cleanup(), `holder cleanup`).rejects.toThrow(
       /cannot be cleaned up directly/,
     )
     expect(facade.status, `status after a refused cleanup`).toBe(`ready`)
@@ -946,12 +946,12 @@ async function runHistory(
               : undefined,
           )
         }
-        // A holder may clean up a shown facade. The graph then cannot write
-        // it, and its bucket must still flush and retire without failing.
+        // A holder may try to clean up a shown facade. The call is refused,
+        // and the facade keeps receiving the graph's writes.
         const cleanupBucket =
           step.cleanup === undefined ? undefined : BUCKETS[step.cleanup]
         if (cleanupBucket && published.has(cleanupBucket))
-          driver.attemptCleanup(cleanupBucket)
+          await driver.attemptCleanup(cleanupBucket)
         // A persisting user transaction may hold one shown facade's sync
         // commits through this flush and up to two more. It settles before
         // the comparison of its last step.
@@ -980,7 +980,7 @@ async function runHistory(
         const afterOps = applyOps(published, pending)
         const contradictTargets = BUCKETS.filter(
           (bucket) =>
-            driver.entry(bucket)?.sync !== undefined &&
+            driver.entry(bucket) !== undefined &&
             (afterOps.get(bucket)?.size ?? 0) > 0,
         )
         const contradicted =
@@ -1015,7 +1015,7 @@ async function runHistory(
             .map((op) => op.bucket),
         )
         const throwTargets = [...rowBuckets].filter(
-          (bucket) => driver.entry(bucket)?.sync !== undefined,
+          (bucket) => driver.entry(bucket) !== undefined,
         )
         // A facade created in this flush: no facade before the flush, and the
         // pending operations leave its bucket active with rows to commit.

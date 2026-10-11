@@ -320,7 +320,9 @@ export class BucketFacadeAdapter {
       for (const key of snapshot.written.get(entry)!) {
         const row = before.get(key)
         if (!row) {
-          sync.write({ type: `delete`, key })
+          // A key that netted to no change has no row to remove.
+          if (entry.collection._state.getAcceptedSyncedRow(key) !== undefined)
+            sync.write({ type: `delete`, key })
           continue
         }
         if (row.order !== undefined) entry.order.set(row.value, row.order)
@@ -453,13 +455,14 @@ export class BucketFacadeAdapter {
     })
     const dispose = collection.cleanup.bind(collection)
     // Other parent rows can share this facade, so a holder must not end it.
-    collection.cleanup = () => {
-      throw new Error(
-        devBuild() && process.env.NODE_ENV !== `production`
-          ? `A live query's child collection cannot be cleaned up directly. Clean up the live query instead.`
-          : codedMessage(239),
+    collection.cleanup = () =>
+      Promise.reject(
+        new Error(
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `A live query's child collection cannot be cleaned up directly. Clean up the live query instead.`
+            : codedMessage(239),
+        ),
       )
-    }
     const entry: FacadeEntry = {
       collection,
       dispose,
@@ -479,25 +482,19 @@ export class BucketFacadeAdapter {
     hasOrderBy: boolean,
   ): void {
     const key = change.value.publicKey as string | number
-    const accepted = entry.collection._state.getAcceptedSyncedRow(key)
-    const present = accepted !== undefined
-    const previousOrder = present ? entry.order.get(accepted) : undefined
-    const nextOrder = change.value.order
-    const orderChanged = present && previousOrder !== nextOrder
-    const row = { ...this.resolve(change.value.value), $key: key }
-    if (nextOrder !== undefined) {
-      entry.order.set(row, nextOrder)
-    }
-
-    if (change.inserts > change.deletes) {
-      sync.write({ type: present ? `update` : `insert`, value: row })
-    } else if (change.inserts === change.deletes && present) {
-      sync.write({ type: `update`, value: row })
-    } else if (change.deletes > change.inserts) {
+    if (change.deletes > change.inserts) {
       sync.write({ type: `delete`, key })
       return
     }
-
+    const accepted = entry.collection._state.getAcceptedSyncedRow(key)
+    const present = accepted !== undefined
+    // A key that nets to no change while absent gets no write.
+    if (change.inserts === change.deletes && !present) return
+    const nextOrder = change.value.order
+    const orderChanged = present && entry.order.get(accepted) !== nextOrder
+    const row = { ...this.resolve(change.value.value), $key: key }
+    if (nextOrder !== undefined) entry.order.set(row, nextOrder)
+    sync.write({ type: present ? `update` : `insert`, value: row })
     if (hasOrderBy && orderChanged) sync.collection._markLayoutChange()
   }
 

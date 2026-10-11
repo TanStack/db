@@ -1806,11 +1806,7 @@ describe(`Collection-valued includes oracle`, () => {
       const rootSubscription = live.subscribeChanges(
         () => {
           rootSnapshots.push(facade.toArray.map(({ value }) => value))
-          try {
-            void facade.cleanup()
-          } catch (error) {
-            cleanupErrors.push(error)
-          }
+          facade.cleanup().catch((error: unknown) => cleanupErrors.push(error))
         },
         { includeInitialState: false },
       )
@@ -1830,6 +1826,7 @@ describe(`Collection-valued includes oracle`, () => {
             value: { id: 10, kind: `child`, group: 1, value: 2 },
           },
         ])
+        await Promise.resolve()
         expect(rootSnapshots).toEqual([[2]])
         expect(cleanupErrors).toHaveLength(1)
         expect(String(cleanupErrors[0])).toMatch(

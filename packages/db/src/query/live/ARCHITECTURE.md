@@ -630,7 +630,7 @@ and deletes from them rather than from the visible rows. A projected row left
 at retirement is a
 contradictory graph signal: the retirement throws, and the flush aborts and
 restores every facade it wrote. The live query owns its facades:
-several parent rows can share one, so a holder's `cleanup()` throws (code 239).
+several parent rows can share one, so a holder's `cleanup()` rejects (code 239).
 The adapter disposes facades itself, when the live query is cleaned up and
 when a failed flush removes the facades it created. Ordinary Collections keep
 their cleanup and restart. A
