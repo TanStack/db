@@ -150,6 +150,16 @@ A source declaration may be placed in sibling query scopes, but one builder's
 source declaration cannot serve as both an ancestor and a descendant in an
 include. Those scopes need distinct binding IDs. Start the descendant with a
 fresh `new Query().from(...)`, even when it reads the same Collection.
+A bound reference captured from an unrelated query is outside the lexical
+scope, even when its alias matches a local source, and must be rejected before
+its expression can accept rows. This applies to join operands, predicates,
+grouping, ordering, and projections. Functional callbacks receive row values
+at runtime and do not carry statically inspectable binding references.
+A `QueryRef` or union branch exports its result, not its internal source
+declarations, to the containing query or an include. A joined `QueryRef` may
+read actual ancestor route context, but it does not receive the enclosing
+query's sibling source rows. A captured sibling reference inside that joined
+source must be rejected; the enclosing join condition combines the two sources.
 
 ```ts
 type SourceId = Brand<string, 'SourceId'>
@@ -1401,7 +1411,8 @@ create recursive Collection machinery.
    `unionAll()` share one alias namespace. A builder's source declaration may
    be reused in sibling includes, but an include cannot reuse it across an
    ancestor/descendant scope boundary; the descendant starts from a fresh
-   `new Query().from()`.
+   `new Query().from()`. A join operand captured outside the current and
+   ancestor scopes is rejected.
 2. **Contribution conservation:** a public row exists exactly when its reduced
    supporting weight and collision policy produce one.
 3. **Batch partition:** equivalent valid split and atomic deliveries converge.

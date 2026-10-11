@@ -44,8 +44,11 @@ import {
   PropRef,
   Value as ValClass,
   collectCollectionSources,
+  collectPropRefs,
   getFromSources,
+  getHavingExpression,
   getWhereExpression,
+  isBasicOrAggregateExpression,
   isExpressionLike,
 } from '../ir.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
@@ -81,6 +84,7 @@ import type { ValueIdentity } from '../equality-value-identity.js'
 import type { CollectionSubscription } from '../../collection/subscription.js'
 import type { OrderByOptimizationInfo } from './order-by.js'
 import type {
+  Aggregate,
   BasicExpression,
   CollectionRef,
   IncludesMaterialization,
@@ -375,7 +379,7 @@ function getCompilationValueIdentity(cache: QueryCache): ValueIdentity {
  * @param queryMapping Optional lineage from optimized queries to user-defined queries
  * @returns A CompilationResult with the pipeline, source WHERE clauses, and alias metadata
  */
-export function compileQuery(
+type CompileQueryArgs = [
   rawQuery: QueryIR,
   inputs: Record<string, KeyedStream>,
   collections: Record<string, Collection<any, any, any, any, any>>,
@@ -384,11 +388,32 @@ export function compileQuery(
   lazySources: Set<string>,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
   setWindowFn: (windowFn: (options: WindowOptions) => void) => void,
-  cache: QueryCache = new WeakMap(),
-  queryMapping: QueryMapping = new WeakMap(),
-  // For includes: parent key stream to inner-join with this query's FROM
+  cache?: QueryCache,
+  queryMapping?: QueryMapping,
   parentKeyStream?: KeyedStream,
   childCorrelationField?: PropRef,
+]
+
+export function compileQuery(...args: CompileQueryArgs): CompilationResult {
+  return compileQueryInternal(args, false)
+}
+
+function compileQueryInternal(
+  [
+    rawQuery,
+    inputs,
+    collections,
+    subscriptions,
+    callbacks,
+    lazySources,
+    optimizableOrderByCollections,
+    setWindowFn,
+    cache = new WeakMap(),
+    queryMapping = new WeakMap(),
+    parentKeyStream,
+    childCorrelationField,
+  ]: CompileQueryArgs,
+  scopeValidated: boolean,
 ): CompilationResult {
   // Check if the original raw query has already been compiled
   const cachedResult =
@@ -401,7 +426,7 @@ export function compileQuery(
   // Validate the raw query BEFORE optimization to check user's original structure.
   // This must happen before optimization because the optimizer may create internal
   // subqueries (e.g., for predicate pushdown) that reuse aliases, which is fine.
-  validateQueryStructure(rawQuery)
+  if (!scopeValidated) validateQueryStructure(rawQuery)
 
   // Optimize the query before compilation
   const { optimizedQuery, sourceWhereClauses: aliasWhereClauses } =
@@ -573,20 +598,28 @@ export function compileQuery(
       optimizableOrderByCollections,
       setWindowFn,
       rawQuery,
-      compileQuery,
+      query.from,
+      (...args) => compileQueryInternal(args, true),
       aliasToCollectionId,
       aliasRemapping,
       sourceWhereClauses,
-      parentKeyStream !== undefined,
+      joinsParentDirectly,
       valueIdentity,
       parentKeyStream,
     )
   }
 
-  // A recursively compiled source or a correlation owned by a joined source
-  // is already parameterized by route. Once the correlation field is visible,
-  // retain only the copy whose route key matches it.
-  if (parentKeyStream && childCorrelationField && !joinsParentDirectly) {
+  // A RIGHT or FULL join can add a row without the main source after that
+  // source was filtered by parent keys. Check the correlation again once the
+  // joined row is visible; a missing main-side correlation cannot join a route.
+  const canLoseMainSide = query.join?.some(
+    ({ type }) => type === `right` || type === `full`,
+  )
+  if (
+    parentKeyStream &&
+    childCorrelationField &&
+    (!joinsParentDirectly || canLoseMainSide)
+  ) {
     const compiledChildCorrelation = compileExpression(childCorrelationField)
     pipeline = pipeline.pipe(
       filter(([, row]) =>
@@ -848,19 +881,22 @@ export function compileQuery(
           : subquery.query
 
       // Recursively compile child query WITH the parent key stream
-      const childResult = compileQuery(
-        childQuery,
-        allInputs,
-        collections,
-        subscriptions,
-        callbacks,
-        lazySources,
-        optimizableOrderByCollections,
-        setWindowFn,
-        cache,
-        queryMapping,
-        parentKeys,
-        subquery.childCorrelationField,
+      const childResult = compileQueryInternal(
+        [
+          childQuery,
+          allInputs,
+          collections,
+          subscriptions,
+          callbacks,
+          lazySources,
+          optimizableOrderByCollections,
+          setWindowFn,
+          cache,
+          queryMapping,
+          parentKeys,
+          subquery.childCorrelationField,
+        ],
+        true,
       )
 
       // Each include retains its own compilation result and lexical aliases.
@@ -1330,7 +1366,47 @@ function canonicalizeSelectedRows(
 }
 
 /** Validate each lexical scope before optimization changes the plan. */
-function validateQueryStructure(query: QueryIR): void {
+function validateExpressionBindings(
+  expression: BasicExpression | Aggregate,
+  availableBindings: ReadonlySet<string>,
+): void {
+  for (const ref of collectPropRefs(expression)) {
+    if (ref.bindingId !== undefined && !availableBindings.has(ref.bindingId)) {
+      throw new QueryCompilationError(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `Query reference "${ref.path.join(`.`)}" is out of scope. Use a source from this query or a containing query.`
+          : codedMessage(237, { path: ref.path }),
+      )
+    }
+  }
+}
+
+function validateSelectBindings(
+  value: unknown,
+  availableBindings: ReadonlySet<string>,
+): void {
+  if (value instanceof IncludesSubquery) return
+  if (isBasicOrAggregateExpression(value)) {
+    validateExpressionBindings(value, availableBindings)
+  } else if (value instanceof ConditionalSelect) {
+    for (const branch of value.branches) {
+      validateExpressionBindings(branch.condition, availableBindings)
+      validateSelectBindings(branch.value, availableBindings)
+    }
+    if (value.defaultValue !== undefined) {
+      validateSelectBindings(value.defaultValue, availableBindings)
+    }
+  } else if (isNestedSelectObject(value)) {
+    for (const nested of Object.values(value)) {
+      validateSelectBindings(nested, availableBindings)
+    }
+  }
+}
+
+function validateQueryStructure(
+  query: QueryIR,
+  ancestorBindings: ReadonlySet<string> = new Set(),
+): void {
   // One scope cannot name two sources alike.
   const levelAliases = getAllSources(query).map((source) => source.alias)
   for (const [index, alias] of levelAliases.entries()) {
@@ -1343,31 +1419,63 @@ function validateQueryStructure(query: QueryIR): void {
     }
   }
 
-  // Recursively validate FROM subqueries
+  const availableBindings = new Set(ancestorBindings)
+
+  // A FROM subquery sees ancestors, but not its own enclosing source
+  // declaration. Union branches do not expose their sources to one another.
   if (query.from.type === `unionAll`) {
     for (const branch of query.from.queries) {
-      validateQueryStructure(branch)
+      validateQueryStructure(branch, ancestorBindings)
     }
   } else {
     for (const source of getFromSources(query.from)) {
       if (source.type === `queryRef`) {
-        validateQueryStructure(source.query)
+        validateQueryStructure(source.query, ancestorBindings)
       }
+      availableBindings.add(source.bindingId)
     }
   }
 
-  // Recursively validate JOIN subqueries
+  // Each join may read sources declared before it and its joined source.
+  // A binding captured from an unrelated query is not an ancestor, even if
+  // that query happened to use the same alias text.
   if (query.join) {
     for (const joinClause of query.join) {
       if (joinClause.from.type === `queryRef`) {
-        validateQueryStructure(joinClause.from.query)
+        validateQueryStructure(joinClause.from.query, ancestorBindings)
       }
+      const joinBindings = new Set(availableBindings)
+      joinBindings.add(joinClause.from.bindingId)
+      validateExpressionBindings(joinClause.on, joinBindings)
+      availableBindings.add(joinClause.from.bindingId)
     }
   }
 
+  for (const where of query.where ?? []) {
+    validateExpressionBindings(getWhereExpression(where), availableBindings)
+  }
+  for (const expression of query.groupBy ?? []) {
+    validateExpressionBindings(expression, availableBindings)
+  }
+  for (const having of query.having ?? []) {
+    validateExpressionBindings(getHavingExpression(having), availableBindings)
+  }
+  for (const { expression } of query.orderBy ?? []) {
+    validateExpressionBindings(expression, availableBindings)
+  }
   if (query.select) {
+    validateSelectBindings(query.select, availableBindings)
     for (const { subquery } of extractIncludesFromSelect(query.select)) {
-      validateQueryStructure(subquery.query)
+      validateExpressionBindings(subquery.correlationField, availableBindings)
+      const childBindings = new Set(availableBindings)
+      for (const source of getAllSources(subquery.query)) {
+        childBindings.add(source.bindingId)
+      }
+      validateExpressionBindings(subquery.childCorrelationField, childBindings)
+      for (const where of subquery.parentFilters ?? []) {
+        validateExpressionBindings(getWhereExpression(where), childBindings)
+      }
+      validateQueryStructure(subquery.query, availableBindings)
     }
   }
 }
@@ -1586,18 +1694,22 @@ function processUnionAll(
       }
       branchAliases.add(source.alias)
     }
-    const branchResult = compileQuery(
-      branch,
-      allInputs,
-      collections,
-      subscriptions,
-      callbacks,
-      lazySources,
-      optimizableOrderByCollections,
-      setWindowFn,
-      cache,
-      queryMapping,
-      parentKeyStream,
+    const branchResult = compileQueryInternal(
+      [
+        branch,
+        allInputs,
+        collections,
+        subscriptions,
+        callbacks,
+        lazySources,
+        optimizableOrderByCollections,
+        setWindowFn,
+        cache,
+        queryMapping,
+        parentKeyStream,
+        undefined,
+      ],
+      true,
     )
 
     if (!mainCollectionId) {
@@ -1754,18 +1866,22 @@ function processFrom(
         originalQuery && queriesMatchForCaching(from.query, originalQuery)
           ? originalQuery
           : from.query
-      const subQueryResult = compileQuery(
-        queryToCompile,
-        allInputs,
-        collections,
-        subscriptions,
-        callbacks,
-        lazySources,
-        optimizableOrderByCollections,
-        setWindowFn,
-        cache,
-        queryMapping,
-        parentKeyStream,
+      const subQueryResult = compileQueryInternal(
+        [
+          queryToCompile,
+          allInputs,
+          collections,
+          subscriptions,
+          callbacks,
+          lazySources,
+          optimizableOrderByCollections,
+          setWindowFn,
+          cache,
+          queryMapping,
+          parentKeyStream,
+          undefined,
+        ],
+        true,
       )
 
       // Pull up alias mappings from subquery to parent scope.
