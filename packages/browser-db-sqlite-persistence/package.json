@@ -43,6 +43,8 @@
         "default": "./dist/cjs/index.cjs"
       }
     },
+    "./wa-sqlite.wasm": "./dist/wa-sqlite.wasm",
+    "./assets/*": "./dist/assets/*",
     "./package.json": "./package.json"
   },
   "sideEffects": false,

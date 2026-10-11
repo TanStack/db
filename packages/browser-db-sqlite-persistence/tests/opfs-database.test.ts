@@ -187,6 +187,16 @@ afterEach(() => {
 })
 
 describe(`openBrowserWASQLiteOPFSDatabase`, () => {
+  it(`reports unavailable when the page location is missing`, async () => {
+    installWorkerTestEnvironment()
+    vi.stubGlobal(`location`, undefined)
+
+    await expect(
+      openBrowserWASQLiteOPFSDatabase({ databaseName: `phase-7.sqlite` }),
+    ).rejects.toBeInstanceOf(PersistenceUnavailableError)
+    expect(FakeWorker.instances).toHaveLength(0)
+  })
+
   it(`initializes via worker and supports execute + close`, async () => {
     installWorkerTestEnvironment({
       executeRows: [{ id: `1`, title: `from worker` }],
