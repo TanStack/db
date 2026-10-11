@@ -95,10 +95,11 @@ type GeneratedHistory = {
   /** The operation whose publication meets a throwing subscriber. */
   throwOn?: number
   /**
-   * The throwing operation runs inside a subscriber of another Collection,
-   * during that Collection's own write.
+   * The throwing operation runs inside a change subscriber during another
+   * write: of another Collection, or of this Collection on a key outside the
+   * model, which is removed again afterwards.
    */
-  nested?: boolean
+  nested?: `other` | `same`
 }
 
 type GeneratedStep = { key: Key; deleteWhenPresent: boolean }
@@ -375,7 +376,7 @@ async function runHistory(
   id: string,
   indexType?: IndexType,
   throwOn?: number,
-  nested = false,
+  nested?: `other` | `same`,
 ): Promise<void> {
   const initialRows = [...expectedRowsAfter(initialKeys, [])].map(
     ([, row]) => row,
@@ -457,16 +458,20 @@ async function runHistory(
     // publishes. A local-only direct write stores its rows as it publishes
     // them, so the throw cannot undo the write: the call rethrows, and its
     // transaction still settles. The rows and the mirror follow the model.
-    // When the operation runs inside another Collection's subscriber, the
-    // failure is still this call's, and the outer write succeeds.
+    // When the operation runs inside another write's subscriber, the failure
+    // is still this call's, and the outer write succeeds. Inside this
+    // Collection's own publication the operation takes the transaction path,
+    // so its failure rolls it back instead. The subscriber
+    // throws only for the operation's key.
     const injected = new Error(`subscriber failed`)
-    let armed = false
+    let armedKey: Key | undefined
     const throwing =
       throwOn === undefined
         ? undefined
         : collection.subscribeChanges(
-            () => {
-              if (armed) throw injected
+            (changes) => {
+              if (changes.some((change) => change.key === armedKey))
+                throw injected
             },
             { includeInitialState: true },
           )
@@ -481,11 +486,12 @@ async function runHistory(
         getKey: (item: TestItem) => item.id,
       }),
     )
-    const applyNested = (op: Op) => {
+    const OUTER_KEY = 99
+    const applyNested = (op: Op, target: typeof collection) => {
       let inner: { error: unknown } | undefined
       let ran = false
-      const subscription = outer.subscribeChanges(() => {
-        if (ran) return
+      const subscription = target.subscribeChanges((changes) => {
+        if (ran || changes.every((change) => change.key !== OUTER_KEY)) return
         ran = true
         try {
           applyOp(collection, op)
@@ -495,7 +501,7 @@ async function runHistory(
       })
       let outerError: unknown
       try {
-        outer.insert({ id: outer.size + 1, name: `outer`, fileId: `f1` })
+        target.insert({ id: OUTER_KEY, name: `outer`, fileId: `f1` })
       } catch (error) {
         outerError = error
       } finally {
@@ -503,17 +509,32 @@ async function runHistory(
       }
       expect(ran, `nested write ran`).toBe(true)
       expect(outerError, `outer write unaffected`).toBe(undefined)
+      // The outer row is outside the model; remove it again.
+      target.delete(OUTER_KEY)
       if (inner) throw inner.error
     }
     const applyAt = (op: Op, operationIndex: number) => {
       if (operationIndex !== throwOn) return applyOp(collection, op)
-      armed = true
+      armedKey = op.key
       const before = created.length
       try {
-        if (nested) applyNested(op)
+        if (nested) applyNested(op, nested === `same` ? collection : outer)
         else applyOp(collection, op)
       } catch (error) {
         expect(error, `operation ${operationIndex} rethrows`).toBe(injected)
+        if (nested === `same`) {
+          // During this Collection's own publication the operation takes the
+          // transaction path, so its subscriber failure rolls it back. The
+          // outer insert and its removal also create transactions. Apply the
+          // operation again, unobserved, so the history continues as planned.
+          expect(created.length, `transactions created`).toBe(before + 3)
+          expect(
+            (created[before + 1] as unknown as { state: string }).state,
+            `operation ${operationIndex} rolls back`,
+          ).toBe(`failed`)
+          armedKey = undefined
+          return applyOp(collection, op)
+        }
         expect(created.length, `one transaction`).toBe(before + 1)
         expect(
           (created[before] as unknown as { state: string }).state,
@@ -521,7 +542,7 @@ async function runHistory(
         ).toBe(`completed`)
         return created[before]!
       } finally {
-        armed = false
+        armedKey = undefined
       }
       throw new Error(`operation ${operationIndex} did not meet the throw`)
     }
@@ -759,7 +780,7 @@ describe(`change-event history oracle`, () => {
       mode: fc.constantFrom(`batched` as const, `sequential` as const),
       // About one history in three meets a throwing subscriber.
       throwOn: fc.option(fc.nat(19), { nil: undefined, freq: 2 }),
-      nested: fc.boolean(),
+      nested: fc.constantFrom(undefined, `other` as const, `same` as const),
     })
     .map(({ initialKeys, steps, mode, throwOn, nested }) => {
       const sequence = opsFromPresence(initialKeys, steps, 1)
