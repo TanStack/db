@@ -90,8 +90,10 @@ import type {
  * from their original persistence read.
  * A managed on-demand cache has a separate claim boundary. Once its claim
  * expires, old rows and source callbacks cannot populate the replacement
- * generation. Recovery reacquires active subsets, current index declarations,
- * and a renewal timer after the provider restarts. A transient renewal error
+ * generation. A source with its own restart hook controls that handoff; a
+ * custom source without one is cleaned up and reentered with fresh callbacks.
+ * Recovery reacquires active subsets, current index declarations,
+ * and a renewal timer after the source restarts. A transient renewal error
  * alone does not establish claim loss; adapter operations still check claims.
  *
  * `foldDurabilityLedger` is the independent model for append-only source
@@ -20543,56 +20545,177 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
   })
 
-  // A managed source with no provider-session restart cannot promise that an
-  // old asynchronous callback will stop after rotation. The independent law
-  // refuses this recovery before changing durable authority. Demand rejection,
-  // absence of rotation, and absence of public stale rows are the observations.
-  it(`refuses cache rotation when the managed source cannot restart`, async () => {
-    const adapter = createRecordingAdapter([
-      { id: `stale`, title: `Old persisted row` },
-    ])
-    let rotations = 0
-    let revokeClaim = false
+  // A custom source is allowed to omit a provider-specific restart hook. Its
+  // Collection must still recover after claim expiry: the wrapper ends the old
+  // source session, rotates storage, and starts a fresh source session. A held
+  // callback from the retired session has no authority over new public rows or
+  // durable storage. The source-session and row ledgers are independent of the
+  // wrapper's recovery flags.
+  it.each([false, true])(
+    `restarts a custom on-demand source after its cache claim expires (prior demand=%s)`,
+    async (priorDemand) => {
+      const adapter = createRecordingAdapter([
+        { id: `stale`, title: `Old persisted row` },
+      ])
+      let rotations = 0
+      let sourceStarts = 0
+      let sourceCleanups = 0
+      const sourceSessions: Array<TodoSyncParams> = []
+      let revokeClaim = false
+      adapter.claimCacheGeneration = async () => ({
+        storageCollectionId: `old-storage`,
+        claimId: `old-claim`,
+        expiresAtMs: Date.now() + 10_000,
+      })
+      adapter.renewCacheGenerationClaim = async (_storageId, claimId) =>
+        revokeClaim && claimId === `old-claim` ? undefined : Date.now() + 10_000
+      adapter.rotateCacheGeneration = async () => {
+        rotations++
+        return {
+          storageCollectionId: `new-storage`,
+          claimId: `new-claim`,
+        }
+      }
+      adapter.releaseCacheGenerationClaim = async () => {}
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `custom-cache-source`,
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: (params) => {
+              const session = ++sourceStarts
+              sourceSessions.push(params)
+              params.markReady()
+              return {
+                cleanup: () => {
+                  sourceCleanups++
+                },
+                loadSubset: async () => {
+                  params.begin()
+                  params.write({
+                    type: `update`,
+                    value: {
+                      id: `row-${session}`,
+                      title: `Session ${session}`,
+                    },
+                  })
+                  await params.commit()
+                },
+              }
+            },
+          },
+          persistence: { adapter },
+        }),
+      )
+      const releaseOldCallback = createEventGate()
+      let lateCallback: Promise<void> | undefined
+
+      try {
+        await collection.stateWhenReady()
+        expect(sourceStarts).toBe(1)
+        const oldSource = sourceSessions[0]!
+        lateCallback = (async () => {
+          await releaseOldCallback.promise
+          oldSource.begin()
+          oldSource.write({
+            type: `insert`,
+            value: { id: `late-old`, title: `Retired session` },
+          })
+          await oldSource.commit()
+        })()
+        if (priorDemand) {
+          await collection._sync.loadSubset({ limit: 2 })
+          expect(collection.get(`row-1`)).toBeDefined()
+        }
+        revokeClaim = true
+        await collection._sync.loadSubset({ limit: 1 })
+        expect(sourceStarts).toBe(2)
+        expect(sourceCleanups).toBe(1)
+        expect(rotations).toBe(1)
+        expect(collection.get(`stale`)).toBeUndefined()
+        expect(collection.get(`row-1`)).toBeUndefined()
+        expect(collection.get(`row-2`)).toMatchObject({
+          id: `row-2`,
+          title: `Session 2`,
+        })
+        releaseOldCallback.resolve()
+        await lateCallback
+        expect(collection.get(`late-old`)).toBeUndefined()
+        expect(
+          adapter.applyCommittedTxCalls.some(({ tx }) =>
+            tx.mutations.some(({ key }) => key === `late-old`),
+          ),
+        ).toBe(false)
+      } finally {
+        releaseOldCallback.resolve()
+        await Promise.allSettled([lateCallback])
+        await collection.cleanup()
+      }
+    },
+  )
+
+  // Cleanup can win after the old custom session retires but before SQLite
+  // returns its replacement claim. That history owns one source cleanup and
+  // must not start another source session after Collection disposal.
+  it(`does not restart a custom source after cleanup wins a held rotation`, async () => {
+    const adapter = createRecordingAdapter()
+    const rotationEntered = createEventGate()
+    const releaseRotation = createEventGate()
+    let sourceStarts = 0
+    let sourceCleanups = 0
     adapter.claimCacheGeneration = async () => ({
       storageCollectionId: `old-storage`,
       claimId: `old-claim`,
-      expiresAtMs: Date.now() + 10_000,
     })
-    adapter.renewCacheGenerationClaim = async () =>
-      revokeClaim ? undefined : Date.now() + 10_000
+    adapter.renewCacheGenerationClaim = async () => Date.now() + 10_000
     adapter.rotateCacheGeneration = async () => {
-      rotations++
-      return {
-        storageCollectionId: `new-storage`,
-        claimId: `new-claim`,
-      }
+      rotationEntered.resolve()
+      await releaseRotation.promise
+      return { storageCollectionId: `new-storage`, claimId: `new-claim` }
     }
     adapter.releaseCacheGenerationClaim = async () => {}
+    let source!: TodoSyncParams
     const collection = createCollection(
       persistedCollectionOptions<Todo, string>({
-        id: `unrestartable-cache-source`,
+        id: `custom-cleanup-during-rotation`,
         syncMode: `on-demand`,
         getKey: (row) => row.id,
         sync: {
           sync: (params) => {
+            sourceStarts++
+            source = params
             params.markReady()
-            return { loadSubset: async () => {} }
+            return {
+              cleanup: () => {
+                sourceCleanups++
+              },
+            }
           },
         },
         persistence: { adapter },
       }),
     )
-
+    let recovery: Promise<void> | undefined
     try {
+      collection.startSyncImmediate()
       await collection.stateWhenReady()
-      revokeClaim = true
-      await expect(collection._sync.loadSubset({ limit: 1 })).rejects.toThrow(
-        `must implement restartAfterScopedRecovery`,
+      recovery = source.metadata!.persistence!.startScopedRecovery!()
+      void recovery.catch(() => undefined)
+      await atPersistedOracleCheckpoint(
+        rotationEntered.promise,
+        `held custom cache rotation`,
       )
-      expect(rotations).toBe(0)
-      expect(collection.get(`stale`)).toBeUndefined()
-      expect(adapter.applyCommittedTxCalls).toEqual([])
+      await collection.cleanup()
+      releaseRotation.resolve()
+      await Promise.allSettled([recovery])
+      expect({ sourceStarts, sourceCleanups }).toEqual({
+        sourceStarts: 1,
+        sourceCleanups: 1,
+      })
     } finally {
+      releaseRotation.resolve()
+      await Promise.allSettled([recovery])
       await collection.cleanup()
     }
   })

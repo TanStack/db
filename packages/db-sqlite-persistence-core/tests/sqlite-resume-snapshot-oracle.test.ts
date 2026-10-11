@@ -279,6 +279,103 @@ async function observeCachedSchemaState(
  * node:sqlite, not an elapsed-time or browser OPFS latency guarantee.
  */
 describe(`SQLite resume snapshots`, () => {
+  // Claim expiry is a real SQLite boundary, while source-session restart is a
+  // wrapper obligation. This receiving history joins them: after an expired
+  // claim, a custom on-demand source without a provider hook is reentered.
+  // The old callback cannot publish or durably write into the new physical
+  // cache. Public rows and a claimed SQLite read are checked after demand.
+  it(`restarts a custom source after a real SQLite cache claim expires`, async () => {
+    type Row = { id: string; title: string }
+    const database = new DatabaseSync(`:memory:`)
+    const logicalId = `custom-expired-cache`
+    let now = 1_000
+    const adapter = new SQLiteCorePersistenceAdapter({
+      driver: createDriver(database),
+      cacheGenerationClaimTtlMs: 300_000,
+      now: () => now,
+    })
+    const sessions: Array<Parameters<SyncConfig<Row, string>[`sync`]>[0]> = []
+    let cleanups = 0
+    const collection = createCollection(
+      persistedCollectionOptions<Row, string>({
+        id: logicalId,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            const session = sessions.push(params)
+            params.markReady()
+            return {
+              cleanup: () => {
+                cleanups++
+              },
+              loadSubset: async () => {
+                params.begin()
+                params.write({
+                  type: `update`,
+                  value: { id: `row-${session}`, title: `Session ${session}` },
+                })
+                await whenSyncAccepted(params.commit())
+              },
+            }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    let primaryFailure: unknown
+    try {
+      collection.startSyncImmediate()
+      await collection.stateWhenReady()
+      await collection._sync.loadSubset({ limit: 1 })
+      expect(collection.get(`row-1`)).toMatchObject({ id: `row-1` })
+      const oldClaim = database
+        .prepare(
+          `SELECT claim_id, physical_id FROM cache_generation_claim
+           WHERE logical_id = ? AND expires_at_ms > ?`,
+        )
+        .get(logicalId, now) as { claim_id: string; physical_id: string }
+
+      now += 300_001
+      await collection._sync.loadSubset({ limit: 2 })
+      expect(sessions).toHaveLength(2)
+      expect(cleanups).toBe(1)
+      expect(collection.get(`row-1`)).toBeUndefined()
+      expect(collection.get(`row-2`)).toMatchObject({ id: `row-2` })
+      const newClaim = database
+        .prepare(
+          `SELECT claim_id, physical_id FROM cache_generation_claim
+           WHERE logical_id = ? AND expires_at_ms > ?`,
+        )
+        .get(logicalId, now) as { claim_id: string; physical_id: string }
+      expect(newClaim.physical_id).not.toBe(oldClaim.physical_id)
+
+      sessions[0]!.begin()
+      sessions[0]!.write({
+        type: `update`,
+        value: { id: `late-old`, title: `Retired session` },
+      })
+      await sessions[0]!.commit()
+      expect(collection.get(`late-old`)).toBeUndefined()
+      const durable = await adapter.loadSubset(
+        {
+          kind: `managed`,
+          storageCollectionId: newClaim.physical_id,
+          claimId: newClaim.claim_id,
+        },
+        {},
+        { cacheGenerationClaimId: newClaim.claim_id },
+      )
+      expect(durable.map(({ key }) => key).sort()).toEqual([`row-2`])
+    } catch (error) {
+      primaryFailure = error
+      throw error
+    } finally {
+      await collection.cleanup()
+      closeDatabasePreservingPrimary(database, primaryFailure)
+    }
+  })
+
   // A storage target states whether the caller owns an eager Collection or a
   // claimed cache generation. The independent rule is simple: collection of a
   // generation ends that claim's authority, so its target cannot read or write

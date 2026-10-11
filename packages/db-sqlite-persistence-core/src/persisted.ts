@@ -2287,14 +2287,6 @@ class PersistedCollectionRuntime<
     this.clearCacheClaimRenewal()
     const lifecycleGeneration = this.lifecycleGeneration
     const restartSource = this.restartSourceAfterScopedRecovery
-    if (this.cacheGenerationClaim && restartSource === null) {
-      throw this.markTerminalFailure(
-        new InvalidPersistedCollectionConfigError(
-          `A managed on-demand cache source must implement restartAfterScopedRecovery`,
-        ),
-        lifecycleGeneration,
-      )
-    }
     // Invalidate an in-flight old-cache read before yielding to the mutex.
     this.scopedRecovery = true
     this.scopedRecoveryPending = true
@@ -5395,6 +5387,7 @@ function createWrappedSyncConfig<
       const isCleanedUp = () => startupState.cleanedUp
       type SubsetAcquisition = {
         forwarded: boolean
+        source?: SyncConfigRes
         cancelAdmissionWait?: () => void
       }
       const acquisitions = new Map<LoadSubsetOptions, SubsetAcquisition>()
@@ -5579,6 +5572,7 @@ function createWrappedSyncConfig<
         },
       }
 
+      let sourceSession = 0
       const wrappedParams = {
         ...params,
         markError: reportUpstreamError,
@@ -6006,9 +6000,183 @@ function createWrappedSyncConfig<
         },
       }
 
+      // Each invocation of a custom source owns its callbacks. Retiring that
+      // invocation before rotation makes late work harmless even when the
+      // source does not provide its own restart hook.
+      const sourceParamsFor = (session: number) => {
+        const active = () =>
+          !startupState.cleanedUp && session === sourceSession
+        const metadata = wrappedParams.metadata
+        return {
+          ...wrappedParams,
+          markReady: () => {
+            if (active()) wrappedParams.markReady()
+          },
+          markError: (error?: unknown) => {
+            if (active()) wrappedParams.markError(error)
+          },
+          begin: () => {
+            if (active()) wrappedParams.begin()
+          },
+          write: (message: ChangeMessageOrDeleteKeyMessage<T, TKey>) => {
+            if (active()) wrappedParams.write(message)
+          },
+          truncate: () => {
+            if (active()) wrappedParams.truncate()
+          },
+          commit: (signal?: AbortSignal) =>
+            active() ? wrappedParams.commit(signal) : true,
+          metadata: metadata && {
+            ...metadata,
+            row: {
+              get: (key: TKey) =>
+                active() ? metadata.row.get(key) : undefined,
+              set: (key: TKey, value: unknown) => {
+                if (active()) metadata.row.set(key, value)
+              },
+              delete: (key: TKey) => {
+                if (active()) metadata.row.delete(key)
+              },
+            },
+            collection: {
+              get: (key: string) =>
+                active() ? metadata.collection.get(key) : undefined,
+              set: (key: string, value: unknown) => {
+                if (active()) metadata.collection.set(key, value)
+              },
+              delete: (key: string) => {
+                if (active()) metadata.collection.delete(key)
+              },
+              list: (prefix?: string) =>
+                active() ? metadata.collection.list(prefix) : [],
+            },
+            persistence: {
+              ...metadata.persistence,
+              reserveCommitTurn: () => {
+                if (active()) metadata.persistence.reserveCommitTurn()
+              },
+              hydrateBaseline: () =>
+                active()
+                  ? metadata.persistence.hydrateBaseline()
+                  : Promise.resolve(),
+              startScopedRecovery: (resetMetadata?: {
+                key: string
+                value: unknown
+              }) =>
+                active()
+                  ? (metadata.persistence.startScopedRecovery?.(
+                      resetMetadata,
+                    ) ?? Promise.resolve())
+                  : Promise.resolve(),
+              scanPersistedRows: (
+                options?: Parameters<
+                  typeof metadata.persistence.scanPersistedRows
+                >[0],
+              ) =>
+                active()
+                  ? metadata.persistence.scanPersistedRows(options)
+                  : Promise.resolve([]),
+              resumeSnapshot: {
+                certify: () =>
+                  active()
+                    ? metadata.persistence.resumeSnapshot.certify()
+                    : Promise.resolve(),
+                getKeySetEvidence: () =>
+                  active()
+                    ? metadata.persistence.resumeSnapshot.getKeySetEvidence()
+                    : undefined,
+                expectCurrentCommit: () => {
+                  if (active())
+                    metadata.persistence.resumeSnapshot.expectCurrentCommit()
+                },
+              },
+            },
+          },
+        }
+      }
+
       let sourceResult: SyncConfigRes = {}
       let sourceResultSettled = false
       let activeSourceSyncEntry: Promise<void> | undefined
+      let sourceCleanupPromise: Promise<void> | undefined
+      let customRestartSequence = 0
+      const enterSourceSession = (): void => {
+        const session = ++sourceSession
+        let settleSourceSyncEntry!: () => void
+        activeSourceSyncEntry = new Promise<void>((resolve) => {
+          settleSourceSyncEntry = resolve
+        })
+        try {
+          sourceResult = normalizeSyncFnResult(
+            sourceSyncConfig.sync(
+              runtime.hasManagedCacheGeneration()
+                ? sourceParamsFor(session)
+                : wrappedParams,
+            ),
+          )
+          // A coordinator acquisition owns the source session that accepted
+          // it. A late release must not unload the replacement session.
+          if (!startupState.cleanedUp && sourceResult.loadSubset) {
+            const ownerSource = sourceResult
+            const loadSubset = async (
+              options: TransportedLoadSubsetOptions,
+            ) => {
+              if (startupState.cleanedUp || session !== sourceSession) {
+                throw new Error(`persisted sync source is no longer active`)
+              }
+              await ownerSource.loadSubset?.(
+                options as unknown as LoadSubsetOptions,
+              )
+            }
+            runtime.registerRemoteSubsetOwner(
+              Object.assign(loadSubset, {
+                unloadSubset: (options: TransportedLoadSubsetOptions) =>
+                  ownerSource.unloadSubset?.(
+                    options as unknown as LoadSubsetOptions,
+                  ),
+                onError: (error: unknown) => {
+                  if (session === sourceSession) reportUpstreamError(error)
+                },
+              }),
+            )
+          }
+        } finally {
+          activeSourceSyncEntry = undefined
+          settleSourceSyncEntry()
+        }
+      }
+      const restartCustomSource = (cacheRotated: Promise<void>) => {
+        const restartSequence = ++customRestartSequence
+        // Synchronous retirement is required by the recovery boundary. Any
+        // open old-source transaction is abandoned before the new cache binds.
+        if (!sourceCleanupPromise) {
+          sourceSession++
+          const abortError = new SyncTransactionAbortedError()
+          for (const transaction of transactionStack) {
+            settlePublicationAdmissionWaiters(transaction, abortError)
+          }
+          transactionStack.length = 0
+          const retiredResult = sourceResult
+          sourceCleanupPromise = Promise.resolve().then(() =>
+            retiredResult.cleanup?.(),
+          )
+        }
+        return Promise.all([sourceCleanupPromise, cacheRotated]).then(() => {
+          if (
+            startupState.cleanedUp ||
+            restartSequence !== customRestartSequence
+          )
+            return
+          sourceCleanupPromise = undefined
+          enterSourceSession()
+          runtime.setSourceRestartAfterScopedRecovery(
+            sourceResult.restartAfterScopedRecovery ??
+              (runtime.hasManagedCacheGeneration()
+                ? restartCustomSource
+                : undefined),
+          )
+        })
+      }
       fullStartPromise = runtime.ensureStarted()
       // Startup can fail before the source reaches markReady or loadSubset,
       // which are the two eventual consumers of this outer adopting promise.
@@ -6024,42 +6192,13 @@ function createWrappedSyncConfig<
           return sourceResult
         }
 
-        let settleSourceSyncEntry!: () => void
-        activeSourceSyncEntry = new Promise<void>((resolve) => {
-          settleSourceSyncEntry = resolve
-        })
-        try {
-          sourceResult = normalizeSyncFnResult(
-            sourceSyncConfig.sync(wrappedParams),
-          )
-        } finally {
-          activeSourceSyncEntry = undefined
-          settleSourceSyncEntry()
-        }
-        // Cleanup can reenter while the source sync function is still active.
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-        if (!startupState.cleanedUp && sourceResult.loadSubset) {
-          const loadSubset = async (options: TransportedLoadSubsetOptions) => {
-            if (startupState.cleanedUp) {
-              throw new Error(`persisted sync source is no longer active`)
-            }
-            await sourceResult.loadSubset?.(
-              options as unknown as LoadSubsetOptions,
-            )
-          }
-          runtime.registerRemoteSubsetOwner(
-            Object.assign(loadSubset, {
-              unloadSubset: (options: TransportedLoadSubsetOptions) =>
-                sourceResult.unloadSubset?.(
-                  options as unknown as LoadSubsetOptions,
-                ),
-              onError: reportUpstreamError,
-            }),
-          )
-        }
+        enterSourceSession()
         sourceResultSettled = true
         runtime.setSourceRestartAfterScopedRecovery(
-          sourceResult.restartAfterScopedRecovery,
+          sourceResult.restartAfterScopedRecovery ??
+            (runtime.hasManagedCacheGeneration()
+              ? restartCustomSource
+              : undefined),
         )
         return sourceResult
       })()
@@ -6088,9 +6227,11 @@ function createWrappedSyncConfig<
           transactionStack.length = 0
           let sourceCleanup: Promise<void>
           try {
-            sourceCleanup = sourceSyncEntry
-              ? sourceSyncEntry.then(() => sourceResult.cleanup?.())
-              : Promise.resolve(sourceResult.cleanup?.())
+            sourceCleanup =
+              sourceCleanupPromise ??
+              (sourceSyncEntry
+                ? sourceSyncEntry.then(() => sourceResult.cleanup?.())
+                : Promise.resolve(sourceResult.cleanup?.()))
           } catch (error) {
             sourceCleanup = Promise.reject(error)
           }
@@ -6118,10 +6259,9 @@ function createWrappedSyncConfig<
           if (runtimeOutcome.status === `rejected`) throw runtimeOutcome.reason
         },
         loadSubset: (options: LoadSubsetOptions): true | Promise<void> => {
-          const acquisition = { forwarded: false }
+          const acquisition: SubsetAcquisition = { forwarded: false }
           acquisitions.set(options, acquisition)
           const forwardUpstream = (
-            resolvedSourceResult: SyncConfigRes,
             loadOptions: LoadSubsetOptions,
           ): true | Promise<void> => {
             // Hydration is another async boundary. A release before this
@@ -6132,14 +6272,17 @@ function createWrappedSyncConfig<
             ) {
               return true
             }
-            if (!resolvedSourceResult.loadSubset) return true
+            const currentSource = sourceResult
+            if (!currentSource.loadSubset) return true
             acquisition.forwarded = true
+            acquisition.source = currentSource
             try {
               // Returning a promise transfers its lease even if it rejects.
               // Only a synchronous throw leaves no upstream lease to release.
-              return resolvedSourceResult.loadSubset(loadOptions)
+              return currentSource.loadSubset(loadOptions)
             } catch (error) {
               acquisition.forwarded = false
+              acquisition.source = undefined
               throw error
             }
           }
@@ -6191,7 +6334,7 @@ function createWrappedSyncConfig<
           const hydrated =
             sourceResultSettled && !needsPublicationAdmission
               ? runtime.loadHydratedSubset(options, (loadOptions) =>
-                  forwardUpstream(sourceResult, loadOptions),
+                  forwardUpstream(loadOptions),
                 )
               : undefined
           if (hydrated !== undefined) {
@@ -6200,7 +6343,7 @@ function createWrappedSyncConfig<
 
           const work = (async () => {
             await fullStartPromise
-            const resolvedSourceResult = await sourceResultPromise
+            await sourceResultPromise
             if (
               startupState.cleanedUp ||
               acquisitions.get(options) !== acquisition
@@ -6225,8 +6368,7 @@ function createWrappedSyncConfig<
             }
             return runtime.loadSubset(
               options,
-              (loadOptions) =>
-                forwardUpstream(resolvedSourceResult, loadOptions),
+              (loadOptions) => forwardUpstream(loadOptions),
               () => {
                 hydrationStarted = true
               },
@@ -6243,7 +6385,9 @@ function createWrappedSyncConfig<
           acquisitions.delete(options)
           runtime.unloadSubset(
             options,
-            acquisition?.forwarded ? sourceResult.unloadSubset : undefined,
+            acquisition?.forwarded
+              ? acquisition.source?.unloadSubset
+              : undefined,
           )
         },
       }

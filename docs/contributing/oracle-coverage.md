@@ -2092,6 +2092,15 @@ queued old callback cannot add a source request; the new notice must request
 source reacquisition. These use a controlled in-process coordinator whose recording
 adapter shares row storage across physical IDs. Exact durable row isolation,
 arbitrary interleavings, and native multi-tab delivery remain separate checks.
+The persisted owner varies whether a custom on-demand source has an active
+subset before claim loss. It requires one source cleanup and a new source entry
+after rotation, checks that a retained demand reaches the replacement, and
+invokes a late callback from the retired session. The callback cannot publish
+or persist its row. A real SQLite receiving history expires the first claim,
+then checks reentry, public rows, and the replacement physical cache through
+a claimed adapter read. Native-host delivery remains separate.
+The controlled owner also holds custom rotation until Collection cleanup; it
+requires one old-source cleanup and no replacement source entry after disposal.
 The same owner crosses cleanup before and after a held scoped refresh settles.
 Its raw coordinator release log requires exactly one release in both orders;
 the cleanup-first case rejected the prior double-release path at the late

@@ -416,8 +416,10 @@ export type SyncConfigRes = {
   loadSubset?: LoadSubsetFn
   unloadSubset?: UnloadSubsetFn
   /**
-   * Retire old provider callbacks synchronously. Start the replacement only
-   * after `cacheRotated` fulfills; it rejects if scoped recovery fails.
+   * Optional provider-controlled restart for a lost managed cache claim.
+   * Retire old provider callbacks synchronously and start the replacement only
+   * after `cacheRotated` fulfills; it rejects if scoped recovery fails. When
+   * absent, the persistence wrapper cleans up and reenters `sync` itself.
    */
   restartAfterScopedRecovery?: (
     cacheRotated: Promise<void>,
