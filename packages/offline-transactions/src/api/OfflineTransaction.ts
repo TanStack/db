@@ -13,6 +13,8 @@ export class OfflineTransaction {
   private idempotencyKey: string
   private metadata: Record<string, any>
   private transaction: Transaction | null = null
+  /** The mutation function ran, so the executor settles the waiter. */
+  private persisting = false
   private persistTransaction: (tx: OfflineTransactionType) => Promise<void>
   private executor: any // Will be typed properly - reference to OfflineExecutor
 
@@ -41,6 +43,7 @@ export class OfflineTransaction {
       id: this.offlineId,
       autoCommit: this.autoCommit,
       mutationFn: async () => {
+        this.persisting = true
         // This is the blocking mutationFn that waits for the executor
         // First persist the transaction to the outbox
         const offlineTransaction: OfflineTransactionType = {
@@ -83,13 +86,23 @@ export class OfflineTransaction {
     })
     // A transaction without mutations completes, and one rolled back before
     // it commits fails, without its mutation function, so the executor never
-    // settles its waiter. Settle it here with the same outcome; the executor
-    // has already settled every other transaction.
+    // settles its waiter. Settle that waiter here with the same outcome. Once
+    // the mutation function runs, only the executor settles it.
     if (created)
       void this.transaction.isPersisted.promise.then(
-        () => this.executor.resolveTransaction(this.offlineId, undefined),
-        (error: Error) =>
-          this.executor.rejectTransaction(this.offlineId, error),
+        () => {
+          if (!this.persisting)
+            this.executor.resolveTransaction(this.offlineId, undefined)
+        },
+        (error: unknown) => {
+          if (!this.persisting)
+            this.executor.rejectTransaction(
+              this.offlineId,
+              error instanceof Error
+                ? error
+                : new Error(`Offline transaction was rolled back`),
+            )
+        },
       )
 
     this.transaction.mutate(() => {

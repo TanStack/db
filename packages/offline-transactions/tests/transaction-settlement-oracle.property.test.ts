@@ -52,7 +52,8 @@ import type {
  * receipt and `waitForTransactionCompletion` fulfil before any provider
  * settles. A manual transaction that rolls back before it commits may also
  * precede a position. It also settles without the provider, so its waiter
- * must reject with the same reason as its `isPersisted`. A callback that
+ * must reject with an Error that names the rollback. Once a transaction's
+ * mutation function runs, only the executor settles its waiter. A callback that
  * throws leaves its transaction pending, as core
  * transactions do, so its waiter stays pending too; that case is not
  * generated. Pinned examples
@@ -222,7 +223,7 @@ const settlementTransaction = fc.record({
   emptyBefore: fc.boolean(),
   // A manual transaction writes a row of its own and rolls back before it
   // commits. It also settles without the provider, and its waiter rejects
-  // with the rollback's error.
+  // with an Error that names the rollback.
   rolledBackBefore: fc.boolean(),
 })
 
@@ -315,17 +316,12 @@ it.each(oracleSeeds(20260913, settlementOracle))(
             )
             const expectedStatuses = Object.fromEntries([
               ...emptyReceipts.map((name) => [name, `fulfilled`]),
-              ...rolledBack.flatMap(({ wait, receipt }) => {
-                const status = actualStatuses[receipt]
-                expect(
-                  [`pending`, `fulfilled`],
-                  `${receipt} rejects`,
-                ).not.toContain(status)
-                return [
-                  [receipt, status],
-                  [wait, status],
-                ]
-              }),
+              // A plain rollback rejects isPersisted with no reason (core
+              // contract); the waiter names the rollback with an Error.
+              ...rolledBack.flatMap(({ wait, receipt }) => [
+                [receipt, undefined],
+                [wait, `Offline transaction was rolled back`],
+              ]),
               ...ids.flatMap((_id, index) => {
                 const status =
                   index < completed
@@ -4055,6 +4051,70 @@ it(`stops after failed deletion without rerunning the provider`, async () => {
     delay.mockRestore()
   }
 })
+
+// Focused witness, not a generated history: the FIFO model keeps a queued
+// transaction's optimistic rows, and a rollback while the transaction
+// persists removes them. Once the mutation function runs, the executor alone
+// settles the waiter, so a rollback must not settle it early or change its
+// outcome.
+it.each([true, false])(
+  `keeps the executor's outcome for a rollback while persisting (succeeds: %s)`,
+  async (succeeds) => {
+    const providerError = new NonRetriableError(`provider failed`)
+    const entered = gate()
+    const release = gate()
+    const env = createTestOfflineEnvironment({
+      mutationFn: async (params) => {
+        entered.resolve()
+        await release.promise
+        if (!succeeds) throw providerError
+        env.applyMutations(params.transaction.mutations)
+      },
+    })
+    const { rejections: unhandled, cleanup: cleanupUnhandled } =
+      captureUnhandledRejections()
+    const logged = vi.spyOn(console, `error`).mockImplementation(() => {})
+    try {
+      await env.waitForLeader()
+      const tx = env.executor.createOfflineTransaction({
+        mutationFnName: env.mutationFnName,
+        autoCommit: false,
+      })
+      tx.mutate(() =>
+        env.collection.insert({
+          id: `held`,
+          value: `v`,
+          completed: false,
+          updatedAt: new Date(0),
+        }),
+      )
+      const statuses: Array<unknown> = []
+      const wait = env.executor.waitForTransactionCompletion(tx.id).then(
+        () => statuses.push(`fulfilled`),
+        (error: unknown) => statuses.push(error),
+      )
+      void tx.commit().catch(() => undefined)
+      await atOracleCheckpoint(entered.promise, `provider entered`)
+      tx.rollback()
+      await turn()
+      expect(statuses, `waiter before the executor settles`).toEqual([])
+      release.resolve()
+      await atOracleCheckpoint(wait, `waiter settled`)
+      expect(statuses, `waiter outcome`).toEqual([
+        succeeds ? `fulfilled` : providerError,
+      ])
+      expect(env.serverState.has(`held`), `server row`).toBe(succeeds)
+      expect(await env.executor.peekOutbox(), `outbox`).toEqual([])
+      await turn()
+      expect(unhandled, `unhandled rejections`).toEqual([])
+    } finally {
+      release.resolve()
+      cleanupUnhandled()
+      logged.mockRestore()
+      env.executor.dispose()
+    }
+  },
+)
 
 // Focused witness, not a generated history: a failed outbox write stops the
 // executor, so a FIFO history cannot continue past it. For every commit path,
