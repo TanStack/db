@@ -2135,7 +2135,7 @@ function createElectricSync<T extends Row<unknown>>(
       // This reset is part of the current runtime's startup decision. The
       // persisted wrapper may commit it before loading the atomic baseline,
       // so carry ownership of exactly this generation into certification.
-      commitResetResumeMetadataImmediately(!scopedRecovery)
+      commitResetResumeMetadataImmediately(true)
     }
     const scopedResetState: ElectricResumeState | undefined = scopedRecovery
       ? persistedResumeState?.kind === `reset`

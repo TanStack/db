@@ -1084,6 +1084,168 @@ it(`keeps the original receipt position after a peer write and fails closed on r
   }
 })
 
+// A logical subset owner can retire while a managed cache claim is being
+// renewed. The independent ownership law says only a retained demand may
+// establish a physical remote acquisition. Hold renewal after the wrapper's
+// admission check, then either retire or retain the request before releasing
+// the gate. Compare coordinator acquisition work when the load settles; the
+// retained neighbor proves this cut still permits one valid acquisition.
+it.each([false, true])(
+  `starts remote acquisition after claim renewal only when demand remains retained (retire=%s)`,
+  async (retire) => {
+    const adapter = createRecordingAdapter()
+    const renewalEntered = createEventGate()
+    const releaseRenewal = createEventGate()
+    let holdRenewal = false
+    adapter.claimCacheGeneration = async () => ({
+      storageCollectionId: `review-claim-storage`,
+      claimId: `review-claim`,
+      expiresAtMs: Date.now() + 10_000,
+    })
+    adapter.renewCacheGenerationClaim = async () => {
+      if (holdRenewal) {
+        renewalEntered.resolve()
+        await releaseRenewal.promise
+      }
+      return Date.now() + 10_000
+    }
+    adapter.rotateCacheGeneration = async () => ({
+      storageCollectionId: `review-rotated-storage`,
+      claimId: `review-claim`,
+      expiresAtMs: Date.now() + 10_000,
+    })
+    adapter.releaseCacheGenerationClaim = async () => {}
+    const coordinator = createFailStopCoordinatorHarness(`review-unload`)
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `review-unload`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            params.markReady()
+            return {
+              loadSubset: async () => {},
+              restartAfterScopedRecovery: () => {},
+            }
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    const options: LoadSubsetOptions = { limit: 1 }
+    try {
+      await collection.stateWhenReady()
+      holdRenewal = true
+      const load = Promise.resolve(collection._sync.loadSubset(options))
+      await atPersistedOracleCheckpoint(
+        renewalEntered.promise,
+        `claim renewal entered`,
+      )
+      if (retire) collection._sync.unloadSubset(options)
+      releaseRenewal.resolve()
+      await atPersistedOracleCheckpoint(load, `late load settled`)
+      expect(coordinator.remoteEnsureCalls).toHaveLength(retire ? 0 : 1)
+    } finally {
+      releaseRenewal.resolve()
+      await collection.cleanup()
+    }
+  },
+)
+
+// A cache read can lose its claim at the post-read check. The reference
+// ownership law keeps the admitted demand through rotation and gives it one
+// replacement acquisition. Hold that acquisition to compare both its work
+// count and the caller's settlement before and after source completion.
+// The neighboring pre-read loss and peer-notice histories exercise different
+// rotation cuts; this one specifically reaches the post-read renewal cut.
+it(`does not request a rotated in-flight subset twice`, async () => {
+  const adapter = createRecordingAdapter()
+  const coordinator = createFailStopCoordinatorHarness(`review-duplicate`)
+  const ensureStarted = createEventGate()
+  const releaseEnsure = createEventGate()
+  coordinator.requestEnsureRemoteSubset = async (_id, options) => {
+    coordinator.remoteEnsureCalls.push(options)
+    ensureStarted.resolve()
+    await releaseEnsure.promise
+  }
+  let storageId = `review-duplicate-old`
+  let loseClaim = false
+  let loseAfterRead = false
+  const originalLoadSubset = adapter.loadSubset.bind(adapter)
+  adapter.loadSubset = async (...args) => {
+    const rows = await originalLoadSubset(...args)
+    if (loseAfterRead) {
+      loseAfterRead = false
+      loseClaim = true
+    }
+    return rows
+  }
+  adapter.claimCacheGeneration = async () => ({
+    storageCollectionId: storageId,
+    claimId: `review-duplicate-claim`,
+    expiresAtMs: Date.now() + 10_000,
+  })
+  adapter.renewCacheGenerationClaim = async () =>
+    loseClaim ? undefined : Date.now() + 10_000
+  adapter.rotateCacheGeneration = async () => {
+    loseClaim = false
+    storageId = `review-duplicate-new`
+    return {
+      storageCollectionId: storageId,
+      claimId: `review-duplicate-claim`,
+      expiresAtMs: Date.now() + 10_000,
+    }
+  }
+  adapter.releaseCacheGenerationClaim = async () => {}
+  const collection = createCollection(
+    persistedCollectionOptions<Todo, string>({
+      id: `review-duplicate`,
+      syncMode: `on-demand`,
+      getKey: (row) => row.id,
+      sync: {
+        sync: (params) => {
+          params.markReady()
+          return {
+            loadSubset: async () => {},
+            restartAfterScopedRecovery: () => {},
+          }
+        },
+      },
+      persistence: { adapter, coordinator },
+    }),
+  )
+  try {
+    await collection.stateWhenReady()
+    loseAfterRead = true
+    const load = Promise.resolve(collection._sync.loadSubset({ limit: 1 }))
+    await atPersistedOracleCheckpoint(
+      ensureStarted.promise,
+      `replacement acquisition`,
+    )
+    await flushAsyncWork()
+    expect(storageId).toBe(`review-duplicate-new`)
+    expect(coordinator.remoteEnsureCalls).toHaveLength(1)
+    let settled = false
+    void load.then(
+      () => {
+        settled = true
+      },
+      () => {
+        settled = true
+      },
+    )
+    await flushAsyncWork()
+    expect(settled).toBe(false)
+    releaseEnsure.resolve()
+    await atPersistedOracleCheckpoint(load, `replacement demand settlement`)
+    expect(coordinator.remoteEnsureCalls).toHaveLength(1)
+  } finally {
+    releaseEnsure.resolve()
+    await collection.cleanup()
+  }
+})
+
 // Reconciliation after a lost answer can arrive even when a peer already
 // published the original tx:committed. A duplicate proof must not turn an
 // unchanged durable snapshot into a second public change batch. This owner
@@ -21768,6 +21930,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         await vi.waitFor(() => expect(remoteEnsures).toContain(newStorageId))
         expect(collection.get(`retired`)).toBeUndefined()
         const ensuresAfterRotation = remoteEnsures.length
+        expect(ensuresAfterRotation).toBe(1)
 
         coordinator.emit(
           {

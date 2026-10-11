@@ -2115,7 +2115,21 @@ the recovering demand reaches its own source owner while the warm run keeps
 its source-backed row. Another controlled receiving test delivers a peer
 notification to an expired claimant before its renewal timer runs and checks
 subset reload. Both coordinator owners offer unload before a held source load
-settles.
+settles. The persisted owner now holds claim renewal after wrapper admission
+and varies whether the demand retires before the claim check returns. At load
+settlement it requires zero coordinator acquisitions for retired demand and one
+for retained demand; the retired case rejected the former late-acquisition path.
+It also revokes a claim after a cache subset read, then holds the replacement
+acquisition. The active demand must request it once and remain pending until it
+settles. The old path made two coordinator requests at that cut. A separate
+pre-read expiry history and peer-notice histories cover their narrower cuts;
+these controlled paths do not prove every real-host scheduling interleaving.
+The Browser coordinator owner holds an acquisition across a failed release and
+varies whether the acquisition settles before or after release starts. A pending
+release retry survives both orders. Its unacquired-release case observes no
+outbound RPC. The overlapping case failed before the acquisition-success path
+stopped clearing release retry debt. These are controlled transport schedules;
+a real tab crash and an indefinitely unreachable leader remain outside them.
 The Browser coordinator owner also checks that a managed local mutation carries
 its exact claim into the coordinator-created transaction. Its recording-adapter
 law failed before the repair at the target-kind comparison. A follower-RPC

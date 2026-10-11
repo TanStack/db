@@ -1505,6 +1505,11 @@ class PersistedCollectionRuntime<
     LoadSubsetOptions,
     LoadSubsetOptions
   >()
+  /** An in-flight load waits for the recovery acquisition of its demand. */
+  private readonly rotatedEnsures = new WeakMap<
+    LoadSubsetOptions,
+    Promise<void>
+  >()
   private readonly queuedHydrationTransactions: Array<
     BufferedSyncTransaction<T, TKey>
   > = []
@@ -2438,9 +2443,12 @@ class PersistedCollectionRuntime<
         if (options.signal?.aborted) continue
         const rotatedOptions = this.rotatedAcquisitions.get(options)
         if (rotatedOptions) {
-          void this.persistence.coordinator
-            .requestEnsureRemoteSubset(this.storageCollectionId, rotatedOptions)
-            .catch((error) => this.reportSyncError(error))
+          const ensure = this.persistence.coordinator.requestEnsureRemoteSubset(
+            this.storageCollectionId,
+            rotatedOptions,
+          )
+          this.rotatedEnsures.set(options, ensure)
+          void ensure.catch((error) => this.reportSyncError(error))
         } else {
           this.refreshScopedSubsets()
           break
@@ -2617,10 +2625,14 @@ class PersistedCollectionRuntime<
     options: LoadSubsetOptions,
     upstreamLoadSubset?: LoadSubsetFn,
     onHydrationStarted?: () => void,
+    isDemandRetained?: () => boolean,
   ): Promise<void> {
     this.throwIfTerminal()
     await this.ensureCacheClaimActive()
-    if (options.signal?.aborted) return
+    // The caller can retire demand while claim renewal or rotation is awaited.
+    // No acquisition may start after that retirement.
+    if (options.signal?.aborted || (isDemandRetained && !isDemandRetained()))
+      return
     const lifecycleGeneration = this.lifecycleGeneration
     const subsetKey = this.getSubsetKey(options)
     const truncateGeneration = this.sourceTruncateGeneration
@@ -2679,10 +2691,11 @@ class PersistedCollectionRuntime<
           this.activeSubsets.get(subsetKey) === options &&
           !options.signal?.aborted
         ) {
-          await this.persistence.coordinator.requestEnsureRemoteSubset(
-            this.storageCollectionId,
-            rotatedOptions,
-          )
+          await (this.rotatedEnsures.get(options) ??
+            this.persistence.coordinator.requestEnsureRemoteSubset(
+              this.storageCollectionId,
+              rotatedOptions,
+            ))
         }
         return
       }
@@ -6217,6 +6230,9 @@ function createWrappedSyncConfig<
               () => {
                 hydrationStarted = true
               },
+              () =>
+                !startupState.cleanedUp &&
+                acquisitions.get(options) === acquisition,
             )
           })()
           return raceRetainedLoad(work, () => !hydrationStarted)

@@ -972,6 +972,98 @@ describe(`BrowserCollectionCoordinator`, () => {
       coord2.dispose()
     })
 
+    // The wrapper may issue best-effort release for a refresh that retired
+    // before acquisition. Without an acquisition ID, the coordinator must not
+    // send a release RPC to any leader.
+    it(`sends no release RPC for an unacquired subset`, async () => {
+      const follower = createCoordinator()
+      const internals = follower as unknown as {
+        sendRPC: (collectionId: string, request: unknown) => Promise<unknown>
+      }
+      const sendRPC = vi.fn(() => Promise.reject(new Error(`unexpected RPC`)))
+      internals.sendRPC = sendRPC
+      try {
+        await follower.requestReleaseRemoteSubset(`todos`, { limit: 1 })
+        expect(sendRPC).not.toHaveBeenCalled()
+      } finally {
+        follower.dispose()
+      }
+    })
+
+    // A release can fail while the original acquisition is still in flight.
+    // Its later success must not cancel the retained release retry debt.
+    // The settled-acquisition neighbor checks that ordinary release retry
+    // remains possible without an overlapping acquisition.
+    it.each([false, true])(
+      `retains a release retry when acquisition overlaps release=%s`,
+      async (overlap) => {
+        const leader = createCoordinator()
+        const follower = createCoordinator()
+        const unsubscribeLeader = leader.subscribe(`todos`, () => {})
+        follower.subscribe(`todos`, () => {})
+        await flush(50)
+        const heldOwner = createDeferred()
+        const owner = Object.assign(
+          vi.fn(() => heldOwner.promise),
+          {
+            unloadSubset: vi.fn(),
+            onError: vi.fn(),
+          },
+        )
+        const unregisterOwner = leader.registerRemoteSubsetOwner(`todos`, owner)
+        const options: LoadSubsetOptions = { limit: 1 }
+        const internals = follower as unknown as {
+          sendRPC: (collectionId: string, request: unknown) => Promise<unknown>
+          outboundRemoteSubsetAcquisitions: Map<
+            string,
+            { retryTimer: ReturnType<typeof setTimeout> | null }
+          >
+        }
+        const sendRPC = internals.sendRPC.bind(follower)
+        let releaseAttempts = 0
+        internals.sendRPC = (collectionId, request) => {
+          if (
+            (request as { type?: string }).type ===
+            `rpc:releaseRemoteSubset:req`
+          ) {
+            releaseAttempts++
+            if (releaseAttempts === 1) {
+              return Promise.reject(
+                new Error(`review release transport failure`),
+              )
+            }
+          }
+          return sendRPC(collectionId, request)
+        }
+        const ensure = follower.requestEnsureRemoteSubset(`todos`, options)
+        try {
+          await vi.waitFor(() => expect(owner).toHaveBeenCalledTimes(1))
+          if (!overlap) {
+            heldOwner.resolve()
+            await ensure
+          }
+          await expect(
+            follower.requestReleaseRemoteSubset(`todos`, options),
+          ).rejects.toThrow(`review release transport failure`)
+          const acquisition = [
+            ...internals.outboundRemoteSubsetAcquisitions.values(),
+          ][0]!
+          expect(acquisition.retryTimer).not.toBeNull()
+          if (overlap) heldOwner.resolve()
+          await ensure
+          expect(acquisition.retryTimer).not.toBeNull()
+          await vi.waitFor(() => expect(releaseAttempts).toBe(2))
+        } finally {
+          heldOwner.resolve()
+          await Promise.allSettled([ensure])
+          unregisterOwner()
+          unsubscribeLeader()
+          leader.dispose()
+          follower.dispose()
+        }
+      },
+    )
+
     it.each([
       { schemaV1: 1, schemaV2: 2 },
       { schemaV1: 2, schemaV2: 4 },

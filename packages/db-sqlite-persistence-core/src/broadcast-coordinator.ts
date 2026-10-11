@@ -649,7 +649,11 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     try {
       await work
       acquired = true
-      this.cancelRemoteSubsetReplayRetry(acquisition)
+      // Release may have failed while this acquisition was in flight. In that
+      // case the shared timer carries release retry debt, not replay work.
+      if (!acquisition.releaseRequested) {
+        this.cancelRemoteSubsetReplayRetry(acquisition)
+      }
     } finally {
       if (acquisition.inFlight === work) acquisition.inFlight = null
       const current = this.collections.get(acquisition.collectionId)
