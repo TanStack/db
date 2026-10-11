@@ -3,7 +3,7 @@ id: SyncQueueInvariantError
 title: SyncQueueInvariantError
 ---
 
-Defined in: [packages/db/src/errors.ts:425](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L425)
+Defined in: [packages/db/src/errors.ts:565](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L565)
 
 An internal sync-queue invariant failed: a cancel targeted a transaction
 that is not the open last one, or replaying the queue invalidated a
@@ -21,7 +21,7 @@ transaction. No public path should reach this.
 new SyncQueueInvariantError(detail): SyncQueueInvariantError;
 ```
 
-Defined in: [packages/db/src/errors.ts:426](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L426)
+Defined in: [packages/db/src/errors.ts:566](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L566)
 
 #### Parameters
 

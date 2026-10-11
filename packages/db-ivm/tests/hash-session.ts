@@ -74,21 +74,3 @@ export async function captureHashSession(
     random.mockRestore()
   }
 }
-
-export class HashReplayError extends Error {
-  constructor(
-    readonly replay: {
-      law: string
-      input: unknown
-      observed: ReadonlyArray<number>
-      tape: ReadonlyArray<number>
-      environment: HashSession[`environment`]
-    },
-    cause: unknown,
-  ) {
-    // The outer native fast-check runner retains its own seed/path/minimized
-    // inputs. Do not replace its reporter or stringify away the original cause.
-    super(`Hash law replay: ${JSON.stringify(replay)}`, { cause })
-    this.name = `HashReplayError`
-  }
-}

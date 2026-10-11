@@ -9,12 +9,14 @@ title: localStorageCollectionOptions
 function localStorageCollectionOptions<T, TKey>(config): CollectionConfig<InferSchemaOutput<T>, TKey, T, LocalStorageCollectionUtils> & object;
 ```
 
-Defined in: [packages/db/src/local-storage.ts:318](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L318)
+Defined in: [packages/db/src/local-storage.ts:386](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L386)
 
 Creates localStorage collection options for use with a standard Collection
 
 This function creates a collection that persists data to localStorage/sessionStorage
-and synchronizes changes across browser tabs using storage events.
+and synchronizes changes across browser tabs using storage events. Active
+Collections sharing this Storage object and storage key also synchronize
+writes in the same tab, without waiting for a browser event.
 Create fresh options for each direct `createCollection()` call. One options
 object contains state owned by one Collection and cannot be reused.
 
@@ -29,8 +31,8 @@ be shared across tabs when using the in-memory fallback.
 **Using with Manual Transactions:**
 
 For manual transactions, call `utils.acceptMutations()` in your transaction's `mutationFn`
-to persist changes made during `tx.mutate()`. The transaction receipt waits for that storage
-write even if the call is not awaited. Await it when later work depends on the write.
+to persist changes made during `tx.mutate()`. The transaction receipt waits for this work even
+when the call is not awaited. Await it when later mutationFn work depends on the storage write.
 
 ### Type Parameters
 
@@ -126,12 +128,14 @@ await tx.commit()
 function localStorageCollectionOptions<T, TKey>(config): CollectionConfig<T, TKey, never, LocalStorageCollectionUtils> & object;
 ```
 
-Defined in: [packages/db/src/local-storage.ts:338](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L338)
+Defined in: [packages/db/src/local-storage.ts:406](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L406)
 
 Creates localStorage collection options for use with a standard Collection
 
 This function creates a collection that persists data to localStorage/sessionStorage
-and synchronizes changes across browser tabs using storage events.
+and synchronizes changes across browser tabs using storage events. Active
+Collections sharing this Storage object and storage key also synchronize
+writes in the same tab, without waiting for a browser event.
 Create fresh options for each direct `createCollection()` call. One options
 object contains state owned by one Collection and cannot be reused.
 
@@ -146,8 +150,8 @@ be shared across tabs when using the in-memory fallback.
 **Using with Manual Transactions:**
 
 For manual transactions, call `utils.acceptMutations()` in your transaction's `mutationFn`
-to persist changes made during `tx.mutate()`. The transaction receipt waits for that storage
-write even if the call is not awaited. Await it when later work depends on the write.
+to persist changes made during `tx.mutate()`. The transaction receipt waits for this work even
+when the call is not awaited. Await it when later mutationFn work depends on the storage write.
 
 ### Type Parameters
 

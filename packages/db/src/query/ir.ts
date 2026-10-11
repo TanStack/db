@@ -218,6 +218,16 @@ export class Aggregate<T = any> extends BaseExpression<T> {
   }
 }
 
+/** Collect refs from an IR expression, including aggregate arguments. */
+export function collectPropRefs(
+  expression: BasicExpression | Aggregate,
+): Array<PropRef> {
+  if (expression.type === `ref`) return [expression]
+  return expression.type === `func` || expression.type === `agg`
+    ? expression.args.flatMap(collectPropRefs)
+    : []
+}
+
 export class IncludesSubquery extends BaseExpression {
   public type = `includesSubquery` as const
   constructor(

@@ -7,7 +7,7 @@ title: SingleResult
 type SingleResult = object;
 ```
 
-Defined in: [packages/db/src/types.ts:1001](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1001)
+Defined in: [packages/db/src/types.ts:1007](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1007)
 
 ## Properties
 
@@ -17,4 +17,4 @@ Defined in: [packages/db/src/types.ts:1001](https://github.com/TanStack/db/blob/
 singleResult: true;
 ```
 
-Defined in: [packages/db/src/types.ts:1002](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1002)
+Defined in: [packages/db/src/types.ts:1008](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1008)

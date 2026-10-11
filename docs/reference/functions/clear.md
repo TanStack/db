@@ -7,7 +7,7 @@ title: clear
 function clear(objectStore): Promise<void>;
 ```
 
-Defined in: packages/db/src/indexed-db-wrapper.ts:481
+Defined in: [packages/db/src/indexed-db-wrapper.ts:531](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db-wrapper.ts#L531)
 
 Removes all items from an object store.
 

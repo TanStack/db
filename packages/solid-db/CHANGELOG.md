@@ -1,5 +1,12 @@
 # @tanstack/react-db
 
+## 0.3.8
+
+### Patch Changes
+
+- Updated dependencies [[`f6aba31`](https://github.com/TanStack/db/commit/f6aba314e44afdfa413d6d70bf8e272dfa67af85), [`faa3de6`](https://github.com/TanStack/db/commit/faa3de64b53737fb7896d8f9c5475e8c5daa05a9), [`bcb2af6`](https://github.com/TanStack/db/commit/bcb2af61b8a1513a09a88db230a4ffb3bb391541), [`2ab7f3e`](https://github.com/TanStack/db/commit/2ab7f3e55475ab6b86f6b5e3b566c89a7d9a9c58), [`86f00ea`](https://github.com/TanStack/db/commit/86f00ea63af5ef22f38f0c6a0a78bd4e3aaf49b5), [`f7ac2c6`](https://github.com/TanStack/db/commit/f7ac2c63a3cabc864caf38b7a4e966088cfe73bb), [`fa36267`](https://github.com/TanStack/db/commit/fa36267473bf989fd0bafd29ab6d67ab5fc91c60), [`2c98b49`](https://github.com/TanStack/db/commit/2c98b4992c412820f8476325ee6941db5ca9ac0f), [`f6d65ea`](https://github.com/TanStack/db/commit/f6d65eacea596f135d11c2adf4c9a4f97748457e), [`fe284cc`](https://github.com/TanStack/db/commit/fe284ccbdba51780f8b2d63efc75fa7100057bfd), [`8b0e1de`](https://github.com/TanStack/db/commit/8b0e1defb0ecf98ead912b3a906995398a30b510), [`4bd66cf`](https://github.com/TanStack/db/commit/4bd66cf8ee72cf2c318878995222415b0452b031)]:
+  - @tanstack/db@0.13.0
+
 ## 0.3.7
 
 ### Patch Changes

@@ -12,4 +12,4 @@ type SelectValueExpression =
   | ConditionalSelect;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:218](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L218)
+Defined in: [packages/db/src/query/ir.ts:242](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L242)

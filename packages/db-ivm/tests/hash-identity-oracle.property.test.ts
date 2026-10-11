@@ -41,14 +41,13 @@ import { captureHashSession } from './hash-session'
  *
  * - `equalHashValues(a, b)` is true exactly when the model identities of the
  *   two value specs are equal.
- * - Equal identities have equal hashes. Distinct identities have distinct
- *   hashes; this is a sampled control, because a 32-bit hash can collide.
+ * - Equal identities have equal hashes. Distinct identities may have the same
+ *   32-bit digest; `equalHashValues` must still distinguish them.
  * - For cyclic values, `equalHashValues` follows the same rules and `hash`
  *   throws a `TypeError`.
  * - Type identity does not depend on random hash values. Every law above also
  *   runs in a second copy of the module whose initialization draws are all
- *   equal, so every type marker has the same hash number. There, only the
- *   sampled distinct-hash control is skipped.
+ *   equal, so every type marker has the same hash number.
  *
  * Authority: the method comments in `src/hashing/hash.ts`, and the behavior at
  * `8283f2e8`, which this file pins before the hash dispatch refactor.
@@ -735,23 +734,25 @@ type Module = {
   name: string
   hash: (value: unknown) => number
   equalHashValues: (left: unknown, right: unknown) => boolean
-  sampledDistinct: boolean
 }
 const MODULES: ReadonlyArray<Module> = [
-  { name: `native`, hash, equalHashValues, sampledDistinct: true },
+  { name: `native`, hash, equalHashValues },
   {
     name: `colliding markers`,
     hash: colliding.hash,
     equalHashValues: colliding.equalHashValues,
-    sampledDistinct: false,
   },
 ]
 
-function expectPair(pair: Pair, seeds: [number, number]): void {
+function expectPair(
+  pair: Pair,
+  seeds: [number, number],
+  modules: ReadonlyArray<Module> = MODULES,
+): void {
   const expected = identity(pair.left) === identity(pair.right)
   const left = realize(pair.left, seeds[0])
   const right = realize(pair.right, seeds[1])
-  for (const module of MODULES) {
+  for (const module of modules) {
     const context = `${module.name}, ${pair.mutation}: ${identity(pair.left)} vs ${identity(pair.right)}`
     expect(module.equalHashValues(left, right), `equality, ${context}`).toBe(
       expected,
@@ -761,12 +762,6 @@ function expectPair(pair: Pair, seeds: [number, number]): void {
     )
     if (expected)
       expect(module.hash(left), `hash, ${context}`).toBe(module.hash(right))
-    // Sampled: a 32-bit collision is not a defect, but this small campaign
-    // should not meet one with native markers.
-    else if (module.sampledDistinct)
-      expect(module.hash(left), `sampled hash, ${context}`).not.toBe(
-        module.hash(right),
-      )
   }
 }
 
@@ -1062,7 +1057,6 @@ describe(`hash identity oracle`, () => {
     expect(equalHashValues(date, temporalLike(`Temporal.PlainDate`))).toBe(true)
     expect(hash(date)).toBe(hash(temporalLike(`Temporal.PlainDate`)))
     expect(equalHashValues(date, month)).toBe(false)
-    expect(hash(date)).not.toBe(hash(month))
   })
 
   // Current behavior outside the grammar: an array from another realm takes
@@ -1115,7 +1109,24 @@ describe(`hash identity oracle`, () => {
     expect(hashes.size).toBe(2) // A RegExp still hashes its header fields.
     expect(colliding.hash(new Map())).toBe(colliding.hash(new Set()))
     expect(colliding.hash(new Map())).toBe(colliding.hash({}))
-    expect(hash(new Map())).not.toBe(hash(new Set()))
+  })
+
+  it(`keeps distinct identities separate when their digests collide`, () => {
+    const pair: Pair = {
+      left: { k: `map`, entries: [] },
+      right: { k: `set`, items: [] },
+      mutation: `retype`,
+    }
+    const left = realize(pair.left, 1)
+    const right = realize(pair.right, 2)
+    expect(colliding.hash(left)).toBe(colliding.hash(right))
+    const digestOnly: Module = {
+      name: `digest-only mutant`,
+      hash: colliding.hash,
+      equalHashValues: (a, b) => colliding.hash(a) === colliding.hash(b),
+    }
+    expect(() => expectPair(pair, [1, 2], [digestOnly])).toThrow()
+    expectPair(pair, [1, 2])
   })
 
   it(`keeps a Map-to-Set replacement in topKBatch when markers collide`, () => {

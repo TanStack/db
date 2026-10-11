@@ -10,7 +10,7 @@ function withFlatChangeTracking<T>(
    asArray): Record<string, unknown>[] | undefined;
 ```
 
-Defined in: [packages/db/src/proxy.ts:856](https://github.com/TanStack/db/blob/main/packages/db/src/proxy.ts#L856)
+Defined in: [packages/db/src/proxy.ts:911](https://github.com/TanStack/db/blob/main/packages/db/src/proxy.ts#L911)
 
 Change tracking for flat rows without proxies. A draft is a shallow copy,
 and its changes are the fields that differ from the row afterwards under

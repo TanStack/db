@@ -7,7 +7,7 @@ title: DehydrateDbClientOptions
 type DehydrateDbClientOptions = object;
 ```
 
-Defined in: [packages/db/src/client.ts:156](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L156)
+Defined in: [packages/db/src/client.ts:158](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L158)
 
 ## Properties
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/client.ts:156](https://github.com/TanStack/db/blob/
 optional shouldDehydrateCollection: (collection) => boolean;
 ```
 
-Defined in: [packages/db/src/client.ts:157](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L157)
+Defined in: [packages/db/src/client.ts:159](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L159)
 
 #### Parameters
 
@@ -37,7 +37,7 @@ Defined in: [packages/db/src/client.ts:157](https://github.com/TanStack/db/blob/
 optional shouldDehydrateLiveQuery: (query) => boolean;
 ```
 
-Defined in: [packages/db/src/client.ts:158](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L158)
+Defined in: [packages/db/src/client.ts:160](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L160)
 
 #### Parameters
 

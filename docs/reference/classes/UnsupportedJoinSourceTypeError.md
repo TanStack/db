@@ -3,7 +3,7 @@ id: UnsupportedJoinSourceTypeError
 title: UnsupportedJoinSourceTypeError
 ---
 
-Defined in: [packages/db/src/errors.ts:692](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L692)
+Defined in: [packages/db/src/errors.ts:929](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L929)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:692](https://github.com/TanStack/db/blob/
 new UnsupportedJoinSourceTypeError(type): UnsupportedJoinSourceTypeError;
 ```
 
-Defined in: [packages/db/src/errors.ts:693](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L693)
+Defined in: [packages/db/src/errors.ts:930](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L930)
 
 #### Parameters
 

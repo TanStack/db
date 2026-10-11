@@ -3,7 +3,7 @@ id: ObjectStoreNotFoundError
 title: ObjectStoreNotFoundError
 ---
 
-Defined in: packages/db/src/indexed-db.ts:45
+Defined in: [packages/db/src/indexed-db.ts:48](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L48)
 
 Thrown when the specified object store doesn't exist in the database
 
@@ -17,12 +17,12 @@ Thrown when the specified object store doesn't exist in the database
 
 ```ts
 new ObjectStoreNotFoundError(
-   storeName,
-   databaseName,
+   storeName, 
+   databaseName, 
    availableStores): ObjectStoreNotFoundError;
 ```
 
-Defined in: packages/db/src/indexed-db.ts:46
+Defined in: [packages/db/src/indexed-db.ts:49](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L49)
 
 #### Parameters
 

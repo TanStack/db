@@ -3,7 +3,7 @@ id: NameRequiredError
 title: NameRequiredError
 ---
 
-Defined in: packages/db/src/indexed-db.ts:63
+Defined in: [packages/db/src/indexed-db.ts:68](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L68)
 
 Thrown when the name (object store) configuration is missing
 
@@ -19,7 +19,7 @@ Thrown when the name (object store) configuration is missing
 new NameRequiredError(): NameRequiredError;
 ```
 
-Defined in: packages/db/src/indexed-db.ts:64
+Defined in: [packages/db/src/indexed-db.ts:69](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L69)
 
 #### Returns
 

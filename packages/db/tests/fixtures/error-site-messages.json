@@ -880,5 +880,13 @@
       "Includes subquery for \"",
       "\" reuses an ancestor's source declaration. Use new Query().from({ alias: collection }) in the child instead of passing the ancestor builder to from()."
     ]
+  },
+  "237": {
+    "file": "query/compiler/index.ts",
+    "template": "Query reference \"${ref.path.join(`.`)}\" is out of scope. Use a source from this query or a containing query.",
+    "literals": [
+      "Query reference \"",
+      "\" is out of scope. Use a source from this query or a containing query."
+    ]
   }
 }
