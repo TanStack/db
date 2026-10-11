@@ -103,7 +103,7 @@ function createOPFSWorkerInstance(workerFileUrl: URL): BrowserOPFSWorkerLike {
     )
   }
 
-  return new WorkerConstructor(workerFileUrl)
+  return new WorkerConstructor(workerFileUrl, { type: `module` })
 }
 
 function getOpenAbortError(signal: AbortSignal): Error {
