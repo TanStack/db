@@ -366,3 +366,45 @@ the observer, view, client, and sources (ORC-010). There is no named semantic
 shared-fault hypothesis requiring a second formulation (ORC-011), or claim
 about a real external provider (ORC-014). This record gives the bounded
 review evidence and remaining attach paths required by ORC-012.
+
+## Observer preload and no-provider diagnostics — 2026-10-11 review follow-up
+
+The corrected first-pass review supplied two legal consumer cuts absent from
+the primary owners. `LiveQueryObserver.preload()` promises a `Promise<void>`:
+reusing an active same-hash stream over different source objects must reject
+that Promise, while the existing stream keeps its row. A descriptor consumed
+without a `DbProvider` must name that remedy in either React hook, even when
+an explicit `queryKey` or legacy dependency list skips derived identity.
+The core source-identity rule and React no-client diagnostic already supply
+these expectations; the new cells change no product policy.
+
+The preload-identity owner now calls `observer.preload()` directly in pooled
+and graph views over a settled stream and in a graph view over a pending
+hydrated stream. It checks the call does not throw, its returned Promise
+rejects on a different same-hash source, and the first stream's public row
+stays intact. The same-source pooled cell remains the accepted neighbor.
+Before repair, both settled conflict cells failed at `not.toThrow()`; the
+pending cell reaches the same guard. One `try` block now converts source-check,
+pooled preload, and graph preload throws into Promise rejection. The owner
+passed 12/12 after repair. The React descriptor owner added both explicit
+identity forms of `useLiveSuspenseQuery`; the query-key cell was RED with the
+generic core message. Passing client and hook name into the Suspense source
+key check made both forms GREEN, and the owner passed 25/25.
+
+The review also described a reentrant stream registration: after an observer
+starts a preload, a source-start or adapter callback can register a conflicting
+same-hash record before the observer registers its own promise. The primary
+preload-identity owner models this collision at `DbClient._registerLiveQuery`
+with a controlled later rejection. On the prior order, its public
+`unhandledRejection` observation was RED after the synchronous source error.
+Attaching the rejection handler before checking the conflict made the owner
+GREEN at 13/13. This is a direct internal registration-boundary witness; no
+official adapter was shown to trigger that reentrancy. It proves the discarded
+promise is observed at this cut, not every SSR scheduling order.
+
+The owner contract, plain source rows, same/different source grammar, real
+observer and React hook paths, and call/settlement/public-row checkpoints are
+stated beside the tests. The original RED assertions and controlled later
+rejection calibrate the comparisons; no production classifier computes the
+expected source relation. The finite model does not include concurrent first
+claims, another framework's message, or a real server stream.

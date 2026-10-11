@@ -747,8 +747,8 @@ export class DbClient {
   ): Promise<void> {
     const existing = this.liveQueries.get(queryHash)
     if (existing && existing.status !== `error`) {
-      if (sources) this._assertLiveQuerySources(queryHash, sources)
       void Promise.resolve(promise).catch(() => {})
+      if (sources) this._assertLiveQuerySources(queryHash, sources)
       return existing.promise
     }
 

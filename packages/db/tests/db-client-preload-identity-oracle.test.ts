@@ -16,7 +16,8 @@
  * a set of source objects cannot tell which row belongs to each position.
  * A pooled view has one source even though it has no query Collection config.
  * Its observer may reuse an existing stream only for that same source, and its
- * preload must finish the view's own source demand.
+ * preload must finish the view's own source demand. Observer preload returns a
+ * Promise for either a successful reuse or a rejected source conflict.
  * An ordinary observer checks an active stream's source claim before retaining
  * its first listener. A conflicting attempt rejects on every retry while the
  * stream remains active; a same-source observer can attach.
@@ -54,6 +55,7 @@ import {
   resolveLiveQueryValue,
 } from '../src'
 import type { SyncConfig } from '../src/types'
+import type { DehydratedLiveQueryResult } from '../src/client'
 
 type Row = { id: string; value: string }
 
@@ -102,6 +104,9 @@ describe(`DbClient preload source identity`, () => {
       const server = new DbClient()
       const browser = new DbClient()
       let settle!: (value: { rows: Array<{ key: string; value: Row }> }) => void
+      let conflictingObserver:
+        ReturnType<typeof createLiveQueryObserver> | undefined
+      let conflictingView: ReturnType<typeof resolveLiveQueryValue> | undefined
 
       try {
         await server.preloadLiveQuery({ query: queryFor(serverSource) })
@@ -136,6 +141,19 @@ describe(`DbClient preload source identity`, () => {
         expect(() => browser.preloadLiveQuery({ query: otherQuery })).toThrow(
           /different source Collections/,
         )
+        if (streamState === `pending`) {
+          conflictingView = resolveLiveQueryValue(otherQuery)
+          expect(conflictingView).not.toBeNull()
+          conflictingObserver = createLiveQueryObserver(conflictingView, {
+            client: browser,
+            queryHash: stream.queryHash,
+          })
+          let rejected: Promise<void> | undefined
+          expect(() => {
+            rejected = conflictingObserver!.preload()
+          }).not.toThrow()
+          await expect(rejected).rejects.toThrow(/different source Collections/)
+        }
 
         if (streamState === `pending`)
           settle(
@@ -165,6 +183,8 @@ describe(`DbClient preload source identity`, () => {
         )
         expect(rows(browser)).toEqual([{ id: `one`, value: `newer server` }])
       } finally {
+        conflictingObserver?.dispose()
+        await conflictingView?.cleanup()
         await browser.cleanup()
         await server.cleanup()
         await serverSource.cleanup()
@@ -383,9 +403,11 @@ describe(`DbClient preload source identity`, () => {
         expect(view?.config, `the receiving view is pooled`).toBeUndefined()
         observer = createLiveQueryObserver(view, { client, queryHash })
         if (sourceRelation === `different`) {
-          await expect(
-            Promise.resolve().then(() => observer!.preload()),
-          ).rejects.toThrow(/different source Collections/)
+          let preload: Promise<void> | undefined
+          expect(() => {
+            preload = observer!.preload()
+          }).not.toThrow()
+          await expect(preload).rejects.toThrow(/different source Collections/)
         } else {
           await expect(observer.preload()).resolves.toBeUndefined()
           expect(
@@ -401,4 +423,84 @@ describe(`DbClient preload source identity`, () => {
       }
     },
   )
+
+  it(`a graph observer rejects a conflicting stream source through its preload Promise`, async () => {
+    const id = `preload-source-identity-graph-observer`
+    const first = createCollection(sourceConfig(id, `first`))
+    const second = createCollection(sourceConfig(id, `second`))
+    const queryFor = (source: typeof first) =>
+      new Query()
+        .from({ item: source })
+        .select(({ item }) => ({ id: item.id, value: item.value }))
+    const firstQuery = queryFor(first)
+    const secondQuery = queryFor(second)
+    const client = new DbClient()
+    let observer: ReturnType<typeof createLiveQueryObserver> | undefined
+    let view: ReturnType<typeof resolveLiveQueryValue> | undefined
+
+    try {
+      await client.preloadLiveQuery({ query: firstQuery })
+      const queryHash = getLiveQueryHash({ query: firstQuery })
+      expect(getLiveQueryHash({ query: secondQuery })).toBe(queryHash)
+      view = resolveLiveQueryValue(secondQuery)
+      expect(view).not.toBeNull()
+      observer = createLiveQueryObserver(view, { client, queryHash })
+      let preload: Promise<void> | undefined
+      expect(() => {
+        preload = observer!.preload()
+      }).not.toThrow()
+      await expect(preload).rejects.toThrow(/different source Collections/)
+      expect(rows(client)).toEqual([{ id: `one`, value: `first` }])
+    } finally {
+      observer?.dispose()
+      await view?.cleanup()
+      await client.cleanup()
+      await first.cleanup()
+      await second.cleanup()
+    }
+  })
+
+  /**
+   * A synchronous source collision can occur after an adapter hook starts a
+   * second preload but before that preload registers its stream. The discarded
+   * promise may later reject. This controlled registration cut checks that
+   * no rejection escapes unhandled after the source conflict is reported.
+   */
+  it(`observes a discarded stream promise after a reentrant source conflict`, async () => {
+    const id = `reentrant-preload-source-conflict`
+    const first = createCollection(sourceConfig(id, `first`))
+    const second = createCollection(sourceConfig(id, `second`))
+    const query = new Query()
+      .from({ item: first })
+      .select(({ item }) => ({ id: item.id, value: item.value }))
+    const client = new DbClient()
+    client._setSsrStreamingEnabled(true)
+    const unhandled: Array<unknown> = []
+    let rejectLater!: (reason: Error) => void
+    const abandoned = new Promise<DehydratedLiveQueryResult>((_, reject) => {
+      rejectLater = reject
+    })
+    const onUnhandled = (reason: unknown, promise: Promise<unknown>) => {
+      if (promise === abandoned) unhandled.push(reason)
+    }
+
+    try {
+      await client.preloadLiveQuery({ query })
+      const hash = getLiveQueryHash({ query })
+      process.on(`unhandledRejection`, onUnhandled)
+      expect(() =>
+        client._registerLiveQuery(hash, abandoned, [second]),
+      ).toThrow(/different source Collections/)
+      rejectLater(new Error(`discarded stream`))
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(unhandled).toEqual([])
+      expect(rows(client)).toEqual([{ id: `one`, value: `first` }])
+    } finally {
+      process.off(`unhandledRejection`, onUnhandled)
+      void abandoned.catch(() => {})
+      await client.cleanup()
+      await first.cleanup()
+      await second.cleanup()
+    }
+  })
 })

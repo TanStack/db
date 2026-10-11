@@ -976,20 +976,16 @@ class LiveQueryObserverImpl<
     if (this.client && this.queryHash) {
       const query = this.client._getLiveQuery(this.queryHash)
       if (query?.status === `pending` || query?.status === `success`) {
-        if (sources)
-          this.client._assertLiveQuerySources(this.queryHash, sources)
-        if (pooledSource && this.collection) {
-          try {
+        try {
+          if (sources)
+            this.client._assertLiveQuerySources(this.queryHash, sources)
+          if (pooledSource && this.collection) {
             return Promise.all([query.promise, this.collection.preload()]).then(
               () => {},
             )
-          } catch (error) {
-            return Promise.reject(error)
           }
-        }
-        // The client stream answers this preload, but it is still a request
-        // for this Collection's data, so its deferred acquisition may resume.
-        try {
+          // The client stream answers this preload, but it is still a request
+          // for this Collection's data, so its deferred acquisition may resume.
           this.collection?._markPreload()
         } catch (error) {
           return Promise.reject(error)

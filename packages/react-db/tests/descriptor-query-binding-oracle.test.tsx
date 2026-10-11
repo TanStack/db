@@ -28,7 +28,8 @@
  * observes dehydration after the committed Effect has reported its first row.
  * A no-client history changes one mounted hook from a concrete query to a
  * descriptor query with the same semantic hash. It must reject the unbound
- * source before reusing the old live-query Collection. The React error names
+ * source before reusing the old live-query Collection. Both explicit identity
+ * forms of the ordinary and Suspense hooks owe the same React error naming
  * DbProvider as the remedy; the core error remains framework neutral.
  * A server-streaming history begins with a pending concrete-source hook and
  * then preloads a descriptor with the same query hash over another source
@@ -346,6 +347,17 @@ describe(`standalone descriptor query binding`, () => {
     ).toThrow(/requires a DbClient.*DbProvider/)
     expect(() =>
       renderHook(() => useLiveQuery({ query: unboundQuery }, [])),
+    ).toThrow(/requires a DbClient.*DbProvider/)
+    expect(() =>
+      renderHook(() =>
+        useLiveSuspenseQuery({
+          query: unboundQuery,
+          queryKey: [`unbound-suspense`],
+        }),
+      ),
+    ).toThrow(/requires a DbClient.*DbProvider/)
+    expect(() =>
+      renderHook(() => useLiveSuspenseQuery(() => unboundQuery, [])),
     ).toThrow(/requires a DbClient.*DbProvider/)
   })
 
