@@ -165,6 +165,7 @@ function installWorkerTestEnvironment(behavior: FakeWorkerBehavior = {}): void {
     configurable: true,
     writable: true,
   })
+  vi.stubGlobal(`location`, { href: `https://example.test/` })
 }
 
 function restoreWorkerTestEnvironment(): void {

@@ -2,7 +2,8 @@ import {
   InvalidPersistedCollectionConfigError,
   PersistenceUnavailableError,
 } from '@tanstack/db-sqlite-persistence-core'
-import OPFSWorkerConstructor from './opfs-worker?worker'
+import wasmUrl from '@journeyapps/wa-sqlite/dist/wa-sqlite.wasm?url&no-inline'
+import workerUrl from './opfs-worker?worker&url'
 import type { BrowserWASQLiteDatabase } from './wa-sqlite-driver'
 import type {
   BrowserOPFSWorkerErrorCode,
@@ -92,7 +93,7 @@ function createWorkerRequestIdFactory(): () => string {
   }
 }
 
-function createOPFSWorkerInstance(): BrowserOPFSWorkerLike {
+function createOPFSWorkerInstance(workerFileUrl: URL): BrowserOPFSWorkerLike {
   const WorkerConstructor = (
     globalThis as typeof globalThis & { Worker?: typeof Worker }
   ).Worker
@@ -102,9 +103,7 @@ function createOPFSWorkerInstance(): BrowserOPFSWorkerLike {
     )
   }
 
-  return new (
-    OPFSWorkerConstructor as unknown as new () => BrowserOPFSWorkerLike
-  )()
+  return new WorkerConstructor(workerFileUrl)
 }
 
 function getOpenAbortError(signal: AbortSignal): Error {
@@ -154,7 +153,24 @@ export async function openBrowserWASQLiteOPFSDatabase(
   }
 
   const vfsName = options.vfsName ?? DEFAULT_VFS_NAME
-  const worker = createOPFSWorkerInstance()
+  let wasmFileUrl = new URL(wasmUrl, globalThis.location.href)
+  let workerFileUrl = new URL(workerUrl, globalThis.location.href)
+  if (workerFileUrl.pathname.includes(`/.vite/assets/`)) {
+    // Vite's dependency optimizer moves this module into .vite/deps without
+    // moving its assets. In development, serve them from the installed package.
+    const cacheBase = new URL(`../../`, workerFileUrl)
+    const nodeModulesBase = cacheBase.pathname.endsWith(`/node_modules/`)
+      ? cacheBase
+      : new URL(`node_modules/`, cacheBase)
+    const packageBase = new URL(
+      `@tanstack/browser-db-sqlite-persistence/dist/`,
+      nodeModulesBase,
+    )
+    const workerFile = workerFileUrl.pathname.split(`/`).at(-1)
+    workerFileUrl = new URL(`assets/${workerFile}`, packageBase)
+    wasmFileUrl = new URL(`wa-sqlite.wasm`, packageBase)
+  }
+  const worker = createOPFSWorkerInstance(workerFileUrl)
   const nextRequestId = createWorkerRequestIdFactory()
   const pendingRequests = new Map<string, PendingWorkerRequest>()
   let disposed = false
@@ -286,6 +302,7 @@ export async function openBrowserWASQLiteOPFSDatabase(
       type: `init`,
       databaseName,
       vfsName,
+      wasmUrl: wasmFileUrl.href,
     })
     signal?.addEventListener(`abort`, onAbort, { once: true })
     if (signal?.aborted) onAbort()
