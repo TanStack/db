@@ -1056,15 +1056,24 @@ export function compileQuery(
   // When in includes mode (parentKeyStream), pass mainSource so that groupBy
   // preserves route metadata for per-parent aggregation.
   const groupByMainSource = parentKeyStream ? mainSource : undefined
+  // A ref reads the query's own rows when it is bound to one of its sources.
+  // A ref bound to an ancestor scope can reuse a source alias. After a
+  // unionAll, an unbound ref names a field of the union's rows.
   const sourceBindings = new Map(
     getAllSources(query).map((source) => [source.alias, source.bindingId]),
   )
+  const unionRows = query.from.type === `unionAll`
+  const isSourceRef = (ref: PropRef) => {
+    const binding = sourceBindings.get(ref.path[0]!)
+    if (binding !== undefined) return (ref.bindingId ?? binding) === binding
+    return unionRows && ref.bindingId === undefined
+  }
   if (query.groupBy && query.groupBy.length > 0) {
     pipeline = processGroupBy(
       pipeline,
       query.groupBy,
       valueIdentity,
-      sourceBindings,
+      isSourceRef,
       query.having,
       query.select,
       query.fnHaving,
@@ -1078,7 +1087,7 @@ export function compileQuery(
       pipeline,
       [], // Empty group by means single group
       valueIdentity,
-      sourceBindings,
+      isSourceRef,
       query.having,
       query.select,
       query.fnHaving,

@@ -64,7 +64,9 @@ import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
  * the computed `upper(c.k)`, by `inArray(c.k, ['a', 'b'])`, by
  * `coalesce(c.d, new Date(5))` (one Date group) or by `add(c.v, NaN)` (one
  * NaN group). Each use builds its literals again, so a group key matches
- * only by value. A shape may hold a nested include. The
+ * only by value. The top-level query reads the comments directly or through
+ * a unionAll, whose refs name fields of the union's rows rather than a source
+ * alias. Every published top-level row keeps the select's field order. A shape may hold a nested include. The
  * raw field `c.k` is a group key only under `groupBy(c.k)`: under
  * `upper(c.k)` the keys `a` and `A` share a group. A shape may add a HAVING
  * condition, which follows the select rule and keeps only the groups for
@@ -540,6 +542,7 @@ async function runHistory(
   grouping: Grouping,
   shadow: boolean,
   steps: ReadonlyArray<Step>,
+  union = false,
 ): Promise<void> {
   const grouped = grouping !== `none`
   // Each use builds a new list literal, as separate query callbacks do.
@@ -589,21 +592,47 @@ async function runHistory(
     }
   }
   // A grouped query groups by `c.k`; its select may read that group key.
-  const group = (query: any, alias: string) =>
-    grouped ? query.groupBy((refs: any) => keyExpression(refs[alias])) : query
-  const having = (s: Shape, query: any, alias: string, issue?: any) =>
+  // After a unionAll, refs name fields of the union's rows, not a source
+  // alias.
+  const rowOf = (refs: any, alias: string | undefined) =>
+    alias === undefined ? refs : refs[alias]
+  const group = (query: any, alias: string | undefined) =>
+    grouped
+      ? query.groupBy((refs: any) => keyExpression(rowOf(refs, alias)))
+      : query
+  const having = (
+    s: Shape,
+    query: any,
+    alias: string | undefined,
+    issue?: any,
+  ) =>
     s.having
       ? query.having((refs: any) =>
-          eq(build(s.having!.part, refs[alias], issue), s.having!.lit),
+          eq(build(s.having!.part, rowOf(refs, alias), issue), s.having!.lit),
         )
       : query
   // The include's source may shadow the parent alias. A parent ref captured
   // from the outer scope still names the parent row.
   const childAlias = shadow ? `issue` : `c`
+  // The top-level query reads the comments directly, or through a unionAll
+  // whose second branch is empty.
+  const topSource = (q: any) =>
+    union
+      ? q.unionAll(
+          q
+            .from({ c: commentSource })
+            .select(({ c }: any) => ({ id: c.id, k: c.k, v: c.v })),
+          q
+            .from({ e: commentSource })
+            .where(({ e }: any) => eq(e.id, -1))
+            .select(({ e }: any) => ({ id: e.id, k: e.k, v: e.v })),
+        )
+      : q.from({ c: commentSource })
+  const topAlias = union ? undefined : `c`
   const topQuery = compile(() =>
     createLiveQueryCollection((q) =>
-      having(top, group(q.from({ c: commentSource }), `c`), `c`).select(
-        ({ c }: any) => buildSelect(top, c, undefined, q, issueSource),
+      having(top, group(topSource(q), topAlias), topAlias).select((refs: any) =>
+        buildSelect(top, rowOf(refs, topAlias), undefined, q, issueSource),
       ),
     ),
   )
@@ -635,9 +664,12 @@ async function runHistory(
     [`include`, includeQuery, nested],
   ] as const) {
     const error = modelError(s, grouping)
+    // A nested include cannot correlate with a unionAll row, which has no
+    // source alias, so the builder rejects it first.
+    const unionInclude = label === `top` && union && s.include === true
     if (error) {
       expect(result.ok, `${label} compile throws`).toBe(false)
-      if (!result.ok)
+      if (!result.ok && !unionInclude)
         expect(result.error, `${label} error class`).toBeInstanceOf(
           error === `nonAggregate`
             ? NonAggregateExpressionNotInGroupByError
@@ -652,6 +684,12 @@ async function runHistory(
     for (const query of live) await query.preload()
     const check = (label: string) => {
       if (topQuery.ok) {
+        // A published row keeps the select's field order.
+        for (const row of topQuery.value.toArray)
+          expect(
+            Object.keys(stripVirtualProps(row)),
+            `${label}: top-level field order`,
+          ).toEqual(Object.keys(top.fields))
         expect(
           sortRows(
             topQuery.value.toArray.map((row: any) => stripVirtualProps(row)),
@@ -727,6 +765,7 @@ const history = fc
       fc.constant(grouping),
       fc.boolean(),
       fc.array(step, { maxLength: 6 }),
+      fc.boolean(),
     ),
   )
 
@@ -734,8 +773,10 @@ describe(`aggregate select shapes`, () => {
   it(`match the model across generated shapes (fixed campaign)`, async () => {
     // A repeatable baseline. Seed 2094 is arbitrary.
     await fc.assert(
-      fc.asyncProperty(history, ([top, nested, grouping, shadow, steps]) =>
-        runHistory(top, nested, grouping, shadow, steps),
+      fc.asyncProperty(
+        history,
+        ([top, nested, grouping, shadow, steps, union]) =>
+          runHistory(top, nested, grouping, shadow, steps, union),
       ),
       { numRuns: oracleRuns(120), seed: 2094 },
     )
@@ -743,8 +784,10 @@ describe(`aggregate select shapes`, () => {
 
   it(`match the model across generated shapes (random or replayed)`, async () => {
     await fc.assert(
-      fc.asyncProperty(history, ([top, nested, grouping, shadow, steps]) =>
-        runHistory(top, nested, grouping, shadow, steps),
+      fc.asyncProperty(
+        history,
+        ([top, nested, grouping, shadow, steps, union]) =>
+          runHistory(top, nested, grouping, shadow, steps, union),
       ),
       oraclePropertyOptions(120, PROPERTY),
     )
@@ -755,6 +798,23 @@ describe(`aggregate select shapes`, () => {
   it(`reads the group key inside a function`, async () => {
     await runHistory(
       { fields: { f0: { k: `add`, a: { k: `lit`, n: 0 }, b: { k: `key` } } } },
+      { fields: { f0: { k: `agg`, fn: `count` } } },
+      `key`,
+      false,
+      [],
+    )
+  })
+
+  // Pinned replay: a published row keeps the select's field order, also
+  // when a group key comes before a plain aggregate.
+  it(`keeps the select's field order`, async () => {
+    await runHistory(
+      {
+        fields: {
+          f0: { k: `key` },
+          f1: { k: `agg`, fn: `count` },
+        },
+      },
       { fields: { f0: { k: `agg`, fn: `count` } } },
       `key`,
       false,

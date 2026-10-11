@@ -70,7 +70,7 @@ describe(`group-by production pipeline`, () => {
       input,
       [],
       createValueIdentity(),
-      new Map([[`row`, `binding-row`]]),
+      (ref: { path: Array<string> }) => ref.path[0] === `row`,
       undefined,
       undefined,
       undefined,
@@ -119,7 +119,7 @@ describe(`group-by production pipeline`, () => {
           graph.newInput<KeyedNamespacedRow>(),
           grouped ? [new PropRef([`row`, `group`])] : [],
           createValueIdentity(),
-          new Map([[`row`, `binding-row`]]),
+          (ref: { path: Array<string> }) => ref.path[0] === `row`,
           undefined,
           { amount: new PropRef([`row`, `amount`]) },
         )
@@ -160,7 +160,7 @@ describe(`group-by production pipeline`, () => {
         input,
         grouped ? [groupRef] : [],
         createValueIdentity(),
-        new Map([[`row`, `binding-row`]]),
+        (ref: { path: Array<string> }) => ref.path[0] === `row`,
         having === `expression`
           ? [
               selection === `none`
