@@ -111,6 +111,7 @@ function createRendererRequestExecutor(options: {
   invoke: ElectronPersistenceInvoke
   channel?: string
   timeoutMs?: number
+  claimCollections: Map<string, string>
 }): RendererRequestExecutor {
   const channel = options.channel ?? DEFAULT_ELECTRON_PERSISTENCE_CHANNEL
   const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
@@ -125,13 +126,34 @@ function createRendererRequestExecutor(options: {
     const collectionId = storageTarget
       ? resolvePersistedStorageTarget(storageTarget).collectionId
       : target
+    const isGenerationRequest =
+      method === `claimCacheGeneration` ||
+      method === `rotateCacheGeneration` ||
+      method === `renewCacheGenerationClaim` ||
+      method === `releaseCacheGenerationClaim`
+    const managedTarget = storageTarget?.kind === `managed`
+    const logicalCollectionId =
+      resolution?.logicalCollectionId ??
+      (managedTarget
+        ? options.claimCollections.get(storageTarget.claimId)
+        : isGenerationRequest
+          ? collectionId
+          : undefined)
+    if ((managedTarget || isGenerationRequest) && !logicalCollectionId) {
+      throw new InvalidPersistedCollectionConfigError(
+        `Electron managed cache request requires a known logical Collection ID`,
+      )
+    }
     const request = {
       v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
       requestId: createRequestId(),
       collectionId,
       storageTarget,
       method,
-      resolution,
+      resolution:
+        managedTarget || isGenerationRequest
+          ? { ...resolution, mode: `sync-present`, logicalCollectionId }
+          : resolution,
       payload,
     } as ElectronPersistenceRequest
 
@@ -544,13 +566,14 @@ export function createElectronSQLitePersistence(
 ): PersistedCollectionPersistence {
   const invoke = resolveInvoke(options)
   const coordinator = options.coordinator ?? new SingleProcessCoordinator()
+  const claimCollections = new Map<string, string>()
   const executeRequest = createRendererRequestExecutor({
     invoke,
     channel: options.channel,
     timeoutMs: options.timeoutMs,
+    claimCollections,
   })
   const adapterCache = new Map<string, ElectronRendererResolvedAdapter>()
-  const claimCollections = new Map<string, string>()
 
   const getAdapterForCollection = (
     collectionId: string | undefined,

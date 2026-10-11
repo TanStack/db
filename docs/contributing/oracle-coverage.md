@@ -2142,7 +2142,9 @@ The Electron IPC receiving owner forwards claim, renewal, rotation, release,
 cache-claim read contexts, exact-ID reconciliation, and durable term reservation
 through protocol v6. Its in-process main adapter
 witness keeps the logical Collection ID for adapter selection while reads
-address the claimed physical storage ID. The shared SQLite adapter contract
+address the claimed physical storage ID. A direct shared-renderer-adapter
+claim/read/release history selects the authored logical ID, and a raw managed
+envelope without it fails before main-process selection. The shared SQLite adapter contract
 runs its claimed-cache cases over that bridge. A custom main-process adapter
 can explicitly disable managed cache generations and retain the full-shape
 fallback. The local Electron binary is unavailable, so an actual

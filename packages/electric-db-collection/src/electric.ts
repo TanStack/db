@@ -2785,12 +2785,7 @@ function createElectricSync<T extends Row<unknown>>(
             const currentRetired = retired
             const result = current.loadSubset?.(demand) ?? true
             const outcome = await Promise.race([
-              Promise.resolve(result).then(
-                () => `settled` as const,
-                (error: unknown) => {
-                  throw error
-                },
-              ),
+              Promise.resolve(result).then(() => `settled` as const),
               currentRetired.then(() => `retired` as const),
             ])
             if (outcome === `settled`) return

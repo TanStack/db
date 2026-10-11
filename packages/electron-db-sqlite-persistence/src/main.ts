@@ -420,6 +420,14 @@ function resolveModeAwarePersistence(
   persistence: PersistedCollectionPersistence,
   request: ElectronPersistenceRequestEnvelope,
 ): PersistedCollectionPersistence {
+  if (
+    request.storageTarget?.kind === `managed` &&
+    !request.resolution?.logicalCollectionId
+  ) {
+    throw new InvalidPersistedCollectionConfigError(
+      `Electron managed cache request requires a logical Collection ID`,
+    )
+  }
   const mode = request.resolution?.mode ?? `sync-absent`
   const schemaVersion = request.resolution?.schemaVersion
   const collectionAwarePersistence =

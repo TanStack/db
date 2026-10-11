@@ -61,8 +61,11 @@ import type {
  * on-demand rows. The logical Collection ID still selects the main-process
  * adapter. The receiving history claims, reads, renews, rotates, reads again,
  * and releases; its reference is the authored logical ID and claim returned
- * at each step, independent of the IPC routing code. A custom adapter that
- * opts out advertises no managed-cache operations and retains the fallback.
+ * at each step, independent of the IPC routing code. A direct claim through
+ * the shared adapter retains that logical ID for reads, while a raw managed
+ * envelope lacking it is rejected before main-process adapter selection.
+ * A custom adapter that opts out advertises no managed-cache operations and
+ * retains the fallback.
  * Exact-ID reconciliation uses the resolved Collection mode and schema version.
  * An adapter without it reports an unknown result and leaves the durable rows
  * and stream position unchanged.
@@ -669,7 +672,7 @@ describe(`electron sqlite persistence bridge`, () => {
         resolvePersistenceForCollection: (selection) => {
           const { collectionId } = selection
           resolutions.push(selection)
-          if (collectionId !== `todos`) {
+          if (collectionId !== `todos` && collectionId !== `manual`) {
             throw new Error(`Wrong logical Collection: ${collectionId}`)
           }
           return mainPersistence.resolvePersistenceForCollection!(selection)
@@ -782,13 +785,54 @@ describe(`electron sqlite persistence bridge`, () => {
       },
     )
     await adapter.releaseCacheGenerationClaim!(rotated.claimId)
-    expect(resolutions).toEqual(
-      Array(19).fill({
+    // The shared adapter is a valid lower-level entry point too. Its claim
+    // identifies a logical Collection even though later data calls carry only
+    // the physical storage target. Main-process selection must retain that
+    // logical identity at the read checkpoint.
+    const directClaim =
+      await rendererPersistence.adapter.claimCacheGeneration!(`manual`)
+    await rendererPersistence.adapter.loadSubset(
+      {
+        kind: `managed`,
+        storageCollectionId: directClaim.storageCollectionId,
+        claimId: directClaim.claimId,
+      },
+      {},
+      { cacheGenerationClaimId: directClaim.claimId },
+    )
+    await rendererPersistence.adapter.releaseCacheGenerationClaim!(
+      directClaim.claimId,
+    )
+    const missingLogicalId = await handler!(undefined, {
+      v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
+      requestId: `missing-logical-id`,
+      method: `loadSubset`,
+      collectionId: directClaim.storageCollectionId,
+      storageTarget: {
+        kind: `managed`,
+        storageCollectionId: directClaim.storageCollectionId,
+        claimId: directClaim.claimId,
+      },
+      payload: { options: {} },
+    })
+    expect(missingLogicalId).toMatchObject({
+      ok: false,
+      error: {
+        message: `Electron managed cache request requires a logical Collection ID`,
+      },
+    })
+    expect(resolutions).toEqual([
+      ...Array(19).fill({
         collectionId: `todos`,
         mode: `sync-present`,
         schemaVersion: 11,
       }),
-    )
+      ...Array(3).fill({
+        collectionId: `manual`,
+        mode: `sync-present`,
+        schemaVersion: undefined,
+      }),
+    ])
     await expect(
       driver.query<{ schema_version: number }>(
         `SELECT schema_version FROM collection_registry WHERE collection_id = ?`,
