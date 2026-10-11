@@ -8390,6 +8390,138 @@ it(`refetches a later Query demand with old client data after cache rotation`, a
   expect(itemIds(collection.toArray)).toEqual([`fresh`, `later`])
 })
 
+// A new key has no fetch from the retired cache generation. The generation
+// boundary requires a fresh provider result, but its first fetch already
+// supplies that result. The request log is the observation: a cancelled first
+// fetch followed by a second one would return the right rows while wasting
+// one transport for every new key after recovery.
+it(`fetches a new Query key once after cache rotation`, async () => {
+  const id = `query-cache-new-key-after-rotation`
+  const driver = new BetterSqlite3SQLiteDriver({ filename: `:memory:` })
+  let now = 1_000
+  const persistence = createNodeSQLitePersistence({
+    database: driver.getDatabase(),
+    cacheGenerationClaimTtlMs: 10_000,
+    now: () => now,
+  })
+  const queryClient = createQueryClient()
+  const queryFn = vi.fn((context: QueryFunctionContext) =>
+    Promise.resolve([
+      {
+        id: `row-${String(context.queryKey[1])}`,
+        category: `active`,
+        name: `source`,
+      },
+    ]),
+  )
+  const collection = createCollection(
+    persistedCollectionOptions<
+      Item,
+      string | number,
+      never,
+      QueryCollectionUtils<Item, string | number, Item, unknown>
+    >({
+      ...queryCollectionOptions<Item>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+      }),
+      persistence,
+    }),
+  )
+  cleanups.push(async () => {
+    await collection.cleanup()
+    queryClient.clear()
+    driver.close()
+  })
+
+  await collection._sync.loadSubset({ limit: 1 })
+  now += 10_001
+  await collection._sync.loadSubset({ limit: 1, refetch: true })
+  const beforeNewKey = queryFn.mock.calls.length
+  await collection._sync.loadSubset({ limit: 2 })
+  expect(queryFn.mock.calls.length - beforeNewKey).toBe(1)
+
+  const laterDemand = { limit: 3 }
+  queryClient.setQueryData(
+    [id, getLoadSubsetDemandKey(laterDemand)],
+    [{ id: `stale`, category: `active`, name: `Stale` }],
+  )
+  const beforeSeededKey = queryFn.mock.calls.length
+  await collection._sync.loadSubset(laterDemand)
+  expect(queryFn.mock.calls.length - beforeSeededKey).toBe(1)
+})
+
+// Rotation is a durable authority boundary. If SQLite refuses it, the current
+// sync run cannot resume its old observers as if the cache were still valid.
+// The public Collection status and later demand rejection make this fail-stop
+// visible; a pending internal recovery flag alone is not a silent freeze.
+it(`reports a failed Query cache rotation as a terminal Collection error`, async () => {
+  const id = `query-cache-failed-rotation`
+  const driver = new BetterSqlite3SQLiteDriver({ filename: `:memory:` })
+  const persistence = createNodeSQLitePersistence({
+    database: driver.getDatabase(),
+    now: () => 1_000,
+  })
+  const managed = persistence.resolvePersistenceForCollection!({
+    collectionId: id,
+    mode: `sync-present`,
+  })
+  const failure = new Error(`rotation refused`)
+  const rotationEntered = createDeferred<void>()
+  managed.adapter.rotateCacheGeneration = async () => {
+    rotationEntered.resolve()
+    throw failure
+  }
+  const queryClient = createQueryClient()
+  const queryOptions = queryCollectionOptions<Item>({
+    id,
+    queryClient,
+    queryKey: [id],
+    queryFn: () =>
+      Promise.resolve([{ id: `old`, category: `active`, name: `Old` }]),
+    getKey: (item) => item.id,
+    syncMode: `on-demand`,
+    startSync: true,
+  })
+  const sourceSync = queryOptions.sync.sync
+  let recover!: () => Promise<void>
+  const collection = createCollection(
+    persistedCollectionOptions<
+      Item,
+      string | number,
+      never,
+      QueryCollectionUtils<Item, string | number, Item, unknown>
+    >({
+      ...queryOptions,
+      sync: {
+        ...queryOptions.sync,
+        sync: (params) => {
+          recover = params.metadata!.persistence!.startScopedRecovery!
+          return sourceSync(params)
+        },
+      },
+      persistence: managed,
+    }),
+  )
+  cleanups.push(async () => {
+    await collection.cleanup()
+    queryClient.clear()
+    driver.close()
+  })
+
+  await collection._sync.loadSubset({ limit: 1 })
+  const outcome = recover()
+  await rotationEntered.promise
+  await expect(outcome).rejects.toBe(failure)
+  expect(collection.status).toBe(`error`)
+  await expect(collection._sync.loadSubset({ limit: 2 })).rejects.toBe(failure)
+})
+
 // A public refetch returns a Query result only if that result still belongs to
 // the current persisted cache generation. This provider captures the old row
 // before a held fetch, then recovery rotates SQLite and applies the fresh row.

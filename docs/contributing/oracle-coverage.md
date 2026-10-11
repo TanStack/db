@@ -2092,6 +2092,10 @@ queued old callback cannot add a source request; the new notice must request
 source reacquisition. These use a controlled in-process coordinator whose recording
 adapter shares row storage across physical IDs. Exact durable row isolation,
 arbitrary interleavings, and native multi-tab delivery remain separate checks.
+The same owner crosses cleanup before and after a held scoped refresh settles.
+Its raw coordinator release log requires exactly one release in both orders;
+the cleanup-first case rejected the prior double-release path at the late
+settlement checkpoint. A real multi-tab transport receiving cut remains open.
 The persisted owner also rejects a startup resume read after its claim expires,
 including two successive claim losses, then enters the source only after a live
 read under the replacement claim. A live-claim read error stays terminal. The
@@ -2244,6 +2248,13 @@ late success and late error require a new fetch before demand fulfillment.
 Two queued rotations have a separate held-second-rotation cut: the first
 recovery cannot reacquire an active Query subset or start a provider fetch.
 After the second rotation, that demand must fetch and apply a fresh row.
+The Query owner also checks new keys with and without a stale QueryClient value
+after claim rotation: one provider fetch satisfies the generation boundary in
+either case, with no extra cancelled fetch.
+A rejected SQLite rotation instead puts the Collection in public terminal error
+and rejects later demands with that same error; this is fail-stop, not a silent
+observer freeze. These are real SQLite/QueryClient cuts, not arbitrary provider
+failure schedules.
 The persisted owner also holds active rotation across index bootstrap and checks
 that an index added during the hold targets new storage. Its adapter call log
 does not prove native SQLite DDL completion. A virtual-clock history holds the

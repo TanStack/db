@@ -22366,6 +22366,120 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     assertGenerationNoticeHistory,
   )
 
+  // The model has one one-shot refresh lease. The grammar crosses cleanup
+  // before and after source settlement. Whichever event wins releases the
+  // lease once. The raw release log retains multiplicity at both checkpoints.
+  it.each([false, true])(
+    `releases a scoped refresh once when settlement precedes cleanup: %s`,
+    async (settleBeforeCleanup) => {
+      const adapter = createRecordingAdapter()
+      const coordinator = createCoordinatorHarness()
+      const logicalId = `scoped-refresh-cleanup`
+      const oldStorageId = `scoped-refresh-old`
+      const newStorageId = `scoped-refresh-new`
+      const refreshEntered = createEventGate()
+      const releaseRefresh = createEventGate()
+      const releaseCalls: Array<LoadSubsetOptions> = []
+      let watchRefresh = false
+      let refreshOptions: LoadSubsetOptions | undefined
+      adapter.claimCacheGeneration = async () => ({
+        storageCollectionId: oldStorageId,
+        claimId: `scoped-refresh-claim`,
+        expiresAtMs: Date.now() + 60_000,
+      })
+      adapter.renewCacheGenerationClaim = async () => Date.now() + 60_000
+      adapter.rotateCacheGeneration = async () => ({
+        storageCollectionId: newStorageId,
+        claimId: `scoped-refresh-claim`,
+        expiresAtMs: Date.now() + 60_000,
+      })
+      adapter.releaseCacheGenerationClaim = async () => {}
+      coordinator.requestEnsureRemoteSubset = async (_id, options) => {
+        if (watchRefresh && options.refetch === true) {
+          refreshOptions = options
+          refreshEntered.resolve()
+          await releaseRefresh.promise
+        }
+      }
+      coordinator.requestReleaseRemoteSubset = async (_id, options) => {
+        releaseCalls.push(options)
+      }
+      let source!: TodoSyncParams
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: logicalId,
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: (params) => {
+              source = params
+              params.markReady()
+              return {
+                restartAfterScopedRecovery: (cacheRotated) => cacheRotated,
+                loadSubset: async () => {},
+              }
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      )
+      try {
+        collection.startSyncImmediate()
+        await atPersistedOracleCheckpoint(
+          vi.waitFor(() => expect(source).toBeDefined()),
+          `source sync entered`,
+        )
+        await collection._sync.loadSubset({ limit: 1 })
+        await source.metadata!.persistence!.startScopedRecovery!()
+        watchRefresh = true
+        coordinator.emit(
+          {
+            type: `tx:committed`,
+            term: 1,
+            seq: 1,
+            txId: `scoped-refresh-notice`,
+            latestRowVersion: 1,
+            requiresFullReload: false,
+            changedRows: [
+              { key: `fresh`, value: { id: `fresh`, title: `Fresh` } },
+            ],
+            deletedKeys: [],
+          },
+          `peer`,
+          newStorageId,
+        )
+        await atPersistedOracleCheckpoint(
+          refreshEntered.promise,
+          `scoped refresh acquisition entered`,
+        )
+        if (settleBeforeCleanup) {
+          releaseRefresh.resolve()
+          await atPersistedOracleCheckpoint(
+            vi.waitFor(() =>
+              expect(
+                releaseCalls.filter((options) => options === refreshOptions),
+              ).toHaveLength(1),
+            ),
+            `refresh settlement released its lease`,
+          )
+        }
+        const cleanup = collection.cleanup()
+        await atPersistedOracleCheckpoint(cleanup, `cleanup released refresh`)
+        expect(
+          releaseCalls.filter((options) => options === refreshOptions),
+        ).toHaveLength(1)
+        releaseRefresh.resolve()
+        await flushAsyncWork()
+        expect(
+          releaseCalls.filter((options) => options === refreshOptions),
+        ).toHaveLength(1)
+      } finally {
+        releaseRefresh.resolve()
+        await collection.cleanup()
+      }
+    },
+  )
+
   // A cached read may start under a live claim, then return after a paused
   // tab's claim expires while its renewal timer is still queued. The read's
   // old rows have no publication authority at that cut. The model discards

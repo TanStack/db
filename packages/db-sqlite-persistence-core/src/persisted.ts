@@ -4740,7 +4740,7 @@ class PersistedCollectionRuntime<
           }
         })
         .finally(() => {
-          this.scopedRefreshes.delete(refreshOptions)
+          if (!this.scopedRefreshes.delete(refreshOptions)) return
           void this.persistence.coordinator
             .requestReleaseRemoteSubset(storageId, refreshOptions)
             .catch((error: unknown) => {
