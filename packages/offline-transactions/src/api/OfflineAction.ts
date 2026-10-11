@@ -28,7 +28,7 @@ export function createOfflineAction<T>(
       {
         mutationFnName,
         // The transaction commits after onMutate and reports a failure
-        // through isPersisted.
+        // through `when('settled')`.
         autoCommit: true,
       },
       mutationFn,
