@@ -459,3 +459,40 @@ map retains these limits.
 | ORC-012 review evidence | Pass for this bounded repair: the original head, RED/GREEN cut, neighboring control, paths, limits, and every applicable requirement are recorded here. |
 | ORC-013 boundary witness | Pass. The active different-source rejection and consumed different-source acceptance distinguish a permanent hash claim from the stated lifetime. |
 | ORC-014 controlled-premise handoff | No real-provider claim is made. The synchronous source fixture establishes the readiness premise for this core API history. |
+
+## Failed stream followed by newer hydration
+
+CodeRabbit review 5483962718 covered `3a8787998c58d74df9e383ef274cf06c1d37bc7c`.
+It found that `DbClient.hydrate()` copied a failed stream's source Collection
+claim into a newer hydrated result. The accepted law is that a failed stream
+has no reusable result and no source claim. A newer hydrated result carries a
+portable hash but no local Collection object identity; its first healthy local
+observer may claim its source. The SSR guide states this boundary. The earlier
+preload-identity owner checked newer hydration after a successful local claim,
+and the deferred-acquisition owner checked a replacement observer directly
+after failure. Neither crossed failure with a subsequent hydrated result.
+
+The primary preload-identity oracle now starts a real source Collection whose
+sync run later calls `markError`. It observes a pending client stream, its
+rejection, and omission from public dehydration. It then hydrates a newer
+result with either a settled snapshot or a held result promise, and subscribes
+a healthy same-hash observer backed by a different Collection object with the
+same ID. The independent two-row model predicts acceptance at subscription
+and the replacement source's row after preload. Both cells were RED on the
+reviewed head at the `not.toThrow()` subscription assertion with source error
+234. The reviewer's suggested source-copy guard alone left both cells RED:
+`_assertLiveQuerySources()` still found the failed stream's source objects in
+the retained preload entry. The repair discards that entry when hydration
+replaces an error record and copies sources only from non-error records. Both
+new cells then passed. Existing active-stream and hydration-first cells are
+the opposite checkpoints: a different source must still reject while a
+reusable result has a local claim.
+
+This establishes the failure-then-hydration transition for one later source
+failure, one newer settled or pending hydrated result, and one healthy observer
+at its public subscription and row-read cuts. It does not enumerate concurrent
+first claims, other failure schedules, multiple hydration chunks after the
+replacement, or other adapters. The coverage map assigns those limits. The
+separate inline documentation finding was also accurate: the React receiving
+oracle already shows that `useLiveSuspenseQuery` can preload and claim during
+render without a commit, so the SSR guide now names that timing explicitly.

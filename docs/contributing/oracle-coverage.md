@@ -317,8 +317,12 @@ a same-ID pair swapped between union branches also rejects. A descriptor and
 its own materialized Collection may reuse it. For a hydrated hash, the first
 local preload claims ordered source-object identity; a later conflicting
 preload rejects for settled and pending streams. A newer hydration chunk keeps
-that claim. Different explicit query keys and concurrent first local claims
-remain outside this finite history.
+that claim. If the earlier local stream instead fails, a newer settled or
+pending hydrated result starts without its source claim. A healthy observer
+using a different same-ID source then attaches and reads its own row. The old
+preload entry cannot claim the new stream. Different explicit query keys,
+concurrent first local claims, and other failure/hydration orders remain
+outside this finite history.
 Observer preload checks that an active settled graph or pooled stream, and a
 pending hydrated graph stream, reject a different same-hash source through the
 returned Promise without a synchronous throw. Same-source pooled preload is

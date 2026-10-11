@@ -223,8 +223,11 @@ source Collections for that reusable result. While the result is pending or
 successful, later local consumers with the same hash must use those Collection
 objects in the same query positions. A different source object with the same ID
 is rejected; give a genuinely different query a distinct `queryKey`. A newer
-hydration chunk updates the result without changing its established claim. Once
-a subscribed live result becomes authoritative, the client consumes the stream;
+hydration chunk updates the result without changing its established claim.
+`useLiveSuspenseQuery` can preload during render, claiming a source even if
+React never commits that render. A failed stream releases its claim, so a newer
+hydrated result can accept the first healthy local source. Once a subscribed
+live result becomes authoritative, the client consumes the stream;
 a later observer uses its own source Collection, even under the same hash.
 
 ### Server

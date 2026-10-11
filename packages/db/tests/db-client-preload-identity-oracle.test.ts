@@ -47,6 +47,13 @@
  * cannot carry server-side object identity; a later local consumer must use
  * the claimed objects. This is checked while the hydrated stream is settled
  * and while its result promise is pending.
+ * A failed stream has no result to reuse and relinquishes its source claim.
+ * If a newer hydrated result arrives after that failure, its portable hash
+ * still has no local source identity. The first healthy observer may claim it,
+ * even when its source object differs from the failed stream's source. The
+ * failure-then-hydration history compares the public subscription result and
+ * the observer's own row after preload. It does not model concurrent first
+ * claims or arbitrary hydration orders.
  */
 import { describe, expect, it, vi } from 'vitest'
 import {
@@ -196,6 +203,103 @@ describe(`DbClient preload source identity`, () => {
         await serverSource.cleanup()
         await firstLocal.cleanup()
         await otherLocal.cleanup()
+      }
+    },
+  )
+
+  /**
+   * Model: failure retires the old reusable result and its source claim.
+   * Hydration adds a portable result without local Collection provenance, so
+   * the first healthy local observer may attach and read its own source row.
+   * The active-stream cells below are the opposite source-claim cut.
+   */
+  it.each([`settled`, `pending`] as const)(
+    `a %s hydrated result after stream failure accepts a healthy observer source`,
+    async (streamState) => {
+      const id = `hydrated-after-failed-source-claim-${streamState}`
+      let failFirst!: () => void
+      const failed = createCollection({
+        id,
+        getKey: (row: Row) => row.id,
+        startSync: true,
+        sync: {
+          sync: ({
+            markError,
+          }: Parameters<SyncConfig<Row, string>[`sync`]>[0]) => {
+            failFirst = () => markError(new Error(`first source failed`))
+          },
+        },
+      })
+      const replacement = createCollection(sourceConfig(id, `replacement`))
+      const queryFor = (source: typeof failed) =>
+        new Query()
+          .from({ item: source })
+          .select(({ item }) => ({ id: item.id, value: item.value }))
+      const firstQuery = queryFor(failed)
+      const replacementQuery = queryFor(replacement)
+      const queryHash = getLiveQueryHash({ query: firstQuery })
+      const client = new DbClient()
+      const snapshot: DehydratedLiveQueryResult = {
+        rows: [{ key: `one`, value: { id: `one`, value: `server` } }],
+      }
+      let settleHydration:
+        ((value: DehydratedLiveQueryResult) => void) | undefined
+      const hydrationPromise = new Promise<DehydratedLiveQueryResult>(
+        (resolve) => {
+          settleHydration = resolve
+        },
+      )
+      let view: ReturnType<typeof resolveLiveQueryValue> | undefined
+      let observer: ReturnType<typeof createLiveQueryObserver> | undefined
+      let unsubscribe: (() => void) | undefined
+
+      try {
+        expect(getLiveQueryHash({ query: replacementQuery })).toBe(queryHash)
+        const pending = client.preloadLiveQuery({ query: firstQuery })
+        const stream = client.dehydrate({
+          shouldDehydrateLiveQuery: () => true,
+        }).liveQueries?.[0]
+        expect(stream?.queryHash).toBe(queryHash)
+        failFirst()
+        await expect(pending).rejects.toThrow(/entered error state/)
+        expect(client.dehydrate().liveQueries).toBeUndefined()
+
+        client.hydrate({
+          collections: [],
+          liveQueries: [
+            {
+              queryHash,
+              dehydratedAt: stream!.dehydratedAt + 1,
+              ...(streamState === `settled`
+                ? { snapshot }
+                : { promise: hydrationPromise }),
+            },
+          ],
+        })
+        if (streamState === `settled`)
+          expect(rows(client)).toEqual([{ id: `one`, value: `server` }])
+
+        view = resolveLiveQueryValue(replacementQuery)
+        expect(view).not.toBeNull()
+        observer = createLiveQueryObserver(view, { client, queryHash })
+        expect(() => {
+          unsubscribe = observer!.subscribe(() => {})
+        }).not.toThrow()
+        const preload = observer.preload()
+        settleHydration?.(snapshot)
+        await preload
+        expect(
+          (observer.getSnapshot().data as Array<Row>).map((row) => row.value),
+        ).toEqual([`replacement`])
+        expect(observer.getSnapshot().status).toBe(`ready`)
+      } finally {
+        settleHydration?.(snapshot)
+        unsubscribe?.()
+        observer?.dispose()
+        await view?.cleanup()
+        await client.cleanup()
+        await failed.cleanup()
+        await replacement.cleanup()
       }
     },
   )
