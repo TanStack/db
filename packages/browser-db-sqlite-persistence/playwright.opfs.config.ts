@@ -9,6 +9,7 @@ export default defineConfig({
   testMatch: [
     `shared-driver-fairness-oracle.opfs.spec.ts`,
     `remote-subset-two-tab.opfs.spec.ts`,
+    `cache-claim-notice.opfs.spec.ts`,
     `open-timeout.opfs.spec.ts`,
     `hydration-commit-oracle.opfs.spec.ts`,
     `leader-close-oracle.opfs.spec.ts`,
