@@ -222,7 +222,7 @@ mutation function after restart; an unmarked row may replay.
 #### Methods
 
 - `createOfflineTransaction(options)` - Create a manual offline transaction
-- `waitForTransactionCompletion(id)` - Wait for a specific transaction to complete
+- `waitForTransactionCompletion(id)` - Wait for a specific transaction to complete. Call it before the transaction settles: a waiter for a transaction that this executor already settled rejects. A waiter for an id the executor does not know yet keeps waiting, because another tab can still queue that transaction.
 - `removeFromOutbox(id)` - Manually remove transaction from outbox
 - `clearOutbox()` - Manually remove all outbox transactions
 - `peekOutbox()` - View all pending transactions

@@ -54,7 +54,9 @@ import type {
  * settles. A manual transaction that rolls back before it commits may also
  * precede a position. It also settles without the provider, so its waiter
  * must reject with an Error that names the rollback. Once a transaction's
- * mutation function runs, only the executor settles its waiter. A callback that
+ * mutation function runs, only the executor settles its waiter. When every
+ * transaction has settled, a new waiter for each one rejects instead of
+ * waiting forever. A callback that
  * throws leaves its transaction pending, as core
  * transactions do, so its waiter stays pending too; that case is not
  * generated. When nobody reads an auto-commit's receipt, the Collection that
@@ -529,6 +531,19 @@ it.each(oracleSeeds(20260913, settlementOracle))(
             }
             await turn()
             expect(unhandled, `unhandled rejections`).toEqual([])
+            // A waiter registered after its transaction settled has nothing to
+            // wait for, so it rejects instead of hanging.
+            for (const id of ids) {
+              const late = env.executor.waitForTransactionCompletion(id).then(
+                () => `fulfilled`,
+                () => `rejected`,
+              )
+              await turn()
+              expect(
+                await Promise.race([late, turn().then(() => `pending`)]),
+                `late waiter for ${id}`,
+              ).toBe(`rejected`)
+            }
             // A receipt nobody read still settles with its own outcome; read
             // it only now, after the unhandled-rejection checkpoint.
             for (const [index, transaction] of made.entries()) {

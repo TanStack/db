@@ -41,6 +41,9 @@ import type {
 } from './types'
 import type { Transaction } from '@tanstack/db'
 
+/** How many settled ids an executor remembers to reject late waiters. */
+const SETTLED_TRANSACTIONS_REMEMBERED = 1000
+
 export class OfflineExecutor {
   private config: OfflineConfig
 
@@ -474,12 +477,30 @@ export class OfflineExecutor {
     )
   }
 
+  /**
+   * Ids this executor settled, oldest first. A waiter for one of them has
+   * nothing left to wait for. An unknown id can still arrive from another tab.
+   */
+  private readonly settledTransactions = new Set<string>()
+
+  private rememberSettled(transactionId: string): void {
+    this.settledTransactions.add(transactionId)
+    if (this.settledTransactions.size > SETTLED_TRANSACTIONS_REMEMBERED)
+      this.settledTransactions.delete(
+        this.settledTransactions.values().next().value!,
+      )
+  }
+
   // Method for OfflineTransaction to wait for completion
   async waitForTransactionCompletion(transactionId: string): Promise<any> {
     const existing = this.pendingTransactionPromises.get(transactionId)
     if (existing) {
       return existing.promise
     }
+    if (this.settledTransactions.has(transactionId))
+      throw new Error(
+        `Offline transaction ${transactionId} already settled; wait for it before it settles`,
+      )
 
     const deferred: {
       promise: Promise<any>
@@ -498,6 +519,7 @@ export class OfflineExecutor {
 
   // Method for TransactionExecutor to signal completion
   resolveTransaction(transactionId: string, result: any): void {
+    this.rememberSettled(transactionId)
     const deferred = this.pendingTransactionPromises.get(transactionId)
     if (deferred) {
       deferred.resolve(result)
@@ -510,6 +532,7 @@ export class OfflineExecutor {
 
   // Method for TransactionExecutor to signal failure
   rejectTransaction(transactionId: string, error: Error): void {
+    this.rememberSettled(transactionId)
     const deferred = this.pendingTransactionPromises.get(transactionId)
     if (deferred) {
       deferred.reject(error)
