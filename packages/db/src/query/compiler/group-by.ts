@@ -427,7 +427,9 @@ export function processGroupBy(
     for (const [alias, expr] of Object.entries(selectClause)) {
       if (expr.type === `agg`) {
         addAggregate(alias, expr)
-      } else if (containsAggregate(expr)) {
+      } else {
+        // Every other value reads the group's key values, the route's parent
+        // context, and the aggregates it wraps.
         const { transformed, extracted } = extractAndReplaceAggregates(
           expr as SelectValueExpression,
           aggCounter,
@@ -439,16 +441,6 @@ export function processGroupBy(
         wrappedAggExprs[alias] = compileGroupedSelectValue(
           replaceGroupByRefsInSelectValue(
             transformed,
-            groupByClause,
-            fields.groupKeyRefs,
-          ),
-        )
-      } else {
-        // A literal, group key or parent field reads the group's key values
-        // and the route's parent context, as a wrapped aggregate does.
-        wrappedAggExprs[alias] = compileGroupedSelectValue(
-          replaceGroupByRefsInSelectValue(
-            expr as SelectValueExpression,
             groupByClause,
             fields.groupKeyRefs,
           ),

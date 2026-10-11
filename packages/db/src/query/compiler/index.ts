@@ -753,7 +753,9 @@ function compileQueryInternal(
       includesEntries.length > 0 &&
       ((query.groupBy?.length ?? 0) > 0 || selectHasAggregates)
     )
-      throw new NonAggregateExpressionNotInGroupByError(includesEntries[0]!.key)
+      throw new NonAggregateExpressionNotInGroupByError(
+        includesEntries[0]!.path.join(`.`),
+      )
     if (includesEntries.length > 0) {
       query = { ...query, select: { ...query.select } }
     }
@@ -1102,7 +1104,10 @@ function compileQueryInternal(
   const isSourceRef = (ref: PropRef) => {
     const binding = sourceBindings.get(ref.path[0]!)
     if (binding !== undefined) return (ref.bindingId ?? binding) === binding
-    return unionRows && ref.bindingId === undefined
+    // `$selected` names the query's own select values, not a source.
+    return (
+      unionRows && ref.bindingId === undefined && ref.path[0] !== `$selected`
+    )
   }
   if (query.groupBy && query.groupBy.length > 0) {
     pipeline = processGroupBy(

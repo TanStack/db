@@ -107,7 +107,7 @@ type Shape = {
    * select rule: its value outside an aggregate must be constant within the
    * group.
    */
-  having?: { part: Part; lit: number | string }
+  having?: { part: Part; lit: number | string; selected?: string }
   spread?: `source` | `parent`
   /** A nested include beside the aggregate. */
   include?: boolean
@@ -200,6 +200,7 @@ function modelError(
   )
   if (
     shape.having &&
+    shape.having.selected === undefined &&
     aggregatesOf(shape.having.part).some((fn) => !selected.has(fn))
   )
     return `aggregateNotInSelect`
@@ -209,7 +210,8 @@ function modelError(
 function modelThrows(shape: Shape, grouping: Grouping): boolean {
   return (
     shape.spread !== undefined ||
-    (shape.having !== undefined &&
+    (shape.having?.selected === undefined &&
+      shape.having !== undefined &&
       readsSourceOutsideAggregate(shape.having.part, grouping)) ||
     shape.include === true ||
     Object.values(shape.fields).some((part) =>
@@ -292,10 +294,14 @@ function modelGroup(
       : rows.length === 0
         ? []
         : [rows]
+  // HAVING comes after the select, so it can read `$selected`. A condition
+  // on `$selected` reads a select field's group value.
+  const havingPart = (having: NonNullable<Shape[`having`]>) =>
+    having.selected === undefined ? having.part : shape.fields[having.selected]!
   const kept = shape.having
     ? groups.filter(
         (group) =>
-          evaluate(shape.having!.part, group, parent, grouping) ===
+          evaluate(havingPart(shape.having!), group, parent, grouping) ===
           shape.having!.lit,
       )
     : groups
@@ -436,10 +442,20 @@ const shape = (include: boolean, grouping: Grouping): fc.Arbitrary<Shape> =>
               .map((fn): Part => ({ k: `agg`, fn })),
           ),
           lit: conditionLiteral,
+          // One in three reads a select field through `$selected` instead.
+          selected: fc.option(fc.constant(true), { nil: undefined, freq: 2 }),
         }),
         { nil: undefined, freq: 3 },
       ),
     })
+    .map((s) =>
+      s.having?.selected
+        ? {
+            ...s,
+            having: { ...s.having, selected: Object.keys(s.fields)[0]! },
+          }
+        : { ...s, having: s.having && { ...s.having, selected: undefined } },
+    )
     .filter(
       (s) => grouping !== `none` || Object.values(s.fields).some(hasAggregate),
     )
@@ -608,7 +624,12 @@ async function runHistory(
   ) =>
     s.having
       ? query.having((refs: any) =>
-          eq(build(s.having!.part, rowOf(refs, alias), issue), s.having!.lit),
+          eq(
+            s.having!.selected === undefined
+              ? build(s.having!.part, rowOf(refs, alias), issue)
+              : refs.$selected[s.having!.selected],
+            s.having!.lit,
+          ),
         )
       : query
   // The include's source may shadow the parent alias. A parent ref captured
@@ -631,8 +652,12 @@ async function runHistory(
   const topAlias = union ? undefined : `c`
   const topQuery = compile(() =>
     createLiveQueryCollection((q) =>
-      having(top, group(topSource(q), topAlias), topAlias).select((refs: any) =>
-        buildSelect(top, rowOf(refs, topAlias), undefined, q, issueSource),
+      having(
+        top,
+        group(topSource(q), topAlias).select((refs: any) =>
+          buildSelect(top, rowOf(refs, topAlias), undefined, q, issueSource),
+        ),
+        topAlias,
       ),
     ),
   )
@@ -648,11 +673,11 @@ async function runHistory(
                 .from({ [childAlias]: commentSource })
                 .where((refs: any) => eq(refs[childAlias].k, issue.k)),
               childAlias,
+            ).select((refs: any) =>
+              buildSelect(nested, refs[childAlias], issue, q, issueSource),
             ),
             childAlias,
             issue,
-          ).select((refs: any) =>
-            buildSelect(nested, refs[childAlias], issue, q, issueSource),
           ),
         ),
       })),
