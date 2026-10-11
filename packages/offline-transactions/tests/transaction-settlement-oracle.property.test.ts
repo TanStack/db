@@ -47,7 +47,10 @@ import type {
  * `autoCommit: true`, with the option omitted, or as an `OfflineAction`. An
  * auto-commit has no `commit()` caller, so its `isPersisted` is the commit
  * receipt. No failure, manual or auto-committed, may escape as an unhandled
- * process rejection, be logged again, or write debug output. Pinned examples
+ * process rejection, be logged again, or write debug output. When nobody
+ * reads an auto-commit's receipt, the Collection that tracks the transaction
+ * owns its rejection; every generated transaction writes to one. A caller may
+ * also register its completion waiter before the transaction is admitted. Pinned examples
  * reconstruct all-success, middle-failure, all-failure, and alternating
  * outcomes. Shared keys distinguish sibling rollback from disjoint-key
  * survival. Width distinguishes complete optimistic state for several rows
@@ -207,6 +210,9 @@ const settlementTransaction = fc.record({
     `action` as const,
   ),
   readReceipt: fc.boolean(),
+  // The caller may wait for completion before the transaction is admitted,
+  // which only a transaction object made before mutate() allows.
+  waitBefore: fc.boolean(),
 })
 
 it.each(oracleSeeds(20260913, settlementOracle))(
@@ -386,20 +392,26 @@ it.each(oracleSeeds(20260913, settlementOracle))(
                     ? {}
                     : { autoCommit: commit === `auto` }),
                 })
+                if (transactions[index]!.waitBefore)
+                  observe(
+                    `wait-${index}`,
+                    env.executor.waitForTransactionCompletion(tx.id),
+                  )
                 transaction = tx.mutate(write)
               }
               ids.push(transaction.id)
-              observe(
-                `wait-${index}`,
-                env.executor.waitForTransactionCompletion(transaction.id),
-              )
+              if (!(`wait-${index}` in statuses))
+                observe(
+                  `wait-${index}`,
+                  env.executor.waitForTransactionCompletion(transaction.id),
+                )
               // An auto-commit has no commit() caller; its receipt is
               // isPersisted, which settles like a manual commit's.
               if (!unread[index])
                 observe(
                   `commit-${index}`,
                   autoCommits[index]
-                    ? transaction.isPersisted.promise
+                    ? transaction.when(`settled`)
                     : tx!.commit(),
                 )
               if (index === 0)
@@ -431,12 +443,9 @@ it.each(oracleSeeds(20260913, settlementOracle))(
             }
             await turn()
             expect(unhandled, `unhandled rejections`).toEqual([])
-            expect(
-              logged.mock.calls.filter(([message]) =>
-                String(message).includes(`commit failed`),
-              ),
-              `commit failures logged`,
-            ).toEqual([])
+            // A failure of the mutation function is reported through the
+            // receipt only; nothing is logged as an error.
+            expect(logged.mock.calls, `errors logged`).toEqual([])
             expect(debug.mock.calls, `debug output`).toEqual([])
           } catch (error) {
             hasPrimaryFailure = true
@@ -465,8 +474,18 @@ it.each(oracleSeeds(20260913, settlementOracle))(
               sharedKeys: true,
               width: 1,
               transactions: [
-                { succeeds: true, commit: `manual`, readReceipt: true },
-                { succeeds: true, commit: `manual`, readReceipt: true },
+                {
+                  succeeds: true,
+                  commit: `manual`,
+                  readReceipt: true,
+                  waitBefore: false,
+                },
+                {
+                  succeeds: true,
+                  commit: `manual`,
+                  readReceipt: true,
+                  waitBefore: false,
+                },
               ],
             },
           ],
@@ -475,9 +494,24 @@ it.each(oracleSeeds(20260913, settlementOracle))(
               sharedKeys: false,
               width: 2,
               transactions: [
-                { succeeds: true, commit: `manual`, readReceipt: true },
-                { succeeds: false, commit: `manual`, readReceipt: true },
-                { succeeds: true, commit: `manual`, readReceipt: true },
+                {
+                  succeeds: true,
+                  commit: `manual`,
+                  readReceipt: true,
+                  waitBefore: false,
+                },
+                {
+                  succeeds: false,
+                  commit: `manual`,
+                  readReceipt: true,
+                  waitBefore: false,
+                },
+                {
+                  succeeds: true,
+                  commit: `manual`,
+                  readReceipt: true,
+                  waitBefore: false,
+                },
               ],
             },
           ],
@@ -486,9 +520,24 @@ it.each(oracleSeeds(20260913, settlementOracle))(
               sharedKeys: true,
               width: 2,
               transactions: [
-                { succeeds: false, commit: `manual`, readReceipt: true },
-                { succeeds: false, commit: `manual`, readReceipt: true },
-                { succeeds: false, commit: `manual`, readReceipt: true },
+                {
+                  succeeds: false,
+                  commit: `manual`,
+                  readReceipt: true,
+                  waitBefore: false,
+                },
+                {
+                  succeeds: false,
+                  commit: `manual`,
+                  readReceipt: true,
+                  waitBefore: false,
+                },
+                {
+                  succeeds: false,
+                  commit: `manual`,
+                  readReceipt: true,
+                  waitBefore: false,
+                },
               ],
             },
           ],
@@ -497,9 +546,24 @@ it.each(oracleSeeds(20260913, settlementOracle))(
               sharedKeys: true,
               width: 1,
               transactions: [
-                { succeeds: false, commit: `manual`, readReceipt: true },
-                { succeeds: true, commit: `manual`, readReceipt: true },
-                { succeeds: false, commit: `manual`, readReceipt: true },
+                {
+                  succeeds: false,
+                  commit: `manual`,
+                  readReceipt: true,
+                  waitBefore: false,
+                },
+                {
+                  succeeds: true,
+                  commit: `manual`,
+                  readReceipt: true,
+                  waitBefore: false,
+                },
+                {
+                  succeeds: false,
+                  commit: `manual`,
+                  readReceipt: true,
+                  waitBefore: false,
+                },
               ],
             },
           ],
@@ -508,9 +572,24 @@ it.each(oracleSeeds(20260913, settlementOracle))(
               sharedKeys: true,
               width: 1,
               transactions: [
-                { succeeds: false, commit: `auto`, readReceipt: false },
-                { succeeds: true, commit: `manual`, readReceipt: true },
-                { succeeds: false, commit: `auto`, readReceipt: true },
+                {
+                  succeeds: false,
+                  commit: `auto`,
+                  readReceipt: false,
+                  waitBefore: false,
+                },
+                {
+                  succeeds: true,
+                  commit: `manual`,
+                  readReceipt: true,
+                  waitBefore: false,
+                },
+                {
+                  succeeds: false,
+                  commit: `auto`,
+                  readReceipt: true,
+                  waitBefore: false,
+                },
               ],
             },
           ],
@@ -521,8 +600,18 @@ it.each(oracleSeeds(20260913, settlementOracle))(
               sharedKeys: false,
               width: 1,
               transactions: [
-                { succeeds: false, commit: `default`, readReceipt: false },
-                { succeeds: false, commit: `action`, readReceipt: true },
+                {
+                  succeeds: false,
+                  commit: `default`,
+                  readReceipt: false,
+                  waitBefore: false,
+                },
+                {
+                  succeeds: false,
+                  commit: `action`,
+                  readReceipt: true,
+                  waitBefore: false,
+                },
               ],
             },
           ],
@@ -2073,7 +2162,7 @@ it.each([
           outcome.commit = error
         },
       )
-      const persisted = transaction.isPersisted.promise.then(
+      const persisted = transaction.when(`settled`).then(
         () => {
           outcome.persisted = `fulfilled`
         },
@@ -3867,6 +3956,7 @@ it.each([`manual`, `auto`, `default`, `action`] as const)(
     const { rejections: unhandled, cleanup: cleanupUnhandled } =
       captureUnhandledRejections()
     const logged = vi.spyOn(console, `error`).mockImplementation(() => {})
+    const debug = vi.spyOn(console, `log`).mockImplementation(() => {})
     try {
       await env.waitForLeader()
       const write = () =>
@@ -3882,7 +3972,7 @@ it.each([`manual`, `auto`, `default`, `action`] as const)(
           mutationFnName: env.mutationFnName,
           onMutate: write,
         })(undefined)
-        receipt = transaction.isPersisted.promise
+        receipt = transaction.when(`settled`)
       } else {
         const tx = env.executor.createOfflineTransaction({
           mutationFnName: env.mutationFnName,
@@ -3890,22 +3980,25 @@ it.each([`manual`, `auto`, `default`, `action`] as const)(
         })
         const transaction = tx.mutate(write)
         receipt =
-          commit === `manual` ? tx.commit() : transaction.isPersisted.promise
+          commit === `manual` ? tx.commit() : transaction.when(`settled`)
       }
       await expect(receipt).rejects.toBe(storageError)
       await new Promise((resolve) => setTimeout(resolve, 0))
       expect(unhandled, `unhandled rejections`).toEqual([])
+      // The executor logs the persist failure once; nothing logs it again.
       expect(
-        logged.mock.calls.filter(([message]) =>
-          String(message).includes(`commit failed`),
-        ),
-        `commit failures logged`,
-      ).toEqual([])
+        logged.mock.calls.map(([message]) => String(message)),
+        `errors logged`,
+      ).toEqual([
+        expect.stringMatching(/^Failed to persist offline transaction /),
+      ])
+      expect(debug.mock.calls, `debug output`).toEqual([])
       expect(env.collection.get(`stored`), `optimistic row`).toBeUndefined()
       expect(env.serverState.size, `provider calls`).toBe(0)
     } finally {
       cleanupUnhandled()
       logged.mockRestore()
+      debug.mockRestore()
       env.executor.dispose()
     }
   },

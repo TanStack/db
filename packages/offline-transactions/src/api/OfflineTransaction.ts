@@ -35,7 +35,7 @@ export class OfflineTransaction {
     // One offline transaction is one transaction, and its id is unique among
     // live transactions. Repeated calls add to it while it is pending. With
     // autoCommit, it commits after this callback and reports a failure
-    // through isPersisted, so a later call throws: it is no longer pending.
+    // through `when('settled')`, so a later call throws: it is no longer pending.
     this.transaction ??= createTransaction({
       id: this.offlineId,
       autoCommit: this.autoCommit,
