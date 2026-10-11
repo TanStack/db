@@ -12,7 +12,7 @@ import {
   toArray,
 } from '../../src/query/index.js'
 import { getQueryIR } from '../../src/query/builder/query-ir.js'
-import { PropRef } from '../../src/query/ir.js'
+import { IncludesSubquery, PropRef } from '../../src/query/ir.js'
 import { getQueryIdentity } from '../../src/query/ir-stable-identity.js'
 import { optimizeQuery } from '../../src/query/optimizer.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
@@ -1163,6 +1163,59 @@ describe(`captured alias scope oracle`, () => {
         })
       }
     }
+  }
+})
+
+/**
+ * A child may use a captured ancestor only when its route projects that
+ * binding. This is an internal plan invariant, separate from the public row
+ * model above. Remove the projection from a legal, shadowed plan after the
+ * builder made it: compilation must reject the malformed plan before a child
+ * can silently read its same-named local row.
+ */
+test(`a missing captured parent projection fails before child rows are read`, async () => {
+  const parents = createScopedSource(
+    `missing-projection-parent`,
+    [{ id: 1, name: `PARENT` }],
+    `eager`,
+  )
+  const children = createScopedSource(
+    `missing-projection-child`,
+    [{ id: 10, parentId: 1, name: `CHILD` }],
+    `eager`,
+  )
+  const query = new Query()
+    .from({ item: parents.collection })
+    .select(({ item: parent }) => ({
+      id: parent.id,
+      children: toArray(
+        new Query()
+          .from({ item: children.collection })
+          .where(({ item }) => eq(item.parentId, parent.id))
+          .select(({ item }) => ({
+            id: item.id,
+            parentName: parent.name,
+          })),
+      ),
+    }))
+  const includes = (getQueryIR(query).select as Record<string, unknown>)[
+    `children`
+  ]
+  expect(includes).toBeInstanceOf(IncludesSubquery)
+  const childPlan = includes as IncludesSubquery
+  expect(childPlan.parentProjection?.length).toBeGreaterThan(0)
+  childPlan.parentProjection = []
+  let live: ReturnType<typeof createLiveQueryCollection> | undefined
+
+  try {
+    await expect(async () => {
+      live = createLiveQueryCollection({ query })
+      await live.preload()
+    }).rejects.toThrow(/missing a captured parent projection/)
+  } finally {
+    await live?.cleanup()
+    await parents.collection.cleanup()
+    await children.collection.cleanup()
   }
 })
 
@@ -3269,15 +3322,18 @@ describe(`outer joins preserve absent source bindings under shadowing`, () => {
  *
  * The independent model below recomputes two LEFT joins from plain rows. Its
  * legal history changes an absent local issue into a match and back, then
- * removes and restores the second joined side. A second parent route keeps a
- * matched local issue as the opposite control. The QueryRef filters tags by
- * parent; the direct source reads the parent in its equality operand instead.
+ * removes and restores the second joined side. It also changes a parent label
+ * while the joins are matched: that label must survive from the main route,
+ * even when the joined input carries its own inherited context. A second
+ * parent route keeps a matched local issue as the opposite control. The
+ * QueryRef filters tags by parent; the direct source reads the parent in its
+ * equality operand instead.
  * The production driver uses public Query and Collection APIs; after preload
  * and each write, public child rows are compared with the model. Shadowed and
  * renamed aliases, both route causes, and eager and on-demand sources agree.
  */
 describe(`chained joins keep an absent local source absent`, () => {
-  type Issue = { id: number }
+  type Issue = { id: number; label: string }
   type Comment = {
     id: number
     issueId: number
@@ -3287,6 +3343,7 @@ describe(`chained joins keep an absent local source absent`, () => {
   type Tag = { id: number; issueId: number }
   type Expected = {
     parentId: number
+    parentLabel: string
     commentId: number
     localIssueId: number | undefined
     tagId: number | undefined
@@ -3309,6 +3366,7 @@ describe(`chained joins keep an absent local source absent`, () => {
             const tag = tags.get(comment.tagId)
             return {
               parentId: parent.id,
+              parentLabel: parent.label,
               commentId: comment.id,
               localIssueId: localIssue?.id,
               tagId:
@@ -3325,14 +3383,16 @@ describe(`chained joins keep an absent local source absent`, () => {
   for (const mode of [`eager`, `onDemand`] as const) {
     test(`${mode} chained joins preserve absence under shadowing and renaming`, async () => {
       const parentRows = new Map<number, Issue>([
-        [1, { id: 1 }],
-        [2, { id: 2 }],
+        [1, { id: 1, label: `first parent` }],
+        [2, { id: 2, label: `second parent` }],
       ])
       const commentRows = new Map<number, Comment>([
         [10, { id: 10, issueId: 1, localIssueId: 99, tagId: 7 }],
         [20, { id: 20, issueId: 2, localIssueId: 2, tagId: 8 }],
       ])
-      const localIssueRows = new Map<number, Issue>([[2, { id: 2 }]])
+      const localIssueRows = new Map<number, Issue>([
+        [2, { id: 2, label: `local issue` }],
+      ])
       const tagRows = new Map<number, Tag>([
         [7, { id: 7, issueId: 1 }],
         [8, { id: 8, issueId: 2 }],
@@ -3412,6 +3472,7 @@ describe(`chained joins keep an absent local source absent`, () => {
                         eq((context.comment as Comment).issueId, parent.id),
                       )
                       .select((context: Context) => ({
+                        parentLabel: parent.label,
                         commentId: (context.comment as Comment).id,
                         localIssueId: (context[alias] as Issue).id,
                         tagId: (context.tag as Tag).id,
@@ -3463,7 +3524,13 @@ describe(`chained joins keep an absent local source absent`, () => {
           }
           check(`initial publication`)
 
-          const matchedIssue = { id: 99 }
+          const changedParent = { id: 2, label: `changed parent` }
+          parentRows.set(2, changedParent)
+          for (const entry of cases) entry.parents.put(changedParent)
+          await flushPromises()
+          check(`parent label changes`)
+
+          const matchedIssue = { id: 99, label: `new local issue` }
           localIssueRows.set(99, matchedIssue)
           for (const entry of cases) entry.localIssues.put(matchedIssue)
           await flushPromises()
@@ -3493,6 +3560,159 @@ describe(`chained joins keep an absent local source absent`, () => {
             () => entry.localIssues.collection.cleanup(),
             () => entry.tags.collection.cleanup(),
           ]),
+      )
+    })
+  }
+})
+
+/**
+ * # A lazy joined QueryRef targets the source that owns its projected key
+ *
+ * ARCHITECTURE.md Identity and law 12 require a joined subquery's projected
+ * tag key to keep its source identity even when its post alias shadows the
+ * outer user alias. The plain-row model joins each user to a post and tag by
+ * tag ID. Only the matching post and tag need to enter on-demand sources.
+ *
+ * The legal history uses a joined QueryRef whose selected join key comes
+ * from its own joined tag source, not its post FROM source. It crosses
+ * shadowed and renamed post aliases, then moves the user's tag and updates
+ * the new tag. Public rows are compared after preload and both writes; the
+ * installed source rows at each cut expose a wrong lazy target that might
+ * otherwise return the right final row by loading an entire source.
+ */
+describe(`joined QueryRef lazy targets retain lexical source identity`, () => {
+  type User = { id: number; tagId: number; name: string }
+  type Post = { id: number; tagId: number; title: string }
+  type Tag = { id: number; label: string }
+  type Expected = {
+    id: number
+    name: string
+    title: string | undefined
+    label: string | undefined
+  }
+
+  const model = (
+    users: ReadonlyMap<number, User>,
+    posts: ReadonlyMap<number, Post>,
+    tags: ReadonlyMap<number, Tag>,
+  ): Array<Expected> =>
+    [...users.values()].map((user) => {
+      const post = [...posts.values()].find(
+        (candidate) =>
+          candidate.tagId === user.tagId && tags.has(candidate.tagId),
+      )
+      return {
+        id: user.id,
+        name: user.name,
+        title: post?.title,
+        label: post ? tags.get(post.tagId)?.label : undefined,
+      }
+    })
+
+  for (const alias of [`u`, `post`] as const) {
+    test(`${alias} post alias: projected tag drives on-demand rows`, async () => {
+      const userRows = new Map<number, User>([
+        [1, { id: 1, tagId: 7, name: `USER` }],
+      ])
+      const postRows = new Map<number, Post>([
+        [10, { id: 10, tagId: 7, title: `POST` }],
+        [11, { id: 11, tagId: 8, title: `OTHER POST` }],
+      ])
+      const tagRows = new Map<number, Tag>([
+        [7, { id: 7, label: `MATCH` }],
+        [8, { id: 8, label: `OTHER` }],
+      ])
+      const users = createScopedSource(
+        `lazy-joined-users-${alias}`,
+        [...userRows.values()],
+        `onDemand`,
+      )
+      const posts = createScopedSource(
+        `lazy-joined-posts-${alias}`,
+        [...postRows.values()],
+        `onDemand`,
+      )
+      const tags = createScopedSource(
+        `lazy-joined-tags-${alias}`,
+        [...tagRows.values()],
+        `onDemand`,
+      )
+      users.collection.createIndex((row) => row.id, {
+        indexType: BasicIndex,
+      })
+      posts.collection.createIndex((row) => row.tagId, {
+        indexType: BasicIndex,
+      })
+      tags.collection.createIndex((row) => row.id, {
+        indexType: BasicIndex,
+      })
+      const joined = new Query()
+        .from({ [alias]: posts.collection })
+        .innerJoin({ tag: tags.collection }, (context: Context) =>
+          eq((context[alias] as Post).tagId, (context.tag as Tag).id),
+        )
+        .select((context: Context) => ({
+          tagId: (context.tag as Tag).id,
+          title: (context[alias] as Post).title,
+          label: (context.tag as Tag).label,
+        }))
+      const live = createLiveQueryCollection({
+        query: new Query()
+          .from({ u: users.collection })
+          .leftJoin({ p: joined }, ({ u, p }) => eq(u.tagId, p.tagId))
+          .select(({ u, p }) => ({
+            id: u.id,
+            name: u.name,
+            title: p.title,
+            label: p.label,
+          })),
+      })
+
+      await withHistoryCleanup(
+        async () => {
+          const check = (
+            cut: string,
+            expectedPosts: Array<number>,
+            expectedTags: Array<number>,
+          ) => {
+            expect(
+              live.toArray.map(({ id, name, title, label }) => ({
+                id,
+                name,
+                title,
+                label,
+              })),
+              `${alias} at ${cut}: public rows`,
+            ).toEqual(model(userRows, postRows, tagRows))
+            expect(
+              posts.collection.toArray.map((row) => row.id).sort(),
+              `${alias} at ${cut}: installed posts`,
+            ).toEqual(expectedPosts)
+            expect(
+              tags.collection.toArray.map((row) => row.id).sort(),
+              `${alias} at ${cut}: installed tags`,
+            ).toEqual(expectedTags)
+          }
+
+          await live.preload()
+          check(`preload`, [10], [7])
+          const moved = { id: 1, tagId: 8, name: `USER` }
+          userRows.set(1, moved)
+          users.put(moved)
+          await flushPromises()
+          check(`user changes tag`, [10, 11], [7, 8])
+          const changedTag = { id: 8, label: `CHANGED` }
+          tagRows.set(8, changedTag)
+          tags.put(changedTag)
+          await flushPromises()
+          check(`tag changes label`, [10, 11], [7, 8])
+        },
+        () => [
+          () => live.cleanup(),
+          () => users.collection.cleanup(),
+          () => posts.collection.cleanup(),
+          () => tags.collection.cleanup(),
+        ],
       )
     })
   }

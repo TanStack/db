@@ -49,14 +49,17 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   BTreeIndex,
   DbClient,
+  collectionOptions,
   createCollection,
   createLiveQueryCollection,
   createLiveQueryObserver,
   eq,
+  getLiveQueryHash,
+  prepareLiveQueryValue,
 } from '../src'
 import { Query } from '../src/query/builder/index.js'
 import { createPooledLiveQuery } from '../src/query/pooled-live-query.js'
-import type { Collection } from '../src'
+import type { Collection, LiveQueryObserver } from '../src'
 
 type Row = { id: string; rank: number; group: string }
 const ROWS: Array<Row> = [
@@ -503,7 +506,10 @@ describe(`live-query deferred acquisition`, () => {
  * subscription defers acquisition until a view has a subscriber or a preload.
  * Only eager source states apply, and pooled cleanup releases a shared
  * partition, so this block uses the histories without cleanup. `start` is
- * building the view.
+ * building the view. An observer is another public demand path for the same
+ * view: its preload must reach the source even though a pooled view has no
+ * query-Collection config. The observer runs with and without an SSR cleanup
+ * client, which must not mistake the absent config for a live-query builder.
  */
 // The pooled entry point takes the internal builder, as its own oracle does.
 const pooledQuery =
@@ -514,6 +520,61 @@ const pooledQuery =
       .orderBy(({ row }: any) => row.rank, `asc`)
 
 describe(`pooled live-query deferred acquisition`, () => {
+  it.each([
+    [`eager-idle`, `no SSR cleanup client`],
+    [`eager-running`, `no SSR cleanup client`],
+    [`eager-idle`, `an SSR cleanup client`],
+    [`eager-running`, `an SSR cleanup client`],
+  ] as const)(
+    `an observer preload reaches a config-free pooled view from %s with %s`,
+    async (state, clientMode) => {
+      const { collection: source, counts } = makeSource(state)
+      const view = createPooledLiveQuery(pooledQuery(source)(new Query()), {
+        gcTime: 0,
+      })
+      expect(view, `the query is poolable`).toBeDefined()
+      const client =
+        clientMode === `an SSR cleanup client` ? new DbClient() : undefined
+      client?._setSsrServerCleanupEnabled(true)
+      let observer: LiveQueryObserver<Row, string | number> | undefined
+      let constructionError: unknown
+      try {
+        observer = createLiveQueryObserver(view as Collection<Row>, {
+          client,
+          queryHash: `config-free-pooled-view`,
+        })
+      } catch (error) {
+        constructionError = error
+      }
+      try {
+        expect(
+          constructionError,
+          `observer construction succeeds`,
+        ).toBeUndefined()
+        if (!observer) throw new Error(`missing observer after construction`)
+        // Model: explicit demand starts an idle source once. An already
+        // running source needs no second start for the same public rows.
+        const startsBefore = counts.starts
+        await expect(
+          Promise.resolve().then(() => observer.preload()),
+          `observer preload succeeds`,
+        ).resolves.toBeUndefined()
+        await settle()
+        expect(counts.starts - startsBefore, `new source starts`).toBe(
+          state === `eager-idle` ? 1 : 0,
+        )
+        expect(observer.getSnapshot().status).toBe(`ready`)
+        const rows = observer.getSnapshot().data as ReadonlyArray<Row>
+        expect(rows.map((row) => row.id)).toEqual(EXPECTED_IDS.all)
+      } finally {
+        observer?.dispose()
+        await view?.cleanup()
+        await source.cleanup()
+        await client?.cleanup()
+      }
+    },
+  )
+
   const pooledHistories: Record<string, Array<Command>> = {
     'build and read without a subscriber': [`start`, `read`],
     'subscribe after build': [`start`, `read`, `subscribe`],
@@ -618,6 +679,362 @@ describe(`preload answered by a DbClient stream`, () => {
       }
     })
   }
+})
+
+/**
+ * A DbClient preload owns the release of every source it prepared. If the
+ * first source's sync run throws, that error belongs to the failed query;
+ * the later healthy source still gets its release and can serve a direct
+ * reader. The model needs only two independent start counts: zero before
+ * preload, one for each after release. The public checkpoint is the failed
+ * preload followed by readiness of the second source Collection.
+ * The failed call has no result to stream. A dehydration request at the
+ * synchronous error cut must not publish its pending query promise, even when
+ * the caller opts to stream pending queries.
+ * A later same-hash preload over a healthy replacement source must publish
+ * that source's row; the failed attempt has no result to reuse.
+ * The same options can be retried, but the failed source Collection remains
+ * in error until explicitly restarted. That retry must report the source error
+ * rather than wait on the failed query's former pending stream. A controlled
+ * later `markError` crosses the asynchronous failure cut: the pending preload
+ * rejects, its stream disappears, and a healthy replacement of the same
+ * query hash can publish its own row while the peer source remains ready. A
+ * failed stream has no reusable result, so a replacement observer may attach
+ * through the same hash before a new preload. Its public snapshot must show
+ * the replacement row as ready, with no stale stream error. The active-stream
+ * identity rule also applies before that failure: a different same-hash
+ * preload rejects while the original stream is pending. A synchronous source
+ * throw crosses the same recovery law at a different cut. After the peer source
+ * becomes ready, a replacement observer may attach before a new client preload
+ * and must read only the replacement row. These fixed histories do not claim
+ * all failure schedules or concurrent replacement observers.
+ */
+describe(`DbClient preload releases independent source starts`, () => {
+  it(`retire a pending stream after asynchronous source startup failure`, async () => {
+    const failure = new Error(`late source startup failure`)
+    let failFirst!: () => void
+    let firstStarts = 0
+    let secondStarts = 0
+    const first = collectionOptions(`preload-async-first`, () => ({
+      id: `preload-async-first`,
+      getKey: (row: { id: string }) => row.id,
+      startSync: true,
+      sync: {
+        sync: ({ markError }) => {
+          firstStarts++
+          failFirst = () => markError(failure)
+        },
+      },
+    }))
+    const second = collectionOptions(`preload-async-second`, () => ({
+      id: `preload-async-second`,
+      getKey: (row: { id: string }) => row.id,
+      startSync: true,
+      sync: {
+        sync: ({ markReady }) => {
+          secondStarts++
+          markReady()
+        },
+      },
+    }))
+    const replacement = createCollection({
+      id: `preload-async-first`,
+      getKey: (row: { id: string }) => row.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          write({ type: `insert`, value: { id: `recovered` } })
+          commit()
+          markReady()
+        },
+      },
+    })
+    const secondBranch = () =>
+      new Query().from({ second }).select(({ second: row }) => ({ id: row.id }))
+    const failedQuery = new Query().unionAll(
+      new Query().from({ first }).select(({ first: row }) => ({ id: row.id })),
+      secondBranch(),
+    )
+    const recoveredQuery = new Query().unionAll(
+      new Query()
+        .from({ first: replacement })
+        .select(({ first: row }) => ({ id: row.id })),
+      secondBranch(),
+    )
+    const client = new DbClient()
+
+    try {
+      const pending = client.preloadLiveQuery({ query: failedQuery })
+      expect([firstStarts, secondStarts]).toEqual([1, 1])
+      expect(
+        client.dehydrate({ shouldDehydrateLiveQuery: () => true }).liveQueries,
+      ).toHaveLength(1)
+      // Model: the pending result still belongs to the original sources.
+      // The replacement becomes legal only after this stream fails.
+      expect(() => client.preloadLiveQuery({ query: recoveredQuery })).toThrow(
+        /different source Collections/,
+      )
+      expect(
+        client.dehydrate({ shouldDehydrateLiveQuery: () => true }).liveQueries,
+      ).toHaveLength(1)
+
+      failFirst()
+      await expect(pending).rejects.toThrow(/entered error state/)
+      expect(
+        client.dehydrate({ shouldDehydrateLiveQuery: () => true }).liveQueries,
+      ).toBeUndefined()
+      expect(client.collection(second).status).toBe(`ready`)
+
+      // Model: failure retired the first result. The observer's subscription
+      // is a new local demand for the healthy replacement, so it may attach
+      // and must show that source's row at the settled-read checkpoint.
+      const queryHash = getLiveQueryHash({ query: failedQuery })
+      expect(getLiveQueryHash({ query: recoveredQuery })).toBe(queryHash)
+      const prepared = prepareLiveQueryValue(recoveredQuery, client)
+      const view = createLiveQueryCollection({
+        query: prepared as typeof recoveredQuery,
+        startSync: false,
+      })
+      const observer = createLiveQueryObserver(view, {
+        client,
+        queryHash,
+        mode: `wholesale`,
+      })
+      try {
+        let unsubscribe!: () => void
+        expect(() => {
+          unsubscribe = observer.subscribe(() => {})
+        }, `replacement observer attaches after the failed stream`).not.toThrow()
+        try {
+          await observer.preload()
+          expect(observer.getSnapshot().data).toEqual([
+            expect.objectContaining({ id: `recovered` }),
+          ])
+          expect(observer.getSnapshot().status).toBe(`ready`)
+          expect(observer.getError()).toBeUndefined()
+        } finally {
+          unsubscribe()
+        }
+      } finally {
+        observer.dispose()
+        await view.cleanup()
+      }
+
+      await client.preloadLiveQuery({ query: recoveredQuery })
+      expect(
+        client
+          .dehydrate()
+          .liveQueries?.[0]?.snapshot?.rows.map(
+            ({ value }) => (value as { id: string }).id,
+          ),
+      ).toEqual([`recovered`])
+    } finally {
+      await client.cleanup()
+      await replacement.cleanup()
+    }
+  })
+
+  it(`reports source error instead of reusing a failed query stream`, async () => {
+    const failure = new Error(`source start failed`)
+    let starts = 0
+    const source = collectionOptions(`preload-transient-start`, () => ({
+      id: `preload-transient-start`,
+      getKey: (row: { id: string }) => row.id,
+      startSync: true,
+      sync: {
+        sync: () => {
+          starts++
+          throw failure
+        },
+      },
+    }))
+    const client = new DbClient()
+    const options = {
+      query: new Query()
+        .from({ item: source })
+        .select(({ item }) => ({ id: item.id })),
+    }
+
+    try {
+      expect(() => client.preloadLiveQuery(options)).toThrow(failure)
+      expect(
+        client.dehydrate({ shouldDehydrateLiveQuery: () => true }).liveQueries,
+      ).toBeUndefined()
+      await expect(client.preloadLiveQuery(options)).rejects.toThrow(
+        /entered error state/,
+      )
+      expect(starts).toBe(1)
+      expect(
+        client.dehydrate({ shouldDehydrateLiveQuery: () => true }).liveQueries,
+      ).toBeUndefined()
+    } finally {
+      await client.cleanup()
+    }
+  })
+
+  it(`releases a peer source and permits replacement after a synchronous throw`, async () => {
+    const failure = new Error(`first source failed`)
+    let firstStarts = 0
+    let secondStarts = 0
+    const first = collectionOptions(`preload-release-first`, () => ({
+      id: `preload-release-first`,
+      getKey: (row: { id: string }) => row.id,
+      startSync: true,
+      sync: {
+        sync: () => {
+          firstStarts++
+          throw failure
+        },
+      },
+    }))
+    const second = collectionOptions(`preload-release-second`, () => ({
+      id: `preload-release-second`,
+      getKey: (row: { id: string }) => row.id,
+      startSync: true,
+      sync: {
+        sync: ({ markReady }) => {
+          secondStarts++
+          markReady()
+        },
+      },
+    }))
+    const client = new DbClient()
+    const query = new Query().unionAll(
+      new Query().from({ first }).select(({ first: row }) => ({ id: row.id })),
+      new Query()
+        .from({ second })
+        .select(({ second: row }) => ({ id: row.id })),
+    )
+    const replacement = createCollection({
+      id: `preload-release-first`,
+      getKey: (row: { id: string }) => row.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          write({ type: `insert`, value: { id: `recovered` } })
+          commit()
+          markReady()
+        },
+      },
+    })
+    const recoveredQuery = new Query().unionAll(
+      new Query()
+        .from({ first: replacement })
+        .select(({ first: row }) => ({ id: row.id })),
+      new Query()
+        .from({ second })
+        .select(({ second: row }) => ({ id: row.id })),
+    )
+
+    try {
+      let thrown: unknown
+      try {
+        client.preloadLiveQuery({ query })
+      } catch (error) {
+        thrown = error
+      }
+      expect(thrown).toBe(failure)
+      expect(firstStarts).toBe(1)
+      expect(secondStarts).toBe(1)
+      expect(
+        client.dehydrate({ shouldDehydrateLiveQuery: () => true }).liveQueries,
+      ).toBeUndefined()
+      const healthy = client.collection(second)
+      await healthy.preload()
+      expect(healthy.status).toBe(`ready`)
+
+      // The synchronous throw left no reusable result. A replacement observer
+      // may therefore attach under this hash before another client preload.
+      const queryHash = getLiveQueryHash({ query })
+      expect(getLiveQueryHash({ query: recoveredQuery })).toBe(queryHash)
+      const prepared = prepareLiveQueryValue(recoveredQuery, client)
+      const view = createLiveQueryCollection({
+        query: prepared as typeof recoveredQuery,
+        startSync: false,
+      })
+      const observer = createLiveQueryObserver(view, {
+        client,
+        queryHash,
+        mode: `wholesale`,
+      })
+      try {
+        let unsubscribe!: () => void
+        expect(() => {
+          unsubscribe = observer.subscribe(() => {})
+        }, `replacement observer attaches after a synchronous throw`).not.toThrow()
+        try {
+          await observer.preload()
+          expect(observer.getSnapshot().data).toEqual([
+            expect.objectContaining({ id: `recovered` }),
+          ])
+          expect(observer.getSnapshot().status).toBe(`ready`)
+          expect(observer.getError()).toBeUndefined()
+        } finally {
+          unsubscribe()
+        }
+      } finally {
+        observer.dispose()
+        await view.cleanup()
+      }
+
+      await client.preloadLiveQuery({ query: recoveredQuery })
+      expect(
+        client
+          .dehydrate()
+          .liveQueries?.[0]?.snapshot?.rows.map(
+            ({ value }) => (value as { id: string }).id,
+          ),
+      ).toEqual([`recovered`])
+    } finally {
+      await client.cleanup()
+      await replacement.cleanup()
+    }
+  })
+
+  it(`reports a preparation error even if a deferred source also throws`, async () => {
+    const preparationFailure = new Error(`second source factory failed`)
+    const startFailure = new Error(`first source start failed`)
+    let firstStarts = 0
+    const first = collectionOptions(`preload-primary-first`, () => ({
+      id: `preload-primary-first`,
+      getKey: (row: { id: string }) => row.id,
+      startSync: true,
+      sync: {
+        sync: () => {
+          firstStarts++
+          throw startFailure
+        },
+      },
+    }))
+    const second = collectionOptions(
+      `preload-primary-second`,
+      (): {
+        id: string
+        getKey: (row: { id: string }) => string
+        sync: { sync: () => void }
+      } => {
+        throw preparationFailure
+      },
+    )
+    const client = new DbClient()
+    const query = new Query().unionAll(
+      new Query().from({ first }).select(({ first: row }) => ({ id: row.id })),
+      new Query()
+        .from({ second })
+        .select(({ second: row }) => ({ id: row.id })),
+    )
+
+    try {
+      expect(() => client.preloadLiveQuery({ query })).toThrow(
+        preparationFailure,
+      )
+      expect(firstStarts).toBe(1)
+    } finally {
+      await client.cleanup()
+    }
+  })
 })
 
 /**

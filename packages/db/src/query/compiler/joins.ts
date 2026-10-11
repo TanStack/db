@@ -25,6 +25,7 @@ import {
   collectPropRefs,
   getFromSources,
   getPropRefSourceAlias,
+  requireCollectionSource,
 } from '../ir.js'
 import { compileExpression } from './evaluators.js'
 import { getLazyLoadTargets } from './lazy-targets.js'
@@ -44,7 +45,7 @@ import type { CompileQueryFn } from './index.js'
 import type { OrderByOptimizationInfo } from './order-by.js'
 import type {
   BasicExpression,
-  CollectionRef,
+  CollectionSourceRef,
   From,
   JoinClause,
   PropRef,
@@ -326,7 +327,7 @@ function processJoin(
   const { mainExpr, joinedExpr } = conditions[0]!
   const joinedExpressionUsesParent = conditions.some(
     ({ joinedExpr: expression }) =>
-      getJoinReferences(expression).some((ref) => {
+      collectPropRefs(expression).some((ref) => {
         const sourceRole = role(ref)
         return sourceRole === `ancestor` || sourceRole === `unknown`
       }),
@@ -539,8 +540,6 @@ function processJoin(
   )
 }
 
-export const getJoinReferences = collectPropRefs
-
 type JoinRefRole = `joined` | `main` | `ancestor` | `unknown`
 
 function getJoinRefAlias(ref: PropRef): string | undefined {
@@ -557,8 +556,8 @@ function analyzeJoinExpressions(
   joinedSource: string,
   role: (ref: PropRef) => JoinRefRole,
 ): { mainExpr: BasicExpression; joinedExpr: BasicExpression } {
-  const leftRefs = getJoinReferences(left)
-  const rightRefs = getJoinReferences(right)
+  const leftRefs = collectPropRefs(left)
+  const rightRefs = collectPropRefs(right)
   const leftRoles = new Set(leftRefs.map(role))
   const rightRoles = new Set(rightRefs.map(role))
   const leftMain = leftRoles.has(`main`) || leftRoles.has(`ancestor`)
@@ -617,7 +616,7 @@ function analyzeJoinExpressions(
  * Processes the join source (collection or sub-query)
  */
 function processJoinSource(
-  from: CollectionRef | QueryRef,
+  from: CollectionSourceRef | QueryRef,
   allInputs: Record<string, KeyedStream>,
   collections: Record<string, Collection>,
   subscriptions: Record<string, CollectionSubscription>,
@@ -635,6 +634,8 @@ function processJoinSource(
   parentKeyStream?: KeyedStream,
 ): { alias: string; input: KeyedStream; collectionId: string } {
   switch (from.type) {
+    case `descriptorRef`:
+      return requireCollectionSource(from)
     case `collectionRef`: {
       const input = allInputs[from.sourceId]
       if (!input) {

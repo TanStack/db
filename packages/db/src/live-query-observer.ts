@@ -5,6 +5,7 @@ import {
   isSingleResultCollection,
 } from './live-query-adapter.js'
 import { getBuilderFromConfig } from './query/live/collection-registry.js'
+import { getPooledLiveQuerySource } from './query/pooled-live-query.js'
 import { getPersistedReadinessSource } from './persisted-readiness.js'
 import type { Collection } from './collection/index.js'
 import type { DbClient, DehydratedLiveQueryResult } from './client.js'
@@ -619,6 +620,10 @@ class LiveQueryObserverImpl<
 
   subscribe(listener: LiveQueryObserverListener<T, TKey>): () => void {
     if (this.disposed) throw new LiveQueryObserverDisposedError()
+    if (this.subscriptions.size === 0 && this.client && this.queryHash) {
+      const { sources } = this.getSourceInfo()
+      if (sources) this.client._assertLiveQuerySources(this.queryHash, sources)
+    }
 
     const record: SubscriptionRecord<T, TKey> = { listener, active: true }
     this.subscriptions.add(record)
@@ -860,11 +865,12 @@ class LiveQueryObserverImpl<
   }
 
   private registerClientResource(): void {
+    const config: object | undefined = this.collection?.config
     if (
       this.unregisterClientResource ||
       !this.client?._isSsrServerCleanupEnabled() ||
-      !this.collection ||
-      !getBuilderFromConfig(this.collection.config)
+      !config ||
+      !getBuilderFromConfig(config)
     ) {
       return
     }
@@ -948,15 +954,38 @@ class LiveQueryObserverImpl<
     if (failure) throw failure.error
   }
 
+  private getSourceInfo(): {
+    sources: ReadonlyArray<Collection<any, any, any>> | undefined
+    pooledSource: Collection<any, any, any> | undefined
+  } {
+    const collection = this.collection
+    const config = collection?.config
+    const pooledSource = collection && getPooledLiveQuerySource(collection)
+    const sources = config
+      ? getBuilderFromConfig(config)?.getSourceCollections()
+      : pooledSource
+        ? [pooledSource]
+        : undefined
+    return { sources, pooledSource: pooledSource || undefined }
+  }
+
   preload(): Promise<void> {
     if (this.preloadPromise) return this.preloadPromise
 
+    const { sources, pooledSource } = this.getSourceInfo()
     if (this.client && this.queryHash) {
       const query = this.client._getLiveQuery(this.queryHash)
       if (query?.status === `pending` || query?.status === `success`) {
-        // The client stream answers this preload, but it is still a request
-        // for this Collection's data, so its deferred acquisition may resume.
         try {
+          if (sources)
+            this.client._assertLiveQuerySources(this.queryHash, sources)
+          if (pooledSource && this.collection) {
+            return Promise.all([query.promise, this.collection.preload()]).then(
+              () => {},
+            )
+          }
+          // The client stream answers this preload, but it is still a request
+          // for this Collection's data, so its deferred acquisition may resume.
           this.collection?._markPreload()
         } catch (error) {
           return Promise.reject(error)
@@ -973,6 +1002,7 @@ class LiveQueryObserverImpl<
         ? this.client._registerLiveQuery(
             this.queryHash,
             collectionPromise.then(() => this.dehydrate()),
+            sources,
           )
         : collectionPromise
     this.preloadPromise = preloadPromise

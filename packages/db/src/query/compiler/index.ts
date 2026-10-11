@@ -30,7 +30,10 @@ import {
   UnsupportedFromTypeError,
 } from '../../errors.js'
 import { VIRTUAL_PROP_NAMES } from '../../virtual-props.js'
-import { BaseQueryBuilder } from '../builder/index.js'
+import {
+  BaseQueryBuilder,
+  collectExternalRefsFromQuery,
+} from '../builder/index.js'
 import { isRefProxy } from '../builder/ref-proxy-identity.js'
 import {
   CaseWhenWrapper,
@@ -50,6 +53,7 @@ import {
   getWhereExpression,
   isBasicOrAggregateExpression,
   isExpressionLike,
+  requireCollectionSource,
 } from '../ir.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
 import { createSourceRecord } from '../../utils/source-record.js'
@@ -87,11 +91,12 @@ import type {
   Aggregate,
   BasicExpression,
   CollectionRef,
+  CollectionSourceRef,
+  From,
   IncludesMaterialization,
   QueryIR,
   QueryRef,
   UnionAll,
-  UnionFrom,
 } from '../ir.js'
 import type { LazyCollectionCallbacks } from './joins.js'
 import type { Collection } from '../../collection/index.js'
@@ -427,6 +432,7 @@ function compileQueryInternal(
   // This must happen before optimization because the optimizer may create internal
   // subqueries (e.g., for predicate pushdown) that reuse aliases, which is fine.
   if (!scopeValidated) validateQueryStructure(rawQuery)
+  const rawSources = collectCollectionSources(rawQuery)
 
   // Optimize the query before compilation
   const { optimizedQuery, sourceWhereClauses: aliasWhereClauses } =
@@ -444,7 +450,6 @@ function compileQueryInternal(
 
   // Create a copy of the inputs map to avoid modifying the original
   const allInputs = Object.assign(createSourceRecord<KeyedStream>(), inputs)
-  const rawSources = collectCollectionSources(rawQuery)
   bindSourceInputs(rawSources, allInputs)
 
   // Track alias to collection id relationships discovered during compilation.
@@ -1375,7 +1380,7 @@ function validateExpressionBindings(
       throw new QueryCompilationError(
         devBuild() && process.env.NODE_ENV !== `production`
           ? `Query reference "${ref.path.join(`.`)}" is out of scope. Use a source from this query or a containing query.`
-          : codedMessage(237, { path: ref.path }),
+          : codedMessage(238, { path: ref.path }),
       )
     }
   }
@@ -1476,6 +1481,30 @@ function validateQueryStructure(
         validateExpressionBindings(getWhereExpression(where), childBindings)
       }
       validateQueryStructure(subquery.query, availableBindings)
+      const projected = new Set(
+        (subquery.parentProjection ?? []).map((ref) =>
+          JSON.stringify([ref.bindingId, ref.path]),
+        ),
+      )
+      const required = [
+        ...collectExternalRefsFromQuery(subquery.query),
+        ...(subquery.parentFilters ?? []).flatMap((where) =>
+          collectPropRefs(getWhereExpression(where)),
+        ),
+      ]
+      for (const ref of required) {
+        if (
+          ref.bindingId !== undefined &&
+          availableBindings.has(ref.bindingId) &&
+          !projected.has(JSON.stringify([ref.bindingId, ref.path]))
+        ) {
+          throw new QueryCompilationError(
+            devBuild() && process.env.NODE_ENV !== `production`
+              ? `Include query is missing a captured parent projection for "${ref.path.join(`.`)}".`
+              : codedMessage(239, { path: ref.path }),
+          )
+        }
+      }
     }
   }
 }
@@ -1485,7 +1514,7 @@ function validateQueryStructure(
  * Populates `aliasToCollectionId` and `aliasRemapping` for per-alias subscription tracking.
  */
 function processFromClause(
-  from: CollectionRef | QueryRef | UnionFrom | UnionAll,
+  from: From,
   allInputs: Record<string, KeyedStream>,
   collections: Record<string, Collection>,
   subscriptions: Record<string, CollectionSubscription>,
@@ -1817,7 +1846,7 @@ function encodeKeyForUnionBranch(key: unknown): string {
 }
 
 function processFrom(
-  from: CollectionRef | QueryRef,
+  from: CollectionSourceRef | QueryRef,
   allInputs: Record<string, KeyedStream>,
   collections: Record<string, Collection>,
   subscriptions: Record<string, CollectionSubscription>,
@@ -1839,6 +1868,8 @@ function processFrom(
   isParentRouted: boolean
 } {
   switch (from.type) {
+    case `descriptorRef`:
+      return requireCollectionSource(from)
     case `collectionRef`: {
       const input = allInputs[from.sourceId]
       if (!input) {
@@ -2065,7 +2096,7 @@ function mapNestedQueries(
   }
 }
 
-function getAllSources(query: QueryIR): Array<CollectionRef | QueryRef> {
+function getAllSources(query: QueryIR): Array<CollectionSourceRef | QueryRef> {
   return [
     ...getFromSources(query.from),
     ...(query.join?.map((join) => join.from) ?? []),

@@ -160,11 +160,20 @@ Guide audit for this oracle repair:
 
 ## Chained joins and main-correlated route work — 2026-10-10 follow-up
 
-The nine-item user review inspected `2d0cbafabddb898d8fadcb7d304ff06fb0154d7e` without executing its findings. The current repair started from `43d7c3d771c52c39bff38ba5a4fb7b1d02e99215`; its executable commit is `b41dc35bf`. This section records the bounded oracle evidence for the two reported behavior gaps. The task-local lossless ledger is `/private/tmp/pr2095-user-review-ledger.md`.
+The nine-item user review inspected `2d0cbafabddb898d8fadcb7d304ff06fb0154d7e` without executing its findings. The current repair started from `43d7c3d771c52c39bff38ba5a4fb7b1d02e99215`; its executable commit is `b41dc35bf`. This section records the bounded oracle evidence for the two reported behavior gaps.
 
 **Absent local binding law.** `ARCHITECTURE.md` §Identity and law 1 distinguish a captured ancestor's `issue` from a child's same-named declaration. Once a LEFT join has no child `issue`, a later routed joined row may carry the ancestor context but cannot supply the missing child source. The prior outer-join matrix had one join only. It was green for its declared boundary and could not generate the reported two-join sequence.
 
 The primary `includes-alias-shadowing-oracle.test.ts` now recomputes two LEFT joins from plain parent, comment, issue, and tag rows. Its legal history has two parent routes: one child issue is absent and the other is matched. It adds and removes the absent issue, then removes and restores the second joined side. Each cut compares exact public child rows, including the local issue ID and `isUndefined`, under shadowed and renamed aliases, eager and on-demand sources, and routing caused by either a parent-dependent QueryRef or a captured ancestor operand. The model uses source roles and plain numeric relations; it does not read compiler namespaces, binding maps, or route metadata. The QueryRef filters tags by parent, while the direct source reads the parent in its equality operand; the model states that distinction explicitly.
+
+A 2026-10-11 review control adds a parent label to this plain-row model and
+selected child result, then changes that label while the two joins have matched
+rows. Both source modes and both route causes preserve the changed parent
+label, including the shadowed local alias. This reaches a matched-join public
+observation that the earlier absence-only assertion did not name. It does not
+settle the reviewer's broader claim about every joined QueryRef shape or every
+extra namespaced key; a concrete contrary query would need its own legal
+history and public-row witness.
 
 With the final oracle in place, restoring the original merge order made both source-mode tests fail at **initial public rows**: child comment 10 had expected local issue `undefined` and `missingLocalIssue: true`, but received ancestor issue ID `1` and `false`. The QueryRef route produced the same RED observation in an earlier calibration run. The repair copies the main row's scope when it exists and only the joined source from the joined row; when the main side is absent, it still retains the joined row's route context and clears local main aliases. The repaired oracle passes both tests and its neighboring single-join matrix.
 
@@ -337,7 +346,7 @@ These were assertion failures at the promised checkpoints, not setup errors or
 timeouts; every temporary mutant was removed. The final validator checks
 visible bindings in join operands, predicates, grouping, ordering, select
 expressions, extracted parent filters, and both correlation fields before
-optimization. The development text for error 237 now says “Query reference”
+optimization. The development text for error 238 now says “Query reference”
 to match its wider scope.
 
 **GREEN and limits.** On the final working tree, the two focused owners passed
@@ -477,3 +486,79 @@ These work probes are diagnostic observations, not permanent work laws. The
 primary oracle keeps the public behavior claim and its hostile-matcher
 calibration. No production repair was made for M3, M6, M7, or M8 in this
 follow-up.
+
+## Missing captured projection invariant on the combined tree
+
+This follow-up starts from #2077's pushed combined head `712e572bf`. A
+builder-created include projects each captured ancestor reference into the
+child route. An absent projection is a malformed internal plan, not a valid
+way to reinterpret a bound ancestor reference as a same-named local source.
+The compiler must reject it before child rows are accepted.
+
+The primary alias oracle builds a valid shadowed include through `Query`,
+confirms its captured parent projection exists, then removes that projection
+from the resulting IR. Before the compiler guard, the query compiled and its
+preload fulfilled; the expected rejection assertion was RED. A separate
+hostile mutant that made the builder omit parent projections was rejected by
+the existing `QueryRef` public-row comparison at initial publication: both
+children became empty. The new compiler guard reuses the builder's external-
+reference walk, checks bound parent references in the child plan and extracted
+parent filters against the projected list, and throws before compilation when
+one is absent. The malformed-plan witness and all 178 primary alias tests now
+pass. This check does not assert that arbitrary hand-written IR is otherwise
+valid, or prove every possible runtime route-metadata transport path; the
+public-row oracle retains the bounded legal histories stated above.
+
+On the repaired combined tree, the primary alias owner passed 178 tests and
+the broader DB query runtime suite passed 4,675. DB source and test TypeScript
+checks, changed-code lint, formatting, generated error documentation, and
+production error-text checks passed. The broad runtime run disabled Vitest's
+built-in typecheck because that runner tried to write a build-info file through
+a dependency symlink outside this worktree; the separate TypeScript checks
+passed. The pushed head and CI remain a separate gate.
+
+## Joined QueryRef lazy-target identity — 2026-10-11 review control
+
+The review observed that alias-keyed metadata can be overwritten when a
+joined QueryRef's inner source shadows an outer alias, and that a
+Collection/SourceId mismatch can turn off lazy targeting. The reviewer later
+withdrew the claimed missing-load and wrong-row consequences after testing
+public queries on the PR heads. These remain internal work and identity
+questions, so this oracle checks a nearby legal receiving history without
+calling the retracted consequence a current defect. ARCHITECTURE.md §Identity
+says lexical source identity survives alias text reuse; law 12 says irrelevant
+indexed rows do not require unrelated acquisition.
+
+The primary alias oracle now uses three on-demand sources: one user, two posts,
+and two tags. Its joined QueryRef joins posts to tags and projects the tag's ID
+as the outer LEFT join key. The post alias either shadows the outer user alias
+or is renamed. A plain-map model predicts the user/post/tag result without
+consulting compiler maps. At preload, only post 10 and tag 7 should have
+entered their Collections. Moving the user to tag 8 admits post 11 and tag 8;
+changing tag 8's label updates the public row. Exact public rows and installed
+post/tag IDs are asserted at all three cuts. The installed-row observation is
+needed because a full-source fallback can produce the right public row while
+doing wrong lazy work.
+
+Starting from combined head `688eac636`, the implementation passed both alias
+cells. A temporary wrong-target mutant paired the projected tag SourceId with
+the QueryRef's post Collection. Both cells failed by assertion at preload:
+post 11 was installed early instead of only post 10. Restoring the original
+source pair made both cells GREEN. This establishes the law for one nested
+joined QueryRef, one outer LEFT join, two alias spellings, two join-key values,
+and one tag update. It does not prove that every recursive source shape avoids
+alias-map collisions, nor does the controlled provider establish a real-provider
+request bound.
+
+For ORC-001–003 and 005, the executable prose identifies the identity/work
+law, plain-map model, finite grammar, public Query/Collection path, rows and
+installed-source comparisons at each cut. ORC-004 and 007 do not apply because
+this is bounded enumeration rather than a generated property. The wrong
+Collection/SourceId mutant and shadowed-versus-renamed controls calibrate
+ORC-006 and 013; ORC-008 adds no model state. ORC-009 maps model user, post,
+and tag roles to source declarations rather than compiler alias maps.
+withHistoryCleanup preserves a primary assertion and releases all four
+Collections (ORC-010). A second semantic formulation is not required without
+a named shared-fault hypothesis (ORC-011). This section states the starting-head
+scope and remaining paths for ORC-012; ORC-014 leaves external providers
+unclaimed.
