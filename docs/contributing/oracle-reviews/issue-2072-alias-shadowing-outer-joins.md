@@ -516,3 +516,49 @@ production error-text checks passed. The broad runtime run disabled Vitest's
 built-in typecheck because that runner tried to write a build-info file through
 a dependency symlink outside this worktree; the separate TypeScript checks
 passed. The pushed head and CI remain a separate gate.
+
+## Joined QueryRef lazy-target identity — 2026-10-11 review control
+
+The review observed that alias-keyed metadata can be overwritten when a
+joined QueryRef's inner source shadows an outer alias, and that a
+Collection/SourceId mismatch can turn off lazy targeting. The reviewer later
+withdrew the claimed missing-load and wrong-row consequences after testing
+public queries on the PR heads. These remain internal work and identity
+questions, so this oracle checks a nearby legal receiving history without
+calling the retracted consequence a current defect. ARCHITECTURE.md §Identity
+says lexical source identity survives alias text reuse; law 12 says irrelevant
+indexed rows do not require unrelated acquisition.
+
+The primary alias oracle now uses three on-demand sources: one user, two posts,
+and two tags. Its joined QueryRef joins posts to tags and projects the tag's ID
+as the outer LEFT join key. The post alias either shadows the outer user alias
+or is renamed. A plain-map model predicts the user/post/tag result without
+consulting compiler maps. At preload, only post 10 and tag 7 should have
+entered their Collections. Moving the user to tag 8 admits post 11 and tag 8;
+changing tag 8's label updates the public row. Exact public rows and installed
+post/tag IDs are asserted at all three cuts. The installed-row observation is
+needed because a full-source fallback can produce the right public row while
+doing wrong lazy work.
+
+Starting from combined head `688eac636`, the implementation passed both alias
+cells. A temporary wrong-target mutant paired the projected tag SourceId with
+the QueryRef's post Collection. Both cells failed by assertion at preload:
+post 11 was installed early instead of only post 10. Restoring the original
+source pair made both cells GREEN. This establishes the law for one nested
+joined QueryRef, one outer LEFT join, two alias spellings, two join-key values,
+and one tag update. It does not prove that every recursive source shape avoids
+alias-map collisions, nor does the controlled provider establish a real-provider
+request bound.
+
+For ORC-001–003 and 005, the executable prose identifies the identity/work
+law, plain-map model, finite grammar, public Query/Collection path, rows and
+installed-source comparisons at each cut. ORC-004 and 007 do not apply because
+this is bounded enumeration rather than a generated property. The wrong
+Collection/SourceId mutant and shadowed-versus-renamed controls calibrate
+ORC-006 and 013; ORC-008 adds no model state. ORC-009 maps model user, post,
+and tag roles to source declarations rather than compiler alias maps.
+withHistoryCleanup preserves a primary assertion and releases all four
+Collections (ORC-010). A second semantic formulation is not required without
+a named shared-fault hypothesis (ORC-011). This section states the starting-head
+scope and remaining paths for ORC-012; ORC-014 leaves external providers
+unclaimed.

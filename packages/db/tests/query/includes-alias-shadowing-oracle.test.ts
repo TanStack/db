@@ -3566,6 +3566,159 @@ describe(`chained joins keep an absent local source absent`, () => {
 })
 
 /**
+ * # A lazy joined QueryRef targets the source that owns its projected key
+ *
+ * ARCHITECTURE.md Identity and law 12 require a joined subquery's projected
+ * tag key to keep its source identity even when its post alias shadows the
+ * outer user alias. The plain-row model joins each user to a post and tag by
+ * tag ID. Only the matching post and tag need to enter on-demand sources.
+ *
+ * The legal history uses a joined QueryRef whose selected join key comes
+ * from its own joined tag source, not its post FROM source. It crosses
+ * shadowed and renamed post aliases, then moves the user's tag and updates
+ * the new tag. Public rows are compared after preload and both writes; the
+ * installed source rows at each cut expose a wrong lazy target that might
+ * otherwise return the right final row by loading an entire source.
+ */
+describe(`joined QueryRef lazy targets retain lexical source identity`, () => {
+  type User = { id: number; tagId: number; name: string }
+  type Post = { id: number; tagId: number; title: string }
+  type Tag = { id: number; label: string }
+  type Expected = {
+    id: number
+    name: string
+    title: string | undefined
+    label: string | undefined
+  }
+
+  const model = (
+    users: ReadonlyMap<number, User>,
+    posts: ReadonlyMap<number, Post>,
+    tags: ReadonlyMap<number, Tag>,
+  ): Array<Expected> =>
+    [...users.values()].map((user) => {
+      const post = [...posts.values()].find(
+        (candidate) =>
+          candidate.tagId === user.tagId && tags.has(candidate.tagId),
+      )
+      return {
+        id: user.id,
+        name: user.name,
+        title: post?.title,
+        label: post ? tags.get(post.tagId)?.label : undefined,
+      }
+    })
+
+  for (const alias of [`u`, `post`] as const) {
+    test(`${alias} post alias: projected tag drives on-demand rows`, async () => {
+      const userRows = new Map<number, User>([
+        [1, { id: 1, tagId: 7, name: `USER` }],
+      ])
+      const postRows = new Map<number, Post>([
+        [10, { id: 10, tagId: 7, title: `POST` }],
+        [11, { id: 11, tagId: 8, title: `OTHER POST` }],
+      ])
+      const tagRows = new Map<number, Tag>([
+        [7, { id: 7, label: `MATCH` }],
+        [8, { id: 8, label: `OTHER` }],
+      ])
+      const users = createScopedSource(
+        `lazy-joined-users-${alias}`,
+        [...userRows.values()],
+        `onDemand`,
+      )
+      const posts = createScopedSource(
+        `lazy-joined-posts-${alias}`,
+        [...postRows.values()],
+        `onDemand`,
+      )
+      const tags = createScopedSource(
+        `lazy-joined-tags-${alias}`,
+        [...tagRows.values()],
+        `onDemand`,
+      )
+      users.collection.createIndex((row) => row.id, {
+        indexType: BasicIndex,
+      })
+      posts.collection.createIndex((row) => row.tagId, {
+        indexType: BasicIndex,
+      })
+      tags.collection.createIndex((row) => row.id, {
+        indexType: BasicIndex,
+      })
+      const joined = new Query()
+        .from({ [alias]: posts.collection })
+        .innerJoin({ tag: tags.collection }, (context: Context) =>
+          eq((context[alias] as Post).tagId, (context.tag as Tag).id),
+        )
+        .select((context: Context) => ({
+          tagId: (context.tag as Tag).id,
+          title: (context[alias] as Post).title,
+          label: (context.tag as Tag).label,
+        }))
+      const live = createLiveQueryCollection({
+        query: new Query()
+          .from({ u: users.collection })
+          .leftJoin({ p: joined }, ({ u, p }) => eq(u.tagId, p.tagId))
+          .select(({ u, p }) => ({
+            id: u.id,
+            name: u.name,
+            title: p.title,
+            label: p.label,
+          })),
+      })
+
+      await withHistoryCleanup(
+        async () => {
+          const check = (
+            cut: string,
+            expectedPosts: Array<number>,
+            expectedTags: Array<number>,
+          ) => {
+            expect(
+              live.toArray.map(({ id, name, title, label }) => ({
+                id,
+                name,
+                title,
+                label,
+              })),
+              `${alias} at ${cut}: public rows`,
+            ).toEqual(model(userRows, postRows, tagRows))
+            expect(
+              posts.collection.toArray.map((row) => row.id).sort(),
+              `${alias} at ${cut}: installed posts`,
+            ).toEqual(expectedPosts)
+            expect(
+              tags.collection.toArray.map((row) => row.id).sort(),
+              `${alias} at ${cut}: installed tags`,
+            ).toEqual(expectedTags)
+          }
+
+          await live.preload()
+          check(`preload`, [10], [7])
+          const moved = { id: 1, tagId: 8, name: `USER` }
+          userRows.set(1, moved)
+          users.put(moved)
+          await flushPromises()
+          check(`user changes tag`, [10, 11], [7, 8])
+          const changedTag = { id: 8, label: `CHANGED` }
+          tagRows.set(8, changedTag)
+          tags.put(changedTag)
+          await flushPromises()
+          check(`tag changes label`, [10, 11], [7, 8])
+        },
+        () => [
+          () => live.cleanup(),
+          () => users.collection.cleanup(),
+          () => posts.collection.cleanup(),
+          () => tags.collection.cleanup(),
+        ],
+      )
+    })
+  }
+})
+
+/**
  * # Later outer joins preserve the source roles of an earlier outer join
  *
  * ARCHITECTURE.md §Identity makes an absent child source distinct from an
