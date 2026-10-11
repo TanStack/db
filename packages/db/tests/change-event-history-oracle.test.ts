@@ -474,7 +474,7 @@ async function runHistory(
         expect(error, `operation ${operationIndex} rethrows`).toBe(injected)
         expect(created.length, `one transaction`).toBe(before + 1)
         expect(
-          (created[before] as unknown as { state: string }).state,
+          created[before]!.state,
           `operation ${operationIndex} settles`,
         ).toBe(`completed`)
         return created[before]!
