@@ -491,7 +491,7 @@ export class BucketFacadeAdapter {
       sync.write({ type: present ? `update` : `insert`, value: row })
     } else if (change.inserts === change.deletes && present) {
       sync.write({ type: `update`, value: row })
-    } else if (change.deletes > 0) {
+    } else if (change.deletes > change.inserts) {
       sync.write({ type: `delete`, key })
       return
     }

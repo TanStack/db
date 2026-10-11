@@ -1022,9 +1022,17 @@ async function runHistory(
         // Throw from the commit of one facade the flush writes. A facade commits
         // only when it has a pending row operation, so choose among existing
         // facades with one. Retiring an empty facade writes nothing.
+        // A key inserted and retracted again within the flush, absent before
+        // and after, nets to nothing, so the flush writes nothing for it.
         const rowBuckets = new Set(
           pending
-            .filter((op) => op.type !== `activate` && op.type !== `retire`)
+            .filter(
+              (op) =>
+                op.type !== `activate` &&
+                op.type !== `retire` &&
+                (published.get(op.bucket)?.has(op.id) === true ||
+                  afterOps.get(op.bucket)?.has(op.id) === true),
+            )
             .map((op) => op.bucket),
         )
         // A cleaned-up facade has no sync, so the flush never writes it.
