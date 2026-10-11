@@ -4,7 +4,7 @@
 
 A live query with included child collections now throws when the query graph retires a child collection that still has rows the graph never removed. The graph always removes a child collection's rows before it retires it, so this is an internal invariant violation. Before, the rows were removed silently, which hid the fault. The failed flush restores the child collections, as for any failed flush.
 
-A child collection is now final after cleanup. Subscribing to it, preloading it or writing to it afterwards throws, because the query graph never writes it again. Before, it started again and showed only rows the graph wrote later. Ordinary Collections still restart after cleanup.
+Calling `cleanup()` on a child collection of a live query now throws. The live query owns its child collections, and several parent rows can share one. Before, a cleanup stopped the child collection for every parent that shared it, so they never saw its rows again. Clean up the live query instead. Ordinary Collections are not affected.
 
 An optimistic update of a row in a child collection no longer throws "Bucket facade row has no public key". Each child row now carries its key in `$key`, so the copy that an update makes keeps it.
 

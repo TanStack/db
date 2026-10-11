@@ -619,10 +619,11 @@ persisting one holds and a transaction still open. It decides inserts, updates
 and deletes from them rather than from the visible rows. A projected row left
 at retirement is a
 contradictory graph signal: the retirement throws, and the flush aborts and
-restores every facade it wrote. Cleanup of a facade is final, whether a holder
-or the adapter performs it. The adapter never writes a cleaned-up facade again,
-so a use that would start it again throws (code 238), and the facade holds no
-projected rows. Ordinary Collections can still restart after cleanup. A
+restores every facade it wrote. The live query owns its facades:
+several parent rows can share one, so a holder's `cleanup()` throws (code 238).
+The adapter disposes facades itself, when the live query is cleaned up and
+when a failed flush removes the facades it created. Ordinary Collections keep
+their cleanup and restart. A
 restore undoes only the keys the
 flush wrote, including writes that a persisting transaction still holds, so a
 held write cannot land after the rollback. A facade that `resolve()` created

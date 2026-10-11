@@ -1770,7 +1770,7 @@ describe(`Collection-valued includes oracle`, () => {
   })
 
   fcTest(
-    `cleanup during root publication suppresses the prepared facade callback`,
+    `a holder's cleanup during root publication throws and keeps the facade`,
     async () => {
       type NodeRow = {
         id: number
@@ -1800,11 +1800,17 @@ describe(`Collection-valued includes oracle`, () => {
       const facade = live.get(1)!.children
       const rootSnapshots: Array<Array<number>> = []
       const facadeSnapshots: Array<Array<number>> = []
-      let cleanup: Promise<void> | undefined
+      // The live query owns its child collections, so a holder's cleanup
+      // throws, even inside the root's publication.
+      const cleanupErrors: Array<unknown> = []
       const rootSubscription = live.subscribeChanges(
         () => {
           rootSnapshots.push(facade.toArray.map(({ value }) => value))
-          cleanup = facade.cleanup()
+          try {
+            void facade.cleanup()
+          } catch (error) {
+            cleanupErrors.push(error)
+          }
         },
         { includeInitialState: false },
       )
@@ -1824,12 +1830,14 @@ describe(`Collection-valued includes oracle`, () => {
             value: { id: 10, kind: `child`, group: 1, value: 2 },
           },
         ])
-        await cleanup
-
         expect(rootSnapshots).toEqual([[2]])
-        expect(facadeSnapshots).toEqual([])
-        expect(facade.status).toBe(`cleaned-up`)
-        expect(facade.toArray).toEqual([])
+        expect(cleanupErrors).toHaveLength(1)
+        expect(String(cleanupErrors[0])).toMatch(
+          /cannot be cleaned up directly/,
+        )
+        expect(facadeSnapshots).toEqual([[2]])
+        expect(facade.status).toBe(`ready`)
+        expect(facade.toArray.map(({ value }) => value)).toEqual([2])
       } finally {
         rootSubscription.unsubscribe()
         facadeSubscription.unsubscribe()

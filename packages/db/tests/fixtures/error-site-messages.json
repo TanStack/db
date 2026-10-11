@@ -888,7 +888,9 @@
   },
   "238": {
     "file": "query/live/bucket-facade-adapter.ts",
-    "template": "Bucket facade cannot start again after cleanup",
-    "literals": ["Bucket facade cannot start again after cleanup"]
+    "template": "A live query's child collection cannot be cleaned up directly. Clean up the live query instead.",
+    "literals": [
+      "A live query's child collection cannot be cleaned up directly. Clean up the live query instead."
+    ]
   }
 }

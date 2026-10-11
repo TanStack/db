@@ -29,6 +29,8 @@ type PendingRow = {
 
 type FacadeEntry = {
   collection: Collection<any, any, any>
+  /** Cleans up the facade; holders cannot, because its live query owns it. */
+  dispose: () => Promise<void>
   sync: FacadeSync | undefined
   order: WeakMap<object, string>
 }
@@ -220,7 +222,7 @@ export class BucketFacadeAdapter {
     this.cleanedUp = true
     for (const byBucket of this.entries.values()) {
       for (const entry of byBucket.values()) {
-        void entry.collection.cleanup()
+        void entry.dispose()
       }
     }
     this.entries.clear()
@@ -344,7 +346,7 @@ export class BucketFacadeAdapter {
     this.resolvedValues = new WeakMap()
 
     for (const entry of currentEntries) {
-      if (!previousEntries.has(entry)) void entry.collection.cleanup()
+      if (!previousEntries.has(entry)) void entry.dispose()
     }
   }
 
@@ -414,7 +416,6 @@ export class BucketFacadeAdapter {
 
     const order = new WeakMap<object, string>()
     let sync: FacadeSync | undefined
-    let stopped = false
     const collection = createCollection<any, string | number>({
       id: `__bucket-facade:${this.parentId}:${edgeId}:${bucketKey}`,
       getKey: (row) => {
@@ -441,26 +442,27 @@ export class BucketFacadeAdapter {
       sync: {
         rowUpdateMode: `full`,
         sync: (methods) => {
-          // Cleanup is final: the adapter never writes a facade again, so a
-          // restart would show a Collection that the graph no longer feeds.
-          if (stopped)
-            throw new Error(
-              devBuild() && process.env.NODE_ENV !== `production`
-                ? `Bucket facade cannot start again after cleanup`
-                : codedMessage(238),
-            )
           sync = methods
           return () => {
             sync = undefined
-            stopped = true
           }
         },
       },
       startSync: true,
       gcTime: 0,
     })
+    const dispose = collection.cleanup.bind(collection)
+    // Other parent rows can share this facade, so a holder must not end it.
+    collection.cleanup = () => {
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `A live query's child collection cannot be cleaned up directly. Clean up the live query instead.`
+          : codedMessage(238),
+      )
+    }
     const entry: FacadeEntry = {
       collection,
+      dispose,
       get sync() {
         return sync
       },
@@ -533,7 +535,7 @@ export class BucketFacadeAdapter {
   private cleanupRetiredEntries(): void {
     for (const byBucket of this.retiredEntries.values()) {
       for (const entry of byBucket.values()) {
-        void entry.collection.cleanup()
+        void entry.dispose()
       }
     }
     this.retiredEntries.clear()

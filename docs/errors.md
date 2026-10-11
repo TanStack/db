@@ -2397,5 +2397,5 @@ Bucket facade retired with rows the graph did not retract
 Development builds show this message, with `${...}` replaced by values:
 
 ```text
-Bucket facade cannot start again after cleanup
+A live query's child collection cannot be cleaned up directly. Clean up the live query instead.
 ```
