@@ -105,15 +105,16 @@ export class MurmurHashStream implements Hasher {
 
   /** Write four bytes, low byte first, as four `writeByte` calls would. */
   private writeWord(word: number): void {
+    this.length += 4
     if (this.carryBytes === 0) {
-      this.length += 4
       this._mix(word >>> 0)
       return
     }
-    this.writeByte(word & 0xff)
-    this.writeByte((word >>> 8) & 0xff)
-    this.writeByte((word >>> 16) & 0xff)
-    this.writeByte((word >>> 24) & 0xff)
+    // The carry's bytes come first. The word's low bytes complete that block,
+    // and its high bytes become the new carry, which keeps its byte count.
+    const shift = 8 * this.carryBytes
+    this._mix((this.carry | (word << shift)) >>> 0)
+    this.carry = word >>> (32 - shift)
   }
 
   update(chunk: symbol | string | number | bigint): void {

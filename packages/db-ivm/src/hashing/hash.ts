@@ -72,8 +72,10 @@ function hashObject(input: object, context: HashContext): number {
       if (body) updateHasher(hasher, value, context)
       else hasher.update(value as string | number)
     if (body) {
-      // Sorted string keys, then enumerable symbol keys by identity.
-      const keys: Array<string | symbol> = Object.keys(body).sort(keySort)
+      // String keys in UTF-16 code-unit order, then enumerable symbol keys by
+      // identity. Code-unit order is total; locale collation can rank two
+      // distinct keys as equal and leave their insertion order in the hash.
+      const keys: Array<string | symbol> = Object.keys(body).sort()
       keys.push(
         ...Object.getOwnPropertySymbols(body)
           .filter((key) =>
@@ -282,13 +284,4 @@ function cachedReferenceHash(fn: object): number {
     referenceValues.add(fn)
   }
   return valueHash
-}
-
-/**
- * Strings sorted by UTF-16 code unit. Unlike `localeCompare`, this is a total
- * order: two distinct keys never compare equal, so equal objects always visit
- * their keys in the same order.
- */
-function keySort(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0
 }
