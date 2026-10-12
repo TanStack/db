@@ -286,56 +286,6 @@ describe(`BTreeIndex - undefined value handling`, () => {
     })
   })
 
-  describe(`equalityLookup with undefined`, () => {
-    it(`should find items with undefined indexed value`, () => {
-      const index = createIndex(`status`)
-      index.add(`a`, { status: `active` })
-      index.add(`b`, { status: undefined })
-      index.add(`c`, { status: `inactive` })
-      index.add(`d`, { status: undefined })
-
-      const undefinedItems = index.equalityLookup(undefined)
-      expect(undefinedItems.size).toBe(2)
-      expect(undefinedItems).toContain(`b`)
-      expect(undefinedItems).toContain(`d`)
-    })
-
-    it(`should return empty set when no undefined values exist`, () => {
-      const index = createIndex(`value`)
-      index.add(`a`, { value: 1 })
-      index.add(`b`, { value: 2 })
-
-      expect(index.equalityLookup(undefined).size).toBe(0)
-    })
-  })
-
-  describe(`inArrayLookup with undefined`, () => {
-    it(`should handle undefined in inArrayLookup`, () => {
-      const index = createIndex(`value`)
-      index.add(`undef`, { value: undefined })
-      index.add(`one`, { value: 1 })
-      index.add(`two`, { value: 2 })
-      index.add(`three`, { value: 3 })
-
-      const result = index.inArrayLookup([undefined, 1])
-      expect(result.size).toBe(2)
-      expect(result).toContain(`undef`)
-      expect(result).toContain(`one`)
-    })
-
-    it(`should handle inArrayLookup with only undefined`, () => {
-      const index = createIndex(`value`)
-      index.add(`undef1`, { value: undefined })
-      index.add(`undef2`, { value: undefined })
-      index.add(`one`, { value: 1 })
-
-      const result = index.inArrayLookup([undefined])
-      expect(result.size).toBe(2)
-      expect(result).toContain(`undef1`)
-      expect(result).toContain(`undef2`)
-    })
-  })
-
   describe(`valueMapData getter`, () => {
     it(`should return undefined keys denormalized, not as sentinel`, () => {
       const index = createIndex(`value`)

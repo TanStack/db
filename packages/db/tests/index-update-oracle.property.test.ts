@@ -473,21 +473,27 @@ describe.each(indexTypes)(`%s update properties`, (_indexName, IndexType) => {
 /**
  * Direct index equality keeps `undefined` and `null` in distinct exact-value
  * buckets, even though the default ordering comparator places both at one
- * position. The established direct-index tests below exercise this distinction
- * through `equalityLookup` and `lookup('eq')`. This law does not describe the
- * live-query WHERE evaluator, which uses three-valued nullish equality.
+ * position. An `IN` lookup returns the union of the requested exact-value
+ * memberships, including every owner of a repeated value and no unrequested
+ * value. The established direct-index tests exercise these methods. This law
+ * does not describe the live-query WHERE evaluator, which uses three-valued
+ * nullish equality.
  *
  * A source Map predicts membership without index normalization or comparator
  * classification. Fresh singleton histories preserve the old update cuts;
- * coexisting values expose a wrong union of nullish buckets. The generated
- * tail adds nearby put/delete histories over three keys and four values. An
- * absent source key is added, while an owned key is updated. A direct update
- * of an absent key is outside this grammar. Removing either nullish value
- * loses the distinction; removing the defined values loses transitions across
- * it; one key cannot expose surviving peers after a move or deletion.
- * After each direct action returns, both exact-lookup methods and key count
- * must agree with the Map. Ordered reads, range queries, `IN`, and bucket
- * object identity belong to other observations.
+ * coexisting values expose a wrong union of nullish buckets. Fixed histories
+ * also retain two undefined owners beside strings, a nonempty state without
+ * undefined, and both mixed and undefined-only `IN` lists. The generated tail
+ * adds nearby put/delete histories over three keys and five values, with both
+ * orders of a mixed `IN` list, while a fixed four-key history keeps a third
+ * defined distractor. An absent source key is added, while an owned key is
+ * updated. A direct update of an absent key is outside this grammar. Each
+ * nullish value is needed to distinguish the buckets. Defined values exercise
+ * mixed-list selection and moves across the nullish boundary. At least two
+ * keys are needed to expose surviving peers.
+ * After each direct action returns, exact and `IN` methods, their `lookup`
+ * dispatches, and key count must agree with the Map. Ordered reads, range
+ * queries, bucket object identity, and instrumentation are outside this law.
  */
 type NullishIndexValue = number | null | undefined
 type NullishIndexAction =
@@ -499,6 +505,18 @@ const nullishProbeValues: ReadonlyArray<NullishIndexValue> = [
   null,
   1,
   2,
+  3,
+]
+const nullishInProbes: ReadonlyArray<ReadonlyArray<NullishIndexValue>> = [
+  [],
+  [undefined],
+  [null],
+  [undefined, 1],
+  [1, undefined],
+  [undefined, null],
+  [3],
+  [1, 2],
+  [1, 1],
 ]
 const arbitraryNullishAction: fc.Arbitrary<NullishIndexAction> = fc.oneof(
   fc.record({
@@ -512,20 +530,39 @@ const arbitraryNullishAction: fc.Arbitrary<NullishIndexAction> = fc.oneof(
   }),
 )
 
-function expectNullishMembership(
+function expectExactMembership<T>(
   index: BaseIndex<string>,
-  rows: ReadonlyMap<string, NullishIndexValue>,
+  rows: ReadonlyMap<string, T>,
+  exactProbes: ReadonlyArray<T>,
+  inProbes: ReadonlyArray<ReadonlyArray<T>>,
 ): void {
   // Map key identity distinguishes null from undefined without consulting the
-  // index's normalized keys or its ordering comparator.
+  // index's normalized keys or its ordering comparator. IN membership follows
+  // from source-value membership in the operand list, including an empty list.
   const groups = groupKeysByValue(rows)
   expect(index.keyCount).toBe(rows.size)
   expect(indexedKeysSet(index)).toEqual(new Set(rows.keys()))
-  for (const value of nullishProbeValues) {
+  for (const value of exactProbes) {
     const expected = groups.get(value) ?? new Set<string>()
     expect(index.equalityLookup(value)).toEqual(expected)
     expect(index.lookup(`eq`, value)).toEqual(expected)
   }
+  for (const values of inProbes) {
+    const expected = new Set(
+      [...rows]
+        .filter(([, value]) => values.includes(value))
+        .map(([key]) => key),
+    )
+    expect(index.inArrayLookup([...values])).toEqual(expected)
+    expect(index.lookup(`in`, [...values])).toEqual(expected)
+  }
+}
+
+function expectNullishMembership(
+  index: BaseIndex<string>,
+  rows: ReadonlyMap<string, NullishIndexValue>,
+): void {
+  expectExactMembership(index, rows, nullishProbeValues, nullishInProbes)
 }
 
 function applyNullishAction(
@@ -575,6 +612,55 @@ describe.each(indexTypes)(
         [`null1`, null],
         [`undef1`, undefined],
         [`num1`, 1],
+      ] as const) {
+        applyNullishAction(index, rows, { type: `put`, key, value })
+      }
+    })
+
+    test(`finds every undefined owner beside distinct string values`, () => {
+      const index = new IndexType(1, new PropRef([`status`]))
+      const rows = new Map<string, string | undefined>()
+      const exactProbes = [undefined, `active`, `inactive`]
+      const inProbes = [[undefined], [undefined, `active`]]
+      for (const [key, value] of [
+        [`a`, `active`],
+        [`b`, undefined],
+        [`c`, `inactive`],
+        [`d`, undefined],
+      ] as const) {
+        index.add(key, { status: value })
+        rows.set(key, value)
+        expectExactMembership(index, rows, exactProbes, inProbes)
+      }
+    })
+
+    test(`returns no undefined key from a nonempty all-defined index`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>()
+      applyNullishAction(index, rows, { type: `put`, key: `a`, value: 1 })
+      applyNullishAction(index, rows, { type: `put`, key: `b`, value: 2 })
+    })
+
+    test(`unites undefined and defined IN members without distractors`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>()
+      for (const [key, value] of [
+        [`undef`, undefined],
+        [`one`, 1],
+        [`two`, 2],
+        [`three`, 3],
+      ] as const) {
+        applyNullishAction(index, rows, { type: `put`, key, value })
+      }
+    })
+
+    test(`returns every undefined owner from a singleton IN list`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>()
+      for (const [key, value] of [
+        [`undef1`, undefined],
+        [`undef2`, undefined],
+        [`one`, 1],
       ] as const) {
         applyNullishAction(index, rows, { type: `put`, key, value })
       }
@@ -653,6 +739,120 @@ describe.each(indexTypes)(
         expect(united).toHaveBeenCalledWith(`eq`, undefined)
       } finally {
         united.mockRestore()
+      }
+    })
+
+    test(`rejects an exact lookup that loses one undefined owner`, () => {
+      const index = new IndexType(1, new PropRef([`status`]))
+      const rows = new Map<string, string | undefined>([
+        [`a`, `active`],
+        [`b`, undefined],
+        [`c`, `inactive`],
+        [`d`, undefined],
+      ])
+      for (const [key, status] of rows) index.add(key, { status })
+      const lookup = index.equalityLookup.bind(index)
+      const truncated = vi
+        .spyOn(index, `equalityLookup`)
+        .mockImplementation((value) =>
+          value === undefined ? new Set([`b`]) : lookup(value),
+        )
+      try {
+        expect(() =>
+          expectExactMembership(index, rows, [undefined], [[undefined]]),
+        ).toThrowError(/expected/)
+        expect(truncated).toHaveBeenCalledWith(undefined)
+      } finally {
+        truncated.mockRestore()
+      }
+    })
+
+    test(`rejects an IN lookup that drops an undefined operand`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>()
+      applyNullishAction(index, rows, {
+        type: `put`,
+        key: `undef`,
+        value: undefined,
+      })
+      applyNullishAction(index, rows, { type: `put`, key: `one`, value: 1 })
+      const lookup = index.inArrayLookup.bind(index)
+      const dropped = vi
+        .spyOn(index, `inArrayLookup`)
+        .mockImplementation((values) =>
+          values.length === 2 && values[0] === 1 && values[1] === undefined
+            ? new Set([`one`])
+            : lookup(values),
+        )
+      try {
+        expect(() => expectNullishMembership(index, rows)).toThrowError(
+          /expected/,
+        )
+        expect(dropped).toHaveBeenCalledWith([1, undefined])
+      } finally {
+        dropped.mockRestore()
+      }
+    })
+
+    test(`rejects an IN lookup that loses a same-value owner`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>()
+      applyNullishAction(index, rows, {
+        type: `put`,
+        key: `undef1`,
+        value: undefined,
+      })
+      applyNullishAction(index, rows, {
+        type: `put`,
+        key: `undef2`,
+        value: undefined,
+      })
+      const lookup = index.inArrayLookup.bind(index)
+      const truncated = vi
+        .spyOn(index, `inArrayLookup`)
+        .mockImplementation((values) =>
+          values.length === 1 && values[0] === undefined
+            ? new Set([`undef1`])
+            : lookup(values),
+        )
+      try {
+        expect(() => expectNullishMembership(index, rows)).toThrowError(
+          /expected/,
+        )
+        expect(truncated).toHaveBeenCalledWith([undefined])
+      } finally {
+        truncated.mockRestore()
+      }
+    })
+
+    test(`rejects IN dispatch that returns only its first value group`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>()
+      applyNullishAction(index, rows, {
+        type: `put`,
+        key: `undef`,
+        value: undefined,
+      })
+      applyNullishAction(index, rows, { type: `put`, key: `one`, value: 1 })
+      const lookup = index.lookup.bind(index)
+      const firstOnly = vi
+        .spyOn(index, `lookup`)
+        .mockImplementation((op, value) =>
+          op === `in` &&
+          Array.isArray(value) &&
+          value.length === 2 &&
+          value[0] === undefined &&
+          value[1] === 1
+            ? new Set([`undef`])
+            : lookup(op, value),
+        )
+      try {
+        expect(() => expectNullishMembership(index, rows)).toThrowError(
+          /expected/,
+        )
+        expect(firstOnly).toHaveBeenCalledWith(`in`, [undefined, 1])
+      } finally {
+        firstOnly.mockRestore()
       }
     })
   },
