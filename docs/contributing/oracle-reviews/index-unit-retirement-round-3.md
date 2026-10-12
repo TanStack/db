@@ -4,8 +4,8 @@ The source-isolated Field Lab loss audits used `b56d1a45c` as the frozen
 baseline. The receiving owner is
 `packages/db/tests/index-update-oracle.property.test.ts`. Its prior nullish
 Map law checked `equalityLookup` and `lookup('eq')`, but explicitly excluded
-`IN`. The four legacy blocks below remain in the source file until the new
-checks and hostile review pass.
+`IN`. The four legacy blocks below were retired at reviewed code head
+`d880f3139bbbba7141dc658d84d3602217c2960f`.
 
 ## Transfer ledger before retirement
 
@@ -23,8 +23,8 @@ call either production lookup, normalized-key helper, or comparator. The
 driver checks both direct methods and `lookup('eq')`/`lookup('in')` for
 BasicIndex and BTreeIndex after each source action returns. A generated
 three-key, five-value put/delete grammar checks nearby transitions with empty,
-repeated, both orders of a mixed list, and nullish-only operand lists. The fixed four-key and string
-histories preserve source distinctions outside that generated domain.
+repeated, both orders of a mixed list, and nullish-only operand lists. The
+fixed four-key and string histories preserve distinctions outside that domain.
 
 This is a direct-index set-selection law. It does not specify live-query WHERE
 or `IN` nullish semantics, ordered traversal, range lookup, bucket identity,
@@ -66,6 +66,12 @@ membership slice (36 passed, no type errors) and found no remaining semantic
 blocker to retiring the four named blocks. It did not run a production mutant.
 No production change was justified by this round.
 
+The reviewer rechecked committed head
+`d880f3139bbbba7141dc658d84d3602217c2960f` after the commit hook. The
+commit removed exactly the four ledger blocks and retained the reviewed oracle
+and coverage claims. The reviewer reran all three targeted files: 423/423
+passed with no type errors. `git show --check` was clean. No new blocker arose.
+
 ## Oracle guide audit
 
 | Requirement | Outcome |
@@ -81,7 +87,7 @@ No production change was justified by this round.
 | ORC-009 | `put` maps to index `add` or `update` according to source ownership; `delete` maps to `remove`. `IN` operands are lists of source values, and the after-action comparison is the checkpoint. |
 | ORC-010 | Wrong-result spies restore in `finally`. Guarded replay records the property failure separately from child exit and cleans its temporary witness channel. The temporary model fault was removed after replay. |
 | ORC-011 | No plausible shared semantic fault requiring a second independent formulation was identified for this bounded primitive-value Map rule. The review's order-sensitive survivor was an enforcement gap and is now checked. |
-| ORC-012 | This versioned ledger records source assertions, law limits, execution, hostile review, and remaining scope. The committed code head is identified in the postcommit review addendum. |
+| ORC-012 | This versioned ledger records source assertions, law limits, execution, hostile review, and remaining scope against exact reviewed code head `d880f3139bbbba7141dc658d84d3602217c2960f`. |
 | ORC-013 | `[undefined, 1]` versus `[1, undefined]` distinguishes operand-order dependence; `[undefined]` with two owners rejects first-owner-only selection; `[]` and `[1, 1]` check empty and duplicate boundaries. The wrong-result controls fail at returned-set comparisons. |
 | ORC-014 | No controlled provider or host premise is used to claim real-provider or host behavior. |
 
