@@ -728,6 +728,21 @@ export class CollectionImpl<
     return this._state.has(key)
   }
 
+  /** Maximum number of source rows whose visible projection a local write can hide. */
+  public _optimisticOverlaySize(): number {
+    return (
+      this._state.optimisticDeletes.size + this._state.optimisticUpserts.size
+    )
+  }
+
+  /** Whether a local write obscures this key's authoritative source row. */
+  public _hasOptimisticOverlay(key: TKey): boolean {
+    return (
+      this._state.optimisticDeletes.has(key) ||
+      this._state.optimisticUpserts.has(key)
+    )
+  }
+
   /**
    * Get the current size of the collection (cached)
    */

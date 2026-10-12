@@ -1207,7 +1207,11 @@ export class CollectionSubscription
       subscription: this,
       // Include orderBy and limit if provided so sync layer can optimize the query
       orderBy: opts?.orderBy,
-      limit: opts?.limit,
+      // A local optimistic row can hide one source row from a bounded prefix.
+      limit:
+        opts?.limit === undefined
+          ? undefined
+          : opts.limit + this.collection._optimisticOverlaySize(),
     }
     // The loader can reenter releaseSnapshot before startSubsetDemand returns.
     if (opts?.where) this.requestedSubsetWhere.set(loadOptions, opts.where)
@@ -1365,7 +1369,7 @@ export class CollectionSubscription
     this.options.truncateReplayPublication?.succeed()
   }
 
-  /** Read the applied rows in an ordered acquisition without starting demand. */
+  /** Read source-derived ordered rows without starting demand. */
   readOrderedSnapshot(
     options: LoadSubsetOptions,
   ): Array<ChangeMessage<Record<string, unknown>, string | number>> {
@@ -1382,7 +1386,14 @@ export class CollectionSubscription
           ? predicates.reduce((left, right) => and(left, right))
           : undefined,
     })
-    return Array.isArray(snapshot) ? snapshot : []
+    // Optimistic rows can fill the visible window but cannot establish a
+    // provider offset or cursor boundary. Excluding their keys is conservative
+    // when an optimistic update hides a source row in the local ordered view.
+    return Array.isArray(snapshot)
+      ? snapshot.filter(
+          ({ key }) => !this.collection._hasOptimisticOverlay(key),
+        )
+      : []
   }
 
   /**
@@ -1476,7 +1487,7 @@ export class CollectionSubscription
       if (allRowsWithMinValue) {
         const keysWithMinValue = allRowsWithMinValue
           .map((change) => change.key)
-          .filter((key) => !this.sentKeys.has(key) && filterFn(key))
+          .filter(filterFn)
 
         // Add items with the minValue first
         keys.push(...keysWithMinValue)
@@ -1560,15 +1571,17 @@ export class CollectionSubscription
 
     // A cursor value does not bound how many provider rows precede it. When an
     // adapter ignores cursor expressions and no offset was supplied, only a
-    // full-source request can reach an arbitrary cursor value. Otherwise
-    // request a prefix from zero: at most sentKeys.size rows in it were already
-    // selected, so this bound admits `limit` unseen rows when available.
+    // full-source request can reach an arbitrary cursor value. Otherwise,
+    // selected keys and optimistic overlays can each hide source rows from a
+    // local page. Their cardinalities bound how many extra provider rows the
+    // request may need to reach `limit` visible rows.
+    const overlaySize = this.collection._optimisticOverlaySize()
     const providerLimit =
       offset !== undefined
-        ? limit
+        ? limit + overlaySize
         : hasMinValue
           ? undefined
-          : limit + this.sentKeys.size
+          : limit + this.sentKeys.size + overlaySize
 
     // Request the sync layer to load more data
     // don't await it, we will load the data into the collection when it comes in

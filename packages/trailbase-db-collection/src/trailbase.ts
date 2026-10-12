@@ -33,9 +33,9 @@ type OptionalConversions<
   OutputType extends ShapeOf<InputType>,
 > = {
   // Excludes all keys that require a conversation.
-  [
-    K in keyof InputType as InputType[K] extends OutputType[K] ? K : never
-  ]?: Conversion<InputType[K], OutputType[K]>
+  [K in keyof InputType as InputType[K] extends OutputType[K]
+    ? K
+    : never]?: Conversion<InputType[K], OutputType[K]>
 }
 
 type RequiredConversions<
@@ -43,9 +43,9 @@ type RequiredConversions<
   OutputType extends ShapeOf<InputType>,
 > = {
   // Excludes all keys that do not strictly require a conversation.
-  [
-    K in keyof InputType as InputType[K] extends OutputType[K] ? never : K
-  ]: Conversion<InputType[K], OutputType[K]>
+  [K in keyof InputType as InputType[K] extends OutputType[K]
+    ? never
+    : K]: Conversion<InputType[K], OutputType[K]>
 }
 
 type Conversions<
@@ -279,7 +279,13 @@ export function trailBaseCollectionOptions<
 
           // Drained or read enough.
           if (length < limit || remaining <= 0) {
-            if (response.cursor) {
+            // Core subscriptions cannot send lastKey, so retaining their
+            // cursors only grows this cache. Direct callers can use the key
+            // from a completed page as their next opaque boundary.
+            if (
+              response.cursor &&
+              (opts.subscription === undefined || lastKey !== undefined)
+            ) {
               cursors.set(
                 getKey(parse(response.records.at(-1)!)),
                 response.cursor,

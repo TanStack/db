@@ -17,7 +17,10 @@ import type {
 import type { OrderByOptimizationInfo } from '../compiler/order-by.js'
 
 type OrderedRequestKind =
-  `ordered` | `ordered-repair` | `boundary` | `full-source`
+  | `ordered`
+  | `ordered-repair`
+  | `boundary`
+  | `full-source`
 
 type OrderedContinuation = {
   kind: `boundary` | `more`
@@ -65,7 +68,8 @@ export class OrderedSourceLoader {
   // The record's presence blocks automatic retry, including initial requests
   // that have no explicit window-operation generation.
   private failedRequest:
-    { windowOperationGeneration: number | undefined } | undefined
+    | { windowOperationGeneration: number | undefined }
+    | undefined
   private failedAcquisitions = new Map<ReleaseLoadSubset, OrderedRequestKind>()
   private active = true
   private orderedLoadGeneration = 0
@@ -218,8 +222,17 @@ export class OrderedSourceLoader {
         continuesOrderedPrefixRepair &&
         this.authoritativeRequestKind === `ordered-repair`
       )
-    )
+    ) {
+      if (windowOperationGeneration !== undefined) {
+        // A window move held behind repair still needs its source-coverage
+        // check when that repair resumes ordered loading.
+        this.blockedLoadMore = {
+          windowOperationGeneration,
+          continuesOrderedPrefixRepair,
+        }
+      }
       return this.pending
+    }
     if (
       (this.needsOrderingRepair &&
         !(
@@ -253,6 +266,14 @@ export class OrderedSourceLoader {
       return this.pending
     }
     if (!this.info.dataNeeded || this.pending) {
+      if (this.pending && windowOperationGeneration !== undefined) {
+        // A window move can wait behind an ordered repair. Its source-coverage
+        // check still belongs to the continuation after that repair settles.
+        this.blockedLoadMore = {
+          windowOperationGeneration,
+          continuesOrderedPrefixRepair,
+        }
+      }
       if (continuesOrderedPrefixRepair && !this.pending) {
         this.finishOrderedPrefixRepair(windowOperationGeneration)
       }
@@ -322,6 +343,7 @@ export class OrderedSourceLoader {
       `ordered-repair`,
       windowOperationGeneration,
       true,
+      this.info.offset + this.info.limit,
     )
   }
 
@@ -354,6 +376,7 @@ export class OrderedSourceLoader {
       `ordered`,
       windowOperationGeneration,
       continuesOrderedPrefixRepair,
+      count,
     )
     this.lastPrefixCount = count
   }
@@ -578,6 +601,7 @@ export class OrderedSourceLoader {
       `ordered`,
       windowOperationGeneration,
       continuesOrderedPrefixRepair,
+      count,
     )
   }
 
@@ -589,6 +613,7 @@ export class OrderedSourceLoader {
     options?: LoadSubsetOptions,
     continuesOrderedPrefixRepair = false,
     requestGraphInputRevision?: number,
+    requestedCount?: number,
   ): Promise<void> | undefined {
     const isFullSource = kind === `full-source`
     const isOrderedRepair = kind === `ordered-repair`
@@ -711,8 +736,14 @@ export class OrderedSourceLoader {
             if (!isFullSource && options?.orderBy) {
               try {
                 this.settledSourceBoundary =
-                  this.subscription.readOrderedSnapshot(options).at(-1)
-                    ?.value ?? this.settledSourceBoundary
+                  this.subscription
+                    .readOrderedSnapshot({
+                      ...options,
+                      // Provider limits include optimistic headroom. Those
+                      // extra local ranks do not prove a source boundary.
+                      limit: requestedCount ?? options.limit,
+                    })
+                    .at(-1)?.value ?? this.settledSourceBoundary
               } catch (error) {
                 if (canSettleSynchronously) {
                   synchronousCompletionFailure = { error }
@@ -1049,6 +1080,7 @@ export class OrderedSourceLoader {
     kind: OrderedRequestKind,
     windowOperationGeneration?: number,
     continuesOrderedPrefixRepair = false,
+    requestedCount?: number,
   ): Promise<void> | undefined {
     const isFullSource = kind === `full-source`
     const isAuthoritativeRepair =
@@ -1081,6 +1113,7 @@ export class OrderedSourceLoader {
         observed.options,
         continuesOrderedPrefixRepair,
         graphInputRevision,
+        requestedCount,
       )
     } catch (error) {
       if (error instanceof OrderedPostSettlementError) throw error.cause

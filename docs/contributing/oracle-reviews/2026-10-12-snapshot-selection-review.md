@@ -11,7 +11,7 @@ The independent follow-up review covered implementation commit `eeb3a8673`.
 Merge commit `91bef133d76990ce93256d4881d27182431c0fbf` adds only the
 remote bot's formatting change to that implementation. It contains
 `origin/main` at `f6857fee9de59dc82cbe596ca7df4a18152004ed`. The final
-evidence commit changes this record only. The repaired full package run was
+evidence commit in that earlier cycle changed this record only. The repaired full package run was
 before that formatting merge; the four focused suites passed again afterwards.
 
 ## Law and observation cuts
@@ -58,10 +58,12 @@ actual offset pages after sparse callbacks and ordered callback reentry. An
 offset-only provider over three and seven ranks checks a high cursor value:
 the request has offset zero and no finite limit, and its target row becomes
 public.
-The pagination recomputation oracle's key transport now uses its offset path
-when `cursor.lastKey` is absent. The public `LoadSubsetOptions` type makes that
-field optional, and the TrailBase adapter has the same fallback. All 24
-pending-mutation transport cases pass with this fixture rule.
+The pagination recomputation oracle exercises cursor-expression and offset
+transports. CollectionSubscription never supplies `cursor.lastKey`, so its
+former key-transport cases exercised the offset path and were removed. The
+TrailBase adapter test exercises an explicit last-key caller and its offset
+fallback. All 16 pending-mutation transport cases pass in the two reachable
+live-query modes.
 
 ## RED and GREEN calibration
 
@@ -105,6 +107,46 @@ that private-selection requirement.
 | ORC-014 | Controlled adapters supply replay timing and offset or key-cursor pages. Their three- and seven-row results demonstrate the Collection boundary but do not prove every real provider's pagination behavior. |
 
 Open scope: rank ties, other predicates, arbitrary and changing provider result
-sets, provider-specific cursors, and compiled live-query windows remain with
+sets, provider-specific cursors, and compiled live-query windows outside the
+bounded optimistic and settled-page histories remain with
 the owners named in the coverage map. These controlled providers and
 bounded histories do not prove every possible source schedule.
+
+## Second review: optimistic rows and source coverage
+
+The next external review inspected `ba6dcb3dd`. It found that a pending
+optimistic delete can consume a bounded provider page without supplying a
+visible row. The same source-coverage law also applies to optimistic inserts
+and rank moves: a local row can fill the visible window, but it cannot prove
+that the provider supplied an earlier rank. The ordered-loading architecture
+authorizes this distinction. The pagination recomputation oracle owns the
+compiled live-query window, while the lifecycle publication oracle owns the
+direct Collection subscription request.
+
+The lifecycle owner checks one and two pending deletes or predicate-removing
+updates at request submission. The remote array's next visible rank must lie
+within the submitted provider page. The original bounded request and a
+one-row-only headroom edit fail those comparisons. The pagination owner also
+checks final public rows after authoritative source acceptance. Its continuation
+matrix holds one or two inserts or rank moves, widens a window, and crosses
+cursor-expression and offset-only adapters; insert histories start with zero
+or one source row in the initial window. The array model sorts the remote rows
+and applies the authored mutation without reading loader state. It requires a
+request for the needed unchanged source rank when that request can start before
+settlement, and exact public rows after the source commit.
+
+Before the source-coverage repair, six of the first eight continuation cells
+failed at the request comparison: both offset-only inserts and all four rank
+moves. The two-move history also failed at the final public window after the
+earlier request assertion was moved past a legally held repair. Filtering
+currently optimistic keys alone fixed the single-row cases but left that
+two-move failure. The source commit could drop the overlay before a padded
+request settled, allowing moved rows beyond its original requested count to
+be mistaken for its provider boundary. Capping that boundary read at the
+original count and checking the source-coverage deficit on delayed
+continuations repaired the same history. Runtime hostile edits that disabled
+overlay exclusion, optimistic headroom, the original-count cap, or delayed
+coverage each failed a corresponding public-row witness. The complete
+pagination file passed 289 tests; the four relevant DB files passed 641 tests;
+TrailBase's adapter file passed 27 tests. These checks use controlled providers,
+not a real Electric, query-db, or TrailBase backend.

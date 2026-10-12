@@ -127,7 +127,10 @@ type PublicationModel = {
   sentKeys: Set<RowKey>
 }
 type PublicationPhase =
-  `public` | `private-pending` | `private-settling` | `private-failed`
+  | `public`
+  | `private-pending`
+  | `private-settling`
+  | `private-failed`
 type SourceEffect = `insert` | `update` | `delete`
 type PublicationObservation = {
   index: number
@@ -2022,6 +2025,136 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
         expect(visible.has(remote.at(-1)!.id)).toBe(true)
         expect(violations).toEqual([])
       } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
+  // A provider page is ranked in authoritative source state, while the local
+  // Collection is an optimistic projection of it. A pending delete or update
+  // can hide a source row without reserving its key for this subscriber. The
+  // plain remote array and the pending local changes define the next visible
+  // rank independently of the subscription's request arithmetic. At request
+  // submission, its provider page must reach that rank. A source commit may
+  // remain queued behind the optimistic transaction, so this cut judges the
+  // request rather than claiming that the page is already public.
+  it.each(
+    ([`delete`, `update-out-of-filter`] as const).flatMap((mutation) =>
+      [1, 2].map((hiddenCount) => ({ mutation, hiddenCount })),
+    ),
+  )(
+    `loads past $hiddenCount pending optimistic $mutation row(s)`,
+    async ({ mutation, hiddenCount }) => {
+      type ProviderRow = { id: number; value: number; status: string }
+      const remote = [1, 2, 3].map((id) => ({
+        id,
+        value: id,
+        status: `visible`,
+      }))
+      const heldMutation = createDeferred<void>()
+      const delivered = new Set<number>()
+      const requests: Array<LoadSubsetOptions> = []
+      let operations!: Parameters<SyncConfig<ProviderRow, number>[`sync`]>[0]
+      const collection = createCollection<ProviderRow, number>({
+        id: `snapshot-optimistic-prefix-${mutation}-${hiddenCount}`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        onDelete: async () => heldMutation.promise,
+        onUpdate: async () => heldMutation.promise,
+        sync: {
+          sync: (sync) => {
+            operations = sync
+            sync.markReady()
+            return {
+              loadSubset: (options) => {
+                requests.push(options)
+                const start = options.offset ?? 0
+                const page = remote.slice(
+                  start,
+                  options.limit === undefined
+                    ? undefined
+                    : start + options.limit,
+                )
+                const fresh = page.filter(({ id }) => !delivered.has(id))
+                if (fresh.length > 0) {
+                  operations.begin()
+                  for (const row of fresh) {
+                    delivered.add(row.id)
+                    operations.write({ type: `insert`, value: row })
+                  }
+                  return operations.commit(options.signal)
+                }
+                return true
+              },
+              unloadSubset: () => {},
+            }
+          },
+        },
+      })
+      const index = collection.createIndex((row) => row.value, {
+        indexType: BTreeIndex,
+      })
+      const visible = new Set<number>()
+      const invalidChanges: Array<string> = []
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          for (const change of changes) {
+            if (change.type === `delete`) {
+              if (!visible.delete(change.key))
+                invalidChanges.push(`delete absent:${change.key}`)
+            } else {
+              if (change.type === `insert` && visible.has(change.key))
+                invalidChanges.push(`duplicate insert:${change.key}`)
+              visible.add(change.key)
+            }
+          }
+        },
+        mutation === `update-out-of-filter`
+          ? {
+              whereExpression: new Func(`eq`, [
+                new PropRef([`status`]),
+                new Value(`visible`),
+              ]),
+            }
+          : undefined,
+      )
+      subscription.setOrderByIndex(index)
+      try {
+        subscription.requestLimitedSnapshot({
+          orderBy: valueOrderBy(),
+          limit: hiddenCount,
+        })
+        expect([...visible].sort()).toEqual(
+          remote.slice(0, hiddenCount).map(({ id }) => id),
+        )
+        for (const { id } of remote.slice(0, hiddenCount)) {
+          if (mutation === `delete`) collection.delete(id)
+          else
+            collection.update(id, (draft) => {
+              draft.status = `hidden`
+            })
+        }
+        expect(visible.size).toBe(0)
+        expect(collection._optimisticOverlaySize()).toBe(hiddenCount)
+
+        subscription.requestLimitedSnapshot({
+          orderBy: valueOrderBy(),
+          limit: 1,
+        })
+        const nextRequest = requests.at(-1)!
+        const start = nextRequest.offset ?? 0
+        const requested = remote.slice(
+          start,
+          nextRequest.limit === undefined
+            ? undefined
+            : start + nextRequest.limit,
+        )
+        expect(invalidChanges).toEqual([])
+        expect(requests).toHaveLength(2)
+        expect(requested.map(({ id }) => id)).toContain(remote[hiddenCount]!.id)
+      } finally {
+        heldMutation.resolve()
         subscription.unsubscribe()
         await collection.cleanup()
       }

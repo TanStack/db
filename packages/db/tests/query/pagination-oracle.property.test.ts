@@ -1072,7 +1072,8 @@ async function runPaginationStateScenario(
         rows: Array<PublicPageRow>
       }> = []
       let publicationSubscription:
-        ReturnType<typeof live.subscribeChanges> | undefined
+        | ReturnType<typeof live.subscribeChanges>
+        | undefined
 
       const readCurrentWindow = () =>
         Array.from(live.values(), ({ id, rank }) => ({ id, rank }))
@@ -1786,7 +1787,7 @@ async function runPendingMutationScenario(
   timing: `before-response` | `after-response`,
   finalLimitAfterMutation?: number,
   explicitPublicKeyOrder = true,
-  transport: `cursor` | `offset` | `key` = `cursor`,
+  transport: `cursor` | `offset` = `cursor`,
   fault?:
     | `held-publication`
     | `held-window`
@@ -1997,15 +1998,6 @@ async function runPendingMutationScenario(
       )
       const options = { ...request.options }
       if (transport !== `cursor`) {
-        // Model providers whose opaque continuation token is indexed by the
-        // last fetched row key, rather than by the predicate expression.
-        if (transport === `key` && options.cursor?.lastKey !== undefined) {
-          const boundary = orderedRows.findIndex(
-            ({ id }) => id === options.cursor!.lastKey,
-          )
-          expect(boundary).toBeGreaterThanOrEqual(0)
-          options.offset = boundary + 1
-        }
         options.cursor = undefined
       }
       begin()
@@ -5638,10 +5630,298 @@ describe(`pagination recomputation oracle`, () => {
           0,
         )
         expect(returnedRows).toBeLessThanOrEqual(rows.length + 2 * pageCount)
+        expect(
+          requests
+            .filter(({ orderBy }) => orderBy !== undefined)
+            .every(({ limit }) => limit !== undefined),
+        ).toBe(true)
         expect(requests.some((request) => request.cursor !== undefined)).toBe(
           true,
         )
       } finally {
+        await live.cleanup()
+        await source.cleanup()
+      }
+    },
+  )
+
+  // A pending optimistic mutation changes the local ordered relation while
+  // the provider still ranks its original rows. The reference relation below
+  // applies those pending changes to a plain remote array. After the repair
+  // acquisition, both public window rows and the provider page that supplied
+  // them must agree with that relation. One and two changed rows distinguish
+  // a general bound from a one-row exception.
+  it.each(
+    ([`delete`, `move-after`] as const).flatMap((mutation) =>
+      [1, 2].map((count) => ({ mutation, count })),
+    ),
+  )(
+    `refills an ordered window past $count pending optimistic $mutation row(s)`,
+    async ({ mutation, count }) => {
+      const remote = [1, 2, 3, 4, 5].map((id) => ({ id, rank: id }))
+      const delivered = new Set<number>()
+      const requests: Array<LoadSubsetOptions> = []
+      const heldMutation = createDeferred<void>()
+      let sourceOps!: Parameters<
+        SyncConfig<(typeof remote)[number], number>[`sync`]
+      >[0]
+      const source = createCollection({
+        id: `pagination-optimistic-prefix-${collectionSequence++}`,
+        getKey: (row: (typeof remote)[number]) => row.id,
+        syncMode: `on-demand`,
+        onDelete: async () => heldMutation.promise,
+        onUpdate: async () => heldMutation.promise,
+        sync: {
+          sync: (operations) => {
+            sourceOps = operations
+            const { begin, write, commit, markReady } = operations
+            markReady()
+            return {
+              loadSubset: (options: LoadSubsetOptions) => {
+                requests.push(options)
+                const orderedRemote = [...remote].sort(
+                  (left, right) => left.rank - right.rank,
+                )
+                const fresh = rowsForLoadSubset(orderedRemote, options).filter(
+                  ({ id }) => !delivered.has(id),
+                )
+                if (fresh.length > 0) {
+                  begin()
+                  for (const row of fresh) {
+                    delivered.add(row.id)
+                    write({ type: `insert`, value: row })
+                  }
+                  return commit(options.signal)
+                }
+                return true
+              },
+            }
+          },
+        },
+      })
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank)
+          .limit(count),
+      )
+      try {
+        await live.preload()
+        expect([...live.values()].map(({ id }) => id)).toEqual(
+          remote.slice(0, count).map(({ id }) => id),
+        )
+        const affected = remote.slice(0, count)
+        const transactions = affected.map(({ id }) => {
+          if (mutation === `delete`) return source.delete(id)
+          else
+            return source.update(id, (draft) => {
+              draft.rank = 100 + id
+            })
+        })
+        await flushPromises()
+
+        const expected = remote
+          .map((row) =>
+            row.id <= count && mutation === `move-after`
+              ? { ...row, rank: 100 + row.id }
+              : row,
+          )
+          .filter(({ id }) => mutation !== `delete` || id > count)
+          .sort((left, right) => left.rank - right.rank)
+          .slice(0, count)
+          .map(({ id }) => id)
+        expect(
+          requests.some((request) =>
+            rowsForLoadSubset(remote, request).some(
+              ({ id }) => id === expected.at(-1),
+            ),
+          ),
+        ).toBe(true)
+
+        // Accept the local mutations in one authoritative source transaction.
+        // Provider responses submitted while they were pending may finish
+        // afterward; the final public window must still match the model.
+        sourceOps.begin()
+        for (const row of affected) {
+          if (mutation === `delete`) {
+            remote.splice(
+              remote.findIndex(({ id }) => id === row.id),
+              1,
+            )
+            sourceOps.write({ type: `delete`, value: row })
+          } else {
+            const updated = { ...row, rank: 100 + row.id }
+            remote[remote.findIndex(({ id }) => id === row.id)] = updated
+            sourceOps.write({ type: `update`, value: updated })
+          }
+        }
+        const receipt = sourceOps.commit()
+        heldMutation.resolve()
+        await Promise.all(transactions.map((tx) => tx.isPersisted.promise))
+        await receipt
+        await flushPromises()
+        expect([...live.values()].map(({ id }) => id)).toEqual(expected)
+      } finally {
+        heldMutation.resolve()
+        await live.cleanup()
+        await source.cleanup()
+      }
+    },
+  )
+
+  // An optimistic insert or rank move changes the local relation without
+  // establishing a provider prefix. The remote array below is the independent
+  // source order. A finite request may use cursor expressions or a provider
+  // offset, but neither may skip a remote rank because a local row filled the
+  // window. Widening while the mutation is held tests both the continuation
+  // request and the public window after the authoritative source change.
+  it.each(
+    ([`insert-before`, `move-after`] as const).flatMap((mutation) =>
+      [1, 2].flatMap((count) =>
+        (mutation === `insert-before` ? [0, 1] : [count]).flatMap(
+          (initialLimit) =>
+            ([`cursor`, `offset`] as const).map((transport) => ({
+              mutation,
+              count,
+              initialLimit,
+              transport,
+            })),
+        ),
+      ),
+    ),
+  )(
+    `does not count $count optimistic $mutation row(s) as $transport provider coverage after a $initialLimit-row window`,
+    async ({ mutation, count, initialLimit, transport }) => {
+      const remote = [1, 2, 3, 4, 5, 6, 7].map((id) => ({ id, rank: id }))
+      const finalLimit = mutation === `insert-before` ? count + 2 : count + 1
+      const delivered = new Set<number>()
+      const requests: Array<LoadSubsetOptions> = []
+      const heldMutation = createDeferred<void>()
+      let sourceOps!: Parameters<
+        SyncConfig<(typeof remote)[number], number>[`sync`]
+      >[0]
+      const source = createCollection({
+        id: `pagination-optimistic-continuation-${collectionSequence++}`,
+        getKey: (row: (typeof remote)[number]) => row.id,
+        syncMode: `on-demand`,
+        onInsert: async () => heldMutation.promise,
+        onUpdate: async () => heldMutation.promise,
+        sync: {
+          sync: (operations) => {
+            sourceOps = operations
+            const { begin, write, commit, markReady } = operations
+            markReady()
+            return {
+              loadSubset: (options: LoadSubsetOptions) => {
+                requests.push(options)
+                const orderedRemote = [...remote].sort(
+                  (left, right) => left.rank - right.rank,
+                )
+                const page = rowsForLoadSubset(
+                  orderedRemote,
+                  transport === `offset`
+                    ? { ...options, cursor: undefined }
+                    : options,
+                )
+                const fresh = page.filter(({ id }) => !delivered.has(id))
+                if (fresh.length === 0) return true
+                begin()
+                for (const row of fresh) {
+                  delivered.add(row.id)
+                  write({ type: `insert`, value: row })
+                }
+                return commit(options.signal)
+              },
+            }
+          },
+        },
+      })
+      source.createIndex((row) => row.rank, { indexType: BTreeIndex })
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank)
+          .limit(initialLimit),
+      )
+      try {
+        await live.preload()
+        expect([...live.values()].map(({ id }) => id)).toEqual(
+          remote.slice(0, initialLimit).map(({ id }) => id),
+        )
+
+        const changed = Array.from({ length: count }, (_, index) =>
+          mutation === `insert-before`
+            ? { id: -index, rank: -index }
+            : { id: index + 1, rank: 100 + index },
+        )
+        const transactions = changed.map((row) =>
+          mutation === `insert-before`
+            ? source.insert(row)
+            : source.update(row.id, (draft) => {
+                draft.rank = row.rank
+              }),
+        )
+        await flushPromises()
+        const priorRequestCount = requests.length
+        const windowResult = live.utils.setWindow({
+          offset: 0,
+          limit: finalLimit,
+        })
+        if (windowResult instanceof Promise) {
+          void windowResult.catch(() => undefined)
+        }
+        await flushPromises()
+
+        const expectedRemote =
+          mutation === `insert-before`
+            ? [...remote, ...changed]
+            : remote.map((row) =>
+                row.id <= count ? { ...row, rank: 100 + row.id - 1 } : row,
+              )
+        const expected = expectedRemote
+          .sort((left, right) => left.rank - right.rank)
+          .slice(0, finalLimit)
+          .map(({ id }) => id)
+        const lastUnchangedSourceId = expected
+          .filter((id) => !changed.some((row) => row.id === id))
+          .at(-1)!
+        if (mutation === `insert-before` || count === 1) {
+          expect(
+            delivered.has(lastUnchangedSourceId) ||
+              requests
+                .slice(priorRequestCount)
+                .some((request) =>
+                  rowsForLoadSubset(
+                    remote,
+                    transport === `offset`
+                      ? { ...request, cursor: undefined }
+                      : request,
+                  ).some(({ id }) => id === lastUnchangedSourceId),
+                ),
+          ).toBe(true)
+        }
+        sourceOps.begin()
+        for (const row of changed) {
+          if (mutation === `insert-before`) {
+            remote.push(row)
+            sourceOps.write({ type: `insert`, value: row })
+          } else {
+            remote[remote.findIndex(({ id }) => id === row.id)] = row
+            sourceOps.write({ type: `update`, value: row })
+          }
+        }
+        const receipt = sourceOps.commit()
+        heldMutation.resolve()
+        await Promise.all(transactions.map((tx) => tx.isPersisted.promise))
+        await receipt
+        await windowResult
+        await flushPromises()
+
+        // The public view is checked after source acceptance, so a missing
+        // provider row cannot hide behind the local overlay.
+        expect([...live.values()].map(({ id }) => id)).toEqual(expected)
+      } finally {
+        heldMutation.resolve()
         await live.cleanup()
         await source.cleanup()
       }
@@ -5686,7 +5966,7 @@ describe(`pagination recomputation oracle`, () => {
     ([`asc`, `desc`] as const).flatMap((direction) =>
       ([`before-response`, `after-response`] as const).flatMap((timing) =>
         [0.5, 100].flatMap((rank) =>
-          ([`cursor`, `offset`, `key`] as const).map((transport) => ({
+          ([`cursor`, `offset`] as const).map((transport) => ({
             direction,
             timing,
             rank,

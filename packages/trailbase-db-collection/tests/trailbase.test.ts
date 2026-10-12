@@ -683,6 +683,55 @@ describe(`TrailBase Integration`, () => {
     }
   })
 
+  it(`does not cache a cursor that a core subscription cannot resume`, async () => {
+    const recordApi = new MockRecordApi<Data>()
+    recordApi.list
+      .mockResolvedValueOnce({
+        records: [{ id: 1, updated: 0, data: `first` }],
+        cursor: `after-1`,
+      })
+      .mockResolvedValue({ records: [] })
+    recordApi.subscribe.mockResolvedValue(new TransformStream<Event>().readable)
+    const collection = createCollection(
+      trailBaseCollectionOptions({
+        recordApi,
+        getKey: (item: Data) => item.id ?? -1,
+        startSync: true,
+        syncMode: `on-demand`,
+        parse: {},
+        serialize: {},
+      }),
+    )
+    const subscription = collection.subscribeChanges(() => {})
+    const id = new IR.PropRef([`id`])
+    try {
+      await vi.waitFor(() => expect(collection.status).toBe(`ready`))
+      subscription.requestSnapshot()
+      await vi.waitFor(() => expect(subscription.status).toBe(`ready`))
+      await collection._sync.loadSubset({
+        limit: 1,
+        offset: 1,
+        cursor: {
+          whereCurrent: new IR.Func(`eq`, [id, new IR.Value(1)]),
+          whereFrom: new IR.Func(`gt`, [id, new IR.Value(1)]),
+          lastKey: 1,
+        },
+      })
+
+      // Direct calls still cache their own results; this lookup must not use
+      // the cursor produced only for a core request that cannot send lastKey.
+      expect(recordApi.list).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          pagination: { limit: 1, offset: 1, cursor: undefined },
+        }),
+      )
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
   it(`publishes a complete two-row list at every change callback`, async () => {
     expectAtomicList(await observeAtomicList())
   })
@@ -1057,7 +1106,10 @@ describe(`TrailBase Integration`, () => {
  */
 describe(`TrailBase aborted subset loads`, () => {
   type AbortCut =
-    `before-fetch` | `fetch-rejects` | `before-commit` | `between-pages`
+    | `before-fetch`
+    | `fetch-rejects`
+    | `before-commit`
+    | `between-pages`
   const expected = (cut: AbortCut) => ({
     load: `AbortError`,
     acceptedVisible: cut === `between-pages`,

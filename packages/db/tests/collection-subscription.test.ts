@@ -698,9 +698,11 @@ describe(`CollectionSubscription status tracking`, () => {
         new Value(`second`),
       ])
       let releaseFirst:
-        ((primaryFailure?: { error: unknown }) => void) | undefined
+        | ((primaryFailure?: { error: unknown }) => void)
+        | undefined
       let releaseSecond:
-        ((primaryFailure?: { error: unknown }) => void) | undefined
+        | ((primaryFailure?: { error: unknown }) => void)
+        | undefined
 
       subscription.requestSnapshot({
         where: firstWhere,
@@ -878,7 +880,8 @@ describe(`CollectionSubscription status tracking`, () => {
     const unloads: Array<LoadSubsetOptions> = []
     const reported: Array<unknown> = []
     let releaseFailedDemand:
-      ((primaryFailure?: { error: unknown }) => void) | undefined
+      | ((primaryFailure?: { error: unknown }) => void)
+      | undefined
     let cleanupAttempts = 0
     let caughtCleanup: unknown
     const collection = createCollection<{ id: string }>({
@@ -1778,6 +1781,8 @@ describe(`CollectionSubscription status tracking`, () => {
 
       try {
         requestPage()
+        const initialLimit = loads.at(-1)?.limit
+        expect(initialLimit).toBeDefined()
         sync.begin()
         if (grouping === `as an update beside a matching change`) {
           sync.write({
@@ -1803,7 +1808,11 @@ describe(`CollectionSubscription status tracking`, () => {
           grouping === `alone` ? [`a1`] : [`a1`, `a2`],
         )
         expect(loads.at(-1)?.offset).toBe(0)
-        expect(loads.at(-1)?.limit).toBe(1 + published.size)
+        // A dropped source change cannot increase the provider prefix. Only
+        // the extra matching row in the grouped histories can add one slot.
+        expect(loads.at(-1)?.limit).toBe(
+          initialLimit! + (grouping === `alone` ? 0 : 1),
+        )
       } finally {
         subscription.unsubscribe()
         await collection.cleanup()
