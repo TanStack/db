@@ -8433,15 +8433,20 @@ describe(`query collection ownership lifecycle`, () => {
   /**
    * A disabled Query never starts its own request. Eager B can project the
    * shared cache edit immediately; on-demand B still waits for server
-   * authority under its separate subset ownership law. Explicit refetch
-   * remains available in both modes and later replaces the cached value.
+   * authority under its separate subset ownership law, including after an
+   * outside setQueryData edit. Explicit refetch remains available in both
+   * modes and later replaces the cached value.
    */
-  it.each([`eager`, `on-demand`] as const)(
-    `respects disabled %s acquisition of a shared Query`,
-    async (syncMode) => {
+  it.each([
+    { syncMode: `eager`, externalCacheEdit: false },
+    { syncMode: `on-demand`, externalCacheEdit: false },
+    { syncMode: `on-demand`, externalCacheEdit: true },
+  ] as const)(
+    `respects disabled $syncMode acquisition of a shared Query with external cache edit=$externalCacheEdit`,
+    async ({ syncMode, externalCacheEdit }) => {
       type Row = { id: string; name: string }
       const queryClient = createQueryClient()
-      const queryKey = [`disabled-late-peer-${syncMode}`]
+      const queryKey = [`disabled-late-peer-${syncMode}-${externalCacheEdit}`]
       const server = { id: `x`, name: `Server` }
       const newer = { id: `x`, name: `Newer` }
       const held = createDeferred<Array<Row>>()
@@ -8475,6 +8480,8 @@ describe(`query collection ownership lifecycle`, () => {
       if (syncMode === `eager`) await a.preload()
       else await a._sync.loadSubset({})
       await a.utils.writeUpdate({ id: server.id, name: `Manual` })
+      if (externalCacheEdit)
+        queryClient.setQueryData(queryKey, [{ ...server, name: `Manual` }])
       peer.collection = makeCollection(`b`, false)
       const b = peer.collection
       const load =
@@ -8827,6 +8834,138 @@ describe(`query collection ownership lifecycle`, () => {
       await load
       expect(ownerB.get(server.id)?.name).toBe(newer.name)
       expect(ownerA.get(server.id)?.name).toBe(newer.name)
+    },
+  )
+
+  /**
+   * Query Core may assign a Collection key the physical Query created for a
+   * different stored key when a custom hash aliases them. The cache is the
+   * source of that Query's rows; a direct write to a different row cannot
+   * evict the foreign stored key or turn its old row into a fresh fetch. The
+   * reference keeps the ownerless direct y across subset release and keeps
+   * the foreign physical Query. Its cached x has not been verified by a
+   * physical fetch for this Collection, so disabled reacquisition waits until
+   * an explicit refetch returns the server row. This distinguishes retaining
+   * the cache entry from incorrectly treating it as fresh authority.
+   */
+  it(`retains a foreign stored key under a custom Query hash after a direct write`, async () => {
+    type Row = { id: string; name: string }
+    const foreignKey = [`foreign-stored-key`]
+    const baseKey = [`collection-stored-key`]
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: {
+          queryKeyHashFn: () => `shared-hash`,
+          staleTime: Infinity,
+          gcTime: Infinity,
+          retry: false,
+        },
+      },
+    })
+    queryClient.setQueryData(foreignKey, [{ id: `x`, name: `Cached` }])
+    const physicalQuery = queryClient.getQueryCache().getAll()[0]!
+    const queryFn = vi.fn(() => Promise.resolve([{ id: `x`, name: `Server` }]))
+    const collection = createCollection(
+      queryCollectionOptions<Row>({
+        id: `foreign-stored-key-collection`,
+        queryClient,
+        queryKey: () => baseKey,
+        queryFn,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        enabled: false,
+        startSync: true,
+      }),
+    )
+    cleanups.push(async () => {
+      await collection.cleanup()
+      queryClient.clear()
+    })
+
+    await collection._sync.loadSubset({})
+    expect(collection.get(`x`)?.name).toBe(`Cached`)
+    await collection.utils.writeInsert({ id: `y`, name: `Manual` })
+    collection._sync.unloadSubset({})
+    const reacquisition = Promise.resolve(collection._sync.loadSubset({}))
+    let settled = false
+    void reacquisition.then(() => (settled = true))
+    for (let turn = 0; turn < 5; turn++) await Promise.resolve()
+    expect(settled).toBe(false)
+    expect(collection.get(`y`)?.name).toBe(`Manual`)
+    expect(queryClient.getQueryCache().getAll()).toContain(physicalQuery)
+    expect(physicalQuery.queryKey).toEqual(foreignKey)
+    expect(queryFn).not.toHaveBeenCalled()
+    await collection.utils.refetch({ throwOnError: true })
+    await reacquisition
+    expect(collection.get(`x`)?.name).toBe(`Server`)
+    expect(collection.has(`y`)).toBe(false)
+    expect(queryFn).toHaveBeenCalledOnce()
+  })
+
+  /**
+   * A reset may reuse a Query's numeric data-update count. The independent
+   * authority rule distinguishes the physical provider result from A's local
+   * cache patch: B must ignore the patch while waiting, then apply the new
+   * provider row even when reset gives it the patch's old count. The driver
+   * observes B's pending load before the result and its settlement afterward.
+   */
+  it.each([`new-response`, `same-reference`] as const)(
+    `settles a shared Query acquisition after reset reuses a cache edit version: %s`,
+    async (responseIdentity) => {
+      type Row = { id: string; name: string }
+      const queryKey = [`shared-reset-cache-version`]
+      const queryClient = createQueryClient()
+      const replacement = createDeferred<Array<Row>>()
+      const abandoned = createDeferred<Array<Row>>()
+      const queryFn = vi
+        .fn()
+        .mockResolvedValueOnce([{ id: `x`, name: `Initial` }])
+        .mockImplementationOnce(() => abandoned.promise)
+        .mockImplementationOnce(() => replacement.promise)
+      const makeCollection = (id: string) =>
+        createCollection(
+          queryCollectionOptions<Row>({
+            id,
+            queryClient,
+            queryKey,
+            queryFn,
+            getKey: (row) => row.id,
+            syncMode: `on-demand`,
+            staleTime: Infinity,
+            startSync: true,
+          }),
+        )
+      const a = makeCollection(`shared-reset-a`)
+      const b = makeCollection(`shared-reset-b`)
+      cleanups.push(async () => {
+        abandoned.resolve([])
+        replacement.resolve([])
+        await a.cleanup()
+        await b.cleanup()
+        queryClient.clear()
+      })
+
+      await a._sync.loadSubset({})
+      await a.utils.writeUpdate({ id: `x`, name: `Manual` })
+      const query = queryClient.getQueryCache().find({ queryKey, exact: true })!
+      const editedCacheData = query.state.data as Array<Row>
+      expect(query.state.dataUpdateCount).toBe(1)
+      const acquisition = Promise.resolve(b._sync.loadSubset({}))
+      void acquisition.catch(() => undefined)
+      await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+      expect(b.has(`x`)).toBe(false)
+
+      const reset = queryClient.resetQueries({ queryKey, exact: true })
+      await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(3))
+      const expected =
+        responseIdentity === `same-reference`
+          ? editedCacheData
+          : [{ id: `x`, name: `After reset` }]
+      replacement.resolve(expected)
+      await reset
+      await vi.waitFor(() => expect(b.get(`x`)?.name).toBe(expected[0]?.name))
+      await acquisition
+      expect(query.state.dataUpdateCount).toBe(1)
     },
   )
 

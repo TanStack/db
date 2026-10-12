@@ -1518,6 +1518,8 @@ export function queryCollectionOptions(
     > => {
       const recoveryEpoch = scopedRecoveryEpoch
       const knownRows = queryToRows.get(hashedQueryKey)
+      // An empty result cannot collide with an unseen durable owner. A later
+      // nonempty result can, so scan storage before assigning its row owners.
       if (
         knownRows &&
         (knownRows.size > 0 || incomingItemsAreEmpty) &&
@@ -2048,13 +2050,13 @@ export function queryCollectionOptions(
         // or not. If it collides with cached Query data, fetch on acquisition
         // to establish their order. The write itself starts no request.
         const cachedRows =
-          metadata === undefined
+          persistence?.scanPersistedRows === undefined
             ? undefined
             : select
               ? select(cachedData)
               : cachedData
         const unknownPersistedRowOrder =
-          metadata !== undefined &&
+          persistence?.scanPersistedRows !== undefined &&
           Array.isArray(cachedRows) &&
           cachedRows.some((row) => {
             const rowKey = getKey(row)
@@ -2072,7 +2074,11 @@ export function queryCollectionOptions(
             foreignDirectPatch ||
               unverifiedCacheEdit ||
               unknownPersistedRowOrder
-              ? localQuery.state.dataUpdateCount
+              ? {
+                  data: localQuery.state.data,
+                  version: localQuery.state.dataUpdateCount,
+                  fetchStart: queryCollectionCurrentFetchStarts.get(localQuery),
+                }
               : undefined,
           )
         }
@@ -2267,7 +2273,11 @@ export function queryCollectionOptions(
           )
             previouslyOwnedRows.add(key)
         })
-      } else if (cachedRemoteFetchStart !== undefined) {
+      } else if (
+        cachedRemoteFetchStart !== undefined &&
+        (unownedDirectWritePositions.size > 0 ||
+          persistence?.scanPersistedRows !== undefined)
+      ) {
         // A complete later result settles ownerless direct rows in its scope.
         // A window or cursor cannot prove omission outside the returned page.
         const scope =
@@ -3035,7 +3045,11 @@ export function queryCollectionOptions(
     const subscribeToQuery = (
       observer: QueryObserver<Array<any>, any, Array<any>, Array<any>, any>,
       hashedQueryKey: string,
-      ignoreDataVersion?: number,
+      ignoredCacheSnapshot?: {
+        data: unknown
+        version: number
+        fetchStart: number | undefined
+      },
     ) => {
       if (!isSubscribed(hashedQueryKey)) {
         // Cache removal does not retire eager ownership. Reattach the observer
@@ -3044,13 +3058,17 @@ export function queryCollectionOptions(
         const cachedQueryKey = hashToQueryKey.get(hashedQueryKey)!
         const handleQueryResult = makeQueryResultHandler(cachedQueryKey)
         const applyResult = (result: QueryObserverResult<any, any>) => {
-          if (
-            ignoreDataVersion !== undefined &&
-            result.isSuccess &&
-            observer.getCurrentQuery().state.dataUpdateCount ===
-              ignoreDataVersion
-          )
-            return
+          if (ignoredCacheSnapshot && result.isSuccess) {
+            const query = observer.getCurrentQuery()
+            if (
+              query.state.data === ignoredCacheSnapshot.data &&
+              query.state.dataUpdateCount === ignoredCacheSnapshot.version &&
+              (query.state.fetchStatus !== `idle` ||
+                queryCollectionCurrentFetchStarts.get(query) ===
+                  ignoredCacheSnapshot.fetchStart)
+            )
+              return
+          }
           handleQueryResult(result)
         }
         const unsubscribeFn = observer.subscribe(applyResult)
@@ -3971,8 +3989,22 @@ export function queryCollectionOptions(
     changedKeys: Array<string | number>,
     accepted: Map<string | number, any>,
   ): void => {
+    const changed = new Set(changedKeys)
+    const patchRows = (rows: Array<any>) => {
+      const present = new Set<string | number>()
+      let touched = false
+      const patched = rows.flatMap((row) => {
+        const key = getKey(row)
+        present.add(key)
+        if (!changed.has(key)) return [row]
+        touched = true
+        const next = accepted.get(key)
+        return next === undefined ? [] : [next]
+      })
+      return { patched, present, touched }
+    }
+
     if (syncMode === `on-demand`) {
-      const changed = new Set(changedKeys)
       const affectedOwners = new Set(
         changedKeys.flatMap((key) => [...(rowToQueries.get(key) ?? [])]),
       )
@@ -3995,14 +4027,9 @@ export function queryCollectionOptions(
         const data = query.state.data
         const rows = select && data !== undefined ? select(data) : data
         if (!Array.isArray(rows)) continue
-        if (!rows.some((row) => changed.has(getKey(row)))) continue
-        const patchedRows = rows.flatMap((row) => {
-          const key = getKey(row)
-          if (!changed.has(key)) return [row]
-          const next = accepted.get(key)
-          return next === undefined ? [] : [next]
-        })
-        updateCacheDataForKey(query.queryKey, patchedRows, rows)
+        const { patched, touched } = patchRows(rows)
+        if (!touched) continue
+        updateCacheDataForKey(query.queryKey, patched, rows)
       }
 
       for (const query of [...trackedCacheQueries]) {
@@ -4024,15 +4051,7 @@ export function queryCollectionOptions(
           updateCacheDataForKey(query.queryKey, getItems())
           continue
         }
-        const changed = new Set(changedKeys)
-        const present = new Set<string | number>()
-        const patched = rows.flatMap((row) => {
-          const key = getKey(row)
-          present.add(key)
-          if (!changed.has(key)) return [row]
-          const next = accepted.get(key)
-          return next === undefined ? [] : [next]
-        })
+        const { patched, present } = patchRows(rows)
         for (const key of changedKeys) {
           const next = accepted.get(key)
           if (!present.has(key) && next !== undefined) patched.push(next)

@@ -539,6 +539,17 @@ explicit subset refetch, a derived result held behind `deferDataRefresh`, a
 provisional cache row awaiting persisted application, aliased physical Queries,
 and the boundary between an in-flight pending Query and an idle empty cache
 entry. The cursor-pagination integration oracle supplies the idle-entry control.
+Its shared-Query reset history holds B's acquisition after A's direct cache
+patch, resets the physical Query so the next fetch repeats the patch's numeric
+update count, and requires B's load to settle on the new provider row. It runs
+with a new response array and with the patch's exact array reference. This
+checks the authority boundary at fetch settlement, but does not model every
+Query Core reset schedule or custom-hash collision.
+An outside-prefix custom-hash collision remains in Query Core's cache after a
+direct write. The disabled reacquisition witness requires the load to wait for
+an explicit provider result, then checks that result and ownerless-row
+retirement. It covers one physical alias and an unbounded scope, not arbitrary
+hash functions or windowed scopes.
 The ordinary-unload, provisional-row, and alias tests reject their respective
 hostile classifiers at public-row or cache checkpoints. These finite histories
 do not establish every persistence schedule, every Query hash collision, or a
