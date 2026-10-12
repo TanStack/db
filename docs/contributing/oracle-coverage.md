@@ -533,6 +533,23 @@ The controlled host does not establish arbitrary native values or `toJSON`
 side effects, many-operation histories, or native browser scheduling. Those
 need a widened peer-owner value/history grammar and a receiving browser witness.
 
+The LocalStorage peer owner checks descriptor admission after three failed
+constructor boundaries: invalid index configuration before sync binding,
+controlled browser-listener registration failure during sync startup, and a
+missing on-demand `loadSubset` handler after a browser listener was acquired.
+A corrected retry must persist; a third construction and reuse after successful
+owner cleanup must reject. The original owner can restart and persist, while
+controlled browser-listener counts return to zero after failure and cleanup.
+Paired hosts compare the Storage reads caused by one later same-tab write; the
+failed-construction host has one extra read on `8b3debb3a`, exposing an
+abandoned same-tab callback. These checks cannot prove that a failed Collection
+is no longer retained by a private adapter closure or an inert callback in
+the same-tab registry; those resource-retention claims need a receiving
+lifecycle/GC witness owned by
+`packages/db/tests/local-storage-peer-oracle.test.ts`.
+Native browser listener failure and host scheduling remain outside the
+controlled history.
+
 The [React source ID reuse oracle](https://github.com/TanStack/db/blob/main/packages/react-db/tests/source-id-reuse-oracle.test.tsx) ([review](oracle-reviews/issue-1991-react-source-id.md))
 checks that a mounted derived-identity hook rejects a different same-ID
 source Collection directly, after an intervening ID and predicate, within one
@@ -911,8 +928,14 @@ for that route preserve accepted source rows across insert/update/delete,
 truncate replay, and queued or serial reads. The original unbounded-read path
 and direct options reuse both failed these new witnesses before repair.
 The notice corrects already public rows even during the idle interval after
-demand retirement. Arbitrary overlapping retired subsets and host scheduling
-remain outside these bounded controlled histories.
+demand retirement. With an active unpaginated filter, six further histories
+retain, update, or delete a previously public out-of-filter row across targeted
+and full-reload notices while another in-filter row changes. The original
+mixed-demand implementation failed three of six exact public comparisons;
+the repaired path validates previously visible out-of-filter keys from a
+complete durable snapshot. Paginated mixed demand, arbitrary overlapping
+retired subsets, a peer write between the full and filtered reads, and host
+scheduling remain outside these bounded controlled histories.
 A failed direct Collection constructor releases its options claim if the runtime
 never bound an owner; a corrected retry can then create the Collection. A
 successful owner still retains its claim through cleanup. The persisted owner
@@ -924,9 +947,57 @@ durable seed. These controlled paths assert public rows and change batches;
 they do not prove every host-delivered peer schedule. Zero-demand validation
 clears orphan row metadata with zero or one public row, while an equal
 metadata-bearing row emits no change batch. The full durable snapshot used to
-validate visible keys remains O(table) per notice; there is no O(visible) read
-budget. A keyed atomic snapshot would need an adapter contract and receiving
-witness before that work bound can be claimed.
+validate visible keys remains O(table) per notice, including when a current
+filter leaves previously public keys outside its scope. There is no O(visible)
+read budget. A keyed atomic snapshot would need an adapter contract and
+receiving witness before that work bound can be claimed.
+
+The persisted wrapper owner models complete durable rows as exact values:
+field absence, including an own `undefined` field in the generic adapter,
+matters as much as scalar content. Eighteen bounded histories cross complete
+demand, retired-demand full-reload notice, and retired-demand reset with field
+removal, addition, and scalar change. They compare full public rows, event
+values, deleted and newly admitted keys, and a protected DbClient hydration
+seed at settled publication. Nine removal histories fail on the reviewed
+`8b3debb3a` implementation, while nine neighboring controls pass. The
+`undefined` arms are generic-adapter evidence; SQLite object encoding omits
+those fields. A captured-read source history checks submitted same-key and
+new-key writes after the held read releases, while eighteen complete-demand
+source-precedence histories extend the existing bounded matrix. These checks
+do not assert that a source write was accepted before the held read releases.
+
+Targeted `tx:committed` notices have separate bounded demand-scope and
+partial-patch histories. Six cases cross active `title = Keep` demand and
+retired demand with a row that stays in, enters, or leaves that predicate;
+five fail at exact public-row comparison and the leaving-active control passes.
+Nine more cases protect a DbClient hydration seed against durable replacement,
+partial update, or deletion under active complete, active filtered, or retired
+demand while an ordinary row changes; all nine fail. Two active-demand union
+controls keep a row that leaves `title = Keep` but enters `title = Other`, in
+both demand acquisition orders; both pass on the reviewed head. Temporary
+first-only and last-only evaluator mutants each fail one control at the public
+snapshot comparison.
+Ten source-confirmation histories apply a source insert, update, or delete to a
+DbClient hydration seed, await its applied receipt, then deliver a targeted or
+full-reload peer update, deletion, or insertion. A changing ordinary sibling ensures a
+perpetual-seed-protection mutant fails at exact public-row comparison rather
+than only timing out. Six same-key operation-order cases cross active complete and retired demand
+with delete-then-update, update-then-delete, and two partial updates; three
+fail and three pass. The independent models select authored complete durable
+rows, while notices carry legal source patches. Delete-then-update and
+update-then-delete produce the same separated `changedRows` and `deletedKeys`
+but opposite durable outcomes, so the receiver cannot infer the row from that
+envelope alone. The baseline failures and neighboring controls are recorded in
+the [PR #2096 law review](oracle-reviews/2026-10-12-pr-2096-oracle-laws.md);
+the repaired controlled paths pass. Further in-scope source transactions
+concurrent with targeted delivery need a same-key acceptance-order witness in
+this owner.
+Real SQLite delta creation and browser/Electron notification delivery need
+matching receiving witnesses in their existing adapter and host owners before
+this controlled result can be claimed across those boundaries.
+The metadata of an unseen targeted row is not asserted to be demand-scoped:
+core permits explicit row metadata for an absent row, so this needs a separate
+product decision before changing that contract.
 
 The user chose demand-scoped schema-reset publication for on-demand
 Collections. With no active subset, reset validates only already public keys

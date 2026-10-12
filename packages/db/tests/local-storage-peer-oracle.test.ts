@@ -34,14 +34,17 @@
  * peer publication, later write settlement, and fresh restore. Direct same-tab
  * edits through the raw Storage API are outside the adapter's event contract.
  * An options object contains mutable adapter state and may construct only one
- * Collection, including when shallow copies retain that state. The driver
- * checks this admission before and after the first preload, then checks that
- * the first Collection can still write.
+ * successful Collection, including when shallow copies retain that state. A
+ * synchronous failed construction leaves it available for a corrected retry.
+ * The driver checks admission before and after cleanup and proves that the
+ * original owner can restart. Listener counts cannot prove that a failed
+ * Collection is no longer retained by a private adapter closure.
  */
 import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index'
 import { createDeferred } from '../src/deferred'
 import { LocalStorageCollectionError } from '../src/errors'
+import { BasicIndex } from '../src/indexes/basic-index'
 import { localStorageCollectionOptions } from '../src/local-storage'
 import { createTransaction } from '../src/transactions'
 import { withHistoryCleanup } from './optimistic-history-oracle'
@@ -52,8 +55,12 @@ type Row = { id: string | number; value: number }
 function createHost() {
   const data = new Map<string, string>()
   const listeners = new Set<(event: StorageEvent) => void>()
+  let storageReads = 0
   const storage: StorageApi = {
-    getItem: (key) => data.get(key) ?? null,
+    getItem: (key) => {
+      storageReads++
+      return data.get(key) ?? null
+    },
     setItem: (key, value) => {
       data.set(key, value)
     },
@@ -77,7 +84,16 @@ function createHost() {
     } as StorageEvent
     for (const listener of [...listeners]) listener(event)
   }
-  return { storage, events, deliver, listenerCount: () => listeners.size }
+  return {
+    storage,
+    events,
+    deliver,
+    listenerCount: () => listeners.size,
+    readCount: () => storageReads,
+    resetReadCount: () => {
+      storageReads = 0
+    },
+  }
 }
 
 function makeCollection(
@@ -1104,12 +1120,211 @@ for (const firstPreloaded of [false, true]) {
             { id: 'first', value: 1 },
           ])
           expect(publicRows(first)).toEqual([{ id: 'first', value: 1 }])
+          await first.cleanup()
+          expect(host.listenerCount()).toBe(0)
+          expect(() => createCollection(forCreate())).toThrow(
+            LocalStorageCollectionError,
+          )
+          first.startSyncImmediate()
+          await first.stateWhenReady()
+          const restarted = createTransaction({
+            autoCommit: false,
+            mutationFn: async ({ transaction: pending }) => {
+              await first.utils.acceptMutations(pending)
+            },
+          })
+          restarted.mutate(() => first.insert({ id: 'second', value: 2 }))
+          await restarted.commit()
+          expect(durableRows(host, 'shared')).toEqual([
+            { id: 'first', value: 1 },
+            { id: 'second', value: 2 },
+          ])
+          expect(publicRows(first)).toEqual([
+            { id: 'first', value: 1 },
+            { id: 'second', value: 2 },
+          ])
         },
         () => [() => first.cleanup()],
       )
     })
   }
 }
+
+/** The one-owner claim follows successful construction, not an attempted
+ * construction. This two-step history first violates a constructor requirement,
+ * then corrects it on the same options object. The independent admission model
+ * remains unclaimed after the throw and becomes claimed only when the second
+ * Collection is returned. A durable manual write proves the repaired owner
+ * uses the same options and Storage, while the existing reuse matrix checks
+ * that a successful owner cannot be duplicated. */
+it('releases LocalStorage options after a failed Collection constructor', async () => {
+  const host = createHost()
+  const options = localStorageCollectionOptions<Row>({
+    id: 'corrected-options',
+    storageKey: 'corrected',
+    storage: host.storage,
+    storageEventApi: host.events,
+    getKey: (row) => row.id,
+    autoIndex: 'eager',
+  })
+  expect(() => createCollection(options)).toThrow(/autoIndex/)
+  options.defaultIndexType = BasicIndex
+  const collection = createCollection(options)
+  let unexpectedThird: typeof collection | undefined
+  await withHistoryCleanup(
+    async () => {
+      expect(() => {
+        unexpectedThird = createCollection(options)
+      }).toThrow(LocalStorageCollectionError)
+      await collection.preload()
+      const transaction = createTransaction({
+        autoCommit: false,
+        mutationFn: async ({ transaction: pending }) => {
+          await collection.utils.acceptMutations(pending)
+        },
+      })
+      transaction.mutate(() => collection.insert({ id: 'corrected', value: 1 }))
+      await transaction.commit()
+      expect(durableRows(host, 'corrected')).toEqual([
+        { id: 'corrected', value: 1 },
+      ])
+      expect(publicRows(collection)).toEqual([{ id: 'corrected', value: 1 }])
+    },
+    () => [() => unexpectedThird?.cleanup(), () => collection.cleanup()],
+  )
+})
+
+/** Startup may fail after the adapter begins registering a browser listener.
+ * A failed constructor consumes neither the one-owner claim nor the event
+ * lease. The controlled host counts active listeners; the corrected retry
+ * must own exactly one, release it on cleanup, and still persist a row. This
+ * distinguishes atomic construction from a claim-only repair. */
+it('releases LocalStorage options and listeners after sync-start construction fails', async () => {
+  const host = createHost()
+  const addEventListener = host.events.addEventListener.bind(host.events)
+  const fault = new Error('listener registration failed')
+  let failRegistration = true
+  host.events.addEventListener = (...args) => {
+    if (failRegistration) throw fault
+    addEventListener(...args)
+  }
+  const options = localStorageCollectionOptions<Row>({
+    id: 'corrected-startup-options',
+    storageKey: 'corrected-startup',
+    storage: host.storage,
+    storageEventApi: host.events,
+    getKey: (row) => row.id,
+    startSync: true,
+  })
+  expect(() => createCollection(options)).toThrow(fault)
+  expect(host.listenerCount()).toBe(0)
+  failRegistration = false
+  const collection = createCollection(options)
+  let unexpectedThird: typeof collection | undefined
+  await withHistoryCleanup(
+    async () => {
+      await collection.stateWhenReady()
+      expect(host.listenerCount()).toBe(1)
+      expect(() => {
+        unexpectedThird = createCollection(options)
+      }).toThrow(LocalStorageCollectionError)
+      const transaction = createTransaction({
+        autoCommit: false,
+        mutationFn: async ({ transaction: pending }) => {
+          await collection.utils.acceptMutations(pending)
+        },
+      })
+      transaction.mutate(() => collection.insert({ id: 'corrected', value: 1 }))
+      await transaction.commit()
+      expect(durableRows(host, 'corrected-startup')).toEqual([
+        { id: 'corrected', value: 1 },
+      ])
+      expect(publicRows(collection)).toEqual([{ id: 'corrected', value: 1 }])
+    },
+    () => [() => unexpectedThird?.cleanup(), () => collection.cleanup()],
+  )
+  expect(host.listenerCount()).toBe(0)
+})
+
+/** A second failure cut happens after a browser listener was acquired: core
+ * rejects an on-demand sync run without loadSubset after the adapter returns.
+ * Constructor rollback must release that listener before the corrected eager
+ * retry. This is observable even when an abandoned listener is otherwise inert. */
+it('releases an acquired LocalStorage listener when construction fails', async () => {
+  const host = createHost()
+  const options = localStorageCollectionOptions<Row>({
+    id: 'late-failure-options',
+    storageKey: 'late-failure',
+    storage: host.storage,
+    storageEventApi: host.events,
+    getKey: (row) => row.id,
+    startSync: true,
+    syncMode: 'on-demand',
+  })
+  expect(() => createCollection(options)).toThrow(/loadSubset handler/)
+  expect(host.listenerCount()).toBe(0)
+  options.syncMode = 'eager'
+  const collection = createCollection(options)
+  await withHistoryCleanup(
+    async () => {
+      await collection.stateWhenReady()
+      expect(host.listenerCount()).toBe(1)
+      const transaction = createTransaction({
+        autoCommit: false,
+        mutationFn: async ({ transaction: pending }) => {
+          await collection.utils.acceptMutations(pending)
+        },
+      })
+      transaction.mutate(() => collection.insert({ id: 'recovered', value: 1 }))
+      await transaction.commit()
+      expect(durableRows(host, 'late-failure')).toEqual([
+        { id: 'recovered', value: 1 },
+      ])
+    },
+    () => [() => collection.cleanup()],
+  )
+  expect(host.listenerCount()).toBe(0)
+})
+
+/** A failed Collection cannot remain a same-tab peer. Two otherwise equal
+ * controlled hosts each publish one later write through a healthy Collection;
+ * only one host first attempts a constructor that fails after sync setup.
+ * Their Storage read counts must agree at the write receipt. This metamorphic
+ * comparison detects an abandoned same-tab refresh without reading the
+ * adapter's private listener registry or relying on garbage collection. */
+it('does not retain a same-tab callback after a late constructor failure', async () => {
+  const failedHost = createHost()
+  const controlHost = createHost()
+  const failedOptions = localStorageCollectionOptions<Row>({
+    id: 'failed-peer',
+    storageKey: 'shared',
+    storage: failedHost.storage,
+    storageEventApi: failedHost.events,
+    getKey: (row) => row.id,
+    startSync: true,
+    syncMode: 'on-demand',
+  })
+  expect(() => createCollection(failedOptions)).toThrow(/loadSubset handler/)
+  const failedWriter = makeCollection(failedHost, 'shared', 'writer')
+  const controlWriter = makeCollection(controlHost, 'shared', 'writer')
+  await withHistoryCleanup(
+    async () => {
+      await Promise.all([failedWriter.preload(), controlWriter.preload()])
+      failedHost.resetReadCount()
+      controlHost.resetReadCount()
+      await failedWriter.insert({ id: 'row', value: 1 }).isPersisted.promise
+      await controlWriter.insert({ id: 'row', value: 1 }).isPersisted.promise
+      const failedWriteReads = failedHost.readCount()
+      const controlWriteReads = controlHost.readCount()
+      expect(durableRows(failedHost, 'shared')).toEqual(
+        durableRows(controlHost, 'shared'),
+      )
+      expect(publicRows(failedWriter)).toEqual(publicRows(controlWriter))
+      expect(failedWriteReads).toBe(controlWriteReads)
+    },
+    () => [() => failedWriter.cleanup(), () => controlWriter.cleanup()],
+  )
+})
 
 /** Cleanup ends a sync run, including its browser-event lease. A restart
  * starts one new listener. Counting the controlled host's listeners is the

@@ -1329,6 +1329,21 @@ class ApplyMutex {
   }
 }
 
+function matchesAnySubset(
+  value: object,
+  evaluators: ReadonlyArray<ReturnType<
+    typeof compileSingleRowExpression
+  > | null>,
+): boolean {
+  return evaluators.some(
+    (evaluator) =>
+      !evaluator ||
+      toBooleanPredicate(
+        evaluator(value as Record<string, unknown>) as boolean | null,
+      ),
+  )
+}
+
 function toStableSerializable(value: unknown): unknown {
   if (value == null) {
     return value
@@ -1991,17 +2006,28 @@ class PersistedCollectionRuntime<
       )
     }
 
-    this.boundCollection ??= collection
+    const previousCollection = this.collection
+    const previousControls = this.syncControls
     this.setSyncControls(syncControls)
-    if (this.collection === collection) return
-    this.collection = collection
-    if (
-      !this.persistence.adapter.claimCacheGeneration ||
-      this.mode !== `sync-present` ||
-      this.syncMode !== `on-demand`
-    ) {
-      this.attachCoordinatorSubscription()
+    if (this.collection === collection) {
+      this.boundCollection ??= collection
+      return
     }
+    this.collection = collection
+    try {
+      if (
+        !this.persistence.adapter.claimCacheGeneration ||
+        this.mode !== `sync-present` ||
+        this.syncMode !== `on-demand`
+      ) {
+        this.attachCoordinatorSubscription()
+      }
+    } catch (error) {
+      this.collection = previousCollection
+      this.syncControls = previousControls
+      throw error
+    }
+    this.boundCollection ??= collection
   }
 
   getLeadershipState(): PersistedCollectionLeadershipState {
@@ -3532,6 +3558,12 @@ class PersistedCollectionRuntime<
               valueChanged ||
               (metadataChanged && durable.metadata !== undefined)
             ) {
+              // A persisted read supplies a complete row. In partial-update
+              // mode, deleting it within this sync transaction removes fields
+              // that are absent from the durable value before replacement.
+              if (valueChanged) {
+                this.syncControls.write?.({ type: `delete`, key })
+              }
               this.syncControls.write?.({
                 type: `update`,
                 value: durable.value,
@@ -3556,6 +3588,15 @@ class PersistedCollectionRuntime<
           this.collection?._hasHydratedKey(row.key)
         ) {
           continue
+        }
+        if (
+          this.collection?.base.has(row.key) &&
+          !equalPersistedSnapshotValues(
+            this.collection.base.get(row.key),
+            row.value,
+          )
+        ) {
+          this.syncControls.write?.({ type: `delete`, key: row.key })
         }
         this.syncControls.write?.({
           type: `update`,
@@ -4891,6 +4932,32 @@ class PersistedCollectionRuntime<
       (opt) => opt.limit != null || opt.offset != null || opt.cursor != null,
     )
 
+    // A targeted envelope separates changed rows from deleted keys, losing
+    // repeated same-key operation order. A previously unseen key also has no
+    // public baseline with which to complete a source patch. In either case
+    // only the durable snapshot can decide the final row and its demand scope.
+    const changedKeys = new Set(txCommitted.changedRows.map((row) => row.key))
+    const hasRepeatedChange =
+      changedKeys.size !== txCommitted.changedRows.length
+    const hasChangedAndDeletedKey = txCommitted.deletedKeys.some((key) =>
+      changedKeys.has(key),
+    )
+    const hasUnseenDemandedKey =
+      this.activeSubsets.size > 0 &&
+      txCommitted.changedRows.some(
+        (row) =>
+          !this.collection?.base.has(row.key as TKey) &&
+          !this.collection?._hasHydratedKey(row.key as TKey),
+      )
+    if (
+      hasRepeatedChange ||
+      hasChangedAndDeletedKey ||
+      (this.syncMode === `on-demand` && hasUnseenDemandedKey)
+    ) {
+      await reloadActiveSubsets()
+      return
+    }
+
     if (!hasPaginatedSubset || changedKeyCount === 0) {
       await this.applyTargetedInvalidationUnsafe(txCommitted)
       return
@@ -4915,20 +4982,34 @@ class PersistedCollectionRuntime<
         key: changedKey,
         value: newValue,
       } of txCommitted.changedRows) {
-        const matchesAnySubset = subsetEvaluators.some((evaluator) => {
-          if (!evaluator) return true
-          return toBooleanPredicate(evaluator(newValue) as boolean | null)
-        })
+        const key = changedKey as TKey
+        if (this.collection?._hasHydratedKey(key)) continue
+        const previous = this.collection?.base.get(key)
+        if (previous === undefined && this.activeSubsets.size === 0) continue
+        const completeValue = {
+          ...(previous as object | undefined),
+          ...newValue,
+        } as T
+        const currentlyDemanded = matchesAnySubset(
+          completeValue,
+          subsetEvaluators,
+        )
+        const previouslyOutsideDemand =
+          previous !== undefined &&
+          !matchesAnySubset(previous, subsetEvaluators)
 
-        if (matchesAnySubset) {
-          this.syncControls.write?.({ type: `update`, value: newValue as T })
-        } else if (this.collection?.get(changedKey as TKey) !== undefined) {
-          this.syncControls.write?.({ type: `delete`, key: changedKey as TKey })
+        if (currentlyDemanded || previouslyOutsideDemand) {
+          this.syncControls.write?.({ type: `update`, value: completeValue })
+        } else if (previous !== undefined) {
+          this.syncControls.write?.({ type: `delete`, key })
         }
       }
 
       for (const deletedKey of txCommitted.deletedKeys) {
-        this.syncControls.write?.({ type: `delete`, key: deletedKey as TKey })
+        const key = deletedKey as TKey
+        if (!this.collection?._hasHydratedKey(key)) {
+          this.syncControls.write?.({ type: `delete`, key })
+        }
       }
 
       txCommitted.rowMetadataMutations?.forEach((mutation) => {
@@ -4973,6 +5054,26 @@ class PersistedCollectionRuntime<
     if (restoreResetBaseline && activeSubsetOptions.length === 0) {
       activeSubsetOptions.push({})
     }
+    const evaluators = activeSubsetOptions.map((options) =>
+      options.where ? compileSingleRowExpression(options.where) : null,
+    )
+    // A filtered read has no authority over public rows that were already
+    // outside every active predicate. Validate those keys against the complete
+    // durable snapshot; only active demand may admit previously unseen keys.
+    const outsideDemandKeys = activeSubsetOptions.some(
+      (options) =>
+        options.limit != null ||
+        options.offset != null ||
+        options.cursor != null,
+    )
+      ? []
+      : Array.from(this.collection?.base ?? [])
+          .filter(
+            ([key, row]) =>
+              !this.collection?._hasHydratedKey(key) &&
+              !matchesAnySubset(row, evaluators),
+          )
+          .map(([key]) => key)
 
     this.hydratedDemands.clear()
     this.hydrationSequence++
@@ -4986,7 +5087,8 @@ class PersistedCollectionRuntime<
       let collectionMetadata: Array<{ key: string; value: unknown }> = []
       try {
         validationSnapshot =
-          activeSubsetOptions.length === 0 && this.collection?.base.size
+          (activeSubsetOptions.length === 0 || outsideDemandKeys.length > 0) &&
+          this.collection?.base.size
             ? await adapter.loadResumeSnapshot(this.storageTargetFor(), {
                 requiredIndexSignatures: this.getRequiredIndexSignatures(),
                 includeRows: true,
@@ -5005,6 +5107,21 @@ class PersistedCollectionRuntime<
               value: row.value,
               metadata: row.metadata,
             })
+          }
+        }
+        if (outsideDemandKeys.length > 0 && validationSnapshot) {
+          const durableRows = new Map(
+            validationSnapshot.rows.map((row) => [row.key, row]),
+          )
+          for (const key of outsideDemandKeys) {
+            if (mergedRows.has(key)) continue
+            const row = durableRows.get(key)
+            if (row) {
+              mergedRows.set(key, {
+                value: row.value as T,
+                metadata: row.metadata,
+              })
+            }
           }
         }
       } catch (error) {

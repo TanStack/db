@@ -823,6 +823,10 @@ export function localStorageCollectionOptions(
             : codedMessage(230),
         )
       claimed = true
+      return () => {
+        sync.abortFailedConstruction()
+        claimed = false
+      }
     },
   })
 
@@ -911,6 +915,7 @@ function createLocalStorageSync<T extends object>(
 ): SyncConfig<T> & {
   manualTrigger?: (knownSnapshot?: Map<string | number, StoredItem<T>>) => void
   collection: any
+  abortFailedConstruction: () => void
   confirmOperationsSync: (
     mutations: Array<any>,
     persisted: Map<string | number, StoredItem<T>>,
@@ -918,6 +923,7 @@ function createLocalStorageSync<T extends object>(
 } {
   let syncParams: Parameters<SyncConfig<T>[`sync`]>[0] | null = null
   let collection: any = null
+  let activeCleanup: (() => void) | null = null
 
   /**
    * Compare two Maps to find differences using version keys
@@ -1085,20 +1091,26 @@ function createLocalStorageSync<T extends object>(
         markReady()
         storageEventApi.addEventListener(`storage`, handleStorageEvent)
       } catch (error) {
+        storageEventApi.removeEventListener(`storage`, handleStorageEvent)
         unsubscribeSameTab()
         if (syncParams === params) {
           syncParams = null
+          collection = null
         }
         throw error
       }
+      const cleanup = () => {
+        storageEventApi.removeEventListener(`storage`, handleStorageEvent)
+        unsubscribeSameTab()
+        if (syncParams === params) {
+          syncParams = null
+          collection = null
+        }
+        if (activeCleanup === cleanup) activeCleanup = null
+      }
+      activeCleanup = cleanup
       return {
-        cleanup: () => {
-          storageEventApi.removeEventListener(`storage`, handleStorageEvent)
-          unsubscribeSameTab()
-          if (syncParams === params) {
-            syncParams = null
-          }
-        },
+        cleanup,
       }
     },
 
@@ -1153,6 +1165,7 @@ function createLocalStorageSync<T extends object>(
 
   return {
     ...syncConfig,
+    abortFailedConstruction: () => activeCleanup?.(),
     get collection() {
       return collection
     },
