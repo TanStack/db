@@ -75,7 +75,15 @@ function hashObject(input: object, context: HashContext): number {
       // String keys in UTF-16 code-unit order, then enumerable symbol keys by
       // identity. Code-unit order is total; locale collation can rank two
       // distinct keys as equal and leave their insertion order in the hash.
-      const keys: Array<string | symbol> = Object.keys(body).sort()
+      const keys: Array<string | symbol> = Object.keys(body)
+      // A dense array with no other keys lists its indices in one order for
+      // every equal array: integer keys come first, so the last key is the
+      // last index. Anything else sorts.
+      const denseArray =
+        Array.isArray(body) &&
+        keys.length === body.length &&
+        (keys.length === 0 || keys[keys.length - 1] === String(body.length - 1))
+      if (!denseArray) keys.sort()
       keys.push(
         ...Object.getOwnPropertySymbols(body)
           .filter((key) =>

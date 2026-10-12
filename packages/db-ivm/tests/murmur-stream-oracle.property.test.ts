@@ -16,8 +16,9 @@ import { fc } from '@fast-check/vitest'
  * for each marker, in declaration order, so the seed and each marker are
  * equal across the two modules and different from each other. Swapping two
  * markers therefore changes a digest. Histories are generated chunk
- * sequences. Odd-length strings leave the stream two bytes into a block, so
- * the words after them take the merge path. The comparison runs on the digest
+ * sequences. An odd-length string leaves the stream two bytes into a block,
+ * and a bigint of one or three bytes leaves one or three, so the words after
+ * them take the merge path at each of the three offsets. The comparison runs on the digest
  * of every prefix of the sequence, so an error in an early chunk cannot be
  * hidden by a later one.
  *
@@ -89,10 +90,14 @@ describe(`MurmurHashStream`, () => {
     )
   })
 
-  it(`digests the words after an odd-length string`, () => {
-    // One code unit leaves two bytes in the block; the numbers after it
-    // each merge across a block boundary.
-    const chunks: Array<Chunk> = [`x`, 1.5, -0, `yz`, 7n, `abc`, 2 ** 40]
-    expect(digests(Current, chunks)).toEqual(digests(Reference, chunks))
-  })
+  it.each([
+    [`two bytes, after a one-code-unit string`, [`x`, 1.5, -0, `yz`]],
+    [`one byte, after a one-byte bigint`, [7n, 1.5, `ab`, 2 ** 40]],
+    [`three bytes, after a three-byte bigint`, [0x123456n, 2.5, `cd`, -1]],
+  ] as Array<[string, Array<Chunk>]>)(
+    `digests the words that follow a block offset of %s`,
+    (_, chunks) => {
+      expect(digests(Current, chunks)).toEqual(digests(Reference, chunks))
+    },
+  )
 })

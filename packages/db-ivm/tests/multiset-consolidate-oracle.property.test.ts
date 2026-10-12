@@ -39,7 +39,9 @@ import type { MultiSetArray } from '../src/multiset.js'
  * - Structural identity uses a 32-bit hash in production. The small value
  *   domain here makes a collision unlikely, but this is not an injectivity
  *   claim.
- * - Objects have one key, so this law does not cover key-order sensitivity.
+ * - Key order is covered only by one fixed pair of keys that tie under locale
+ *   collation (a precomposed and a decomposed Å), inserted in both orders in
+ *   structural histories; equal objects must merge whatever the order.
  */
 
 type Data = unknown
