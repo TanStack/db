@@ -453,11 +453,11 @@ class Driver {
         if (previous) {
           this.rows.sendData(new MultiSet([[[op.bucket, previous], -1]]))
         }
-        const row: BucketRow = {
-          publicKey: op.id,
-          value: { id: op.id, v: op.v },
-          order: orderOf(op.rank, op.id),
-        }
+        const row: BucketRow = [
+          op.id,
+          { id: op.id, v: op.v },
+          orderOf(op.rank, op.id),
+        ]
         this.rows.sendData(new MultiSet([[[op.bucket, row], 1]]))
         sent!.set(op.id, row)
       }
@@ -1451,11 +1451,11 @@ describe(`bucket facade rollback`, () => {
     const ref = (bucketKey: string) => ({
       [BUCKET_FACADE_REF]: { edgeId: `children`, bucketKey },
     })
-    const row = (publicKey: number, value: object): BucketRow => ({
+    const row = (publicKey: number, value: object): BucketRow => [
       publicKey,
       value,
-      order: undefined,
-    })
+      undefined,
+    ]
     const child10 = row(10, { id: 10, v: 1 })
     const parent1 = row(1, { id: 1, kids: ref(`c1`) })
 

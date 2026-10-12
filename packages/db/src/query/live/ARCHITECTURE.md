@@ -529,6 +529,15 @@ type BucketValue<Value> = readonly [bucketKey: BucketKey, value: Value]
 type CellValue<Value> = readonly [cellId: MaterializationCellId, value: Value]
 ```
 
+Physical layout: a value that D2 keeps in join or reduce state under a key
+it shares with other values leads with its own string, number or bigint
+key, as the `[publicKey, row, order]` child of a bucket row and the routed
+parent of an inline include do. The D2 index tells apart values with
+different leading keys without hashing them, so a value is hashed only
+against a value with the same leading key, such as its own retraction. A
+value of another shape is still correct, but the index hashes it whenever
+it shares a key. This is a cost rule, not part of the relation semantics.
+
 A route move is an ordinary weighted batch:
 
 ```text
