@@ -142,7 +142,7 @@ export class BucketFacadeAdapter {
             snapshot,
             publications,
             [...changes.values()].map(
-              (change) => change.value.publicKey as string | number,
+              (change) => change.value[0] as string | number,
             ),
           )
           for (const change of changes.values()) {
@@ -241,7 +241,7 @@ export class BucketFacadeAdapter {
     const buckets = getOrCreate(this.pending, edgeId, () => new Map())
     const rows = getOrCreate(buckets, bucketKey, () => new Map())
 
-    const key = serializeValue(row.publicKey)
+    const key = serializeValue(row[0])
     const change = rows.get(key) ?? {
       deletes: 0,
       inserts: 0,
@@ -481,7 +481,8 @@ export class BucketFacadeAdapter {
     change: PendingRow,
     hasOrderBy: boolean,
   ): void {
-    const key = change.value.publicKey as string | number
+    const [publicKey, value, nextOrder] = change.value
+    const key = publicKey as string | number
     if (change.deletes > change.inserts) {
       sync.write({ type: `delete`, key })
       return
@@ -490,9 +491,8 @@ export class BucketFacadeAdapter {
     const present = accepted !== undefined
     // A key that nets to no change while absent gets no write.
     if (change.inserts === change.deletes && !present) return
-    const nextOrder = change.value.order
     const orderChanged = present && entry.order.get(accepted) !== nextOrder
-    const row = { ...this.resolve(change.value.value), $key: key }
+    const row = { ...this.resolve(value), $key: key }
     if (nextOrder !== undefined) entry.order.set(row, nextOrder)
     sync.write({ type: present ? `update` : `insert`, value: row })
     if (hasOrderBy && orderChanged) sync.collection._markLayoutChange()
@@ -500,8 +500,8 @@ export class BucketFacadeAdapter {
 
   /** Resolve and validate every public key before opening a sync transaction. */
   private prepareChange(entry: FacadeEntry, change: PendingRow): void {
-    this.resolve(change.value.value)
-    entry.collection.getKeyFromItem({ $key: change.value.publicKey })
+    this.resolve(change.value[1])
+    entry.collection.getKeyFromItem({ $key: change.value[0] })
   }
 
   private resolveValue(value: unknown): unknown {

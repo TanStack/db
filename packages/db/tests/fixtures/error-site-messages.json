@@ -451,7 +451,7 @@
   },
   "156": {
     "file": "query/live/materialized-pipeline.ts",
-    "template": "Query contributors for public key ${serializeValue(left.publicKey)} are not congruent",
+    "template": "Query contributors for public key ${serializeValue(publicKey)} are not congruent",
     "literals": ["Query contributors for public key ", " are not congruent"]
   },
   "157": {

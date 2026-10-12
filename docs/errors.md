@@ -1673,7 +1673,7 @@ Canonical query row has no positive contributor
 Development builds show this message, with `${...}` replaced by values:
 
 ```text
-Query contributors for public key ${serializeValue(left.publicKey)} are not congruent
+Query contributors for public key ${serializeValue(publicKey)} are not congruent
 ```
 
 <a id="error-157"></a>

@@ -37,16 +37,16 @@ type IncludeRoute = {
   parentContext: Record<string, any> | null
 }
 
-type CanonicalResult = {
-  publicKey: unknown
-  tuple: ResultTuple
-}
+// Rows held in D2 state lead with their public key: the index partitions
+// values by a leading string or number, so distinct keys never need a
+// structural hash.
+type CanonicalResult = readonly [publicKey: unknown, tuple: ResultTuple]
 
-export type BucketRow = {
-  publicKey: unknown
-  value: Record<PropertyKey, any>
-  order: string | undefined
-}
+export type BucketRow = readonly [
+  publicKey: unknown,
+  value: Record<PropertyKey, any>,
+  order: string | undefined,
+]
 
 export type BucketFacadeCompilation = {
   edgeId: string
@@ -229,7 +229,7 @@ function canonicalizeByPublicKey(
               routeKey(tuple[2], tuple[3], valueIdentity),
               publicKey,
             ])
-      return [relationKey, { publicKey, tuple }] as [string, CanonicalResult]
+      return [relationKey, [publicKey, tuple]] as [string, CanonicalResult]
     }),
     reduce((values: Array<[CanonicalResult, number]>) => {
       const totalMultiplicity = values.reduce(
@@ -261,7 +261,7 @@ function canonicalizeByPublicKey(
 
       return [[visible, 1]]
     }),
-    map(([relationKey, { publicKey, tuple }]) => [
+    map(([relationKey, [publicKey, tuple]]) => [
       scope === `root` ? publicKey : relationKey,
       tuple,
     ]),
@@ -272,10 +272,11 @@ function assertCongruentContributors(
   left: CanonicalResult,
   right: CanonicalResult,
 ): void {
+  const [publicKey, leftTuple] = left
   const [leftValue, leftOrder, leftCorrelation, leftContext, leftRouting] =
-    left.tuple
+    leftTuple
   const [rightValue, rightOrder, rightCorrelation, rightContext, rightRouting] =
-    right.tuple
+    right[1]
 
   if (
     leftOrder !== rightOrder ||
@@ -286,8 +287,8 @@ function assertCongruentContributors(
   ) {
     throw new Error(
       devBuild() && process.env.NODE_ENV !== `production`
-        ? `Query contributors for public key ${serializeValue(left.publicKey)} are not congruent`
-        : codedMessage(156, { publicKey: left.publicKey }),
+        ? `Query contributors for public key ${serializeValue(publicKey)} are not congruent`
+        : codedMessage(156, { publicKey }),
     )
   }
 }
@@ -330,17 +331,18 @@ function attachInlineInclude(
               routing.parentContext,
               valueIdentity,
             ),
-        { parentKey, tuple },
-      ] as [string, { parentKey: unknown; tuple: ResultTuple }]
+        [parentKey, tuple],
+      ] as [string, readonly [parentKey: unknown, tuple: ResultTuple]]
     }),
     join(bucketValues, `left`),
     map(([_bucketKey, [parent, bucketValue]]) => {
+      const [parentKey, tuple] = parent!
       const [value, order, correlationKey, parentContext, routing, publicKey] =
-        parent!.tuple
+        tuple
       const edgeRouting = routing?.[include.fieldName]
       if (edgeRouting?.active !== true) {
         return [
-          parent!.parentKey,
+          parentKey,
           [value, order, correlationKey, parentContext, routing, publicKey],
         ]
       }
@@ -349,7 +351,7 @@ function attachInlineInclude(
           ? emptyMaterializedValue(include.materialization)
           : bucketValue.value
       return [
-        parent!.parentKey,
+        parentKey,
         [
           setNestedValue(value, include.resultPath, materialized),
           order,
@@ -382,7 +384,7 @@ function createBucketRows(
         rawTuple as ResultTuple
       return [
         routeKey(correlationKey, parentContext, valueIdentity),
-        { publicKey: publicKey ?? internalKey, value, order },
+        [publicKey ?? internalKey, value, order],
       ] as [string, BucketRow]
     }),
   )
@@ -476,22 +478,23 @@ function routeKey(
 }
 
 function compareBucketRows(left: BucketRow, right: BucketRow): number {
-  if (left.order !== right.order) {
-    if (left.order === undefined) return 1
-    if (right.order === undefined) return -1
-    return left.order < right.order ? -1 : 1
+  const [leftPublicKey, , leftOrder] = left
+  const [rightPublicKey, , rightOrder] = right
+  if (leftOrder !== rightOrder) {
+    if (leftOrder === undefined) return 1
+    if (rightOrder === undefined) return -1
+    return leftOrder < rightOrder ? -1 : 1
   }
 
   if (
-    (typeof left.publicKey === `string` ||
-      typeof left.publicKey === `number`) &&
-    (typeof right.publicKey === `string` || typeof right.publicKey === `number`)
+    (typeof leftPublicKey === `string` || typeof leftPublicKey === `number`) &&
+    (typeof rightPublicKey === `string` || typeof rightPublicKey === `number`)
   ) {
-    return compareKeys(left.publicKey, right.publicKey)
+    return compareKeys(leftPublicKey, rightPublicKey)
   }
 
-  const leftKey = serializeValue(left.publicKey)
-  const rightKey = serializeValue(right.publicKey)
+  const leftKey = serializeValue(leftPublicKey)
+  const rightKey = serializeValue(rightPublicKey)
   return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0
 }
 
@@ -501,8 +504,8 @@ function materializeRows(
 ): unknown {
   const scalarField = include.scalarField
   const values = scalarField
-    ? rows.map(({ value }) => value[scalarField])
-    : rows.map(({ value }) => value)
+    ? rows.map(([, value]) => value[scalarField])
+    : rows.map(([, value]) => value)
 
   if (include.materialization === `array`) return values
   if (include.materialization === `singleton`) return values[0]
