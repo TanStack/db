@@ -3,11 +3,12 @@ id: QueryCollectionUtils
 title: QueryCollectionUtils
 ---
 
-Defined in: [packages/query-db-collection/src/query.ts:291](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L291)
+Defined in: [packages/query-db-collection/src/query.ts:292](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L292)
 
 Utility methods available on Query Collections for direct writes and manual operations.
 Direct writes bypass optimistic mutations and write to the synced data store.
-Eager collections patch Query cache; on-demand collections revalidate scoped entries.
+Direct writes do not trigger a Query refetch. On-demand cache edits are
+best-effort and do not establish scoped result authority.
 
 ## Type Parameters
 

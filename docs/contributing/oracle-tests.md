@@ -15,8 +15,8 @@ The payoff is broader bug detection and a stable check during refactoring. The c
 Start with [one small oracle](#build-one-small-oracle). Follow the later sections when your contract needs [richer state](#keep-only-state-that-can-matter), [controlled timing](#generate-histories-that-reach-the-problem), or [more observations](#observe-what-the-contract-promises). The [review card](#a-review-card) is a short way to apply the guide to an existing test. Historical cases and research are collected in the [companion notes](oracle-test-notes.md). Use the [project glossary](glossary.md) for terms shared with production code.
 
 For help discovering or challenging the law itself, use the repository's
-[oracle-authoring](../../.agents/skills/oracle-authoring/SKILL.md) or
-[oracle-review](../../.agents/skills/oracle-review/SKILL.md) skill and its
+[oracle-authoring](https://github.com/TanStack/db/blob/main/.agents/skills/oracle-authoring/SKILL.md) or
+[oracle-review](https://github.com/TanStack/db/blob/main/.agents/skills/oracle-review/SKILL.md) skill and its
 [design instruments](instruments/index.md). These aids support inquiry; the
 numbered requirements below continue to define guide conformance.
 
