@@ -78,6 +78,40 @@ import type { Weighted } from './incrementalization-law-oracle.js'
 type Keyed = [number, number]
 type JoinOutput = [number, [number, number]]
 type OuterJoinOutput = [number, [number | null, number | null]]
+type GroupedTextOutput = [
+  string,
+  {
+    bucket: number
+    lowFirst: string | undefined
+    highFirst: string | undefined
+    lowSecond: string | undefined
+    highSecond: string | undefined
+  },
+]
+
+/**
+ * Each value names a pair of strings. groupBy merges contributions with equal
+ * pre-aggregate values without hashing them, so its identity for a string
+ * must not depend on where one value ends and the next begins. The pairs
+ * `["|s", ""]` and `["", "|s"]`, and `["a", "|s"]` and `["a|s", ""]`, read
+ * the same when their parts are joined with any separator these strings
+ * contain.
+ */
+const TEXT_PAIRS: ReadonlyArray<readonly [string, string]> = [
+  [`|s`, ``],
+  [``, `|s`],
+  [`a`, `|s`],
+  [`a|s`, ``],
+  [`s`, `|`],
+  [`|`, `s`],
+  [``, ``],
+]
+// Named witnesses reach past the generated -3..3 range, so the table wraps.
+const textPair = (value: number) =>
+  TEXT_PAIRS[
+    ((value % TEXT_PAIRS.length) + TEXT_PAIRS.length) % TEXT_PAIRS.length
+  ]!
+
 type GroupedOutput = [
   string,
   {
@@ -136,6 +170,7 @@ const keyedPolicy = jsonLawValuePolicy<Keyed>()
 const joinPolicy = jsonLawValuePolicy<JoinOutput>()
 const outerJoinPolicy = jsonLawValuePolicy<OuterJoinOutput>()
 const groupedPolicy = jsonLawValuePolicy<GroupedOutput>()
+const groupedTextPolicy = jsonLawValuePolicy<GroupedTextOutput>()
 const uniqueRowSplitDomain = {
   uniqueKey: ([key]: Keyed) => String(key),
 }
@@ -286,6 +321,39 @@ function groupedAggregates(input: Weighted<Keyed>): Weighted<GroupedOutput> {
   ])
 }
 
+/** Per-bucket string extrema of both parts, recomputed from plain rows. */
+function groupedTextExtrema(
+  input: Weighted<Keyed>,
+): Weighted<GroupedTextOutput> {
+  const groups = new Map<number, Array<readonly [string, string]>>()
+  for (const [[key, value]] of keyedIdentity(input)) {
+    const pairs = groups.get(key % 2) ?? []
+    pairs.push(textPair(value))
+    groups.set(key % 2, pairs)
+  }
+  const low = (values: Array<string>) =>
+    values.reduce((left, right) => (right < left ? right : left))
+  const high = (values: Array<string>) =>
+    values.reduce((left, right) => (right > left ? right : left))
+  return [...groups].map(([bucket, pairs]) => {
+    const first = pairs.map(([text]) => text)
+    const second = pairs.map(([, text]) => text)
+    return [
+      [
+        JSON.stringify({ bucket }),
+        {
+          bucket,
+          lowFirst: low(first),
+          highFirst: high(first),
+          lowSecond: low(second),
+          highSecond: high(second),
+        },
+      ],
+      1,
+    ]
+  })
+}
+
 function topTwo(input: Weighted<Keyed>): Weighted<Keyed> {
   const groups = new Map<number, Array<[number, number]>>()
   for (const [[key, value], weight] of keyedIdentity(input)) {
@@ -392,6 +460,31 @@ describe(`DBSP incrementalization laws`, () => {
                   }),
                 ),
               evaluate: groupedAggregates,
+            })
+            assertUnaryIncrementalization({
+              name: `groupBy string extrema`,
+              initial: worlds[0]!,
+              batches,
+              inputPolicy: keyedPolicy,
+              outputPolicy: groupedTextPolicy,
+              build: (input) =>
+                input.pipe(
+                  groupBy(([key]) => ({ bucket: key % 2 }), {
+                    lowFirst: groupByOperators.min(
+                      ([, value]) => textPair(value)[0],
+                    ),
+                    highFirst: groupByOperators.max(
+                      ([, value]) => textPair(value)[0],
+                    ),
+                    lowSecond: groupByOperators.min(
+                      ([, value]) => textPair(value)[1],
+                    ),
+                    highSecond: groupByOperators.max(
+                      ([, value]) => textPair(value)[1],
+                    ),
+                  }),
+                ),
+              evaluate: groupedTextExtrema,
             })
             assertUnaryIncrementalization({
               name: `top-K`,

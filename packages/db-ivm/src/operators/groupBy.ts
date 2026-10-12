@@ -9,6 +9,45 @@ type BasicAggregateFunction<T, R, V = unknown> = {
   preMap: (data: T) => V
   reduce: (values: Array<[V, number]>) => V
   postMap?: (result: V) => R
+  /**
+   * For an object input, a string that two inputs share exactly when they
+   * hash equal, or undefined when it has none. Primitive inputs need none.
+   * Without one, contributions that hold this object are compared by
+   * structural hash.
+   */
+  identity?: (value: V) => string | undefined
+}
+
+/**
+ * One part of a contribution's identity, normalized as the structural hash
+ * normalizes it, or undefined when the value has no cheap exact identity.
+ */
+function identityPart(
+  value: unknown,
+  identity: ((value: any) => string | undefined) | undefined,
+): string | undefined {
+  switch (typeof value) {
+    case `number`:
+      // The hash treats -0 as 0 and every NaN as one value.
+      return `n${value === 0 ? 0 : value}`
+    case `string`:
+      return `s${value.length}:${value}`
+    case `boolean`:
+      return value ? `t` : `f`
+    case `undefined`:
+      return `u`
+    case `bigint`:
+      return `g${value}`
+    case `object`:
+      if (value === null) return `l`
+      if (!identity) return undefined
+      {
+        const id = identity(value)
+        return id === undefined ? undefined : `o${id.length}:${id}`
+      }
+    default:
+      return undefined
+  }
 }
 
 type PipedAggregateFunction<T, R> = {
@@ -63,7 +102,13 @@ export function groupBy<
     // Special key to store the original key object
     const KEY_SENTINEL = Symbol(`original_group_key`)
 
-    // First map to extract keys and pre-aggregate values
+    const aggregateEntries = Object.entries(basicAggregates)
+
+    // First map to extract keys and pre-aggregate values. Each contribution
+    // leads with an identity built from its pre-aggregate values when every
+    // value has one. Within one group the reduce index then merges equal
+    // contributions by that identity instead of hashing them. A null
+    // identity falls back to the structural hash.
     const withKeysAndValues = stream.pipe(
       map((data) => {
         const key = keyExtractor(data)
@@ -72,24 +117,33 @@ export function groupBy<
         // Create values object with pre-aggregated values
         const values: Record<string | symbol, unknown> = {}
 
-        // Store the original key object
+        // Store the original key object. Every contribution to one group
+        // has the same serialized key, so the identity leaves it out.
         values[KEY_SENTINEL] = key
 
         // Add pre-aggregated values
-        for (const [name, aggregate] of Object.entries(basicAggregates)) {
-          values[name] = aggregate.preMap(data)
+        let identity: string | null = ``
+        for (const [name, aggregate] of aggregateEntries) {
+          const value = aggregate.preMap(data)
+          values[name] = value
+          if (identity === null) continue
+          const part = identityPart(value, aggregate.identity)
+          identity = part === undefined ? null : `${identity}|${part}`
         }
 
-        return [keyString, values] as KeyValue<
+        return [keyString, [identity, values]] as KeyValue<
           string,
-          Record<string | symbol, unknown>
+          [string | null, Record<string | symbol, unknown>]
         >
       }),
     )
 
     // Then reduce to compute aggregates
     const reduced = withKeysAndValues.pipe(
-      reduce((values) => {
+      reduce((contributions) => {
+        const values = contributions.map(
+          ([[, value], multiplicity]) => [value, multiplicity] as const,
+        )
         // Calculate total multiplicity to check if the group should exist
         let totalMultiplicity = 0
         for (const [_, multiplicity] of values) {
@@ -116,7 +170,7 @@ export function groupBy<
         }
 
         return [[result, 1]]
-      }),
+      }, { prefixIdentity: true }),
     )
 
     // Finally map to extract the key and include all values
@@ -195,6 +249,11 @@ export function avg<T>(
       sum: valueExtractor(data),
       count: 0,
     }),
+    // The hash treats -0 as 0 and every NaN as one value.
+    identity: (value) =>
+      typeof value.sum === `number`
+        ? `${value.sum === 0 ? 0 : value.sum}:${value.count}`
+        : undefined,
     reduce: (values: Array<[{ sum: number; count: number }, number]>) => {
       let totalSum = 0
       let totalCount = 0

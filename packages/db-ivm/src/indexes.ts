@@ -58,8 +58,13 @@ class PrefixMap<TValue, TPrefix> extends Map<
 > {
   /**
    * Add a value to the PrefixMap. Returns true if the map becomes empty after the operation.
+   * With `prefixIdentity`, values that share a prefix are the same value.
    */
-  addValue(value: TValue, multiplicity: number): boolean {
+  addValue(
+    value: TValue,
+    multiplicity: number,
+    prefixIdentity = false,
+  ): boolean {
     if (multiplicity === 0) return this.size === 0
 
     const prefix = getPrefix<TValue, TPrefix>(value)
@@ -73,7 +78,11 @@ class PrefixMap<TValue, TPrefix> extends Map<
         throw new Error(`Mismatching prefixes, this should never happen`)
       }
 
-      if (currentValue === value || hash(currentValue) === hash(value)) {
+      if (
+        currentValue === value ||
+        (prefixIdentity && prefix !== NO_PREFIX) ||
+        hash(currentValue) === hash(value)
+      ) {
         // Same value, update multiplicity
         const newMultiplicity = currentMultiplicity + multiplicity
         if (newMultiplicity === 0) {
@@ -151,9 +160,16 @@ export class Index<TKey, TValue, TPrefix = any> {
    */
   #inner: IndexMap<TKey, TValue, TPrefix>
   #consolidatedMultiplicity: Map<TKey, number> = new Map() // sum of multiplicities per key
+  /**
+   * When true, the producer guarantees that a value's string or number
+   * prefix determines the value: two values under one key with an equal
+   * prefix are equal, so they merge without a structural hash.
+   */
+  #prefixIdentity: boolean
 
-  constructor() {
+  constructor(options?: { prefixIdentity?: boolean }) {
     this.#inner = new Map()
+    this.#prefixIdentity = options?.prefixIdentity ?? false
   }
 
   /**
@@ -348,7 +364,11 @@ export class Index<TKey, TValue, TPrefix = any> {
       }
     } else {
       // Handle existing PrefixMap
-      const isEmpty = mapOrSingleValue.addValue(value, multiplicity)
+      const isEmpty = mapOrSingleValue.addValue(
+        value,
+        multiplicity,
+        this.#prefixIdentity,
+      )
       if (isEmpty) {
         this.#inner.delete(key)
       }
@@ -384,7 +404,8 @@ export class Index<TKey, TValue, TPrefix = any> {
     // Check if they're the same value by prefix/suffix comparison
     if (
       isSamePrefix(currentPrefix, newPrefix) &&
-      (currentValue === newValue || hash(currentValue) === hash(newValue))
+      ((this.#prefixIdentity && newPrefix !== NO_PREFIX) ||
+        hash(currentValue) === hash(newValue))
     ) {
       const newMultiplicity = currentMultiplicity + multiplicity
       if (newMultiplicity === 0) {

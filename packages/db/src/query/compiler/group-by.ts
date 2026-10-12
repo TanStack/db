@@ -162,6 +162,12 @@ function exactObjectTag(value: object): string {
   return value instanceof Uint8Array ? `Uint8Array` : `Object`
 }
 
+// A representative's only enumerable field is its key, so equal keys are
+// exactly the representatives that hash equal.
+function representativeIdentity(value: Representative<unknown>): string {
+  return value.key
+}
+
 function getRepresentative<T>(
   values: Array<[Representative<T>, number]>,
 ): Representative<T> | undefined {
@@ -219,6 +225,7 @@ function addCorrelationRouteAggregate(
     },
     reduce: getRepresentative,
     postMap: unwrapRepresentative,
+    identity: representativeIdentity,
   }
 }
 
@@ -318,6 +325,8 @@ export function processGroupBy(
         }
         return group
       },
+      identity: (metadata: RowVirtualMetadata) =>
+        `${metadata.synced ? 1 : 0}${metadata.hasLocal ? 1 : 0}`,
     },
   }
 
@@ -401,6 +410,7 @@ export function processGroupBy(
       },
       reduce: getRepresentative,
       postMap: unwrapRepresentative,
+      identity: representativeIdentity,
     }
   }
 
