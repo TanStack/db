@@ -30,12 +30,14 @@ import type {
  * file adds the row-publication node. A truncate opens a private replacement;
  * source writes accumulate there until every gating attempt succeeds. Replay
  * failure keeps the replacement and later source changes private while the
- * last public snapshot remains visible. Retiring the final logical subset
- * owner can retire that replacement barrier without publishing its rows.
- * Its source writes stay installed, so the subscriber can show an older value
- * than the source. No barrier gates a later request, and that request
- * delivers its installed row: an update when the subscriber shows an older
- * value. Leaving the older value would keep a stale row visible.
+ * last public snapshot remains visible. Releasing the final logical subset
+ * owner retires the replacement, since nothing can complete it. A
+ * replacement whose current attempt has not failed then publishes the rows
+ * it holds, so the subscriber does not keep values the source replaced or
+ * deleted during it. One that failed stays private, as a failed replay does
+ * until an authoritative replay succeeds, even after its failed owner was
+ * released. A later request delivers its installed row, so a row that the
+ * subscriber still shows at an older value is updated then.
  * The `Collection.subscribeChanges` API contract in `../src/collection/index.ts`
  * is the authority for callback batches and their per-key causal order. The
  * public Collection lifecycle and shared lifecycle grammar specify cleanup,
@@ -114,6 +116,10 @@ type Replacement = {
   replayGeneration: number
   rows: Map<RowKey, Row>
   failed: boolean
+  // A current attempt failed, even if its owner has been released since.
+  // Only full retirement reads it: with owners left, a released owner's
+  // failure cannot stop a successful replacement.
+  everFailed: boolean
 }
 type PublicationModel = {
   source: Map<RowKey, Row>
@@ -311,6 +317,7 @@ function finishReplacement(
   replacement.failed = currentAttempts.some(
     ({ outcome }) => outcome === `reject`,
   )
+  replacement.everFailed ||= replacement.failed
   if (lifecycle.publicationBarrierOpen) return
   if (replacement.failed) {
     replacement.failed = true
@@ -323,6 +330,13 @@ function finishReplacement(
     lifecycle.owners.length > 0 &&
     currentAttempts.every(({ outcome }) => outcome === `resolve`)
   ) {
+    publishIfChanged(publication, new Map(replacement.rows))
+    publication.retainedKeys.clear()
+    publication.replacement = undefined
+  } else if (lifecycle.owners.length === 0 && !replacement.everFailed) {
+    // Releasing the final owner retires a replay that has not failed. Nothing
+    // can complete it, so it publishes the rows it holds rather than keep
+    // values the source has replaced or deleted.
     publishIfChanged(publication, new Map(replacement.rows))
     publication.retainedKeys.clear()
     publication.replacement = undefined
@@ -360,6 +374,7 @@ function projectPublication(
         replayGeneration: lifecycle.replayGeneration,
         rows: new Map(publication.source),
         failed: false,
+        everFailed: false,
       }
     } else {
       publication.replacement = undefined
@@ -401,6 +416,7 @@ function projectPublication(
       replayGeneration: lifecycle.replayGeneration,
       rows: new Map(),
       failed: false,
+      everFailed: false,
     }
   } else if (
     command.type === `source` &&
@@ -494,21 +510,17 @@ function projectPublication(
         .length === 1
         ? publication.source.get(command.demand)
         : undefined
-    // A request delivers its installed row. An unsent row is an insert. A
-    // sent row that the subscriber still shows at an older value, such as
-    // one kept after a replay retired without publishing, is an update to
-    // the installed value; leaving it would keep a stale row visible.
+    // A request delivers its installed row: an insert when the subscriber
+    // does not show it, an update when it shows an older value, such as a
+    // row a failed replay kept, and nothing when it shows the same value.
+    // Either way the row is no longer retained.
     const shown = requested && publication.visible.get(requested.id)
     const row =
-      requested &&
-      (!publication.sentKeys.has(requested.id) ||
-        (shown !== undefined && shown.value !== requested.value))
-        ? requested
-        : undefined
+      requested && requested.value !== shown?.value ? requested : undefined
     publication.batches.push(
       row
         ? [
-            shown && publication.sentKeys.has(row.id)
+            shown
               ? {
                   type: `update`,
                   key: row.id,
@@ -523,9 +535,9 @@ function projectPublication(
           ]
         : [],
     )
+    if (requested) publication.retainedKeys.delete(requested.id)
     if (row) {
       publication.visible.set(row.id, cloneRow(row))
-      publication.retainedKeys.delete(row.id)
       publication.sentKeys.add(row.id)
     }
   }
@@ -1988,31 +2000,86 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     ])
   })
 
-  // Generated at seed -136205996: the replay retires when its last owner is
-  // released, so the source keeps a = 0 while the subscriber still shows
-  // a = 1. Requesting a again must update the stale row to the installed one.
-  it(`updates a row left stale by a retired replay when its demand is requested again`, async () => {
+  // Releasing the final owner retires a replay that has not failed; it
+  // publishes the rows it holds, so none of these rows stays stale.
+  it.each([
+    [
+      `a value written during the replay`,
+      [
+        { type: `source`, key: `a`, action: `upsert`, value: 1 },
+        { type: `request`, demand: `a` },
+        { type: `truncate` },
+        { type: `abort`, demand: `a` },
+        { type: `source`, key: `a`, action: `upsert`, value: 0 },
+        { type: `release`, demand: `a` },
+        { type: `request`, demand: `a` },
+      ],
+    ],
+    [
+      `a value written again after the replay retired`,
+      [
+        { type: `source`, key: `a`, action: `upsert`, value: 1 },
+        { type: `request`, demand: `a` },
+        { type: `truncate` },
+        { type: `abort`, demand: `a` },
+        { type: `source`, key: `a`, action: `upsert`, value: 2 },
+        { type: `release`, demand: `a` },
+        { type: `source`, key: `a`, action: `upsert`, value: 2 },
+      ],
+    ],
+    [
+      `a row no demand names`,
+      [
+        { type: `source`, key: `c`, action: `upsert`, value: 1 },
+        { type: `request`, demand: `a` },
+        { type: `truncate` },
+        { type: `abort`, demand: `a` },
+        { type: `source`, key: `c`, action: `upsert`, value: 2 },
+        { type: `release`, demand: `a` },
+      ],
+    ],
+    [
+      `a row deleted during the replay`,
+      [
+        { type: `source`, key: `a`, action: `upsert`, value: 1 },
+        { type: `request`, demand: `a` },
+        { type: `truncate` },
+        { type: `abort`, demand: `a` },
+        { type: `source`, key: `a`, action: `delete`, value: 0 },
+        { type: `release`, demand: `a` },
+        { type: `request`, demand: `a` },
+      ],
+    ],
+  ] as Array<[string, Array<PublicationCommand>]>)(
+    `leaves no stale row after a retired replay: %s`,
+    async (_, history) => {
+      await runPublicationHistory(history)
+    },
+  )
+
+  // Law 9: a failed replay stays private until an authoritative replay
+  // succeeds, even after its failed owner is released and nothing remains.
+  it(`keeps a failed replay private when its final owner releases`, async () => {
     await runPublicationHistory([
       { type: `source`, key: `a`, action: `upsert`, value: 1 },
       { type: `request`, demand: `a` },
-      { type: `restart` },
-      { type: `abort`, demand: `b` },
-      { type: `truncate` },
       {
         type: `settle`,
         demand: `a`,
-        scope: `obsolete`,
+        scope: `current`,
+        age: `oldest`,
+        outcome: `resolve`,
+      },
+      { type: `truncate` },
+      { type: `source`, key: `a`, action: `upsert`, value: 5 },
+      {
+        type: `settle`,
+        demand: `a`,
+        scope: `current`,
         age: `oldest`,
         outcome: `reject`,
       },
-      { type: `release`, demand: `b` },
-      { type: `abort`, demand: `a` },
-      { type: `abort`, demand: `a` },
-      { type: `source`, key: `a`, action: `upsert`, value: 0 },
       { type: `release`, demand: `a` },
-      { type: `request`, demand: `a` },
-      { type: `cleanup` },
-      { type: `restart` },
     ])
   })
 

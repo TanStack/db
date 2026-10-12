@@ -1245,7 +1245,12 @@ replacement. Replay failure is scoped to the logical demand that failed. If
 that demand retires, its failure cannot poison a successful replacement for the
 remaining demand. If the last logical demand retires, the now-unreachable source
 replay rejects its completion with `AbortError` and stops gating the shared
-graph; unrelated parent or sibling changes may then publish. If release
+graph; unrelated parent or sibling changes may then publish. A direct
+subscriber's replay whose current attempt has not failed publishes the rows it
+holds at that retirement, because nothing can complete it and keeping the old
+snapshot would leave values the source replaced or deleted. A replay whose
+current attempt failed keeps the last public snapshot, even after its failed
+owner was released; a later request reconciles a row it still shows. If release
 publication or adapter unload synchronously acquires new demand, core checks
 completion after that callback: the new demand joins the private replacement,
 while the retired transport can no longer gate it. A genuine replay failure is

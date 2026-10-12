@@ -604,6 +604,8 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
           pending: Set<number>
           currentAttemptIndex: number
           publicationCount: number
+          // The current attempt failed, even if its demand was released since.
+          failed: boolean
         }
       | undefined
 
@@ -651,6 +653,7 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
       } else {
         if (isCurrent) {
           lastReportedError = pending.error
+          replayState.failed = true
         } else {
           expect(pending.signal?.aborted).toBe(true)
         }
@@ -721,8 +724,14 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
         pending: new Set(),
         currentAttemptIndex: attemptIndex,
         publicationCount: expectedPublicationCount,
+        failed: false,
       }
-      modelReplayState.currentAttemptIndex = attemptIndex
+      // settleReplay records a failure from a callback, so reset without
+      // narrowing the field for this scope.
+      Object.assign(modelReplayState, {
+        currentAttemptIndex: attemptIndex,
+        failed: false,
+      })
 
       for (const load of attempt.loads) {
         queuedLoads.push({ attemptIndex, load })
@@ -757,8 +766,24 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
           }
         }
         // A released request does not retract rows already applied by the
-        // source, nor change the retained baseline of an unfinished replay.
+        // source. Releasing the final demand retires the replay: one that has
+        // not failed publishes the rows the source applied, since nothing can
+        // complete it; a failed one keeps the retained baseline (law 9).
         if (modelReplayState.pending.size === 0 && activeDemandIds.size === 0) {
+          if (!modelReplayState.failed) {
+            const previousPublication = new Map(expectedPublished)
+            expectedPublished.clear()
+            for (const [id, row] of sourceRows) {
+              expectedPublished.set(id, { ...row })
+            }
+            const expectedBatch = publicationDiff(
+              previousPublication,
+              expectedPublished,
+            )
+            expect(publicationCount - modelReplayState.publicationCount).toBe(
+              Number(expectedBatch.length > 0),
+            )
+          }
           expectedPublicationCount = publicationCount
           modelReplayState = undefined
         }
@@ -4253,7 +4278,11 @@ describe(`CollectionSubscription replay oracle`, () => {
         expect(sortedChanges(batches[0]!)).toEqual([
           { type: `insert`, key: `one`, value: { id: `one`, value: 1 } },
         ])
-        expect(sortedChanges(batches.at(-1)!)).toEqual([
+        // Retiring the replay publishes its applied row at the release; the
+        // reacquired demand then has nothing new to deliver.
+        expect(
+          sortedChanges(batches.filter((batch) => batch.length > 0).at(-1)!),
+        ).toEqual([
           {
             type: `update`,
             key: `one`,
