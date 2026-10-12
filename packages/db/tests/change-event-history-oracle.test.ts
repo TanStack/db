@@ -48,7 +48,7 @@ import type { ChangeMessage, SyncConfig } from '../src/types'
  * repeated changes and complete row values, while leaving cross-key
  * interleaving unconstrained.
  *
- * About one generated history in three meets a second subscriber, registered
+ * About one generated history in four meets a second subscriber, registered
  * after the mirror, that throws while one operation publishes. A local-only
  * direct write stores its rows as it publishes, so the call rethrows, its
  * transaction is already completed, and the rows and mirror still follow the
@@ -713,7 +713,8 @@ describe(`change-event history oracle`, () => {
         { minLength: 1, maxLength: 20 },
       ),
       mode: fc.constantFrom(`batched` as const, `sequential` as const),
-      // About one history in three meets a throwing subscriber.
+      // About two histories in three arm a throwing subscriber; about one in
+      // four reaches the operation it throws on.
       throwOn: fc.option(fc.nat(19), { nil: undefined, freq: 2 }),
     })
     .map(({ initialKeys, steps, mode, throwOn }) => {
