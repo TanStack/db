@@ -7,6 +7,13 @@ results were reproduced against `6ec97f8a0` or the named hostile edit; the
 GREEN results use the repaired working tree. The law concerns Collection
 subscription selection and provider requests within the stated histories.
 
+The independent follow-up review covered implementation commit `eeb3a8673`.
+Merge commit `91bef133d76990ce93256d4881d27182431c0fbf` adds only the
+remote bot's formatting change to that implementation. It contains
+`origin/main` at `f6857fee9de59dc82cbe596ca7df4a18152004ed`. The final
+evidence commit changes this record only. The repaired full package run was
+before that formatting merge; the four focused suites passed again afterwards.
+
 ## Law and observation cuts
 
 `requestLimitedSnapshot` promises not to resend a key already sent to its
