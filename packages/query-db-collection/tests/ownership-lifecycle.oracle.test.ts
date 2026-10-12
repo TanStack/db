@@ -7461,6 +7461,65 @@ describe(`query collection ownership lifecycle`, () => {
   )
 
   /**
+   * A shared request started before A's local write remains a server result
+   * for B. A's later accepted value wins only in A. The reference keeps two
+   * Collection row sets over the one provider response. B releases and
+   * reacquires its subset while the fetch is held. After settlement, B sees
+   * the provider row and A sees its direct write. This tests the result-merge
+   * and remount paths as well as the immediate cache patch path above.
+   */
+  it(`keeps an older shared fetch from carrying A's direct write into B`, async () => {
+    type Row = { id: string; name: string }
+    const queryClient = createQueryClient()
+    const queryKey = [`shared-older-fetch-isolation`]
+    const older = createDeferred<Array<Row>>()
+    const server = { id: `x`, name: `Server` }
+    const queryFn = vi
+      .fn()
+      .mockResolvedValueOnce([server])
+      .mockImplementationOnce(() => older.promise)
+    const makeCollection = (id: string) =>
+      createCollection(
+        queryCollectionOptions<Row>({
+          id,
+          queryClient,
+          queryKey,
+          queryFn,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          staleTime: Infinity,
+          startSync: true,
+        }),
+      )
+    const ownerA = makeCollection(`shared-older-fetch-a`)
+    const ownerB = makeCollection(`shared-older-fetch-b`)
+    cleanups.push(async () => {
+      older.resolve([server])
+      await ownerA.cleanup()
+      await ownerB.cleanup()
+      queryClient.clear()
+    })
+
+    await Promise.all([
+      ownerA._sync.loadSubset({}),
+      ownerB._sync.loadSubset({}),
+    ])
+    const refresh = ownerA.utils.refetch({ throwOnError: true })
+    void refresh.catch(() => undefined)
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+    await ownerA.utils.writeUpdate({ id: server.id, name: `Manual` })
+    expect(ownerB.get(server.id)?.name).toBe(`Server`)
+    ownerB._sync.unloadSubset({})
+    expect(ownerB.has(server.id)).toBe(false)
+    const reacquire = Promise.resolve(ownerB._sync.loadSubset({}))
+    void reacquire.catch(() => undefined)
+    older.resolve([{ id: server.id, name: `Older` }])
+    await Promise.all([refresh, reacquire])
+    expect(ownerA.get(server.id)?.name).toBe(`Manual`)
+    expect(ownerB.get(server.id)?.name).toBe(`Older`)
+  })
+
+  /**
    * A direct write is an accepted Collection row, not completion of an
    * unfinished Query request. With a held first fetch, the independent Query
    * state still has no fetched data after the write. The public Collection

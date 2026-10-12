@@ -3354,6 +3354,11 @@ export function queryCollectionOptions(
   const refetch: RefetchFn = (opts) =>
     refetchQueryResults(opts, !isMutationPublicationBlocked())
 
+  const ownedByAnotherCollection = (query: AnyQuery): boolean =>
+    [...(queryCollectionCacheOwners.get(query) ?? [])].some(
+      (owner) => owner !== cacheOwnerToken,
+    )
+
   /**
    * Updates a single query key in the cache with new items, handling both direct arrays
    * and wrapped response formats (when `select` is used).
@@ -3364,6 +3369,12 @@ export function queryCollectionOptions(
       .find({ queryKey: key, exact: true })
     const markUnpatchable = (): void => {
       if (query) unpatchedCacheVersions.set(query, query.state.dataUpdateCount)
+    }
+    if (syncMode === `on-demand` && query && ownedByAnotherCollection(query)) {
+      // Neither a local write nor its merge with an older fetch can become
+      // another Collection's fetched result through the shared cache.
+      markUnpatchable()
+      return false
     }
     if (
       query?.state.status === `pending` &&
@@ -3497,10 +3508,6 @@ export function queryCollectionOptions(
   // stale rows. Unrelated Query entries belong outside that key prefix.
   // Eager collections retain their full-result cache patch.
   const writeDirectCache: UpdateCacheData<any> = (getItems, changedKeys) => {
-    const ownedByAnotherCollection = (query: AnyQuery) =>
-      [...(queryCollectionCacheOwners.get(query) ?? [])].some(
-        (owner) => owner !== cacheOwnerToken,
-      )
     if (syncMode === `on-demand`) {
       const changed = new Set(changedKeys)
       const accepted = new Map(
@@ -3529,13 +3536,6 @@ export function queryCollectionOptions(
         const rows = select && data !== undefined ? select(data) : data
         if (!Array.isArray(rows)) continue
         if (!rows.some((row) => changed.has(getKey(row)))) continue
-        if (ownedByAnotherCollection(query)) {
-          // This Collection's accepted row cannot become another owner's
-          // fetched result through their shared Query.
-          unpatchedCacheVersions.set(query, query.state.dataUpdateCount)
-          continue
-        }
-
         const patchedRows = rows.flatMap((row) => {
           const key = getKey(row)
           if (!changed.has(key)) return [row]
