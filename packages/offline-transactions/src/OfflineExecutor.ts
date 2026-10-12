@@ -78,6 +78,12 @@ export class OfflineExecutor {
     }
   > = new Map()
 
+  /**
+   * Ids this executor settled, oldest first. A waiter for one of them has
+   * nothing left to wait for. An unknown id can still arrive from another tab.
+   */
+  private readonly settledTransactions = new Set<string>()
+
   // Track restoration transactions for cleanup when offline transactions complete
   private restorationTransactions: Map<string, Transaction> = new Map()
 
@@ -476,12 +482,6 @@ export class OfflineExecutor {
       },
     )
   }
-
-  /**
-   * Ids this executor settled, oldest first. A waiter for one of them has
-   * nothing left to wait for. An unknown id can still arrive from another tab.
-   */
-  private readonly settledTransactions = new Set<string>()
 
   private rememberSettled(transactionId: string): void {
     this.settledTransactions.add(transactionId)
