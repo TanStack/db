@@ -1773,10 +1773,7 @@ export function queryCollectionOptions(
             await new Promise<void>((resume) => queueMicrotask(resume))
             // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Cancellation can run while the refetch or microtask is pending.
             if (!active) return
-            if (
-              requiredCacheGenerationFetchStart === undefined ||
-              hasCurrentCacheGenerationFetch(observer.getCurrentQuery())
-            ) {
+            if (hasCurrentCacheGenerationFetch(observer.getCurrentQuery())) {
               break
             }
           }
@@ -1861,10 +1858,7 @@ export function queryCollectionOptions(
           return refetchAndWaitForApplication(observer, hashedQueryKey)
         }
 
-        if (
-          requiredCacheGenerationFetchStart !== undefined &&
-          !hasCurrentCacheGenerationFetch(observer.getCurrentQuery())
-        ) {
+        if (!hasCurrentCacheGenerationFetch(observer.getCurrentQuery())) {
           return refetchAndWaitForApplication(observer, hashedQueryKey)
         }
 
@@ -1956,10 +1950,7 @@ export function queryCollectionOptions(
         if (opts.refetch || unpatchedCacheVersions.has(localQuery)) {
           return refetchAndWaitForApplication(localObserver, hashedQueryKey)
         }
-        if (
-          requiredCacheGenerationFetchStart !== undefined &&
-          !hasCurrentCacheGenerationFetch(localObserver.getCurrentQuery())
-        ) {
+        if (!hasCurrentCacheGenerationFetch(localObserver.getCurrentQuery())) {
           return refetchAndWaitForApplication(localObserver, hashedQueryKey)
         }
         if (currentResult.isError && !currentResult.isFetching) {
@@ -3378,16 +3369,20 @@ export function queryCollectionOptions(
       query?.state.status === `pending` &&
       query.state.fetchStatus !== `idle`
     ) {
-      // A direct write does not complete an unfinished Query request. An idle
-      // empty cache entry can still be seeded by an eager direct write.
+      // An unfinished request cannot be completed by a direct write. An idle
+      // eager raw-row cache still participates in the cache-seeding contract.
       markUnpatchable()
       return false
     }
     const writeCache = (data: unknown): void => {
       if (query) {
-        // A direct edit changes cached rows, not Query's fetch authority,
-        // error, invalidation, or freshness timestamp.
-        query.setState({ data })
+        // An idle eager seed needs a coherent Query status. Keep its zero
+        // freshness timestamp; other edits preserve fetch and error state.
+        query.setState(
+          query.state.status === `pending`
+            ? { data, status: `success` }
+            : { data },
+        )
         unpatchedCacheVersions.delete(query)
       } else {
         queryClient.setQueryData(key, data)
@@ -3459,10 +3454,6 @@ export function queryCollectionOptions(
       deferredResults > 0 ||
       pendingDirectWrites !== undefined ||
       pendingResultApplications.size > 0
-    for (const observer of state.observers.values()) {
-      if (observer.getCurrentQuery().state.fetchStatus === `fetching`)
-        older = true
-    }
     if (!older) {
       for (const query of trackedCacheQueries) {
         if (query.state.fetchStatus === `fetching`) {
@@ -3506,6 +3497,10 @@ export function queryCollectionOptions(
   // stale rows. Unrelated Query entries belong outside that key prefix.
   // Eager collections retain their full-result cache patch.
   const writeDirectCache: UpdateCacheData<any> = (getItems, changedKeys) => {
+    const ownedByAnotherCollection = (query: AnyQuery) =>
+      [...(queryCollectionCacheOwners.get(query) ?? [])].some(
+        (owner) => owner !== cacheOwnerToken,
+      )
     if (syncMode === `on-demand`) {
       const changed = new Set(changedKeys)
       const accepted = new Map(
@@ -3534,6 +3529,12 @@ export function queryCollectionOptions(
         const rows = select && data !== undefined ? select(data) : data
         if (!Array.isArray(rows)) continue
         if (!rows.some((row) => changed.has(getKey(row)))) continue
+        if (ownedByAnotherCollection(query)) {
+          // This Collection's accepted row cannot become another owner's
+          // fetched result through their shared Query.
+          unpatchedCacheVersions.set(query, query.state.dataUpdateCount)
+          continue
+        }
 
         const patchedRows = rows.flatMap((row) => {
           const key = getKey(row)
@@ -3546,10 +3547,8 @@ export function queryCollectionOptions(
 
       for (const query of [...trackedCacheQueries]) {
         if (activeQueries.has(query)) continue
-        const ownedByAnotherCollection = [
-          ...(queryCollectionCacheOwners.get(query) ?? []),
-        ].some((owner) => owner !== cacheOwnerToken)
-        if (ownedByAnotherCollection || query.getObserversCount() > 0) continue
+        if (ownedByAnotherCollection(query) || query.getObserversCount() > 0)
+          continue
         queryClient.getQueryCache().remove(query)
       }
       return

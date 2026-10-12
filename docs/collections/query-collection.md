@@ -736,9 +736,10 @@ These operations:
 - Return a promise that resolves when the sync commit is accepted, including any configured persistence write. Await it in a mutation handler before returning so the server response is stored before the optimistic state drops.
 - While a mutation handler is running, wait behind it and become visible when its optimistic transaction settles, in the same update that drops its optimistic state
 - In eager mode, update the full-result TanStack Query cache in place without refetching
-- In on-demand mode, patch changed keys already present in active raw or directly selected Query cache arrays and remove inactive matching-prefix entries when no other Collection or observer retains them, without refetching
+- In on-demand mode, patch changed keys already present in active raw or directly selected Query cache arrays when no other Collection owns that Query. Remove inactive matching-prefix entries when no other Collection or observer retains them, without refetching
 
 The promise does not wait for a separately requested Query refetch. If a handler returns before it writes the server response, its optimistic state drops and the row shows the previous server value until the response arrives.
+An explicit `utils.refetch()` after a direct write may cancel an older request for the same Query key. Collection refetch callers follow the replacement, but a caller using `queryClient.fetchQuery()` on that key can receive Query Core's `CancelledError`. Avoid sharing exact Query keys with callers that require their original request to settle normally.
 After Collection cleanup starts, direct writes fail with `SyncNotInitializedError` until a new sync run starts.
 
 ### Batch Operations

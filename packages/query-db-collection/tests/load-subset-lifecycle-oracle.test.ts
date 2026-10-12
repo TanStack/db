@@ -22,8 +22,10 @@ import type { LoadSubsetOptions, SyncMetadataApi } from '@tanstack/db'
  * controls cancellation, and a replacement owner starts fresh after abort.
  * Initial failure reaches existing and late dependents; recovery becomes public
  * only after every failed source recovers. A refetch stays pending while result
- * application is deferred, including for existing and cached demands. A later
- * refetch failure retains the last ready snapshot.
+ * application is deferred, including for existing and cached demands. After a
+ * direct write, an explicit subset refetch waits for a request that started
+ * later than that write, even if an empty-cache request was already running.
+ * A later refetch failure retains the last ready snapshot.
  *
  * Small identity forms and lifecycle histories drive a real QueryClient and
  * Collection. The oracle records query calls, values, request options, abort
@@ -623,6 +625,73 @@ async function expectDeferredRefetchWaitsForApplication(
     collection.deferDataRefresh = null
     barrier.resolve()
     await refetch?.catch(() => undefined)
+    await collection.cleanup()
+    queryClient.clear()
+  }
+}
+
+async function expectRefetchWaitsForPostWriteAuthority(): Promise<void> {
+  const queryClient = createQueryClient()
+  const id = `load-subset-refetch-authority-${collectionSequence++}`
+  const initialResult = createDeferred<Array<Row>>()
+  const authoritativeResult = createDeferred<Array<Row>>()
+  const initialStarted = createDeferred<void>()
+  let calls = 0
+  const queryFn = vi.fn(() => {
+    calls++
+    if (calls === 1) {
+      initialStarted.resolve()
+      return initialResult.promise
+    }
+    return authoritativeResult.promise
+  })
+  const collection = createCollection(
+    queryCollectionOptions<Row>({
+      id,
+      queryClient,
+      queryKey: [id],
+      queryFn,
+      getKey: (row) => row.id,
+      startSync: true,
+      syncMode: `on-demand`,
+      retry: false,
+    }),
+  )
+  let initialDemand: Promise<void> | undefined
+  let refetchDemand: Promise<void> | undefined
+
+  try {
+    collection.utils.writeInsert({ id: `optimistic` })
+    initialDemand = collection._sync.loadSubset({}) as Promise<void>
+    await initialStarted.promise
+
+    collection.utils.writeDelete(`optimistic`)
+    refetchDemand = collection._sync.loadSubset({
+      refetch: true,
+    }) as Promise<void>
+    let refetchFulfilled = false
+    void refetchDemand.then(() => {
+      refetchFulfilled = true
+    })
+
+    initialResult.resolve([{ id: `stale` }])
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+
+    expect(queryFn).toHaveBeenCalledTimes(2)
+    expect(refetchFulfilled).toBe(false)
+    expect(collection.has(`stale`)).toBe(false)
+
+    authoritativeResult.resolve([{ id: `authoritative` }])
+    await Promise.all([initialDemand, refetchDemand])
+    expect(collection.has(`authoritative`)).toBe(true)
+  } finally {
+    initialResult.resolve([])
+    authoritativeResult.resolve([])
+    await Promise.allSettled([
+      initialDemand ?? Promise.resolve(),
+      refetchDemand ?? Promise.resolve(),
+    ])
     await collection.cleanup()
     queryClient.clear()
   }
@@ -1302,6 +1371,10 @@ describe(`loadSubset lifecycle oracle`, () => {
       await expectDeferredRefetchWaitsForApplication(demand)
     },
   )
+
+  it(`keeps a subset refetch pending until a post-write fetch applies`, async () => {
+    await expectRefetchWaitsForPostWriteAuthority()
+  })
 
   it(`rejects a refetch after its final acquisition is released`, async () => {
     await expectReleasedRefetchRejects()

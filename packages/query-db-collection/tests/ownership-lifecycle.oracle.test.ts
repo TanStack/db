@@ -7399,6 +7399,68 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   /**
+   * A direct write is local to its Collection until a provider result says
+   * otherwise. Two Collections may own one physical Query, but that shared
+   * cache cannot carry A's accepted local row into B. The reference has one
+   * server row and two Collection row sets: writing A changes only A. Compare
+   * both public rows and the shared cache immediately after the write, before
+   * any newer provider result can legitimately update B.
+   */
+  it.each(
+    ([`update`, `delete`, `upsert`] as const).flatMap((operation) =>
+      ([`A-first`, `B-first`] as const).map((loadOrder) => ({
+        operation,
+        loadOrder,
+      })),
+    ),
+  )(
+    `keeps a $operation out of another Collection sharing its Query ($loadOrder)`,
+    async ({ operation, loadOrder }) => {
+      type Row = { id: string; name: string }
+      const queryClient = createQueryClient()
+      const queryKey = [`shared-direct-write-isolation`]
+      const server = { id: `x`, name: `Server` }
+      const queryFn = vi.fn(() => Promise.resolve([{ ...server }]))
+      const makeCollection = (id: string) =>
+        createCollection(
+          queryCollectionOptions<Row>({
+            id,
+            queryClient,
+            queryKey,
+            queryFn,
+            getKey: (row) => row.id,
+            syncMode: `on-demand`,
+            staleTime: Infinity,
+            startSync: true,
+          }),
+        )
+      const ownerA = makeCollection(`shared-direct-write-owner-a`)
+      const ownerB = makeCollection(`shared-direct-write-owner-b`)
+      cleanups.push(async () => {
+        await ownerA.cleanup()
+        await ownerB.cleanup()
+        queryClient.clear()
+      })
+
+      const first = loadOrder === `A-first` ? ownerA : ownerB
+      const second = loadOrder === `A-first` ? ownerB : ownerA
+      await first._sync.loadSubset({})
+      await second._sync.loadSubset({})
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      if (operation === `delete`) await ownerA.utils.writeDelete(server.id)
+      else if (operation === `upsert`)
+        await ownerA.utils.writeUpsert({ id: server.id, name: `Manual` })
+      else await ownerA.utils.writeUpdate({ id: server.id, name: `Manual` })
+      expect(ownerA.get(server.id)?.name).toBe(
+        operation === `delete` ? undefined : `Manual`,
+      )
+      expect(ownerB.get(server.id)?.name).toBe(`Server`)
+      expect(queryClient.getQueryData(queryKey)).toEqual([server])
+      expect(queryFn).toHaveBeenCalledTimes(1)
+    },
+  )
+
+  /**
    * A direct write is an accepted Collection row, not completion of an
    * unfinished Query request. With a held first fetch, the independent Query
    * state still has no fetched data after the write. The public Collection
@@ -7428,6 +7490,50 @@ describe(`query collection ownership lifecycle`, () => {
     expect(query.state.status).toBe(`pending`)
     first.resolve([])
     await preload
+  })
+
+  /**
+   * Disabling the eager Query leaves a valid pending, idle cache entry. The
+   * existing eager cache-seeding contract applies without an in-flight
+   * request: the accepted row enters the raw-row cache. Query must then be
+   * coherent for consumers, while its untouched timestamp still says that
+   * no provider fetch has established freshness. This distinguishes the
+   * legal idle seed from an unfinished request, which cannot be completed by
+   * a direct write. Collection readiness still waits for a provider result.
+   */
+  it(`seeds an idle pending eager Query coherently without marking it fresh`, async () => {
+    type Row = { id: string; name: string }
+    const id = `pending-idle-direct-write`
+    const queryClient = createQueryClient()
+    const queryFn = vi.fn(() => Promise.resolve([] as Array<Row>))
+    const collection = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (row) => row.id,
+        syncMode: `eager`,
+        enabled: false,
+        staleTime: 1_000,
+        startSync: true,
+      }),
+    )
+    cleanups.push(async () => {
+      await collection.cleanup()
+      queryClient.clear()
+    })
+    const query = queryClient.getQueryCache().find({ queryKey: [id] })!
+    expect(query.state.status).toBe(`pending`)
+    expect(query.state.fetchStatus).toBe(`idle`)
+    await collection.utils.writeInsert({ id: `x`, name: `Manual` })
+    expect(collection.get(`x`)?.name).toBe(`Manual`)
+    expect(query.state.status).toBe(`success`)
+    expect(query.state.data).toEqual([{ id: `x`, name: `Manual` }])
+    expect(query.state.dataUpdatedAt).toBe(0)
+    expect(query.isStaleByTime(1_000)).toBe(true)
+    expect(queryFn).not.toHaveBeenCalled()
+    expect(collection.status).toBe(`loading`)
   })
 
   /**
