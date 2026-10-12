@@ -6,8 +6,10 @@ import {
 } from '@tanstack/query-core'
 import {
   LoadSubsetOperationAbortedError,
+  compileSingleRowExpression,
   deepEquals,
   getLoadSubsetDemandKey,
+  toBooleanPredicate,
   validateSyncPersistenceCapability,
   warnOnce,
   whenSyncAccepted,
@@ -981,7 +983,11 @@ export function queryCollectionOptions(
   // A later cached result can then be compared with that row's last write,
   // without retaining positions for every key ever written.
   const unownedDirectWritePositions = new Map<string | number, number>()
+  // The accepted value of a live key keeps the position of its latest source.
+  const acceptedRowPositions = new Map<string | number, number>()
+  let latestAcceptedRowPosition = 0
   const awaitingFetchSuccessNotification = new WeakSet<object>()
+  const awaitingFetchSuccessVersions = new WeakMap<AnyQuery, number>()
   const fetchStartGenerations = new Map<string, number>()
   const cancelPreWriteFetch = (
     query: AnyQuery,
@@ -1918,7 +1924,8 @@ export function queryCollectionOptions(
         const directPatch = queryCollectionDirectCachePatches.get(query)
         if (
           unpatchedCacheVersions.has(query) ||
-          (directPatch !== undefined &&
+          (syncMode === `on-demand` &&
+            directPatch !== undefined &&
             (directPatch.owner !== cacheOwnerToken ||
               directPatch.session !== syncSession)) ||
           (directWriteGeneration > 0 &&
@@ -2028,6 +2035,7 @@ export function queryCollectionOptions(
       if (cachedData !== undefined) {
         const directPatch = queryCollectionDirectCachePatches.get(localQuery)
         const foreignDirectPatch =
+          syncMode === `on-demand` &&
           directPatch !== undefined &&
           (directPatch.owner !== cacheOwnerToken ||
             directPatch.session !== syncSession)
@@ -2259,14 +2267,55 @@ export function queryCollectionOptions(
           )
             previouslyOwnedRows.add(key)
         })
+      } else if (cachedRemoteFetchStart !== undefined) {
+        // A complete later result settles ownerless direct rows in its scope.
+        // A window or cursor cannot prove omission outside the returned page.
+        const scope =
+          state.observers.get(hashedQueryKey)?.options.meta?.loadSubsetOptions
+        if (
+          scope &&
+          scope.limit === undefined &&
+          scope.offset === undefined &&
+          scope.cursor === undefined
+        ) {
+          const matches = scope.where
+            ? compileSingleRowExpression(scope.where)
+            : undefined
+          currentSyncedItems.forEach((row, key) => {
+            const directPosition = unownedDirectWritePositions.get(key)
+            if (
+              directPosition === undefined
+                ? !persistence?.scanPersistedRows ||
+                  getPersistedOwners(key).size > 0
+                : cachedRemoteFetchStart <= directPosition
+            )
+              return
+            try {
+              if (matches && !toBooleanPredicate(matches(row))) return
+            } catch {
+              return
+            }
+            previouslyOwnedRows.add(key)
+          })
+        }
       }
 
       const newItemsMap = new Map<string | number, any>()
       newItemsArray.forEach((item) => {
         const key = getKey(item)
-        newItemsMap.set(key, item)
+        const acceptedPosition = acceptedRowPositions.get(key)
+        newItemsMap.set(
+          key,
+          cachedRemoteFetchStart !== undefined &&
+            acceptedPosition !== undefined &&
+            acceptedPosition > cachedRemoteFetchStart &&
+            currentSyncedItems.has(key)
+            ? currentSyncedItems.get(key)
+            : item,
+        )
       })
       const settledDirectPositions = new Map<string | number, number>()
+      const removedRows = new Set<string | number>()
 
       const previousOwnedRows = queryToRows.has(hashedQueryKey)
         ? new Set(queryToRows.get(hashedQueryKey))
@@ -2369,11 +2418,9 @@ export function queryCollectionOptions(
             : currentSyncedItems.get(key)
           const newItem = newItemsMap.get(key)
           if (!newItem) {
-            if (syncMode === `eager`) {
-              const directPosition = unownedDirectWritePositions.get(key)
-              if (directPosition !== undefined)
-                settledDirectPositions.set(key, directPosition)
-            }
+            const directPosition = unownedDirectWritePositions.get(key)
+            if (directPosition !== undefined)
+              settledDirectPositions.set(key, directPosition)
             const owners = getPersistedOwners(key)
             owners.delete(hashedQueryKey)
             setPersistedOwners(key, owners)
@@ -2382,6 +2429,7 @@ export function queryCollectionOptions(
             // storage, so delete by key even when no stored row is known.
             if (needToRemove) {
               write({ type: `delete`, key })
+              removedRows.add(key)
             }
           } else if (oldItem && !deepEquals(oldItem, newItem)) {
             write({ type: `update`, value: newItem })
@@ -2453,6 +2501,39 @@ export function queryCollectionOptions(
         // Readiness counts accepted rows; the application, which settles a
         // subset load, waits for them to be visible.
         const finishApplication = () => {
+          removedRows.forEach((key) => {
+            if (collection._state.getAcceptedSyncedRow(key) === undefined)
+              acceptedRowPositions.delete(key)
+          })
+          const recordFetchPosition = (position: number) => {
+            newItemsMap.forEach((_item, key) => {
+              if (collection._state.getAcceptedSyncedRow(key) === undefined)
+                return
+              if (position > (acceptedRowPositions.get(key) ?? 0))
+                acceptedRowPositions.set(key, position)
+            })
+            latestAcceptedRowPosition = Math.max(
+              latestAcceptedRowPosition,
+              position,
+            )
+          }
+          if (cachedRemoteFetchStart !== undefined) {
+            recordFetchPosition(cachedRemoteFetchStart)
+          } else if (currentQuery) {
+            // Observer callbacks run before QueryCache's success notification.
+            // Only that physical success can assign a fetch position.
+            const appliedData = currentQuery.state.data
+            queueMicrotask(() => {
+              if (
+                queryCollectionSuccessfulFetchData.get(currentQuery) ===
+                appliedData
+              ) {
+                const position =
+                  queryCollectionSuccessfulFetchStarts.get(currentQuery)
+                if (position !== undefined) recordFetchPosition(position)
+              }
+            })
+          }
           settledDirectPositions.forEach((position, key) => {
             if (unownedDirectWritePositions.get(key) === position)
               unownedDirectWritePositions.delete(key)
@@ -2695,28 +2776,43 @@ export function queryCollectionOptions(
               return
             }
             if (
-              directWriteGeneration > 0 &&
+              (directWriteGeneration > 0 ||
+                latestAcceptedRowPosition >
+                  (queryCollectionCurrentFetchStarts.get(observedQuery) ??
+                    latestAcceptedRowPosition)) &&
               observedQuery.state.dataUpdateCount >
                 (queryCollectionSuccessfulFetchVersions.get(observedQuery) ?? 0)
             ) {
               // Query observers run before the cache success event. Wait for
               // that event to distinguish a physical fetch from a local
               // setQueryData edit. The latter cannot replace a direct write.
-              if (!awaitingFetchSuccessNotification.has(result)) {
-                awaitingFetchSuccessNotification.add(result)
+              const version = observedQuery.state.dataUpdateCount
+              if (awaitingFetchSuccessVersions.get(observedQuery) !== version) {
+                awaitingFetchSuccessVersions.set(observedQuery, version)
                 queueMicrotask(() => {
                   const currentObserver = state.observers.get(hashedQueryKey)
-                  if (currentObserver?.getCurrentResult() === result)
+                  if (
+                    currentObserver === observer &&
+                    observedQuery.state.data === result.data &&
+                    observedQuery.state.dataUpdateCount === version
+                  )
                     handleQueryResult(result)
                 })
+                return
               }
-              return
+              if (
+                directWriteGeneration > 0 &&
+                queryCollectionSuccessfulFetchData.get(observedQuery) !==
+                  observedQuery.state.data
+              )
+                return
             }
             const currentFetchStart =
               queryCollectionCurrentFetchStarts.get(observedQuery)
             if (
               !result.isFetching &&
-              unownedDirectWritePositions.size > 0 &&
+              (unownedDirectWritePositions.size > 0 ||
+                persistence?.scanPersistedRows !== undefined) &&
               currentFetchStart !== undefined &&
               currentFetchStart !==
                 queryCollectionSuccessfulFetchStarts.get(observedQuery) &&
@@ -3038,6 +3134,7 @@ export function queryCollectionOptions(
       const query = observer.getCurrentQuery()
       const directPatch = queryCollectionDirectCachePatches.get(query)
       if (
+        syncMode === `on-demand` &&
         directPatch &&
         (directPatch.owner !== cacheOwnerToken ||
           directPatch.session !== syncSession)
@@ -3112,7 +3209,17 @@ export function queryCollectionOptions(
       }
 
       if (needsTransaction) {
-        commit()
+        const applied = commit()
+        const retireDeletedPositions = () => {
+          rowsToDelete.forEach((row) => {
+            const key = getKey(row)
+            if (collection._state.getAcceptedSyncedRow(key) === undefined)
+              acceptedRowPositions.delete(key)
+          })
+        }
+        const accepted = whenSyncAccepted(applied)
+        if (accepted === true) retireDeletedPositions()
+        else void accepted.then(retireDeletedPositions, () => undefined)
       }
 
       state.observers.delete(hashedQueryKey)
@@ -3246,10 +3353,15 @@ export function queryCollectionOptions(
             }
             captureFetchResult(event.query, fetchStart)
           } else if (event.action.type === `success` && !event.action.manual) {
-            queryCollectionDirectCachePatches.delete(event.query)
+            // An observer can directly edit this Query while Query Core is
+            // still notifying observers of the fetch. Its success action is
+            // the fetched payload; the current Query state may already hold
+            // the later local edit and must keep that provenance.
+            if (event.query.state.data === event.action.data)
+              queryCollectionDirectCachePatches.delete(event.query)
             queryCollectionSuccessfulFetchData.set(
               event.query,
-              event.query.state.data,
+              event.action.data,
             )
             queryCollectionSuccessfulFetchVersions.set(
               event.query,
@@ -3359,6 +3471,8 @@ export function queryCollectionOptions(
       }
       fetchStartGenerations.clear()
       unownedDirectWritePositions.clear()
+      acceptedRowPositions.clear()
+      latestAcceptedRowPosition = 0
 
       // Unsubscribe from cache events (cleanup already happened above)
       unsubscribeQueryCache()
@@ -3462,6 +3576,8 @@ export function queryCollectionOptions(
       retainedQueriesPendingRevalidation.clear()
       directWriteKeyGenerations.clear()
       unownedDirectWritePositions.clear()
+      acceptedRowPositions.clear()
+      latestAcceptedRowPosition = 0
       persistedRetentionTimers.forEach((timer) => clearTimeout(timer))
       persistedRetentionTimers.clear()
       requiredCacheGenerationFetchStart = nextQueryCollectionAuthorityPosition
@@ -3673,7 +3789,7 @@ export function queryCollectionOptions(
     const markUnpatchable = (): void => {
       if (query) unpatchedCacheVersions.set(query, query.state.dataUpdateCount)
     }
-    if (query && ownedByAnotherCollection(query)) {
+    if (syncMode === `on-demand` && query && ownedByAnotherCollection(query)) {
       // Neither a local write nor its merge with an older fetch can become
       // another Collection's fetched result through the shared cache.
       markUnpatchable()
@@ -3823,12 +3939,18 @@ export function queryCollectionOptions(
       // insert of the same key must not inherit that old subset's owners.
       for (const key of changedKeys) {
         if (accepted.has(key)) {
+          acceptedRowPositions.set(key, position)
+          latestAcceptedRowPosition = Math.max(
+            latestAcceptedRowPosition,
+            position,
+          )
           if ((rowToQueries.get(key)?.size ?? 0) === 0)
             unownedDirectWritePositions.set(key, position)
           else unownedDirectWritePositions.delete(key)
           continue
         }
         unownedDirectWritePositions.delete(key)
+        acceptedRowPositions.delete(key)
         for (const owner of [...(rowToQueries.get(key) ?? [])]) {
           removeRowOwner(key, owner)
         }
@@ -3892,17 +4014,35 @@ export function queryCollectionOptions(
       return
     }
 
-    const items = getItems()
     const allCached = [...trackedCacheQueries]
 
     if (allCached.length > 0) {
       for (const query of allCached) {
-        updateCacheDataForKey(query.queryKey, items)
+        const data = query.state.data
+        const rows = select && data !== undefined ? select(data) : data
+        if (!Array.isArray(rows)) {
+          updateCacheDataForKey(query.queryKey, getItems())
+          continue
+        }
+        const changed = new Set(changedKeys)
+        const present = new Set<string | number>()
+        const patched = rows.flatMap((row) => {
+          const key = getKey(row)
+          present.add(key)
+          if (!changed.has(key)) return [row]
+          const next = accepted.get(key)
+          return next === undefined ? [] : [next]
+        })
+        for (const key of changedKeys) {
+          const next = accepted.get(key)
+          if (!present.has(key) && next !== undefined) patched.push(next)
+        }
+        updateCacheDataForKey(query.queryKey, patched, rows)
       }
     } else {
       // Fallback: no queries in cache yet, seed the base query key.
       // This handles the case where updateCacheData is called before any queries are created.
-      updateCacheDataForKey(baseKey, items)
+      updateCacheDataForKey(baseKey, getItems())
     }
   }
 
