@@ -8,11 +8,14 @@ import {
   gt,
   lt,
 } from '@tanstack/db'
+import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { electricCollectionOptions } from '../src/electric'
+import { tagPersistence } from './electric-persistence-fixture'
 import type { ElectricCollectionUtils } from '../src/electric'
 import type { Collection } from '@tanstack/db'
 import type { Message } from '@electric-sql/client'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
+import type { PersistenceAdapter } from '../../db-sqlite-persistence-core/src'
 
 // A live query starts no provider work for its sources until it has a
 // subscriber or a preload, so tests of the requests it sends subscribe it.
@@ -1113,6 +1116,81 @@ describe(`Electric Collection with Live Query - syncMode integration`, () => {
           selectedUser.id,
         ])
       })
+    })
+
+    // A load after the full sync settles only once the swap's applied
+    // receipt resolves. Here the swap's durable write is held. Whether the
+    // row is visible yet is a persistence detail, so the check is the law
+    // itself: a ready query shows the row.
+    it(`a load after the full sync is ready only with the swap's rows`, async () => {
+      vi.clearAllMocks()
+      mockSubscribe.mockImplementation((callback) => {
+        subscriber = callback
+        return () => {}
+      })
+      const { adapter } = tagPersistence()
+      let releaseSwap: (() => void) | undefined
+      const heldAdapter: PersistenceAdapter = {
+        ...adapter,
+        applyCommittedTx: async (id, transaction) => {
+          if (
+            transaction.mutations.some(
+              (mutation) => mutation.key === selectedUser.id,
+            )
+          ) {
+            await new Promise<void>((resolve) => {
+              releaseSwap = resolve
+            })
+          }
+          return adapter.applyCommittedTx(id, transaction)
+        },
+      }
+      const electricCollection = createCollection(
+        persistedCollectionOptions<
+          User,
+          string | number,
+          never,
+          ElectricCollectionUtils<User>
+        >({
+          ...electricCollectionOptions({
+            id: `electric-users-progressive-persisted`,
+            shapeOptions: {
+              url: `http://test-url`,
+              params: { table: `users` },
+            },
+            syncMode: `progressive`,
+            getKey: (user: User) => user.id,
+          }),
+          persistence: { adapter: heldAdapter },
+        }),
+      )
+      electricCollection.startSyncImmediate()
+      await vi.waitFor(() => expect(mockSubscribe).toHaveBeenCalled())
+      completeFullSync([selectedUser])
+      await vi.waitFor(() => expect(releaseSwap).toBeDefined())
+
+      const liveQuery = createLiveQueryCollection((q) =>
+        q
+          .from({ user: electricCollection })
+          .where(({ user }) => eq(user.id, selectedUser.id)),
+      )
+      let preloaded = false
+      void liveQuery.preload().then(() => {
+        preloaded = true
+      })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+
+      if (liveQuery.isReady()) {
+        expect(liveQuery.toArray.map((user) => user.id)).toEqual([
+          selectedUser.id,
+        ])
+      }
+
+      releaseSwap!()
+      await vi.waitFor(() => expect(preloaded).toBe(true))
+      expect(liveQuery.toArray.map((user) => user.id)).toEqual([
+        selectedUser.id,
+      ])
     })
 
     function createProgressiveFromOffset() {

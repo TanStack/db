@@ -386,6 +386,28 @@ interface EffectPipelineRunnerConfig<
  * Unlike CollectionConfigBuilder, this does not publish results to a
  * Collection.
  */
+/**
+ * Report how a held acquisition ends. A truncate replay rejects the
+ * acquisition it supersedes and starts a replacement, which inherits the hold.
+ */
+function followHeldAcquisition(
+  acquisition: Promise<unknown>,
+  replacementAfterFailure: () => Promise<void> | undefined,
+  handlers: {
+    settled: (succeeded: boolean) => void
+    replaced: (replacement: Promise<void>) => void
+  },
+): void {
+  void acquisition.then(
+    () => handlers.settled(true),
+    () => {
+      const replacement = replacementAfterFailure()
+      if (replacement) handlers.replaced(replacement)
+      else handlers.settled(false)
+    },
+  )
+}
+
 class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   private readonly query: QueryIR
   private readonly queryCompareOptions: StringCollationConfig
@@ -844,13 +866,14 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         this.scheduleGraphRun()
     }
     // A load failure disposes the Effect through onLoadSubsetError. Any other
-    // rejection comes from an obsolete or aborted acquisition: it releases its
-    // hold, and a truncate replacement takes the hold over.
-    void result.then(release, () => {
-      const replacement = replacementAfterFailure()
-      if (replacement)
+    // rejection comes from an obsolete or aborted acquisition, so the hold
+    // fails open: it releases unless a truncate replacement takes it over.
+    followHeldAcquisition(result, replacementAfterFailure, {
+      settled: release,
+      replaced: (replacement) => {
         this.trackInitialLoad(replacement, replacementAfterFailure)
-      release()
+        release()
+      },
     })
   }
 
@@ -878,24 +901,16 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         this.scheduleGraphRun()
       }
     }
-    void promise.then(
-      () => finish(true),
-      () => {
-        const replacement = replacementAfterFailure()
-        if (
-          replacement &&
-          this.pendingOrderedPublications.delete(promise) &&
-          !this.disposed
-        ) {
-          // Truncate replay aborted an obsolete acquisition. Its replacement
-          // now owns the same publication hold and settles after replay rows
-          // have reached this Effect's private D2 state.
+    // A failed repair chain fails closed until a fresh chain starts. A
+    // replacement settles after replay rows reach this Effect's private D2
+    // state, so it takes over the same publication hold.
+    followHeldAcquisition(promise, replacementAfterFailure, {
+      settled: finish,
+      replaced: (replacement) => {
+        if (this.pendingOrderedPublications.delete(promise) && !this.disposed)
           this.trackOrderedPublication(replacement, replacementAfterFailure)
-          return
-        }
-        finish(false)
       },
-    )
+    })
   }
 
   /**
@@ -1000,8 +1015,8 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     }
   }
 
-  /** Check that every source has served its initial data to this effect. */
-  private allSourcesServedInitialData(): boolean {
+  /** Check the source-readiness part of initial readiness for every source. */
+  private sourcesPermitInitialReadiness(): boolean {
     return this.collectionSources.every(({ collection }) =>
       sourcePermitsInitialReadiness(collection),
     )
@@ -1014,7 +1029,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       this.pendingOrderedPublications.size === 0 &&
       this.pendingInitialLoads.size === 0 &&
       !this.hasPendingJoinedFilterWork() &&
-      this.allSourcesServedInitialData()
+      this.sourcesPermitInitialReadiness()
     )
   }
 

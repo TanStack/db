@@ -671,7 +671,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   syncMode,
   isBufferingInitialSync,
   waitForFullSnapshot,
-  waitForSnapshotReset,
+  waitForEstablishedSnapshot,
   begin,
   write,
   commit,
@@ -688,7 +688,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   syncMode: ElectricSyncMode
   isBufferingInitialSync: () => boolean
   waitForFullSnapshot?: () => Promise<void>
-  waitForSnapshotReset: () => Promise<void>
+  waitForEstablishedSnapshot?: () => Promise<void>
   begin: () => void
   write: (mutation: {
     type: `insert` | `update` | `delete`
@@ -792,7 +792,9 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
         const { data: rows } = await stream.fetchSnapshot(snapshotParams)
         if (!isBufferingInitialSync()) {
           debug(`${logPrefix}Ignoring snapshot - sync completed while fetching`)
-          return settleWith(waitForSnapshotReset())
+          return waitForEstablishedSnapshot
+            ? settleWith(waitForEstablishedSnapshot())
+            : undefined
         }
         // Check the signal before commit to discard a stale snapshot.
         throwIfAborted()
@@ -828,7 +830,10 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
     // Outside its buffered initial sync, a progressive load installs no rows.
     // A resumed stream or a completed full sync already holds them; a reset
     // supplies them only when its snapshot completes.
-    if (syncMode === `progressive`) return settleWith(waitForSnapshotReset())
+    if (syncMode === `progressive`)
+      return waitForEstablishedSnapshot
+        ? settleWith(waitForEstablishedSnapshot())
+        : undefined
 
     const { cursor, where, orderBy, limit } = opts
 
@@ -1844,11 +1849,15 @@ function createElectricSync<T extends Row<unknown>>(
       syncMode === `on-demand` &&
       (!requiresFreshSourceEvidence || scopedRecovery)
     const usesFullLog = syncMode === `on-demand` && !usesChangesOnlyLog
+    // A full-log on-demand stream waits for this snapshot before any load. A
+    // progressive stream waits for it only outside its buffered initial sync,
+    // where a load installs no rows itself.
+    const tracksFullSnapshot = usesFullLog || syncMode === `progressive`
     let resolveFullSnapshot: (receipt: SyncAppliedReceipt) => void = () => {}
     let rejectFullSnapshot: (error: unknown) => void = () => {}
     let fullSnapshotReady = Promise.resolve()
     const resetFullSnapshot = () => {
-      if (!usesFullLog) return
+      if (!tracksFullSnapshot) return
       fullSnapshotReady = new Promise<void>((resolve, reject) => {
         resolveFullSnapshot = (receipt) =>
           resolve(receipt === true ? undefined : receipt)
@@ -2011,6 +2020,8 @@ function createElectricSync<T extends Row<unknown>>(
     // up-to-date message must not run the initial atomic swap again.
     let hasReceivedUpToDate =
       syncMode === `progressive` && requiresCompleteResume
+    // A complete resume already holds the established rows.
+    if (hasReceivedUpToDate) resolveFullSnapshot(true)
     // A must-refetch starts a new snapshot generation. Until its up-to-date
     // commit is applied, old Collection keys cannot make an update valid and
     // the durable resume marker must remain reset.
@@ -2221,22 +2232,8 @@ function createElectricSync<T extends Row<unknown>>(
       syncMode,
       isBufferingInitialSync,
       waitForFullSnapshot: usesFullLog ? () => fullSnapshotReady : undefined,
-      waitForSnapshotReset: () =>
-        new Promise<void>((resolve) => {
-          // A resumed stream's local rows are already complete; only a reset
-          // before the first ready leaves the subset without its rows.
-          if (!isResettingSnapshot || collection.isReady()) return resolve()
-          // Cleanup never runs first-ready callbacks; its abort ends the wait.
-          const stop = collection.onFirstReady(resolve)
-          abortController.signal.addEventListener(
-            `abort`,
-            () => {
-              stop()
-              resolve()
-            },
-            { once: true },
-          )
-        }),
+      waitForEstablishedSnapshot:
+        syncMode === `progressive` ? () => fullSnapshotReady : undefined,
       begin,
       write,
       commit,
