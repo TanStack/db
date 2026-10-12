@@ -598,7 +598,7 @@ export function withExpectedRejection<T>(
   }).finally(() => restoreListeners())
 }
 
-type IndexInternals<TKey> = { indexedKeys: Set<TKey> } & (
+type IndexInternals<TKey> = { indexedKeys: ReadonlyMap<TKey, true> } & (
   | { sortedValues: Array<unknown>; valueMap: Map<unknown, Set<TKey>> }
   | {
       valueMap: Map<unknown, { keys: Set<TKey> }>
@@ -628,7 +628,7 @@ function indexInternals<TKey>(index: object): [IndexInternals<TKey>, boolean] {
 
 /** Test inspection of an index's tracked keys. */
 export function indexedKeysSet<TKey>(index: object): Set<TKey> {
-  return indexInternals<TKey>(index)[0].indexedKeys
+  return new Set(indexInternals<TKey>(index)[0].indexedKeys.keys())
 }
 
 /** Test inspection of an index's value buckets keyed by indexed value. */

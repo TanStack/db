@@ -7,6 +7,7 @@ import {
   normalizeForBTree,
 } from '../utils/comparison.js'
 import { codedMessage, devBuild } from '../error-message.js'
+import { TombstoneMap } from '../utils/tombstone-map'
 import {
   BaseIndex,
   builtInIndexResolverNames,
@@ -61,11 +62,12 @@ export class BTreeIndex<
   private orderedEntries = new BTree<any, OrderedBucket<TKey>>((a, b) =>
     this.compareStored(a, b),
   )
-  private valueMap = new Map<
+  private valueMap = new TombstoneMap<
     unknown,
     { keys: Set<TKey>; ordered: OrderedBucket<TKey> }
   >()
-  private indexedKeys = new Set<TKey>()
+  // Rows deleted and inserted again keep their entry; see TombstoneMap.
+  private indexedKeys = new TombstoneMap<TKey, true>()
 
   // Stored keys use UNDEFINED_SENTINEL; the comparator, which may be
   // user-supplied, expects undefined.
@@ -87,7 +89,7 @@ export class BTreeIndex<
     this.addToBucket(key, normalizedValue)
     this.addRangeValue(indexedValue)
 
-    this.indexedKeys.add(key)
+    this.indexedKeys.set(key, true)
   }
 
   private addToBucket(key: TKey, normalizedValue: unknown): void {
@@ -196,7 +198,7 @@ export class BTreeIndex<
     this.removeRangeValue(oldIndexedValue)
     this.addToBucket(key, newValue)
     this.addRangeValue(newIndexedValue)
-    this.indexedKeys.add(key)
+    this.indexedKeys.set(key, true)
   }
 
   /**

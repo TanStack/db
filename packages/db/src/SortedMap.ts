@@ -1,4 +1,5 @@
 import { compareKeys } from '@tanstack/db-ivm'
+import { TombstoneMap } from './utils/tombstone-map'
 
 /**
  * A Map implementation that keeps its entries sorted based on a comparator function
@@ -19,7 +20,7 @@ export class SortedMap<TKey extends string | number, TValue> {
    *                     If not provided, entries are sorted by key only.
    */
   constructor(comparator?: (a: TValue, b: TValue) => number) {
-    this.map = new Map<TKey, TValue>()
+    this.map = new TombstoneMap<TKey, TValue>()
     this.sortedKeys = []
     this.comparator = comparator
   }

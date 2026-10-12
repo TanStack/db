@@ -5,6 +5,7 @@ import {
   findInsertPositionInArray,
 } from '../utils/array-utils.js'
 import { codedMessage, devBuild } from '../error-message.js'
+import { TombstoneMap } from '../utils/tombstone-map'
 import {
   BaseIndex,
   builtInIndexResolverNames,
@@ -58,7 +59,8 @@ export class BasicIndex<
   // Sorted array of unique indexed values for range queries
   private sortedValues: Array<any> = []
   // Set of all indexed PKs
-  private indexedKeys = new Set<TKey>()
+  // Rows deleted and inserted again keep their entry; see TombstoneMap.
+  private indexedKeys = new TombstoneMap<TKey, true>()
 
   protected initialize(_options?: BasicIndexOptions): void {}
 
@@ -72,7 +74,7 @@ export class BasicIndex<
     this.addToBucket(key, normalizedValue)
     this.addRangeValue(indexedValue)
 
-    this.indexedKeys.add(key)
+    this.indexedKeys.set(key, true)
   }
 
   private addToBucket(key: TKey, normalizedValue: unknown): void {
@@ -178,7 +180,7 @@ export class BasicIndex<
     this.removeRangeValue(oldIndexedValue)
     this.addToBucket(key, newValue)
     this.addRangeValue(newIndexedValue)
-    this.indexedKeys.add(key)
+    this.indexedKeys.set(key, true)
   }
 
   /**
@@ -193,7 +195,7 @@ export class BasicIndex<
       const indexedValue = this.evaluateAddedValue(key, item)
       entriesArray.push({ key, value: normalizeValue(indexedValue) })
       this.addRangeValue(indexedValue)
-      this.indexedKeys.add(key)
+      this.indexedKeys.set(key, true)
     }
 
     // Group by value

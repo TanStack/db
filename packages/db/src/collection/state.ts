@@ -6,6 +6,7 @@ import {
   SyncQueueInvariantError,
   SyncTransactionAbortedError,
 } from '../errors.js'
+import { TombstoneMap } from '../utils/tombstone-map'
 import type { DuplicateKeySyncError } from '../errors.js'
 import type {
   VirtualOrigin,
@@ -152,7 +153,7 @@ export class CollectionStateManager<
    * does not identify the source client. Optimistic rows are separately 'local'.
    * Used for the $origin virtual property.
    */
-  public rowOrigins = new Map<TKey, VirtualOrigin>()
+  public rowOrigins: Map<TKey, VirtualOrigin> = new TombstoneMap()
 
   /**
    * Tracks keys of pending or persisting local mutations for source-write attribution.
@@ -167,7 +168,7 @@ export class CollectionStateManager<
   // Keyed by row key, not row object: adding a WeakMap entry for each
   // published row cost more than the copy it saves. Sync writes, deletes,
   // and cleanup drop a key's entry.
-  private virtualPropsCache = new Map<
+  private virtualPropsCache = new TombstoneMap<
     TKey,
     {
       row: TOutput
