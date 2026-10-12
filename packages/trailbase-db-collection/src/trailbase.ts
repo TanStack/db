@@ -33,9 +33,9 @@ type OptionalConversions<
   OutputType extends ShapeOf<InputType>,
 > = {
   // Excludes all keys that require a conversation.
-  [K in keyof InputType as InputType[K] extends OutputType[K]
-    ? K
-    : never]?: Conversion<InputType[K], OutputType[K]>
+  [
+    K in keyof InputType as InputType[K] extends OutputType[K] ? K : never
+  ]?: Conversion<InputType[K], OutputType[K]>
 }
 
 type RequiredConversions<
@@ -43,9 +43,9 @@ type RequiredConversions<
   OutputType extends ShapeOf<InputType>,
 > = {
   // Excludes all keys that do not strictly require a conversation.
-  [K in keyof InputType as InputType[K] extends OutputType[K]
-    ? never
-    : K]: Conversion<InputType[K], OutputType[K]>
+  [
+    K in keyof InputType as InputType[K] extends OutputType[K] ? never : K
+  ]: Conversion<InputType[K], OutputType[K]>
 }
 
 type Conversions<
