@@ -753,7 +753,7 @@ Unsupported join source type: custom
 Development builds show the full message. For example:
 
 ```text
-Non-aggregate expression 'field' in SELECT must also appear in GROUP BY clause
+Non-aggregate expression 'field' must also appear in GROUP BY clause
 ```
 
 <a id="error-71"></a>
@@ -1238,12 +1238,12 @@ caseWhen() conditions must be expression-like values
 
 <a id="error-113"></a>
 
-## Error 113: `query/builder/index.ts`
+## Error 113: `query/ir.ts`
 
 Development builds show this message, with `${...}` replaced by values:
 
 ```text
-Cannot use collection descriptor "${alias}" as a query source without a DbClient resolver. In React, wrap your tree in <DbProvider>.
+Collection descriptor "${source.alias}" requires a DbClient when the query is consumed. Bind the query through a client-aware API or use a concrete Collection.
 ```
 
 <a id="error-114"></a>
@@ -2360,6 +2360,16 @@ Development builds show this message, with `${...}` replaced by values:
 [LocalStorageCollection] Error refreshing a same-tab peer for storage key "${key}":
 ```
 
+<a id="error-234"></a>
+
+## Error 234: `client.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+DbClient cannot reuse live query "${queryHash}" with different source Collections. Use the same Collection objects or a distinct query key.
+```
+
 <a id="error-235"></a>
 
 ## Error 235: `query/live/bucket-facade-adapter.ts`
@@ -2378,4 +2388,54 @@ Development builds show this message, with `${...}` replaced by values:
 
 ```text
 Includes subquery for "${fieldName}" reuses an ancestor's source declaration. Use new Query().from({ alias: collection }) in the child instead of passing the ancestor builder to from().
+```
+
+<a id="error-237"></a>
+
+## Error 237: `query/builder/query-ir.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Query must resolve to a QueryBuilder; received ${received}.
+```
+
+<a id="error-238"></a>
+
+## Error 238: `query/compiler/index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Query reference "${ref.path.join(`.`)}" is out of scope. Use a source from this query or a containing query.
+```
+
+<a id="error-239"></a>
+
+## Error 239: `query/compiler/index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Include query is missing a captured parent projection for "${ref.path.join(`.`)}".
+```
+
+<a id="error-240"></a>
+
+## Error 240: `query/live/bucket-facade-adapter.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Bucket facade retired with rows the graph did not retract
+```
+
+<a id="error-241"></a>
+
+## Error 241: `query/live/bucket-facade-adapter.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+A live query's child collection cannot be cleaned up directly. Clean up the live query instead.
 ```

@@ -9,7 +9,7 @@ title: and
 function and(left, right): BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:209](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L209)
+Defined in: [packages/db/src/query/builder/functions.ts:210](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L210)
 
 ### Parameters
 
@@ -34,7 +34,7 @@ function and(
 rest): BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:213](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L213)
+Defined in: [packages/db/src/query/builder/functions.ts:214](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L214)
 
 ### Parameters
 

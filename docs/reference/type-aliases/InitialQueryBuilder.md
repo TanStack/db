@@ -7,4 +7,4 @@ title: InitialQueryBuilder
 type InitialQueryBuilder = Pick<BaseQueryBuilder<Context>, "from" | "unionAll">;
 ```
 
-Defined in: [packages/db/src/query/builder/index.ts:1620](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L1620)
+Defined in: [packages/db/src/query/builder/index.ts:1826](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L1826)

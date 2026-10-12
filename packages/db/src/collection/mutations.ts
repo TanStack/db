@@ -3,6 +3,7 @@ import {
   withChangeTracking,
   withFlatChangeTracking,
 } from '../proxy'
+import { normalizeError } from '../utils/error.js'
 import { safeRandomUUID } from '../utils/uuid'
 import { createTransaction, getActiveTransaction } from '../transactions'
 import {
@@ -219,9 +220,14 @@ export class CollectionMutationsManager<
       mutationFn: () => Promise.resolve(),
     })
     transaction.applyMutations(mutations)
-    direct.write(mutations)
-    transaction.setState(`completed`)
-    transaction.isPersisted.resolve(transaction)
+    // The rows are stored when `write` publishes them, so a throwing
+    // subscriber cannot undo the write; the transaction still completes.
+    try {
+      direct.write(mutations)
+    } finally {
+      transaction.setState(`completed`)
+      transaction.isPersisted.resolve(transaction)
+    }
     return transaction
   }
 
@@ -232,10 +238,7 @@ export class CollectionMutationsManager<
   ): void {
     // The Collection owns the request before its handler can write through
     // sync, so a confirmation written by the handler waits for settlement.
-    // A rejection the caller never observes is not an unhandled rejection;
-    // the caller reads it from `isPersisted` or `when('settled')`.
-    if (this.state.trackTransaction(transaction))
-      transaction.isPersisted.promise.catch(() => undefined)
+    this.state.trackTransaction(transaction)
     transaction.applyMutations(mutations)
     this.state.recomputeOptimisticState(true)
   }
@@ -271,7 +274,22 @@ export class CollectionMutationsManager<
           >,
         }),
     })
-    this.applyOwnedMutations(transaction, mutations)
+    try {
+      this.applyOwnedMutations(transaction, mutations)
+    } catch (error) {
+      // A subscriber threw before the handler could run. Roll back only this
+      // write, so no Collection keeps a transaction that nothing will settle.
+      // The admission error is the reported cause.
+      try {
+        transaction.rollback({
+          isSecondaryRollback: true,
+          error: normalizeError(error),
+        })
+      } catch {
+        // Settlement still ran every step.
+      }
+      throw error
+    }
     // Errors still reject `isPersisted.promise`. This catch only prevents an
     // unhandled rejection from the fire-and-forget commit.
     transaction.commit().catch(() => undefined)

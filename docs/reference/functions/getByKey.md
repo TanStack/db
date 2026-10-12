@@ -7,7 +7,7 @@ title: getByKey
 function getByKey<T>(objectStore, key): Promise<T | undefined>;
 ```
 
-Defined in: packages/db/src/indexed-db-wrapper.ts:391
+Defined in: [packages/db/src/indexed-db-wrapper.ts:426](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db-wrapper.ts#L426)
 
 Retrieves a single item by its key from an object store.
 

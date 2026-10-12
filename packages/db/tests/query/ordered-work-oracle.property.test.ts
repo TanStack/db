@@ -31,6 +31,10 @@ import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
  * independent filter/sort/window recomputation. It must also avoid duplicate
  * finite requests, partial initial publications, and cross-source suppression
  * when joined loads overlap or replay.
+ * `pagination-oracle.property.test.ts` owns general ordered-window rows and
+ * publication.
+ * This file checks rows again at eager indexed and joined work cuts so a work
+ * bound cannot pass by dropping required rows.
  * Direct LEFT-joined filters require a finite indexed root prefix, settlement
  * of child demand before continuation, and one complete initial publication.
  * Custom collation uses one full-source request, while an unindexed underfilled

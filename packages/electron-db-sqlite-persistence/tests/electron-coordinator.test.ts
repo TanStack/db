@@ -5,6 +5,7 @@
  * retry-result, and disposal boundaries.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { resolvePersistedStorageTarget } from '@tanstack/db-sqlite-persistence-core'
 import { ElectronCollectionCoordinator } from '../src/electron-coordinator'
 import type { ElectronCollectionCoordinatorOptions } from '../src/electron-coordinator'
 import type { PersistenceAdapter } from '@tanstack/db-sqlite-persistence-core'
@@ -150,8 +151,9 @@ function createStubAdapter(): StubAdapter {
       latestSeq: 0,
       latestRowVersion: 0,
     }),
-    async reserveLeadershipTerm(collectionId, observedTerm) {
-      const position = await this.getStreamPosition(collectionId)
+    async reserveLeadershipTerm(target, observedTerm) {
+      const collectionId = resolvePersistedStorageTarget(target).collectionId
+      const position = await this.getStreamPosition()
       const latestTerm =
         Math.max(
           position.latestTerm,
@@ -283,7 +285,11 @@ describe(`ElectronCollectionCoordinator parity`, () => {
       await waitForLeadership(coordinator, `todos`)
       const spec = { expressionSql: [`title`] }
 
-      await adapter.ensureIndex(`todos`, `idx-once`, spec)
+      await adapter.ensureIndex(
+        { kind: `eager`, collectionId: `todos` },
+        `idx-once`,
+        spec,
+      )
       await coordinator.requestEnsurePersistedIndex(
         `todos`,
         `idx-once`,

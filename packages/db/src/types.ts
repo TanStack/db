@@ -415,6 +415,15 @@ export type SyncConfigRes = {
   cleanup?: CleanupFn
   loadSubset?: LoadSubsetFn
   unloadSubset?: UnloadSubsetFn
+  /**
+   * Optional provider-controlled restart for a lost managed cache claim.
+   * Retire old provider callbacks synchronously and start the replacement only
+   * after `cacheRotated` fulfills; it rejects if scoped recovery fails. When
+   * absent, the persistence wrapper cleans up and reenters `sync` itself.
+   */
+  restartAfterScopedRecovery?: (
+    cacheRotated: Promise<void>,
+  ) => void | Promise<void>
 }
 export interface SyncConfig<
   T extends object = Record<string, unknown>,
@@ -538,7 +547,16 @@ export type SyncPersistenceCapabilityV1<
 > = {
   readonly protocol: `@tanstack/db/sync-persistence`
   readonly version: 1
+  /** This run owns a claimed on-demand cache generation. */
+  readonly managedCacheGeneration?: boolean
+  /** The on-demand cache generation rotated before the source sync run entered. */
+  readonly startupCacheGenerationRotated?: boolean
   readonly hydrateBaseline: () => Promise<void>
+  /** Retire untrusted on-demand rows and retain the provider's reset metadata. */
+  readonly startScopedRecovery?: (resetMetadata?: {
+    key: string
+    value: unknown
+  }) => Promise<void>
   /**
    * Reserve the open sync transaction's FIFO turn, so a subset hydration
    * that starts before it commits waits for that commit.

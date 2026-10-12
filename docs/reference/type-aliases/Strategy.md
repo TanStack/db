@@ -11,6 +11,6 @@ type Strategy =
   | BatchStrategy;
 ```
 
-Defined in: [packages/db/src/strategies/types.ts:117](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L117)
+Defined in: [packages/db/src/strategies/types.ts:126](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L126)
 
 Union type of all available strategies

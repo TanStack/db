@@ -129,6 +129,7 @@ import {
   QueryRef as QueryRefClass,
   UnionAll as UnionAllClass,
   UnionFrom as UnionFromClass,
+  collectPropRefs,
   createResidualWhere,
   getFromSources,
   getWhereExpression,
@@ -136,7 +137,7 @@ import {
 } from './ir.js'
 import type {
   BasicExpression,
-  CollectionRef as CollectionRefClass,
+  CollectionSourceRef,
   From,
   QueryIR,
   Select,
@@ -308,7 +309,7 @@ function isCollectionReference(query: QueryIR, sourceAlias: string): boolean {
   // Check the FROM clause
   for (const source of getFromSources(query.from)) {
     if (source.alias === sourceAlias) {
-      return source.type === `collectionRef`
+      return source.type === `collectionRef` || source.type === `descriptorRef`
     }
   }
 
@@ -316,7 +317,10 @@ function isCollectionReference(query: QueryIR, sourceAlias: string): boolean {
   if (query.join) {
     for (const joinClause of query.join) {
       if (joinClause.from.alias === sourceAlias) {
-        return joinClause.from.type === `collectionRef`
+        return (
+          joinClause.from.type === `collectionRef` ||
+          joinClause.from.type === `descriptorRef`
+        )
       }
     }
   }
@@ -481,7 +485,7 @@ function removeRedundantFromClause(from: From): From {
     )
   }
 
-  if (from.type === `collectionRef`) {
+  if (from.type === `collectionRef` || from.type === `descriptorRef`) {
     return from
   }
 
@@ -494,7 +498,10 @@ function removeRedundantFromClause(from: From): From {
   ) {
     // Return the inner query's FROM clause with this alias
     const innerFrom = removeRedundantFromClause(processedQuery.from)
-    if (innerFrom.type === `collectionRef`) {
+    if (
+      innerFrom.type === `collectionRef` ||
+      innerFrom.type === `descriptorRef`
+    ) {
       // A user-declared wrapper has its own lexical binding. Collapsing it
       // would leave outer references pointing at a binding no longer present.
       return innerFrom.bindingId === from.bindingId
@@ -509,9 +516,9 @@ function removeRedundantFromClause(from: From): From {
 }
 
 function removeRedundantJoinFromClause(
-  from: CollectionRefClass | QueryRefClass,
-): CollectionRefClass | QueryRefClass {
-  return removeRedundantFromClause(from) as CollectionRefClass | QueryRefClass
+  from: CollectionSourceRef | QueryRefClass,
+): CollectionSourceRef | QueryRefClass {
+  return removeRedundantFromClause(from) as CollectionSourceRef | QueryRefClass
 }
 
 /**
@@ -777,7 +784,7 @@ function applyOptimizations(
           joinClause.from,
           pushableSingleSource,
           actuallyOptimized,
-        ) as CollectionRefClass | QueryRefClass,
+        ) as CollectionSourceRef | QueryRefClass,
       }))
     : undefined
 
@@ -852,7 +859,7 @@ function deepCopyQuery(query: QueryIR): QueryIR {
           type: joinClause.type,
           on: joinClause.on,
           from: deepCopyFrom(joinClause.from) as
-            CollectionRefClass | QueryRefClass,
+            CollectionSourceRef | QueryRefClass,
         }))
       : undefined,
     where: query.where ? [...query.where] : undefined,
@@ -872,8 +879,8 @@ function copyClauseArrays(query: QueryIR): QueryIR {
 }
 
 function deepCopyFrom(from: From): From {
-  // Share the CollectionRef: its SourceId is the compiled input identity.
-  if (from.type === `collectionRef`) {
+  // Share source refs: their SourceId is the compiled input identity.
+  if (from.type === `collectionRef` || from.type === `descriptorRef`) {
     return from
   }
 
@@ -893,7 +900,7 @@ function deepCopyFrom(from: From): From {
 
   return new UnionFromClass(
     from.sources.map(
-      (source: CollectionRefClass | QueryRefClass) =>
+      (source: CollectionSourceRef | QueryRefClass) =>
         deepCopyFrom(source) as any,
     ),
   )
@@ -948,7 +955,7 @@ function optimizeFromWithTracking(
             source,
             singleSourceClauses,
             actuallyOptimized,
-          ) as CollectionRefClass | QueryRefClass,
+          ) as CollectionSourceRef | QueryRefClass,
       ),
     )
   }
@@ -962,9 +969,9 @@ function optimizeFromWithTracking(
   const whereClause = singleSourceClauses.get(from.alias)
 
   if (!whereClause) {
-    // No optimization needed. Keep the CollectionRef itself: its sourceId is
+    // No optimization needed. Keep the source ref itself: its sourceId is
     // the compiled input identity, and a copy would lose it.
-    if (from.type === `collectionRef`) {
+    if (from.type === `collectionRef` || from.type === `descriptorRef`) {
       return from
     }
     // Must be queryRef due to type system
@@ -975,7 +982,7 @@ function optimizeFromWithTracking(
     )
   }
 
-  if (from.type === `collectionRef`) {
+  if (from.type === `collectionRef` || from.type === `descriptorRef`) {
     // Create a new subquery with the WHERE clause for the collection
     // This is always safe since we're creating a new subquery
     const subQuery: QueryIR = {
@@ -1098,34 +1105,6 @@ function isSafeToPushIntoExistingSubquery(
 }
 
 /**
- * Recursively collects all PropRef references from an expression.
- *
- * @param expr - The expression to traverse
- * @returns Array of PropRef references found in the expression
- */
-function collectRefs(expr: any): Array<PropRef> {
-  const refs: Array<PropRef> = []
-
-  if (expr == null || typeof expr !== `object`) return refs
-
-  switch (expr.type) {
-    case `ref`:
-      refs.push(expr as PropRef)
-      break
-    case `func`:
-    case `agg`:
-      for (const arg of expr.args ?? []) {
-        refs.push(...collectRefs(arg))
-      }
-      break
-    default:
-      break
-  }
-
-  return refs
-}
-
-/**
  * Determines whether the provided WHERE clause references fields that are
  * computed by a subquery SELECT rather than pass-through properties.
  *
@@ -1152,7 +1131,7 @@ function whereReferencesComputedSelectFields(
     computed.add(key)
   }
 
-  const refs = collectRefs(whereClause)
+  const refs = collectPropRefs(whereClause)
 
   for (const ref of refs) {
     const path = (ref as any).path as Array<string>
@@ -1177,7 +1156,7 @@ function referencesAliasWithRemappedSelect(
   whereClause: BasicExpression<boolean>,
   outerAlias: string,
 ): boolean {
-  const refs = collectRefs(whereClause)
+  const refs = collectPropRefs(whereClause)
   // Only care about clauses that actually reference the outer alias.
   if (refs.every((ref) => ref.path[0] !== outerAlias)) {
     return false

@@ -1219,7 +1219,8 @@ describe(`draft revert oracle`, () => {
 // Law, checked after the last step:
 // - `x` is reported exactly when it differs from the original.
 // - `f` is reported, with its final value, when it differs from the original.
-//   When it equals the original, `f` may be reported, with its final value.
+//   When it equals the original, `f` may be reported only if the history wrote
+//   the live `f` value, and then only with its final value.
 // - Reading the draft gives the model's final row.
 
 type NativeRow = { x: number; f: { arr: Array<number>; g: { a?: number } } }
@@ -1269,18 +1270,25 @@ const cloneRow = (row: NativeRow): NativeRow => ({
 const sameRowPart = (left: unknown, right: unknown) =>
   JSON.stringify(left) === JSON.stringify(right)
 
-function nativeModel(history: NativeHistory): NativeRow {
+function nativeModel(history: NativeHistory): {
+  row: NativeRow
+  wroteF: boolean
+} {
   const row = cloneRow(history.original)
   let handle: Array<number> | undefined
+  let wroteF = false
   for (const action of history.ops) {
     switch (action.op) {
       case `push`:
+        wroteF = true
         row.f.arr.push(action.v)
         break
       case `pop`:
+        wroteF = true
         row.f.arr.pop()
         break
       case `reverse`:
+        wroteF = true
         row.f.arr.reverse()
         break
       case `assignArr`:
@@ -1290,13 +1298,16 @@ function nativeModel(history: NativeHistory): NativeRow {
         // An assignment of an equal value is a no-op: the draft keeps its
         // array, so a retained handle stays attached.
         if (sameRowPart(next, row.f.arr)) break
+        wroteF = true
         row.f.arr = [...next]
         break
       }
       case `replaceG`:
+        wroteF = true
         row.f.g = {}
         break
       case `setGa`:
+        if (row.f.g.a !== action.v) wroteF = true
         row.f.g.a = action.v
         break
       case `retain`:
@@ -1304,6 +1315,7 @@ function nativeModel(history: NativeHistory): NativeRow {
         break
       case `pushHandle`:
         if (handle === undefined) break
+        if (handle === row.f.arr) wroteF = true
         handle.push(action.v)
         break
       case `setX`:
@@ -1311,7 +1323,7 @@ function nativeModel(history: NativeHistory): NativeRow {
         break
     }
   }
-  return row
+  return { row, wroteF }
 }
 
 function driveNative(history: NativeHistory): {
@@ -1363,17 +1375,21 @@ function driveNative(history: NativeHistory): {
   }
 }
 
-function expectNativeHistory(history: NativeHistory): void {
-  const final = nativeModel(history)
-  const { changes, read } = driveNative(history)
+function expectNativeResult(
+  history: NativeHistory,
+  { changes, read }: ReturnType<typeof driveNative>,
+): void {
+  const { row: final, wroteF } = nativeModel(history)
   const context = JSON.stringify(history)
   expect(read, `draft reads the final row, ${context}`).toEqual(final)
   const xChanged = final.x !== history.original.x
   expect(`x` in changes, `x reported, ${context}`).toBe(xChanged)
   if (xChanged) expect(changes.x, `x value, ${context}`).toBe(final.x)
   const fChanged = !sameRowPart(final.f, history.original.f)
-  expect(`f` in changes || !fChanged, `f reported, ${context}`).toBe(true)
-  // An equal f may be reported, with its final value.
+  if (fChanged) expect(`f` in changes, `f reported, ${context}`).toBe(true)
+  else if (!wroteF)
+    expect(`f` in changes, `unwritten f absent, ${context}`).toBe(false)
+  // An equal f may be reported only after a write to the live value.
   if (`f` in changes) expect(changes.f, `f value, ${context}`).toEqual(final.f)
   expect(Object.keys(changes).sort(), `only x and f, ${context}`).toEqual(
     Object.keys(changes)
@@ -1382,7 +1398,34 @@ function expectNativeHistory(history: NativeHistory): void {
   )
 }
 
+function expectNativeHistory(history: NativeHistory): void {
+  expectNativeResult(history, driveNative(history))
+}
+
 describe(`draft revert oracle: native mutators mixed with assignments`, () => {
+  it(`rejects an unwritten field in the change report`, () => {
+    const histories: Array<NativeHistory> = [
+      {
+        original: { x: 0, f: { arr: [1], g: { a: 0 } } },
+        ops: [{ op: `setX`, v: 1 }],
+      },
+      {
+        original: { x: 0, f: { arr: [1], g: { a: 0 } } },
+        ops: [{ op: `setGa`, v: 0 }],
+      },
+    ]
+    for (const history of histories) {
+      const observed = driveNative(history)
+      expect(() =>
+        expectNativeResult(history, {
+          ...observed,
+          changes: { ...observed.changes, f: history.original.f },
+        }),
+      ).toThrow()
+      expectNativeResult(history, observed)
+    }
+  })
+
   for (const { name, seed } of campaigns) {
     it(`matches the model across generated native histories (${name})`, () => {
       fc.assert(fc.property(nativeHistoryArb, expectNativeHistory), {

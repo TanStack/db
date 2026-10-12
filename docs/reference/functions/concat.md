@@ -9,7 +9,7 @@ title: concat
 function concat<T>(arg): ConcatToArrayWrapper<T>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:307](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L307)
+Defined in: [packages/db/src/query/builder/functions.ts:308](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L308)
 
 ### Type Parameters
 
@@ -33,7 +33,7 @@ Defined in: [packages/db/src/query/builder/functions.ts:307](https://github.com/
 function concat(...args): BasicExpression<string>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:310](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L310)
+Defined in: [packages/db/src/query/builder/functions.ts:311](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L311)
 
 ### Parameters
 

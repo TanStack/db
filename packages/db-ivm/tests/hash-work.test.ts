@@ -71,7 +71,7 @@ describe(`hash traversal work`, () => {
     const before = hash({ handle: first })
     first.changed = true
     expect(hash({ handle: first })).toBe(before)
-    expect(hash({ handle: second })).not.toBe(before)
+    expect(equalHashValues({ handle: first }, { handle: second })).toBe(false)
     expect(
       countTraversalAllocations(() => {
         hash(first)

@@ -35,9 +35,13 @@ import type { Scheduler } from 'fast-check'
  * and callback reentry. It compares every intermediate publication, not only
  * the final rows.
  *
- * This file owns replay-specific data and timing. General owner/attempt status
- * is modeled in the lifecycle grammar, and optimistic transaction semantics
- * are modeled by the optimistic-history oracle.
+ * `collection-subscription-lifecycle-publication-oracle.property.test.ts`
+ * owns the general public-row and exact-batch law. This file applies it to
+ * replay-specific schedules, including same-key source changes after a failed
+ * replay. The Collection `subscribeChanges` contract supplies the public
+ * observation. General owner/attempt status is modeled in the lifecycle
+ * grammar, and optimistic transaction semantics in the optimistic-history
+ * oracle.
  */
 
 type ReplayRow = {
