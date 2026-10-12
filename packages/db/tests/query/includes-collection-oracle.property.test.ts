@@ -1844,6 +1844,81 @@ describe(`Collection-valued includes oracle`, () => {
   )
 
   fcTest(
+    `live query cleanup during root publication suppresses the prepared facade callback`,
+    async () => {
+      type NodeRow = {
+        id: number
+        kind: `parent` | `child`
+        group: number
+        value: number
+      }
+      const nodes = createControlledCollection<NodeRow>(
+        `publication-live-cleanup`,
+        [
+          { id: 1, kind: `parent`, group: 1, value: 1 },
+          { id: 10, kind: `child`, group: 1, value: 1 },
+        ],
+      )
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ parent: nodes.collection })
+          .where(({ parent }) => eq(parent.kind, `parent`))
+          .select(({ parent }) => ({
+            id: parent.id,
+            value: parent.value,
+            children: q
+              .from({ child: nodes.collection })
+              .where(({ child }) => eq(child.kind, `child`))
+              .where(({ child }) => eq(child.group, parent.group)),
+          })),
+      )
+
+      await live.preload()
+      const facade = live.get(1)!.children
+      const rootSnapshots: Array<Array<number>> = []
+      const facadeSnapshots: Array<Array<number>> = []
+      // The owner ends its child collections while the root publishes. The
+      // facade's prepared publication must not reach its subscribers after
+      // that.
+      let cleanup: Promise<void> | undefined
+      const rootSubscription = live.subscribeChanges(
+        () => {
+          rootSnapshots.push(facade.toArray.map(({ value }) => value))
+          cleanup = live.cleanup()
+        },
+        { includeInitialState: false },
+      )
+      const facadeSubscription = facade.subscribeChanges(
+        () => facadeSnapshots.push(facade.toArray.map(({ value }) => value)),
+        { includeInitialState: false },
+      )
+
+      try {
+        nodes.writeBatch([
+          {
+            type: `update`,
+            value: { id: 1, kind: `parent`, group: 1, value: 2 },
+          },
+          {
+            type: `update`,
+            value: { id: 10, kind: `child`, group: 1, value: 2 },
+          },
+        ])
+        await cleanup
+
+        expect(rootSnapshots).toEqual([[2]])
+        expect(facadeSnapshots).toEqual([])
+        expect(facade.status).toBe(`cleaned-up`)
+        expect(facade.toArray).toEqual([])
+      } finally {
+        rootSubscription.unsubscribe()
+        facadeSubscription.unsubscribe()
+        await nodes.collection.cleanup()
+      }
+    },
+  )
+
+  fcTest(
     `shared facades remain active until their last parent departs`,
     async () => {
       const driver = createCollectionDriver(
