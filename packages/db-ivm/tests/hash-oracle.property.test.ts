@@ -52,9 +52,15 @@ function expectEqualHashes(
 
 // Prefixing preserves arbitrary string content while excluding integer-index
 // keys. Unique keys and at least two entries make reversal consequential.
+// Canonically equivalent spellings are distinct keys that locale collation
+// ranks as equal, so the order the hash visits keys must not depend on
+// collation.
+const collationTies = [`\u00C5`, `A\u030A`, `\u00E9`, `e\u0301`, `\u212B`]
 const arbitraryNonIndexEntries = fc.uniqueArray(
   fc.tuple(
-    fc.string().map((key) => `key:${key}`),
+    fc
+      .oneof(fc.string(), fc.constantFrom(...collationTies))
+      .map((key) => `key:${key}`),
     fc.integer(),
   ),
   { minLength: 2, maxLength: 5, selector: ([key]) => key },
@@ -208,6 +214,23 @@ describe(`hash property-based tests`, () => {
   })
 
   describe(`property order independence`, () => {
+    it(`hashes an array with holes and extra keys the same in any key order`, () => {
+      // Only a dense array keeps its index order unsorted; this one sorts.
+      const first = [] as unknown as Array<number> & Record<string, number>
+      first.length = 4
+      first[1] = 1
+      first[3] = 3
+      first.x = 1
+      first.y = 2
+      const second = [] as unknown as Array<number> & Record<string, number>
+      second.length = 4
+      second[1] = 1
+      second[3] = 3
+      second.y = 2
+      second.x = 1
+      expectEqualHashes(first, second)
+    })
+
     hashProp([
       fc.uniqueArray(
         fc.string().filter((s) => s !== `` && s !== `__proto__`),

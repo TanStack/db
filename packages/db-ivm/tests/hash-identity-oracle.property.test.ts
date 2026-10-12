@@ -103,7 +103,9 @@ const TEMPORALS: ReadonlyArray<[keyof typeof Temporal, string]> = [
   [`Instant`, `2024-01-15T00:00:00Z`],
 ]
 const SYMBOLS = [Symbol(`s0`), Symbol(`s1`)]
-const OBJECT_KEYS = [`a`, `b`, `c`, `0`, `1`]
+// The last two are distinct keys that locale collation ranks as equal (a
+// precomposed and a decomposed Å), so key order must not come from collation.
+const OBJECT_KEYS = [`a`, `b`, `c`, `0`, `1`, `\u00C5`, `A\u030A`]
 // No value in any pool equals this text, so a leaf that holds it makes a
 // cyclic value unequal to its original.
 const SENTINEL = `\u0000sentinel`
