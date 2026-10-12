@@ -10,6 +10,11 @@ function sameOutput(left: unknown, right: unknown): boolean {
   return left === right || (left !== left && right !== right)
 }
 
+/** The value a Map stores as a key: -0 becomes 0. */
+function asMapKey<T>(value: T): T {
+  return (value === 0 ? 0 : value) as T
+}
+
 /**
  * Base operator for reduction operations (version-free)
  */
@@ -50,17 +55,19 @@ export class ReduceOperator<K, V1, V2> extends UnaryOperator<[K, V1], [K, V2]> {
       // Most keys have at most one output before and after. Compare the two
       // directly, by the SameValueZero identity the maps below use.
       if (out.length <= 1 && currOut.length <= 1) {
+        // Earlier outputs were stored as Map keys, so only the new one needs it.
         const before = currOut[0]
         const after = out[0]
+        const value = after === undefined ? undefined : asMapKey(after[0])
         if (
           before !== undefined &&
           after !== undefined &&
-          sameOutput(before[0], after[0])
+          sameOutput(before[0], value)
         ) {
           const delta = after[1] - before[1]
           if (delta !== 0) {
-            result.push([[key, after[0]], delta])
-            this.#indexOut.addValue(key, [after[0], delta])
+            result.push([[key, before[0]], delta])
+            this.#indexOut.addValue(key, [before[0], delta])
           }
           continue
         }
@@ -69,8 +76,8 @@ export class ReduceOperator<K, V1, V2> extends UnaryOperator<[K, V1], [K, V2]> {
           this.#indexOut.addValue(key, [before[0], -before[1]])
         }
         if (after !== undefined && after[1] !== 0) {
-          result.push([[key, after[0]], after[1]])
-          this.#indexOut.addValue(key, [after[0], after[1]])
+          result.push([[key, value as V2], after[1]])
+          this.#indexOut.addValue(key, [value as V2, after[1]])
         }
         continue
       }
