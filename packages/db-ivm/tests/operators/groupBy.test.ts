@@ -760,8 +760,13 @@ describe(`Operators`, () => {
       // its instance, the deleted value, is the one that comes back, in either
       // insertion order.
       for (const deletedFirst of [true, false]) {
-        expect(Object.is(extremes(-0, 0, { deletedFirst }).lo, -0)).toBe(true)
-        expect(Object.is(extremes(0, -0, { deletedFirst }).lo, 0)).toBe(true)
+        for (const deleted of [-0, 0]) {
+          const zero = extremes(deleted, deleted === 0 ? -0 : 0, {
+            deletedFirst,
+          })
+          expect(Object.is(zero.lo, deleted)).toBe(true)
+          expect(Object.is(zero.hi, deleted)).toBe(true)
+        }
         const deletedDate = new Date(5)
         const date = extremes(deletedDate, new Date(5), { deletedFirst })
         expect(date.lo).toBe(deletedDate)

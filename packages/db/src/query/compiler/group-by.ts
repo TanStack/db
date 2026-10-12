@@ -430,17 +430,16 @@ export function processGroupBy(
     }
   }
 
-  // D2 consolidates contributions whose hashes match, keeping the instance it
-  // was last given (db-ivm's groupBy min/max contract test records this),
-  // and the hash treats -0
-  // as 0 and equal Dates as one value. A min or max returns one of its
-  // inputs, so each contribution carries the exact key of the value it
-  // compares, as a group value does. A primitive's key is its exact value, so
-  // equal primitives still consolidate. An object's key holds its row key, so
-  // a retraction cancels its insert even when the argument builds a new
-  // instance each time, and a merged contribution never keeps a deleted
-  // row's instance. A sum, avg, or count only adds its coerced numbers, so
-  // merging equal inputs cannot change its result.
+  // D2 consolidates contributions whose hashes match, and the hash treats -0 as 0
+  // and equal Dates as one value. Today it keeps the instance it was last given;
+  // db-ivm's groupBy tests pin that as current behavior, not as a promise. A min
+  // or max returns one of its inputs, so each contribution carries the exact key
+  // of the value it compares, as a group value does. A primitive's key is its
+  // exact value, so equal primitives still consolidate. An object's key holds its
+  // row key, so a retraction cancels its insert even when the argument builds a
+  // new instance each time, and a merged contribution never keeps a deleted row's
+  // instance. A sum, avg, or count only adds its coerced numbers, so merging
+  // equal inputs cannot change its result.
   const exactInputs: Array<(entry: [string, NamespacedRow]) => unknown> = []
   const addAggregate = (alias: string, aggExpr: Aggregate) => {
     aggregates[alias] = getAggregateFunction(aggExpr)
