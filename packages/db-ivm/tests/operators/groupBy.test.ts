@@ -754,6 +754,40 @@ describe(`Operators`, () => {
       }
     })
 
+    test(`a retraction cancels its insert when it holds an equal array subclass`, () => {
+      // The hash treats an array subclass like an array, so the retraction
+      // below must meet the plain-array insert and remove it.
+      class Sub extends Array<number> {}
+      const graph = new D2()
+      const input = graph.newInput<{ k: Array<number>; v: number }>()
+      const groups = new Map<string, number>()
+      input.pipe(
+        groupBy((row) => ({ k: row.k }), {
+          lo: min((row) => row.v),
+          n: count((row) => row.v),
+        }),
+        output((message) => {
+          for (const [[, row], multiplicity] of message.getInner()) {
+            const tally = `${row.lo}:${row.n}`
+            groups.set(tally, (groups.get(tally) ?? 0) + multiplicity)
+          }
+        }),
+      )
+      graph.finalize()
+      input.sendData(
+        new MultiSet([
+          [{ k: [1], v: 5 }, 1],
+          [{ k: [1], v: 9 }, 1],
+        ]),
+      )
+      graph.run()
+      input.sendData(new MultiSet([[{ k: Sub.from([1]), v: 5 }, -1]]))
+      graph.run()
+      expect(
+        [...groups].filter(([, multiplicity]) => multiplicity !== 0),
+      ).toEqual([[`9:1`, 1]])
+    })
+
     test(`a group reports the key of a current member, not of a deleted one`, () => {
       // The two Maps serialize to one group key but hash differently, so
       // their contributions must not merge. After the first row is deleted,

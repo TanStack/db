@@ -1,3 +1,4 @@
+import { structuralIdentity } from '../hashing/hash.js'
 import { serializeValue } from '../utils.js'
 import { map } from './map.js'
 import { reduce } from './reduce.js'
@@ -12,95 +13,28 @@ type BasicAggregateFunction<T, R, V = unknown> = {
   /**
    * For an object input, a string that two inputs share exactly when they
    * hash equal. It must return undefined for both or a string for both of
-   * two inputs that hash equal, so a retraction meets its insert. Primitive
-   * inputs and dense arrays of primitives need none. Without one, a
-   * contribution that holds this object is compared by structural hash.
+   * two inputs that hash equal, so a retraction meets its insert, and
+   * different strings for inputs that hash differently. Primitives and
+   * arrays or objects built from them need none. Without one, a contribution
+   * that holds this object is compared by structural hash.
    */
   identity?: (value: V) => string | undefined
 }
 
-// Nesting a contribution identity may follow into arrays: a min or max input
-// is an array of exact keys, and an exact key can hold a reference tuple.
-const MAX_IDENTITY_DEPTH = 3
-
 /**
- * One part of a contribution's identity, normalized as the structural hash
- * normalizes it, or undefined when the value has no cheap exact identity.
- * Every part is self-delimiting, so joined parts cannot run together. Tags
- * are punctuation, so they never read as identifiers in this source.
+ * One part of a contribution's identity: the aggregate's own identity for an
+ * object it declares one for, otherwise the structural identity, which the
+ * hash defines. Undefined means the contribution is compared by hash.
  */
 function identityPart(
   value: unknown,
   identity?: (value: object) => string | undefined,
-  depth = 0,
 ): string | undefined {
-  switch (typeof value) {
-    case `number`:
-      // The hash treats -0 as 0 and every NaN as one value.
-      return `#${value === 0 ? 0 : value}`
-    case `string`:
-      return `"${value.length}:${value}`
-    case `boolean`:
-      return value ? `+` : `-`
-    case `undefined`:
-      return `~`
-    case `bigint`:
-      return `%${value}`
-    case `object`: {
-      if (value === null) return `!`
-      if (identity) {
-        const id = identity(value)
-        return id === undefined ? undefined : `@${id.length}:${id}`
-      }
-      return arrayIdentity(value, depth)
-    }
-    default:
-      return undefined
+  if (identity && typeof value === `object` && value !== null) {
+    const id = identity(value)
+    return id === undefined ? undefined : `@${id.length}:${id}`
   }
-}
-
-/**
- * A dense plain array hashes by its length and its elements, so its identity
- * is theirs. Holes, extra properties and symbol keys also reach the hash, so
- * an array with any of them has no identity.
- */
-function arrayIdentity(value: object, depth: number): string | undefined {
-  if (
-    depth >= MAX_IDENTITY_DEPTH ||
-    !Array.isArray(value) ||
-    Object.getPrototypeOf(value) !== Array.prototype ||
-    Object.keys(value).length !== value.length ||
-    Object.getOwnPropertySymbols(value).length > 0
-  )
-    return undefined
-  const parts: Array<string> = []
-  for (const element of value) {
-    const part = identityPart(element, undefined, depth + 1)
-    if (part === undefined) return undefined
-    parts.push(part)
-  }
-  const joined = parts.join(`|`)
-  return `[${value.length}:${joined.length}:${joined}`
-}
-
-/**
- * A group key is a plain object whose hash covers each enumerable key and
- * value, in key order. Its identity does the same, or is undefined.
- */
-function groupKeyIdentity(key: GroupKey): string | undefined {
-  const prototype = Object.getPrototypeOf(key)
-  if (
-    (prototype !== Object.prototype && prototype !== null) ||
-    Object.getOwnPropertySymbols(key).length > 0
-  )
-    return undefined
-  let identity = ``
-  for (const name of Object.keys(key).sort()) {
-    const part = identityPart(key[name], undefined, 1)
-    if (part === undefined) return undefined
-    identity += `|${identityPart(name)}=${part}`
-  }
-  return identity
+  return structuralIdentity(value)
 }
 
 type PipedAggregateFunction<T, R> = {
@@ -176,7 +110,7 @@ export function groupBy<
         values[KEY_SENTINEL] = key
 
         // Add pre-aggregated values
-        let identity: string | null = groupKeyIdentity(key) ?? null
+        let identity: string | null = structuralIdentity(key) ?? null
         for (const [name, aggregate] of aggregateEntries) {
           const value = aggregate.preMap(data)
           values[name] = value
@@ -303,13 +237,8 @@ export function avg<T>(
       sum: valueExtractor(data),
       count: 0,
     }),
-    identity: (value) => {
-      const sumPart = identityPart(value.sum)
-      const countPart = identityPart(value.count)
-      return sumPart === undefined || countPart === undefined
-        ? undefined
-        : `${sumPart}|${countPart}`
-    },
+    // preMap always sets count to 0, so the sum alone identifies the input.
+    identity: (value) => identityPart(value.sum),
     reduce: (values: Array<[{ sum: number; count: number }, number]>) => {
       let totalSum = 0
       let totalCount = 0

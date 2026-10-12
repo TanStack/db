@@ -99,6 +99,7 @@ export class ReduceOperator<K, V1, V2> extends UnaryOperator<[K, V1], [K, V2]> {
   }
 }
 
+/** @internal groupBy's option; its producer must keep the identity exact. */
 export type ReduceOptions = {
   /**
    * Input values are `[identity, value]` with a string or number identity
