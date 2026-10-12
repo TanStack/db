@@ -10,6 +10,7 @@ import {
 import { localOnlyCollectionOptions } from '../src/local-only'
 import { PropRef } from '../src/query/ir'
 import { oraclePropertyOptions, oracleRuns } from './oracle-config'
+import { captureCreatedTransactions } from './utils'
 import type { LocalOnlyCollectionUtils } from '../src/local-only'
 import type { Collection } from '../src/index'
 import type { BaseIndex } from '../src/indexes/base-index'
@@ -46,6 +47,13 @@ import type { ChangeMessage, SyncConfig } from '../src/types'
  * sync history checks this by comparing one ordered trace per key, including
  * repeated changes and complete row values, while leaving cross-key
  * interleaving unconstrained.
+ *
+ * About one generated history in four meets a second subscriber, registered
+ * after the mirror, that throws while one operation publishes. A local-only
+ * direct write stores its rows as it publishes, so the call rethrows, its
+ * transaction is already completed, and the rows and mirror still follow the
+ * model. Whether a throwing subscriber may stop a later subscriber of the same
+ * publication is not decided here; the throwing subscriber is always last.
  *
  * This partial oracle does not cover failed persistence, sync-transaction
  * cancellation, general callback batch shape, callback-time index agreement, or
@@ -84,6 +92,8 @@ type GeneratedHistory = {
   initialKeys: ReadonlyArray<Key>
   sequence: ReadonlyArray<Op>
   mode: `batched` | `sequential`
+  /** The operation whose publication meets a throwing subscriber. */
+  throwOn?: number
 }
 
 type GeneratedStep = { key: Key; deleteWhenPresent: boolean }
@@ -359,6 +369,7 @@ async function runHistory(
   mode: `batched` | `sequential`,
   id: string,
   indexType?: IndexType,
+  throwOn?: number,
 ): Promise<void> {
   const initialRows = [...expectedRowsAfter(initialKeys, [])].map(
     ([, row]) => row,
@@ -436,9 +447,46 @@ async function runHistory(
         ? collection.subscribeChanges(onChanges, { includeInitialState: false })
         : collection.subscribeChanges(onChanges)
 
+    // A second subscriber, after the mirror, throws while one operation
+    // publishes. A local-only direct write stores its rows as it publishes
+    // them, so the throw cannot undo the write: the call rethrows, and its
+    // transaction still settles. The rows and the mirror follow the model.
+    const injected = new Error(`subscriber failed`)
+    let armed = false
+    const throwing =
+      throwOn === undefined
+        ? undefined
+        : collection.subscribeChanges(
+            () => {
+              if (armed) throw injected
+            },
+            { includeInitialState: true },
+          )
+    const { created, restore: restoreCreate } =
+      captureCreatedTransactions(collection)
+    const applyAt = (op: Op, operationIndex: number) => {
+      if (operationIndex !== throwOn) return applyOp(collection, op)
+      armed = true
+      const before = created.length
+      try {
+        applyOp(collection, op)
+      } catch (error) {
+        expect(error, `operation ${operationIndex} rethrows`).toBe(injected)
+        expect(created.length, `one transaction`).toBe(before + 1)
+        expect(
+          created[before]!.state,
+          `operation ${operationIndex} settles`,
+        ).toBe(`completed`)
+        return created[before]!
+      } finally {
+        armed = false
+      }
+      throw new Error(`operation ${operationIndex} did not meet the throw`)
+    }
+
     if (mode === `batched`) {
       const transactions = sequence.map((op, operationIndex) => {
-        const transaction = applyOp(collection, op)
+        const transaction = applyAt(op, operationIndex)
         if (index) {
           const expected = expectedRowsAfter(
             initialKeys,
@@ -455,8 +503,8 @@ async function runHistory(
       if (index) assertIndexAgreement(index, expected)
     } else {
       const settled: Array<Op> = []
-      for (const op of sequence) {
-        await settle(applyOp(collection, op))
+      for (const [operationIndex, op] of sequence.entries()) {
+        await settle(applyAt(op, operationIndex))
         settled.push(op)
         const expected = expectedRowsAfter(initialKeys, settled)
         assertFinalAgreement(collection, mirror, expected)
@@ -473,6 +521,8 @@ async function runHistory(
     for (const publication of publications) {
       expect(publication.mirrorRows).toEqual(publication.publicRows)
     }
+    throwing?.unsubscribe()
+    restoreCreate()
     expect(protocolViolations, `change-message protocol`).toEqual([])
   } catch (error) {
     primaryFailure = error
@@ -509,12 +559,15 @@ async function verifyGeneratedHistory({
   initialKeys,
   sequence,
   mode,
+  throwOn,
 }: GeneratedHistory): Promise<void> {
   await runHistory(
     sequence,
     initialKeys,
     mode,
     `history-oracle-generated-${initialKeys.join(``)}-${mode}-${describeSequence(sequence)}`,
+    undefined,
+    throwOn === undefined ? undefined : throwOn % sequence.length,
   )
 }
 
@@ -660,10 +713,13 @@ describe(`change-event history oracle`, () => {
         { minLength: 1, maxLength: 20 },
       ),
       mode: fc.constantFrom(`batched` as const, `sequential` as const),
+      // About two histories in three arm a throwing subscriber; about one in
+      // four reaches the operation it throws on.
+      throwOn: fc.option(fc.nat(19), { nil: undefined, freq: 2 }),
     })
-    .map(({ initialKeys, steps, mode }) => {
+    .map(({ initialKeys, steps, mode, throwOn }) => {
       const sequence = opsFromPresence(initialKeys, steps, 1)
-      return { initialKeys, sequence, mode }
+      return { initialKeys, sequence, mode, throwOn }
     })
 
   // The fixed prefix forces reused keys through an already-built index.

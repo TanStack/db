@@ -3,6 +3,7 @@ import {
   withChangeTracking,
   withFlatChangeTracking,
 } from '../proxy'
+import { normalizeError } from '../utils/error.js'
 import { safeRandomUUID } from '../utils/uuid'
 import { createTransaction, getActiveTransaction } from '../transactions'
 import {
@@ -219,9 +220,14 @@ export class CollectionMutationsManager<
       mutationFn: () => Promise.resolve(),
     })
     transaction.applyMutations(mutations)
-    direct.write(mutations)
-    transaction.setState(`completed`)
-    transaction.isPersisted.resolve(transaction)
+    // The rows are stored when `write` publishes them, so a throwing
+    // subscriber cannot undo the write; the transaction still completes.
+    try {
+      direct.write(mutations)
+    } finally {
+      transaction.setState(`completed`)
+      transaction.isPersisted.resolve(transaction)
+    }
     return transaction
   }
 
@@ -268,7 +274,22 @@ export class CollectionMutationsManager<
           >,
         }),
     })
-    this.applyOwnedMutations(transaction, mutations)
+    try {
+      this.applyOwnedMutations(transaction, mutations)
+    } catch (error) {
+      // A subscriber threw before the handler could run. Roll back only this
+      // write, so no Collection keeps a transaction that nothing will settle.
+      // The admission error is the reported cause.
+      try {
+        transaction.rollback({
+          isSecondaryRollback: true,
+          error: normalizeError(error),
+        })
+      } catch {
+        // Settlement still ran every step.
+      }
+      throw error
+    }
     // Errors still reject `isPersisted.promise`. This catch only prevents an
     // unhandled rejection from the fire-and-forget commit.
     transaction.commit().catch(() => undefined)
