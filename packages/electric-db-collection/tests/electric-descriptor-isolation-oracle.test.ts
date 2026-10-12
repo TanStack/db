@@ -3,7 +3,10 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCollection, createTransaction } from '@tanstack/db'
 import { ShapeStream } from '@electric-sql/client'
-import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
+import {
+  InvalidPersistedCollectionConfigError,
+  persistedCollectionOptions,
+} from '../../db-sqlite-persistence-core/src'
 import { electricCollectionOptions } from '../src/electric'
 import { StreamAbortedError } from '../src/errors'
 import {
@@ -1665,13 +1668,21 @@ if (replayPath === undefined) {
   )
 }
 
-fixedCase(
-  `keeps insert acknowledgements on the owner of a reused persisted descriptor`,
-  async () => {
+// The Electric descriptor may be reused across independent persisted wrappers.
+// The wrappers may address the same or different durable Collection IDs; that
+// storage identity does not transfer an insert acknowledgement to a peer.
+// Reusing one wrapper itself is rejected before a second owner starts. The
+// public checkpoints are admission, the first receipt, and each Collection's
+// rows after only the first provider session acknowledges its transaction.
+fixedCase.each([`shared storage`, `distinct storage`] as const)(
+  `keeps insert acknowledgements on the owner of a reused Electric descriptor ($0)`,
+  async (storage) => {
+    const readTargets: Array<string> = []
     const adapter: PersistenceAdapter = {
       loadSubset: () => Promise.resolve([]),
-      loadResumeSnapshot: () =>
-        Promise.resolve({
+      loadResumeSnapshot: (target) => {
+        readTargets.push(storageTargetId(target))
+        return Promise.resolve({
           rows: [],
           keySet: { status: `consistent` },
           collectionMetadata: [],
@@ -1679,31 +1690,40 @@ fixedCase(
           latestSeq: 0,
           latestRowVersion: 0,
           resetEpoch: 0,
-        }),
+        })
+      },
       loadCollectionMetadata: () => Promise.resolve([]),
       applyCommittedTx: () => Promise.resolve(),
       ensureIndex: () => Promise.resolve(),
     }
-    const options = persistedCollectionOptions<
-      TestRow,
-      string | number,
-      never,
-      ElectricCollectionUtils<TestRow>
-    >({
-      ...electricCollectionOptions<TestRow>({
-        id: `shared-persisted-options`,
-        shapeOptions: {
-          url: `http://test-url`,
-          params: { table: `test_table` },
-        },
-        getKey: (row) => row.id,
-        startSync: false,
-        onInsert: () => Promise.resolve({ txid: 200, timeout: 100 }),
-      }),
-      persistence: { adapter },
+    const electricOptions = electricCollectionOptions<TestRow>({
+      shapeOptions: {
+        url: `http://test-url`,
+        params: { table: `test_table` },
+      },
+      getKey: (row) => row.id,
+      startSync: false,
+      onInsert: () => Promise.resolve({ txid: 200, timeout: 100 }),
     })
-    const first = createCollection(options)
-    const second = createCollection(options)
+    // The Electric descriptor is reusable; each persisted wrapper binds one
+    // Collection so its receipt and sync controls cannot move to another owner.
+    const persistedOptions = (id: string) =>
+      persistedCollectionOptions<
+        TestRow,
+        string | number,
+        never,
+        ElectricCollectionUtils<TestRow>
+      >({ ...electricOptions, id, persistence: { adapter } })
+    const firstOptions = persistedOptions(`first-persisted-owner`)
+    const first = createCollection(firstOptions)
+    expect(() => createCollection(firstOptions)).toThrow(
+      InvalidPersistedCollectionConfigError,
+    )
+    const secondId =
+      storage === `shared storage`
+        ? `first-persisted-owner`
+        : `second-persisted-owner`
+    const second = createCollection(persistedOptions(secondId))
     try {
       first.startSyncImmediate()
       await vi.waitFor(() => expect(streams).toHaveLength(1))
@@ -1713,6 +1733,10 @@ fixedCase(
       await vi.waitFor(() => expect(streams).toHaveLength(2))
       streams[1]!.send([upToDate])
       await vi.waitFor(() => expect(second.status).toBe(`ready`))
+      expect(second.id).toBe(secondId)
+      expect(new Set(readTargets)).toEqual(
+        new Set([`first-persisted-owner`, secondId]),
+      )
 
       const transaction = first.insert({
         id: 1,
