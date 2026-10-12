@@ -18,6 +18,7 @@ import type {
   PersistenceAdapter,
   ProtocolEnvelope,
   SQLiteDriver,
+  TxCommitted,
 } from '../../db-sqlite-persistence-core/src'
 import type { ElectricCollectionUtils, ElectricSyncMode } from '../src/electric'
 
@@ -48,7 +49,12 @@ import type { ElectricCollectionUtils, ElectricSyncMode } from '../src/electric'
  * external-publisher fixture routes complete committed transactions through
  * its bound adapter; that wiring does not add native-host evidence.
  */
-type Item = Row & { id: number; name: string; stable: string }
+type Item = Row & {
+  id: number
+  name: string
+  stable: string
+  obsolete?: string
+}
 type Subscriber = (messages: Array<Message<Item>>) => void
 type Exposure = { cut: string; rows: Array<Item> }
 
@@ -155,7 +161,7 @@ function change(
   operation: `insert` | `update` | `delete`,
   value: Partial<Item>,
 ): Message<Item> {
-  return { key: String(value.id), value: value as Item, headers: { operation } }
+  return { key: String(value.id), value: value, headers: { operation } }
 }
 
 function fixture(
@@ -182,10 +188,10 @@ function fixture(
   let latestSeq = 0
   let latestRowVersion = 0
   let resetEpoch = 0
-  let subsetLoads = 0
+  let durableRowReads = 0
   const adapter: PersistenceAdapter = {
     loadSubset: () => {
-      subsetLoads++
+      durableRowReads++
       const snapshot = Array.from(rows, ([key, value]) => ({
         key,
         value: { ...value },
@@ -193,7 +199,10 @@ function fixture(
       return hydrationGate.then(() => snapshot)
     },
     loadResumeSnapshot: async (_collectionId, ctx) => {
-      if (ctx?.includeRows !== false) await hydrationGate
+      if (ctx?.includeRows !== false) {
+        durableRowReads++
+        await hydrationGate
+      }
       return {
         rows:
           ctx?.includeRows === false
@@ -232,10 +241,15 @@ function fixture(
       for (const mutation of tx.mutations) {
         if (mutation.type === `delete`) rows.delete(mutation.key)
         else {
-          rows.set(mutation.key, {
-            ...rows.get(mutation.key),
-            ...structuredClone(mutation.value),
-          } as Item)
+          rows.set(
+            mutation.key,
+            mutation.type === `insert`
+              ? (structuredClone(mutation.value) as Item)
+              : ({
+                  ...rows.get(mutation.key),
+                  ...structuredClone(mutation.value),
+                } as Item),
+          )
         }
       }
       latestTerm = tx.term
@@ -284,11 +298,17 @@ function fixture(
     }),
   )
   const publicRows = () =>
-    Array.from(collection.values(), ({ id, name, stable }) => ({
-      id,
-      name,
-      stable,
-    })).sort((a, b) => a.id - b.id)
+    Array.from(collection.values(), (row) => {
+      const {
+        $hasPendingWrites: _pending,
+        $synced: _synced,
+        $origin: _origin,
+        $key: _key,
+        $collectionId: _collectionId,
+        ...value
+      } = row
+      return structuredClone(value)
+    }).sort((a, b) => a.id - b.id)
   const durableRows = () =>
     structuredClone([...rows.values()].sort((a, b) => a.id - b.id))
   const exposures: Array<Exposure> = []
@@ -314,7 +334,7 @@ function fixture(
     durableRows,
     exposures,
     record,
-    subsetLoadCount: () => subsetLoads,
+    durableRowReadCount: () => durableRowReads,
     latestDurableRowVersion: () => latestRowVersion,
     commitExternalTx: (tx: PersistedTx) =>
       adapter.applyCommittedTx(
@@ -847,6 +867,36 @@ async function observePersistedRestart(
 }
 
 describe(`persisted Electric recovery laws`, () => {
+  // The Map adapter is the driver's durable boundary. It must enact SQLite's
+  // distinct row operations before its rows can serve as evidence for a peer
+  // notice. Insert replaces a same-key row; update retains omitted fields.
+  it.each([`insert`, `update`] as const)(
+    `models a same-key %s against the durable row operation`,
+    async (operation) => {
+      const f = fixture(`on-demand`)
+      await withFixtureCleanup(f, async () => {
+        const old = { ...freshRow, obsolete: `old field` }
+        await f.commitExternalTx({
+          txId: `old`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [{ type: `insert`, key: old.id, value: old }],
+        })
+        const next = { ...freshRow, name: `next` }
+        await f.commitExternalTx({
+          txId: `next`,
+          term: 2,
+          seq: 1,
+          rowVersion: 2,
+          mutations: [{ type: operation, key: next.id, value: next }],
+        })
+        expect(f.rows.get(next.id)).toEqual(
+          operation === `insert` ? next : { ...old, ...next },
+        )
+      })
+    },
+  )
   beforeEach(() => {
     subscribers.length = 0
     vi.clearAllMocks()
@@ -984,6 +1034,7 @@ describe(`persisted Electric recovery laws`, () => {
         row: Item,
         deleted: boolean,
         fullReload: boolean,
+        operation?: `insert` | `update`,
       ) => {
         const revision = term++
         const rowVersion = fixtureState.latestDurableRowVersion() + 1
@@ -1000,7 +1051,9 @@ describe(`persisted Electric recovery laws`, () => {
             ? [{ type: `delete`, key: row.id, value: row }]
             : [
                 {
-                  type: fixtureState.rows.has(row.id) ? `update` : `insert`,
+                  type:
+                    operation ??
+                    (fixtureState.rows.has(row.id) ? `update` : `insert`),
                   key: row.id,
                   value: row,
                 },
@@ -1009,25 +1062,35 @@ describe(`persisted Electric recovery laws`, () => {
             { type: `set`, key: `oracle:publication`, value: revision },
           ],
         })
+        const committed: TxCommitted = fullReload
+          ? {
+              type: `tx:committed`,
+              term: revision,
+              seq: 1,
+              txId,
+              latestRowVersion: rowVersion,
+              requiresFullReload: true,
+            }
+          : {
+              type: `tx:committed`,
+              term: revision,
+              seq: 1,
+              txId,
+              latestRowVersion: rowVersion,
+              requiresFullReload: false,
+              changedRows: deleted ? [] : [{ key: row.id, value: row }],
+              deletedKeys: deleted ? [row.id] : [],
+              collectionMetadataMutations: [
+                { type: `set`, key: `oracle:publication`, value: revision },
+              ],
+            }
         receive?.({
           v: 1,
           dbName: id,
           collectionId: id,
           senderId: `peer`,
           ts: Date.now(),
-          payload: {
-            type: `tx:committed`,
-            term: revision,
-            seq: 1,
-            txId,
-            latestRowVersion: rowVersion,
-            requiresFullReload: fullReload,
-            changedRows: deleted ? [] : [{ key: row.id, value: row }],
-            deletedKeys: deleted ? [row.id] : [],
-            collectionMetadataMutations: [
-              { type: `set`, key: `oracle:publication`, value: revision },
-            ],
-          },
+          payload: committed,
         })
         return revision
       },
@@ -1084,6 +1147,8 @@ describe(`persisted Electric recovery laws`, () => {
     name: string
     deleted: boolean
     fullReload: boolean
+    operation?: `insert` | `update`
+    obsolete?: boolean
   }
 
   /**
@@ -1094,10 +1159,14 @@ describe(`persisted Electric recovery laws`, () => {
    *
    * The bounded grammar permits 1–8 pairs, keys 2–4 beside the untouched
    * baseline key 1, and names of length 0–8. Key variation distinguishes
-   * independent rows from repeated edits; name variation distinguishes peer
-   * values before the stream overwrites them; deletion changes membership;
-   * fullReload changes whether the adapter must read the persisted rows; and
-   * multiple pairs expose repeated-key histories. The authored history below
+   * independent rows from repeated edits; name and optional field variation
+   * distinguish partial update from same-key insert replacement. Deletion
+   * changes membership;
+   * fullReload requires a persisted read. A targeted notice can also require
+   * a read when its row is new to this Collection: the notice carries a
+   * patch without a completeness certificate. Public rows, rather than the
+   * number of reads, decide whether that route satisfies the law. Multiple
+   * pairs expose repeated-key histories. The authored history below
    * reconstructs insert then delete with a reload. The other fixed histories
    * reach both sequence-length and name/key margins. The grammar excludes a
    * malformed peer transaction that lists one key as both changed and deleted;
@@ -1110,6 +1179,8 @@ describe(`persisted Electric recovery laws`, () => {
       name: fc.string({ maxLength: 8 }),
       deleted: fc.boolean(),
       fullReload: fc.boolean(),
+      operation: fc.constantFrom(`insert` as const, `update` as const),
+      obsolete: fc.boolean(),
     }),
     { minLength: 1, maxLength: 8 },
   )
@@ -1141,15 +1212,26 @@ describe(`persisted Electric recovery laws`, () => {
             id: command.id,
             name: command.name,
             stable: `peer-${command.id}`,
+            ...(command.obsolete ? { obsolete: `old field` } : {}),
           }
+          const operation =
+            command.operation ?? (expected.has(row.id) ? `update` : `insert`)
           if (command.deleted) expected.delete(row.id)
-          else expected.set(row.id, structuredClone(row))
-          const subsetLoadsBeforeSettlement = f.subsetLoadCount()
+          else {
+            expected.set(
+              row.id,
+              operation === `insert`
+                ? structuredClone(row)
+                : { ...expected.get(row.id), ...structuredClone(row) },
+            )
+          }
+          const rowReadsBeforeNotice = f.durableRowReadCount()
           const revision = await peer.publish(
             f,
             row,
             command.deleted,
             command.fullReload,
+            operation,
           )
           f.record(`after peer revision ${revision}`)
           // An unchanged row set is not proof that the peer publication ran.
@@ -1166,18 +1248,25 @@ describe(`persisted Electric recovery laws`, () => {
           if (command.fullReload) {
             await vi.waitFor(
               () =>
-                expect(f.subsetLoadCount()).toBeGreaterThan(
-                  subsetLoadsBeforeSettlement,
+                expect(f.durableRowReadCount()).toBeGreaterThan(
+                  rowReadsBeforeNotice,
                 ),
               { interval: 1 },
             )
-          } else {
-            expect(f.subsetLoadCount()).toBe(subsetLoadsBeforeSettlement)
           }
           expect(f.publicRows()).toEqual(expectedRows())
           f.record(`peer revision ${revision} settled`)
           const afterPeer = expectedRows()
-          expectWholeRecoveryTrace(f.exposures.slice(cut), [before, afterPeer])
+          const peerExposures = f.exposures.slice(cut)
+          expectWholeRecoveryTrace(peerExposures, [before, afterPeer])
+          if (!isDeepStrictEqual(before, afterPeer)) {
+            expect(
+              peerExposures.some(
+                ({ cut: eventCut, rows }) =>
+                  eventCut === `event` && isDeepStrictEqual(rows, afterPeer),
+              ),
+            ).toBe(true)
+          }
           checkpoint = `stream delta after ${JSON.stringify(command)}`
           const streamCut = f.exposures.length
           f.record(`before stream revision ${revision}`)
@@ -1185,17 +1274,29 @@ describe(`persisted Electric recovery laws`, () => {
             change(`update`, { id: row.id, name: `stream` }),
             upToDate,
           ])
-          if (!command.deleted) expected.set(row.id, { ...row, name: `stream` })
+          if (!command.deleted) {
+            const current = expected.get(row.id)
+            if (!current)
+              throw new Error(`peer row missing before stream update`)
+            expected.set(row.id, { ...current, name: `stream` })
+          }
           f.record(`after stream revision ${revision}`)
           expect(f.publicRows()).toEqual(expectedRows())
           await vi.waitFor(
             () => expect(f.durableRows()).toEqual(expectedRows()),
             { interval: 1 },
           )
-          expectWholeRecoveryTrace(f.exposures.slice(streamCut), [
-            afterPeer,
-            expectedRows(),
-          ])
+          const streamExposures = f.exposures.slice(streamCut)
+          expectWholeRecoveryTrace(streamExposures, [afterPeer, expectedRows()])
+          if (!isDeepStrictEqual(afterPeer, expectedRows())) {
+            expect(
+              streamExposures.some(
+                ({ cut: eventCut, rows }) =>
+                  eventCut === `event` &&
+                  isDeepStrictEqual(rows, expectedRows()),
+              ),
+            ).toBe(true)
+          }
         }
       } catch (error) {
         throw new Error(
@@ -1213,6 +1314,26 @@ describe(`persisted Electric recovery laws`, () => {
         [
           { id: 2, name: `external`, deleted: false, fullReload: false },
           { id: 2, name: `removed`, deleted: true, fullReload: true },
+        ],
+      ],
+      [
+        [
+          {
+            id: 2,
+            name: `with field`,
+            deleted: false,
+            fullReload: false,
+            operation: `insert`,
+            obsolete: true,
+          },
+          {
+            id: 2,
+            name: `replacement`,
+            deleted: false,
+            fullReload: true,
+            operation: `insert`,
+            obsolete: false,
+          },
         ],
       ],
       [

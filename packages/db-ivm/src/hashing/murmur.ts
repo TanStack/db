@@ -63,11 +63,8 @@ export interface Hasher {
   digest: () => number
 }
 
-// Allocate these once, outside the hot path
-const buf = new ArrayBuffer(8)
-// dv and u8 are 2 different views on the same buffer `buf`
-const dv = new DataView(buf)
-const u8 = new Uint8Array(buf)
+// Allocate this once, outside the hot path
+const dv = new DataView(new ArrayBuffer(8))
 
 /**
  * This implementation of Murmur hash uses a random initial seed and random markers.
@@ -106,6 +103,20 @@ export class MurmurHashStream implements Hasher {
     }
   }
 
+  /** Write four bytes, low byte first, as four `writeByte` calls would. */
+  private writeWord(word: number): void {
+    this.length += 4
+    if (this.carryBytes === 0) {
+      this._mix(word >>> 0)
+      return
+    }
+    // The carry's bytes come first. The word's low bytes complete that block,
+    // and its high bytes become the new carry, which keeps its byte count.
+    const shift = 8 * this.carryBytes
+    this._mix((this.carry | (word << shift)) >>> 0)
+    this.carry = word >>> (32 - shift)
+  }
+
   update(chunk: symbol | string | number | bigint): void {
     switch (typeof chunk) {
       case `symbol`: {
@@ -115,22 +126,25 @@ export class MurmurHashStream implements Hasher {
       }
       case `string`:
         this.update(STRING_MARKER)
-        for (let i = 0; i < chunk.length; i++) {
-          const code = chunk.charCodeAt(i)
-          this.writeByte(code & 0xff)
-          this.writeByte((code >>> 8) & 0xff)
+        {
+          // Each code unit is two bytes, so a pair of them is one word.
+          const pairs = chunk.length - (chunk.length % 2)
+          for (let i = 0; i < pairs; i += 2) {
+            this.writeWord(
+              chunk.charCodeAt(i) | (chunk.charCodeAt(i + 1) << 16),
+            )
+          }
+          if (pairs < chunk.length) {
+            const code = chunk.charCodeAt(pairs)
+            this.writeByte(code & 0xff)
+            this.writeByte((code >>> 8) & 0xff)
+          }
         }
         return
       case `number`:
         dv.setFloat64(0, chunk, true) // fixed little-endian
-        this.writeByte(u8[0]!)
-        this.writeByte(u8[1]!)
-        this.writeByte(u8[2]!)
-        this.writeByte(u8[3]!)
-        this.writeByte(u8[4]!)
-        this.writeByte(u8[5]!)
-        this.writeByte(u8[6]!)
-        this.writeByte(u8[7]!)
+        this.writeWord(dv.getUint32(0, true))
+        this.writeWord(dv.getUint32(4, true))
         return
       case `bigint`: {
         let value = chunk

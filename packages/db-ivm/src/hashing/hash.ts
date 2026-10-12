@@ -72,8 +72,18 @@ function hashObject(input: object, context: HashContext): number {
       if (body) updateHasher(hasher, value, context)
       else hasher.update(value as string | number)
     if (body) {
-      // Sorted string keys, then enumerable symbol keys by identity.
-      const keys: Array<string | symbol> = Object.keys(body).sort(keySort)
+      // String keys in UTF-16 code-unit order, then enumerable symbol keys by
+      // identity. Code-unit order is total; locale collation can rank two
+      // distinct keys as equal and leave their insertion order in the hash.
+      const keys: Array<string | symbol> = Object.keys(body)
+      // A dense array with no other keys lists its indices in one order for
+      // every equal array: integer keys come first, so the last key is the
+      // last index. Anything else sorts.
+      const denseArray =
+        Array.isArray(body) &&
+        keys.length === body.length &&
+        (keys.length === 0 || keys[keys.length - 1] === String(body.length - 1))
+      if (!denseArray) keys.sort()
       keys.push(
         ...Object.getOwnPropertySymbols(body)
           .filter((key) =>
@@ -282,13 +292,6 @@ function cachedReferenceHash(fn: object): number {
     referenceValues.add(fn)
   }
   return valueHash
-}
-
-/**
- * Strings sorted lexicographically.
- */
-function keySort(a: string, b: string): number {
-  return a.localeCompare(b)
 }
 
 // One punctuation tag per objectParts marker, so values of different kinds

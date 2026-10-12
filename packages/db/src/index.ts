@@ -8,6 +8,8 @@ export * from './SortedMap'
 export * from './transactions'
 export * from './client.js'
 export { withCollectionConfigFactory } from './client.js'
+/** @internal First-party adapter ownership marker. */
+export { collectionOptionsClaim } from './collection-options.js'
 export * from './types'
 export * from './proxy'
 export * from './query/index.js'
