@@ -65,6 +65,11 @@ type InferSchemaInput<T> = T extends StandardSchemaV1
 
 type TQueryKeyBuilder<TQueryKey> = (opts: LoadSubsetOptions) => TQueryKey
 
+function isStoredLoadSubsetOptions(value: unknown): value is LoadSubsetOptions {
+  // This adapter stores typed request options in its observer metadata.
+  return value !== null && typeof value === `object`
+}
+
 const queryObserverOptionKeys = [
   `enabled`,
   `refetchInterval`,
@@ -2281,10 +2286,9 @@ export function queryCollectionOptions(
         // A complete later result settles ownerless direct rows in its scope.
         // A window or cursor cannot prove omission outside the returned page.
         const scope =
-          state.observers.get(hashedQueryKey)?.options.meta
-            ?.loadSubsetOptions ?? null
+          state.observers.get(hashedQueryKey)?.options.meta?.loadSubsetOptions
         if (
-          scope &&
+          isStoredLoadSubsetOptions(scope) &&
           scope.limit === undefined &&
           scope.offset === undefined &&
           scope.cursor === undefined
