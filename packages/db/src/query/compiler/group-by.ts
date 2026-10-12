@@ -120,7 +120,8 @@ function createRepresentative<T>(
   identity: unknown,
 ): Representative<T> {
   // Encode once per contribution, not once per member on every group change.
-  // D2 consolidates contributions whose hashes match. The identity must
+  // D2 consolidates contributions that hash equal (groupBy finds them by an
+  // identity string that is equal for exactly those). The identity must
   // therefore separate every exactly different value, so a merged
   // contribution never projects a value that no positive member holds.
   const representative = {
@@ -414,7 +415,7 @@ export function processGroupBy(
     }
   }
 
-  // D2 consolidates contributions whose hashes match, and the hash treats -0 as 0
+  // D2 consolidates contributions that hash equal, and the hash treats -0 as 0
   // and equal Dates as one value. Today it keeps the instance it was last given;
   // db-ivm's groupBy tests pin that as current behavior, not as a promise. A min
   // or max returns one of its inputs, so each contribution carries the exact key

@@ -78,6 +78,8 @@ import type { Weighted } from './incrementalization-law-oracle.js'
 type Keyed = [number, number]
 type JoinOutput = [number, [number, number]]
 type OuterJoinOutput = [number, [number | null, number | null]]
+type GroupedMeanOutput = [string, { bucket: number; mean: number }]
+
 type GroupedTextOutput = [
   string,
   {
@@ -119,6 +121,7 @@ type GroupedOutput = [
     total: number
     minimum: number | undefined
     maximum: number | undefined
+    mean: number
   },
 ]
 
@@ -171,6 +174,7 @@ const joinPolicy = jsonLawValuePolicy<JoinOutput>()
 const outerJoinPolicy = jsonLawValuePolicy<OuterJoinOutput>()
 const groupedPolicy = jsonLawValuePolicy<GroupedOutput>()
 const groupedTextPolicy = jsonLawValuePolicy<GroupedTextOutput>()
+const groupedMeanPolicy = jsonLawValuePolicy<GroupedMeanOutput>()
 const uniqueRowSplitDomain = {
   uniqueKey: ([key]: Keyed) => String(key),
 }
@@ -299,7 +303,7 @@ function joinedSums(
 function groupedAggregates(input: Weighted<Keyed>): Weighted<GroupedOutput> {
   const groups = new Map<
     number,
-    { total: number; minimum: number; maximum: number }
+    { total: number; minimum: number; maximum: number; count: number }
   >()
   for (const [[key, value], weight] of keyedIdentity(input)) {
     const bucket = key % 2
@@ -307,16 +311,45 @@ function groupedAggregates(input: Weighted<Keyed>): Weighted<GroupedOutput> {
     groups.set(
       bucket,
       current === undefined
-        ? { total: value * weight, minimum: value, maximum: value }
+        ? {
+            total: value * weight,
+            minimum: value,
+            maximum: value,
+            count: weight,
+          }
         : {
             total: current.total + value * weight,
             minimum: Math.min(current.minimum, value),
             maximum: Math.max(current.maximum, value),
+            count: current.count + weight,
           },
     )
   }
-  return [...groups].map(([bucket, aggregates]) => [
-    [JSON.stringify({ bucket }), { bucket, ...aggregates }],
+  return [...groups].map(([bucket, { count, ...aggregates }]) => [
+    [
+      JSON.stringify({ bucket }),
+      // The mean is the weighted total over the weighted row count.
+      { bucket, ...aggregates, mean: aggregates.total / count },
+    ],
+    1,
+  ])
+}
+
+/**
+ * The per-bucket mean alone. With no other aggregate, every value's identity
+ * comes from avg, so an avg identity that merges different sums shows here.
+ */
+function groupedMean(input: Weighted<Keyed>): Weighted<GroupedMeanOutput> {
+  const groups = new Map<number, { total: number; count: number }>()
+  for (const [[key, value], weight] of keyedIdentity(input)) {
+    const current = groups.get(key % 2) ?? { total: 0, count: 0 }
+    groups.set(key % 2, {
+      total: current.total + value * weight,
+      count: current.count + weight,
+    })
+  }
+  return [...groups].map(([bucket, { total, count }]) => [
+    [JSON.stringify({ bucket }), { bucket, mean: total / count }],
     1,
   ])
 }
@@ -457,9 +490,24 @@ describe(`DBSP incrementalization laws`, () => {
                     total: groupByOperators.sum(([, value]) => value),
                     minimum: groupByOperators.min(([, value]) => value),
                     maximum: groupByOperators.max(([, value]) => value),
+                    mean: groupByOperators.avg(([, value]) => value),
                   }),
                 ),
               evaluate: groupedAggregates,
+            })
+            assertUnaryIncrementalization({
+              name: `groupBy mean alone`,
+              initial: worlds[0]!,
+              batches,
+              inputPolicy: keyedPolicy,
+              outputPolicy: groupedMeanPolicy,
+              build: (input) =>
+                input.pipe(
+                  groupBy(([key]) => ({ bucket: key % 2 }), {
+                    mean: groupByOperators.avg(([, value]) => value),
+                  }),
+                ),
+              evaluate: groupedMean,
             })
             assertUnaryIncrementalization({
               name: `groupBy string extrema`,
@@ -723,6 +771,7 @@ describe(`DBSP incrementalization laws`, () => {
             total: groupByOperators.sum(([, value]) => value),
             minimum: groupByOperators.min(([, value]) => value),
             maximum: groupByOperators.max(([, value]) => value),
+            mean: groupByOperators.avg(([, value]) => value),
           }),
         ),
       evaluate: groupedAggregates,
@@ -983,6 +1032,7 @@ describe(`DBSP incrementalization laws`, () => {
               total: groupByOperators.sum(([, value]) => value),
               minimum: truthinessMinimum,
               maximum: truthinessMaximum,
+              mean: groupByOperators.avg(([, value]) => value),
             }),
           ),
         evaluate: groupedAggregates,

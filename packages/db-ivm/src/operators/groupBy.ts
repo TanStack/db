@@ -11,20 +11,27 @@ type BasicAggregateFunction<T, R, V = unknown> = {
   postMap?: (result: V) => R
   /**
    * For an object input, a string that two inputs share exactly when they
-   * hash equal, or undefined when it has none. Primitive inputs need none.
-   * Without one, contributions that hold this object are compared by
-   * structural hash.
+   * hash equal. It must return undefined for both or a string for both of
+   * two inputs that hash equal, so a retraction meets its insert. Primitive
+   * inputs and dense arrays of primitives need none. Without one, a
+   * contribution that holds this object is compared by structural hash.
    */
   identity?: (value: V) => string | undefined
 }
 
+// Nesting a contribution identity may follow into arrays: a min or max input
+// is an array of exact keys, and an exact key can hold a reference tuple.
+const MAX_IDENTITY_DEPTH = 3
+
 /**
  * One part of a contribution's identity, normalized as the structural hash
  * normalizes it, or undefined when the value has no cheap exact identity.
+ * Every part is self-delimiting, so joined parts cannot run together.
  */
 function identityPart(
   value: unknown,
-  identity: ((value: any) => string | undefined) | undefined,
+  identity?: (value: object) => string | undefined,
+  depth = 0,
 ): string | undefined {
   switch (typeof value) {
     case `number`:
@@ -38,16 +45,61 @@ function identityPart(
       return `u`
     case `bigint`:
       return `g${value}`
-    case `object`:
+    case `object`: {
       if (value === null) return `l`
-      if (!identity) return undefined
-      {
+      if (identity) {
         const id = identity(value)
         return id === undefined ? undefined : `o${id.length}:${id}`
       }
+      return arrayIdentity(value, depth)
+    }
     default:
       return undefined
   }
+}
+
+/**
+ * A dense plain array hashes by its length and its elements, so its identity
+ * is theirs. Holes, extra properties and symbol keys also reach the hash, so
+ * an array with any of them has no identity.
+ */
+function arrayIdentity(value: object, depth: number): string | undefined {
+  if (
+    depth >= MAX_IDENTITY_DEPTH ||
+    !Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Array.prototype ||
+    Object.keys(value).length !== value.length ||
+    Object.getOwnPropertySymbols(value).length > 0
+  )
+    return undefined
+  const parts: Array<string> = []
+  for (const element of value) {
+    const part = identityPart(element, undefined, depth + 1)
+    if (part === undefined) return undefined
+    parts.push(part)
+  }
+  const joined = parts.join(`|`)
+  return `a${value.length}:${joined.length}:${joined}`
+}
+
+/**
+ * A group key is a plain object whose hash covers each enumerable key and
+ * value, in key order. Its identity does the same, or is undefined.
+ */
+function groupKeyIdentity(key: GroupKey): string | undefined {
+  const prototype = Object.getPrototypeOf(key)
+  if (
+    (prototype !== Object.prototype && prototype !== null) ||
+    Object.getOwnPropertySymbols(key).length > 0
+  )
+    return undefined
+  let identity = ``
+  for (const name of Object.keys(key).sort()) {
+    const part = identityPart(key[name], undefined, 1)
+    if (part === undefined) return undefined
+    identity += `|${identityPart(name)}=${part}`
+  }
+  return identity
 }
 
 type PipedAggregateFunction<T, R> = {
@@ -105,10 +157,10 @@ export function groupBy<
     const aggregateEntries = Object.entries(basicAggregates)
 
     // First map to extract keys and pre-aggregate values. Each contribution
-    // leads with an identity built from its pre-aggregate values when every
-    // value has one. Within one group the reduce index then merges equal
-    // contributions by that identity instead of hashing them. A null
-    // identity falls back to the structural hash.
+    // leads with an identity built from its group key and pre-aggregate
+    // values when every one of them has one. Within one group the reduce
+    // index then merges equal contributions by that identity instead of
+    // hashing them. A null identity falls back to the structural hash.
     const withKeysAndValues = stream.pipe(
       map((data) => {
         const key = keyExtractor(data)
@@ -117,12 +169,13 @@ export function groupBy<
         // Create values object with pre-aggregated values
         const values: Record<string | symbol, unknown> = {}
 
-        // Store the original key object. Every contribution to one group
-        // has the same serialized key, so the identity leaves it out.
+        // Store the original key object. Contributions whose keys serialize
+        // alike but hash apart must not merge, so the key is part of the
+        // identity.
         values[KEY_SENTINEL] = key
 
         // Add pre-aggregated values
-        let identity: string | null = ``
+        let identity: string | null = groupKeyIdentity(key) ?? null
         for (const [name, aggregate] of aggregateEntries) {
           const value = aggregate.preMap(data)
           values[name] = value
@@ -142,12 +195,9 @@ export function groupBy<
     const reduced = withKeysAndValues.pipe(
       reduce(
         (contributions) => {
-          const values = contributions.map(
-            ([[, value], multiplicity]) => [value, multiplicity] as const,
-          )
           // Calculate total multiplicity to check if the group should exist
           let totalMultiplicity = 0
-          for (const [_, multiplicity] of values) {
+          for (const [_, multiplicity] of contributions) {
             totalMultiplicity += multiplicity
           }
 
@@ -159,13 +209,13 @@ export function groupBy<
           const result: Record<PropertyKey, unknown> = {}
 
           // Get the original key from first value in group
-          const originalKey = values[0]?.[0]?.[KEY_SENTINEL]
+          const originalKey = contributions[0]?.[0][1][KEY_SENTINEL]
           result[KEY_SENTINEL] = originalKey
 
           // Apply each aggregate function
-          for (const [name, aggregate] of Object.entries(basicAggregates)) {
-            const preValues = values.map(
-              ([v, m]) => [v[name], m] as [any, number],
+          for (const [name, aggregate] of aggregateEntries) {
+            const preValues = contributions.map(
+              ([[, v], m]) => [v[name], m] as [any, number],
             )
             result[name] = aggregate.reduce(preValues)
           }
@@ -189,7 +239,7 @@ export function groupBy<
         Object.assign(result, key)
 
         // Apply postMap if provided
-        for (const [name, aggregate] of Object.entries(basicAggregates)) {
+        for (const [name, aggregate] of aggregateEntries) {
           if (aggregate.postMap) {
             result[name] = aggregate.postMap(values[name])
           } else {
@@ -252,11 +302,13 @@ export function avg<T>(
       sum: valueExtractor(data),
       count: 0,
     }),
-    // The hash treats -0 as 0 and every NaN as one value.
-    identity: (value) =>
-      typeof value.sum === `number`
-        ? `${value.sum === 0 ? 0 : value.sum}:${value.count}`
-        : undefined,
+    identity: (value) => {
+      const sumPart = identityPart(value.sum)
+      const countPart = identityPart(value.count)
+      return sumPart === undefined || countPart === undefined
+        ? undefined
+        : `${sumPart}|${countPart}`
+    },
     reduce: (values: Array<[{ sum: number; count: number }, number]>) => {
       let totalSum = 0
       let totalCount = 0
