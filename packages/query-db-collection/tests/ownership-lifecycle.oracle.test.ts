@@ -17,6 +17,10 @@ import {
 } from '@tanstack/db'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createDeferred } from '../../db/src/deferred.js'
+import {
+  compileSingleRowExpression,
+  toBooleanPredicate,
+} from '../../db/src/query/compiler/evaluators.js'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src/index.js'
 import { createNodeSQLitePersistence } from '../../node-db-sqlite-persistence/src/index.js'
 import { BetterSqlite3SQLiteDriver } from '../../node-db-sqlite-persistence/src/node-driver.js'
@@ -307,6 +311,11 @@ type OwnershipFixture = {
 const shared = { id: `shared`, category: `shared`, name: `Shared` }
 const detailOnly = { id: `detail`, category: `detail`, name: `Detail` }
 const listOnly = { id: `list`, category: `list`, name: `List` }
+
+// The overlap fixtures return rows from both named categories.
+// A literal field name passed to eq() would instead become a constant value.
+const categoryIn = (...categories: Array<string>) =>
+  new IR.Func(`in`, [new IR.PropRef([`category`]), new IR.Value(categories)])
 const cleanups: Array<() => Promise<void>> = []
 
 async function runCleanups(): Promise<void> {
@@ -2104,8 +2113,8 @@ describe(`query collection ownership lifecycle`, () => {
       secondRefresh.resolve([refreshedList])
       return Promise.resolve()
     })
-    const detail = { where: eq(`category`, `detail`) }
-    const list = { where: eq(`category`, `list`) }
+    const detail = { where: eq(new IR.PropRef([`category`]), `detail`) }
+    const list = { where: eq(new IR.PropRef([`category`]), `list`) }
     await collection._sync.loadSubset(detail)
     await collection._sync.loadSubset(list)
 
@@ -2306,8 +2315,8 @@ describe(`query collection ownership lifecycle`, () => {
 
   it(`rejects before an independent accepted application settles`, async () => {
     const id = `explicit-refetch-fail-fast`
-    const detail = { where: eq(`category`, `detail`) }
-    const list = { where: eq(`category`, `list`) }
+    const detail = { where: eq(new IR.PropRef([`category`]), `detail`) }
+    const list = { where: eq(new IR.PropRef([`category`]), `list`) }
     const listKey = [id, getLoadSubsetDemandKey(list)]
     const invalidDetail = { ...detailOnly, name: `Invalid detail` }
     const refreshedList = { ...listOnly, name: `Refreshed list` }
@@ -2951,7 +2960,9 @@ describe(`query collection ownership lifecycle`, () => {
 
       let transaction: Transaction<Record<string, unknown>>
       if (invocation === `manual-transaction`) {
-        transaction = createTransaction<Record<string, unknown>>({ mutationFn })
+        transaction = createTransaction<Record<string, unknown>>({
+          mutationFn,
+        })
         transaction.mutate(() => {
           collection.update(shared.id, (draft) => {
             draft.name = `Optimistic`
@@ -5707,8 +5718,8 @@ describe(`query collection ownership lifecycle`, () => {
 
   it(`releases provisional ownership when commit fails before publication`, async () => {
     const id = `failed-prepublication-commit`
-    const detailSubset = { where: eq(`category`, `detail`) }
-    const listSubset = { where: eq(`category`, `list`) }
+    const detailSubset = { where: eq(new IR.PropRef([`category`]), `detail`) }
+    const listSubset = { where: eq(new IR.PropRef([`category`]), `list`) }
     const detailKey = [id, getLoadSubsetDemandKey(detailSubset)] as const
     const detail = { id: `a`, category: `detail`, name: `A` }
     const list = { id: `c`, category: `list`, name: `C` }
@@ -6353,7 +6364,11 @@ describe(`query collection ownership lifecycle`, () => {
     const subscription = collection.subscribeChanges(() => {})
     cleanups.push(() => Promise.resolve(subscription.unsubscribe()))
     await collection.stateWhenReady()
-    const restarted = { id: `restarted`, category: `direct`, name: `Restarted` }
+    const restarted = {
+      id: `restarted`,
+      category: `direct`,
+      name: `Restarted`,
+    }
     expect(await observe(() => collection.utils.writeInsert(restarted))).toBe(
       expectedDirectWriteAdmission(`current`),
     )
@@ -6733,7 +6748,7 @@ describe(`query collection ownership lifecycle`, () => {
       id: `shared-acquisition`,
       results: [[shared, detailOnly]],
     })
-    const subset = { where: eq(`category`, `detail`) }
+    const subset = { where: categoryIn(`shared`, `detail`) }
 
     await collection._sync.loadSubset(subset)
     await collection._sync.loadSubset(subset)
@@ -6758,8 +6773,8 @@ describe(`query collection ownership lifecycle`, () => {
         [shared, listOnly],
       ],
     })
-    const detail = { where: eq(`category`, `detail`) }
-    const list = { where: eq(`category`, `list`) }
+    const detail = { where: categoryIn(`shared`, `detail`) }
+    const list = { where: categoryIn(`shared`, `list`) }
 
     await collection._sync.loadSubset(detail)
     await collection._sync.loadSubset(list)
@@ -6822,7 +6837,7 @@ describe(`query collection ownership lifecycle`, () => {
     `preserves startup ownership for $owners calls, shared reference $sharedReference, $retired retired`,
     async ({ owners, sharedReference, retired }) => {
       const id = `startup-owner-history`
-      const subset = { where: eq(`category`, `shared`) }
+      const subset = { where: eq(new IR.PropRef([`category`]), `shared`) }
       const queryHash = hashKey([id, getLoadSubsetDemandKey(subset)])
       const { collection, queryFn } = createOwnershipFixture({
         id,
@@ -6983,7 +6998,7 @@ describe(`query collection ownership lifecycle`, () => {
     `honors %s during startup retention maintenance`,
     async (action) => {
       const id = `released-startup-retention`
-      const subset = { where: eq(`category`, `shared`) }
+      const subset = { where: eq(new IR.PropRef([`category`]), `shared`) }
       const key = `queryCollection:gc:${hashKey([id, getLoadSubsetDemandKey(subset)])}`
       const { collection, queryFn } = createOwnershipFixture({
         id,
@@ -7065,7 +7080,7 @@ describe(`query collection ownership lifecycle`, () => {
       id,
       results: [[shared]],
     })
-    const subset = { where: eq(`category`, `detail`) }
+    const subset = { where: eq(new IR.PropRef([`category`]), `shared`) }
     await collection._sync.loadSubset(subset)
 
     queryClient.removeQueries({ queryKey: [id] })
@@ -7215,7 +7230,7 @@ describe(`query collection ownership lifecycle`, () => {
       id: `direct-insert-without-query-owner`,
       results: [[shared]],
     })
-    const subset = { where: eq(`category`, `shared`) }
+    const subset = { where: eq(new IR.PropRef([`category`]), `shared`) }
     const inserted = { id: `direct`, category: `shared`, name: `Direct` }
     const expectedKeys = new Set([shared.id])
 
@@ -7314,6 +7329,80 @@ describe(`query collection ownership lifecycle`, () => {
       expect(rows(collection)).toEqual(
         removes ? [other.id] : [other.id, shared.id],
       )
+    },
+  )
+
+  /**
+   * An empty provider response is not evidence of global absence. The
+   * reference keeps an ownerless direct row when the complete predicate is
+   * disjoint or the request covers only a window. The provider has no server
+   * rows, so each empty response is a legal result for its request. Compare
+   * public keys when the explicit refetch has applied.
+   */
+  it.each([
+    {
+      history: `disjoint-empty`,
+      where: eq(new IR.PropRef([`category`]), `other`),
+      window: {},
+    },
+    {
+      history: `offset-empty`,
+      where: eq(new IR.PropRef([`category`]), `shared`),
+      window: { offset: 1 },
+    },
+    {
+      history: `cursor-empty`,
+      where: eq(new IR.PropRef([`category`]), `shared`),
+      window: {
+        cursor: {
+          whereFrom: eq(new IR.PropRef([`id`]), `other`),
+          whereCurrent: eq(new IR.PropRef([`id`]), `other`),
+          lastKey: `other`,
+        },
+      },
+    },
+  ] as const)(
+    `keeps an ownerless direct row after a $history refetch`,
+    async ({ history, where, window }) => {
+      const { collection, queryFn } = createOwnershipFixture({
+        id: `ownerless-${history}`,
+        results: [[], []],
+      })
+      const subset = { where, ...window }
+      await collection._sync.loadSubset(subset)
+      await collection.utils.writeInsert(shared)
+      await collection.utils.refetch({ throwOnError: true })
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(rows(collection)).toEqual([shared.id])
+    },
+  )
+
+  /**
+   * A compound predicate remains a scope boundary. The independent rule
+   * evaluates both conjuncts on the accepted direct row before deciding
+   * whether a complete empty result can retire it.
+   */
+  it.each([
+    { history: `matching`, id: shared.id, removes: true },
+    { history: `disjoint`, id: `other`, removes: false },
+  ] as const)(
+    `reconciles a direct row after a $history compound-scope refetch`,
+    async ({ history, id, removes }) => {
+      const { collection, queryFn } = createOwnershipFixture({
+        id: `ownerless-compound-${history}`,
+        results: [[], []],
+      })
+      const subset = {
+        where: new IR.Func(`and`, [
+          eq(new IR.PropRef([`category`]), `shared`),
+          eq(new IR.PropRef([`id`]), id),
+        ]),
+      }
+      await collection._sync.loadSubset(subset)
+      await collection.utils.writeInsert(shared)
+      await collection.utils.refetch({ throwOnError: true })
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(rows(collection)).toEqual(removes ? [] : [shared.id])
     },
   )
 
@@ -7607,13 +7696,20 @@ describe(`query collection ownership lifecycle`, () => {
   /**
    * A fresh persisted run no longer has the writer's in-memory position, but
    * an explicit complete source result still settles an omitted direct row.
-   * The reference has a durable insert followed by an empty full-scope fetch:
+   * The reference has a durable insert followed by an empty complete-scope fetch:
    * the row exists before that fetch and is absent when it applies. This is
    * separate from the limited-window restart above, whose omission proves
-   * nothing about a row outside its window.
+   * nothing about a row outside its window. A disjoint durable row remains
+   * stored because the filtered result says nothing about it. Its public
+   * visibility requires acquiring its own on-demand scope after restart.
    */
   it(`retires a persisted ownerless row after a complete empty result`, async () => {
     const id = `persisted-ownerless-complete-result`
+    const disjoint = {
+      id: `persisted-disjoint`,
+      category: `other`,
+      name: `Other`,
+    }
     const driver = new BetterSqlite3SQLiteDriver({ filename: `:memory:` })
     const persistence = createNodeSQLitePersistence({
       database: driver.getDatabase(),
@@ -7656,7 +7752,9 @@ describe(`query collection ownership lifecycle`, () => {
     })
     await vi.waitFor(() => expect(first.status).toBe(`ready`))
     await first.utils.writeInsert(shared)
+    await first.utils.writeInsert(disjoint)
     expect(first.has(shared.id)).toBe(true)
+    expect(first.has(disjoint.id)).toBe(true)
     await first.cleanup()
     const claim = await managed.adapter.claimCacheGeneration!(id)
     try {
@@ -7668,11 +7766,16 @@ describe(`query collection ownership lifecycle`, () => {
       expect(durable.rows.find((row) => row.key === shared.id)?.value).toEqual(
         shared,
       )
+      expect(
+        durable.rows.find((row) => row.key === disjoint.id)?.value,
+      ).toEqual(disjoint)
     } finally {
       await managed.adapter.releaseCacheGenerationClaim!(claim.claimId)
     }
     restart.collection = makeCollection(secondClient)
-    await restart.collection._sync.loadSubset({})
+    await restart.collection._sync.loadSubset({
+      where: eq(new IR.PropRef([`category`]), `shared`),
+    })
     expect(queryFn).toHaveBeenCalledOnce()
     expect(restart.collection.has(shared.id)).toBe(false)
     const settledClaim = await managed.adapter.claimCacheGeneration!(id)
@@ -7683,6 +7786,9 @@ describe(`query collection ownership lifecycle`, () => {
         claimId: settledClaim.claimId,
       })
       expect(durable.rows.some((row) => row.key === shared.id)).toBe(false)
+      expect(
+        durable.rows.find((row) => row.key === disjoint.id)?.value,
+      ).toEqual(disjoint)
     } finally {
       await managed.adapter.releaseCacheGenerationClaim!(settledClaim.claimId)
     }
@@ -9507,11 +9613,29 @@ describe(`query collection ownership lifecycle`, () => {
         older.resolve([olderRow])
         newer.resolve([newerRow])
       })
-      const olderSubset = { where: eq(`category`, `shared`) }
-      const newerSubset = { where: eq(`id`, `shared`) }
+      const olderSubset = { where: eq(new IR.PropRef([`category`]), `shared`) }
+      const newerSubset = { where: eq(new IR.PropRef([`id`]), `shared`) }
       expect(getLoadSubsetDemandKey(olderSubset)).not.toBe(
         getLoadSubsetDemandKey(newerSubset),
       )
+      // The provider's authored rows must be legal for their real scopes.
+      // This checks fixture admission only; the reference below still judges
+      // public values independently of the production expression compiler.
+      expect(
+        toBooleanPredicate(
+          compileSingleRowExpression(olderSubset.where)(initial),
+        ),
+      ).toBe(true)
+      expect(
+        toBooleanPredicate(
+          compileSingleRowExpression(olderSubset.where)(olderRow),
+        ),
+      ).toBe(true)
+      expect(
+        toBooleanPredicate(
+          compileSingleRowExpression(newerSubset.where)(newerRow),
+        ),
+      ).toBe(true)
 
       // Model: each accepted operation may replace the value only when its
       // position exceeds the position of the accepted value already held.
@@ -9619,6 +9743,27 @@ describe(`query collection ownership lifecycle`, () => {
       } else {
         release(`newer`)
         release(`older`)
+      }
+
+      // Reacquisition starts a new row-ownership lifetime. Only the acquired
+      // Query's retained cache is projected; an earlier overlap does not
+      // permanently rewrite a different Query entry. This legal neighbor
+      // distinguishes continuous-owner precedence from global precedence.
+      if (!existingOwner && settleNewerFirst && directWrite === `none`) {
+        reference.owners.add(`older`)
+        reference.value = olderRow.name
+        await collection._sync.loadSubset(olderSubset)
+        expectPublicRow()
+        expect(queryFn).toHaveBeenCalledTimes(2)
+        collection._sync.unloadSubset(olderSubset)
+        reference.owners.delete(`older`)
+        expectPublicRow()
+
+        reference.owners.add(`newer`)
+        reference.value = newerRow.name
+        await collection._sync.loadSubset(newerSubset)
+        expectPublicRow()
+        expect(queryFn).toHaveBeenCalledTimes(2)
       }
     },
   )
@@ -10270,8 +10415,8 @@ describe(`query collection ownership lifecycle`, () => {
         startSync: true,
       }),
     )
-    const a = { where: eq(`category`, `A`) }
-    const b = { where: eq(`id`, `x`) }
+    const a = { where: eq(new IR.PropRef([`category`]), `A`) }
+    const b = { where: eq(new IR.PropRef([`id`]), `x`) }
     let unsubscribe = () => {}
     cleanups.push(async () => {
       unsubscribe()
@@ -10442,7 +10587,7 @@ describe(`query collection ownership lifecycle`, () => {
       return originals.call(this, key, value)
     })
     const demands = Array.from({ length: 8 }, (_, index) => ({
-      where: eq(`id`, String(index)),
+      where: eq(new IR.PropRef([`id`]), String(index)),
     }))
     try {
       for (const demand of demands) await collection._sync.loadSubset(demand)
@@ -11136,7 +11281,7 @@ describe(`query collection ownership lifecycle`, () => {
       await collection.cleanup()
       queryClient.clear()
     })
-    const a = { where: eq(`id`, `x`) }
+    const a = { where: eq(new IR.PropRef([`id`]), `x`) }
     const b = {
       where: new IR.Func(`in`, [new IR.PropRef([`id`]), new IR.Value([`x`])]),
     }
@@ -11206,7 +11351,7 @@ describe(`query collection ownership lifecycle`, () => {
       await collection.cleanup()
       queryClient.clear()
     })
-    const a = { where: eq(`id`, `x`) }
+    const a = { where: eq(new IR.PropRef([`id`]), `x`) }
     const b = {
       where: new IR.Func(`in`, [new IR.PropRef([`id`]), new IR.Value([`x`])]),
     }
@@ -11281,7 +11426,7 @@ describe(`query collection ownership lifecycle`, () => {
       await collection.cleanup()
       queryClient.clear()
     })
-    const a = { where: eq(`id`, `x`) }
+    const a = { where: eq(new IR.PropRef([`id`]), `x`) }
     const b = {
       where: new IR.Func(`in`, [new IR.PropRef([`id`]), new IR.Value([`x`])]),
     }
@@ -11355,8 +11500,12 @@ describe(`query collection ownership lifecycle`, () => {
       await collection.cleanup()
       queryClient.clear()
     })
-    await collection._sync.loadSubset({ where: eq(`category`, `A`) })
-    await collection._sync.loadSubset({ where: eq(`id`, `x`) })
+    await collection._sync.loadSubset({
+      where: eq(new IR.PropRef([`category`]), `A`),
+    })
+    await collection._sync.loadSubset({
+      where: eq(new IR.PropRef([`id`]), `x`),
+    })
     const queries = queryClient.getQueryCache().getAll()
     expect(queries).toHaveLength(1)
     let notifications = 0
@@ -11408,8 +11557,8 @@ describe(`query collection ownership lifecycle`, () => {
       await collection.cleanup()
       queryClient.clear()
     })
-    const demandA = { where: eq(`category`, `A`) }
-    const demandB = { where: eq(`category`, `B`) }
+    const demandA = { where: eq(new IR.PropRef([`category`]), `A`) }
+    const demandB = { where: eq(new IR.PropRef([`category`]), `B`) }
     await collection._sync.loadSubset(demandA)
     const query = queryClient.getQueryCache().getAll()[0]!
     const observerA = query.observers[0]!
@@ -11469,7 +11618,7 @@ describe(`query collection ownership lifecycle`, () => {
     })
     for (let category = 0; category < 10; category++)
       await collection._sync.loadSubset({
-        where: eq(`category`, String(category)),
+        where: eq(new IR.PropRef([`category`]), String(category)),
       })
     getKeyCalls = 0
     await collection.utils.writeUpdate({ id: `3-0`, name: `after` })
@@ -11588,8 +11737,8 @@ describe(`query collection ownership lifecycle`, () => {
       results: [[shared], [shared, listOnly]],
       metadataRecorder: metadata,
     })
-    const detail = { where: eq(`category`, `detail`) }
-    const list = { where: eq(`category`, `list`) }
+    const detail = { where: categoryIn(`shared`, `detail`) }
+    const list = { where: categoryIn(`shared`, `list`) }
 
     await collection._sync.loadSubset(detail)
     expect(persistedOwners(metadata.rows, shared.id)).toHaveLength(1)

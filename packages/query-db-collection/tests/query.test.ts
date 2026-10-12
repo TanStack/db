@@ -10,6 +10,7 @@ import {
 import {
   BTreeIndex,
   DbClient,
+  IR,
   collectionOptions,
   createCollection,
   createLiveQueryCollection,
@@ -5741,7 +5742,7 @@ describe(`QueryCollection`, () => {
       const consoleErrorSpy = vi
         .spyOn(console, `error`)
         .mockImplementation(() => {})
-      const demand = { where: eq(`id`, `1`) }
+      const demand = { where: eq(new IR.PropRef([`id`]), `1`) }
       const collection = createCollection(
         queryCollectionOptions<TestItem>({
           id: `failed-application-coverage`,
@@ -9126,7 +9127,9 @@ describe(`QueryCollection`, () => {
           id: `on-demand-persistence-clone-safe-test`,
           queryClient,
           queryKey: [`on-demand-persistence-clone-safe-test`],
-          queryFn: vi.fn().mockResolvedValue(items),
+          queryFn: vi
+            .fn()
+            .mockResolvedValue(items.filter((item) => item.category === `A`)),
           getKey: (item) => item.id,
           syncMode: `on-demand`,
           startSync: true,
@@ -9135,7 +9138,7 @@ describe(`QueryCollection`, () => {
 
       try {
         await collection._sync.loadSubset({
-          where: eq(`category`, `A`),
+          where: eq(new IR.PropRef([`category`]), `A`),
           subscription: {
             options: {
               onUnsubscribe: () => {},

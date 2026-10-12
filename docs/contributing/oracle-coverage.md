@@ -617,28 +617,43 @@ cache seed, an older held fetch, and a later complete result. They compare A
 and B's public rows and the shared cache at write and fetch-settlement cuts. A
 held B application checks that disjoint writes alter only their own cache
 keys while preserving the peer's edit, for raw rows and a directly selected
-`{ items }` envelope whose unrelated metadata must survive. A disabled eager peer projects the
-cached edit without a request; a disabled on-demand peer waits for an explicit
-refetch. A held
-persisted direct commit crossed with a refetch start compares public and
-durable rows before the provider responds, then after a newer response; eager
-and on-demand modes both reject replay of the old cached success. A complete
-matching on-demand refetch removes an omitted ownerless direct row, whether the
-result is empty or nonempty. A real SQLite restart witness confirms that the
-complete fetch ran and the durable row was retired. Unload alone, a disjoint,
-limited, offset, cursor, or failed result leaves it intact. A seven-history overlap model crosses prior
-ownership, both request settlement orders, equal-value responses, and direct
-writes between or after request starts. It compares the public row after each
-result and after releasing both owners in either order; the older response may
-add an owner without replacing the later-started fetch's value. The original
-implementation fails three reverse-settlement histories. A separate real
-Query Core history writes inside an observer's success notification; a late
-on-demand peer must not mistake that cache edit for the fetch action's payload.
-The original implementation fails at the peer's held-request checkpoint.
-These finite
-histories leave same-run external durable writers, larger overlapping-fetch
-schedules, and direct-patch provenance after Query cache dehydration outside
-their proven scope.
+`{ items }` envelope whose unrelated metadata must survive. An eager writer's
+representable edit also reaches an already-acquired on-demand peer sharing its
+exact Query, while an unacquired peer waits for a server result. An eager peer
+with a derived visibility filter projects a direct-property writer's cache edit.
+A disabled eager peer projects a cached edit without a request; a disabled
+on-demand peer waits for an explicit refetch. A held persisted direct commit
+crossed with a refetch start compares public and durable rows before the provider
+responds, then after a newer response; eager and on-demand modes both reject
+replay of the old cached success.
+
+A complete matching on-demand refetch removes an omitted ownerless direct row,
+whether the result is empty or nonempty. A real SQLite restart witness confirms
+that the complete filtered fetch ran, retired the matching durable row, and
+preserved a disjoint durable sibling. Unload alone, disjoint, limited, offset,
+cursor, or failed results leave the row intact. Empty disjoint, offset, and
+cursor results and matching/disjoint compound predicates check the completeness
+and membership boundary at public-row settlement.
+
+A seven-history overlap model crosses prior ownership, both request settlement
+orders, equal-value responses, and direct writes between or after request
+starts. Its provider rows satisfy real `IR.PropRef` predicates; a fixture guard
+rejects literal-field comparisons that would make these histories illegal. It
+compares the public row after each result and after releasing both owners in
+either order. The older response may add an owner without replacing the
+later-started fetch's value while row ownership remains continuous. After full
+release, a receiving witness reacquires each retained Query with infinite
+`staleTime` and `gcTime`: each cache entry projects its own value without a new
+request. A complete response that omits an ownerless direct row settles that
+row for its matching scope; it does not tombstone older responses from other
+Query entries. A cross-scope omission-ordering guarantee would need a separate
+law and model. The original implementation fails three reverse-settlement
+histories. A separate real Query Core history writes inside an observer's
+success notification; a late on-demand peer must not mistake that cache edit
+for the fetch action's payload. The original implementation fails at the peer's
+held-request checkpoint. These finite histories leave same-run external durable
+writers, larger overlapping-fetch schedules, and direct-patch provenance after
+Query cache dehydration outside their proven scope.
 
 The alias-scope owner also has a compiler invariant witness for a malformed
 include plan: removing a captured ancestor's parent projection after the
