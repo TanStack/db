@@ -470,12 +470,21 @@ defined distractors, and a singleton `[undefined]` list with two owners. A
 plain source Map supplies expected `equalityLookup`, `lookup('eq')`,
 `inArrayLookup`, and `lookup('in')` sets after returned actions. Fixed and random
 three-key put/delete histories exercise nearby states with empty, repeated,
-both orders of a mixed list, and nullish-only `IN` lists. Skipped-update, wrong equality, lost-owner,
-dropped-operand, and wrong-dispatch controls fail the check. This direct-index
-evidence does not establish ordered, range, live-query, bucket-identity, or
-instrumentation behavior. The [nullish transfer ledger](oracle-reviews/index-unit-retirement-round-2.md)
+both orders of a mixed list, and nullish-only `IN` lists. The same source Map
+now predicts unfiltered ordered arrays and selected forward range sets over `undefined`, `null`,
+and positive numbers. Fixed histories preserve endpoint versus explicit
+undefined cursors, three undefined owners, removal of one of two owners,
+explicit versus omitted lower bounds, and two owners between double undefined
+bounds. The generated histories compare after each returned direct action.
+Skipped-update, wrong equality, lost-owner, dropped-operand, wrong-dispatch,
+wrong-cursor, and wrong-range controls fail the check. This direct-index
+evidence does not establish mixed-type ordering, custom comparator behavior,
+all forward bound combinations, reverse nullish ranges, filtered takes,
+private ordered-entry representation, live-query
+behavior, bucket identity, or instrumentation. The [nullish transfer ledger](oracle-reviews/index-unit-retirement-round-2.md)
 records the first five retired legacy blocks; the [IN transfer ledger](oracle-reviews/index-unit-retirement-round-3.md)
-records the next four and their review boundary.
+records the next four; the [ordered/range ledger](oracle-reviews/index-unit-retirement-round-4.md)
+records the current transfer boundary and review.
 
 The alias-scope owner also has a compiler invariant witness for a malformed
 include plan: removing a captured ancestor's parent projection after the

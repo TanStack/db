@@ -492,8 +492,22 @@ describe.each(indexTypes)(`%s update properties`, (_indexName, IndexType) => {
  * mixed-list selection and moves across the nullish boundary. At least two
  * keys are needed to expose surviving peers.
  * After each direct action returns, exact and `IN` methods, their `lookup`
- * dispatches, and key count must agree with the Map. Ordered reads, range
- * queries, bucket object identity, and instrumentation are outside this law.
+ * dispatches, unfiltered ordered reads, selected forward ranges, and key count must agree with
+ * the Map. The default comparator puts null and undefined at one ordered
+ * position before the positive numbers in this bounded domain, although
+ * exact lookup keeps them apart. Endpoint reads start at an end; an explicit
+ * cursor excludes its entire comparator position. Range bounds constrain
+ * positions only when supplied, even when the supplied value is undefined.
+ * The source Map is sorted anew for ordered reads and filtered for ranges;
+ * neither expectation uses the production comparator or traversal. Fixed
+ * histories keep three undefined owners, a remove-one-of-two cut, a mixed
+ * four-row range, and explicit versus omitted lower bounds. The generated
+ * tail varies owners and values at each returned-action cut. Removing the
+ * nullish values loses the boundary distinction, one owner loses repeated
+ * bucket traversal, and one defined value loses cursor continuation. Values
+ * outside the positive 1..3 domain, mixed-type numeric/string order, custom options,
+ * reverse ranges, all bound combinations, filtered takes, bucket object
+ * identity, and instrumentation are outside this ordered and range claim.
  */
 type NullishIndexValue = number | null | undefined
 type NullishIndexAction =
@@ -563,6 +577,131 @@ function expectNullishMembership(
   rows: ReadonlyMap<string, NullishIndexValue>,
 ): void {
   expectExactMembership(index, rows, nullishProbeValues, nullishInProbes)
+  expectNullishOrderedReads(index, rows)
+}
+
+type ModelBound = Readonly<{
+  value: NullishIndexValue
+  inclusive: boolean
+}>
+type ModelRange = Readonly<{
+  lower?: ModelBound
+  upper?: ModelBound
+  unusedLowerInclusive?: false
+}>
+
+const nullishRangeProbes: ReadonlyArray<ModelRange> = [
+  {},
+  { upper: { value: 2, inclusive: true } },
+  { upper: { value: 2, inclusive: true }, unusedLowerInclusive: false },
+  {
+    lower: { value: undefined, inclusive: true },
+    upper: { value: 2, inclusive: true },
+  },
+  {
+    lower: { value: undefined, inclusive: false },
+    upper: { value: 2, inclusive: true },
+  },
+  {
+    lower: { value: undefined, inclusive: true },
+    upper: { value: undefined, inclusive: true },
+  },
+  {
+    lower: { value: null, inclusive: true },
+    upper: { value: null, inclusive: true },
+  },
+  { lower: { value: null, inclusive: false } },
+  { upper: { value: undefined, inclusive: false } },
+  {
+    lower: { value: 1, inclusive: true },
+    upper: { value: 2, inclusive: false },
+  },
+]
+
+// "Position" is a model label, not a stored index bucket. In the declared
+// domain 1..3, zero names the shared nullish comparator position. Source key
+// ownership remains in the Map even when two values share that position.
+function nullishPosition(value: NullishIndexValue): number {
+  return value === null || value === undefined ? 0 : value
+}
+
+function expectNullishOrderedReads(
+  index: BaseIndex<string>,
+  rows: ReadonlyMap<string, NullishIndexValue>,
+): void {
+  const ordered = [...rows]
+    .sort(
+      ([leftKey, leftValue], [rightKey, rightValue]) =>
+        nullishPosition(leftValue) - nullishPosition(rightValue) ||
+        (leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0),
+    )
+    .map(([key, value]) => ({ key, value }))
+
+  // The public arrays preserve both ordering and multiplicity. A set-only
+  // check would miss a repeated undefined owner or a skipped peer.
+  for (const n of [1, 3, 10]) {
+    expect(index.takeFromStart(n)).toEqual(
+      ordered.slice(0, n).map(({ key }) => key),
+    )
+    expect(index.takeReversedFromEnd(n)).toEqual(
+      [...ordered]
+        .reverse()
+        .slice(0, n)
+        .map(({ key }) => key),
+    )
+    for (const cursor of nullishProbeValues) {
+      const cursorPosition = nullishPosition(cursor)
+      expect(index.take(n, cursor)).toEqual(
+        ordered
+          .filter(({ value }) => nullishPosition(value) > cursorPosition)
+          .slice(0, n)
+          .map(({ key }) => key),
+      )
+      expect(index.takeReversed(n, cursor)).toEqual(
+        [...ordered]
+          .reverse()
+          .filter(({ value }) => nullishPosition(value) < cursorPosition)
+          .slice(0, n)
+          .map(({ key }) => key),
+      )
+    }
+  }
+
+  // Model bounds are separate objects, so an absent lower bound is not
+  // conflated with a present bound whose value is literally undefined.
+  for (const probe of nullishRangeProbes) {
+    const options = {
+      ...(probe.lower && {
+        from: probe.lower.value,
+        fromInclusive: probe.lower.inclusive,
+      }),
+      ...(probe.upper && {
+        to: probe.upper.value,
+        toInclusive: probe.upper.inclusive,
+      }),
+      ...(probe.unusedLowerInclusive === false && { fromInclusive: false }),
+    }
+    const expected = new Set(
+      ordered
+        .filter(({ value }) => {
+          const position = nullishPosition(value)
+          const lower = probe.lower
+          const upper = probe.upper
+          return (
+            (lower === undefined ||
+              (lower.inclusive
+                ? position >= nullishPosition(lower.value)
+                : position > nullishPosition(lower.value))) &&
+            (upper === undefined ||
+              (upper.inclusive
+                ? position <= nullishPosition(upper.value)
+                : position < nullishPosition(upper.value)))
+          )
+        })
+        .map(({ key }) => key),
+    )
+    expect(index.rangeQuery(options)).toEqual(expected)
+  }
 }
 
 function applyNullishAction(
@@ -590,7 +729,7 @@ function applyNullishAction(
 }
 
 describe.each(indexTypes)(
-  `%s nullish exact membership`,
+  `%s nullish direct index refinement`,
   (_indexName, IndexType) => {
     test.each([
       [`undefined to null`, undefined, null],
@@ -661,6 +800,73 @@ describe.each(indexTypes)(
         [`undef1`, undefined],
         [`undef2`, undefined],
         [`one`, 1],
+      ] as const) {
+        applyNullishAction(index, rows, { type: `put`, key, value })
+      }
+    })
+
+    test(`distinguishes endpoint reads from explicit undefined cursors`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>()
+      for (const [key, value] of [
+        [`a`, undefined],
+        [`b`, 1],
+        [`c`, 2],
+      ] as const) {
+        applyNullishAction(index, rows, { type: `put`, key, value })
+      }
+    })
+
+    test(`traverses every undefined owner before continuing to numbers`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>()
+      for (const [key, value] of [
+        [`undef1`, undefined],
+        [`undef2`, undefined],
+        [`undef3`, undefined],
+        [`one`, 1],
+        [`two`, 2],
+      ] as const) {
+        applyNullishAction(index, rows, { type: `put`, key, value })
+      }
+    })
+
+    test(`retains the second undefined owner after removing the first`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>()
+      applyNullishAction(index, rows, {
+        type: `put`,
+        key: `a`,
+        value: undefined,
+      })
+      applyNullishAction(index, rows, {
+        type: `put`,
+        key: `b`,
+        value: undefined,
+      })
+      applyNullishAction(index, rows, { type: `delete`, key: `a` })
+    })
+
+    test(`distinguishes explicit and omitted undefined lower bounds`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>()
+      for (const [key, value] of [
+        [`undef`, undefined],
+        [`one`, 1],
+        [`two`, 2],
+        [`three`, 3],
+      ] as const) {
+        applyNullishAction(index, rows, { type: `put`, key, value })
+      }
+    })
+
+    test(`includes both undefined owners within double undefined bounds`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>()
+      for (const [key, value] of [
+        [`a`, undefined],
+        [`b`, undefined],
+        [`c`, 1],
       ] as const) {
         applyNullishAction(index, rows, { type: `put`, key, value })
       }
@@ -853,6 +1059,158 @@ describe.each(indexTypes)(
         expect(firstOnly).toHaveBeenCalledWith(`in`, [undefined, 1])
       } finally {
         firstOnly.mockRestore()
+      }
+    })
+
+    test(`rejects an endpoint read that drops the undefined owner`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>([
+        [`a`, undefined],
+        [`b`, 1],
+        [`c`, 2],
+      ])
+      for (const [key, value] of rows) index.add(key, { value })
+      const dropped = vi
+        .spyOn(index, `takeFromStart`)
+        .mockImplementation(() => [`b`, `c`])
+      try {
+        expect(() => expectNullishOrderedReads(index, rows)).toThrowError(
+          /expected/,
+        )
+        expect(dropped).toHaveBeenCalled()
+      } finally {
+        dropped.mockRestore()
+      }
+    })
+
+    test(`rejects a cursor that repeats the last undefined owner`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>([
+        [`undef1`, undefined],
+        [`undef2`, undefined],
+        [`undef3`, undefined],
+        [`one`, 1],
+        [`two`, 2],
+      ])
+      for (const [key, value] of rows) index.add(key, { value })
+      const take = index.take.bind(index)
+      const repeated = vi
+        .spyOn(index, `take`)
+        .mockImplementation((n, from, filter) =>
+          n === 10 && from === undefined
+            ? [`undef3`, `one`, `two`]
+            : take(n, from, filter),
+        )
+      try {
+        expect(() => expectNullishOrderedReads(index, rows)).toThrowError(
+          /expected/,
+        )
+        expect(repeated).toHaveBeenCalledWith(10, undefined)
+      } finally {
+        repeated.mockRestore()
+      }
+    })
+
+    test(`rejects a forward range that drops an explicit undefined lower bound`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>([
+        [`undef`, undefined],
+        [`one`, 1],
+        [`two`, 2],
+        [`three`, 3],
+      ])
+      for (const [key, value] of rows) index.add(key, { value })
+      const rangeQuery = index.rangeQuery.bind(index)
+      const dropped = vi
+        .spyOn(index, `rangeQuery`)
+        .mockImplementation((options) =>
+          `from` in options &&
+          options.from === undefined &&
+          options.to === 2 &&
+          options.fromInclusive === true
+            ? new Set([`one`, `two`])
+            : rangeQuery(options),
+        )
+      try {
+        expect(() => expectNullishOrderedReads(index, rows)).toThrowError(
+          /expected/,
+        )
+        expect(dropped).toHaveBeenCalledWith({
+          from: undefined,
+          fromInclusive: true,
+          to: 2,
+          toInclusive: true,
+        })
+      } finally {
+        dropped.mockRestore()
+      }
+    })
+
+    test(`rejects a double undefined range that loses one owner`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>([
+        [`a`, undefined],
+        [`b`, undefined],
+        [`c`, 1],
+      ])
+      for (const [key, value] of rows) index.add(key, { value })
+      const rangeQuery = index.rangeQuery.bind(index)
+      const truncated = vi
+        .spyOn(index, `rangeQuery`)
+        .mockImplementation((options) =>
+          `from` in options &&
+          options.from === undefined &&
+          `to` in options &&
+          options.to === undefined
+            ? new Set([`a`])
+            : rangeQuery(options),
+        )
+      try {
+        expect(() => expectNullishOrderedReads(index, rows)).toThrowError(
+          /expected/,
+        )
+        expect(truncated).toHaveBeenCalledWith({
+          from: undefined,
+          fromInclusive: true,
+          to: undefined,
+          toInclusive: true,
+        })
+      } finally {
+        truncated.mockRestore()
+      }
+    })
+
+    test(`rejects a null bound that drops its undefined peer`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>([
+        [`a`, undefined],
+        [`b`, null],
+        [`c`, 1],
+      ])
+      for (const [key, value] of rows) index.add(key, { value })
+      const rangeQuery = index.rangeQuery.bind(index)
+      const exactOnly = vi
+        .spyOn(index, `rangeQuery`)
+        .mockImplementation((options) =>
+          `from` in options &&
+          options.from === null &&
+          `to` in options &&
+          options.to === null
+            ? new Set([`b`])
+            : rangeQuery(options),
+        )
+      try {
+        expect(() => expectNullishOrderedReads(index, rows)).toThrowError(
+          /expected/,
+        )
+        expect(exactOnly).toHaveBeenCalledWith({
+          from: null,
+          fromInclusive: true,
+          to: null,
+          toInclusive: true,
+        })
+      } finally {
+        exactOnly.mockRestore()
       }
     })
   },
