@@ -137,7 +137,9 @@ presence of a preferred heading, class, comment template, or helper.
   needs an authorized contract decision.
 - **Not required:** Observation of internal facts that the contract does not
   expose, or an exhaustive search for indistinguishable histories without a
-  concrete information-gap hypothesis.
+  concrete information-gap hypothesis. For ORC-012, evidence may record that no
+  concrete missing-information hypothesis was identified; this does not claim
+  an exhaustive search.
 
 ### ORC-006: Checker calibration
 
@@ -984,9 +986,12 @@ This card is an optional presentation for the ORC-012 evidence. For a new oracle
 or a claimed repair, ask:
 
 1. What exact promise authorizes this expected result?
-2. Under ORC-005, can two legal histories be indistinguishable to the production path
-   through the claimed checkpoint yet require incompatible public observations?
-   If so, where must the missing information come from?
+2. Under ORC-005, could the promised result depend on source facts the
+   production path lacks at the claimed checkpoint? If so, can two legal
+   histories be indistinguishable to that path through the checkpoint yet
+   require incompatible public observations? Where must the missing
+   information come from? If no concrete gap is identified, record that
+   limited conclusion rather than claiming an exhaustive search.
 3. Which legal history distinguishes the proposed model from a weaker one?
 4. Does the fixture make production do the work being tested?
 5. Which concrete wrong answer can the comparison reject—and which can it miss?

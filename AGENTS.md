@@ -19,7 +19,7 @@ miss a violation when its histories, path, observation checkpoint, or
 comparison are insufficient.
 Correctly implemented behavior can also fail the user's need. Use the
 [repair-location table](docs/contributing/instruments/adversarial-review.md#locate-the-repair)
-to investigate before changing expectations.
+after diagnosing which account failed, before changing expectations.
 
 Challenge the laws themselves when the task warrants it: their suitability,
 interactions, and underlying concepts can need revision. Keep proposed design

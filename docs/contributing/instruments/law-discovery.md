@@ -36,9 +36,12 @@ lead, not evidence that one contract governs every item.
    underlying histories that give the production path the same initial state
    and inputs through that checkpoint, but require incompatible public
    observations. If they exist, name the missing information or provider
-   obligation; do not silently narrow an accepted promise.
-6. Describe the smallest independent model that can make the rival and boundary
-   predictions from steps 3–4.
+   obligation. A candidate law may be scoped explicitly; do not silently narrow
+   an accepted promise, which requires authority to revise.
+6. Describe the smallest independent model that enacts the obligation and limits
+   from step 1 and makes the rival and boundary predictions from steps 3–4.
+   Retain the source facts needed to examine any information gap from step 5,
+   even when the production path has not received them.
    For any proposed merge of model states, ask whether a legal next action can
    distinguish them. Map model abstractions to the project vocabulary.
 
@@ -48,8 +51,10 @@ that the production path has never received. For example, suppose a path must
 publish a full top-ten result after a deletion but receives only the old top
 ten and the deletion. If it cannot receive replacement rows before publication,
 two source datasets can require incompatible results while the path sees the
-same inputs. A live query that receives replacement rows through `loadSubset`
-has more information; judge it at its own promised publication checkpoint.
+same inputs. A live query can request replacement rows with `loadSubset`. If
+the provider supplies them through Collection sync writes that apply before
+publication, that path has the needed information; judge it at its own promised
+publication checkpoint.
 
 **Return:** the candidate law and status, its source, rival predictions, a
 concrete distinguishing witness, and the next experiment or unresolved decision.
