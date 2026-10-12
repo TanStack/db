@@ -99,7 +99,7 @@ remain in the source file.
 | ORC-009 | A model `put` maps to add or update according to source ownership; `delete` maps to remove when owned. Model comparator position combines null and undefined only for order/range, while exact membership keeps them distinct. |
 | ORC-010 | Spies restore in `finally`; the guarded runner recorded the primary mismatch separately from process exit and removed its private witness channel. |
 | ORC-011 | The reviewer found a missing probe, not a fault shared by the model and production. The added null-bound probe distinguishes the model rule from an exact-bucket interpretation. |
-| ORC-012 | This versioned ledger holds source assertions, transfer, limits, execution, and the hostile verdict. Exact committed-head recheck is recorded in a follow-up entry below. |
+| ORC-012 | This versioned ledger holds source assertions, transfer, limits, execution, hostile verdict, and the exact committed-head recheck below. |
 | ORC-013 | Explicit inclusive versus exclusive undefined and null bounds, paired with omitted bounds, distinguish presence and comparator-position grouping. The wrong-result controls fail at those comparisons. |
 | ORC-014 | No host or external provider behavior is claimed. |
 
@@ -108,3 +108,13 @@ crosses the Collection/query path. The other four retained tests observe
 private BTree ordering or storage and custom-comparator arguments; direct
 source-Map arrays and sets cannot replace those observations without a
 separate contract decision and receiving witness.
+
+## Exact committed-head recheck
+
+The same hostile reviewer rechecked committed code head
+`a72a7043d5750b33100ab95b7d3c6a490b15626c` after the commit hook. The
+commit deletes exactly the seven reviewed blocks and keeps all five intended
+legacy tests. The committed oracle retains the Map comparisons, null-bound
+probes, and five wrong-result controls; no temporary calibration fault remains.
+The two targeted files passed 415/415 tests with no type errors, and
+`git show --check --oneline HEAD` passed. The reviewer found no new blocker.
