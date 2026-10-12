@@ -18,6 +18,7 @@ import type {
   PersistenceAdapter,
   ProtocolEnvelope,
   SQLiteDriver,
+  TxCommitted,
 } from '../../db-sqlite-persistence-core/src'
 import type { ElectricCollectionUtils, ElectricSyncMode } from '../src/electric'
 
@@ -182,10 +183,10 @@ function fixture(
   let latestSeq = 0
   let latestRowVersion = 0
   let resetEpoch = 0
-  let subsetLoads = 0
+  let durableRowReads = 0
   const adapter: PersistenceAdapter = {
     loadSubset: () => {
-      subsetLoads++
+      durableRowReads++
       const snapshot = Array.from(rows, ([key, value]) => ({
         key,
         value: { ...value },
@@ -193,7 +194,10 @@ function fixture(
       return hydrationGate.then(() => snapshot)
     },
     loadResumeSnapshot: async (_collectionId, ctx) => {
-      if (ctx?.includeRows !== false) await hydrationGate
+      if (ctx?.includeRows !== false) {
+        durableRowReads++
+        await hydrationGate
+      }
       return {
         rows:
           ctx?.includeRows === false
@@ -314,7 +318,7 @@ function fixture(
     durableRows,
     exposures,
     record,
-    subsetLoadCount: () => subsetLoads,
+    durableRowReadCount: () => durableRowReads,
     latestDurableRowVersion: () => latestRowVersion,
     commitExternalTx: (tx: PersistedTx) =>
       adapter.applyCommittedTx(
@@ -1009,25 +1013,35 @@ describe(`persisted Electric recovery laws`, () => {
             { type: `set`, key: `oracle:publication`, value: revision },
           ],
         })
+        const committed: TxCommitted = fullReload
+          ? {
+              type: `tx:committed`,
+              term: revision,
+              seq: 1,
+              txId,
+              latestRowVersion: rowVersion,
+              requiresFullReload: true,
+            }
+          : {
+              type: `tx:committed`,
+              term: revision,
+              seq: 1,
+              txId,
+              latestRowVersion: rowVersion,
+              requiresFullReload: false,
+              changedRows: deleted ? [] : [{ key: row.id, value: row }],
+              deletedKeys: deleted ? [row.id] : [],
+              collectionMetadataMutations: [
+                { type: `set`, key: `oracle:publication`, value: revision },
+              ],
+            }
         receive?.({
           v: 1,
           dbName: id,
           collectionId: id,
           senderId: `peer`,
           ts: Date.now(),
-          payload: {
-            type: `tx:committed`,
-            term: revision,
-            seq: 1,
-            txId,
-            latestRowVersion: rowVersion,
-            requiresFullReload: fullReload,
-            changedRows: deleted ? [] : [{ key: row.id, value: row }],
-            deletedKeys: deleted ? [row.id] : [],
-            collectionMetadataMutations: [
-              { type: `set`, key: `oracle:publication`, value: revision },
-            ],
-          },
+          payload: committed,
         })
         return revision
       },
@@ -1096,8 +1110,11 @@ describe(`persisted Electric recovery laws`, () => {
    * baseline key 1, and names of length 0–8. Key variation distinguishes
    * independent rows from repeated edits; name variation distinguishes peer
    * values before the stream overwrites them; deletion changes membership;
-   * fullReload changes whether the adapter must read the persisted rows; and
-   * multiple pairs expose repeated-key histories. The authored history below
+   * fullReload requires a persisted read. A targeted notice can also require
+   * a read when its row is new to this Collection: the notice carries a
+   * patch without a completeness certificate. Public rows, rather than the
+   * number of reads, decide whether that route satisfies the law. Multiple
+   * pairs expose repeated-key histories. The authored history below
    * reconstructs insert then delete with a reload. The other fixed histories
    * reach both sequence-length and name/key margins. The grammar excludes a
    * malformed peer transaction that lists one key as both changed and deleted;
@@ -1144,7 +1161,7 @@ describe(`persisted Electric recovery laws`, () => {
           }
           if (command.deleted) expected.delete(row.id)
           else expected.set(row.id, structuredClone(row))
-          const subsetLoadsBeforeSettlement = f.subsetLoadCount()
+          const rowReadsBeforeNotice = f.durableRowReadCount()
           const revision = await peer.publish(
             f,
             row,
@@ -1166,13 +1183,11 @@ describe(`persisted Electric recovery laws`, () => {
           if (command.fullReload) {
             await vi.waitFor(
               () =>
-                expect(f.subsetLoadCount()).toBeGreaterThan(
-                  subsetLoadsBeforeSettlement,
+                expect(f.durableRowReadCount()).toBeGreaterThan(
+                  rowReadsBeforeNotice,
                 ),
               { interval: 1 },
             )
-          } else {
-            expect(f.subsetLoadCount()).toBe(subsetLoadsBeforeSettlement)
           }
           expect(f.publicRows()).toEqual(expectedRows())
           f.record(`peer revision ${revision} settled`)

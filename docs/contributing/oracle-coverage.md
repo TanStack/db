@@ -995,6 +995,14 @@ this owner.
 Real SQLite delta creation and browser/Electron notification delivery need
 matching receiving witnesses in their existing adapter and host owners before
 this controlled result can be claimed across those boundaries.
+The Electric recovery owner has separate real SQLite restart histories. Its
+generated peer-publication history instead uses a Map-backed adapter and a
+manually delivered notice. It compares exact public rows, durable rows, and a
+committed metadata marker. A full-reload notice requires an authoritative
+durable row read in that active-demand history, through either adapter row-read
+route. A targeted notice for a previously unseen key may also read durable
+rows because its value has no completeness certificate. The oracle does not
+treat `requiresFullReload: false` as a no-read guarantee.
 The metadata of an unseen targeted row is not asserted to be demand-scoped:
 core permits explicit row metadata for an absent row, so this needs a separate
 product decision before changing that contract.
