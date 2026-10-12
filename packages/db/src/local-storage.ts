@@ -459,6 +459,20 @@ export function localStorageCollectionOptions(
     parser,
     config.getKey,
     lastKnownData,
+    (collection) => {
+      const claim = (
+        collection.config as typeof collection.config & {
+          [collectionOptionsClaim]?: unknown
+        }
+      )[collectionOptionsClaim]
+      if (claim !== optionsClaim) {
+        throw new LocalStorageCollectionError(
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `LocalStorage sync belongs to its options Collection.`
+            : codedMessage(242),
+        )
+      }
+    },
   )
 
   /**
@@ -813,17 +827,22 @@ export function localStorageCollectionOptions(
   }
 
   let claimed = false
+  function optionsClaim() {
+    if (claimed)
+      throw new LocalStorageCollectionError(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `LocalStorage options can create only one Collection. Create fresh options for each Collection.`
+          : codedMessage(230),
+      )
+    claimed = true
+    return () => {
+      sync.abortFailedConstruction()
+      claimed = false
+    }
+  }
   Object.defineProperty(options, collectionOptionsClaim, {
     enumerable: true,
-    value: () => {
-      if (claimed)
-        throw new LocalStorageCollectionError(
-          devBuild() && process.env.NODE_ENV !== `production`
-            ? `LocalStorage options can create only one Collection. Create fresh options for each Collection.`
-            : codedMessage(230),
-        )
-      claimed = true
-    },
+    value: optionsClaim,
   })
 
   return withCollectionConfigFactory(options, () => {
@@ -908,9 +927,13 @@ function createLocalStorageSync<T extends object>(
   parser: Parser,
   getKey: (item: T) => string | number,
   lastKnownData: Map<string | number, StoredItem<T>>,
+  assertOwner: (
+    collection: Parameters<SyncConfig<T>[`sync`]>[0][`collection`],
+  ) => void,
 ): SyncConfig<T> & {
   manualTrigger?: (knownSnapshot?: Map<string | number, StoredItem<T>>) => void
   collection: any
+  abortFailedConstruction: () => void
   confirmOperationsSync: (
     mutations: Array<any>,
     persisted: Map<string | number, StoredItem<T>>,
@@ -918,6 +941,7 @@ function createLocalStorageSync<T extends object>(
 } {
   let syncParams: Parameters<SyncConfig<T>[`sync`]>[0] | null = null
   let collection: any = null
+  let activeCleanup: (() => void) | null = null
 
   /**
    * Compare two Maps to find differences using version keys
@@ -1034,6 +1058,7 @@ function createLocalStorageSync<T extends object>(
   } = {
     rowUpdateMode: `full`,
     sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
+      assertOwner(params.collection)
       const { begin, write, commit, markReady } = params
 
       // A failed restore cannot establish an empty authoritative snapshot.
@@ -1085,20 +1110,26 @@ function createLocalStorageSync<T extends object>(
         markReady()
         storageEventApi.addEventListener(`storage`, handleStorageEvent)
       } catch (error) {
+        storageEventApi.removeEventListener(`storage`, handleStorageEvent)
         unsubscribeSameTab()
         if (syncParams === params) {
           syncParams = null
+          collection = null
         }
         throw error
       }
+      const cleanup = () => {
+        storageEventApi.removeEventListener(`storage`, handleStorageEvent)
+        unsubscribeSameTab()
+        if (syncParams === params) {
+          syncParams = null
+          collection = null
+        }
+        if (activeCleanup === cleanup) activeCleanup = null
+      }
+      activeCleanup = cleanup
       return {
-        cleanup: () => {
-          storageEventApi.removeEventListener(`storage`, handleStorageEvent)
-          unsubscribeSameTab()
-          if (syncParams === params) {
-            syncParams = null
-          }
-        },
+        cleanup,
       }
     },
 
@@ -1153,6 +1184,7 @@ function createLocalStorageSync<T extends object>(
 
   return {
     ...syncConfig,
+    abortFailedConstruction: () => activeCleanup?.(),
     get collection() {
       return collection
     },
