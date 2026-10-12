@@ -47,6 +47,13 @@ import type { QueryCollectionUtils } from '../src/query.js'
  * begins during result application, becomes durable only after publication and
  * persistence, and retires when superseded, canceled, cleaned up, or released.
  * Mutation refetches add a second authority path but do not bypass those rules.
+ * An accepted direct write changes its Collection without starting a Query
+ * request. When another Collection owns the same physical Query, that write
+ * leaves the shared cache untouched and does not become the peer's row. A
+ * later Collection cannot publish another writer's patched cache as a server
+ * result; a later physical fetch may replace the direct row. A disabled late
+ * peer waits for explicit refetch. These claims cover one QueryClient; cache
+ * hydration into another client does not retain local-patch provenance.
  *
  * The reference view is an ownership graph: query scope and demand nodes point
  * to row keys. Sync-run lifetime fences, direct-write key positions, and
@@ -6208,6 +6215,94 @@ describe(`query collection ownership lifecycle`, () => {
     expect(collection.get(shared.id)?.name).toBe(`Updated`)
   })
 
+  /**
+   * A Query refetch may begin while a direct write waits for its persisted
+   * commit. Starting that request repeats the old cached success to observers,
+   * but no new provider row has arrived. The independent reference has three
+   * row states in order: the first fetched Server row, the accepted Manual
+   * write, and the later fetched Newer row. The old cached row cannot become
+   * authoritative again at refetch start.
+   *
+   * The legal history holds the direct commit, starts a real QueryClient
+   * refetch whose provider response is also held, then releases the commit.
+   * At the write receipt, while the response is still held, compare public
+   * and durable rows with Manual. After the provider responds, compare both
+   * with Newer. These two cuts reject a design that treats a fetch-start
+   * observer notification as a fresh result without forbidding a later
+   * physical result from replacing the direct write.
+   */
+  it.each([`eager`, `on-demand`] as const)(
+    `keeps an accepted persisted %s write through a refetch start until its result arrives`,
+    async (syncMode) => {
+      const id = `persisted-direct-write-refetch-start-${syncMode}`
+      const storage = createOwnershipStorage(undefined, 2)
+      const queryClient = createQueryClient()
+      const newer = { ...shared, name: `Newer` }
+      const manual = { ...shared, name: `Manual` }
+      const heldResult = createDeferred<Array<Item>>()
+      const requestStarted = createDeferred<void>()
+      const queryFn = vi
+        .fn()
+        .mockResolvedValueOnce([shared])
+        .mockImplementationOnce(() => {
+          requestStarted.resolve()
+          return heldResult.promise
+        })
+      const collection = createCollection(
+        persistedCollectionOptions<
+          Item,
+          string | number,
+          never,
+          QueryCollectionUtils<Item, string | number, Item, unknown>
+        >({
+          ...queryCollectionOptions<Item>({
+            id,
+            queryClient,
+            queryKey: [id],
+            queryFn,
+            getKey: (item) => item.id,
+            syncMode,
+            persistedGcTime: Number.POSITIVE_INFINITY,
+            startSync: true,
+          }),
+          persistence: { adapter: storage.adapter },
+        }),
+      )
+      cleanups.push(async () => {
+        storage.release()
+        heldResult.resolve([newer])
+        await collection.cleanup()
+        queryClient.clear()
+      })
+
+      if (syncMode === `eager`) await collection.stateWhenReady()
+      else await collection._sync.loadSubset({})
+      expect(collection.get(shared.id)?.name).toBe(shared.name)
+      expect(storedItems(storage)[0]?.name).toBe(shared.name)
+
+      const write = collection.utils.writeUpdate(manual)
+      await storage.entered
+      const refetch = queryClient.refetchQueries({ queryKey: [id] })
+      void refetch.catch(() => undefined)
+      await requestStarted.promise
+      expect(queryFn).toHaveBeenCalledTimes(2)
+
+      storage.release()
+      await write
+      expect({
+        public: collection.get(shared.id)?.name,
+        durable: storedItems(storage)[0]?.name,
+      }).toEqual({ public: manual.name, durable: manual.name })
+
+      heldResult.resolve([newer])
+      await refetch
+      expect({
+        public: collection.get(shared.id)?.name,
+        durable: storedItems(storage)[0]?.name,
+      }).toEqual({ public: newer.name, durable: newer.name })
+    },
+  )
+
   it(`rejects writes from an invalidated sync run and admits writes after restart`, async () => {
     const id = `direct-write-cleanup-admission`
     const storage = createOwnershipStorage()
@@ -7139,6 +7234,30 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   /**
+   * An on-demand result owns only its returned rows. A direct insert that no
+   * subset claimed remains a surgical Collection write even when a later
+   * complete scoped response is empty. The independent reference keeps that
+   * ownerless key until the caller deletes it; the eager full-snapshot neighbor
+   * below deliberately makes the opposite prediction for eager mode.
+   */
+  it(`keeps an ownerless on-demand insert after an empty explicit refetch`, async () => {
+    const { collection, queryFn } = createOwnershipFixture({
+      id: `on-demand-direct-insert-empty-refetch`,
+      results: [[], []],
+    })
+    const subset = { where: eq(`category`, `shared`) }
+    await collection._sync.loadSubset(subset)
+    await collection.utils.writeInsert(shared)
+    expect(rows(collection)).toEqual([shared.id])
+
+    await collection.utils.refetch({ throwOnError: true })
+    expect(queryFn).toHaveBeenCalledTimes(2)
+    expect(rows(collection)).toEqual([shared.id])
+    await collection.utils.writeDelete(shared.id)
+    expect(rows(collection)).toEqual([])
+  })
+
+  /**
    * An eager refetch is a complete source snapshot. A direct insert changes
    * the public row set without fetching, but a later explicit refetch with an
    * empty server result removes that key. The independent reference replaces
@@ -7193,9 +7312,11 @@ describe(`query collection ownership lifecycle`, () => {
    * The bounded legal grammar crosses one/two overlapping subset owners,
    * in-memory/persisted metadata, and update, delete, reinsert, upsert, and
    * refetch-after-reinsert. The driver uses real QueryClient and public write
-   * utilities. It compares public rows and accepted owner metadata after each
-   * action and release; forgetting ownership on any write fails the update
-   * lane, while retaining a deleted lifetime fails the reinsert lane.
+   * utilities. The independent claim set records demand indices, then maps
+   * those indices to the documented static on-demand Query key for metadata
+   * comparison. It compares public rows and exact accepted owner identities
+   * after each action and release; forgetting ownership on any write fails the
+   * update lane, while retaining a deleted lifetime fails the reinsert lane.
    */
   it.each(
     ([1, 2] as const).flatMap((ownerCount) =>
@@ -7231,6 +7352,9 @@ describe(`query collection ownership lifecycle`, () => {
         0,
         ownerCount,
       )
+      const demandHashes = demands.map((demand) =>
+        hashKey([id, getLoadSubsetDemandKey(demand)]),
+      )
       const claims = new Set<number>()
       let expected: Item | undefined
       let insertedDirectly = false
@@ -7240,7 +7364,7 @@ describe(`query collection ownership lifecycle`, () => {
         if (withMetadata)
           expect(
             persistedOwners(collection._state.syncedMetadata, shared.id),
-          ).toHaveLength(claims.size)
+          ).toEqual([...claims].map((index) => demandHashes[index]!).sort())
       }
       for (const [index, demand] of demands.entries()) {
         await collection._sync.loadSubset(demand)
@@ -7286,6 +7410,51 @@ describe(`query collection ownership lifecycle`, () => {
       )
     },
   )
+
+  /**
+   * A direct update preserves both subset claims in durable metadata. A fresh
+   * Collection over those stored rows can retire one claim after an empty
+   * result without losing the peer's row, then retire the final claim and the
+   * row. The reference is the authored set of two demand identities; each
+   * empty result removes only its own identity. Cloning the durable snapshot
+   * represents a new process without asking cleanup to retire the old run's
+   * active demands. Compare exact stored owners and public rows after each
+   * revalidation, not just their cardinality.
+   */
+  it(`retires overlapping persisted owners after a direct update and restart`, async () => {
+    const id = `direct-update-overlap-persisted-restart`
+    const first = categorySubset(`detail`)
+    const second = categorySubset(`list`)
+    const firstHash = hashKey([id, getLoadSubsetDemandKey(first)])
+    const secondHash = hashKey([id, getLoadSubsetDemandKey(second)])
+    const hotStorage = createOwnershipStorage()
+    const hot = createPersistedOwnershipFixture(id, hotStorage, [shared])
+
+    await hot.collection._sync.loadSubset(first)
+    await hot.collection._sync.loadSubset(second)
+    await hot.collection.utils.writeUpdate({ id: shared.id, name: `Updated` })
+    const durable = hotStorage.snapshot()
+    expect(durable.rows.get(shared.id)?.name).toBe(`Updated`)
+    expect(persistedOwners(durable.rowMetadata, shared.id)).toEqual(
+      [firstHash, secondHash].sort(),
+    )
+
+    const coldStorage = createOwnershipStorage(durable)
+    const cold = createPersistedOwnershipFixture(id, coldStorage, [])
+    await cold.collection._sync.loadSubset(first)
+    expect(cold.collection.get(shared.id)?.name).toBe(`Updated`)
+    expect(
+      persistedOwners(coldStorage.snapshot().rowMetadata, shared.id),
+    ).toEqual([secondHash])
+
+    await cold.collection._sync.loadSubset(second)
+    expect(cold.collection.has(shared.id)).toBe(false)
+    const settled = coldStorage.snapshot()
+    expect(settled.rows.has(shared.id)).toBe(false)
+    expect(persistedOwners(settled.rowMetadata, shared.id)).toEqual([])
+    expect(hot.queryFn).toHaveBeenCalledTimes(2)
+    expect(cold.queryFn).toHaveBeenCalledTimes(2)
+  })
 
   /**
    * SQLite is the receiving boundary for the row-lifetime rule. A fetched
@@ -7767,6 +7936,640 @@ describe(`query collection ownership lifecycle`, () => {
   )
 
   /**
+   * Eager mode has one full-result Query, but that physical sharing does not
+   * make A's accepted direct write a server response for B. The independent
+   * reference gives both Collections Server, then changes only A. These
+   * histories cross a changed row, a deleted row, and an upserted row so a
+   * cache patch cannot leak any direct operation into the eager peer.
+   */
+  it.each([`update`, `delete`, `upsert`] as const)(
+    `keeps an eager $0 local when two Collections share a Query`,
+    async (operation) => {
+      type Row = { id: string; name: string }
+      const queryClient = createQueryClient()
+      const queryKey = [`shared-eager-direct-${operation}`]
+      const server = { id: `x`, name: `Server` }
+      const queryFn = vi.fn(() => Promise.resolve([server]))
+      const makeCollection = (suffix: string) =>
+        createCollection(
+          queryCollectionOptions<Row>({
+            id: `shared-eager-direct-${operation}-${suffix}`,
+            queryClient,
+            queryKey,
+            queryFn,
+            getKey: (row) => row.id,
+            syncMode: `eager`,
+            staleTime: Infinity,
+            startSync: true,
+          }),
+        )
+      const a = makeCollection(`a`)
+      const b = makeCollection(`b`)
+      cleanups.push(async () => {
+        await a.cleanup()
+        await b.cleanup()
+        queryClient.clear()
+      })
+
+      await Promise.all([a.preload(), b.preload()])
+      expect(queryFn).toHaveBeenCalledOnce()
+      if (operation === `delete`) await a.utils.writeDelete(server.id)
+      else if (operation === `upsert`)
+        await a.utils.writeUpsert({ id: server.id, name: `Manual` })
+      else await a.utils.writeUpdate({ id: server.id, name: `Manual` })
+      expect(a.get(server.id)?.name).toBe(
+        operation === `delete` ? undefined : `Manual`,
+      )
+      expect(b.get(server.id)?.name).toBe(server.name)
+      expect(queryClient.getQueryData(queryKey)).toEqual([server])
+      expect(queryFn).toHaveBeenCalledOnce()
+    },
+  )
+
+  /**
+   * A new direct key has no fetched owner. That must not make it visible to an
+   * eager peer through their shared Query. A later complete server response
+   * that omits the key retires A's local row; this rejects an isolation rule
+   * that also refuses subsequent physical fetch authority.
+   */
+  it(`keeps an eager new-key insert local until a later complete fetch`, async () => {
+    type Row = { id: string; name: string }
+    const queryClient = createQueryClient()
+    const queryKey = [`shared-eager-new-key`]
+    const server = { id: `x`, name: `Server` }
+    const queryFn = vi.fn(() => Promise.resolve([server]))
+    const makeCollection = (suffix: string) =>
+      createCollection(
+        queryCollectionOptions<Row>({
+          id: `shared-eager-new-key-${suffix}`,
+          queryClient,
+          queryKey,
+          queryFn,
+          getKey: (row) => row.id,
+          syncMode: `eager`,
+          staleTime: Infinity,
+          startSync: true,
+        }),
+      )
+    const a = makeCollection(`a`)
+    const b = makeCollection(`b`)
+    cleanups.push(async () => {
+      await a.cleanup()
+      await b.cleanup()
+      queryClient.clear()
+    })
+
+    await Promise.all([a.preload(), b.preload()])
+    expect(queryFn).toHaveBeenCalledOnce()
+    await a.utils.writeInsert({ id: `y`, name: `Manual` })
+    expect(a.get(`y`)?.name).toBe(`Manual`)
+    expect(b.has(`y`)).toBe(false)
+    expect(queryClient.getQueryData(queryKey)).toEqual([server])
+    expect(queryFn).toHaveBeenCalledOnce()
+
+    await b.utils.refetch({ throwOnError: true })
+    expect(queryFn).toHaveBeenCalledTimes(2)
+    expect(a.has(`y`)).toBe(false)
+    expect(b.has(`y`)).toBe(false)
+    expect(a.get(`x`)?.name).toBe(server.name)
+    expect(b.get(`x`)?.name).toBe(server.name)
+  })
+
+  /**
+   * Sharing the physical Query does not let its pre-write request replace A's
+   * later direct row. The independent reference orders Server, the older
+   * request start, A's Manual write, and a later Newer request. At the older
+   * settlement A keeps Manual while B may accept Older; the post-write result
+   * then gives both Collections Newer. This crosses the eager full-snapshot
+   * path and distinguishes local-write protection from rejecting all fetches.
+   */
+  it(`preserves an eager direct write across an older shared fetch`, async () => {
+    type Row = { id: string; name: string }
+    const queryClient = createQueryClient()
+    const queryKey = [`shared-eager-older-fetch`]
+    const server = { id: `x`, name: `Server` }
+    const older = { id: `x`, name: `Older` }
+    const newer = { id: `x`, name: `Newer` }
+    const held = createDeferred<Array<Row>>()
+    const started = createDeferred<void>()
+    const queryFn = vi
+      .fn()
+      .mockResolvedValueOnce([server])
+      .mockImplementationOnce(() => {
+        started.resolve()
+        return held.promise
+      })
+      .mockResolvedValue([newer])
+    const makeCollection = (suffix: string) =>
+      createCollection(
+        queryCollectionOptions<Row>({
+          id: `shared-eager-older-fetch-${suffix}`,
+          queryClient,
+          queryKey,
+          queryFn,
+          getKey: (row) => row.id,
+          syncMode: `eager`,
+          staleTime: Infinity,
+          startSync: true,
+        }),
+      )
+    const a = makeCollection(`a`)
+    const b = makeCollection(`b`)
+    cleanups.push(async () => {
+      held.resolve([older])
+      await a.cleanup()
+      await b.cleanup()
+      queryClient.clear()
+    })
+
+    await Promise.all([a.preload(), b.preload()])
+    const refetch = b.utils.refetch({ throwOnError: true })
+    await started.promise
+    await a.utils.writeUpdate({ id: server.id, name: `Manual` })
+    expect(a.get(server.id)?.name).toBe(`Manual`)
+    expect(b.get(server.id)?.name).toBe(server.name)
+    held.resolve([older])
+    await refetch
+    expect(a.get(server.id)?.name).toBe(`Manual`)
+    expect(b.get(server.id)?.name).toBe(older.name)
+
+    await b.utils.refetch({ throwOnError: true })
+    expect(queryFn).toHaveBeenCalledTimes(3)
+    expect(a.get(server.id)?.name).toBe(newer.name)
+    expect(b.get(server.id)?.name).toBe(newer.name)
+  })
+
+  /**
+   * When A alone patches its eager cache, a later eager B still needs a
+   * physical response before it can publish that cached local edit. The
+   * independent reference gives A Manual after its write, B no row during
+   * the held request, then both Collections Newer from the server. This
+   * distinguishes later acquisition from the co-owner histories above.
+   */
+  it(`revalidates an eager cache patch before a later Collection adopts it`, async () => {
+    type Row = { id: string; name: string }
+    const queryClient = createQueryClient()
+    const queryKey = [`late-eager-direct-patch`]
+    const server = { id: `x`, name: `Server` }
+    const newer = { id: `x`, name: `Newer` }
+    const held = createDeferred<Array<Row>>()
+    const requestStarted = createDeferred<void>()
+    const queryFn = vi
+      .fn()
+      .mockResolvedValueOnce([server])
+      .mockImplementationOnce(() => {
+        requestStarted.resolve()
+        return held.promise
+      })
+    const makeCollection = (suffix: string) =>
+      createCollection(
+        queryCollectionOptions<Row>({
+          id: `late-eager-direct-${suffix}`,
+          queryClient,
+          queryKey,
+          queryFn,
+          getKey: (row) => row.id,
+          syncMode: `eager`,
+          staleTime: Infinity,
+          startSync: true,
+        }),
+      )
+    const a = makeCollection(`a`)
+    const peer: { collection?: ReturnType<typeof makeCollection> } = {}
+    cleanups.push(async () => {
+      held.resolve([newer])
+      await a.cleanup()
+      await peer.collection?.cleanup()
+      queryClient.clear()
+    })
+
+    await a.preload()
+    await a.utils.writeUpdate({ id: server.id, name: `Manual` })
+    expect(queryClient.getQueryData(queryKey)).toEqual([
+      { id: server.id, name: `Manual` },
+    ])
+    peer.collection = makeCollection(`b`)
+    const b = peer.collection
+    const load = b.preload()
+    void load.catch(() => undefined)
+    expect(
+      await Promise.race([
+        load.then(
+          () => `settled`,
+          () => `rejected`,
+        ),
+        requestStarted.promise.then(() => `request-started`),
+      ]),
+    ).toBe(`request-started`)
+    expect(b.has(server.id)).toBe(false)
+    expect(a.get(server.id)?.name).toBe(`Manual`)
+    held.resolve([newer])
+    await load
+    expect(b.get(server.id)?.name).toBe(newer.name)
+    expect(a.get(server.id)?.name).toBe(newer.name)
+    expect(queryFn).toHaveBeenCalledTimes(2)
+  })
+
+  /**
+   * A disabled late peer has no authority to publish another Collection's
+   * local cache edit, but disabled queries also do not run automatically.
+   * The independent reference holds B empty until an explicit refetch returns
+   * Newer. Both sync modes cross the shared-Query provenance boundary; the
+   * request and pending-load cuts reject an implicit recovery fetch.
+   */
+  it.each([`eager`, `on-demand`] as const)(
+    `waits for an explicit refetch before a disabled %s peer adopts a shared Query`,
+    async (syncMode) => {
+      type Row = { id: string; name: string }
+      const queryClient = createQueryClient()
+      const queryKey = [`disabled-late-peer-${syncMode}`]
+      const server = { id: `x`, name: `Server` }
+      const newer = { id: `x`, name: `Newer` }
+      const held = createDeferred<Array<Row>>()
+      const queryFn = vi
+        .fn()
+        .mockResolvedValueOnce([server])
+        .mockImplementationOnce(() => held.promise)
+      const makeCollection = (suffix: string, enabled: boolean) =>
+        createCollection(
+          queryCollectionOptions<Row>({
+            id: `disabled-late-peer-${syncMode}-${suffix}`,
+            queryClient,
+            queryKey,
+            queryFn,
+            getKey: (row) => row.id,
+            syncMode,
+            enabled,
+            staleTime: Infinity,
+            startSync: true,
+          }),
+        )
+      const a = makeCollection(`a`, true)
+      const peer: { collection?: ReturnType<typeof makeCollection> } = {}
+      cleanups.push(async () => {
+        held.resolve([newer])
+        await a.cleanup()
+        await peer.collection?.cleanup()
+        queryClient.clear()
+      })
+
+      if (syncMode === `eager`) await a.preload()
+      else await a._sync.loadSubset({})
+      await a.utils.writeUpdate({ id: server.id, name: `Manual` })
+      peer.collection = makeCollection(`b`, false)
+      const b = peer.collection
+      const load =
+        syncMode === `eager`
+          ? b.preload()
+          : Promise.resolve(b._sync.loadSubset({}))
+      let loadState: `pending` | `fulfilled` | `rejected` = `pending`
+      void load.then(
+        () => (loadState = `fulfilled`),
+        () => (loadState = `rejected`),
+      )
+      for (let turn = 0; turn < 4; turn++) await Promise.resolve()
+      expect(queryFn).toHaveBeenCalledOnce()
+      expect(b.has(server.id)).toBe(false)
+      expect(loadState).toBe(`pending`)
+
+      const refetch = b.utils.refetch({ throwOnError: true })
+      held.resolve([newer])
+      await Promise.all([load, refetch])
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(b.get(server.id)?.name).toBe(newer.name)
+      expect(a.get(server.id)?.name).toBe(newer.name)
+    },
+  )
+
+  /**
+   * Eager direct writes can seed an idle Query before any provider fetch.
+   * That seed is still local to A. A disabled B must not treat it as a server
+   * result or start its own request; an explicit refetch is the first source
+   * of authority for B. This distinguishes the cold-seed path from the
+   * fetched-and-patched cache path above.
+   */
+  it(`waits for explicit refetch after a disabled eager peer joins a direct cache seed`, async () => {
+    type Row = { id: string; name: string }
+    const queryClient = createQueryClient()
+    const queryKey = [`disabled-eager-seed-peer`]
+    const direct = { id: `x`, name: `Manual` }
+    const server = { id: `x`, name: `Server` }
+    const held = createDeferred<Array<Row>>()
+    const queryFn = vi.fn(() => held.promise)
+    const makeCollection = (suffix: string) =>
+      createCollection(
+        queryCollectionOptions<Row>({
+          id: `disabled-eager-seed-peer-${suffix}`,
+          queryClient,
+          queryKey,
+          queryFn,
+          getKey: (row) => row.id,
+          syncMode: `eager`,
+          enabled: false,
+          staleTime: Infinity,
+          startSync: true,
+        }),
+      )
+    const a = makeCollection(`a`)
+    const peer: { collection?: ReturnType<typeof makeCollection> } = {}
+    cleanups.push(async () => {
+      held.resolve([server])
+      await a.cleanup()
+      await peer.collection?.cleanup()
+      queryClient.clear()
+    })
+
+    await a.utils.writeInsert(direct)
+    expect(a.get(direct.id)?.name).toBe(direct.name)
+    expect(queryClient.getQueryData(queryKey)).toEqual([direct])
+    peer.collection = makeCollection(`b`)
+    const b = peer.collection
+    const load = b.preload()
+    void load.catch(() => undefined)
+    for (let turn = 0; turn < 4; turn++) await Promise.resolve()
+    expect(queryFn).not.toHaveBeenCalled()
+    expect(b.has(direct.id)).toBe(false)
+
+    const refetch = b.utils.refetch({ throwOnError: true })
+    expect(queryFn).toHaveBeenCalledOnce()
+    held.resolve([server])
+    await Promise.all([load, refetch])
+    expect(b.get(direct.id)?.name).toBe(server.name)
+    expect(a.get(direct.id)?.name).toBe(server.name)
+  })
+
+  /**
+   * B owns a shared on-demand Query while A has no subset owner. The Query
+   * Collection guide's on-demand cache rule protects another Collection's
+   * owned Query: A's direct insert changes only A's accepted row and starts
+   * no provider request. A later physical fetch may replace that row when A
+   * acquires the cached result, as the guide's shared-key rule permits.
+   *
+   * The reference is the authored server row, A-only insert, and newer server
+   * row in that order. The first public-row and cache checkpoint rejects a
+   * shared-cache guard that runs only when the writing Collection owns a row.
+   * The final checkpoint distinguishes that guard from a rule that refuses
+   * all later server authority.
+   */
+  it(`keeps an unacquired direct insert out of another Collection's shared Query`, async () => {
+    type Row = { id: string; name: string }
+    const queryClient = createQueryClient()
+    const queryKey = [`shared-unacquired-direct-insert`]
+    const server = { id: `x`, name: `Server` }
+    const newer = { id: `x`, name: `Newer` }
+    const queryFn = vi
+      .fn()
+      .mockResolvedValueOnce([server])
+      .mockResolvedValue([newer])
+    const makeCollection = (id: string) =>
+      createCollection(
+        queryCollectionOptions<Row>({
+          id,
+          queryClient,
+          queryKey,
+          queryFn,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          staleTime: Infinity,
+          startSync: true,
+        }),
+      )
+    const ownerA = makeCollection(`shared-unacquired-insert-a`)
+    const ownerB = makeCollection(`shared-unacquired-insert-b`)
+    cleanups.push(async () => {
+      await ownerA.cleanup()
+      await ownerB.cleanup()
+      queryClient.clear()
+    })
+
+    await ownerB._sync.loadSubset({})
+    expect(ownerB.get(server.id)?.name).toBe(server.name)
+    expect(ownerA.has(server.id)).toBe(false)
+    await ownerA.utils.writeInsert({ id: server.id, name: `Manual` })
+    expect(ownerA.get(server.id)?.name).toBe(`Manual`)
+    expect(ownerB.get(server.id)?.name).toBe(server.name)
+    expect(queryClient.getQueryData(queryKey)).toEqual([server])
+    expect(queryFn).toHaveBeenCalledOnce()
+
+    await ownerB.utils.refetch({ throwOnError: true })
+    expect(ownerA.get(server.id)?.name).toBe(`Manual`)
+    expect(ownerB.get(server.id)?.name).toBe(newer.name)
+    await ownerA._sync.loadSubset({})
+    expect(ownerA.get(server.id)?.name).toBe(newer.name)
+    expect(queryFn).toHaveBeenCalledTimes(2)
+  })
+
+  /**
+   * A Collection that acquires a Query after another Collection's direct
+   * cache patch must not mistake that local edit for a server result. The
+   * reference starts with one server row, then gives only A the direct update.
+   * B's first acquisition may request a new result; while that request is
+   * held, B has no server-confirmed copy of A's value. A post-write result
+   * may then replace A's write in both Collections. Constructing B before or
+   * after the write varies registration without changing this authority law.
+   * The driver checks public rows, cache data, and provider calls at each cut.
+   */
+  it.each([`registered`, `later-created`] as const)(
+    `does not adopt another Collection's cached direct edit on later acquisition: %s`,
+    async (peerTiming) => {
+      type Row = { id: string; name: string }
+      const queryClient = createQueryClient()
+      const queryKey = [`late-shared-direct-edit-${peerTiming}`]
+      const server = { id: `x`, name: `Server` }
+      const newer = { id: `x`, name: `Newer` }
+      const held = createDeferred<Array<Row>>()
+      const requestStarted = createDeferred<void>()
+      const queryFn = vi
+        .fn()
+        .mockResolvedValueOnce([server])
+        .mockImplementationOnce(() => {
+          requestStarted.resolve()
+          return held.promise
+        })
+      const makeCollection = (id: string) =>
+        createCollection(
+          queryCollectionOptions<Row>({
+            id,
+            queryClient,
+            queryKey,
+            queryFn,
+            getKey: (row) => row.id,
+            syncMode: `on-demand`,
+            staleTime: Infinity,
+            startSync: true,
+          }),
+        )
+      const ownerA = makeCollection(`late-shared-a-${peerTiming}`)
+      let ownerB =
+        peerTiming === `registered`
+          ? makeCollection(`late-shared-b-${peerTiming}`)
+          : undefined
+      cleanups.push(async () => {
+        held.resolve([newer])
+        await ownerA.cleanup()
+        await ownerB?.cleanup()
+        queryClient.clear()
+      })
+
+      await ownerA._sync.loadSubset({})
+      expect(ownerA.get(server.id)?.name).toBe(server.name)
+      await ownerA.utils.writeUpdate({ id: server.id, name: `Manual` })
+      expect(ownerA.get(server.id)?.name).toBe(`Manual`)
+      expect(queryClient.getQueryData(queryKey)).toEqual([
+        { id: server.id, name: `Manual` },
+      ])
+      expect(queryFn).toHaveBeenCalledOnce()
+
+      ownerB ??= makeCollection(`late-shared-b-${peerTiming}`)
+      const load = Promise.resolve(ownerB._sync.loadSubset({}))
+      void load.catch(() => undefined)
+      const first = await Promise.race([
+        load.then(
+          () => `settled`,
+          () => `rejected`,
+        ),
+        requestStarted.promise.then(() => `request-started`),
+      ])
+      expect(first).toBe(`request-started`)
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(ownerB.has(server.id)).toBe(false)
+      held.resolve([newer])
+      await load
+      expect(ownerB.get(server.id)?.name).toBe(newer.name)
+      expect(ownerA.get(server.id)?.name).toBe(newer.name)
+    },
+  )
+
+  /**
+   * A directly selected response property has the same provenance rule as a
+   * raw array. A's direct edit can patch its Query envelope, but a later B
+   * cannot treat that envelope as a server fetch. The reference gives B no
+   * row until the held replacement response, then gives it the server row.
+   * This distinguishes the rule from a patch marker set only for raw arrays.
+   */
+  it(`withholds a directly selected cache edit from a later Collection`, async () => {
+    type Row = { id: string; name: string }
+    type Response = { items: Array<Row> }
+    const queryClient = createQueryClient()
+    const queryKey = [`late-shared-wrapped-direct-edit`]
+    const server = { id: `x`, name: `Server` }
+    const newer = { id: `x`, name: `Newer` }
+    const held = createDeferred<Response>()
+    const requestStarted = createDeferred<void>()
+    const queryFn = vi
+      .fn()
+      .mockResolvedValueOnce({ items: [server] })
+      .mockImplementationOnce(() => {
+        requestStarted.resolve()
+        return held.promise
+      })
+    const makeCollection = (id: string) =>
+      createCollection(
+        queryCollectionOptions({
+          id,
+          queryClient,
+          queryKey,
+          queryFn,
+          select: (response: Response) => response.items,
+          getKey: (row: Row) => row.id,
+          syncMode: `on-demand`,
+          staleTime: Infinity,
+          startSync: true,
+        }),
+      )
+    const ownerA = makeCollection(`late-wrapped-a`)
+    const peer: { collection?: ReturnType<typeof makeCollection> } = {}
+    cleanups.push(async () => {
+      held.resolve({ items: [newer] })
+      await ownerA.cleanup()
+      await peer.collection?.cleanup()
+      queryClient.clear()
+    })
+
+    await ownerA._sync.loadSubset({})
+    await ownerA.utils.writeUpdate({ id: server.id, name: `Manual` })
+    expect(queryClient.getQueryData(queryKey)).toEqual({
+      items: [{ id: server.id, name: `Manual` }],
+    })
+    peer.collection = makeCollection(`late-wrapped-b`)
+    const ownerB = peer.collection
+    const load = Promise.resolve(ownerB._sync.loadSubset({}))
+    void load.catch(() => undefined)
+    expect(
+      await Promise.race([
+        load.then(
+          () => `settled`,
+          () => `rejected`,
+        ),
+        requestStarted.promise.then(() => `request-started`),
+      ]),
+    ).toBe(`request-started`)
+    expect(ownerB.has(server.id)).toBe(false)
+    expect(queryFn).toHaveBeenCalledTimes(2)
+    held.resolve({ items: [newer] })
+    await load
+    expect(ownerB.get(server.id)?.name).toBe(newer.name)
+    expect(ownerA.get(server.id)?.name).toBe(newer.name)
+  })
+
+  /**
+   * The late peer must withhold A's local cache edit while its replacement
+   * fetch runs. If that fetch fails, it still reports the new Query error:
+   * withholding an old success cannot suppress a terminal failure. The
+   * independent reference has no B-owned row and one failed B request, so the
+   * public checkpoint is B's error state and absence of A's direct value.
+   * The successful sibling above distinguishes this from withholding every
+   * result. Registration on either side of the write is a legal history.
+   */
+  it.each([`registered`, `later-created`] as const)(
+    `reports a failed fetch while withholding another Collection's cached edit: %s`,
+    async (peerTiming) => {
+      type Row = { id: string; name: string }
+      const queryClient = createQueryClient()
+      const queryKey = [`late-shared-direct-error-${peerTiming}`]
+      const failure = new Error(`replacement failed`)
+      const queryFn = vi
+        .fn()
+        .mockResolvedValueOnce([{ id: `x`, name: `Server` }])
+        .mockRejectedValueOnce(failure)
+      const makeCollection = (id: string) =>
+        createCollection(
+          queryCollectionOptions<Row>({
+            id,
+            queryClient,
+            queryKey,
+            queryFn,
+            getKey: (row) => row.id,
+            syncMode: `on-demand`,
+            staleTime: Infinity,
+            startSync: true,
+          }),
+        )
+      const ownerA = makeCollection(`late-error-a-${peerTiming}`)
+      let ownerB =
+        peerTiming === `registered`
+          ? makeCollection(`late-error-b-${peerTiming}`)
+          : undefined
+      cleanups.push(async () => {
+        await ownerA.cleanup()
+        await ownerB?.cleanup()
+        queryClient.clear()
+      })
+
+      await ownerA._sync.loadSubset({})
+      await ownerA.utils.writeUpdate({ id: `x`, name: `Manual` })
+      ownerB ??= makeCollection(`late-error-b-${peerTiming}`)
+      await expect(ownerB._sync.loadSubset({})).rejects.toBe(failure)
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(ownerB.has(`x`)).toBe(false)
+      expect(ownerB.utils.lastError).toBe(failure)
+      expect(ownerB.utils.isError).toBe(true)
+      expect(ownerB.utils.errorCount).toBe(1)
+      expect(ownerA.get(`x`)?.name).toBe(`Manual`)
+    },
+  )
+
+  /**
    * A shared request started before A's local write remains a server result
    * for B. A's later accepted value wins only in A. The reference keeps two
    * Collection row sets over the one provider response. B releases and
@@ -7994,6 +8797,141 @@ describe(`query collection ownership lifecycle`, () => {
   )
 
   /**
+   * Cleanup ends one sync run and discards its memory-only direct rows. A
+   * direct-row position from that run cannot veto a valid cached Query row
+   * when the same Collection starts a new run. The independent reference has
+   * one server row, one optional accepted direct row, and a run boundary that
+   * removes the direct row. B retains the physical Query throughout.
+   *
+   * Both histories insert directly; one explicitly deletes before cleanup.
+   * The real QueryClient and public Collection are checked after restart and
+   * cached acquisition. One provider call proves the cached path was used.
+   */
+  it.each([false, true] as const)(
+    `does not carry an old direct-row position into a restarted sync run, deleted=%s`,
+    async (deleteBeforeCleanup) => {
+      type Row = { id: string; name: string }
+      const id = `direct-position-restart-${deleteBeforeCleanup}`
+      const queryClient = createQueryClient()
+      const queryKey = [id]
+      const server = { id: `x`, name: `Server` }
+      const queryFn = vi.fn(() => Promise.resolve([server]))
+      const makeCollection = (name: string) =>
+        createCollection(
+          queryCollectionOptions<Row>({
+            id: name,
+            queryClient,
+            queryKey,
+            queryFn,
+            getKey: (row) => row.id,
+            syncMode: `on-demand`,
+            staleTime: Infinity,
+            startSync: true,
+          }),
+        )
+      const a = makeCollection(`${id}-a`)
+      const b = makeCollection(`${id}-b`)
+      cleanups.push(async () => {
+        await a.cleanup()
+        await b.cleanup()
+        queryClient.clear()
+      })
+      await b._sync.loadSubset({})
+      expect(b.get(`x`)?.name).toBe(server.name)
+      await a.utils.writeInsert({ id: `x`, name: `Direct` })
+      expect(a.get(`x`)?.name).toBe(`Direct`)
+      if (deleteBeforeCleanup) await a.utils.writeDelete(`x`)
+      await a.cleanup()
+
+      const subscription = a.subscribeChanges(() => {})
+      cleanups.push(() => Promise.resolve(subscription.unsubscribe()))
+      await a._sync.loadSubset({})
+      expect(queryFn).toHaveBeenCalledOnce()
+      expect(a.get(`x`)?.name).toBe(server.name)
+      expect(b.get(`x`)?.name).toBe(server.name)
+    },
+  )
+
+  /**
+   * A direct cache patch belongs to the sync run that accepted it. An outside
+   * Query observer can retain that physical cache through A's cleanup, but
+   * A's next run cannot treat its own old local edit as a fetched result.
+   * The independent reference discards A's memory-only row at cleanup and
+   * waits for a new server response. The held-request cut rejects a cache
+   * provenance rule that compares Collection identity but ignores sync run.
+   */
+  it(`does not replay its own direct cache patch after sync restart`, async () => {
+    type Row = { id: string; name: string }
+    const id = `direct-cache-patch-restart`
+    const queryClient = createQueryClient()
+    const queryKey = [id]
+    const server = { id: `x`, name: `Server` }
+    const newer = { id: `x`, name: `Newer` }
+    const held = createDeferred<Array<Row>>()
+    const requestStarted = createDeferred<void>()
+    const queryFn = vi
+      .fn()
+      .mockResolvedValueOnce([server])
+      .mockImplementationOnce(() => {
+        requestStarted.resolve()
+        return held.promise
+      })
+    const collection = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        staleTime: Infinity,
+        startSync: true,
+      }),
+    )
+    const outside = new QueryObserver(queryClient, {
+      queryKey,
+      queryFn,
+      enabled: false,
+      staleTime: Infinity,
+    })
+    const unsubscribeOutside = outside.subscribe(() => {})
+    cleanups.push(async () => {
+      held.resolve([newer])
+      unsubscribeOutside()
+      await collection.cleanup()
+      queryClient.clear()
+    })
+
+    await collection._sync.loadSubset({})
+    await collection.utils.writeUpdate({ id: server.id, name: `Manual` })
+    expect(queryClient.getQueryData(queryKey)).toEqual([
+      { id: server.id, name: `Manual` },
+    ])
+    await collection.cleanup()
+    expect(queryClient.getQueryData(queryKey)).toEqual([
+      { id: server.id, name: `Manual` },
+    ])
+    const subscription = collection.subscribeChanges(() => {})
+    cleanups.push(() => Promise.resolve(subscription.unsubscribe()))
+    const load = Promise.resolve(collection._sync.loadSubset({}))
+    void load.catch(() => undefined)
+    expect(
+      await Promise.race([
+        load.then(
+          () => `settled`,
+          () => `rejected`,
+        ),
+        requestStarted.promise.then(() => `request-started`),
+      ]),
+    ).toBe(`request-started`)
+    expect(collection.has(server.id)).toBe(false)
+    expect(queryFn).toHaveBeenCalledTimes(2)
+    held.resolve([newer])
+    await load
+    expect(collection.get(server.id)?.name).toBe(newer.name)
+  })
+
+  /**
    * A's accepted direct row has its own position. A physical fetch started
    * later may replace and claim it when A next acquires the shared Query;
    * an earlier fetched snapshot or B's local cache edit may not. The small
@@ -8005,10 +8943,11 @@ describe(`query collection ownership lifecycle`, () => {
    * The legal grammar crosses fetch/write order, another write to the same or
    * a disjoint key, a foreign local cache edit, and a final real refetch. The
    * driver uses two Collections sharing one physical Query. At A's acquisition
-   * and subset release it compares public rows with the reference and asserts
-   * that a cached result caused no extra provider request. The inverse order
-   * rejects blindly trusting any cached result; the cache-edit lanes reject
-   * mistaking setQueryData for a remote success.
+   * and subset release it compares public rows with the reference. A fetched
+   * cached result needs no request; a local cache edit with no later fetch
+   * requires one to establish authority. The inverse order rejects blindly
+   * trusting any cached result; the cache-edit lanes reject mistaking
+   * setQueryData for a remote success.
    */
   it.each(
     ([`write-first`, `fetch-first`] as const).flatMap((order) =>
@@ -8095,7 +9034,17 @@ describe(`query collection ownership lifecycle`, () => {
       if (finalRefetch) await fetchB(false)
       const callsBeforeAcquisition = queryFn.mock.calls.length
       await a._sync.loadSubset({})
-      expect(queryFn).toHaveBeenCalledTimes(callsBeforeAcquisition)
+      const revalidatedCacheEdit = cacheEdit && !finalRefetch
+      expect(queryFn).toHaveBeenCalledTimes(
+        callsBeforeAcquisition + Number(revalidatedCacheEdit),
+      )
+      if (revalidatedCacheEdit) {
+        reference.remoteX = {
+          value: `Server 2`,
+          position: ++reference.position,
+        }
+        reference.cacheStillFetched = true
+      }
       const { directX, remoteX, cacheStillFetched } = reference
       if (!directX || !remoteX) throw new Error(`Illegal authority history`)
       const remoteMayReplace =
@@ -8210,6 +9159,125 @@ describe(`query collection ownership lifecycle`, () => {
         callsBeforeRestartLoad + 1,
       )
       expect(restart.collection.get(`x`)?.name).toBe(`Server`)
+    },
+  )
+
+  /**
+   * A fresh persisted Collection can meet a Query cache entry fetched before
+   * its accepted direct write. The shared physical Query stays unchanged
+   * while B owns it: letting A patch that cache would publish A's local row
+   * into B. A's SQLite row nevertheless survives cleanup. Its owner may be
+   * absent (direct insert before A acquired the subset) or retained (direct
+   * update after A acquired it); neither makes the old cache a new fetch.
+   *
+   * The independent reference orders B's server result, A's accepted write,
+   * A's cleanup, and A's next acquisition. The retained cache cannot order
+   * its row against the durable write, so acquisition must request a new
+   * result; that result may replace the durable value. The driver uses a real QueryClient
+   * shared by both Collections and a managed SQLite cache. It checks A and B,
+   * the unchanged Query cache, durable storage after cleanup, request count,
+   * and A's public row when the new acquisition settles. The two histories
+   * distinguish the ownerless-row ambiguity guard from an owned direct
+   * update whose cached Query is equally old.
+   */
+  it.each([`ownerless-insert`, `owned-update`] as const)(
+    `keeps a persisted %s direct row ahead of an older shared Query after restart`,
+    async (rowLifetime) => {
+      type Row = { id: string; name: string }
+      const id = `persisted-old-shared-cache-${rowLifetime}`
+      const driver = new BetterSqlite3SQLiteDriver({ filename: `:memory:` })
+      const persistence = createNodeSQLitePersistence({
+        database: driver.getDatabase(),
+      })
+      const managed = persistence.resolvePersistenceForCollection!({
+        collectionId: id,
+        mode: `sync-present`,
+      })
+      const queryClient = createQueryClient()
+      const queryKey = [id]
+      const server = { id: `x`, name: `Server` }
+      const direct = { id: `x`, name: `Direct` }
+      const newer = { id: `x`, name: `Newer` }
+      const queryFn = vi
+        .fn(() => Promise.resolve([newer]))
+        .mockResolvedValueOnce([server])
+      const makeA = () =>
+        createCollection(
+          persistedCollectionOptions<
+            Row,
+            string | number,
+            never,
+            QueryCollectionUtils<Row, string | number, Row, unknown>
+          >({
+            ...queryCollectionOptions<Row>({
+              id,
+              queryClient,
+              queryKey,
+              queryFn,
+              getKey: (row) => row.id,
+              syncMode: `on-demand`,
+              staleTime: Infinity,
+              startSync: true,
+            }),
+            persistence: managed,
+          }),
+        )
+      const a = makeA()
+      const b = createCollection(
+        queryCollectionOptions<Row>({
+          id: `${id}-b`,
+          queryClient,
+          queryKey,
+          queryFn,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          staleTime: Infinity,
+          startSync: true,
+        }),
+      )
+      let restarted: ReturnType<typeof makeA> | undefined
+      try {
+        await b._sync.loadSubset({})
+        if (rowLifetime === `owned-update`) await a._sync.loadSubset({})
+        else await vi.waitFor(() => expect(a.status).toBe(`ready`))
+        expect(a.get(`x`)?.name).toBe(
+          rowLifetime === `owned-update` ? server.name : undefined,
+        )
+        if (rowLifetime === `owned-update`) await a.utils.writeUpdate(direct)
+        else await a.utils.writeInsert(direct)
+        expect(a.get(`x`)?.name).toBe(direct.name)
+        expect(b.get(`x`)?.name).toBe(server.name)
+        expect(queryClient.getQueryData(queryKey)).toEqual([server])
+        expect(queryFn).toHaveBeenCalledOnce()
+
+        await a.cleanup()
+        const claim = await managed.adapter.claimCacheGeneration!(id)
+        try {
+          const durable = await managed.adapter.loadResumeSnapshot({
+            kind: `managed`,
+            storageCollectionId: claim.storageCollectionId,
+            claimId: claim.claimId,
+          })
+          expect(durable.rows.find((row) => row.key === `x`)?.value).toEqual(
+            direct,
+          )
+        } finally {
+          await managed.adapter.releaseCacheGenerationClaim!(claim.claimId)
+        }
+
+        restarted = makeA()
+        const callsBeforeAcquisition = queryFn.mock.calls.length
+        await restarted._sync.loadSubset({})
+        const newRequests = queryFn.mock.calls.length - callsBeforeAcquisition
+        expect(newRequests).toBe(1)
+        expect(restarted.get(`x`)?.name).toBe(newer.name)
+      } finally {
+        await restarted?.cleanup()
+        await a.cleanup()
+        await b.cleanup()
+        queryClient.clear()
+        driver.close()
+      }
     },
   )
 
@@ -8772,9 +9840,9 @@ describe(`query collection ownership lifecycle`, () => {
   /**
    * A fetch-start position is needed only while its subset observer remains
    * live. The reference count after retiring eight distinct subset leases is
-   * zero. Instrument the map receiving each fetch-start stamp (keyed by this
-   * fixture's unique Query hash and initial generation zero), then compare
-   * its retained entries with that count after every subset unloads.
+   * zero. Instrument maps receiving this fixture's unique Query hashes,
+   * distinguish fetch positions by their distinct values across eight
+   * requests, then compare retained entries after every subset unloads.
    */
   it(`retires fetch-start positions with their subset observers`, async () => {
     type Row = { id: string }
@@ -8803,7 +9871,11 @@ describe(`query collection ownership lifecycle`, () => {
       key: unknown,
       value: unknown,
     ) {
-      if (typeof key === `string` && key.includes(id) && value === 0) {
+      if (
+        typeof key === `string` &&
+        key.includes(id) &&
+        typeof value === `number`
+      ) {
         stamped.add(this)
       }
       return originals.call(this, key, value)
@@ -8816,14 +9888,22 @@ describe(`query collection ownership lifecycle`, () => {
     } finally {
       setSpy.mockRestore()
     }
-    expect(stamped.size).toBe(1)
-    const fetchStarts = [...stamped][0]!
+    const fetchStarts = [...stamped].find((map) => {
+      const positions = demands.map((demand) =>
+        map.get(hashKey([id, getLoadSubsetDemandKey(demand)])),
+      )
+      return (
+        positions.every((position) => typeof position === `number`) &&
+        new Set(positions).size === demands.length
+      )
+    })
+    expect(fetchStarts).toBeDefined()
     expect(
-      [...fetchStarts.keys()].filter((key) => String(key).includes(id)),
+      [...fetchStarts!.keys()].filter((key) => String(key).includes(id)),
     ).toHaveLength(8)
     for (const demand of demands) collection._sync.unloadSubset(demand)
     expect(
-      [...fetchStarts.keys()].filter((key) => String(key).includes(id)),
+      [...fetchStarts!.keys()].filter((key) => String(key).includes(id)),
     ).toHaveLength(0)
   })
 
@@ -8856,7 +9936,7 @@ describe(`query collection ownership lifecycle`, () => {
           key: unknown,
           value: unknown,
         ) {
-          if (key === queryHash && value === 0) stamped.add(this)
+          if (key === queryHash && typeof value === `number`) stamped.add(this)
           return originalSet.call(this, key, value)
         })
       const load = Promise.resolve(collection._sync.loadSubset({}))
@@ -8866,19 +9946,24 @@ describe(`query collection ownership lifecycle`, () => {
       } finally {
         setSpy.mockRestore()
       }
-      expect(stamped.size).toBe(1)
-      const fetchStarts = [...stamped][0]!
       const query = queryClient.getQueryCache().find({ queryKey: [id] })!
       collection._sync.unloadSubset({})
       expect(query.state.fetchStatus).toBe(`fetching`)
-      expect(fetchStarts.has(queryHash)).toBe(true)
+      const fetchStarts = [...stamped].find(
+        (map) =>
+          typeof map.get(queryHash) === `number` &&
+          Number.isFinite(map.get(queryHash)) &&
+          map.get(queryHash) !== 0,
+      )
+      expect(fetchStarts).toBeDefined()
+      expect(fetchStarts!.has(queryHash)).toBe(true)
       if (ending === `settlement`) {
         pending.resolve([])
         await vi.waitFor(() => expect(query.state.fetchStatus).toBe(`idle`))
       } else {
         queryClient.removeQueries({ queryKey: [id], exact: true })
       }
-      expect(fetchStarts.has(queryHash)).toBe(false)
+      expect(fetchStarts!.has(queryHash)).toBe(false)
       pending.resolve([])
       await load.catch(() => undefined)
     },
@@ -9161,6 +10246,207 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   /**
+   * A cached row with a subset owner does not give a later local cache edit
+   * server authority over an accepted direct update. The independent order
+   * has four values: fetched Server, A's Manual write, a QueryClient-only
+   * cache edit, then a new provider fetch. The edit is visible to B through
+   * its Query observer, but A keeps Manual until the final fetch starts after
+   * the write and returns Newer. This crosses the owned-row state omitted by
+   * the ownerless shared-cache histories. The real QueryClient drives both
+   * Collections; public rows and provider calls are checked after the edit
+   * and after the optional fetch. The neighboring fetch history rejects a
+   * repair that permanently shields A from server results.
+   */
+  it.each([
+    { history: `local-cache-edit`, fetchAfterEdit: false },
+    { history: `newer-provider-fetch`, fetchAfterEdit: true },
+  ])(
+    `keeps owned direct-row authority across $history`,
+    async ({ fetchAfterEdit }) => {
+      type Row = { id: string; name: string }
+      const id = `owned-direct-cache-edit-${fetchAfterEdit}`
+      const queryClient = createQueryClient()
+      const queryFn = vi
+        .fn()
+        .mockResolvedValueOnce([{ id: `x`, name: `Server` }])
+        .mockResolvedValue([{ id: `x`, name: `Newer` }])
+      const makeCollection = (suffix: string) =>
+        createCollection(
+          queryCollectionOptions<Row>({
+            id: `${id}-${suffix}`,
+            queryClient,
+            queryKey: [id],
+            queryFn,
+            getKey: (row) => row.id,
+            syncMode: `on-demand`,
+            staleTime: Infinity,
+            startSync: true,
+          }),
+        )
+      const a = makeCollection(`a`)
+      const b = makeCollection(`b`)
+      cleanups.push(async () => {
+        await a.cleanup()
+        await b.cleanup()
+        queryClient.clear()
+      })
+
+      await a._sync.loadSubset({})
+      await b._sync.loadSubset({})
+      expect(queryFn).toHaveBeenCalledOnce()
+      await a.utils.writeUpdate({ id: `x`, name: `Manual` })
+      expect(a.get(`x`)?.name).toBe(`Manual`)
+      expect(b.get(`x`)?.name).toBe(`Server`)
+
+      queryClient.setQueryData([id], [{ id: `x`, name: `Local edit` }])
+      await vi.waitFor(() => expect(b.get(`x`)?.name).toBe(`Local edit`))
+      expect(queryFn).toHaveBeenCalledOnce()
+      if (!fetchAfterEdit) {
+        expect(a.get(`x`)?.name).toBe(`Manual`)
+        return
+      }
+
+      await b.utils.refetch({ throwOnError: true })
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(a.get(`x`)?.name).toBe(`Newer`)
+      expect(b.get(`x`)?.name).toBe(`Newer`)
+    },
+  )
+
+  /**
+   * Starting a newer physical fetch does not publish its answer. While that
+   * request is held, a manual Query cache edit remains local and cannot
+   * replace A's accepted direct row. The independent reference orders the
+   * direct write, fetch start, local edit, and fetch result separately. The
+   * held cut distinguishes fetch-start authority from result authority; the
+   * final cut admits the actual newer server row.
+   */
+  it(`keeps an owned direct row through a local cache edit during a held fetch`, async () => {
+    type Row = { id: string; name: string }
+    const id = `owned-direct-held-fetch-cache-edit`
+    const queryClient = createQueryClient()
+    const held = createDeferred<Array<Row>>()
+    const requestStarted = createDeferred<void>()
+    const queryFn = vi
+      .fn()
+      .mockResolvedValueOnce([{ id: `x`, name: `Server` }])
+      .mockImplementationOnce(() => {
+        requestStarted.resolve()
+        return held.promise
+      })
+    const makeCollection = (suffix: string) =>
+      createCollection(
+        queryCollectionOptions<Row>({
+          id: `${id}-${suffix}`,
+          queryClient,
+          queryKey: [id],
+          queryFn,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          staleTime: Infinity,
+          startSync: true,
+        }),
+      )
+    const a = makeCollection(`a`)
+    const b = makeCollection(`b`)
+    cleanups.push(async () => {
+      held.resolve([{ id: `x`, name: `Newer` }])
+      await a.cleanup()
+      await b.cleanup()
+      queryClient.clear()
+    })
+
+    await a._sync.loadSubset({})
+    await b._sync.loadSubset({})
+    await a.utils.writeUpdate({ id: `x`, name: `Manual` })
+    const refetch = b.utils.refetch({ throwOnError: true })
+    await requestStarted.promise
+    queryClient.setQueryData([id], [{ id: `x`, name: `Local edit` }])
+    await vi.waitFor(() => expect(b.get(`x`)?.name).toBe(`Local edit`))
+    expect(queryFn).toHaveBeenCalledTimes(2)
+    expect(a.get(`x`)?.name).toBe(`Manual`)
+
+    held.resolve([{ id: `x`, name: `Newer` }])
+    await refetch
+    expect(a.get(`x`)?.name).toBe(`Newer`)
+    expect(b.get(`x`)?.name).toBe(`Newer`)
+  })
+
+  /**
+   * A local cache edit still lacks server authority after A releases and
+   * reacquires its sole subset. The direct update owned that subset, so its
+   * row retires on unload; the retained Query cache then contains a manual
+   * edit that cannot establish a new owned row. The independent reference
+   * requires a physical result before load settlement. An outside Query
+   * observer keeps the cache alive, and the held-request checkpoint rejects
+   * treating the manual edit as a successful fetch.
+   */
+  it(`revalidates a sole owner's manually edited cache on reacquisition`, async () => {
+    type Row = { id: string; name: string }
+    const id = `owned-direct-manual-cache-reacquisition`
+    const queryClient = createQueryClient()
+    const queryKey = [id]
+    const newer = { id: `x`, name: `Newer` }
+    const held = createDeferred<Array<Row>>()
+    const requestStarted = createDeferred<void>()
+    const queryFn = vi
+      .fn()
+      .mockResolvedValueOnce([{ id: `x`, name: `Server` }])
+      .mockImplementationOnce(() => {
+        requestStarted.resolve()
+        return held.promise
+      })
+    const collection = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        staleTime: Infinity,
+        startSync: true,
+      }),
+    )
+    const outside = new QueryObserver(queryClient, {
+      queryKey,
+      queryFn,
+      enabled: false,
+      staleTime: Infinity,
+    })
+    const unsubscribeOutside = outside.subscribe(() => {})
+    cleanups.push(async () => {
+      held.resolve([newer])
+      unsubscribeOutside()
+      await collection.cleanup()
+      queryClient.clear()
+    })
+
+    await collection._sync.loadSubset({})
+    await collection.utils.writeUpdate({ id: `x`, name: `Manual` })
+    queryClient.setQueryData(queryKey, [{ id: `x`, name: `Local edit` }])
+    expect(collection.get(`x`)?.name).toBe(`Manual`)
+    collection._sync.unloadSubset({})
+    expect(collection.has(`x`)).toBe(false)
+    const load = Promise.resolve(collection._sync.loadSubset({}))
+    void load.catch(() => undefined)
+    expect(
+      await Promise.race([
+        load.then(
+          () => `settled`,
+          () => `rejected`,
+        ),
+        requestStarted.promise.then(() => `request-started`),
+      ]),
+    ).toBe(`request-started`)
+    expect(collection.has(`x`)).toBe(false)
+    held.resolve([newer])
+    await load
+    expect(collection.get(`x`)?.name).toBe(newer.name)
+    expect(queryFn).toHaveBeenCalledTimes(2)
+  })
+
+  /**
    * A direct cache edit is a notification, not a Query result. Its independent
    * reference keeps the last fetch error and Query's invalidation/freshness
    * metadata while replacing only an already cached row. The grammar here
@@ -9235,6 +10521,241 @@ describe(`query collection ownership lifecycle`, () => {
       }
     },
   )
+
+  /**
+   * A Query Core hash may coalesce equivalent subset predicates into one
+   * physical Query while DB retains two logical subset demands. A response
+   * from a fetch started before an accepted direct write cannot undo that
+   * write's key, whichever logical demand observed the fetch. A response from
+   * a later fetch may replace it. The reference is the order of the authored
+   * fetches and write, independent of the Query cache's chosen first key.
+   *
+   * The legal history uses `id = x` and `id IN [x]`, which have equal row
+   * meaning but distinct demand keys. The real QueryClient coalesces them by
+   * a custom hash. The public row is compared after the write, after the held
+   * older result applies, and after a post-write result applies. The provider
+   * call count proves each requested fetch ran.
+   */
+  it(`preserves a direct write across an older aliased Query fetch`, async () => {
+    type Row = { id: string; name: string }
+    const id = `aliased-fetch-write-order`
+    const older = createDeferred<Array<Row>>()
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: false,
+          staleTime: Infinity,
+          gcTime: Infinity,
+          queryKeyHashFn: () => `equivalent-subset-query`,
+        },
+      },
+    })
+    const before = { id: `x`, name: `Before` }
+    const manual = { id: `x`, name: `Manual` }
+    const newer = { id: `x`, name: `Newer` }
+    const queryFn = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([before])
+      .mockImplementationOnce(() => older.promise)
+      .mockResolvedValue([newer])
+    const collection = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+      }),
+    )
+    cleanups.push(async () => {
+      older.resolve([])
+      await collection.cleanup()
+      queryClient.clear()
+    })
+    const a = { where: eq(`id`, `x`) }
+    const b = {
+      where: new IR.Func(`in`, [new IR.PropRef([`id`]), new IR.Value([`x`])]),
+    }
+    expect(getLoadSubsetDemandKey(a)).not.toBe(getLoadSubsetDemandKey(b))
+
+    await collection._sync.loadSubset(a)
+    await collection._sync.loadSubset({ ...b, refetch: true })
+    expect(collection.get(`x`)?.name).toBe(before.name)
+    const held = collection._sync.loadSubset({ ...b, refetch: true })
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(3))
+    await collection.utils.writeUpdate(manual)
+    expect(collection.get(`x`)?.name).toBe(manual.name)
+
+    older.resolve([{ id: `x`, name: `Older` }])
+    await held
+    expect(collection.get(`x`)?.name).toBe(manual.name)
+
+    await collection._sync.loadSubset({ ...b, refetch: true })
+    expect(queryFn).toHaveBeenCalledTimes(4)
+    expect(collection.get(`x`)?.name).toBe(newer.name)
+  })
+
+  /**
+   * The physical Query may start fetching before a second equivalent logical
+   * demand attaches. That demand did not observe the fetch event, but its
+   * result is still older than a later accepted direct write. The independent
+   * reference orders the held fetch before the write and preserves `Manual`
+   * for both demands at result settlement. A later fetch remains authoritative.
+   * This history distinguishes joining an in-flight Query from observing a
+   * fetch that starts after both logical demands are attached.
+   */
+  it(`preserves a direct write when an aliased demand joins an in-flight fetch`, async () => {
+    type Row = { id: string; name: string }
+    const id = `aliased-join-in-flight-fetch`
+    const older = createDeferred<Array<Row>>()
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: false,
+          staleTime: Infinity,
+          gcTime: Infinity,
+          queryKeyHashFn: () => `aliased-join-query`,
+        },
+      },
+    })
+    const before = { id: `x`, name: `Before` }
+    const manual = { id: `x`, name: `Manual` }
+    const newer = { id: `x`, name: `Newer` }
+    const queryFn = vi
+      .fn()
+      .mockResolvedValueOnce([before])
+      .mockImplementationOnce(() => older.promise)
+      .mockResolvedValue([newer])
+    const collection = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+      }),
+    )
+    cleanups.push(async () => {
+      older.resolve([])
+      await collection.cleanup()
+      queryClient.clear()
+    })
+    const a = { where: eq(`id`, `x`) }
+    const b = {
+      where: new IR.Func(`in`, [new IR.PropRef([`id`]), new IR.Value([`x`])]),
+    }
+    expect(getLoadSubsetDemandKey(a)).not.toBe(getLoadSubsetDemandKey(b))
+
+    await collection._sync.loadSubset(a)
+    expect(collection.get(`x`)?.name).toBe(before.name)
+    const held = collection._sync.loadSubset({ ...a, refetch: true })
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+    const joining = collection._sync.loadSubset(b)
+    const query = queryClient.getQueryCache().find({ queryKey: [id] })!
+    await vi.waitFor(() => expect(query.getObserversCount()).toBe(2))
+    await collection.utils.writeUpdate(manual)
+    expect(collection.get(`x`)?.name).toBe(manual.name)
+
+    older.resolve([{ id: `x`, name: `Older` }])
+    await Promise.all([held, joining])
+    expect(collection.get(`x`)?.name).toBe(manual.name)
+    expect(queryFn).toHaveBeenCalledTimes(2)
+
+    await collection._sync.loadSubset({ ...b, refetch: true })
+    expect(queryFn).toHaveBeenCalledTimes(3)
+    expect(collection.get(`x`)?.name).toBe(newer.name)
+  })
+
+  /**
+   * Two equivalent demands share a physical Query. A direct write lands while
+   * its first refetch is held. A later physical refetch starts after the write,
+   * then the demand whose key Query Core uses retires. The remaining demand
+   * did not run the Query function, but the new fetch is authoritative for
+   * its row. The independent reference uses the authored fetch/write order:
+   * `Newer` must replace `Manual` when the replacement result applies. This
+   * distinguishes fetch-event propagation from attach-time initialization.
+   */
+  it(`applies a post-write fetch to an aliased demand after its peer retires`, async () => {
+    type Row = { id: string; name: string }
+    const id = `aliased-peer-retires-after-fetch-start`
+    const older = createDeferred<Array<Row>>()
+    const replacement = createDeferred<Array<Row>>()
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: false,
+          staleTime: Infinity,
+          gcTime: Infinity,
+          queryKeyHashFn: () => `aliased-peer-retirement-query`,
+        },
+      },
+    })
+    const before = { id: `x`, name: `Before` }
+    const manual = { id: `x`, name: `Manual` }
+    const newer = { id: `x`, name: `Newer` }
+    const queryFn = vi
+      .fn()
+      .mockResolvedValueOnce([before])
+      .mockImplementationOnce(() => older.promise)
+      .mockImplementationOnce(() => replacement.promise)
+    const collection = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+      }),
+    )
+    cleanups.push(async () => {
+      older.resolve([])
+      replacement.resolve([])
+      await collection.cleanup()
+      queryClient.clear()
+    })
+    const a = { where: eq(`id`, `x`) }
+    const b = {
+      where: new IR.Func(`in`, [new IR.PropRef([`id`]), new IR.Value([`x`])]),
+    }
+    expect(getLoadSubsetDemandKey(a)).not.toBe(getLoadSubsetDemandKey(b))
+
+    await collection._sync.loadSubset(b)
+    await collection._sync.loadSubset(a)
+    expect(collection.get(`x`)?.name).toBe(before.name)
+    const query = queryClient.getQueryCache().find({ queryKey: [id] })!
+    expect(query.getObserversCount()).toBe(2)
+    const held = queryClient.refetchQueries({
+      predicate: (candidate) => candidate === query,
+    })
+    void held.catch(() => {})
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+    expect(query.state.fetchStatus).toBe(`fetching`)
+    await collection.utils.writeUpdate(manual)
+    expect(collection.get(`x`)?.name).toBe(manual.name)
+
+    const postWrite = queryClient.refetchQueries({
+      predicate: (candidate) => candidate === query,
+    })
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(3))
+    collection._sync.unloadSubset(b)
+    expect(query.getObserversCount()).toBe(1)
+    expect(collection.get(`x`)?.name).toBe(manual.name)
+
+    replacement.resolve([newer])
+    await postWrite
+    await vi.waitFor(() => expect(collection.get(`x`)?.name).toBe(newer.name))
+    older.resolve([{ id: `x`, name: `Older` }])
+    await held.catch(() => {})
+    expect(collection.get(`x`)?.name).toBe(newer.name)
+    expect(queryFn).toHaveBeenCalledTimes(3)
+  })
 
   /**
    * One physical Query has one cache-patch obligation per direct write. Two
@@ -9394,6 +10915,109 @@ describe(`query collection ownership lifecycle`, () => {
     expect(collection.get(`3-0`)?.name).toBe(`after`)
     expect(queryFn).toHaveBeenCalledTimes(10)
     expect(getKeyCalls).toBeLessThanOrEqual(3010)
+  })
+
+  /**
+   * An empty persisted baseline is established by its first scan in a sync
+   * run. With no durable writer or cache rotation, later retained Query
+   * reacquisitions have no row ownership to reconcile and need no further
+   * full-store scan.
+   * A new sync run has no such evidence: a durable owner may have appeared
+   * while this Collection was absent. This is a bounded work proposal beside
+   * the existing row-ownership law, not a claim about arbitrary peer writes.
+   *
+   * The independent model retains only whether the current sync run scanned
+   * its empty baseline. `restart` removes that evidence. The fixed histories
+   * distinguish retained reacquisition from a cold run. They drive the real
+   * Query observer and persistence scan seam. They compare scan counts and
+   * public rows after each applied result.
+   */
+  const expectedEmptyBaselineScans = (
+    history: ReadonlyArray<`empty-result` | `restart`>,
+  ): number => {
+    let scans = 0
+    let emptyBaselineKnown = false
+    for (const action of history) {
+      if (action === `restart`) {
+        emptyBaselineKnown = false
+      } else if (!emptyBaselineKnown) {
+        scans++
+        emptyBaselineKnown = true
+      }
+    }
+    return scans
+  }
+
+  it(`does not rescan a stable empty persisted baseline on retained reacquisition`, async () => {
+    const id = `empty-persisted-baseline-work`
+    const queryHash = hashKey([id])
+    const scanPersistedRows = vi.fn(() => Promise.resolve([]))
+    const { collection, queryFn } = createOwnershipFixture({
+      id,
+      results: [[], [], []],
+      scanPersistedRows,
+      persistedGcTime: Number.POSITIVE_INFINITY,
+      setupMetadata: (metadata) =>
+        metadata.collection.set(`queryCollection:gc:${queryHash}`, {
+          queryHash,
+          mode: `until-revalidated`,
+        }),
+    })
+    const history: Array<`empty-result` | `restart`> = []
+
+    await collection._sync.loadSubset({})
+    history.push(`empty-result`)
+    expect(rows(collection)).toEqual([])
+    expect(scanPersistedRows).toHaveBeenCalledTimes(
+      expectedEmptyBaselineScans(history),
+    )
+
+    for (let result = 0; result < 2; result++) {
+      collection._sync.unloadSubset({})
+      await collection._sync.loadSubset({ refetch: true })
+      history.push(`empty-result`)
+      expect(rows(collection)).toEqual([])
+      expect(scanPersistedRows).toHaveBeenCalledTimes(
+        expectedEmptyBaselineScans(history),
+      )
+    }
+    expect(queryFn).toHaveBeenCalledTimes(3)
+  })
+
+  it(`scans a cold durable owner that appeared after an empty sync run`, async () => {
+    const id = `cold-owner-after-empty-baseline`
+    const queryHash = hashKey([id])
+    const hotStorage = createOwnershipStorage()
+    const hot = createPersistedOwnershipFixture(id, hotStorage, [])
+    await hot.collection._sync.loadSubset({})
+    expect(storedItems(hotStorage)).toEqual([])
+    await hot.collection.cleanup()
+
+    // This seeded durable state represents another writer's committed owner
+    // while the first Collection had no sync run. The cold Collection cannot
+    // use the first run's empty-baseline evidence.
+    const coldSeed = hotStorage.snapshot()
+    coldSeed.rows.set(shared.id, shared)
+    coldSeed.rowMetadata.set(shared.id, {
+      queryCollection: { owners: { [queryHash]: true } },
+    })
+    coldSeed.collectionMetadata.set(`queryCollection:gc:${queryHash}`, {
+      queryHash,
+      mode: `until-revalidated`,
+    })
+    const coldStorage = createOwnershipStorage(coldSeed)
+    const coldScanRows = vi.spyOn(coldStorage.adapter, `scanRows`)
+    const cold = createPersistedOwnershipFixture(id, coldStorage, [])
+    await cold.collection._sync.loadSubset({})
+
+    // The empty provider result retires the cold durable owner. A design that
+    // skips every empty-baseline scan leaves the stored row behind.
+    expect(cold.queryFn).toHaveBeenCalledOnce()
+    expect(rows(cold.collection)).toEqual([])
+    expect(storedItems(coldStorage)).toEqual([])
+    expect(coldScanRows).toHaveBeenCalledTimes(
+      expectedEmptyBaselineScans([`restart`, `empty-result`]),
+    )
   })
 
   it(`emits metadata for every owner of rows shared by overlapping queries`, async () => {

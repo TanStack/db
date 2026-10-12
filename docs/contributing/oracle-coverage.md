@@ -547,11 +547,13 @@ The ownership oracle now checks a direct row's ownership lifetime across one
 and two subset claims, with and without Collection row metadata. A direct
 update preserves those claims; a direct delete ends them; a later insert or
 upsert of the same key starts unowned; a later Query result can claim the new
-row. Its 20 bounded histories compare accepted public rows and owner metadata
-after each action and subset release. Removing the delete-retirement repair
+row. Its 20 bounded histories compare accepted public rows and exact persisted
+owner identities after each action and subset release. Removing the delete-retirement repair
 fails nine histories at those checkpoints. One real SQLite receiving history
 releases both former subsets, restarts the Collection from the same storage,
-and keeps the reinserted unowned row. This does not establish every persisted
+and keeps the reinserted unowned row. A controlled persisted snapshot restart
+also retires two overlapping claims one at a time and compares durable owner
+identities and public rows after each empty result. This does not establish every persisted
 adapter, overlapping result schedule, or ownership of an inferred window
 replacement; the persisted direct-write owner retains the wider durable
 receiving boundary. Shared-Query cached-result authority
@@ -570,6 +572,55 @@ acquisition refetches once and the new server row wins. Without that guarded
 revalidation the original receiving history kept the direct value. These
 finite histories do not establish every persisted adapter, a cached result
 without a colliding key, or a cross-process Query cache hydration order.
+
+Further controlled histories compare an accepted direct insert with a cached
+server row across cleanup and restart, so a discarded run's write position
+cannot suppress that row. The insert/delete neighbor distinguishes a stale
+position from intentional row deletion. An equivalent-predicate alias history
+coalesces two logical demands into one physical Query: a held pre-write fetch
+must preserve the accepted direct row, while a later fetch can replace it. A
+shared-Query history also checks A's direct insert while only B has loaded the
+Query; B's public row and cache stay on the server value until a newer fetch.
+The latter history rejects a cache patch that depends on A already owning a
+subset. A stable empty persisted result avoids repeated full-store scans on
+retained reacquisition, while a cold run still scans and retires a newly
+seeded durable owner. A nonempty provisional result still takes the baseline
+scan before applying. These checks use real Query Core observers and controlled
+persistence; they do not cover every custom hash collision, external durable
+writer, or arbitrary interleaving of overlapping subset fetches.
+
+The shared-Query authority histories now also vary peer acquisition timing:
+both Collections loaded at the write, B loaded while A is not, and B acquiring
+after A patched the cache. The latter rejects a local edit leaking into a
+late peer at a held-request public-row checkpoint, then admits the later
+server result. A real SQLite restart matrix distinguishes a persisted
+ownerless insert from an owned direct update against a shared pre-write cache
+row. It compares durable storage after cleanup and the fresh Collection's row
+after acquisition; an owned row cannot silently revert to the cached older
+value. Two alias schedules separately reject omitting the observer-attach
+fetch position and omitting propagation of a later physical fetch position to
+all logical observers. A directly selected response property checks the same
+late-peer rule as a raw array. A failed replacement fetch reaches the peer's
+public error state without publishing the other Collection's local edit. An
+outside Query observer retains A's own cache patch through cleanup; A's next
+sync run must request a new result rather than replay that old patch. A
+separate owned-row history checks that `queryClient.setQueryData` can update
+B but cannot replace A's later accepted direct value; a real post-write fetch
+may replace it. A held-fetch history checks the local edit before that provider
+result, and a sole-owner unload/reacquire history requires a new result before
+the manually edited cache can establish rows again. Eager shared-Query histories
+cross active co-owners, a genuinely new direct key, a later peer, an older held
+fetch, and a later complete result. They compare A and B's public rows and the
+shared cache at write and fetch-settlement cuts. Disabled late peers in both
+modes, including an eager peer of a cold direct cache seed, make no automatic
+request and wait for an explicit refetch. A held
+persisted direct commit crossed with a refetch start compares public and
+durable rows before the provider responds, then after a newer response; eager
+and on-demand modes both reject replay of the old cached success. An explicit
+empty on-demand refetch preserves an ownerless direct insert, unlike an eager
+full-snapshot refetch. These finite histories leave same-run external durable
+writers, arbitrary overlapping-fetch value precedence, and direct-patch
+provenance after Query cache dehydration outside their proven scope.
 
 The alias-scope owner also has a compiler invariant witness for a malformed
 include plan: removing a captured ancestor's parent projection after the
