@@ -5,6 +5,7 @@ import {
   SYNC_PERSISTENCE_PROTOCOL,
   SYNC_PERSISTENCE_VERSION,
   SyncTransactionAbortedError,
+  collectionOptionsClaim,
   compileSingleRowExpression,
   equalPersistedSnapshotValues,
   getLoadSubsetDemandKey,
@@ -1611,6 +1612,7 @@ class PersistedCollectionRuntime<
     private readonly syncMode: `eager` | `on-demand`,
     private readonly dbName: string,
     private readonly persistedReadiness?: PersistedReadinessTracker,
+    private readonly optionsClaim?: () => void | (() => void),
   ) {}
 
   private get storageCollectionId(): string {
@@ -2000,6 +2002,17 @@ class PersistedCollectionRuntime<
     collection: Collection<T, TKey, PersistedCollectionUtils>,
     syncControls: SyncControlFns<T, TKey>,
   ): void {
+    if (
+      (
+        collection.config as typeof collection.config & {
+          [collectionOptionsClaim]?: unknown
+        }
+      )[collectionOptionsClaim] !== this.optionsClaim
+    ) {
+      throw new InvalidPersistedCollectionConfigError(
+        `Persisted sync belongs to its options Collection`,
+      )
+    }
     if (this.boundCollection && this.boundCollection !== collection) {
       throw new InvalidPersistedCollectionConfigError(
         `Persisted options cannot own more than one Collection`,
@@ -4876,12 +4889,11 @@ class PersistedCollectionRuntime<
     // A subscriber may reacquire reentrantly from the truncate commit.
     this.hydratedDemands.clear()
     this.resetSequence++
-    // Without demand, current public keys are the validation scope. Keep
-    // them until the durable read can correct or remove them.
-    const validateVisibleRowsOnly =
-      this.syncMode === `on-demand` && this.activeSubsets.size === 0
+    // On-demand reset keeps previously public rows and hydration seeds until
+    // the new durable snapshot can replace them in one publication. Active
+    // demand may add rows; retired demand may only validate visible keys.
     if (
-      !validateVisibleRowsOnly &&
+      this.syncMode === `eager` &&
       this.syncControls.begin &&
       this.syncControls.commit
     ) {
@@ -4932,15 +4944,20 @@ class PersistedCollectionRuntime<
       (opt) => opt.limit != null || opt.offset != null || opt.cursor != null,
     )
 
-    // A targeted envelope separates changed rows from deleted keys, losing
-    // repeated same-key operation order. A previously unseen key also has no
-    // public baseline with which to complete a source patch. In either case
-    // only the durable snapshot can decide the final row and its demand scope.
+    // A targeted envelope separates changed rows from deleted keys and omits
+    // insert/update identity. A same-key insert replaces the durable row,
+    // while an update merges omitted fields. The public row cannot decide
+    // which operation produced a changed value. A previously unseen key also
+    // has no public baseline with which to complete a source patch. Read the
+    // durable result whenever that ambiguity affects a public row or demand.
     const changedKeys = new Set(txCommitted.changedRows.map((row) => row.key))
     const hasRepeatedChange =
       changedKeys.size !== txCommitted.changedRows.length
     const hasChangedAndDeletedKey = txCommitted.deletedKeys.some((key) =>
       changedKeys.has(key),
+    )
+    const hasChangedPublicKey = txCommitted.changedRows.some((row) =>
+      this.collection?.base.has(row.key as TKey),
     )
     const hasUnseenDemandedKey =
       this.activeSubsets.size > 0 &&
@@ -4952,6 +4969,7 @@ class PersistedCollectionRuntime<
     if (
       hasRepeatedChange ||
       hasChangedAndDeletedKey ||
+      hasChangedPublicKey ||
       (this.syncMode === `on-demand` && hasUnseenDemandedKey)
     ) {
       await reloadActiveSubsets()
@@ -5013,6 +5031,9 @@ class PersistedCollectionRuntime<
       }
 
       txCommitted.rowMetadataMutations?.forEach((mutation) => {
+        // A DbClient hydration seed owns both its row and row metadata until
+        // an accepted source transaction confirms the key.
+        if (this.collection?._hasHydratedKey(mutation.key as TKey)) return
         if (mutation.type === `delete`) {
           this.syncControls.metadata?.row.delete(mutation.key as TKey)
         } else {
@@ -6809,6 +6830,7 @@ export function persistedCollectionOptions<
       syncOptions.syncMode ?? `eager`,
       collectionId,
       persistedReadinessTracker,
+      claimOptions,
     )
     claimedRuntime = runtime
 
@@ -6859,6 +6881,7 @@ export function persistedCollectionOptions<
     localOnlyOptions.syncMode ?? `eager`,
     localOnlyOptions.id ?? DEFAULT_DB_NAME,
     persistedReadinessTracker,
+    claimOptions,
   )
   claimedRuntime = runtime
 

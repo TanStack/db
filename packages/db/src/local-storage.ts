@@ -459,6 +459,20 @@ export function localStorageCollectionOptions(
     parser,
     config.getKey,
     lastKnownData,
+    (collection) => {
+      const claim = (
+        collection.config as typeof collection.config & {
+          [collectionOptionsClaim]?: unknown
+        }
+      )[collectionOptionsClaim]
+      if (claim !== optionsClaim) {
+        throw new LocalStorageCollectionError(
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `LocalStorage sync belongs to its options Collection.`
+            : codedMessage(242),
+        )
+      }
+    },
   )
 
   /**
@@ -813,21 +827,22 @@ export function localStorageCollectionOptions(
   }
 
   let claimed = false
+  function optionsClaim() {
+    if (claimed)
+      throw new LocalStorageCollectionError(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `LocalStorage options can create only one Collection. Create fresh options for each Collection.`
+          : codedMessage(230),
+      )
+    claimed = true
+    return () => {
+      sync.abortFailedConstruction()
+      claimed = false
+    }
+  }
   Object.defineProperty(options, collectionOptionsClaim, {
     enumerable: true,
-    value: () => {
-      if (claimed)
-        throw new LocalStorageCollectionError(
-          devBuild() && process.env.NODE_ENV !== `production`
-            ? `LocalStorage options can create only one Collection. Create fresh options for each Collection.`
-            : codedMessage(230),
-        )
-      claimed = true
-      return () => {
-        sync.abortFailedConstruction()
-        claimed = false
-      }
-    },
+    value: optionsClaim,
   })
 
   return withCollectionConfigFactory(options, () => {
@@ -912,6 +927,9 @@ function createLocalStorageSync<T extends object>(
   parser: Parser,
   getKey: (item: T) => string | number,
   lastKnownData: Map<string | number, StoredItem<T>>,
+  assertOwner: (
+    collection: Parameters<SyncConfig<T>[`sync`]>[0][`collection`],
+  ) => void,
 ): SyncConfig<T> & {
   manualTrigger?: (knownSnapshot?: Map<string | number, StoredItem<T>>) => void
   collection: any
@@ -1040,6 +1058,7 @@ function createLocalStorageSync<T extends object>(
   } = {
     rowUpdateMode: `full`,
     sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
+      assertOwner(params.collection)
       const { begin, write, commit, markReady } = params
 
       // A failed restore cannot establish an empty authoritative snapshot.

@@ -1547,6 +1547,120 @@ it.each([`sparse slot`, `extra array property`] as const)(
   },
 )
 
+// A reconciliation reload compares the resulting public snapshot, not the raw
+// durable relation. A DbClient seed can be absent from storage or have an older
+// durable value while an ordinary row is unchanged. The independent model
+// overlays that seed on the durable relation, then expects zero new change
+// batches at the settled reload checkpoint. The ordinary row makes a delete-
+// then-reinsert shortcut observable even though final rows would match.
+it.each([`absent`, `older`] as const)(
+  `does not republish an unchanged row beside an %s hydrated seed`,
+  async (seedCache) => {
+    const ordinary = { id: `ordinary`, title: `Durable` }
+    const seed = { id: `seed`, title: `Hydrated` }
+    const olderSeed = { id: seed.id, title: `Older durable` }
+    const adapter = createRecordingAdapter([
+      ordinary,
+      ...(seedCache === `older` ? [olderSeed] : []),
+    ])
+    const coordinator = createCoordinatorHarness()
+    const collectionId = `reconciliation-seed-${seedCache}`
+    let source!: TodoSyncParams
+    const descriptor = collectionOptions(
+      persistedCollectionOptions<Todo, string>({
+        id: collectionId,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            source = params
+            params.markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    const client = new DbClient()
+    const seedMetadata = { owner: `hydrated` }
+    client.hydrate({
+      collections: [
+        {
+          collectionId,
+          rows: [{ key: seed.id, value: seed, metadata: seedMetadata }],
+        },
+      ],
+    })
+    const collection = client.collection(descriptor)
+    const demand = {}
+    let subscription: ReturnType<typeof collection.subscribeChanges> | undefined
+    let hasPrimaryFailure = false
+    try {
+      collection.startSyncImmediate()
+      await collection.stateWhenReady()
+      await collection._sync.loadSubset(demand)
+      const expected = new Map<string, Todo>([
+        [ordinary.id, ordinary],
+        [seed.id, seed],
+      ])
+      const publicRows = () =>
+        new Map(
+          Array.from(collection.values(), (row) => [
+            row.id,
+            stripVirtualProps(row),
+          ]),
+        )
+      expectExactSnapshot(publicRows(), expected)
+      expect(source.metadata?.row.get(seed.id)).toEqual(seedMetadata)
+      const eventKeys: Array<string> = []
+      subscription = collection.subscribeChanges(
+        (changes) => {
+          eventKeys.push(...changes.map(({ key }) => String(key)))
+        },
+        { includeInitialState: false },
+      )
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId },
+        { txId: `repeat`, term: 1, seq: 1, rowVersion: 1, mutations: [] },
+      )
+      const reloadSettled = createEventGate()
+      adapter.runInHydrationScope = async (task) => {
+        const result = await task(adapter)
+        reloadSettled.resolve()
+        return result
+      }
+      coordinator.emit(
+        {
+          type: `tx:committed`,
+          term: 1,
+          seq: 1,
+          txId: `repeat`,
+          latestRowVersion: 1,
+          requiresFullReload: true,
+          reconciliationReload: true,
+        },
+        undefined,
+        collectionId,
+      )
+      await atPersistedOracleCheckpoint(
+        reloadSettled.promise,
+        `seed reconciliation reload settled`,
+      )
+      await flushAsyncWork()
+      expectExactSnapshot(publicRows(), expected)
+      expect(source.metadata?.row.get(seed.id)).toEqual(seedMetadata)
+      expect(eventKeys).toEqual([])
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      subscription?.unsubscribe()
+      collection._sync.unloadSubset(demand)
+      await cleanupPersistedOracle([() => client.cleanup()], hasPrimaryFailure)
+    }
+  },
+)
+
 // A real version gap can arrive after a baseline row was published while the
 // coordinator offers no pullSince capability. The independent durable ledger
 // has versions 1, 2, and 3; the passive Collection sees only version 3's notice.
@@ -4650,6 +4764,66 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       }
     },
   )
+
+  // Construction, rather than first sync startup, assigns the descriptor's
+  // Collection owner. A lazy wrapped source leaves a legal interval in which a
+  // second Collection can select only its public sync field and start first.
+  // The independent admission rule still gives the first constructed owner
+  // the runtime; the selected copy must fail before it installs controls.
+  it(`rejects a selected sync that starts before its lazy descriptor owner`, async () => {
+    const adapter = createRecordingAdapter()
+    let source!: TodoSyncParams
+    const options = persistedCollectionOptions<Todo, string>({
+      id: `lazy-selected-sync-owner`,
+      getKey: (row) => row.id,
+      startSync: false,
+      sync: {
+        sync: (params) => {
+          source = params
+          params.markReady()
+        },
+      },
+      persistence: { adapter },
+    })
+    const first = createCollection(options)
+    const selected = createCollection({
+      id: `lazy-selected-sync-copy`,
+      getKey: (row: Todo) => row.id,
+      sync: options.sync,
+      startSync: false,
+    })
+    let hasPrimaryFailure = false
+    try {
+      expect(() => selected.startSyncImmediate()).toThrow(
+        InvalidPersistedCollectionConfigError,
+      )
+      first.startSyncImmediate()
+      await first.stateWhenReady()
+      source.begin()
+      source.write({
+        type: `insert`,
+        value: { id: `owned`, title: `Original owner` },
+      })
+      await Promise.resolve(source.commit())
+      expect(stripVirtualProps(first.get(`owned`))).toEqual({
+        id: `owned`,
+        title: `Original owner`,
+      })
+      expect(selected.has(`owned`)).toBe(false)
+      expect(adapter.rows.get(`owned`)).toEqual({
+        id: `owned`,
+        title: `Original owner`,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      await cleanupPersistedOracle(
+        [() => selected.cleanup(), () => first.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  })
 
   it(`does not reuse a persisted runtime after its Collection cleans up`, async () => {
     const options = persistedCollectionOptions<Todo, string>({
@@ -16358,32 +16532,43 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   // previously public A outside that predicate. The independent model keeps
   // A unless durable evidence changes or deletes it, and applies the complete
   // durable B value. The same authored durable state and demands cross targeted
-  // and full-reload peer notices; their public snapshots must agree after
+  // full-reload, and reset peer notices; their public snapshots must agree after
   // publication. Updated and deleted A reject a repair that merely preserves
-  // an obsolete out-of-filter row.
+  // an obsolete out-of-filter row. A DbClient seed stays source-owned across
+  // every peer route, whether the durable snapshot lacks it or holds an older
+  // value. The reset route must preserve it without an empty publication.
   it.each(
-    ([`targeted`, `full reload`] as const).flatMap((notice) =>
-      ([`unchanged`, `updated`, `deleted`] as const).map((outsideChange) => ({
-        notice,
-        outsideChange,
-      })),
+    ([`targeted`, `full reload`, `reset`] as const).flatMap((notice) =>
+      ([`unchanged`, `updated`, `deleted`] as const).flatMap((outsideChange) =>
+        ([`absent`, `older`] as const).map((seedCache) => ({
+          notice,
+          outsideChange,
+          seedCache,
+        })),
+      ),
     ),
   )(
-    `validates a previously public $outsideChange row outside a later active filter after a $notice notice`,
-    async ({ notice, outsideChange }) => {
+    `validates a previously public $outsideChange row and an $seedCache seed after a $notice notice`,
+    async ({ notice, outsideChange, seedCache }) => {
       const outside = { id: `outside`, title: `Other` }
       const outsideUpdated = { ...outside, title: `Other now` }
       const inside = { id: `inside`, title: `Keep`, detail: `old` }
       const insideUpdated = { ...inside, detail: `new` }
-      const adapter = createRecordingAdapter([outside, inside])
+      const seed = { id: `seed`, title: `Keep`, detail: `source-owned` }
+      const storedSeed = { id: seed.id, title: `Other`, detail: `older` }
+      const adapter = createRecordingAdapter([
+        outside,
+        inside,
+        ...(seedCache === `older` ? [storedSeed] : []),
+      ])
       const loadSubset = adapter.loadSubset.bind(adapter)
       adapter.loadSubset = async (id, options, context) =>
         (await loadSubset(id, options, context)).filter(
           (row) => !options.where || row.value.title === `Keep`,
         )
       const coordinator = createCoordinatorHarness()
-      const collectionId = `mixed-demand-notice-${notice}-${outsideChange}`
-      const collection = createCollection(
+      const collectionId = `mixed-demand-notice-${notice}-${outsideChange}-${seedCache}`
+      const descriptor = collectionOptions(
         persistedCollectionOptions<Todo, string>({
           id: collectionId,
           syncMode: `on-demand`,
@@ -16397,6 +16582,11 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           persistence: { adapter, coordinator },
         }),
       )
+      const client = new DbClient()
+      client.hydrate({
+        collections: [{ collectionId, rows: [{ key: seed.id, value: seed }] }],
+      })
+      const collection = client.collection(descriptor)
       const broadDemand = {}
       const filteredDemand = {
         where: new IR.Func(`eq`, [
@@ -16414,8 +16604,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       const before = new Map<string, Todo>([
         [outside.id, outside],
         [inside.id, inside],
+        [seed.id, seed],
       ])
-      const expected = new Map<string, Todo>([
+      const durableExpected = new Map<string, Todo>([
         ...(outsideChange === `deleted`
           ? []
           : [
@@ -16425,13 +16616,18 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
               ] as [string, Todo],
             ]),
         [insideUpdated.id, insideUpdated],
+        ...(seedCache === `older`
+          ? ([[storedSeed.id, storedSeed]] as Array<[string, Todo]>)
+          : []),
       ])
+      const expected = new Map([...durableExpected, [seed.id, seed] as const])
       const published = createEventGate()
       const snapshots: Array<Map<string, Todo>> = []
       let subscription:
         ReturnType<typeof collection.subscribeChanges> | undefined
       let hasPrimaryFailure = false
       try {
+        collection.startSyncImmediate()
         await collection.stateWhenReady()
         await collection._sync.loadSubset(broadDemand)
         expectExactSnapshot(publicRows(), before)
@@ -16479,35 +16675,45 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
             term: 1,
             seq: 1,
             rowVersion: 1,
-            mutations,
+            truncate: notice === `reset`,
+            mutations:
+              notice === `reset`
+                ? Array.from(durableExpected, ([key, value]) => ({
+                    type: `insert` as const,
+                    key,
+                    value,
+                  }))
+                : mutations,
           },
         )
-        expectExactSnapshot(adapter.rows, expected)
-        const envelope: TxCommitted =
-          notice === `full reload`
-            ? {
-                type: `tx:committed`,
-                term: 1,
-                seq: 1,
-                txId: `mixed-demand-notice`,
-                latestRowVersion: 1,
-                requiresFullReload: true,
-              }
-            : {
-                type: `tx:committed`,
-                term: 1,
-                seq: 1,
-                txId: `mixed-demand-notice`,
-                latestRowVersion: 1,
-                requiresFullReload: false,
-                changedRows: mutations
-                  .filter((mutation) => mutation.type !== `delete`)
-                  .map((mutation) => ({
-                    key: mutation.key,
-                    value: mutation.value,
-                  })),
-                deletedKeys: outsideChange === `deleted` ? [outside.id] : [],
-              }
+        expectExactSnapshot(adapter.rows, durableExpected)
+        const envelope: TxCommitted | CollectionReset =
+          notice === `reset`
+            ? { type: `collection:reset`, schemaVersion: 1, resetEpoch: 1 }
+            : notice === `full reload`
+              ? {
+                  type: `tx:committed`,
+                  term: 1,
+                  seq: 1,
+                  txId: `mixed-demand-notice`,
+                  latestRowVersion: 1,
+                  requiresFullReload: true,
+                }
+              : {
+                  type: `tx:committed`,
+                  term: 1,
+                  seq: 1,
+                  txId: `mixed-demand-notice`,
+                  latestRowVersion: 1,
+                  requiresFullReload: false,
+                  changedRows: mutations
+                    .filter((mutation) => mutation.type !== `delete`)
+                    .map((mutation) => ({
+                      key: mutation.key,
+                      value: mutation.value,
+                    })),
+                  deletedKeys: outsideChange === `deleted` ? [outside.id] : [],
+                }
         coordinator.emit(envelope, undefined, collectionId)
         await atPersistedOracleCheckpoint(
           published.promise,
@@ -16525,7 +16731,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         subscription?.unsubscribe()
         collection._sync.unloadSubset(filteredDemand)
         await cleanupPersistedOracle(
-          [() => collection.cleanup()],
+          [() => client.cleanup()],
           hasPrimaryFailure,
         )
       }
@@ -16544,13 +16750,18 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   it.each(
     ([`active demand`, `active filter`, `retired demand`] as const).flatMap(
       (route) =>
-        ([`replacement`, `partial update`, `deletion`] as const).map(
-          (mutation) => ({ route, mutation }),
+        ([`replacement`, `partial update`, `deletion`] as const).flatMap(
+          (mutation) =>
+            ([`set`, `delete`] as const).map((metadataAction) => ({
+              route,
+              mutation,
+              metadataAction,
+            })),
         ),
     ),
   )(
-    `preserves a hydrated seed during a targeted $mutation with $route`,
-    async ({ route, mutation }) => {
+    `preserves a hydrated seed and metadata during a targeted $mutation with $route ($metadataAction)`,
+    async ({ route, mutation, metadataAction }) => {
       const ordinary =
         route === `active filter`
           ? { id: `ordinary`, title: `Keep`, detail: `old` }
@@ -16605,6 +16816,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
                   route === `active filter` ? `Other` : `Still older durable`,
               }
       const adapter = createRecordingAdapter([ordinary, storedSeed])
+      adapter.rowMetadata.set(seed.id, { owner: `older durable` })
       if (route === `active filter`) {
         const originalLoad = adapter.loadSubset.bind(adapter)
         adapter.loadSubset = async (id, options, context) =>
@@ -16614,14 +16826,16 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       }
       const coordinator = createCoordinatorHarness()
       const collectionId = `targeted-seed-${route}`
+      let sourceParams!: TodoSyncParams
       const descriptor = collectionOptions(
         persistedCollectionOptions<Todo, string>({
           id: collectionId,
           syncMode: `on-demand`,
           getKey: (row) => row.id,
           sync: {
-            sync: ({ markReady }) => {
-              markReady()
+            sync: (params) => {
+              sourceParams = params
+              params.markReady()
               return { loadSubset: () => true }
             },
           },
@@ -16629,8 +16843,14 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         }),
       )
       const client = new DbClient()
+      const seedMetadata = { owner: `hydrated source` }
       client.hydrate({
-        collections: [{ collectionId, rows: [{ key: seed.id, value: seed }] }],
+        collections: [
+          {
+            collectionId,
+            rows: [{ key: seed.id, value: seed, metadata: seedMetadata }],
+          },
+        ],
       })
       const collection = client.collection(descriptor)
       const demand =
@@ -16665,6 +16885,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           [seed.id, seed],
         ])
         expectExactSnapshot(publicRows(), before)
+        expect(sourceParams.metadata?.row.get(seed.id)).toEqual(seedMetadata)
         if (route === `retired demand`) collection._sync.unloadSubset(demand)
         subscription = collection.subscribeChanges(
           (batch) => {
@@ -16702,6 +16923,15 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
               },
               seedMutation,
             ],
+            rowMetadataMutations: [
+              metadataAction === `set`
+                ? {
+                    type: `set`,
+                    key: seed.id,
+                    value: { owner: `peer durable` },
+                  }
+                : { type: `delete`, key: seed.id },
+            ],
           },
         )
         const authoredDurable = new Map<string, Todo>([
@@ -16726,6 +16956,15 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
                 : [{ key: seed.id, value: seedMutation.value }]),
             ],
             deletedKeys: seedMutation.type === `delete` ? [seed.id] : [],
+            rowMetadataMutations: [
+              metadataAction === `set`
+                ? {
+                    type: `set`,
+                    key: seed.id,
+                    value: { owner: `peer durable` },
+                  }
+                : { type: `delete`, key: seed.id },
+            ],
           },
           undefined,
           collectionId,
@@ -16748,6 +16987,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
                 route === `active demand`,
               )
         expectExactSnapshot(publicRows(), expected)
+        expect(sourceParams.metadata?.row.get(seed.id)).toEqual(seedMetadata)
         expect(publishedSnapshots).toHaveLength(1)
         for (const snapshot of publishedSnapshots)
           expectExactSnapshot(snapshot, expected)
@@ -16968,13 +17208,20 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   // reconstruct either result from that envelope alone. The independent case
   // table authors the final durable relation; the recording adapter checks
   // that each operation sequence reaches it before the notice is delivered.
-  // Both active complete and retired demand compare the public row at each
-  // callback and after the next task turn. Two updates are a neighboring
-  // same-key control that should retain the old field omitted by each patch.
+  // A same-key insert also shares the targeted changedRows shape with an
+  // update, yet replaces rather than merges the durable row. Both active
+  // complete and retired demand compare the public row at each callback and
+  // after the next task turn. Two updates are a neighboring control that
+  // retains the old field omitted by each patch.
   it.each(
     ([`active demand`, `retired demand`] as const).flatMap((route) =>
       (
-        [`delete then update`, `update then delete`, `two updates`] as const
+        [
+          `delete then update`,
+          `update then delete`,
+          `two updates`,
+          `insert replacement`,
+        ] as const
       ).map((sequence) => ({ route, sequence })),
     ),
   )(
@@ -16995,14 +17242,17 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
                 { type: `update`, key: old.id, value: fresh },
                 { type: `delete`, key: old.id, value: old },
               ]
-            : [
-                { type: `update`, key: old.id, value: detailPatch },
-                { type: `update`, key: old.id, value: titlePatch },
-              ]
+            : sequence === `insert replacement`
+              ? [{ type: `insert`, key: old.id, value: fresh }]
+              : [
+                  { type: `update`, key: old.id, value: detailPatch },
+                  { type: `update`, key: old.id, value: titlePatch },
+                ]
       const authoredDurable = new Map<string, Todo>(
         sequence === `update then delete`
           ? []
-          : sequence === `delete then update`
+          : sequence === `delete then update` ||
+              sequence === `insert replacement`
             ? [[old.id, fresh]]
             : [[old.id, { ...old, ...detailPatch, ...titlePatch }]],
       )
@@ -17082,7 +17332,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
             latestRowVersion: 1,
             requiresFullReload: false,
             changedRows,
-            deletedKeys: sequence === `two updates` ? [] : [old.id],
+            deletedKeys:
+              sequence === `two updates` || sequence === `insert replacement`
+                ? []
+                : [old.id],
           },
           undefined,
           collectionId,
@@ -19227,7 +19480,13 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       })
       await flushAsyncWork()
       await flushAsyncWork()
-      expect(collection.size).toBe(0)
+      // Failed durable validation cannot retract the last public row. The
+      // failed run must still reject a later acquisition instead of treating
+      // that retained row as proof of hydrated coverage.
+      expect(stripVirtualProps(collection.get(`1`))).toEqual({
+        id: `1`,
+        title: `cached`,
+      })
 
       const readsBeforeReacquire = adapter.loadSubsetCalls.length
       const reacquired = collection._sync.loadSubset({ limit: 1 })
@@ -22650,8 +22909,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
   })
 
-  it(`targeted update avoids full loadSubset call`, async () => {
-    const adapter = createRecordingAdapter([{ id: `1`, title: `Original` }])
+  it(`checks durable row authority when a targeted public-key change could be a replacement`, async () => {
+    const adapter = createRecordingAdapter([
+      { id: `1`, title: `Original`, detail: `removed by insert` },
+    ])
     const coordinator = createCoordinatorHarness()
 
     const collection = createCollection(
@@ -22674,7 +22935,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     await flushAsyncWork()
     const loadSubsetCallsAfterPreload = adapter.loadSubsetCalls.length
 
-    // Update the row in the adapter backing store
+    // The envelope has no insert/update certificate. Durable insert may have
+    // replaced the entire row, including a field omitted from the notice.
     adapter.rows.set(`1`, { id: `1`, title: `Updated` })
 
     coordinator.emit({
@@ -22691,8 +22953,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     await flushAsyncWork()
     await flushAsyncWork()
 
-    // Targeted path should NOT have called loadSubset again
-    expect(adapter.loadSubsetCalls.length).toBe(loadSubsetCallsAfterPreload)
+    expect(adapter.loadSubsetCalls.length).toBe(loadSubsetCallsAfterPreload + 1)
     expect(stripVirtualProps(collection.get(`1`))).toEqual({
       id: `1`,
       title: `Updated`,
@@ -22704,6 +22965,11 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       { id: `1`, title: `Keep` },
       { id: `2`, title: `Keep` },
     ])
+    const loadSubset = adapter.loadSubset.bind(adapter)
+    adapter.loadSubset = async (id, options, context) =>
+      (await loadSubset(id, options, context)).filter(
+        (row) => !options.where || row.value.title === `Keep`,
+      )
     const coordinator = createCoordinatorHarness()
 
     const whereExpr = new IR.Func(`eq`, [

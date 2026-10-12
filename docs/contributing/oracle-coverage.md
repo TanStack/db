@@ -906,6 +906,24 @@ skips needed cleanup. Sparse-array, extra-array-property, and nested-prototype
 histories require a changed durable value to reload even when ordinary deep
 equality would skip it.
 
+The PR #2096 four-oracle review adds a mixed-demand reset route to the
+targeted/full-reload history. A previously public row outside the current
+filter is retained, refreshed, or deleted according to complete durable
+evidence; an unconfirmed DbClient seed remains source-owned. The controlled
+reset must publish no intermediate empty snapshot. Eighteen crossed histories
+compare every callback snapshot and final rows, including absent or older
+durable seed values. The original reset failed at the callback checkpoint.
+Targeted peer metadata set/delete now crosses active complete demand, an active
+filter, and retired demand with row update/delete/insert: an unconfirmed seed
+keeps both its row and its row metadata. The old receiver failed all eighteen
+seed-metadata histories. A protected-seed no-op reconciliation control reaches
+the same public event cut and emits none; its suspected redundant public event
+did not reproduce. Accepted same-key source transactions racing a targeted
+notice, paginated mixed demand, a peer write between complete and filtered
+reads, and atomic multi-subset reads remain unproved by these controlled
+histories. The [four-oracle review](oracle-reviews/2026-10-12-pr-2096-four-oracle-review.md)
+records the exact laws, witnesses, and dispositions.
+
 Direct persisted options and their spread copies can create only one Collection,
 both with and without a wrapped upstream sync source. The second creation
 rejects before it redirects the first owner's local or source writes.
@@ -913,6 +931,14 @@ Selecting only the exposed wrapped `sync` config omits the descriptor claim;
 the runtime guard rejects that second Collection before changing control
 callbacks. A local-only write and an in-flight upstream source transaction
 remain with the first owner after the rejection.
+The ownership history now starts a selected-sync copy before the original
+lazy wrapped-source Collection as well as after it. A copy cannot bind first
+and steal the runtime from the successfully constructed options owner. The
+LocalStorage peer owner crosses those start orders for a selected `sync` copy
+and checks the owner's receipt, public rows, durable bytes, and listener count.
+Controlled listener and row observations do not establish that retained module
+options stop strongly referencing a cleaned-up restartable Collection. Whether
+cleanup promises collectability remains a separate resource-contract question.
 Cleanup does not release that claim. A selected `sync` config also cannot bind
 a second Collection after the first cleans up; the original Collection can
 restart and write through the same runtime in local-only and upstream-sync
@@ -1137,6 +1163,18 @@ checks. The previous fixture announced version 101 while its durable position
 remained zero, so the new gap detector treated an ordinary notification as a
 missed history. These controlled owners do not prove real Electric delivery of
 a lost-notice gap; the Browser Electric/OPFS receiver owns that schedule.
+The Electric recovery fixture now distinguishes same-key insert replacement
+from partial update merge. Its generated peer-publication grammar varies that
+operation and a removable field, and requires a subscriber event carrying the
+authored callback-time snapshot when public rows change. A missing-event mutant
+fails at that event assertion. The generated same-key insert history found a
+receiver violation: targeted notices omit insert/update identity, so a public
+row must be checked against durable state before interpreting an omitted field.
+The primary persisted owner crosses insert replacement with two-update and
+delete/update controls under active and retired demand; removing the durable
+check fails both insert histories at exact public-row comparison. These
+Map-backed histories do not establish real SQLite notice construction or
+browser delivery; the relevant real-provider receiver remains needed.
 
 The [live Electric hydration-straddle oracle](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/electric-hydration-straddle.opfs.spec.ts)
 owns one #1754 host history: an on-demand Collection has an initial durable row;

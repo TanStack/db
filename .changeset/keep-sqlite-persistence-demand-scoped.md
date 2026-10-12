@@ -3,4 +3,4 @@
 '@tanstack/db-sqlite-persistence-core': patch
 ---
 
-Reject reuse of persisted collection options across direct Collections while keeping DbClient materializations independent. Pass fresh `persistedCollectionOptions(...)` to each direct `createCollection(...)`; DbClient descriptors remain reusable. Preserve the first Collection's ownership through cleanup and restart. Keep on-demand peer reloads and schema resets scoped to rows already visible when no subset demand remains. Correct changed or deleted visible rows without adding unrelated stored rows or replacing unconfirmed DbClient hydration seeds.
+Reject reuse of mutable persisted and LocalStorage sync options across Collections while keeping DbClient materializations independent. Pass fresh options to each direct `createCollection(...)`; DbClient descriptors remain reusable. Keep on-demand peer reloads and schema resets scoped to active demand and previously visible rows. Refresh or delete visible rows from durable evidence without replacing unconfirmed DbClient hydration rows or metadata. Resolve targeted peer updates from storage when their notice cannot distinguish a replacing insert from a partial update.

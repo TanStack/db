@@ -1150,6 +1150,57 @@ for (const firstPreloaded of [false, true]) {
   }
 }
 
+/** A selected sync field still closes over one mutable LocalStorage runtime.
+ * The independent ownership model assigns that runtime to the first options
+ * Collection at construction, even when it has not started. Starting a copy
+ * first or second must reject before it can redirect sync controls. The
+ * original then persists a row and remains the only listener owner. */
+it.each([`copy first`, `owner first`] as const)(
+  `rejects a selected LocalStorage sync started $0`,
+  async (startOrder) => {
+    const host = createHost()
+    const options = localStorageCollectionOptions<Row>({
+      id: `selected-owner`,
+      storageKey: `selected-owner`,
+      storage: host.storage,
+      storageEventApi: host.events,
+      getKey: (row) => row.id,
+      startSync: false,
+    })
+    const first = createCollection(options)
+    const selected = createCollection({
+      id: `selected-copy`,
+      getKey: (row: Row) => row.id,
+      sync: options.sync,
+      startSync: false,
+    })
+    await withHistoryCleanup(
+      async () => {
+        if (startOrder === `owner first`) {
+          first.startSyncImmediate()
+          await first.stateWhenReady()
+        }
+        expect(() => selected.startSyncImmediate()).toThrow(
+          LocalStorageCollectionError,
+        )
+        if (startOrder === `copy first`) {
+          first.startSyncImmediate()
+          await first.stateWhenReady()
+        }
+        expect(host.listenerCount()).toBe(1)
+        await first.insert({ id: `owned`, value: 1 }).isPersisted.promise
+        expect(publicRows(first)).toEqual([{ id: `owned`, value: 1 }])
+        expect([...selected.values()]).toEqual([])
+        expect(durableRows(host, `selected-owner`)).toEqual([
+          { id: `owned`, value: 1 },
+        ])
+      },
+      () => [() => selected.cleanup(), () => first.cleanup()],
+    )
+    expect(host.listenerCount()).toBe(0)
+  },
+)
+
 /** The one-owner claim follows successful construction, not an attempted
  * construction. This two-step history first violates a constructor requirement,
  * then corrects it on the same options object. The independent admission model
