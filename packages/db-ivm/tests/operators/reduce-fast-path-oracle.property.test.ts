@@ -13,24 +13,35 @@ import { output } from '../../src/operators/output.js'
  * compare by SameValueZero (`NaN` equals `NaN`, and `-0` is stored and
  * emitted as `0`). When a key has at most one output before and after, the
  * operator compares the two directly instead. Law: for every history, both
- * paths emit the same delta after every graph run, with values equal under
- * `Object.is`, so `-0` and `0` stay distinguishable in the comparison.
+ * paths emit the same entries after every graph run, each with the same
+ * multiplicity, and with values equal under `Object.is`, so `-0` and `0`
+ * stay distinguishable in the comparison. Entries are compared one by one,
+ * not summed, so an extra zero entry or a split -1/+1 pair is a difference.
+ * Their order within one message is not part of the law: a MultiSet is
+ * unordered.
  *
  * Model: the same reducer forced through the general path. A second
  * operator runs the reducer with one extra sentinel output on every key, so
- * every key has two or more outputs; its emitted deltas, without the
- * sentinel, are the expected deltas. The two operators share no state.
+ * every key has two or more outputs; its emitted entries, without the
+ * sentinel, are the expected entries. The two operators share no state.
  *
  * Grammar: up to six runs of up to four signed input changes to two keys.
- * Each key's reducer output is chosen from its current inputs: no output, or
- * one value from `NaN`, `-0`, `0`, `1` and two fixed objects, with
- * multiplicity 0, 1 or 2. So a key keeps, replaces, removes and re-adds its
- * output, including an unchanged `NaN`, a `-0`/`0` swap and a zero
- * multiplicity.
+ * Each key's reducer outputs are chosen from its current inputs: none, one
+ * or two values from `NaN`, `-0`, `0`, `1`, two fixed objects, a structurally
+ * equal copy of one of them, and two `[prefix, payload]` arrays, each with
+ * multiplicity -1, 0, 1 or 2. So a key keeps, replaces, removes and re-adds
+ * its outputs, including an unchanged `NaN`, a `-0`/`0` swap, a zero or
+ * negative multiplicity, and outputs that the output index merges by hash.
+ * A key with two outputs takes the general path in both operators, so keys
+ * also move between the two paths.
  */
 
 const OBJECT_A = { name: `A` }
 const OBJECT_B = { name: `B` }
+// Equal to OBJECT_A by hash, but a different reference.
+const OBJECT_A_COPY = { name: `A` }
+const PREFIXED_X = [1, `x`]
+const PREFIXED_Y = [1, `y`]
 const OUTPUTS: ReadonlyArray<unknown> = [
   Number.NaN,
   -0,
@@ -38,12 +49,15 @@ const OUTPUTS: ReadonlyArray<unknown> = [
   1,
   OBJECT_A,
   OBJECT_B,
+  OBJECT_A_COPY,
+  PREFIXED_X,
+  PREFIXED_Y,
 ]
 const SENTINEL = Symbol(`general path`)
 
 type Step = { key: `k1` | `k2`; value: number; multiplicity: number }
 
-/** At most one output, chosen from the key's current inputs. */
+/** None, one or two outputs, chosen from the key's current inputs. */
 function choose(values: Array<[number, number]>): Array<[unknown, number]> {
   let sum = 0
   let count = 0
@@ -52,25 +66,34 @@ function choose(values: Array<[number, number]>): Array<[unknown, number]> {
     count += multiplicity
   }
   if (count <= 0 || sum % 7 === 6) return []
-  return [[OUTPUTS[sum % OUTPUTS.length], count % 3]]
+  const first: [unknown, number] = [
+    OUTPUTS[sum % OUTPUTS.length],
+    (count % 4) - 1,
+  ]
+  if (sum % 3 !== 0) return [first]
+  return [first, [OUTPUTS[(sum + count) % OUTPUTS.length], (sum % 2) + 1]]
 }
 
 /** A value's class under Object.is: -0 and 0 differ, NaN is one class. */
 function identity(value: unknown): string {
   if (value === OBJECT_A) return `A`
   if (value === OBJECT_B) return `B`
+  if (value === OBJECT_A_COPY) return `A-copy`
+  if (value === PREFIXED_X) return `[1,x]`
+  if (value === PREFIXED_Y) return `[1,y]`
   if (Object.is(value, -0)) return `-0`
   return String(value)
 }
 
+/** Each run's emitted entries, sorted, without the sentinel. */
 function emitted(
   runs: Array<Array<Step>>,
   withSentinel: boolean,
-): Array<Map<string, number>> {
+): Array<Array<string>> {
   const graph = new D2()
   const input = graph.newInput<[string, number]>()
-  const deltas: Array<Map<string, number>> = []
-  let current = new Map<string, number>()
+  const runsEmitted: Array<Array<string>> = []
+  let current: Array<string> = []
   input.pipe(
     reduce((values: Array<[number, number]>) =>
       withSentinel ? [...choose(values), [SENTINEL, 1]] : choose(values),
@@ -78,8 +101,7 @@ function emitted(
     output((message) => {
       for (const [[key, value], multiplicity] of message.getInner()) {
         if (value === SENTINEL) continue
-        const id = `${key}:${identity(value)}`
-        current.set(id, (current.get(id) ?? 0) + multiplicity)
+        current.push(`${key}:${identity(value)}:${multiplicity}`)
       }
     }),
   )
@@ -91,10 +113,10 @@ function emitted(
       ),
     )
     graph.run()
-    deltas.push(new Map([...current].filter(([, sum]) => sum !== 0)))
-    current = new Map()
+    runsEmitted.push(current.sort())
+    current = []
   }
-  return deltas
+  return runsEmitted
 }
 
 const stepArbitrary: fc.Arbitrary<Step> = fc.record({
@@ -104,7 +126,7 @@ const stepArbitrary: fc.Arbitrary<Step> = fc.record({
 })
 
 describe(`reduce fast path`, () => {
-  it(`emits the general path's delta after every run`, () => {
+  it(`emits the general path's entries after every run`, () => {
     fc.assert(
       fc.property(
         fc.array(fc.array(stepArbitrary, { minLength: 1, maxLength: 4 }), {
@@ -115,7 +137,7 @@ describe(`reduce fast path`, () => {
           expect(emitted(runs, false)).toEqual(emitted(runs, true))
         },
       ),
-      { numRuns: 500 },
+      { numRuns: 1000 },
     )
   })
 })
