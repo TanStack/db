@@ -230,6 +230,10 @@ The `sync` option determines which mode the wrapper uses:
 
 The wrapper also supports `syncMode: 'on-demand'`. In that mode, it loads rows for active query demand rather than loading every stored row into the Collection.
 
+Built-in SQLite adapters use managed generations for on-demand caches. If a cache claim expires, the wrapper retires the old source callbacks, cleans up that source session, rotates the cache, and calls a custom source's `sync` function again. A custom source does not need a restart hook. Query and Electric provide `restartAfterScopedRecovery` to control their own restart; their hooks must retire old callbacks immediately and start replacement loads after `cacheRotated` resolves.
+
+An on-demand cache is not yet a certified offline snapshot. The first managed generation does not import legacy cache tables, and a private replacement created after claim expiry is not the next run's shared cache. A later launch must refetch those subsets from the source.
+
 ## Render after SQLite restore
 
 `initialRender` requires an eager persisted Collection. It does not support `syncMode: 'on-demand'`, which has no complete startup snapshot. Set it on every source Collection in a live query. If one source does not opt in, the query cannot report persisted readiness or use the restored snapshot as its initial-render fallback.

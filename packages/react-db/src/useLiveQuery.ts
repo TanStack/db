@@ -64,8 +64,13 @@ const suspenseCollectionsByClient = new WeakMap<
 function getSourceQualifiedSuspenseKey(
   preparedValue: unknown,
   queryHash: string,
+  client: DbClient | undefined,
 ): string {
-  const sourceIds = getPreparedSources(preparedValue).map(getSourceObjectToken)
+  const sourceIds = getPreparedSources(
+    preparedValue,
+    client,
+    `useLiveSuspenseQuery`,
+  ).map(getSourceObjectToken)
   if (sourceIds.length === 0) return queryHash
   return `${sourceIds.join(`,`)}:${queryHash}`
 }
@@ -870,7 +875,7 @@ function useLiveQueryImpl(
     queryHash && forSuspense && !inputIsCollection
       ? canReuseSuspenseKey
         ? instance.suspenseKey
-        : getSourceQualifiedSuspenseKey(preparedQueryValue, queryHash)
+        : getSourceQualifiedSuspenseKey(preparedQueryValue, queryHash, dbClient)
       : queryHash
 
   const suspenseCollections =
@@ -929,6 +934,9 @@ function useLiveQueryImpl(
             dbClient,
             instance.deferredCollections,
           )
+        }
+        if (!dbClient) {
+          getPreparedSources(preparedQueryValue, dbClient, `useLiveQuery`)
         }
         instance.collection = resolveLiveQueryValue(preparedQueryValue, {
           gcTime: forSuspense

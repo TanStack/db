@@ -7,7 +7,7 @@ title: parseOrderByExpression
 function parseOrderByExpression(orderBy): ParsedOrderBy[];
 ```
 
-Defined in: [packages/db/src/query/expression-helpers.ts:267](https://github.com/TanStack/db/blob/main/packages/db/src/query/expression-helpers.ts#L267)
+Defined in: [packages/db/src/query/expression-helpers.ts:270](https://github.com/TanStack/db/blob/main/packages/db/src/query/expression-helpers.ts#L270)
 
 Parses an ORDER BY expression into a simple array of sort specifications.
 

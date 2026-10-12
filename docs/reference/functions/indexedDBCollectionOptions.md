@@ -9,7 +9,7 @@ title: indexedDBCollectionOptions
 function indexedDBCollectionOptions<T, TKey>(config): CollectionConfig<InferSchemaOutput<T>, TKey, T, IndexedDBCollectionUtils<InferSchemaOutput<T>, InferSchemaInput<T>>> & object;
 ```
 
-Defined in: packages/db/src/indexed-db.ts:403
+Defined in: [packages/db/src/indexed-db.ts:422](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L422)
 
 Creates IndexedDB collection options for use with a standard Collection.
 This provides persistent local storage with cross-tab synchronization.
@@ -76,7 +76,7 @@ const todosCollection = createCollection(
 function indexedDBCollectionOptions<T, TKey>(config): CollectionConfig<T, TKey, never, IndexedDBCollectionUtils<T, T>> & object;
 ```
 
-Defined in: packages/db/src/indexed-db.ts:421
+Defined in: [packages/db/src/indexed-db.ts:440](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L440)
 
 Creates IndexedDB collection options for use with a standard Collection.
 This provides persistent local storage with cross-tab synchronization.

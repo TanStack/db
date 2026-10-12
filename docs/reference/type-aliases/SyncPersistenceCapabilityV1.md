@@ -7,7 +7,7 @@ title: SyncPersistenceCapabilityV1
 type SyncPersistenceCapabilityV1<TKey> = object;
 ```
 
-Defined in: [packages/db/src/types.ts:530](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L530)
+Defined in: [packages/db/src/types.ts:536](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L536)
 
 **`Internal`**
 
@@ -27,7 +27,7 @@ Unstable cross-package protocol for persistence-aware adapters.
 readonly hydrateBaseline: () => Promise<void>;
 ```
 
-Defined in: [packages/db/src/types.ts:535](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L535)
+Defined in: [packages/db/src/types.ts:541](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L541)
 
 #### Returns
 
@@ -41,7 +41,7 @@ Defined in: [packages/db/src/types.ts:535](https://github.com/TanStack/db/blob/m
 readonly protocol: "@tanstack/db/sync-persistence";
 ```
 
-Defined in: [packages/db/src/types.ts:533](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L533)
+Defined in: [packages/db/src/types.ts:539](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L539)
 
 ***
 
@@ -51,7 +51,7 @@ Defined in: [packages/db/src/types.ts:533](https://github.com/TanStack/db/blob/m
 readonly reserveCommitTurn: () => void;
 ```
 
-Defined in: [packages/db/src/types.ts:540](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L540)
+Defined in: [packages/db/src/types.ts:546](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L546)
 
 Reserve the open sync transaction's FIFO turn, so a subset hydration
 that starts before it commits waits for that commit.
@@ -68,7 +68,7 @@ that starts before it commits waits for that commit.
 readonly resumeSnapshot: object;
 ```
 
-Defined in: [packages/db/src/types.ts:544](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L544)
+Defined in: [packages/db/src/types.ts:550](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L550)
 
 #### certify()
 
@@ -111,7 +111,7 @@ readonly getKeySetEvidence: () =>
 readonly scanPersistedRows: (options?) => Promise<SyncPersistenceScannedRow<TKey>[]>;
 ```
 
-Defined in: [packages/db/src/types.ts:541](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L541)
+Defined in: [packages/db/src/types.ts:547](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L547)
 
 #### Parameters
 
@@ -131,4 +131,4 @@ Defined in: [packages/db/src/types.ts:541](https://github.com/TanStack/db/blob/m
 readonly version: 1;
 ```
 
-Defined in: [packages/db/src/types.ts:534](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L534)
+Defined in: [packages/db/src/types.ts:540](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L540)

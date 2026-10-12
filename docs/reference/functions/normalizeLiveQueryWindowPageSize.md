@@ -7,7 +7,7 @@ title: normalizeLiveQueryWindowPageSize
 function normalizeLiveQueryWindowPageSize(pageSize): number;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:90](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L90)
+Defined in: [packages/db/src/live-query-window-controller.ts:120](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L120)
 
 **`Internal`**
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   createRefProxy,
+  createRefProxyWithSelected,
   createSingleRowRefProxy,
   isRefProxy,
   toExpression,
@@ -8,9 +9,16 @@ import {
 } from '../../../src/query/builder/ref-proxy.js'
 import { Aggregate, Func, PropRef, Value } from '../../../src/query/ir.js'
 import { MaterializeWrapper } from '../../../src/query/builder/functions.js'
+import type { RefProxy } from '../../../src/query/builder/ref-proxy.js'
 
 describe(`ref-proxy`, () => {
   describe(`createSingleRowRefProxy`, () => {
+    it(`keeps unbound single-row refs free of proxy-valued binding IDs`, () => {
+      const proxy = createSingleRowRefProxy<{ id: number }>()
+      const ref = proxy.id as unknown as RefProxy
+      expect(ref.__bindingId).toBeUndefined()
+      expect((toExpression(ref) as PropRef).bindingId).toBeUndefined()
+    })
     it(`records a nested path through an optional schema field`, () => {
       type Row = { timestamp?: { seconds: number } }
       const proxy = createSingleRowRefProxy<Row>()
@@ -34,6 +42,38 @@ describe(`ref-proxy`, () => {
   })
 
   describe(`createRefProxy`, () => {
+    it(`exposes binding metadata consistently through proxy introspection`, () => {
+      const proxy = createRefProxy<{ users: { id: number } }>(
+        [`users`],
+        new Map([[`users`, `binding-users`]]),
+      )
+      const ref = proxy.users.id as unknown as RefProxy
+      expect(ref.__bindingId).toBe(`binding-users`)
+      expect(`__bindingId` in ref).toBe(true)
+      expect(Object.getOwnPropertyDescriptor(ref, `__bindingId`)).toMatchObject(
+        {
+          enumerable: false,
+          configurable: true,
+        },
+      )
+      expect(`__bindingId` in proxy).toBe(true)
+      expect(
+        Object.getOwnPropertyDescriptor(proxy, `__bindingId`),
+      ).toMatchObject({
+        enumerable: false,
+        configurable: true,
+      })
+    })
+
+    it(`keeps selected refs free of proxy-valued binding IDs`, () => {
+      const proxy = createRefProxyWithSelected<{ users: { id: number } }>([
+        `users`,
+      ])
+      const ref = (proxy.$selected as unknown as Record<string, unknown>)
+        .id as RefProxy
+      expect(ref.__bindingId).toBeUndefined()
+      expect((toExpression(ref) as PropRef).bindingId).toBeUndefined()
+    })
     it(`creates a proxy with correct basic properties`, () => {
       const proxy = createRefProxy<{ users: { id: number; name: string } }>([
         `users`,

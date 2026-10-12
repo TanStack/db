@@ -3,7 +3,7 @@ id: IndexedDBCollectionUtils
 title: IndexedDBCollectionUtils
 ---
 
-Defined in: packages/db/src/indexed-db.ts:206
+Defined in: [packages/db/src/indexed-db.ts:215](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L215)
 
 Utility functions exposed on collection.utils
 
@@ -35,7 +35,7 @@ Utility functions exposed on collection.utils
 acceptMutations: (transaction) => Promise<void>;
 ```
 
-Defined in: packages/db/src/indexed-db.ts:224
+Defined in: [packages/db/src/indexed-db.ts:233](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L233)
 
 Accepts mutations from a manual transaction and persists to IndexedDB
 
@@ -59,7 +59,7 @@ Accepts mutations from a manual transaction and persists to IndexedDB
 clearObjectStore: () => Promise<void>;
 ```
 
-Defined in: packages/db/src/indexed-db.ts:214
+Defined in: [packages/db/src/indexed-db.ts:223](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L223)
 
 Removes all data from the object store
 Does NOT delete the database itself
@@ -76,7 +76,7 @@ Does NOT delete the database itself
 exportData: () => Promise<TItem[]>;
 ```
 
-Defined in: packages/db/src/indexed-db.ts:232
+Defined in: [packages/db/src/indexed-db.ts:241](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L241)
 
 Exports all data from the object store as an array
 Useful for backup/debugging
@@ -93,7 +93,7 @@ Useful for backup/debugging
 getDatabaseInfo: () => Promise<DatabaseInfo>;
 ```
 
-Defined in: packages/db/src/indexed-db.ts:219
+Defined in: [packages/db/src/indexed-db.ts:228](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L228)
 
 Returns database information for debugging
 
@@ -109,7 +109,7 @@ Returns database information for debugging
 importData: (items) => Promise<void>;
 ```
 
-Defined in: packages/db/src/indexed-db.ts:238
+Defined in: [packages/db/src/indexed-db.ts:247](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L247)
 
 Validates input rows and atomically replaces the object store.
 Failure preserves the previous rows and versions.

@@ -44,7 +44,7 @@ Current status of the subscription
 protected clearListeners(): void;
 ```
 
-Defined in: [packages/db/src/event-emitter.ts:156](https://github.com/TanStack/db/blob/main/packages/db/src/event-emitter.ts#L156)
+Defined in: [packages/db/src/event-emitter.ts:164](https://github.com/TanStack/db/blob/main/packages/db/src/event-emitter.ts#L164)
 
 Clear all listeners
 
@@ -66,7 +66,7 @@ EventEmitter.clearListeners
 protected emitInner<T>(event, eventPayload): void;
 ```
 
-Defined in: [packages/db/src/event-emitter.ts:124](https://github.com/TanStack/db/blob/main/packages/db/src/event-emitter.ts#L124)
+Defined in: [packages/db/src/event-emitter.ts:132](https://github.com/TanStack/db/blob/main/packages/db/src/event-emitter.ts#L132)
 
 **`Internal`**
 
@@ -114,7 +114,7 @@ protected emitInnerWhile<T>(
    isCurrent): void;
 ```
 
-Defined in: [packages/db/src/event-emitter.ts:132](https://github.com/TanStack/db/blob/main/packages/db/src/event-emitter.ts#L132)
+Defined in: [packages/db/src/event-emitter.ts:140](https://github.com/TanStack/db/blob/main/packages/db/src/event-emitter.ts#L140)
 
 Emit until a reentrant callback invalidates the event being delivered.
 
@@ -156,7 +156,7 @@ EventEmitter.emitInnerWhile
 off<T>(event, callback): void;
 ```
 
-Defined in: [packages/db/src/event-emitter.ts:72](https://github.com/TanStack/db/blob/main/packages/db/src/event-emitter.ts#L72)
+Defined in: [packages/db/src/event-emitter.ts:74](https://github.com/TanStack/db/blob/main/packages/db/src/event-emitter.ts#L74)
 
 Unsubscribe from an event
 
@@ -198,7 +198,7 @@ EventEmitter.off
 on<T>(event, callback): () => void;
 ```
 
-Defined in: [packages/db/src/event-emitter.ts:21](https://github.com/TanStack/db/blob/main/packages/db/src/event-emitter.ts#L21)
+Defined in: [packages/db/src/event-emitter.ts:23](https://github.com/TanStack/db/blob/main/packages/db/src/event-emitter.ts#L23)
 
 Subscribe to an event
 
@@ -248,7 +248,7 @@ EventEmitter.on
 once<T>(event, callback): () => void;
 ```
 
-Defined in: [packages/db/src/event-emitter.ts:50](https://github.com/TanStack/db/blob/main/packages/db/src/event-emitter.ts#L50)
+Defined in: [packages/db/src/event-emitter.ts:52](https://github.com/TanStack/db/blob/main/packages/db/src/event-emitter.ts#L52)
 
 Subscribe to an event once (automatically unsubscribes after first emission)
 
@@ -298,7 +298,7 @@ EventEmitter.once
 waitFor<T>(event, timeout?): Promise<SubscriptionEvents[T]>;
 ```
 
-Defined in: [packages/db/src/event-emitter.ts:94](https://github.com/TanStack/db/blob/main/packages/db/src/event-emitter.ts#L94)
+Defined in: [packages/db/src/event-emitter.ts:96](https://github.com/TanStack/db/blob/main/packages/db/src/event-emitter.ts#L96)
 
 Wait for an event to be emitted
 

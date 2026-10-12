@@ -3,7 +3,7 @@ id: DatabaseInfo
 title: DatabaseInfo
 ---
 
-Defined in: packages/db/src/indexed-db.ts:195
+Defined in: [packages/db/src/indexed-db.ts:204](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L204)
 
 Database information returned by getDatabaseInfo()
 
@@ -15,7 +15,7 @@ Database information returned by getDatabaseInfo()
 optional estimatedSize: number;
 ```
 
-Defined in: packages/db/src/indexed-db.ts:200
+Defined in: [packages/db/src/indexed-db.ts:209](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L209)
 
 Origin-wide storage usage in bytes, including other databases and caches.
 
@@ -27,7 +27,7 @@ Origin-wide storage usage in bytes, including other databases and caches.
 name: string;
 ```
 
-Defined in: packages/db/src/indexed-db.ts:196
+Defined in: [packages/db/src/indexed-db.ts:205](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L205)
 
 ***
 
@@ -37,7 +37,7 @@ Defined in: packages/db/src/indexed-db.ts:196
 objectStores: string[];
 ```
 
-Defined in: packages/db/src/indexed-db.ts:198
+Defined in: [packages/db/src/indexed-db.ts:207](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L207)
 
 ***
 
@@ -47,4 +47,4 @@ Defined in: packages/db/src/indexed-db.ts:198
 version: number;
 ```
 
-Defined in: packages/db/src/indexed-db.ts:197
+Defined in: [packages/db/src/indexed-db.ts:206](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L206)

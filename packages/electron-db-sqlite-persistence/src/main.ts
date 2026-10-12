@@ -1,10 +1,14 @@
-import { InvalidPersistedCollectionConfigError } from '@tanstack/db-sqlite-persistence-core'
+import {
+  InvalidPersistedCollectionConfigError,
+  resolvePersistedStorageTarget,
+} from '@tanstack/db-sqlite-persistence-core'
 import {
   DEFAULT_ELECTRON_PERSISTENCE_CHANNEL,
   ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
 } from './protocol'
 import type {
   PersistedCollectionPersistence,
+  PersistedStorageTarget,
   PersistenceAdapter,
   SQLitePullSinceResult,
 } from '@tanstack/db-sqlite-persistence-core'
@@ -18,11 +22,13 @@ import type {
 
 type ElectronMainPersistenceAdapter = PersistenceAdapter & {
   loadCollectionMetadata?: (
-    collectionId: string,
+    target: PersistedStorageTarget,
+    ctx?: { cacheGenerationClaimId?: string },
   ) => Promise<Array<{ key: string; value: unknown }>>
   scanRows?: (
-    collectionId: string,
+    target: PersistedStorageTarget,
     options?: { metadataOnly?: boolean },
+    ctx?: { cacheGenerationClaimId?: string },
   ) => Promise<
     Array<{
       key: ElectronPersistedKey
@@ -31,10 +37,14 @@ type ElectronMainPersistenceAdapter = PersistenceAdapter & {
     }>
   >
   pullSince?: (
-    collectionId: string,
+    target: PersistedStorageTarget,
     fromRowVersion: number,
+    ctx?: { cacheGenerationClaimId?: string },
   ) => Promise<SQLitePullSinceResult<ElectronPersistedKey>>
-  getStreamPosition?: (collectionId: string) => Promise<{
+  getStreamPosition?: (
+    target: PersistedStorageTarget,
+    ctx?: { cacheGenerationClaimId?: string },
+  ) => Promise<{
     latestTerm: number
     latestSeq: number
     latestRowVersion: number
@@ -52,12 +62,26 @@ function serializeError(error: unknown): ElectronSerializedError {
     }
   }
 
-  const codedError = error as Error & { code?: unknown }
+  const detailedError = error as Error & { code?: unknown; path?: unknown }
+  const path = detailedError.path
   return {
     name: error.name || `Error`,
     message: error.message || fallbackMessage,
     stack: error.stack,
-    code: typeof codedError.code === `string` ? codedError.code : undefined,
+    code:
+      typeof detailedError.code === `string` ||
+      typeof detailedError.code === `number`
+        ? detailedError.code
+        : undefined,
+    path:
+      typeof path === `string` ||
+      (Array.isArray(path) &&
+        path.every(
+          (segment: unknown) =>
+            typeof segment === `string` || typeof segment === `number`,
+        ))
+        ? (path as string | ReadonlyArray<string | number>)
+        : undefined,
   }
 }
 
@@ -100,6 +124,25 @@ function assertValidRequest(request: ElectronPersistenceRequestEnvelope): void {
   }
 }
 
+function requireStorageTarget(
+  request: ElectronPersistenceRequestEnvelope,
+): PersistedStorageTarget {
+  const target = request.storageTarget
+  if (!target) {
+    throw new InvalidPersistedCollectionConfigError(
+      `Electron persistence data request requires an explicit storage target`,
+    )
+  }
+  if (
+    resolvePersistedStorageTarget(target).collectionId !== request.collectionId
+  ) {
+    throw new InvalidPersistedCollectionConfigError(
+      `Electron persistence storage target does not match its collectionId`,
+    )
+  }
+  return target
+}
+
 async function executeRequestAgainstAdapter(
   request: ElectronPersistenceRequestEnvelope,
   adapter: ElectronMainPersistenceAdapter,
@@ -107,7 +150,7 @@ async function executeRequestAgainstAdapter(
   switch (request.method) {
     case `loadSubset`: {
       const result = await adapter.loadSubset(
-        request.collectionId,
+        requireStorageTarget(request),
         request.payload.options,
         request.payload.ctx,
       )
@@ -122,7 +165,7 @@ async function executeRequestAgainstAdapter(
 
     case `loadResumeSnapshot`: {
       const result = await adapter.loadResumeSnapshot(
-        request.collectionId,
+        requireStorageTarget(request),
         request.payload.ctx,
       )
       return {
@@ -140,7 +183,10 @@ async function executeRequestAgainstAdapter(
           `loadCollectionMetadata is not supported by the configured electron persistence adapter`,
         )
       }
-      const result = await adapter.loadCollectionMetadata(request.collectionId)
+      const result = await adapter.loadCollectionMetadata(
+        requireStorageTarget(request),
+        request.payload.ctx,
+      )
       return {
         v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
         requestId: request.requestId,
@@ -157,8 +203,9 @@ async function executeRequestAgainstAdapter(
         )
       }
       const result = await adapter.scanRows(
-        request.collectionId,
+        requireStorageTarget(request),
         request.payload.options,
+        request.payload.ctx,
       )
       return {
         v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
@@ -170,7 +217,10 @@ async function executeRequestAgainstAdapter(
     }
 
     case `applyCommittedTx`: {
-      await adapter.applyCommittedTx(request.collectionId, request.payload.tx)
+      await adapter.applyCommittedTx(
+        requireStorageTarget(request),
+        request.payload.tx,
+      )
       return {
         v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
         requestId: request.requestId,
@@ -180,11 +230,29 @@ async function executeRequestAgainstAdapter(
       }
     }
 
+    case `reconcileCommittedTx`: {
+      const result = adapter.reconcileCommittedTx
+        ? await adapter.reconcileCommittedTx(
+            requireStorageTarget(request),
+            request.payload.tx,
+            request.payload.anchor,
+          )
+        : { kind: `unknown` as const }
+      return {
+        v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
+        requestId: request.requestId,
+        method: request.method,
+        ok: true,
+        result,
+      }
+    }
+
     case `ensureIndex`: {
       await adapter.ensureIndex(
-        request.collectionId,
+        requireStorageTarget(request),
         request.payload.signature,
         request.payload.spec,
+        request.payload.ctx,
       )
       return {
         v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
@@ -202,8 +270,9 @@ async function executeRequestAgainstAdapter(
         )
       }
       await adapter.markIndexRemoved(
-        request.collectionId,
+        requireStorageTarget(request),
         request.payload.signature,
+        request.payload.ctx,
       )
       return {
         v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
@@ -221,8 +290,9 @@ async function executeRequestAgainstAdapter(
         )
       }
       const result = await adapter.pullSince(
-        request.collectionId,
+        requireStorageTarget(request),
         request.payload.fromRowVersion,
+        request.payload.ctx,
       )
       return {
         v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
@@ -233,19 +303,114 @@ async function executeRequestAgainstAdapter(
       }
     }
 
-    case `getStreamPosition`: {
-      if (!adapter.getStreamPosition) {
+    case `reserveLeadershipTerm`: {
+      if (!adapter.reserveLeadershipTerm) {
         throw new InvalidPersistedCollectionConfigError(
-          `getStreamPosition is not supported by the configured electron persistence adapter`,
+          `reserveLeadershipTerm is not supported by the configured electron persistence adapter`,
         )
       }
-      const position = await adapter.getStreamPosition(request.collectionId)
+      const position = await adapter.reserveLeadershipTerm(
+        requireStorageTarget(request),
+        request.payload.observedTerm,
+        request.payload.ctx,
+      )
       return {
         v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
         requestId: request.requestId,
         method: request.method,
         ok: true,
         result: position,
+      }
+    }
+
+    case `getStreamPosition`: {
+      if (!adapter.getStreamPosition) {
+        throw new InvalidPersistedCollectionConfigError(
+          `getStreamPosition is not supported by the configured electron persistence adapter`,
+        )
+      }
+      const position = await adapter.getStreamPosition(
+        requireStorageTarget(request),
+        request.payload.ctx,
+      )
+      return {
+        v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
+        requestId: request.requestId,
+        method: request.method,
+        ok: true,
+        result: position,
+      }
+    }
+
+    case `claimCacheGeneration`: {
+      if (!adapter.claimCacheGeneration) {
+        throw new InvalidPersistedCollectionConfigError(
+          `claimCacheGeneration is not supported by the configured electron persistence adapter`,
+        )
+      }
+      const result = await adapter.claimCacheGeneration(request.collectionId)
+      return {
+        v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
+        requestId: request.requestId,
+        method: request.method,
+        ok: true,
+        result,
+      }
+    }
+
+    case `rotateCacheGeneration`: {
+      if (!adapter.rotateCacheGeneration) {
+        throw new InvalidPersistedCollectionConfigError(
+          `rotateCacheGeneration is not supported by the configured electron persistence adapter`,
+        )
+      }
+      const result = await adapter.rotateCacheGeneration(
+        request.collectionId,
+        request.payload.claimId,
+        request.payload.resetMetadata,
+        request.payload.expectedStorageCollectionId,
+      )
+      return {
+        v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
+        requestId: request.requestId,
+        method: request.method,
+        ok: true,
+        result,
+      }
+    }
+
+    case `renewCacheGenerationClaim`: {
+      if (!adapter.renewCacheGenerationClaim) {
+        throw new InvalidPersistedCollectionConfigError(
+          `renewCacheGenerationClaim is not supported by the configured electron persistence adapter`,
+        )
+      }
+      const result = await adapter.renewCacheGenerationClaim(
+        request.payload.storageCollectionId,
+        request.payload.claimId,
+      )
+      return {
+        v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
+        requestId: request.requestId,
+        method: request.method,
+        ok: true,
+        result,
+      }
+    }
+
+    case `releaseCacheGenerationClaim`: {
+      if (!adapter.releaseCacheGenerationClaim) {
+        throw new InvalidPersistedCollectionConfigError(
+          `releaseCacheGenerationClaim is not supported by the configured electron persistence adapter`,
+        )
+      }
+      await adapter.releaseCacheGenerationClaim(request.payload.claimId)
+      return {
+        v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
+        requestId: request.requestId,
+        method: request.method,
+        ok: true,
+        result: null,
       }
     }
   }
@@ -255,11 +420,20 @@ function resolveModeAwarePersistence(
   persistence: PersistedCollectionPersistence,
   request: ElectronPersistenceRequestEnvelope,
 ): PersistedCollectionPersistence {
+  if (
+    request.storageTarget?.kind === `managed` &&
+    !request.resolution?.logicalCollectionId
+  ) {
+    throw new InvalidPersistedCollectionConfigError(
+      `Electron managed cache request requires a logical Collection ID`,
+    )
+  }
   const mode = request.resolution?.mode ?? `sync-absent`
   const schemaVersion = request.resolution?.schemaVersion
   const collectionAwarePersistence =
     persistence.resolvePersistenceForCollection?.({
-      collectionId: request.collectionId,
+      collectionId:
+        request.resolution?.logicalCollectionId ?? request.collectionId,
       mode,
       schemaVersion,
     })

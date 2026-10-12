@@ -17,9 +17,10 @@
  * read-modify-write races because localStorage offers no compare-and-swap.
  * The production driver withholds events through each persistence receipt.
  * Durable and public snapshots are compared at that cut, then again after a
- * delayed event and fresh restore. The proposed same-tab law distinguishes
+ * delayed event and fresh restore. The approved same-tab law distinguishes
  * the old event-only prediction (a peer stays stale until delivery) from the
- * approved prediction (the peer observes each successful local receipt).
+ * required prediction (the peer observes each successful local receipt), as
+ * documented in `docs/collections/local-storage-collection.md`.
  * Different Storage wrapper objects and simultaneous cross-tab writes remain
  * outside this identity-scoped law.
  *

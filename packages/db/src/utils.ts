@@ -30,6 +30,11 @@ export function deepEquals(a: any, b: any): boolean {
   return deepEqualsInternal(a, b, undefined)
 }
 
+/** @internal Compare persisted public and durable value shapes before skipping a reload. */
+export function equalPersistedSnapshotValues(a: unknown, b: unknown): boolean {
+  return deepEqualsInternal(a, b, undefined, true, true)
+}
+
 function isPlainPrototype(prototype: object | null): boolean {
   return prototype === null || Object.getPrototypeOf(prototype) === null
 }
@@ -49,6 +54,7 @@ function enumerableOwnKeys(value: object): Array<string | symbol> {
  * `draft` selects the stricter equality used by change-tracking drafts: Map
  * and Set contents must match in order, RegExp match position must match, and
  * arrays compare as keyed objects (holes and extra enumerable keys count).
+ * `persistedSnapshot` also distinguishes prototypes after serialization.
  */
 export function deepEqualsInternal(
   a: any,
@@ -56,6 +62,7 @@ export function deepEqualsInternal(
   // Created on the first container that descends into a child.
   visited: Map<object, object> | undefined,
   draft = false,
+  persistedSnapshot = false,
 ): boolean {
   // Handle strict equality (primitives, same reference)
   if (a === b || Object.is(a, b)) return true
@@ -65,6 +72,16 @@ export function deepEqualsInternal(
 
   // Handle different types
   if (typeof a !== typeof b) return false
+
+  // SQLite can turn an authored nested instance into an equal-keyed plain
+  // record. A skipped persisted reload must not retain the old public shape.
+  if (
+    persistedSnapshot &&
+    typeof a === `object` &&
+    Object.getPrototypeOf(a) !== Object.getPrototypeOf(b)
+  ) {
+    return false
+  }
 
   // Handle Date objects
   if (a instanceof Date) {
@@ -103,8 +120,21 @@ export function deepEqualsInternal(
     const result = Array.from(a.entries()).every(([key, val], index) =>
       bEntries
         ? Object.is(key, bEntries[index]![0]) &&
-          deepEqualsInternal(val, bEntries[index]![1], visited, true)
-        : b.has(key) && deepEqualsInternal(val, b.get(key), visited),
+          deepEqualsInternal(
+            val,
+            bEntries[index]![1],
+            visited,
+            true,
+            persistedSnapshot,
+          )
+        : b.has(key) &&
+          deepEqualsInternal(
+            val,
+            b.get(key),
+            visited,
+            draft,
+            persistedSnapshot,
+          ),
     )
 
     visited.delete(a)
@@ -131,7 +161,13 @@ export function deepEqualsInternal(
 
     if (draft) {
       const result = aValues.every((val, index) =>
-        deepEqualsInternal(val, bValues[index], visited, draft),
+        deepEqualsInternal(
+          val,
+          bValues[index],
+          visited,
+          draft,
+          persistedSnapshot,
+        ),
       )
       visited.delete(a)
       return result
@@ -159,6 +195,8 @@ export function deepEqualsInternal(
             value,
             bValues[candidateIndex],
             candidateVisited,
+            draft,
+            persistedSnapshot,
           ) &&
           matchValues(
             index + 1,
@@ -248,7 +286,7 @@ export function deepEqualsInternal(
     visited.set(a, b)
 
     const result = a.every((item, index) =>
-      deepEqualsInternal(item, b[index], visited),
+      deepEqualsInternal(item, b[index], visited, draft, persistedSnapshot),
     )
     visited.delete(a)
     return result
@@ -298,7 +336,7 @@ export function deepEqualsInternal(
       }
       if (
         !Object.prototype.propertyIsEnumerable.call(b, key) ||
-        !deepEqualsInternal(value, b[key], visited, draft)
+        !deepEqualsInternal(value, b[key], visited, draft, persistedSnapshot)
       ) {
         result = false
         break

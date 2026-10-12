@@ -520,17 +520,20 @@ async function observeExpressionIndexScenario({
   })
 
   return withFailurePreservingCleanup(async () => {
-    await adapter.applyCommittedTx(collectionId, {
-      txId: `seed-${label}`,
-      term: 1,
-      seq: 1,
-      rowVersion: 1,
-      mutations: rows.map((row) => ({
-        type: `insert` as const,
-        key: row.key,
-        value: row.value,
-      })),
-    })
+    await adapter.applyCommittedTx(
+      { kind: `eager`, collectionId: collectionId },
+      {
+        txId: `seed-${label}`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: rows.map((row) => ({
+          type: `insert` as const,
+          key: row.key,
+          value: row.value,
+        })),
+      },
+    )
     await preparePreviousIndex?.(adapter, collectionId, signature)
     if (viaWrapper) {
       if (
@@ -579,15 +582,22 @@ async function observeExpressionIndexScenario({
       collection.removeIndex(second)
       await collection.preload()
     } else {
-      await adapter.ensureIndex(collectionId, signature, {
-        expressionSql: [serializeIndexExpression(indexExpression)],
-      })
+      await adapter.ensureIndex(
+        { kind: `eager`, collectionId: collectionId },
+        signature,
+        {
+          expressionSql: [serializeIndexExpression(indexExpression)],
+        },
+      )
     }
 
-    const adapterRows = await adapter.loadSubset(collectionId, {
-      ...(where ? { where } : {}),
-      ...(orderBy ? { orderBy } : {}),
-    })
+    const adapterRows = await adapter.loadSubset(
+      { kind: `eager`, collectionId: collectionId },
+      {
+        ...(where ? { where } : {}),
+        ...(orderBy ? { orderBy } : {}),
+      },
+    )
     if (!predicateQuery) {
       throw new Error(`predicate query checkpoint was not reached`)
     }
@@ -1191,26 +1201,36 @@ async function assertExpressionIndexHistory(
   }))
 
   await withFailurePreservingCleanup(async () => {
-    await adapter.applyCommittedTx(collectionId, {
-      txId: `seed-${label}`,
-      term: 1,
-      seq: 1,
-      rowVersion: 1,
-      mutations: seededRows.map((row) => ({
-        type: `insert` as const,
-        key: row.key,
-        value: row.value,
-      })),
-    })
+    await adapter.applyCommittedTx(
+      { kind: `eager`, collectionId: collectionId },
+      {
+        txId: `seed-${label}`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: seededRows.map((row) => ({
+          type: `insert` as const,
+          key: row.key,
+          value: row.value,
+        })),
+      },
+    )
 
-    await adapter.ensureIndex(collectionId, signature, {
-      expressionSql: [JSON.stringify({ type: `ref`, path: testCase.path })],
-    })
+    await adapter.ensureIndex(
+      { kind: `eager`, collectionId: collectionId },
+      signature,
+      {
+        expressionSql: [JSON.stringify({ type: `ref`, path: testCase.path })],
+      },
+    )
 
     if (!adapter.scanRows) {
       throw new Error(`real SQLite adapter did not expose scanRows`)
     }
-    const scannedRows = await adapter.scanRows(collectionId)
+    const scannedRows = await adapter.scanRows({
+      kind: `eager`,
+      collectionId: collectionId,
+    })
     const expectedKeys = expectedKeysFromScan(
       scannedRows,
       testCase.path,
@@ -1228,12 +1248,15 @@ async function assertExpressionIndexHistory(
     ).toEqual(independentlySeededExpectedKeys)
     expect(scannedRows).toHaveLength(seededRows.length)
 
-    const indexedRows = await adapter.loadSubset(collectionId, {
-      where: new IR.Func(`eq`, [
-        new IR.PropRef(testCase.path),
-        new IR.Value(testCase.target),
-      ]),
-    })
+    const indexedRows = await adapter.loadSubset(
+      { kind: `eager`, collectionId: collectionId },
+      {
+        where: new IR.Func(`eq`, [
+          new IR.PropRef(testCase.path),
+          new IR.Value(testCase.target),
+        ]),
+      },
+    )
     const indexedKeys = indexedRows.map((row) => String(row.key)).sort()
 
     expect(
@@ -1654,13 +1677,17 @@ describe(`SQLite expression-index oracle`, () => {
         { key: `zero`, value: { largeViewCount: 0n } },
       ],
       preparePreviousIndex: async (adapter, collectionId, signature) => {
-        await adapter.ensureIndex(collectionId, signature, {
-          expressionSql: [
-            JSON.stringify(indexExpression, (_key, value: unknown) =>
-              typeof value === `bigint` ? value.toString() : value,
-            ),
-          ],
-        })
+        await adapter.ensureIndex(
+          { kind: `eager`, collectionId: collectionId },
+          signature,
+          {
+            expressionSql: [
+              JSON.stringify(indexExpression, (_key, value: unknown) =>
+                typeof value === `bigint` ? value.toString() : value,
+              ),
+            ],
+          },
+        )
       },
     })
 
@@ -2715,13 +2742,21 @@ describe(`SQLite expression-index oracle`, () => {
 
     await withFailurePreservingCleanup(async () => {
       await expect(
-        adapter.applyCommittedTx(`bigint-write-range`, tx),
+        adapter.applyCommittedTx(
+          { kind: `eager`, collectionId: `bigint-write-range` },
+          tx,
+        ),
       ).rejects.toThrow(
         /SQLite BigInt value .* outside the signed 64-bit range/,
       )
 
       if (adapter.scanRows) {
-        expect(await adapter.scanRows(`bigint-write-range`)).toEqual([])
+        expect(
+          await adapter.scanRows({
+            kind: `eager`,
+            collectionId: `bigint-write-range`,
+          }),
+        ).toEqual([])
       }
     }, [() => driver.close()])
   })
@@ -2734,15 +2769,22 @@ describe(`SQLite expression-index oracle`, () => {
     const legacyValue = 10n ** 30n
 
     await withFailurePreservingCleanup(async () => {
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `seed-legacy-bigint-read`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [
-          { type: `insert`, key: `legacy`, value: { id: `legacy`, count: 1n } },
-        ],
-      })
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `seed-legacy-bigint-read`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [
+            {
+              type: `insert`,
+              key: `legacy`,
+              value: { id: `legacy`, count: 1n },
+            },
+          ],
+        },
+      )
       driver
         .getDatabase()
         .prepare(`UPDATE "${tableName}" SET value = ?`)
@@ -2759,17 +2801,23 @@ describe(`SQLite expression-index oracle`, () => {
       if (!adapter.scanRows) {
         throw new Error(`real SQLite adapter did not expose scanRows`)
       }
-      const scanned = await adapter.scanRows(collectionId)
+      const scanned = await adapter.scanRows({
+        kind: `eager`,
+        collectionId: collectionId,
+      })
       expect(scanned.map((row) => row.value)).toEqual([
         { id: `legacy`, count: legacyValue },
       ])
 
-      const subset = await adapter.loadSubset(collectionId, {
-        where: new IR.Func(`eq`, [
-          new IR.PropRef([`id`]),
-          new IR.Value(`legacy`),
-        ]),
-      })
+      const subset = await adapter.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          where: new IR.Func(`eq`, [
+            new IR.PropRef([`id`]),
+            new IR.Value(`legacy`),
+          ]),
+        },
+      )
       expect(subset.map((row) => row.value)).toEqual([
         { id: `legacy`, count: legacyValue },
       ])
@@ -2812,22 +2860,28 @@ describe(`SQLite expression-index oracle`, () => {
       const collectionId = `bigint-query-range`
 
       await withFailurePreservingCleanup(async () => {
-        await adapter.applyCommittedTx(collectionId, {
-          txId: `seed-bigint-query-range`,
-          term: 1,
-          seq: 1,
-          rowVersion: 1,
-          mutations: [
-            {
-              type: `insert`,
-              key: `zero`,
-              value: { largeViewCount: 0n },
-            },
-          ],
-        })
+        await adapter.applyCommittedTx(
+          { kind: `eager`, collectionId: collectionId },
+          {
+            txId: `seed-bigint-query-range`,
+            term: 1,
+            seq: 1,
+            rowVersion: 1,
+            mutations: [
+              {
+                type: `insert`,
+                key: `zero`,
+                value: { largeViewCount: 0n },
+              },
+            ],
+          },
+        )
 
         await expect(
-          adapter.loadSubset(collectionId, { where }),
+          adapter.loadSubset(
+            { kind: `eager`, collectionId: collectionId },
+            { where },
+          ),
         ).rejects.toThrow(bigintRangeError(rejectedValue))
       }, [() => driver.close()])
     },
@@ -2840,16 +2894,20 @@ describe(`SQLite expression-index oracle`, () => {
 
     await withFailurePreservingCleanup(async () => {
       await expect(
-        adapter.ensureIndex(`bigint-index-range`, `out-of-range`, {
-          expressionSql: [
-            serializeIndexExpression(
-              new IR.Func(`add`, [
-                new IR.PropRef([`largeViewCount`]),
-                new IR.Value(value),
-              ]),
-            ),
-          ],
-        }),
+        adapter.ensureIndex(
+          { kind: `eager`, collectionId: `bigint-index-range` },
+          `out-of-range`,
+          {
+            expressionSql: [
+              serializeIndexExpression(
+                new IR.Func(`add`, [
+                  new IR.PropRef([`largeViewCount`]),
+                  new IR.Value(value),
+                ]),
+              ),
+            ],
+          },
+        ),
       ).rejects.toThrow(bigintRangeError(value))
     }, [() => driver.close()])
   })
@@ -2874,26 +2932,32 @@ describe(`SQLite expression-index oracle`, () => {
             const collectionId = `generated-bigint-in-range`
 
             await withFailurePreservingCleanup(async () => {
-              await adapter.applyCommittedTx(collectionId, {
-                txId: `seed-${value}`,
-                term: 1,
-                seq: 1,
-                rowVersion: 1,
-                mutations: [
-                  {
-                    type: `insert`,
-                    key: `match`,
-                    value: { nested: { count: value } },
-                  },
-                ],
-              })
+              await adapter.applyCommittedTx(
+                { kind: `eager`, collectionId: collectionId },
+                {
+                  txId: `seed-${value}`,
+                  term: 1,
+                  seq: 1,
+                  rowVersion: 1,
+                  mutations: [
+                    {
+                      type: `insert`,
+                      key: `match`,
+                      value: { nested: { count: value } },
+                    },
+                  ],
+                },
+              )
 
-              const rows = await adapter.loadSubset(collectionId, {
-                where: new IR.Func(`eq`, [
-                  new IR.PropRef([`nested`, `count`]),
-                  new IR.Value(value),
-                ]),
-              })
+              const rows = await adapter.loadSubset(
+                { kind: `eager`, collectionId: collectionId },
+                {
+                  where: new IR.Func(`eq`, [
+                    new IR.PropRef([`nested`, `count`]),
+                    new IR.Value(value),
+                  ]),
+                },
+              )
               expect(rows.map((row) => row.key)).toEqual([`match`])
               expect(rows[0]?.value).toEqual({ nested: { count: value } })
             }, [() => driver.close()])
@@ -2929,19 +2993,25 @@ describe(`SQLite expression-index oracle`, () => {
 
           await withFailurePreservingCleanup(async () => {
             await expect(
-              adapter.applyCommittedTx(`generated-bigint-out-of-range`, {
-                txId: `reject-${value}`,
-                term: 1,
-                seq: 1,
-                rowVersion: 1,
-                mutations: [
-                  {
-                    type: `insert`,
-                    key: `rejected`,
-                    value: { nested: { count: value } },
-                  },
-                ],
-              }),
+              adapter.applyCommittedTx(
+                {
+                  kind: `eager`,
+                  collectionId: `generated-bigint-out-of-range`,
+                },
+                {
+                  txId: `reject-${value}`,
+                  term: 1,
+                  seq: 1,
+                  rowVersion: 1,
+                  mutations: [
+                    {
+                      type: `insert`,
+                      key: `rejected`,
+                      value: { nested: { count: value } },
+                    },
+                  ],
+                },
+              ),
             ).rejects.toThrow(bigintRangeError(value))
           }, [() => driver.close()])
         }),
@@ -2993,34 +3063,40 @@ describe(`SQLite expression-index oracle`, () => {
     const collectionId = `legacy-nested-path`
 
     await withFailurePreservingCleanup(async () => {
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `seed-legacy-nested-path`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [
-          {
-            type: `insert`,
-            key: `nested-match`,
-            value: {
-              profile: { [`meta-field`]: `alpha` },
-              [`meta-field`]: `flat-other`,
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `seed-legacy-nested-path`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [
+            {
+              type: `insert`,
+              key: `nested-match`,
+              value: {
+                profile: { [`meta-field`]: `alpha` },
+                [`meta-field`]: `flat-other`,
+              },
             },
-          },
-          {
-            type: `insert`,
-            key: `flat-only`,
-            value: { [`meta-field`]: `alpha` },
-          },
-        ],
-      })
+            {
+              type: `insert`,
+              key: `flat-only`,
+              value: { [`meta-field`]: `alpha` },
+            },
+          ],
+        },
+      )
 
-      const rows = await adapter.loadSubset(collectionId, {
-        where: new IR.Func(`eq`, [
-          new IR.PropRef([`profile`, `meta-field`]),
-          new IR.Value(`alpha`),
-        ]),
-      })
+      const rows = await adapter.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          where: new IR.Func(`eq`, [
+            new IR.PropRef([`profile`, `meta-field`]),
+            new IR.Value(`alpha`),
+          ]),
+        },
+      )
 
       expect(rows.map((row) => row.key)).toEqual([`nested-match`])
     }, [() => baseDriver.close()])

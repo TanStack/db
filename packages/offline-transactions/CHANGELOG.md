@@ -1,5 +1,36 @@
 # @tanstack/offline-transactions
 
+## 1.1.0
+
+### Minor Changes
+
+- Add `OfflineConfig.shouldRetry` so an app can retry an offline transaction after ([#1592](https://github.com/TanStack/db/pull/1592))
+  its named mutation function rejects with a recoverable error, such as a 401.
+  Return `undefined` to use the default decision. `NonRetriableError` remains
+  terminal, and retry timing stays the same. The hook returns synchronously and
+  applies to all named mutation functions.
+  If the hook fails, the executor removes only that outbox row and rejects its
+  waiters; queued transactions continue after terminal cleanup.
+
+### Patch Changes
+
+- Stop tracking a transaction after it fails or rolls back. Before, a Collection kept every failed or rolled-back transaction, including a rolled-back offline restoration, until the Collection was cleaned up. Each later mutation walked all of them, so a mutation got slower with each rollback the Collection had seen (about 20× after 4,000 rollbacks), and the failed transactions kept their rows in memory. A settled transaction now leaves the Collection in the recompute that publishes its settlement, and removing it never removes a later transaction that reuses its id. ([#2080](https://github.com/TanStack/db/pull/2080))
+
+  A settled transaction leaves every Collection that tracked it, including a Collection whose mutations merged away, a second Collection instance with the same id, and a Collection whose transaction rolled back during a sync commit.
+
+  When a subscriber throws during settlement, every Collection still recomputes and `isPersisted` still settles, including when the throw comes from a conflicting transaction that the rollback also rolls back. The call then rethrows one of the subscriber errors. Before, a throw could leave other Collections showing the settled transaction's optimistic rows, and a throw from a conflicting rollback left the primary transaction's `isPersisted` pending.
+
+  A settled transaction no longer keeps the set of Collections that tracked it; its mutations still name their Collection. Offline restoration now tracks and releases its transaction through the same path as other transactions. A completed restoration settles its `isPersisted`, and a restoration that one Collection cannot track is rolled back so no Collection keeps its rows.
+
+  Repeated `mutate()` calls on one offline transaction now add to the same transaction. Before, each call created a new transaction with the same id, which replaced the earlier one and hid its rows. With `autoCommit` (the default), the first call commits, so a later call throws `TransactionNotPendingMutateError`, as `mutate()` does on any committed transaction. Create a new offline transaction for each auto-committed write.
+
+  When a mutation function rejects and a subscriber also throws during the rollback, `commit()` now rejects with the mutation error. Before, it rejected with the subscriber error and the mutation error was lost.
+
+  Transaction ids must be unique among unsettled transactions. A write that would make a Collection track a second unsettled transaction with an id it already tracks now throws `DuplicateTransactionIdError` and changes nothing. Before, the second transaction silently replaced the first, whose optimistic rows disappeared while it was still pending. Settling a transaction also no longer removes a different pending transaction that shares its id from conflict tracking.
+
+- Updated dependencies [[`f6aba31`](https://github.com/TanStack/db/commit/f6aba314e44afdfa413d6d70bf8e272dfa67af85), [`faa3de6`](https://github.com/TanStack/db/commit/faa3de64b53737fb7896d8f9c5475e8c5daa05a9), [`bcb2af6`](https://github.com/TanStack/db/commit/bcb2af61b8a1513a09a88db230a4ffb3bb391541), [`2ab7f3e`](https://github.com/TanStack/db/commit/2ab7f3e55475ab6b86f6b5e3b566c89a7d9a9c58), [`86f00ea`](https://github.com/TanStack/db/commit/86f00ea63af5ef22f38f0c6a0a78bd4e3aaf49b5), [`f7ac2c6`](https://github.com/TanStack/db/commit/f7ac2c63a3cabc864caf38b7a4e966088cfe73bb), [`fa36267`](https://github.com/TanStack/db/commit/fa36267473bf989fd0bafd29ab6d67ab5fc91c60), [`2c98b49`](https://github.com/TanStack/db/commit/2c98b4992c412820f8476325ee6941db5ca9ac0f), [`f6d65ea`](https://github.com/TanStack/db/commit/f6d65eacea596f135d11c2adf4c9a4f97748457e), [`fe284cc`](https://github.com/TanStack/db/commit/fe284ccbdba51780f8b2d63efc75fa7100057bfd), [`8b0e1de`](https://github.com/TanStack/db/commit/8b0e1defb0ecf98ead912b3a906995398a30b510), [`4bd66cf`](https://github.com/TanStack/db/commit/4bd66cf8ee72cf2c318878995222415b0452b031)]:
+  - @tanstack/db@0.13.0
+
 ## 1.0.65
 
 ### Patch Changes
