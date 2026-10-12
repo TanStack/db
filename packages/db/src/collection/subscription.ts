@@ -481,9 +481,10 @@ export class CollectionSubscription
       this.isSyncRunGenerationCurrent(replayState.syncRunGeneration) &&
       this.isDemandActive(demand)
     const fail = (error: unknown) => {
-      if (!isCurrent()) return
-      replayState.failures.set(demand, normalizeError(error))
-      replayState.failed = true
+      if (isCurrent()) {
+        replayState.failures.set(demand, normalizeError(error))
+        replayState.failed = true
+      }
     }
     if (demand.initialResult) {
       void replayState.completion.promise.then(
@@ -664,9 +665,19 @@ export class CollectionSubscription
     if (this.truncateReplayState !== replayState) return
     this.truncateReplayState = undefined
     this.truncateReplacementPending = false
+    try {
+      this.publishReplayRows(replayState.privateRows)
+    } finally {
+      replayState.completion.resolve()
+      this.options.truncateReplayPublication?.succeed()
+    }
+  }
 
+  /** Replace the public snapshot with a replay's private rows in one batch. */
+  private publishReplayRows(
+    privateRows: Map<string | number, object> | undefined,
+  ): void {
     // Retained rows the source never re-delivered leave the replacement.
-    const { privateRows } = replayState
     for (const key of this.stalePublishedRows.keys()) privateRows?.delete(key)
     this.stalePublishedRows.clear()
     try {
@@ -681,8 +692,6 @@ export class CollectionSubscription
     } finally {
       // Restore tracking even when a subscriber rejects the replacement.
       this.restorePublishedSnapshotTracking()
-      replayState.completion.resolve()
-      this.options.truncateReplayPublication?.succeed()
     }
   }
 
@@ -1396,19 +1405,9 @@ export class CollectionSubscription
       return
     }
     this.discardTruncateReplay()
-    const { privateRows } = replayState
-    if (privateRows && !replayState.failed) {
-      this.stalePublishedRows.clear()
-      try {
-        const replacement = this.createStateDiff(
-          this.publishedRows,
-          privateRows,
-        )
-        if (replacement.length > 0) this.filteredCallback(replacement)
-      } finally {
-        this.restorePublishedSnapshotTracking()
-        this.options.truncateReplayPublication?.succeed()
-      }
+    // Only a direct subscriber holds private rows; it has no delegate to release.
+    if (replayState.privateRows && !replayState.failed) {
+      this.publishReplayRows(replayState.privateRows)
       return
     }
     this.stalePublishedRows = new Map(this.publishedRows)

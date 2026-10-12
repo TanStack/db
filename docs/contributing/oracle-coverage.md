@@ -475,8 +475,15 @@ The following related oracles own distinct production paths or observation cuts:
   models publish a replay's rows when its last owner is released and its
   current attempt has not failed, and keep a failed one private; the
   publication oracle's named histories cover a value written, rewritten or
-  deleted during the replay, a row no demand names, a failed replay, and a
-  later request that updates a row still shown at an older value.
+  deleted during the replay, a row no demand names, a failed replay, a
+  later request that updates a row still shown at an older value, and a row
+  retained by a failed replay that the source deletes before a later replay
+  retires. The replay oracle's named witnesses fail each synchronous failure
+  site (a replay load, an old lease's unload, a new request) and then release
+  the last owner; removing that site's sticky failure fails its witness.
+  Limit: the generated grammars reach a failed retirement followed by another
+  retired replay only rarely (the replay grammar releases one demand, on the
+  last attempt), so the named histories own that sequence.
 - The [pagination oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/pagination-oracle.property.test.ts)
   owns general ordered-window rows and publication. The
   [ordered-work oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/ordered-work-oracle.property.test.ts)
