@@ -25,6 +25,7 @@ import {
   FnSelectWithGroupByError,
   HavingRequiresGroupByError,
   LimitOffsetRequireOrderByError,
+  NonAggregateExpressionNotInGroupByError,
   QueryCompilationError,
   UnsupportedFnSelectResultError,
   UnsupportedFromTypeError,
@@ -747,8 +748,19 @@ function compileQueryInternal(
       }
     }
   }
+  const selectHasAggregates =
+    query.select !== undefined && containsAggregate(query.select)
   if (query.select) {
     const includesEntries = extractIncludesFromSelect(query.select)
+    // A nested include has one Collection per row, not one value per group,
+    // so it cannot sit in a grouped or aggregate select.
+    if (
+      includesEntries.length > 0 &&
+      ((query.groupBy?.length ?? 0) > 0 || selectHasAggregates)
+    )
+      throw new NonAggregateExpressionNotInGroupByError(
+        includesEntries[0]!.path.join(`.`),
+      )
     if (includesEntries.length > 0) {
       query = { ...query, select: { ...query.select } }
     }
@@ -949,8 +961,6 @@ function compileQueryInternal(
     throw new FnSelectWithGroupByError()
   }
 
-  const selectHasAggregates =
-    query.select !== undefined && containsAggregate(query.select)
   const routingFns = includesRoutingFns
   const getRowIncludesRouting = (row: NamespacedRow) =>
     Object.fromEntries(
@@ -1044,7 +1054,10 @@ function compileQueryInternal(
     }
     pipeline = pipeline.pipe(map(([key, row]) => [key, projectRow(row)]))
   } else if (query.select) {
-    pipeline = processSelect(pipeline, query.select, allInputs)
+    // An aggregate query computes its select values from each group, so it
+    // does not project rows first.
+    if (!selectHasAggregates && !(query.groupBy && query.groupBy.length > 0))
+      pipeline = processSelect(pipeline, query.select, allInputs)
   } else {
     // If no SELECT clause, create $selected with the main table data
     pipeline = pipeline.pipe(
@@ -1086,11 +1099,27 @@ function compileQueryInternal(
   // When in includes mode (parentKeyStream), pass mainSource so that groupBy
   // preserves route metadata for per-parent aggregation.
   const groupByMainSource = parentKeyStream ? mainSource : undefined
+  // A ref reads the query's own rows when it is bound to one of its sources.
+  // A ref bound to an ancestor scope can reuse a source alias. After a
+  // unionAll, an unbound ref names a field of the union's rows.
+  const sourceBindings = new Map(
+    getAllSources(query).map((source) => [source.alias, source.bindingId]),
+  )
+  const unionRows = query.from.type === `unionAll`
+  const isSourceRef = (ref: PropRef) => {
+    const binding = sourceBindings.get(ref.path[0]!)
+    if (binding !== undefined) return (ref.bindingId ?? binding) === binding
+    // `$selected` names the query's own select values, not a source.
+    return (
+      unionRows && ref.bindingId === undefined && ref.path[0] !== `$selected`
+    )
+  }
   if (query.groupBy && query.groupBy.length > 0) {
     pipeline = processGroupBy(
       pipeline,
       query.groupBy,
       valueIdentity,
+      isSourceRef,
       query.having,
       query.select,
       query.fnHaving,
@@ -1104,6 +1133,7 @@ function compileQueryInternal(
       pipeline,
       [], // Empty group by means single group
       valueIdentity,
+      isSourceRef,
       query.having,
       query.select,
       query.fnHaving,
@@ -1114,15 +1144,13 @@ function compileQueryInternal(
   }
 
   // Process the HAVING clause if it exists (only applies after GROUP BY)
-  if (query.having && (!query.groupBy || query.groupBy.length === 0)) {
-    // Check if we have aggregates in SELECT that would trigger implicit grouping
-    const hasAggregates = query.select
-      ? Object.values(query.select).some((expr) => expr.type === `agg`)
-      : false
-
-    if (!hasAggregates) {
-      throw new HavingRequiresGroupByError()
-    }
+  // An aggregate anywhere in SELECT, wrapped or not, makes one implicit group.
+  if (
+    query.having &&
+    (!query.groupBy || query.groupBy.length === 0) &&
+    !selectHasAggregates
+  ) {
+    throw new HavingRequiresGroupByError()
   }
 
   // Process functional HAVING clauses outside of GROUP BY (treat as additional WHERE filters)
