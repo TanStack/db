@@ -17,10 +17,7 @@ import type {
 import type { OrderByOptimizationInfo } from '../compiler/order-by.js'
 
 type OrderedRequestKind =
-  | `ordered`
-  | `ordered-repair`
-  | `boundary`
-  | `full-source`
+  `ordered` | `ordered-repair` | `boundary` | `full-source`
 
 type OrderedContinuation = {
   kind: `boundary` | `more`
@@ -68,8 +65,7 @@ export class OrderedSourceLoader {
   // The record's presence blocks automatic retry, including initial requests
   // that have no explicit window-operation generation.
   private failedRequest:
-    | { windowOperationGeneration: number | undefined }
-    | undefined
+    { windowOperationGeneration: number | undefined } | undefined
   private failedAcquisitions = new Map<ReleaseLoadSubset, OrderedRequestKind>()
   private active = true
   private orderedLoadGeneration = 0
