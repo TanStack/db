@@ -9,8 +9,9 @@ import type { IStreamBuilder, KeyValue } from '../types.js'
  * Base operator for reduction operations (version-free)
  */
 export class ReduceOperator<K, V1, V2> extends UnaryOperator<[K, V1], [K, V2]> {
-  #index = new Index<K, V1>()
-  #indexOut = new Index<K, V2>()
+  // Reduce never reads presence, so its indexes skip that bookkeeping.
+  #index = new Index<K, V1>({ trackConsolidated: false })
+  #indexOut = new Index<K, V2>({ trackConsolidated: false })
   #f: (values: Array<[V1, number]>) => Array<[V2, number]>
 
   constructor(
@@ -40,6 +41,34 @@ export class ReduceOperator<K, V1, V2> extends UnaryOperator<[K, V1], [K, V2]> {
       const curr = this.#index.get(key)
       const currOut = this.#indexOut.get(key)
       const out = this.#f(curr)
+
+      // Most keys have at most one output before and after. Compare the two
+      // directly, by the same reference identity the maps below use.
+      if (out.length <= 1 && currOut.length <= 1) {
+        const before = currOut[0]
+        const after = out[0]
+        if (
+          before !== undefined &&
+          after !== undefined &&
+          before[0] === after[0]
+        ) {
+          const delta = after[1] - before[1]
+          if (delta !== 0) {
+            result.push([[key, after[0]], delta])
+            this.#indexOut.addValue(key, [after[0], delta])
+          }
+          continue
+        }
+        if (before !== undefined) {
+          result.push([[key, before[0]], -before[1]])
+          this.#indexOut.addValue(key, [before[0], -before[1]])
+        }
+        if (after !== undefined && after[1] !== 0) {
+          result.push([[key, after[0]], after[1]])
+          this.#indexOut.addValue(key, [after[0], after[1]])
+        }
+        continue
+      }
 
       // Create maps for current and previous outputs using values directly as keys
       const newOutputMap = new Map<V2, number>()

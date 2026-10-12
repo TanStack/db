@@ -151,9 +151,12 @@ export class Index<TKey, TValue, TPrefix = any> {
    */
   #inner: IndexMap<TKey, TValue, TPrefix>
   #consolidatedMultiplicity: Map<TKey, number> = new Map() // sum of multiplicities per key
+  // Only joins read presence; a reduce index skips this bookkeeping.
+  #trackConsolidated: boolean
 
-  constructor() {
+  constructor(options?: { trackConsolidated?: boolean }) {
     this.#inner = new Map()
+    this.#trackConsolidated = options?.trackConsolidated ?? true
   }
 
   /**
@@ -194,6 +197,11 @@ export class Index<TKey, TValue, TPrefix = any> {
     return this.#inner.size
   }
 
+  #assertTracksPresence(): void {
+    if (!this.#trackConsolidated)
+      throw new Error(`This Index does not track presence`)
+  }
+
   /**
    * This method checks if the index has a given key.
    * @param key - The key to check.
@@ -209,6 +217,7 @@ export class Index<TKey, TValue, TPrefix = any> {
    * @returns True if the key has non-zero consolidated multiplicity, false otherwise.
    */
   hasPresence(key: TKey): boolean {
+    this.#assertTracksPresence()
     return (this.#consolidatedMultiplicity.get(key) || 0) !== 0
   }
 
@@ -218,6 +227,7 @@ export class Index<TKey, TValue, TPrefix = any> {
    * @returns The consolidated multiplicity for the key.
    */
   getConsolidatedMultiplicity(key: TKey): number {
+    this.#assertTracksPresence()
     return this.#consolidatedMultiplicity.get(key) || 0
   }
 
@@ -226,6 +236,7 @@ export class Index<TKey, TValue, TPrefix = any> {
    * @returns An iterator of keys with non-zero consolidated multiplicity.
    */
   getPresenceKeys(): Iterable<TKey> {
+    this.#assertTracksPresence()
     return this.#consolidatedMultiplicity.keys()
   }
 
@@ -235,7 +246,22 @@ export class Index<TKey, TValue, TPrefix = any> {
    * @returns An array of value tuples [value, multiplicity].
    */
   get(key: TKey): Array<[TValue, number]> {
-    return [...this.getIterator(key)]
+    // Built directly, in getIterator's order: join and reduce call this for
+    // every changed key.
+    const mapOrSingleValue = this.#inner.get(key)
+    if (mapOrSingleValue === undefined) return []
+    if (isSingleValue(mapOrSingleValue)) return [mapOrSingleValue]
+    if (mapOrSingleValue instanceof ValueMap)
+      return [...mapOrSingleValue.values()]
+    const result: Array<[TValue, number]> = []
+    for (const singleValueOrValueMap of mapOrSingleValue.values()) {
+      if (isSingleValue(singleValueOrValueMap))
+        result.push(singleValueOrValueMap)
+      else
+        for (const valueTuple of singleValueOrValueMap.values())
+          result.push(valueTuple)
+    }
+    return result
   }
 
   /**
@@ -303,12 +329,14 @@ export class Index<TKey, TValue, TPrefix = any> {
     if (multiplicity === 0) return
 
     // Update consolidated multiplicity tracking
-    const newConsolidatedMultiplicity =
-      (this.#consolidatedMultiplicity.get(key) || 0) + multiplicity
-    if (newConsolidatedMultiplicity === 0) {
-      this.#consolidatedMultiplicity.delete(key)
-    } else {
-      this.#consolidatedMultiplicity.set(key, newConsolidatedMultiplicity)
+    if (this.#trackConsolidated) {
+      const newConsolidatedMultiplicity =
+        (this.#consolidatedMultiplicity.get(key) || 0) + multiplicity
+      if (newConsolidatedMultiplicity === 0) {
+        this.#consolidatedMultiplicity.delete(key)
+      } else {
+        this.#consolidatedMultiplicity.set(key, newConsolidatedMultiplicity)
+      }
     }
 
     const mapOrSingleValue = this.#inner.get(key)
