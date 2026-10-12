@@ -466,23 +466,25 @@ sorted row IDs. Its [transfer ledger](oracle-reviews/comparison-unit-retirement-
 records the five retired same-realm examples. A separate
 [cross-realm Date witness](oracle-reviews/cross-realm-date-order.md) compares
 native `node:vm` Dates by supplied timestamps and invalidity, including equal
-times and numeric NaN with an invalid Date. It also checks one unindexed
-public ordered scan. Exact `normalizeValue` results are direct utility
-observations. Indexed order, public Date range predicates, cursor
-continuation, proxies, and other Date-consuming paths remain outside that
-witness.
+times, numeric NaN with an invalid Date, and Dates with an own display tag.
+It also checks an unindexed public ordered scan with a tagged foreign invalid
+Date. Exact `normalizeValue` results are direct utility observations. Indexed
+order, public Date range predicates, cursor continuation, proxies, subclasses,
+replaced Date prototypes or `getTime` methods, and other Date-consuming paths
+remain outside that witness.
 
 The [WHERE predicate publication oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/where-predicate-publication-oracle.property.test.ts)
 also has a [cross-realm Date equality matrix](oracle-reviews/cross-realm-date-where-publication.md).
 For local and `node:vm` Dates with timestamps 1 and 2 or invalid timestamps,
-plus number 1 and NaN, it compares public live-query keys, filtered subscriber
-keys, and direct snapshot keys after preload and a three-row sync transaction.
+including foreign Dates with an own display tag, plus number 1 and NaN, it
+compares public live-query keys, filtered subscriber keys, and direct snapshot
+keys after preload and a three-row sync transaction.
 Auto-indexing is off in both modes; one mode adds BasicIndex explicitly and
 also checks its equality lookup and an optimized-only public snapshot. This
 proves a public indexed snapshot result but does not prove that the live-query
-planner chose the index. Other realm hosts,
-proxies, subclasses, public range predicates, and arbitrary histories need
-separate witnesses.
+planner chose the index. Other realm hosts, proxies, subclasses, Date prototype
+swaps or method replacement, public range predicates, and arbitrary histories
+need separate witnesses.
 
 The direct [index refinement oracle](../../packages/db/tests/index-update-oracle.property.test.ts)
 also owns exact nullish membership and direct `IN` set selection for BasicIndex

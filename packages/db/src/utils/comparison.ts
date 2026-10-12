@@ -19,20 +19,31 @@ function getObjectId(obj: object): number {
   return id
 }
 
-// A native Date can arrive from another JavaScript realm, where `instanceof`
-// fails. Check its brand before borrowing the built-in method so a forged
-// Symbol.toStringTag cannot make an ordinary object look like a Date.
+// The Date intrinsic checks the native brand across realms. Cheap shape gates
+// avoid that throwing probe for ordinary objects and Temporal values. A Date
+// display tag cannot hide its timestamp, and a forged tag cannot supply one.
 function dateTimestamp(value: unknown): number | undefined {
-  if (value instanceof Date) return Date.prototype.getTime.call(value)
   if (value === null || typeof value !== `object`) return undefined
+  if (value instanceof Date) return Date.prototype.getTime.call(value)
   try {
-    if (Object.prototype.toString.call(value) === `[object Date]`) {
-      return Date.prototype.getTime.call(value)
+    if (Symbol.toStringTag in value) {
+      // A normal Date prototype owns getTime. Inspect its descriptor without
+      // reading a user display-tag getter or trusting a claimed tag value.
+      const prototype = Object.getPrototypeOf(value)
+      if (
+        typeof Object.getOwnPropertyDescriptor(prototype, `getTime`)?.value !==
+        `function`
+      ) {
+        return undefined
+      }
+    } else if (Object.prototype.toString.call(value) !== `[object Date]`) {
+      return undefined
     }
+    return Date.prototype.getTime.call(value)
   } catch {
-    // A proxy or forged Date tag has no native Date timestamp.
+    // An ordinary object or proxy has no native Date timestamp.
+    return undefined
   }
-  return undefined
 }
 
 function hasUnorderableValue(

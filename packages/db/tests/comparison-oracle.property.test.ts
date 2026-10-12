@@ -13,6 +13,7 @@ import {
   normalizeValue,
 } from '../src/utils/comparison'
 import { DEFAULT_COMPARE_OPTIONS } from '../src/utils'
+import { withOracleCleanup } from './utils'
 import type { CompareOptions } from '../src/query/builder/types'
 
 /**
@@ -23,7 +24,8 @@ import type { CompareOptions } from '../src/query/builder/types'
  * ascending domain below, NaN and invalid Dates share one non-finite order
  * position and follow finite values; null remains first. The published NaN
  * ordering change in `packages/db/CHANGELOG.md` (#1582) and the live-query
- * guide establish that law for Dates regardless of their JavaScript realm.
+ * guide establish that law for Dates with native prototypes regardless of
+ * their JavaScript realm.
  *
  * Authority: `OrderByOptions` and `CompareOptions` in the query builder's
  * option types declare these modes. The index comparator contract accepts
@@ -334,13 +336,23 @@ type RealmDateSample = {
   rightTime: number | null
   leftForeign: boolean
   rightForeign: boolean
+  leftOwnTag?: boolean
+  rightOwnTag?: boolean
 }
 
-function dateInRealm(time: number | null, foreign: boolean): Date {
+function dateInRealm(
+  time: number | null,
+  foreign: boolean,
+  ownTag = false,
+): Date {
   const timestamp = time ?? Number.NaN
-  return foreign
+  const date = foreign
     ? (runInNewContext(`new Date(timestamp)`, { timestamp }) as Date)
     : new Date(timestamp)
+  if (ownTag) {
+    Object.defineProperty(date, Symbol.toStringTag, { value: `Other` })
+  }
+  return date
 }
 
 // `null` is a model-only invalid-Date tag; production receives a real Date
@@ -354,8 +366,16 @@ function modelDateSign(left: number | null, right: number | null): -1 | 0 | 1 {
 }
 
 function assertRealmDateOrder(sample: RealmDateSample): void {
-  const left = dateInRealm(sample.leftTime, sample.leftForeign)
-  const right = dateInRealm(sample.rightTime, sample.rightForeign)
+  const left = dateInRealm(
+    sample.leftTime,
+    sample.leftForeign,
+    sample.leftOwnTag,
+  )
+  const right = dateInRealm(
+    sample.rightTime,
+    sample.rightForeign,
+    sample.rightOwnTag,
+  )
   const expected = modelDateSign(sample.leftTime, sample.rightTime)
   const reverseExpected = expected === 0 ? 0 : -expected
   expect(isUnorderable(left)).toBe(sample.leftTime === null)
@@ -375,8 +395,9 @@ function assertRealmDateOrder(sample: RealmDateSample): void {
 // Legal pairs cross local and foreign native Dates, valid epoch milliseconds
 // in -1e12..1e12 and invalid Dates. The fixed witnesses below force the
 // foreign-valid and foreign-invalid paths; generated pairs add equal times,
-// both operand orders, and both invalid values. Spoofed Date tags, proxies,
-// non-Date objects, and user-defined Date subclasses are outside this grammar.
+// both operand orders, both invalid values, and Dates with an own display tag.
+// A display tag cannot change native Date identity. Proxies, non-Date objects,
+// and user-defined Date subclasses are outside this generated grammar.
 const arbitraryDateTime = fc.oneof(
   fc.integer({ min: -1_000_000_000_000, max: 1_000_000_000_000 }),
   fc.constant(null),
@@ -387,18 +408,24 @@ const arbitraryRealmDateSample: fc.Arbitrary<RealmDateSample> = fc.oneof(
     rightTime: arbitraryDateTime,
     leftForeign: fc.boolean(),
     rightForeign: fc.boolean(),
+    leftOwnTag: fc.boolean(),
+    rightOwnTag: fc.boolean(),
   }),
   fc
     .record({
       time: arbitraryDateTime,
       leftForeign: fc.boolean(),
       rightForeign: fc.boolean(),
+      leftOwnTag: fc.boolean(),
+      rightOwnTag: fc.boolean(),
     })
-    .map(({ time, leftForeign, rightForeign }) => ({
+    .map(({ time, leftForeign, rightForeign, leftOwnTag, rightOwnTag }) => ({
       leftTime: time,
       rightTime: time,
       leftForeign,
       rightForeign,
+      leftOwnTag,
+      rightOwnTag,
     })),
 )
 
@@ -963,11 +990,13 @@ describe(`NaN and invalid Date default-order refinement`, () => {
 })
 
 describe(`native Date order across JavaScript realms`, () => {
-  it(`rejects forged or throwing Date tags during native-brand checks`, () => {
+  it(`uses the native Date brand without reading an unrelated display tag`, () => {
     const forged = { [Symbol.toStringTag]: `Date` }
-    const throwing = Object.defineProperty({}, Symbol.toStringTag, {
+    let tagReads = 0
+    const unrelated = Object.defineProperty({}, Symbol.toStringTag, {
       get() {
-        throw new Error(`tag read`)
+        tagReads++
+        return `Other`
       },
     })
     expect(isUnorderable(forged)).toBe(false)
@@ -975,7 +1004,63 @@ describe(`native Date order across JavaScript realms`, () => {
     expect(
       sign(ascComparator(forged, new Date(0), DEFAULT_COMPARE_OPTIONS)),
     ).not.toBe(0)
-    expect(isUnorderable(throwing)).toBe(false)
+    expect(isUnorderable(unrelated)).toBe(false)
+    expect(tagReads).toBe(0)
+  })
+
+  it(`keeps native Date semantics when a foreign Date has an own display tag`, () => {
+    const timestamp = 123
+    const foreignValid = dateInRealm(timestamp, true, true)
+    const foreignInvalid = dateInRealm(null, true, true)
+    const foreignTemporalTagged = dateInRealm(timestamp, true)
+    Object.defineProperty(foreignTemporalTagged, Symbol.toStringTag, {
+      value: `Temporal.PlainDate`,
+    })
+    const foreignPrototypeTagged = dateInRealm(timestamp, true)
+    Object.defineProperty(
+      Object.getPrototypeOf(foreignPrototypeTagged),
+      Symbol.toStringTag,
+      { value: `Other` },
+    )
+    const foreignGetter = dateInRealm(timestamp, true)
+    let tagReads = 0
+    Object.defineProperty(foreignGetter, Symbol.toStringTag, {
+      get() {
+        tagReads++
+        return `Other`
+      },
+    })
+    const localValid = new Date(timestamp)
+    // The intrinsic establishes the native Date premise without consulting
+    // the production detector or the object's display tag.
+    expect(Date.prototype.getTime.call(foreignValid)).toBe(timestamp)
+    expect(Date.prototype.getTime.call(foreignInvalid)).toBeNaN()
+    expect(normalizeValue(foreignValid)).toBe(timestamp)
+    expect(normalizeValue(foreignTemporalTagged)).toBe(timestamp)
+    expect(normalizeValue(foreignPrototypeTagged)).toBe(timestamp)
+    expect(normalizeValue(foreignGetter)).toBe(timestamp)
+    expect(tagReads).toBe(0)
+    expect(normalizeValue(foreignInvalid)).toBeNaN()
+    expect(isUnorderable(foreignInvalid)).toBe(true)
+    expect(
+      ascComparator(foreignValid, localValid, DEFAULT_COMPARE_OPTIONS),
+    ).toBe(0)
+    expect(
+      ascComparator(localValid, foreignValid, DEFAULT_COMPARE_OPTIONS),
+    ).toBe(0)
+    expect(
+      ascComparator(foreignTemporalTagged, localValid, DEFAULT_COMPARE_OPTIONS),
+    ).toBe(0)
+    expect(
+      ascComparator(
+        foreignPrototypeTagged,
+        localValid,
+        DEFAULT_COMPARE_OPTIONS,
+      ),
+    ).toBe(0)
+    expect(
+      sign(ascComparator(foreignInvalid, localValid, DEFAULT_COMPARE_OPTIONS)),
+    ).toBe(1)
   })
 
   it(`treats numeric NaN and invalid Dates as one non-finite order position`, () => {
@@ -1025,11 +1110,15 @@ describe(`native Date order across JavaScript realms`, () => {
   )
 
   it(`orders a foreign invalid Date after a valid Date in a public scan`, async () => {
-    for (const foreign of [false, true]) {
-      const invalid = dateInRealm(null, foreign)
+    for (const [foreign, ownTag] of [
+      [false, false],
+      [true, false],
+      [true, true],
+    ] as const) {
+      const invalid = dateInRealm(null, foreign, ownTag)
       const valid = new Date(Date.UTC(2023, 0, 1))
       const source = createCollection({
-        id: `realm-date-order-${foreign}`,
+        id: `realm-date-order-${foreign}-${ownTag}`,
         getKey: (row: { id: number; when: Date }) => row.id,
         autoIndex: `off`,
         sync: {
@@ -1048,15 +1137,14 @@ describe(`native Date order across JavaScript realms`, () => {
           .orderBy(({ rows }) => rows.when, `asc`)
           .select(({ rows }) => ({ id: rows.id, when: rows.when })),
       )
-      try {
+      // Preserve an ordered-row mismatch if either resource also fails to
+      // clean up, and attempt both cleanups in all cases.
+      await withOracleCleanup(async () => {
         await query.preload()
         // The local control proves that this public query actually orders
         // rows; the foreign case must have the same promised result.
         expect([...query.values()].map(({ id }) => id)).toEqual([2, 1])
-      } finally {
-        await query.cleanup()
-        await source.cleanup()
-      }
+      }, [() => query.cleanup(), () => source.cleanup()])
     }
   })
 })

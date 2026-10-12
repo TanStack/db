@@ -76,4 +76,15 @@ same-realm examples unique.
 
 ## Exact committed-head recheck
 
-Pending commit and fresh recheck.
+At published commit `9a145fba130f27c914a4a1fd4f44c5871a917483`, the fresh
+hostile reviewer `/root/exact_review_comparison_round5` found no loss from the
+five retired same-realm blocks. It checked the complete source file against the
+tagged model, exact comparator zeros, and stable sorted row IDs. The focused
+comparison suite passed 102 tests with no type errors.
+
+The reviewer also found a separate bug in the broader cross-realm Date repair.
+A native foreign Date with an own `Symbol.toStringTag` escaped the production
+Date detector. The new direct and public oracle controls failed against that
+published implementation. The repair and its fresh committed-head verdict are
+recorded in [the Date order review](cross-realm-date-order.md). This finding
+does not restore a unique assertion to any of the five retired blocks.

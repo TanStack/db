@@ -8,12 +8,13 @@ JavaScript realm was not normalized to its timestamp. The
 RED witnesses. This record tests the separate equality and publication path.
 It does not retire another unit test.
 
-The live-query guide's comparison semantics and changelog #1582 say that
-valid Dates compare by timestamp and that invalid Dates share NaN's equality
-class. The WHERE publication owner already models these classes for local
-values. Its new focused matrix tags each source value and literal as a local
-or `node:vm` Date with timestamp 1, timestamp 2, or invalid timestamp, or as
-number 1 or NaN. The model reduces tags to equality classes before production
+The live-query guide now states explicitly that native valid Dates compare by
+timestamp across realms and display tags. Changelog #1582 covers the separate
+invalid-Date/NaN equality class. The WHERE publication owner already models
+these classes for local values. Its focused matrix tags each source value and
+literal as a local or `node:vm` Date with timestamp 1, timestamp 2, or an
+invalid timestamp, or as number 1 or NaN. Some foreign Dates have an own
+display tag. The model reduces tags to equality classes before production
 values exist. It predicts complete, sorted public key sets, independent of
 `normalizeValue`, the evaluator, or either index implementation.
 
@@ -85,4 +86,22 @@ subscriber event multiplicity, payloads, or intermediate publication.
 
 ## Exact committed-head recheck
 
-Pending commit and fresh reviewer recheck.
+At published commit `9a145fba130f27c914a4a1fd4f44c5871a917483`, the fresh
+hostile reviewer `/root/exact_review_where_realm` found no blocker in the
+bounded matrix for unmodified native Dates. The focused WHERE and subset suites
+passed 53 tests with no type errors. Source inspection confirmed that the
+`optimizedOnly: true` read cannot fall back to a scan.
+
+The same reviewer independently found the foreign native Date with an own
+`Symbol.toStringTag`. The published comparison utility classified it by object
+identity, so the broader native-Date claim was open. The matrix now includes
+tagged foreign source rows, tagged literals, and a tagged post-commit update.
+The reviewer ran this expanded matrix in an isolated archive of `9a145fba1`.
+At its first unindexed public live-query checkpoint, a local `Date(1)` literal
+expected `foreign-tagged-one` in the key set, but production omitted it. The
+complete expected set was `[foreign-one, foreign-tagged-one, local-one,
+number-one]`; production returned `[foreign-one, local-one, number-one]`.
+Vitest reported an assertion failure with no type errors. The unmodified
+matrix passed against the same archived code. After the guarded intrinsic
+repair, the expanded matrix passed in both indexed and unindexed modes. A
+fresh committed-head review of the repaired matrix remains pending.

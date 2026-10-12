@@ -86,8 +86,9 @@
  * open; the lifecycle publication owner needs a predicate dimension to reach
  * them. The mock sync source is a controlled provider; this oracle claims only
  * how the Collection filters and routes the sync transactions it supplies.
- * The tagged-Date matrix covers native `node:vm` Dates, not proxies, Date
- * subclasses, spoofed tags, or all possible realm hosts.
+ * The tagged-Date matrix covers native `node:vm` Dates with ordinary Date
+ * prototypes, including own display tags. It excludes proxies, subclasses,
+ * prototype swaps, ordinary objects with spoofed Date tags, and other hosts.
  */
 import { runInNewContext } from 'node:vm'
 import { fc, test as fcTest } from '@fast-check/vitest'
@@ -263,11 +264,13 @@ function syncedModelRow(id: string, v: FieldValue): ModelRow {
 // This focused model starts from tags, not runtime Date classification. A
 // native Date and a number with the same finite timestamp are equal. Invalid
 // Dates and NaN occupy one equality class under the documented float rule.
+// An own display tag does not change a native Date's equality class.
 type DateEqualityTag =
   | {
       kind: `date`
       realm: `local` | `foreign`
       timestamp: number | `invalid`
+      ownTag?: boolean
     }
   | { kind: `number`; value: number | `NaN` }
 
@@ -561,12 +564,16 @@ const pinnedChangeHistories: ReadonlyArray<History> = [
 ]
 
 // The fixed realm grammar crosses the Date constructor's realm with equal,
-// unequal, and invalid timestamps. Number literals test the documented
-// Date/number and invalid-Date/NaN equality classes. A later sync transaction
-// moves three rows between those classes without changing their public keys.
+// unequal, and invalid timestamps, plus foreign Dates with an own display tag.
+// Number literals test the Date/number and invalid-Date/NaN equality classes.
+// A later sync transaction moves three rows between those classes.
 const taggedDateRows: ReadonlyArray<TaggedDateRow> = [
   { id: `local-one`, tag: { kind: `date`, realm: `local`, timestamp: 1 } },
   { id: `foreign-one`, tag: { kind: `date`, realm: `foreign`, timestamp: 1 } },
+  {
+    id: `foreign-tagged-one`,
+    tag: { kind: `date`, realm: `foreign`, timestamp: 1, ownTag: true },
+  },
   { id: `foreign-two`, tag: { kind: `date`, realm: `foreign`, timestamp: 2 } },
   {
     id: `local-invalid`,
@@ -576,6 +583,10 @@ const taggedDateRows: ReadonlyArray<TaggedDateRow> = [
     id: `foreign-invalid`,
     tag: { kind: `date`, realm: `foreign`, timestamp: `invalid` },
   },
+  {
+    id: `foreign-tagged-invalid`,
+    tag: { kind: `date`, realm: `foreign`, timestamp: `invalid`, ownTag: true },
+  },
   { id: `number-one`, tag: { kind: `number`, value: 1 } },
   { id: `number-nan`, tag: { kind: `number`, value: `NaN` } },
 ]
@@ -583,9 +594,11 @@ const taggedDateRows: ReadonlyArray<TaggedDateRow> = [
 const taggedDateLiterals: ReadonlyArray<DateEqualityTag> = [
   { kind: `date`, realm: `local`, timestamp: 1 },
   { kind: `date`, realm: `foreign`, timestamp: 1 },
+  { kind: `date`, realm: `foreign`, timestamp: 1, ownTag: true },
   { kind: `date`, realm: `foreign`, timestamp: 2 },
   { kind: `date`, realm: `local`, timestamp: `invalid` },
   { kind: `date`, realm: `foreign`, timestamp: `invalid` },
+  { kind: `date`, realm: `foreign`, timestamp: `invalid`, ownTag: true },
   { kind: `number`, value: 1 },
   { kind: `number`, value: `NaN` },
 ]
@@ -667,9 +680,14 @@ function runtimeTaggedDateValue(tag: DateEqualityTag): Date | number {
     return tag.value === `NaN` ? Number.NaN : tag.value
   }
   const timestamp = tag.timestamp === `invalid` ? Number.NaN : tag.timestamp
-  return tag.realm === `foreign`
-    ? (runInNewContext(`new Date(timestamp)`, { timestamp }) as Date)
-    : new Date(timestamp)
+  const date =
+    tag.realm === `foreign`
+      ? (runInNewContext(`new Date(timestamp)`, { timestamp }) as Date)
+      : new Date(timestamp)
+  if (tag.ownTag) {
+    Object.defineProperty(date, Symbol.toStringTag, { value: `Other` })
+  }
+  return date
 }
 
 type TaggedValueRow = { id: string; v: Date | number }
@@ -760,8 +778,11 @@ async function observeTaggedDateEquality(
           index: 0,
           tag: { kind: `date`, realm: `foreign`, timestamp: `invalid` },
         },
-        { index: 2, tag: { kind: `date`, realm: `foreign`, timestamp: 1 } },
-        { index: 3, tag: { kind: `date`, realm: `foreign`, timestamp: 2 } },
+        {
+          index: 3,
+          tag: { kind: `date`, realm: `foreign`, timestamp: 1, ownTag: true },
+        },
+        { index: 4, tag: { kind: `date`, realm: `foreign`, timestamp: 2 } },
       ]
     collection.utils.begin()
     for (const transition of transitions) {
