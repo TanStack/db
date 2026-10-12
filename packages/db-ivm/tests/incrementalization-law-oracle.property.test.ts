@@ -94,18 +94,18 @@ type GroupedTextOutput = [
 /**
  * Each value names a pair of strings. groupBy merges contributions with equal
  * pre-aggregate values without hashing them, so its identity for a string
- * must not depend on where one value ends and the next begins. The pairs
- * `["|s", ""]` and `["", "|s"]`, and `["a", "|s"]` and `["a|s", ""]`, read
- * the same when their parts are joined with any separator these strings
- * contain.
+ * must not depend on where one value ends and the next begins. A string's
+ * identity is `"` and its text, joined to the next part with `|`, so the
+ * pairs `["x|\"y", ""]` and `["x", "y|\""]`, and `["|\"", ""]` and
+ * `["", "|\""]`, read the same without each string's length.
  */
 const TEXT_PAIRS: ReadonlyArray<readonly [string, string]> = [
-  [`|s`, ``],
-  [``, `|s`],
-  [`a`, `|s`],
-  [`a|s`, ``],
-  [`s`, `|`],
-  [`|`, `s`],
+  [`x|"y`, ``],
+  [`x`, `y|"`],
+  [`|"`, ``],
+  [``, `|"`],
+  [`a`, `"`],
+  [`a|"`, ``],
   [``, ``],
 ]
 // Named witnesses reach past the generated -3..3 range, so the table wraps.

@@ -10,31 +10,6 @@ type BasicAggregateFunction<T, R, V = unknown> = {
   preMap: (data: T) => V
   reduce: (values: Array<[V, number]>) => V
   postMap?: (result: V) => R
-  /**
-   * For an object input, a string that two inputs share exactly when they
-   * hash equal. It must return undefined for both or a string for both of
-   * two inputs that hash equal, so a retraction meets its insert, and
-   * different strings for inputs that hash differently. Primitives and
-   * arrays or objects built from them need none. Without one, a contribution
-   * that holds this object is compared by structural hash.
-   */
-  identity?: (value: V) => string | undefined
-}
-
-/**
- * One part of a contribution's identity: the aggregate's own identity for an
- * object it declares one for, otherwise the structural identity, which the
- * hash defines. Undefined means the contribution is compared by hash.
- */
-function identityPart(
-  value: unknown,
-  identity?: (value: object) => string | undefined,
-): string | undefined {
-  if (identity && typeof value === `object` && value !== null) {
-    const id = identity(value)
-    return id === undefined ? undefined : `@${id.length}:${id}`
-  }
-  return structuralIdentity(value)
 }
 
 type PipedAggregateFunction<T, R> = {
@@ -115,7 +90,7 @@ export function groupBy<
           const value = aggregate.preMap(data)
           values[name] = value
           if (identity === null) continue
-          const part = identityPart(value, aggregate.identity)
+          const part = structuralIdentity(value)
           identity = part === undefined ? null : `${identity}|${part}`
         }
 
@@ -237,8 +212,6 @@ export function avg<T>(
       sum: valueExtractor(data),
       count: 0,
     }),
-    // preMap always sets count to 0, so the sum alone identifies the input.
-    identity: (value) => identityPart(value.sum),
     reduce: (values: Array<[{ sum: number; count: number }, number]>) => {
       let totalSum = 0
       let totalCount = 0
