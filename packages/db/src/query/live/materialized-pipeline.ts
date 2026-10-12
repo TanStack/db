@@ -43,9 +43,10 @@ type CanonicalResult = {
 }
 
 // A bucket row leads with its public key. The D2 index tells apart values
-// with a different leading string or number without hashing them, so rows
-// of one bucket are hashed only when they share a key. A key of any other
-// type falls back to hashing the whole row, as every row did before.
+// with a different leading string, number or bigint without hashing them, so
+// a row of one bucket is hashed only against a row with the same key,
+// including its own retraction. A key of any other type has the whole row
+// hashed whenever it joins a bucket.
 export type BucketRow = readonly [
   publicKey: unknown,
   value: Record<PropertyKey, any>,
@@ -481,11 +482,8 @@ function routeKey(
 }
 
 function compareBucketRows(left: BucketRow, right: BucketRow): number {
-  // Indexed reads: this comparator runs for every pair a bucket sort compares.
-  const leftPublicKey = left[0]
-  const rightPublicKey = right[0]
-  const leftOrder = left[2]
-  const rightOrder = right[2]
+  const [leftPublicKey, , leftOrder] = left
+  const [rightPublicKey, , rightOrder] = right
   if (leftOrder !== rightOrder) {
     if (leftOrder === undefined) return 1
     if (rightOrder === undefined) return -1
