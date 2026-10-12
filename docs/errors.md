@@ -2419,3 +2419,23 @@ Development builds show this message, with `${...}` replaced by values:
 ```text
 Include query is missing a captured parent projection for "${ref.path.join(`.`)}".
 ```
+
+<a id="error-240"></a>
+
+## Error 240: `query/live/bucket-facade-adapter.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Bucket facade retired with rows the graph did not retract
+```
+
+<a id="error-241"></a>
+
+## Error 241: `query/live/bucket-facade-adapter.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+A live query's child collection cannot be cleaned up directly. Clean up the live query instead.
+```
