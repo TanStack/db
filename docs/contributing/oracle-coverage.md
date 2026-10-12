@@ -469,7 +469,9 @@ invariant witness does not claim arbitrary manually constructed IR is valid.
 The following related oracles own distinct production paths or observation cuts:
 
 - The [Collection lifecycle publication oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts)
-  owns exact public rows and change batches. The
+  owns exact public rows and change batches. A replay that retires when its
+  last owner is released leaves its source writes installed; a later request
+  updates a row the subscriber still shows at an older value. The
   [replay oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-subscription-replay-oracle.property.test.ts)
   applies that law to competing replay schedules and same-key writes.
 - The [pagination oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/pagination-oracle.property.test.ts)

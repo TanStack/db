@@ -32,6 +32,10 @@ import type {
  * failure keeps the replacement and later source changes private while the
  * last public snapshot remains visible. Retiring the final logical subset
  * owner can retire that replacement barrier without publishing its rows.
+ * Its source writes stay installed, so the subscriber can show an older value
+ * than the source. No barrier gates a later request, and that request
+ * delivers its installed row: an update when the subscriber shows an older
+ * value. Leaving the older value would keep a stale row visible.
  * The `Collection.subscribeChanges` API contract in `../src/collection/index.ts`
  * is the authority for callback batches and their per-key causal order. The
  * public Collection lifecycle and shared lifecycle grammar specify cleanup,
@@ -439,8 +443,9 @@ function projectPublication(
     publication.source.clear()
     publication.replacement = undefined
   } else if (command.type === `release`) {
-    // Release changes demand, not source retention. Only source writes or a
-    // successful replacement can change the subscriber's rows.
+    // Release changes demand, not source retention. Releasing alone never
+    // changes the subscriber's rows; a source write, a successful
+    // replacement, or a later request does.
     finishReplacement(publication, lifecycle)
   } else if (command.type === `settle` && effect.attemptId !== undefined) {
     const attempt = lifecycle.attempts[effect.attemptId]!
@@ -482,22 +487,39 @@ function projectPublication(
     index < lifecycle.publications;
     index++
   ) {
-    const row =
+    const requested =
       command.type === `request` &&
       lifecycle.active &&
       lifecycle.owners.filter(({ demand }) => demand === command.demand)
-        .length === 1 &&
-      !publication.sentKeys.has(command.demand)
+        .length === 1
         ? publication.source.get(command.demand)
+        : undefined
+    // A request delivers its installed row. An unsent row is an insert. A
+    // sent row that the subscriber still shows at an older value, such as
+    // one kept after a replay retired without publishing, is an update to
+    // the installed value; leaving it would keep a stale row visible.
+    const shown = requested && publication.visible.get(requested.id)
+    const row =
+      requested &&
+      (!publication.sentKeys.has(requested.id) ||
+        (shown !== undefined && shown.value !== requested.value))
+        ? requested
         : undefined
     publication.batches.push(
       row
         ? [
-            {
-              type: `insert`,
-              key: row.id,
-              value: cloneRow(row),
-            },
+            shown && publication.sentKeys.has(row.id)
+              ? {
+                  type: `update`,
+                  key: row.id,
+                  value: cloneRow(row),
+                  previousValue: cloneRow(shown),
+                }
+              : {
+                  type: `insert`,
+                  key: row.id,
+                  value: cloneRow(row),
+                },
           ]
         : [],
     )
@@ -1963,6 +1985,34 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
         outcome: `reject`,
       },
       { type: `source`, key: `b`, action: `upsert`, value: 51 },
+    ])
+  })
+
+  // Generated at seed -136205996: the replay retires when its last owner is
+  // released, so the source keeps a = 0 while the subscriber still shows
+  // a = 1. Requesting a again must update the stale row to the installed one.
+  it(`updates a row left stale by a retired replay when its demand is requested again`, async () => {
+    await runPublicationHistory([
+      { type: `source`, key: `a`, action: `upsert`, value: 1 },
+      { type: `request`, demand: `a` },
+      { type: `restart` },
+      { type: `abort`, demand: `b` },
+      { type: `truncate` },
+      {
+        type: `settle`,
+        demand: `a`,
+        scope: `obsolete`,
+        age: `oldest`,
+        outcome: `reject`,
+      },
+      { type: `release`, demand: `b` },
+      { type: `abort`, demand: `a` },
+      { type: `abort`, demand: `a` },
+      { type: `source`, key: `a`, action: `upsert`, value: 0 },
+      { type: `release`, demand: `a` },
+      { type: `request`, demand: `a` },
+      { type: `cleanup` },
+      { type: `restart` },
     ])
   })
 
