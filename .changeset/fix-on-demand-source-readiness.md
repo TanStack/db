@@ -7,4 +7,6 @@ A live query over a progressive Electric collection is now ready once its own sn
 
 An effect with `skipInitial: true` ends its initial suppression at the same point. Before, an effect over an on-demand source that was already ready reported its initial rows as `enter` events.
 
-A progressive Electric load that arrives while a must-refetch is replacing the initial snapshot now settles when the replacement completes. Before, it settled at once without loading rows, which the new readiness rule would have reported as a ready, empty query.
+A live query no longer enters an error state when a truncate of a lazily loaded source (a joined or included collection) aborts that source's pending load during the initial load. The truncate's replacement load now decides the demand.
+
+A progressive Electric load that arrives while a must-refetch is replacing the initial snapshot now settles when the replacement completes. After a stream error that `onError` retries, later progressive loads settle once the stream recovers. Before, it settled at once without loading rows, which the new readiness rule would have reported as a ready, empty query.

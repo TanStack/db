@@ -378,15 +378,6 @@ interface EffectPipelineRunnerConfig<
 }
 
 /**
- * Internal class that manages a D2 pipeline for effect delta processing.
- *
- * Sets up the IVM graph, subscribes to source collections, runs the graph
- * when changes arrive, and classifies output multiplicities into DeltaEvents.
- *
- * Unlike CollectionConfigBuilder, this does not publish results to a
- * Collection.
- */
-/**
  * Report how a held acquisition ends. A truncate replay rejects the
  * acquisition it supersedes and starts a replacement, which inherits the hold.
  */
@@ -408,6 +399,15 @@ function followHeldAcquisition(
   )
 }
 
+/**
+ * Internal class that manages a D2 pipeline for effect delta processing.
+ *
+ * Sets up the IVM graph, subscribes to source collections, runs the graph
+ * when changes arrive, and classifies output multiplicities into DeltaEvents.
+ *
+ * Unlike CollectionConfigBuilder, this does not publish results to a
+ * Collection.
+ */
 class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   private readonly query: QueryIR
   private readonly queryCompareOptions: StringCollationConfig
@@ -616,10 +616,12 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         onLoadSubsetError: ({ error }) => {
           this.onSourceError(normalizeError(error))
         },
+        // subscribeChanges can report a result before it returns the
+        // subscription, so read it from the record when a load fails.
         onLoadSubsetResult: (result) =>
           this.trackInitialLoad(
             result,
-            () => subscription.pendingTruncateReplacement,
+            () => this.subscriptions[sourceId]?.pendingTruncateReplacement,
           ),
       })
 
@@ -859,7 +861,12 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     result: true | Promise<unknown>,
     replacementAfterFailure: () => Promise<void> | undefined,
   ): void {
-    if (!(result instanceof Promise) || this.initialLoadComplete) return
+    if (
+      !(result instanceof Promise) ||
+      this.initialLoadComplete ||
+      this.disposed
+    )
+      return
     this.pendingInitialLoads.add(result)
     const release = () => {
       if (this.pendingInitialLoads.delete(result) && !this.disposed)

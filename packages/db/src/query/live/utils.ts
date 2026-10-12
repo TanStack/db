@@ -42,7 +42,7 @@ export { collectCollectionSources as extractCollectionSources }
  * subset demand, so it must reach ready.
  */
 export function sourcePermitsInitialReadiness(
-  collection: Collection<any, any, any>,
+  collection: Pick<Collection, `config` | `isReady`>,
 ): boolean {
   return collection.config.syncMode === `on-demand` || collection.isReady()
 }

@@ -8,6 +8,7 @@ import {
   gt,
   lt,
 } from '@tanstack/db'
+import { ShapeStream } from '@electric-sql/client'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { electricCollectionOptions } from '../src/electric'
 import { tagPersistence } from './electric-persistence-fixture'
@@ -1218,6 +1219,47 @@ describe(`Electric Collection with Live Query - syncMode integration`, () => {
 
       releaseSwap!()
       await vi.waitFor(() => expect(preloaded).toBe(true))
+      expect(liveQuery.toArray.map((user) => user.id)).toEqual([
+        selectedUser.id,
+      ])
+    })
+
+    // A stream error rejects the snapshot that waiting loads follow. When
+    // the user's onError retries and the stream recovers, the recovered full
+    // sync establishes the snapshot again, so later loads must settle.
+    it(`settles later loads after onError retries a progressive stream`, async () => {
+      vi.clearAllMocks()
+      mockSubscribe.mockImplementation((callback) => {
+        subscriber = callback
+        return () => {}
+      })
+      const electricCollection = createCollection({
+        ...electricCollectionOptions({
+          id: `electric-users-progressive-retry`,
+          shapeOptions: {
+            url: `http://test-url`,
+            params: { table: `users` },
+            onError: () => ({}),
+          },
+          syncMode: `progressive`,
+          getKey: (user: User) => user.id,
+        }),
+        startSync: true,
+      })
+      const streamOptions = vi.mocked(ShapeStream).mock.calls.at(-1)![0] as {
+        onError: (error: Error) => Promise<unknown>
+      }
+      await streamOptions.onError(new Error(`stream failed`))
+      completeFullSync([selectedUser])
+      await vi.waitFor(() => expect(electricCollection.status).toBe(`ready`))
+
+      const liveQuery = createLiveQueryCollection((q) =>
+        q
+          .from({ user: electricCollection })
+          .where(({ user }) => eq(user.id, selectedUser.id)),
+      )
+      await liveQuery.preload()
+      expect(liveQuery.status).toBe(`ready`)
       expect(liveQuery.toArray.map((user) => user.id)).toEqual([
         selectedUser.id,
       ])

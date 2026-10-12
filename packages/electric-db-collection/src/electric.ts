@@ -688,7 +688,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   syncMode: ElectricSyncMode
   isBufferingInitialSync: () => boolean
   waitForFullSnapshot?: () => Promise<void>
-  waitForEstablishedSnapshot?: () => Promise<void>
+  waitForEstablishedSnapshot: () => Promise<void>
   begin: () => void
   write: (mutation: {
     type: `insert` | `update` | `delete`
@@ -792,9 +792,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
         const { data: rows } = await stream.fetchSnapshot(snapshotParams)
         if (!isBufferingInitialSync()) {
           debug(`${logPrefix}Ignoring snapshot - sync completed while fetching`)
-          return waitForEstablishedSnapshot
-            ? settleWith(waitForEstablishedSnapshot())
-            : undefined
+          return settleWith(waitForEstablishedSnapshot())
         }
         // Check the signal before commit to discard a stale snapshot.
         throwIfAborted()
@@ -831,9 +829,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
     // A resumed stream or a completed full sync already holds them; a reset
     // supplies them only when its snapshot completes.
     if (syncMode === `progressive`)
-      return waitForEstablishedSnapshot
-        ? settleWith(waitForEstablishedSnapshot())
-        : undefined
+      return settleWith(waitForEstablishedSnapshot())
 
     const { cursor, where, orderBy, limit } = opts
 
@@ -1976,8 +1972,10 @@ function createElectricSync<T extends Row<unknown>>(
         }
 
         if (shapeOptions.onError) {
+          // A progressive stream follows the same snapshot outside its
+          // buffered sync, so a retry must renew it as well.
           const mayRetryFullSnapshot =
-            usesFullLog &&
+            tracksFullSnapshot &&
             !hasReceivedUpToDate &&
             isActiveLifecycle() &&
             !abortController.signal.aborted
@@ -2232,8 +2230,7 @@ function createElectricSync<T extends Row<unknown>>(
       syncMode,
       isBufferingInitialSync,
       waitForFullSnapshot: usesFullLog ? () => fullSnapshotReady : undefined,
-      waitForEstablishedSnapshot:
-        syncMode === `progressive` ? () => fullSnapshotReady : undefined,
+      waitForEstablishedSnapshot: () => fullSnapshotReady,
       begin,
       write,
       commit,

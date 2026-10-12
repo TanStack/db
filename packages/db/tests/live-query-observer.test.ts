@@ -426,7 +426,7 @@ describe(`createLiveQueryObserver`, () => {
         },
       ],
     })
-    const observer = createLiveQueryObserver<Row, string>(live as any, {
+    const observer = createLiveQueryObserver(live, {
       client,
       queryHash: `lagging`,
       mode: `wholesale`,

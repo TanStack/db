@@ -195,6 +195,33 @@ A second `/code-review` pass (head `2812be07f`) made ten findings. Outcomes:
   sync in `awaitTxId`. `useLiveQuery` already rendered rows in this window
   before this change; Suspense now does too.
 
+## Third review round
+
+A third high-effort review (head `19354ffce`) made ten findings:
+
+- **Fixed: progressive loads after an `onError` retry.** A stream error
+  rejected the shared snapshot deferred, and only full-log on-demand streams
+  renewed it on retry. Every later progressive load rejected with the old
+  error. RED: a new Electric test fails on this branch and passes on `main`.
+  Progressive streams now take the same retry renewal.
+- **Fixed: disturbed live-query and `queryOnce` lanes.** Model D now crosses
+  every on-demand consumer with a truncate or a parent rekey. This found a
+  defect that already exists on `main`: a truncate of a lazy source during
+  the initial load aborted its pending demand, and the live query entered
+  error. 80 cells failed at the first checkpoint after the truncate. The
+  lazy demand now follows the truncate replacement, as the Effect hold does.
+- **Fixed by construction:** a failed initial load no longer reads the
+  Effect's subscription before it exists, a disposed Effect takes no new
+  hold, and Electric's progressive snapshot getter is required, without
+  dead fallbacks.
+- **Cleanup:** the Effect class JSDoc sits on the class again, and the new
+  helper and test use no `any`.
+- **Not changed:** a lazy demand settlement can schedule two graph runs. The
+  second run is idempotent, and avoiding it needs another parameter on the
+  hold.
+- **Tracked elsewhere:** `awaitTxId` during the full sync (#2120) and the
+  narrower source-capability design (#2118).
+
 ## Predicted neighbors
 
 The law predicts behavior for other readiness consumers. Each prediction now

@@ -2590,13 +2590,16 @@ async function expectProgressiveTraceMatches(
 // misses the default. A design that waits for every source's Collection
 // readiness keeps the on-demand shapes waiting after their demand settles.
 //
-// The Effect lane also crosses each history with one disturbance before
-// `settle`: a `truncate` of the lagging source, or a `rekey` of the join's
-// parent. Each retires the pending acquisition, which rejects with
+// Every on-demand history is also crossed with one disturbance before
+// `settle`: a `truncate` of the lagging source, or a `rekey` of the join's or
+// include's parent. Each retires the pending acquisition, which rejects with
 // `AbortError`. The model's readiness rule is unchanged, because only current
-// acquisitions count, so a design that lets an obsolete rejection close
-// suppression stays silent after readiness, and one that releases the hold
-// without taking over the truncate replacement reports rows too early.
+// acquisitions count. An Effect that lets an obsolete rejection close
+// suppression stays silent after readiness, and one that releases its hold
+// without the truncate replacement reports rows too early. A live query that
+// treats an aborted lazy-demand load as a failure enters error. Between a
+// truncate and its settlement the replay barrier owns publication, so the
+// model does not judge live-query rows there; the metamorphic twin does.
 //
 // The driver uses real Collections, a live-query preload or `createEffect`,
 // and controlled source writes. Each step is followed by a timer turn. Each
@@ -2656,20 +2659,20 @@ function laggingSourceHistories(
   )
 }
 
-// An Effect also receives one disturbance before `settle`: `truncate`
+// Every consumer also receives one disturbance before `settle`: `truncate`
 // replaces the lagging source's rows, which retires and replays its pending
-// acquisition, and `rekey` (join only) moves the parent to a new key, which
+// acquisition, and `rekey` (join and include) moves the parent to a new key, which
 // retires its pending lazy demand. Each obsolete acquisition rejects with
 // `AbortError`. Neither may hold or close initial suppression; only the
 // current acquisitions decide it.
-function effectHistories(
+function disturbedHistories(
   shape: LaggingSourceShape,
 ): Array<Array<LaggingSourceStep>> {
   const histories = laggingSourceHistories(LAGGING_SOURCE_SHAPES[shape])
   const disturbances: Array<LaggingSourceStep> =
-    shape === `join`
+    shape === `join` || shape === `include`
       ? [`rekey`, `truncate`]
-      : shape === `direct`
+      : LAGGING_SOURCE_SHAPES[shape] === `on-demand`
         ? [`truncate`]
         : []
   return [
@@ -2700,6 +2703,7 @@ type LaggingSourceFacts = {
   writtenAfterReadiness: Array<number>
   exitsAfterReadiness: number
   idsAtReadiness: Array<number> | undefined
+  replayPending: boolean
 }
 
 function initiallyReady(mode: LaggingSourceMode, facts: LaggingSourceFacts) {
@@ -2709,7 +2713,9 @@ function initiallyReady(mode: LaggingSourceMode, facts: LaggingSourceFacts) {
 type LiveQueryObservation = {
   ready: boolean
   preloadSettled: boolean
-  postIds: Array<number>
+  // `null` between a truncate and its settlement: the replay barrier owns
+  // publication there, so only the metamorphic twin compares those rows.
+  postIds: Array<number> | null
   acquisitions: number
 }
 
@@ -2738,21 +2744,20 @@ function expectedLiveQueryObservation(
 ): LiveQueryObservation {
   const mode = LAGGING_SOURCE_SHAPES[shape]
   const ready = initiallyReady(mode, facts)
-  const heldIds = [
-    ...(facts.delivered ? [INITIAL_POST_ID] : []),
-    ...(facts.changed ? [CHANGED_POST_ID] : []),
-  ]
+  const heldIds = facts.posts
+    .filter((post) => postMatchesShape(shape, facts, post))
+    .map(({ id }) => id)
+    .sort((a, b) => a - b)
   return {
     ready,
     preloadSettled: ready,
-    postIds:
-      shape === `find-one`
-        ? heldIds.filter((id) => id === INITIAL_POST_ID)
-        : shape !== `ordered`
-          ? heldIds
-          : facts.settled
-            ? [Math.max(...heldIds)]
-            : [],
+    postIds: facts.replayPending
+      ? null
+      : shape !== `ordered`
+        ? heldIds
+        : facts.settled
+          ? heldIds.slice(-1)
+          : [],
     acquisitions: mode === `on-demand` ? 1 : 0,
   }
 }
@@ -2782,12 +2787,27 @@ function expectedEffectObservation(
 // selected user for the join, or `userId = 2` for the root shapes. After
 // initial readiness it enters the Effect; a left-join parent that showed no
 // post also exits its unmatched row.
+// A post belongs to a shape's result when it matches the shape's filter: its
+// id for the single result, the current parent for the join and include, and
+// `userId = 2` for the root shapes.
+function postMatchesShape(
+  shape: LaggingSourceShape,
+  facts: LaggingSourceFacts,
+  post: { id: number; userId: number },
+): boolean {
+  if (shape === `find-one`) return post.id === INITIAL_POST_ID
+  return (
+    post.userId ===
+    (shape === `join` || shape === `include` ? facts.parentId : 2)
+  )
+}
+
 function recordLaggingSourceWrite(
   shape: LaggingSourceShape,
   facts: LaggingSourceFacts,
   post: { id: number; userId: number },
 ): void {
-  const matches = post.userId === (shape === `join` ? facts.parentId : 2)
+  const matches = postMatchesShape(shape, facts, post)
   const parentShowedPost = facts.posts.some(
     ({ userId }) => userId === facts.parentId,
   )
@@ -2924,17 +2944,12 @@ function laggingSourceQuery(
         .orderBy(({ post }) => post.id, `desc`)
         .limit(1)
     if (shape === `include`)
-      return q
-        .from({ user: users! })
-        .where(({ user }) => eq(user.id, 2))
-        .select(({ user }) => ({
-          id: user.id,
-          posts: toArray(
-            q
-              .from({ post: posts })
-              .where(({ post }) => eq(post.userId, user.id)),
-          ),
-        }))
+      return q.from({ user: users! }).select(({ user }) => ({
+        id: user.id,
+        posts: toArray(
+          q.from({ post: posts }).where(({ post }) => eq(post.userId, user.id)),
+        ),
+      }))
     return q
       .from({ user: users! })
       .join({ post: posts }, ({ user, post }) => eq(user.id, post.userId))
@@ -3045,10 +3060,12 @@ function applyLaggingSourceStep(
     for (const source of sources) source.truncate()
     facts.posts = []
     facts.disturbed = true
+    facts.replayPending = true
   } else if (step === `settle`) {
     for (const source of sources)
       for (const acquisition of source.acquisitions) acquisition.resolve()
     facts.settled = true
+    facts.replayPending = false
   } else {
     // The twin's source has been ready since its start.
     main.source.markReady()
@@ -3059,7 +3076,7 @@ function applyLaggingSourceStep(
     initiallyReady(LAGGING_SOURCE_SHAPES[shape], facts)
   ) {
     facts.idsAtReadiness = facts.posts
-      .filter(({ userId }) => userId === 2)
+      .filter((post) => postMatchesShape(shape, facts, post))
       .map(({ id }) => id)
       .sort((a, b) => a - b)
   }
@@ -3096,6 +3113,7 @@ function createLaggingSourceDriver(
           writtenAfterReadiness: [],
           exitsAfterReadiness: 0,
           idsAtReadiness: undefined,
+          replayPending: false,
         },
         main: startLaggingSourceConsumer(
           consumer,
@@ -3183,9 +3201,9 @@ function observeLaggingSourceConsumer(
     ? {
         ready: state.live!.isReady(),
         preloadSettled: state.preload.preloadSettled,
-        postIds: (
-          state.live!.toArray as Array<Record<string, unknown>>
-        ).flatMap((row) => rowPostIds(shape, row)),
+        postIds: (state.live!.toArray as Array<Record<string, unknown>>)
+          .flatMap((row) => rowPostIds(shape, row))
+          .sort((a, b) => a - b),
         acquisitions: observedAcquisitions(shape, facts, state.source),
       }
     : {
@@ -3219,7 +3237,10 @@ function laggingSourceProjection(
       const twinObservation =
         twin && observeLaggingSourceConsumer(consumer, shape, facts, twin)
       return {
-        observation,
+        observation:
+          facts.replayPending && `postIds` in observation
+            ? { ...observation, postIds: null }
+            : observation,
         twinDisagreement:
           twinObservation &&
           JSON.stringify(twinObservation) !== JSON.stringify(observation)
@@ -3454,10 +3475,7 @@ describe(`includes temporal oracle`, () => {
     }
     const cells = Object.entries(consumers).flatMap(([consumer, shapes]) =>
       shapes.flatMap((shape) =>
-        (consumer === `effect`
-          ? effectHistories(shape)
-          : laggingSourceHistories(LAGGING_SOURCE_SHAPES[shape])
-        ).map((steps) => ({
+        disturbedHistories(shape).map((steps) => ({
           consumer: consumer as LaggingSourceConsumer,
           shape,
           steps,
