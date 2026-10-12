@@ -332,6 +332,8 @@ type InferSchemaOutput<T> = T extends StandardSchemaV1
  *   - syncs all data for the collection in the background
  *   - uses incremental snapshots during the initial sync to provide a fast path to the data required for queries
  *   - collection will be marked as ready once the full sync is complete
+ *   - a live query, Suspense, or `skipInitial` effect is ready once its own snapshot loads, before the full sync
+ *     completes; changes to those rows arrive when the full sync completes
  */
 export type ElectricSyncMode = SyncMode | `progressive`
 
@@ -669,6 +671,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   syncMode,
   isBufferingInitialSync,
   waitForFullSnapshot,
+  waitForSnapshotReset,
   begin,
   write,
   commit,
@@ -685,6 +688,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   syncMode: ElectricSyncMode
   isBufferingInitialSync: () => boolean
   waitForFullSnapshot?: () => Promise<void>
+  waitForSnapshotReset: () => Promise<void>
   begin: () => void
   write: (mutation: {
     type: `insert` | `update` | `delete`
@@ -765,10 +769,12 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
       throwIfAborted()
     }
 
-    if (waitForFullSnapshot) {
+    // A load that installs no rows itself settles when the sync that
+    // establishes them does, so success never precedes its rows.
+    const settleWith = async (establishing: Promise<void>) => {
       const demandSignal = opts.signal
       try {
-        await waitForDemandOrAbort(waitForFullSnapshot(), demandSignal)
+        await waitForDemandOrAbort(establishing, demandSignal)
       } catch (error) {
         if (signal.aborted && isCleanupAbort()) return
         if (demandSignal?.aborted) throw abortReason(demandSignal)
@@ -776,8 +782,9 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
       }
       if (signal.aborted && isCleanupAbort()) return
       if (demandSignal?.aborted) throw abortReason(demandSignal)
-      return
     }
+
+    if (waitForFullSnapshot) return settleWith(waitForFullSnapshot())
 
     if (isBufferingInitialSync()) {
       const snapshotParams = compileSQL<T>(opts, compileOptions)
@@ -785,7 +792,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
         const { data: rows } = await stream.fetchSnapshot(snapshotParams)
         if (!isBufferingInitialSync()) {
           debug(`${logPrefix}Ignoring snapshot - sync completed while fetching`)
-          return
+          return settleWith(waitForSnapshotReset())
         }
         // Check the signal before commit to discard a stale snapshot.
         throwIfAborted()
@@ -818,9 +825,10 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
       return
     }
 
-    if (syncMode === `progressive`) {
-      return
-    }
+    // Outside its buffered initial sync, a progressive load installs no rows.
+    // A resumed stream or a completed full sync already holds them; a reset
+    // supplies them only when its snapshot completes.
+    if (syncMode === `progressive`) return settleWith(waitForSnapshotReset())
 
     const { cursor, where, orderBy, limit } = opts
 
@@ -2213,6 +2221,22 @@ function createElectricSync<T extends Row<unknown>>(
       syncMode,
       isBufferingInitialSync,
       waitForFullSnapshot: usesFullLog ? () => fullSnapshotReady : undefined,
+      waitForSnapshotReset: () =>
+        new Promise<void>((resolve) => {
+          // A resumed stream's local rows are already complete; only a reset
+          // before the first ready leaves the subset without its rows.
+          if (!isResettingSnapshot || collection.isReady()) return resolve()
+          // Cleanup never runs first-ready callbacks; its abort ends the wait.
+          const stop = collection.onFirstReady(resolve)
+          abortController.signal.addEventListener(
+            `abort`,
+            () => {
+              stop()
+              resolve()
+            },
+            { once: true },
+          )
+        }),
       begin,
       write,
       commit,

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   BasicIndex,
   createCollection,
+  createEffect,
   createLiveQueryCollection,
   eq,
   gt,
@@ -884,6 +885,257 @@ describe(`Electric Collection with Live Query - syncMode integration`, () => {
       }),
     )
     expect(mockRequestSnapshot).not.toHaveBeenCalled()
+  })
+
+  // Receiving witnesses for the core initial-readiness law (Model D of
+  // includes-temporal-oracle.test.ts). A real progressive source settles a
+  // query's subset while its own Collection stays `loading` until the full
+  // sync, and a real on-demand source is ready before its subset loads.
+  // Initial-query readiness and Effect `skipInitial` follow the settled subset
+  // in both cases. Electric buffers progressive changes until the full sync,
+  // so it cannot deliver a change between settlement and source readiness;
+  // the controlled core lane owns that history.
+  describe(`initial readiness follows the settled subset`, () => {
+    const selectedUser = sampleUsers[0]!
+    const laterUser = { ...sampleUsers[3]!, active: true, id: 5 }
+
+    function startProgressiveSubset() {
+      const electricCollection =
+        createElectricCollectionWithSyncMode(`progressive`)
+      mockFetchSnapshot.mockResolvedValueOnce({
+        metadata: {},
+        data: [
+          {
+            headers: { operation: `insert` },
+            key: selectedUser.id.toString(),
+            value: selectedUser,
+          },
+        ],
+      })
+      return electricCollection
+    }
+
+    function completeFullSync(users: Array<User>) {
+      subscriber([
+        ...users.map((user) => ({
+          key: user.id.toString(),
+          value: user,
+          headers: { operation: `insert` as const },
+        })),
+        { headers: { control: `up-to-date` } },
+      ])
+    }
+
+    it(`a live query is ready once its subset loads`, async () => {
+      const electricCollection = startProgressiveSubset()
+      const liveQuery = createLiveQueryCollection((q) =>
+        q
+          .from({ user: electricCollection })
+          .where(({ user }) => eq(user.id, selectedUser.id)),
+      )
+
+      let preloaded = false
+      void liveQuery.preload().then(() => {
+        preloaded = true
+      })
+      await vi.waitFor(() => expect(mockFetchSnapshot).toHaveBeenCalledTimes(1))
+      await new Promise((resolve) => setTimeout(resolve, 0))
+
+      expect(preloaded).toBe(true)
+      expect(electricCollection.status).toBe(`loading`)
+      expect(liveQuery.status).toBe(`ready`)
+      expect(liveQuery.toArray.map((user) => user.id)).toEqual([
+        selectedUser.id,
+      ])
+
+      completeFullSync(sampleUsers)
+
+      expect(electricCollection.status).toBe(`ready`)
+      expect(liveQuery.status).toBe(`ready`)
+      expect(liveQuery.toArray.map((user) => user.id)).toEqual([
+        selectedUser.id,
+      ])
+    })
+
+    it(`a skipInitial effect suppresses only its subset rows`, async () => {
+      const electricCollection = startProgressiveSubset()
+      const entered: Array<number> = []
+      const effect = createEffect<User>({
+        query: (q) =>
+          q
+            .from({ user: electricCollection })
+            .where(({ user }) => eq(user.active, true)),
+        skipInitial: true,
+        onEnter: (event) => {
+          entered.push(event.value.id)
+        },
+      })
+
+      await vi.waitFor(() => expect(mockFetchSnapshot).toHaveBeenCalledTimes(1))
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(electricCollection.status).toBe(`loading`)
+      expect(entered).toEqual([])
+
+      // The full sync delivers the subset row again plus a row that became
+      // active after the subset loaded. Only the latter is a change.
+      completeFullSync([selectedUser, laterUser])
+
+      expect(electricCollection.status).toBe(`ready`)
+      await vi.waitFor(() => expect(entered).toEqual([laterUser.id]))
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(entered).toEqual([laterUser.id])
+      await effect.dispose()
+    })
+
+    it(`a skipInitial effect over an on-demand source suppresses its subset rows`, async () => {
+      const electricCollection =
+        createElectricCollectionWithSyncMode(`on-demand`)
+      simulateInitialSync([])
+      expect(electricCollection.status).toBe(`ready`)
+      mockRequestSnapshot.mockResolvedValueOnce({
+        data: [
+          {
+            headers: { operation: `insert` },
+            key: selectedUser.id,
+            value: selectedUser,
+          },
+        ],
+      })
+      const entered: Array<number> = []
+      const effect = createEffect<User>({
+        query: (q) =>
+          q
+            .from({ user: electricCollection })
+            .where(({ user }) => eq(user.active, true)),
+        skipInitial: true,
+        onEnter: (event) => {
+          entered.push(event.value.id)
+        },
+      })
+
+      await vi.waitFor(() =>
+        expect(mockRequestSnapshot).toHaveBeenCalledTimes(1),
+      )
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(electricCollection.has(selectedUser.id)).toBe(true)
+      expect(entered).toEqual([])
+
+      subscriber([
+        {
+          key: laterUser.id.toString(),
+          value: laterUser,
+          headers: { operation: `insert` },
+        },
+        { headers: { control: `up-to-date` } },
+      ])
+
+      await vi.waitFor(() => expect(entered).toEqual([laterUser.id]))
+      await effect.dispose()
+    })
+
+    // Applied settlement: a progressive load may settle only once its rows
+    // are visible or the source's initial sync is ready. Outside the buffered
+    // initial sync a progressive load installs no rows itself, so each phase
+    // below predicts "not ready" while the row is absent and the source is
+    // loading, then "ready with the row" once the sync that holds it applies.
+    // The phases are a must-refetch before the query's load and a
+    // must-refetch while its fetch is in flight. A stream resumed from an
+    // explicit offset is the neighboring case: its local materialization is
+    // complete by contract (the descriptor-isolation oracle's resumed-subset
+    // checkpoint), so the query is ready at once on the rows it holds.
+    describe.each([
+      `reset before the load`,
+      `reset during the fetch`,
+      `resumed from an offset`,
+    ] as const)(`progressive load outside the buffered sync: %s`, (phase) => {
+      it(`reports the query ready only once its rows are established`, async () => {
+        const electricCollection =
+          phase === `resumed from an offset`
+            ? createProgressiveFromOffset()
+            : createElectricCollectionWithSyncMode(`progressive`)
+        let resolveFetch: (() => void) | undefined
+        // A phase that never fetches leaves its one-shot response queued.
+        mockFetchSnapshot.mockReset()
+        mockFetchSnapshot.mockResolvedValue({ metadata: {}, data: [] })
+        mockFetchSnapshot.mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveFetch = () =>
+                resolve({
+                  metadata: {},
+                  data: [
+                    {
+                      headers: { operation: `insert` },
+                      key: selectedUser.id.toString(),
+                      value: selectedUser,
+                    },
+                  ],
+                })
+            }),
+        )
+        if (phase === `reset before the load`) {
+          subscriber([{ headers: { control: `must-refetch` } }])
+        }
+        const liveQuery = createLiveQueryCollection((q) =>
+          q
+            .from({ user: electricCollection })
+            .where(({ user }) => eq(user.id, selectedUser.id)),
+        )
+        let preloaded = false
+        void liveQuery.preload().then(() => {
+          preloaded = true
+        })
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        if (phase === `reset during the fetch`) {
+          await vi.waitFor(() => expect(resolveFetch).toBeDefined())
+          subscriber([{ headers: { control: `must-refetch` } }])
+          resolveFetch!()
+        }
+        await new Promise((resolve) => setTimeout(resolve, 0))
+
+        expect(electricCollection.status).toBe(`loading`)
+        expect(electricCollection.has(selectedUser.id)).toBe(false)
+        const resumed = phase === `resumed from an offset`
+        expect({ ready: liveQuery.isReady(), preloaded }).toEqual({
+          ready: resumed,
+          preloaded: resumed,
+        })
+
+        completeFullSync([selectedUser])
+        await new Promise((resolve) => setTimeout(resolve, 0))
+
+        expect(electricCollection.status).toBe(`ready`)
+        expect({ ready: liveQuery.isReady(), preloaded }).toEqual({
+          ready: true,
+          preloaded: true,
+        })
+        expect(liveQuery.toArray.map((user) => user.id)).toEqual([
+          selectedUser.id,
+        ])
+      })
+    })
+
+    function createProgressiveFromOffset() {
+      vi.clearAllMocks()
+      mockSubscribe.mockImplementation((callback) => {
+        subscriber = callback
+        return () => {}
+      })
+      return createCollection({
+        ...electricCollectionOptions({
+          id: `electric-users-progressive-offset`,
+          shapeOptions: {
+            url: `http://test-url`,
+            params: { table: `users` },
+            offset: `0_0`,
+            handle: `resumed-handle`,
+          },
+          syncMode: `progressive`,
+          getKey: (user: User) => user.id,
+        }),
+        startSync: true,
+      })
+    }
   })
 
   it(`should NOT trigger requestSnapshot in eager mode even when live query needs more data`, async () => {

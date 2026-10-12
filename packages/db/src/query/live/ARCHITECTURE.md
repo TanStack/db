@@ -1268,11 +1268,31 @@ framework unless a source contract proves that the sync-run generation and
 source up-to-date protocol cannot express its ordering.
 
 **Initial readiness:** preload is complete when every demand currently
-reachable from the initial query graph is covered by a settled request. Demand
-that is no longer reachable does not block completion. An empty outer relation
-has no child demand, but its root demand must still settle. Later readiness
+reachable from the initial query graph is covered by a settled request, and
+every source Collection that serves no subset demand is ready. Demand that is
+no longer reachable does not block completion. An empty outer relation has no
+child demand, but its root demand must still settle. Later readiness
 transitions follow the existing Collection contract until an executable test
 defines another public behavior.
+
+Source Collection readiness and initial-query readiness are different
+boundaries. An eager source serves no subset demand, so its Collection
+readiness is the only evidence that the query's rows are present. An
+on-demand source serves the query through subset demand, so the settled
+request is the evidence, and its own Collection readiness does not gate the
+query. This includes a source whose Collection readiness lags its settled
+subsets: a progressive Electric source stays `loading` until its background
+full sync completes, while its "first query loads immediately (on-demand)"
+([TanStack DB 0.5](https://tanstack.com/blog/tanstack-db-0.5-query-driven-sync)).
+Framework adapters derive `isReady` and Suspense release from this one
+readiness, so they release together. An Effect with `skipInitial` ends its
+initial suppression at the same point: its initial subset loads and lazy
+demand hold suppression until they settle, and an eager source must be ready.
+An obsolete or aborted initial load releases its hold, and a truncate
+replacement takes it over; neither can keep suppression open or close it for
+good. A real load failure disposes the Effect. Before an on-demand source completes a full sync, a ready query can
+hold rows that the source does not yet update; the source contract, not this
+law, decides when it delivers those changes.
 
 **Deferred acquisition:** a live-query Collection reads local memory and
 starts no provider work on its own. Until it has a subscriber or a preload in
@@ -1469,7 +1489,9 @@ create recursive Collection machinery.
    succeeds. A failed replay with no remaining logical demand cannot gate other
    graph work.
 10. **Initial demand:** preload completes when every initially reachable demand
-    is covered; obsolete demand does not block it.
+    is covered and every source without subset demand is ready; obsolete
+    demand does not block it, and an on-demand source's own Collection
+    readiness does not gate it.
     Lazy-demand growth loads only uncovered keys. A fragmented churn replacement
     retires prior coverage only after its union applies; failure preserves it.
 11. **Ownership:** a query-db row exists exactly while an explicit owner
@@ -1533,7 +1555,7 @@ keep the meanings defined there.
 | Joined multiplicity, alias identity, and null-key normalization                         | `packages/db/tests/query/includes-query-shape-oracle.test.ts`                                                                   |
 | Alias reuse, captured bindings, public keys, and `SourceId` preservation                | (`packages/db/tests/query/includes-oracle.property.test.ts`, `packages/db/tests/query/includes-alias-shadowing-oracle.test.ts`) |
 | Same-scope and union alias rejection                                                    | `packages/db/tests/query/validate-aliases.test.ts`                                                                              |
-| Demand, cancellation, and progressive timing                                            | `packages/db/tests/query/includes-temporal-oracle.test.ts`                                                                      |
+| Demand, cancellation, progressive timing, and source readiness                          | `packages/db/tests/query/includes-temporal-oracle.test.ts`                                                                      |
 | Optimistic confirmation, rollback, and later reactivity                                 | `packages/db/tests/query/includes-optimistic-oracle.property.test.ts`                                                           |
 | Coherent layered publication                                                            | `packages/db/tests/query/includes-publication-oracle.test.ts`                                                                   |
 | Collection facades, event coherence, and route activation                               | `packages/db/tests/query/includes-collection-oracle.property.test.ts`                                                           |

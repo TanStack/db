@@ -22,6 +22,7 @@ import {
   extractCollectionsFromQuery,
   reconcileChangesForD2,
   sendChangesToInput,
+  sourcePermitsInitialReadiness,
   splitUpdates,
 } from './live/utils.js'
 import type { RootStreamBuilder } from '@tanstack/db-ivm'
@@ -415,6 +416,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   // several prefix/tie/refill steps. Keep their net Effect delta private until
   // the final participant settles, matching live-query Collection publication.
   private readonly pendingOrderedPublications = new Set<Promise<unknown>>()
+  private readonly pendingInitialLoads = new Set<Promise<unknown>>()
   private orderedPublicationFailed = false
 
   // Subscription management
@@ -592,6 +594,11 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         onLoadSubsetError: ({ error }) => {
           this.onSourceError(normalizeError(error))
         },
+        onLoadSubsetResult: (result) =>
+          this.trackInitialLoad(
+            result,
+            () => subscription.pendingTruncateReplacement,
+          ),
       })
 
       // Store subscription immediately so the join compiler can find it
@@ -793,6 +800,10 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       return
     }
     if (update.ready instanceof Promise) {
+      this.trackInitialLoad(
+        update.ready,
+        () => subscription.pendingTruncateReplacement,
+      )
       // Each segment reports its own failure through the subscription. Consume
       // the aggregate rejection so Promise.all does not create a second,
       // detached error channel.
@@ -818,6 +829,28 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   private scheduleGraphRun(): void {
     scheduleQueryGraphRun(this, this.builderDependencies, () => {
       if (!this.disposed && this.subscribedToAllCollections) this.runGraph()
+    })
+  }
+
+  /** Keep `skipInitial` suppression open until a pending initial load settles. */
+  private trackInitialLoad(
+    result: true | Promise<unknown>,
+    replacementAfterFailure: () => Promise<void> | undefined,
+  ): void {
+    if (!(result instanceof Promise) || this.initialLoadComplete) return
+    this.pendingInitialLoads.add(result)
+    const release = () => {
+      if (this.pendingInitialLoads.delete(result) && !this.disposed)
+        this.scheduleGraphRun()
+    }
+    // A load failure disposes the Effect through onLoadSubsetError. Any other
+    // rejection comes from an obsolete or aborted acquisition: it releases its
+    // hold, and a truncate replacement takes the hold over.
+    void result.then(release, () => {
+      const replacement = replacementAfterFailure()
+      if (replacement)
+        this.trackInitialLoad(replacement, replacementAfterFailure)
+      release()
     })
   }
 
@@ -967,20 +1000,21 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     }
   }
 
-  /** Check if all source collections are in the ready state */
-  private checkAllCollectionsReady(): boolean {
-    return Object.values(this.collections).every((collection) =>
-      collection.isReady(),
+  /** Check that every source has served its initial data to this effect. */
+  private allSourcesServedInitialData(): boolean {
+    return this.collectionSources.every(({ collection }) =>
+      sourcePermitsInitialReadiness(collection),
     )
   }
 
-  /** Initial callbacks start only after source readiness and ordered loading. */
+  /** Initial callbacks start only after every source served its initial data. */
   private canCompleteInitialLoad(): boolean {
     return (
       !this.orderedPublicationFailed &&
       this.pendingOrderedPublications.size === 0 &&
+      this.pendingInitialLoads.size === 0 &&
       !this.hasPendingJoinedFilterWork() &&
-      this.checkAllCollectionsReady()
+      this.allSourcesServedInitialData()
     )
   }
 
@@ -1086,6 +1120,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     this.pendingChanges.clear()
     this.publishedRows.clear()
     this.pendingOrderedPublications.clear()
+    this.pendingInitialLoads.clear()
     this.orderedPublicationFailed = false
     this.lazySources.clear()
     this.demand.clear()

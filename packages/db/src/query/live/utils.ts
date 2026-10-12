@@ -34,6 +34,20 @@ export function extractCollectionsFromQuery(
 export { collectCollectionSources as extractCollectionSources }
 
 /**
+ * Whether a source permits initial-query readiness, which live queries and
+ * `skipInitial` Effects share. An on-demand source serves its consumer through
+ * subset demand, whose settlement each consumer tracks, so its own Collection
+ * readiness does not gate the consumer; that readiness can lag, as a
+ * progressive source's background full sync does. An eager source serves no
+ * subset demand, so it must reach ready.
+ */
+export function sourcePermitsInitialReadiness(
+  collection: Collection<any, any, any>,
+): boolean {
+  return collection.config.syncMode === `on-demand` || collection.isReady()
+}
+
+/**
  * Helper function to extract the collection that is referenced in the query's FROM clause.
  * The FROM clause may refer directly to a collection or indirectly to a subquery.
  */
