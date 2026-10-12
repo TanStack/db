@@ -682,10 +682,61 @@ The following related oracles own distinct production paths or observation cuts:
   owns exact public rows and change batches. The
   [replay oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-subscription-replay-oracle.property.test.ts)
   applies that law to competing replay schedules and same-key writes.
+  Bounded three-row histories now compare a subscription's selected keys with
+  callback key/type batches across full, explicit, filtered, and empty snapshots,
+  two later ordered selections, both initial-state modes, and callback reentry.
+  A delete and reinsert checks that selection can reset. A 12-case callback
+  matrix also crosses new insertion and delete/reinsert with filtered,
+  full-state, and skip-filtering subscriptions, with and without a cursor. It
+  checks callback batches after each source commit and checks retained-key
+  count after deletion. Source-callback reentry also selects an unseen ordered
+  row after publishing another key. A controlled three-row offset provider
+  checks sparse callback and ordered callback-reentry histories in both
+  initial-state modes: local selection does not establish a provider prefix.
+  A second offset-only adapter checks cursors near the end of three- and
+  seven-row sources: without an explicit offset, the request must be unbounded
+  because no finite prefix derived from local keys can reach an arbitrary
+  cursor value. A four-cell optimistic-overlay matrix submits a new ordered
+  request after one or two pending deletes or predicate-removing updates. A
+  plain remote array checks that the provider page reaches the first still
+  visible remote rank. The source commit can remain queued behind the mutation,
+  so this is a request-bound check, not an immediate-publication claim.
+  The replay owner checks a filtered snapshot followed
+  by an ordered selection during a pending direct truncate replay, including
+  callback reentry before the target receives the source transaction. It also
+  settles a repeated ordered replay and compares public batches before and
+  after settlement. A sparse successful replacement checks that an adapter
+  honoring a last-key cursor can still acquire lower-ranked rows. The
+  [snapshot-selection review](oracle-reviews/2026-10-12-snapshot-selection-review.md)
+  records the baseline and reservation-removal mutant kills at public-row,
+  request-bound, and replay checkpoints. The controlled providers cover three
+  and seven distinct ranks and the tested request schedules; arbitrary rankings,
+  provider-specific pagination contracts, and compiled live-query windows
+  remain outside these owners.
 - The [pagination oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/pagination-oracle.property.test.ts)
-  owns general ordered-window rows and publication. The
+  owns general ordered-window rows and publication. Its optimistic overlay
+  matrix crosses one and two pending source deletes or rank moves. It checks
+  that a submitted provider page reaches the independently modeled window, then
+  accepts the mutations through source sync and compares final public rows. A
+  second matrix holds one or two optimistic inserts or rank moves while an
+  indexed window widens. It crosses cursor-expression and offset-only providers,
+  including windows opened from zero. The plain remote array checks the needed
+  provider rank when a request can start before settlement; after source
+  acceptance the public window must equal independent recomputation. The
+  original six failing cells and narrow overlay, padded-boundary, and delayed
+  continuation mutants reached these request or public-row comparisons.
+  Settled ten-page traversals bound returned provider row volume and use only
+  cursor-expression and offset transports. CollectionSubscription cannot emit
+  `lastKey`; the [TrailBase adapter test](https://github.com/TanStack/db/blob/main/packages/trailbase-db-collection/tests/trailbase.test.ts)
+  covers an external last-key caller and shows that core requests do not retain
+  unused opaque cursors. Direct ordered subscription requests without an
+  explicit offset may repeatedly load a growing prefix; with a cursor and no
+  offset they may load the full source, because the adapter is permitted to
+  ignore cursor expressions. The
   [ordered-work oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/ordered-work-oracle.property.test.ts)
   rechecks rows while bounding eager indexed and joined work.
+  These finite matrices do not establish arbitrary overlapping optimistic
+  histories, ties, or provider-specific cursor behavior.
 - The [IR identity oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/ir-stable-identity-oracle.test.ts)
   owns demand-key encoding. The
   [load-subset oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/load-subset-oracle.property.test.ts)
