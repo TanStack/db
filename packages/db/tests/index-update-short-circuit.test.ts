@@ -88,19 +88,6 @@ describe.each(indexTypes)(`%s update`, (_indexName, IndexType) => {
     expect(index.lookup(`eq`, null)).toEqual(new Set([`a`]))
   })
 
-  it(`does not use comparator equality to skip an update`, () => {
-    const index = createIndex({
-      compareFn: (a: string, b: string) =>
-        a.toLowerCase().localeCompare(b.toLowerCase()),
-    })
-    index.add(`a`, { value: `A` })
-
-    index.update(`a`, { value: `A` }, { value: `a` })
-
-    expect(index.lookup(`eq`, `A`)).toEqual(new Set())
-    expect(index.lookup(`eq`, `a`)).toEqual(new Set([`a`]))
-  })
-
   it(`preserves the previous error behavior when evaluation fails`, () => {
     const index = createIndex()
     index.add(`a`, { value: 1 })

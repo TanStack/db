@@ -30,6 +30,13 @@ import type { CompareOptions } from '../src/query/builder/types.js'
  * direct index observations are the documented IndexInterface boundary.
  * The Map retains each key's value because a later same-key put or delete can
  * distinguish states with the same value multiplicities but different owners.
+ * An absent lower range bound includes the minimum even when its unused
+ * `fromInclusive` flag is false. With an explicit exclusive lower bound,
+ * the value at that bound is excluded.
+ * Exact equality membership also stays distinct from comparator position:
+ * replacing a value with one in a different exact-equality bucket at the
+ * same comparator position must move its exact lookup membership. These laws
+ * concern returned index results, not bucket identity or maintenance work.
  */
 
 type IndexValue = number
@@ -91,7 +98,10 @@ const arbitraryAction: fc.Arbitrary<IndexAction> = fc.oneof(
  * updates, delete supplies retirement, and build supplies arbitrary replacement
  * sets. Removing any one action loses that transition. Removing the narrow
  * key/value overlap loses collisions; removing -0 loses signed-zero equality.
- * Range probes straddle -2, 0, and 2, including their exact boundaries.
+ * Range probes straddle -2, 0, and 2, including their exact boundaries and
+ * upper-only reads with an unused exclusive-lower flag and paired reads with
+ * an explicit exclusive lower bound. Both run after every action, including
+ * changes to the minimum and an empty build.
  * Duplicate keys passed directly to build are excluded: the source Map first
  * resolves them, since duplicate raw build entries have no contract here.
  */
@@ -146,6 +156,22 @@ function expectIndexMatchesModel(
 
     expect(index.rangeQuery({ from: boundary })).toEqual(keysAtOrAbove)
     expect(index.rangeQuery({ to: boundary })).toEqual(keysAtOrBelow)
+    // The model has no lower predicate here. An inclusivity flag cannot
+    // exclude the minimum when the caller supplied no lower bound.
+    expect(index.rangeQuery({ to: boundary, fromInclusive: false })).toEqual(
+      keysAtOrBelow,
+    )
+    // Supplying the lower bound changes the model predicate. Keys at that
+    // bound are excluded, while later keys through the upper bound remain.
+    expect(
+      index.rangeQuery({ from: boundary, to: 2, fromInclusive: false }),
+    ).toEqual(
+      new Set(
+        [...rows]
+          .filter(([, value]) => value > boundary && value <= 2)
+          .map(([key]) => key),
+      ),
+    )
     expect(index.rangeQueryReversed({ from: boundary })).toEqual(keysAtOrBelow)
     expect(index.rangeQueryReversed({ to: boundary })).toEqual(keysAtOrAbove)
   }
@@ -321,6 +347,61 @@ describe.each(indexTypes)(`%s update properties`, (_indexName, IndexType) => {
     try {
       expect(() =>
         expectIndexMatchesModel(index, new Map([[`boundary`, -2]])),
+      ).toThrowError(/expected/)
+    } finally {
+      wrongOutput.mockRestore()
+    }
+  })
+
+  test(`upper-only range rejects a dropped minimum when the lower flag is exclusive`, () => {
+    const index = new IndexType(1, new PropRef([`value`]))
+    index.add(`minimum`, { value: -2 })
+    const rangeQuery = index.rangeQuery.bind(index)
+    const wrongOutput = vi
+      .spyOn(index, `rangeQuery`)
+      .mockImplementation((options) => {
+        const result = rangeQuery(options)
+        if (!(`from` in options) && options.fromInclusive === false) {
+          result.delete(`minimum`)
+        }
+        return result
+      })
+    try {
+      expect(() =>
+        expectIndexMatchesModel(index, new Map([[`minimum`, -2]])),
+      ).toThrowError(/expected/)
+    } finally {
+      wrongOutput.mockRestore()
+    }
+  })
+
+  test(`explicit exclusive lower bound rejects an included boundary value`, () => {
+    const index = new IndexType(1, new PropRef([`value`]))
+    index.add(`boundary`, { value: -2 })
+    index.add(`later`, { value: 0 })
+    const rangeQuery = index.rangeQuery.bind(index)
+    const wrongOutput = vi
+      .spyOn(index, `rangeQuery`)
+      .mockImplementation((options) => {
+        const result = rangeQuery(options)
+        if (
+          options.from === -2 &&
+          options.to === 2 &&
+          options.fromInclusive === false
+        ) {
+          result.add(`boundary`)
+        }
+        return result
+      })
+    try {
+      expect(() =>
+        expectIndexMatchesModel(
+          index,
+          new Map([
+            [`boundary`, -2],
+            [`later`, 0],
+          ]),
+        ),
       ).toThrowError(/expected/)
     } finally {
       wrongOutput.mockRestore()
@@ -819,14 +900,114 @@ describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
     expectCustomGroups(index, rows, identities)
   })
 
+  test(`moves exact string membership across a comparator-equal update`, () => {
+    // The input facts put A/a in one order group and B/b in another. The
+    // comparator implements that order, but the expected exact memberships
+    // come from the source Map's unchanged strings, not from the comparator.
+    const group = { A: 0, a: 0, B: 1, b: 1 } as const
+    type Value = keyof typeof group
+    const rows = new Map<string, Value>()
+    const index = new IndexType(1, new PropRef([`value`]), undefined, {
+      compareFn: (left, right) =>
+        (left as string)
+          .toLowerCase()
+          .localeCompare((right as string).toLowerCase()),
+    })
+    const expectMatchesSource = () => {
+      expect(index.keyCount).toBe(rows.size)
+      for (const value of Object.keys(group) as Array<Value>) {
+        const exactKeys = new Set(
+          [...rows]
+            .filter(([, current]) => current === value)
+            .map(([key]) => key),
+        )
+        expect(index.equalityLookup(value)).toEqual(exactKeys)
+        expect(index.lookup(`eq`, value)).toEqual(exactKeys)
+        expect(index.rangeQuery({ from: value, to: value })).toEqual(
+          new Set(
+            [...rows]
+              .filter(([, current]) => group[current] === group[value])
+              .map(([key]) => key),
+          ),
+        )
+      }
+    }
+
+    // Check after each direct index action. First update a singleton, as in
+    // the legacy witness; then add peers in both comparator groups. A shortcut
+    // limited to singleton indexes must fail before the peers can mask it.
+    index.add(`changed`, { value: `A` })
+    rows.set(`changed`, `A`)
+    expectMatchesSource()
+
+    const skipEqualUpdate = vi.spyOn(index, `update`).mockImplementation(() => {
+      if (index.keyCount === 1) return
+    })
+    try {
+      index.update(`changed`, { value: `A` }, { value: `a` })
+      rows.set(`changed`, `a`)
+      expect(() => expectMatchesSource()).toThrowError(/expected/)
+    } finally {
+      skipEqualUpdate.mockRestore()
+      rows.set(`changed`, `A`)
+    }
+
+    for (const [key, oldValue, newValue] of [
+      [`changed`, `A`, `a`],
+      [`changed`, `a`, `A`],
+    ] as Array<[string, Value, Value]>) {
+      index.update(key, { value: oldValue }, { value: newValue })
+      rows.set(key, newValue)
+      expectMatchesSource()
+    }
+
+    index.add(`anchor`, { value: `a` })
+    rows.set(`anchor`, `a`)
+    expectMatchesSource()
+    index.add(`other`, { value: `B` })
+    rows.set(`other`, `B`)
+    expectMatchesSource()
+
+    // These histories additionally retain another exact value in the same
+    // order group and then move a key across groups.
+    for (const [key, oldValue, newValue] of [
+      [`changed`, `A`, `a`],
+      [`other`, `B`, `b`],
+      [`other`, `b`, `a`],
+    ] as Array<[string, Value, Value]>) {
+      index.update(key, { value: oldValue }, { value: newValue })
+      rows.set(key, newValue)
+      expectMatchesSource()
+    }
+
+    // EqualityLookup and the public lookup dispatch are separate methods.
+    // A dispatch that substitutes the comparator group for exact equality
+    // would pass an equalityLookup-only check after the same-group update.
+    const lookup = index.lookup.bind(index)
+    const wrongLookup = vi
+      .spyOn(index, `lookup`)
+      .mockImplementation((operation, value) =>
+        operation === `eq`
+          ? index.rangeQuery({ from: value, to: value })
+          : lookup(operation, value),
+      )
+    try {
+      expect(() => expectMatchesSource()).toThrowError(/expected/)
+    } finally {
+      wrongLookup.mockRestore()
+    }
+  })
+
   // Group grammar: 2..20 generated IDs in 0..4, with a forced duplicate first
   // group and a distinct group 5. The same bounded input is run in both index
   // types. The exact-identity lane gives every row a fresh array, then retires
   // and reuses handles. The custom-comparator lane additionally reverses
   // insertion. Without the duplicate, representative retirement is absent;
   // without the distinct group, group order is unobservable; without reversed
-  // insertion, insertion order can masquerade as lexical key order. The pinned
-  // [0, 1] case reconstructs all three distinctions. Invalid comparator
+  // insertion, insertion order can masquerade as lexical key order. Replacing
+  // one value with a fresh value in the same group checks exact membership
+  // independently of comparator position; a later update crosses groups.
+  // The pinned [0, 1] case reconstructs these distinctions. Invalid comparator
   // results and inconsistent comparator order are outside these two grammars.
   test.each([20260930, undefined])(
     `preserves exact equality while ordered traversal retains every row (seed %s)`,
@@ -1023,6 +1204,23 @@ describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
               expectCustomGroups(index, rows, identities)
 
               const previous = rows[0]!
+              const equalGroup = Object.freeze({
+                key: previous.key,
+                groupId: previous.groupId,
+                value: {
+                  groupId: previous.groupId,
+                  position: previous.value.position,
+                },
+              })
+              identities.push(equalGroup.value)
+              index.update(
+                previous.key,
+                { value: previous.value },
+                { value: equalGroup.value },
+              )
+              rows[0] = equalGroup
+              expectCustomGroups(index, rows, identities)
+
               const changed = Object.freeze({
                 key: previous.key,
                 groupId: 99,
@@ -1031,16 +1229,20 @@ describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
               identities.push(changed.value)
               index.update(
                 previous.key,
-                { value: previous.value },
+                { value: equalGroup.value },
                 { value: changed.value },
               )
               rows[0] = changed
               expectCustomGroups(index, rows, identities)
 
-              for (const retired of [removed, previous]) {
+              for (const [ordinal, retired] of [
+                removed,
+                previous,
+                equalGroup,
+              ].entries()) {
                 const reused = Object.freeze({
                   ...retired,
-                  key: `reused-${retired.key}`,
+                  key: `reused-${ordinal}-${retired.key}`,
                 })
                 index.add(reused.key, { value: reused.value })
                 rows.push(reused)
