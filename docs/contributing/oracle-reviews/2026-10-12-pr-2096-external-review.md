@@ -102,3 +102,9 @@ Standalone TypeScript, the persistence-core build, changed-file lint with zero
 errors, formatting, and whitespace checks passed. An unrelated checkpoint in
 the same oracle uses the same explicit generic type as `origin/main` to accept
 its unused transaction result while awaiting the same settlement.
+
+The reset implementation and oracle were committed at `5dcfbef7a`.
+The branch then merged `origin/main` at `a341c317a`; the merge changed the
+release workflow and a separate adapter lifecycle test. The post-merge
+persistence suite again passed 1,439 checks with two todos and no type errors.
+This record reviews the reset code at `5dcfbef7a` as included in that merge.
