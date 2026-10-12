@@ -7,7 +7,7 @@ title: SyncPersistenceScanOptions
 type SyncPersistenceScanOptions = object;
 ```
 
-Defined in: [packages/db/src/types.ts:515](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L515)
+Defined in: [packages/db/src/types.ts:521](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L521)
 
 ## Properties
 
@@ -17,4 +17,4 @@ Defined in: [packages/db/src/types.ts:515](https://github.com/TanStack/db/blob/m
 optional metadataOnly: boolean;
 ```
 
-Defined in: [packages/db/src/types.ts:516](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L516)
+Defined in: [packages/db/src/types.ts:522](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L522)

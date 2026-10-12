@@ -29,7 +29,7 @@ production queues, caches, or semantic helpers merely to share their names.
 | optimistic transaction | A local mutation transaction whose intent may later complete or roll back. | Sync transaction. |
 | optimistic state | The rows an optimistic transaction overlays on the applied synced rows while its mutation function runs. It drops when the mutation function settles, whether it fulfills or rejects. | Retained snapshot or accepted local snapshot. |
 | accepted sync transaction | A committed sync transaction that core, or a wrapping sync after its durable step, has taken. It always applies, in commit order. While an optimistic transaction is persisting it is held, and it applies in the publication that drops that transaction's optimistic state. Handler-facing writes and Collection readiness wait for acceptance; commit receipts and subset loads wait for visibility. | Visible or applied sync transaction. |
-| held optimistic row | A completed transaction's optimistic row kept only while a queued sync transaction touches its key, so the drop and that sync transaction publish together. A sync write committed while the transaction persisted is attributed `$origin: 'local'`; one committed after settlement is `'remote'`. | Retained or accepted snapshot. |
+| held optimistic row | A successful transaction's optimistic row kept only while a queued sync transaction touches its key, so the drop and that transaction publish together. Its source attribution follows the key-and-timing rules in [VirtualOrigin](../reference/type-aliases/VirtualOrigin.md), not source-client identity. | Retained or accepted snapshot. |
 | Collection status | One public Collection lifecycle value: `idle`, `loading`, `ready`, `error`, or `cleaned-up`. | Subscription status. |
 | subscription status | One subscription value: `ready` or `loadingSubset`. | Collection status. |
 | subscription | A consumer of Collection changes with its own subset demands and lifecycle. | Collection, query, or transport. |
@@ -50,11 +50,23 @@ production queues, caches, or semantic helpers merely to share their names.
 | readiness | Evidence that a named consumer may proceed. Always qualify Collection readiness, subscription readiness, or initial-query readiness; they settle at different boundaries. | Provider completion or publication in general. |
 | persisted restore | The eager persisted source Collection's startup read and publication of its durable rows, including an empty snapshot, in the current sync run. | Upstream/provider readiness or an SSR seed. |
 | persisted readiness | An opt-in live-query signal that every source Collection completed persisted restore in the current sync run; it is unavailable if any source did not opt in. | Collection readiness, network availability, or row nonemptiness. |
+| persisted cache generation | One version of an on-demand Collection's durable rows and resume metadata, identified by a monotonic generation number and a distinct storage ID. One current generation accepts new claims; a retired generation remains available to sync runs that already claim it. A stale run may create a new retired generation for its own recovery without replacing the current one. Rotating a generation does not change the public Collection identity. | Sync run, provider session, or source snapshot. |
+| persisted cache claim | A sync run's expiring authority to read and write one persisted cache generation. It is checked before durable access and is separate from a TanStack DB acquisition lease. | Acquisition lease, subset demand, or proof that cached rows are authoritative. |
 | network-first initial render | An opt-in Suspense gate that prefers Collection readiness until a configured deadline or network failure, then permits a completed persisted restore. A failed client query stream counts as network failure; a failed derived query does not. The gate does not stop network sync. | The persisted-readiness status itself or a change to ordinary live-query row publication. |
 
 `source` names a role in a data flow; it does not own a lifecycle. Do not coin a
 `source session`. Use `sync run` for the local Collection sync invocation
 and a provider-qualified `provider session` for a remote lifecycle.
+
+## Persistence coordination terms
+
+| Term | Meaning |
+| --- | --- |
+| durable election term | A per-Collection leadership term reserved in SQLite before a Browser or Electron coordinator announces ownership. Each election gets a greater term even when the previous owner committed no row. |
+| publicly applied row version | The durable row version whose rows the persisted wrapper has applied to the public Collection. A position-only resume snapshot can observe a later version without applying its rows. A schema reset rebinds this version to the new reset epoch. |
+| durable anchor | The row version and reset epoch observed before one source sync transaction is sent to a coordinator. If both still match and the exact transaction ID is absent, the replacement leader may apply that transaction once. |
+| exact-ID reconciliation | The replacement leader checks one immutable source transaction ID under the SQLite writer lock after its RPC result becomes indeterminate. A present ID acknowledges the original commit; an absent ID needs an unchanged durable anchor. |
+| reconciliation reload | A peer notification after exact-ID reconciliation that reloads persisted rows even when the receiver has already observed the same stream position. Equal public rows do not publish a second change batch. |
 
 ## Offline outbox terms
 
@@ -63,7 +75,7 @@ and a provider-qualified `provider session` for a remote lifecycle.
 | offline executor restart | Replacing an executor with a fresh one over retained durable outbox state. This does not restart a Collection sync run. |
 | outbox replay | Resuming unfinished durable offline transaction work, including outbox reconciliation and permitted mutation execution or terminal-phase deletion. This is separate from truncate replay and oracle replay. |
 | `deletion-pending` | The mutation function fulfilled; only acknowledged outbox deletion remains before caller success. An offline executor restart must not call the mutation function again. |
-| `rejection-pending` | The mutation function failed permanently; the caller rejects with that failure. An offline executor restart removes the marked row without calling the mutation function again or restoring its optimistic state. |
+| `rejection-pending` | The named mutation function failed and the executor chose terminal rejection, or the retry decision hook failed. The caller rejects with that failure. An offline executor restart removes the marked row without calling the mutation function again or restoring its optimistic state. |
 
 ## Demand and pagination terms
 
@@ -96,6 +108,7 @@ earlier node alone.
 | acquisition lease | The release obligation created when an adapter accepts a physical acquisition. | The acquisition attempt itself. |
 | window lease | One window-controller caller's contribution to the requested window. | Acquisition lease. |
 | observer lease | One Query DB owner's claim that retains a query observer or its rows. | Subscription or acquisition lease. |
+| deferred acquisition | The state of a live-query Collection's subscription to a source Collection before the live-query Collection has a subscriber or a preload in its current sync run. Its demand is active and reads rows the source already holds, but it starts no idle source sync run and no acquisition attempt. | Paused sync, render deferral, or demand retirement. |
 | demand retirement | Removing one logical owner's claim on demand. | Acquisition release or row deletion. |
 | acquisition release | Fulfilling one acquisition lease by aborting its signal and giving the owning adapter one unload opportunity. | Demand retirement, guaranteed transport cancellation, or row deletion. |
 | adapter unload | The adapter callback invoked during acquisition release. | Demand retirement or proof that transport stopped. |
@@ -145,6 +158,7 @@ crossing subsystem boundaries; these comparisons are not interchangeable.
 | D2 value identity | The value domain compared by `hash` and `equalHashValues`, including their documented reference leaves. A matching hash digest alone does not establish identity. The [identity oracle](https://github.com/TanStack/db/blob/main/packages/db-ivm/tests/hash-identity-oracle.property.test.ts) defines its bounded value rules. Map/Set insertion-order sensitivity is pinned current behavior, not a universal D2 operator contract. |
 | change-event equality | The `deepEquals` comparison used for Collection change-event suppression. Its supported domain ignores Map/Set insertion order, RegExp `lastIndex`, and array holes versus `undefined`. The [change-event equality oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/utils-oracle.property.test.ts) defines its value-class rules. |
 | draft equality | The comparison that recognizes a reverted draft value. Its [revert oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/proxy-revert-oracle.property.test.ts) preserves Map/Set insertion order, RegExp `lastIndex`, and array holes, with explicit snapshot rules for class instances. Native mutator methods have separate change-tracking laws. |
+| persisted-snapshot equality | The value-shape comparison used before skipping a reconciliation reload. It preserves array holes, enumerable array properties, and exact nested prototypes. Equal keyed class, null-prototype, or cross-realm records with different prototypes require reload; Map and Set insertion order remains significant. |
 
 ## Oracle and model terms
 

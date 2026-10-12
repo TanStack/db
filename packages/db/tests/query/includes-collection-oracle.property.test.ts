@@ -1308,6 +1308,73 @@ describe(`Collection-valued includes oracle`, () => {
   )
 
   fcTest(
+    `a retry after a failed root commit publishes the pending child change`,
+    async () => {
+      // The failed root commit keeps the parent and child changes pending.
+      // The retry carries only a further parent change, and must still
+      // publish the child change once.
+      type NodeRow = {
+        id: number
+        kind: `parent` | `child`
+        group: number
+        value: number
+      }
+      const parent: NodeRow = { id: 1, kind: `parent`, group: 1, value: 1 }
+      const child: NodeRow = { id: 10, kind: `child`, group: 1, value: 1 }
+      const nodes = createControlledCollection<NodeRow>(`retry-nodes`, [
+        parent,
+        child,
+      ])
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ parent: nodes.collection })
+          .where(({ parent }) => eq(parent.kind, `parent`))
+          .select(({ parent }) => ({
+            id: parent.id,
+            value: parent.value,
+            children: q
+              .from({ child: nodes.collection })
+              .where(({ child }) => eq(child.kind, `child`))
+              .where(({ child }) => eq(child.group, parent.group)),
+          })),
+      )
+
+      await live.preload()
+      const facade = live.get(1)!.children
+      const childPublications: Array<unknown> = []
+      const childSubscription = facade.subscribeChanges(
+        (batch) => childPublications.push(...batch),
+        { includeInitialState: false },
+      )
+      const originalGetKey = live.config.getKey
+      live.config.getKey = (row) => {
+        if (row.value === 2) throw new Error(`root key failed`)
+        return originalGetKey(row)
+      }
+
+      try {
+        expect(() =>
+          nodes.writeBatch([
+            { type: `update`, value: { ...parent, value: 2 } },
+            { type: `update`, value: { ...child, value: 2 } },
+          ]),
+        ).toThrow(`root key failed`)
+        expect(facade.get(10)!.value).toBe(1)
+
+        live.config.getKey = originalGetKey
+        nodes.writeBatch([{ type: `update`, value: { ...parent, value: 3 } }])
+        expect(live.get(1)!.value).toBe(3)
+        expect(facade.get(10)!.value).toBe(2)
+        expect(childPublications).toHaveLength(1)
+      } finally {
+        live.config.getKey = originalGetKey
+        childSubscription.unsubscribe()
+        await Promise.all([live.cleanup(), nodes.collection.cleanup()])
+      }
+    },
+  )
+
+  fcTest(
     `child-only changes flush the facade without republishing the parent`,
     async () => {
       const parents = createControlledCollection(`facade-only-parents`, [
@@ -1703,7 +1770,7 @@ describe(`Collection-valued includes oracle`, () => {
   })
 
   fcTest(
-    `cleanup during root publication suppresses the prepared facade callback`,
+    `a holder's cleanup during root publication throws and keeps the facade`,
     async () => {
       type NodeRow = {
         id: number
@@ -1733,11 +1800,91 @@ describe(`Collection-valued includes oracle`, () => {
       const facade = live.get(1)!.children
       const rootSnapshots: Array<Array<number>> = []
       const facadeSnapshots: Array<Array<number>> = []
+      // The live query owns its child collections, so a holder's cleanup
+      // throws, even inside the root's publication.
+      const cleanupErrors: Array<unknown> = []
+      const rootSubscription = live.subscribeChanges(
+        () => {
+          rootSnapshots.push(facade.toArray.map(({ value }) => value))
+          facade.cleanup().catch((error: unknown) => cleanupErrors.push(error))
+        },
+        { includeInitialState: false },
+      )
+      const facadeSubscription = facade.subscribeChanges(
+        () => facadeSnapshots.push(facade.toArray.map(({ value }) => value)),
+        { includeInitialState: false },
+      )
+
+      try {
+        nodes.writeBatch([
+          {
+            type: `update`,
+            value: { id: 1, kind: `parent`, group: 1, value: 2 },
+          },
+          {
+            type: `update`,
+            value: { id: 10, kind: `child`, group: 1, value: 2 },
+          },
+        ])
+        await Promise.resolve()
+        expect(rootSnapshots).toEqual([[2]])
+        expect(cleanupErrors).toHaveLength(1)
+        expect(String(cleanupErrors[0])).toMatch(
+          /cannot be cleaned up directly/,
+        )
+        expect(facadeSnapshots).toEqual([[2]])
+        expect(facade.status).toBe(`ready`)
+        expect(facade.toArray.map(({ value }) => value)).toEqual([2])
+      } finally {
+        rootSubscription.unsubscribe()
+        facadeSubscription.unsubscribe()
+        await Promise.all([live.cleanup(), nodes.collection.cleanup()])
+      }
+    },
+  )
+
+  fcTest(
+    `live query cleanup during root publication suppresses the prepared facade callback`,
+    async () => {
+      type NodeRow = {
+        id: number
+        kind: `parent` | `child`
+        group: number
+        value: number
+      }
+      const nodes = createControlledCollection<NodeRow>(
+        `publication-live-cleanup`,
+        [
+          { id: 1, kind: `parent`, group: 1, value: 1 },
+          { id: 10, kind: `child`, group: 1, value: 1 },
+        ],
+      )
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ parent: nodes.collection })
+          .where(({ parent }) => eq(parent.kind, `parent`))
+          .select(({ parent }) => ({
+            id: parent.id,
+            value: parent.value,
+            children: q
+              .from({ child: nodes.collection })
+              .where(({ child }) => eq(child.kind, `child`))
+              .where(({ child }) => eq(child.group, parent.group)),
+          })),
+      )
+
+      await live.preload()
+      const facade = live.get(1)!.children
+      const rootSnapshots: Array<Array<number>> = []
+      const facadeSnapshots: Array<Array<number>> = []
+      // The owner ends its child collections while the root publishes. The
+      // facade's prepared publication must not reach its subscribers after
+      // that.
       let cleanup: Promise<void> | undefined
       const rootSubscription = live.subscribeChanges(
         () => {
           rootSnapshots.push(facade.toArray.map(({ value }) => value))
-          cleanup = facade.cleanup()
+          cleanup = live.cleanup()
         },
         { includeInitialState: false },
       )
@@ -1766,7 +1913,7 @@ describe(`Collection-valued includes oracle`, () => {
       } finally {
         rootSubscription.unsubscribe()
         facadeSubscription.unsubscribe()
-        await Promise.all([live.cleanup(), nodes.collection.cleanup()])
+        await nodes.collection.cleanup()
       }
     },
   )

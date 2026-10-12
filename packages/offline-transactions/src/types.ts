@@ -101,6 +101,16 @@ export interface OfflineConfig {
   storage?: StorageAdapter
   maxConcurrency?: number
   jitter?: boolean
+  /**
+   * Override retry decisions for errors from all named mutation functions.
+   * Return synchronously; undefined uses the default decision. Put any
+   * function-specific context needed by this shared hook on the Error.
+   * NonRetriableError always stops retry.
+   * A throw or invalid return fails only that outbox row and rejects its
+   * waiters with the hook failure. Queued work runs after terminal cleanup.
+   * The default policy still supplies the delay and configured jitter.
+   */
+  shouldRetry?: (error: Error, retryCount: number) => boolean | undefined
   beforeRetry?: (
     transactions: Array<OfflineTransaction>,
   ) => Array<OfflineTransaction>

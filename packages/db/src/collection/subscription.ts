@@ -9,6 +9,7 @@ import { normalizeError } from '../utils/error.js'
 import { runAllCallbacks } from '../utils/callbacks.js'
 import { createDeferred } from '../deferred.js'
 import { LoadSubsetOperationAbortedError } from '../errors.js'
+import { codedMessage, devBuild } from '../error-message.js'
 import {
   createFilterFunctionFromExpression,
   createFilteredCallback,
@@ -38,6 +39,8 @@ type RequestSnapshotOptions = {
   orderBy?: OrderBy
   /** Optional limit to pass to loadSubset for backend optimization */
   limit?: number
+  /** Read only the first `limit` local rows: the source holds every row and an index serves the order. */
+  boundedPrefix?: boolean
   /** Callback that receives the normalized loadSubset result for internal tracking */
   onLoadSubsetResult?: SubsetResultObserver
   /** Called when the local snapshot must fall back from an index to a scan. */
@@ -75,6 +78,15 @@ type CollectionSubscriptionOptions = {
   /** Callback for subset-load failures scoped to this subscription. */
   onLoadSubsetError?: (event: SubscriptionLoadSubsetErrorEvent) => void
   truncateReplayPublication?: TruncateReplayPublicationControl
+  /**
+   * Whether this subscription defers provider work: it starts no idle source
+   * sync run and no acquisition attempt until its acquisition resumes. A
+   * live-query Collection defers its source subscriptions until it has a
+   * subscriber or a preload in its current sync run.
+   */
+  deferAcquisition?: boolean
+  /** Called once when deferred acquisition resumes. */
+  onResumeAcquisition?: () => void
 }
 
 type TruncateReplayPublicationControl = Readonly<{
@@ -197,6 +209,7 @@ export class CollectionSubscription
   >()
   private truncateReplacementPending = false
   private unsubscribed = false
+  private defersAcquisition: boolean
 
   public get status(): SubscriptionStatus {
     return this._status
@@ -212,6 +225,7 @@ export class CollectionSubscription
     private options: CollectionSubscriptionOptions,
   ) {
     super()
+    this.defersAcquisition = options.deferAcquisition === true
     if (options.onUnsubscribe) {
       this.on(`unsubscribed`, options.onUnsubscribe)
     }
@@ -273,6 +287,27 @@ export class CollectionSubscription
     )
   }
 
+  /** Whether this subscription still defers provider work. */
+  public isDeferringAcquisition(): boolean {
+    return this.defersAcquisition
+  }
+
+  /**
+   * Resume deferred acquisition: provider work may now start. This may start
+   * an idle source Collection's sync run, then starts acquisition attempts for
+   * the on-demand demand that stayed detached while acquisition was deferred.
+   */
+  public resumeDeferredAcquisition(): void {
+    if (!this.defersAcquisition || this.unsubscribed) return
+    // Start the source first: if its start throws, this subscription still
+    // defers rather than claiming acquisition it never began.
+    this.options.onResumeAcquisition?.()
+    this.defersAcquisition = false
+    if (this.collection.status !== `idle`) {
+      this.restartDetachedDemands(this.collection._sync.getSyncRunGeneration())
+    }
+  }
+
   /** Detach logical demand from work owned by a discarded sync run. */
   private handleCollectionCleanup(): void {
     this.discardTruncateReplay()
@@ -300,6 +335,9 @@ export class CollectionSubscription
   private restartDetachedDemands(syncRunGeneration: number): void {
     if (
       this.unsubscribed ||
+      // Deferred demand stays detached until acquisition resumes, even when
+      // another consumer starts the source.
+      this.defersAcquisition ||
       !this.isSyncRunGenerationCurrent(syncRunGeneration)
     ) {
       return
@@ -355,7 +393,12 @@ export class CollectionSubscription
   private handleTruncate() {
     // Without a loader, replay only reconciles rows retained across cleanup.
     const hasLoadSubsetHandler = this.collection._sync.syncLoadSubsetFn !== null
-    const demandsToReload = hasLoadSubsetHandler ? [...this.subsetDemands] : []
+    // Deferred demand never acquired, so a truncate gives it nothing to
+    // reload; it acquires the replacement rows when acquisition resumes.
+    const demandsToReload =
+      hasLoadSubsetHandler && !this.defersAcquisition
+        ? [...this.subsetDemands]
+        : []
 
     // Retained rows still need the committed replacement even without demand.
     if (demandsToReload.length === 0 && this.stalePublishedRows.size === 0) {
@@ -999,6 +1042,9 @@ export class CollectionSubscription
     }
     if (
       this.collection.status === `cleaned-up` ||
+      // A deferring subscription starts no acquisition attempt until it resumes.
+      (this.defersAcquisition &&
+        this.collection.config.syncMode === `on-demand`) ||
       // Ready/error callbacks can run before sync returns its loader. Idle
       // deferred starts still acquire through the sync manager's queue.
       (this.collection.config.syncMode === `on-demand` &&
@@ -1160,6 +1206,13 @@ export class CollectionSubscription
         } else {
           stateOpts.where = snapshotWhereExp
         }
+      }
+      // The ordered loader asks for a bounded prefix only when the source
+      // holds every row and an index serves its single order term. Any other
+      // prefix resends every matching row: an on-demand repair relies on them.
+      if (opts.boundedPrefix) {
+        stateOpts.orderBy = opts.orderBy
+        stateOpts.limit = opts.limit
       }
     } else {
       // No options provided so it's loading the entire initial state
@@ -1377,11 +1430,18 @@ export class CollectionSubscription
     onLoadSubsetResult,
   }: RequestLimitedSnapshotOptions) {
     if (this.unsubscribed) return
-    if (!limit) throw new Error(`limit is required`)
+    if (!limit)
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `limit is required`
+          : codedMessage(96),
+      )
 
     if (!this.orderByIndex) {
       throw new Error(
-        `Ordered snapshot was requested but no index was found. You have to call setOrderByIndex before requesting an ordered snapshot.`,
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `Ordered snapshot was requested but no index was found. You have to call setOrderByIndex before requesting an ordered snapshot.`
+          : codedMessage(97),
       )
     }
 

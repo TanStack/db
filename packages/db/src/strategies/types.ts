@@ -10,10 +10,17 @@ export interface BaseStrategy<TName extends string = string> {
   /**
    * Execute a function according to the strategy's timing rules
    * @param fn - The function to execute
+   * @param onAdmit - Optional synchronous preparation for an admitted call.
+   * Built-in debounce/throttle strategies call it after reserving the current
+   * edge but before invoking fn, and do not call it when returning false.
+   * @param onCommit - Optional promise for the actual commit attempt. It can
+   * outlive the public persistence receipt after a manual rollback.
    * @returns The result of the function execution (if applicable)
    */
   execute: <T extends object = Record<string, unknown>>(
     fn: () => Transaction<T>,
+    onAdmit?: () => Transaction<T> | void,
+    onCommit?: () => Promise<unknown> | undefined,
   ) => void | boolean | Promise<void>
 
   /**
@@ -68,6 +75,8 @@ export interface QueueStrategy extends BaseStrategy<`queue`> {
   /** Explicit false rejects the transaction; void preserves custom strategies. */
   execute: <T extends object = Record<string, unknown>>(
     fn: () => Transaction<T>,
+    onAdmit?: () => Transaction<T> | void,
+    onCommit?: () => Promise<unknown> | undefined,
   ) => boolean | void | Promise<void>
 }
 

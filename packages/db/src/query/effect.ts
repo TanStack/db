@@ -4,6 +4,7 @@ import { createDeferred } from '../deferred.js'
 import { runAllCallbacks } from '../utils/callbacks.js'
 import { normalizeError } from '../utils/error.js'
 import { deepEquals } from '../utils.js'
+import { codedMessage, devBuild } from '../error-message.js'
 import { compileQuery } from './compiler/index.js'
 import { normalizeExpressionPaths } from './compiler/expressions.js'
 import { getCollectionBuilder } from './live/collection-registry.js'
@@ -311,18 +312,26 @@ export function createEffect<
           config.onSourceError(error)
         } catch (callbackError) {
           console.error(
-            `[Effect '${id}'] onSourceError callback threw:`,
+            devBuild() && process.env.NODE_ENV !== `production`
+              ? `[Effect '${id}'] onSourceError callback threw:`
+              : codedMessage(220, { id }),
             callbackError,
           )
         }
       } else {
-        console.error(`[Effect '${id}'] ${error.message}. Disposing effect.`)
+        console.error(
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `[Effect '${id}'] ${error.message}. Disposing effect.`
+            : codedMessage(221, { id, message: error.message }),
+        )
       }
 
       // Auto-dispose — the effect can no longer function
       void dispose().catch((cleanupError) => {
         console.error(
-          `[Effect '${id}'] failed to dispose after a source error:`,
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `[Effect '${id}'] failed to dispose after a source error:`
+            : codedMessage(222, { id }),
           cleanupError,
         )
       })
@@ -335,7 +344,9 @@ export function createEffect<
       runner.dispose()
     } catch (cleanupError) {
       console.error(
-        `[Effect '${id}'] failed to dispose after a startup error:`,
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `[Effect '${id}'] failed to dispose after a startup error:`
+          : codedMessage(223, { id }),
         cleanupError,
       )
     }
@@ -658,7 +669,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         if (this.disposed) return
         this.onSourceError(
           new Error(
-            `Source collection '${collectionId}' was cleaned up while effect depends on it`,
+            devBuild() && process.env.NODE_ENV !== `production`
+              ? `Source collection '${collectionId}' was cleaned up while effect depends on it`
+              : codedMessage(134, { collectionId }),
           ),
         )
       }
@@ -673,7 +686,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         if (status === `error`) {
           this.onSourceError(
             new Error(
-              `Source collection '${collectionId}' entered error state`,
+              devBuild() && process.env.NODE_ENV !== `production`
+                ? `Source collection '${collectionId}' entered error state`
+                : codedMessage(135, { collectionId }),
             ),
           )
           return
@@ -1213,10 +1228,25 @@ function reportError<TRow extends object, TKey extends string | number>(
       onError(normalised, event)
     } catch (onErrorError) {
       // Don't let onError errors propagate
-      console.error(`[Effect] Error in onError handler:`, onErrorError)
-      console.error(`[Effect] Original error:`, normalised)
+      console.error(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `[Effect] Error in onError handler:`
+          : codedMessage(224),
+        onErrorError,
+      )
+      console.error(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `[Effect] Original error:`
+          : codedMessage(225),
+        normalised,
+      )
     }
   } else {
-    console.error(`[Effect] Unhandled error in handler:`, normalised)
+    console.error(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `[Effect] Unhandled error in handler:`
+        : codedMessage(226),
+      normalised,
+    )
   }
 }

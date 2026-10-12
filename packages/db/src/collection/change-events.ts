@@ -15,6 +15,7 @@ import {
 } from '../query/equality-conjunct.js'
 import { makeComparator } from '../utils/comparison.js'
 import { buildCompareOptions } from '../query/compiler/order-by'
+import { codedMessage, codedWarning, devBuild } from '../error-message.js'
 import type {
   ChangeMessage,
   CollectionLike,
@@ -124,7 +125,11 @@ export function currentStateAsChanges<
 
   // Validate that limit without orderBy doesn't happen
   if (options.limit !== undefined && !options.orderBy) {
-    throw new Error(`limit cannot be used without orderBy`)
+    throw new Error(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `limit cannot be used without orderBy`
+        : codedMessage(94),
+    )
   }
 
   // First check if orderBy is present (optionally with limit)
@@ -209,7 +214,9 @@ export function currentStateAsChanges<
   } catch (error) {
     // If anything goes wrong with the where clause, fall back to full scan
     console.warn(
-      `${collection.id ? `[${collection.id}] ` : ``}Error processing where clause, falling back to full scan:`,
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `${collection.id ? `[${collection.id}] ` : ``}Error processing where clause, falling back to full scan:`
+        : codedWarning(213, { id: collection.id }),
       error,
     )
 

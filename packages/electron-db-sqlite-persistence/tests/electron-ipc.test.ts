@@ -6,6 +6,7 @@ import {
   InvalidPersistedCollectionConfigError,
   RetryableRemoteSubsetAcquisitionError,
   persistedCollectionOptions,
+  resolvePersistedStorageTarget,
 } from '@tanstack/db-sqlite-persistence-core'
 import { createNodeSQLitePersistence } from '@tanstack/node-db-sqlite-persistence'
 import { IR, createCollection } from '../../db/src'
@@ -26,9 +27,11 @@ import {
 import type {
   ApplyCommittedTxRequest,
   ApplyLocalMutationsRequest,
+  HydrationPersistenceAdapter,
   IndeterminateCommitError,
   PersistedCollectionDurabilityError,
   PersistedCollectionPersistence,
+  PersistedStorageTarget,
   PersistedTx,
   PersistenceAdapter,
   RemoteSubsetOwner,
@@ -54,12 +57,25 @@ import type {
  * acquisition has its own lease and release obligation. The Collection-level
  * mapping is documented in the Browser
  * `per-collection-coordinator-oracle.test.ts` companion.
+ * The approved persisted-cache law requires a claimed physical storage ID for
+ * on-demand rows. The logical Collection ID still selects the main-process
+ * adapter. The receiving history claims, reads, renews, rotates, reads again,
+ * and releases; its reference is the authored logical ID and claim returned
+ * at each step, independent of the IPC routing code. A direct claim through
+ * the shared adapter retains that logical ID for reads, while a raw managed
+ * envelope lacking it is rejected before main-process adapter selection.
+ * A custom adapter that opts out advertises no managed-cache operations and
+ * retains the fallback.
+ * Exact-ID reconciliation uses the resolved Collection mode and schema version.
+ * An adapter without it reports an unknown result and leaves the durable rows
+ * and stream position unchanged.
  *
  * Expected transactions, adapter call logs, SQLite rows, metadata, owner
  * callbacks, and coordinator snapshots form the reference observations.
  * Histories vary response loss, leadership change, owner replacement,
- * duplicate delivery, acquisition release, durability failure, cleanup, and
- * reopen. The driver crosses the real Electron coordinator, its shared
+ * duplicate delivery, acquisition release, durability failure, cleanup,
+ * cache-claim changes, and reopen. The driver crosses the real Electron
+ * coordinator, its shared
  * broadcast coordination engine, and the IPC persistence adapter; the durable
  * witness reopens a real SQLite database.
  *
@@ -70,9 +86,12 @@ import type {
  *
  * Known omissions: the default invoke and Web Locks seams are deterministic
  * process-local controls. They prove an actual Electron process only when
- * explicit runtime-bridge mode runs. Bounded replay retry is covered for
- * retryable transport and admission failures, including cancellation on
- * release and disposal.
+ * explicit runtime-bridge mode runs; that mode executes the renderer adapter
+ * in Vitest and sends its envelope through IPC to an Electron main process.
+ * Concurrent renderer requests in one live main process and a reconciliation
+ * IPC reply delayed until after main applies remain untested. Bounded replay
+ * retry is covered for retryable transport and admission failures, including
+ * cancellation on release and disposal.
  */
 
 type InvokeHarness = {
@@ -94,6 +113,22 @@ type ElectronMainPersistence = PersistedCollectionPersistence
 const electronRuntimeBridgeTimeoutMs = isElectronFullE2EEnabled()
   ? 45_000
   : 4_000
+const testDurableTerms = new Map<string, number>()
+
+function reserveTestLeadershipTerm(
+  target: PersistedStorageTarget,
+  observedTerm: number,
+): Promise<{
+  latestTerm: number
+  latestSeq: number
+  latestRowVersion: number
+}> {
+  const collectionId = resolvePersistedStorageTarget(target).collectionId
+  const latestTerm =
+    Math.max(testDurableTerms.get(collectionId) ?? 0, observedTerm) + 1
+  testDurableTerms.set(collectionId, latestTerm)
+  return Promise.resolve({ latestTerm, latestSeq: 0, latestRowVersion: 0 })
+}
 
 function createFilteredPersistence(
   collectionId: string,
@@ -105,7 +140,9 @@ function createFilteredPersistence(
   }
 
   const baseAdapter = persistence.adapter
-  const assertKnownCollection = (requestedCollectionId: string) => {
+  const assertKnownCollection = (target: PersistedStorageTarget) => {
+    const requestedCollectionId =
+      resolvePersistedStorageTarget(target).collectionId
     if (requestedCollectionId !== collectionId) {
       const error = new Error(
         `Unknown electron persistence collection "${requestedCollectionId}"`,
@@ -132,6 +169,19 @@ function createFilteredPersistence(
     ensureIndex: (requestedCollectionId, signature, spec) => {
       assertKnownCollection(requestedCollectionId)
       return baseAdapter.ensureIndex(requestedCollectionId, signature, spec)
+    },
+    reserveLeadershipTerm: (requestedCollectionId, observedTerm, ctx) => {
+      assertKnownCollection(requestedCollectionId)
+      if (!baseAdapter.reserveLeadershipTerm) {
+        throw new InvalidPersistedCollectionConfigError(
+          `reserveLeadershipTerm is not supported by the configured adapter`,
+        )
+      }
+      return baseAdapter.reserveLeadershipTerm(
+        requestedCollectionId,
+        observedTerm,
+        ctx,
+      )
     },
     markIndexRemoved: (requestedCollectionId, signature) => {
       assertKnownCollection(requestedCollectionId)
@@ -227,6 +277,7 @@ function registerCleanup(cleanupFn: () => void): () => void {
 }
 
 afterEach(() => {
+  testDurableTerms.clear()
   while (activeCleanupFns.length > 0) {
     const cleanupFn = activeCleanupFns.pop()
     cleanupFn?.()
@@ -304,6 +355,7 @@ function electronSubsetWithNestedValue(value: unknown): LoadSubsetOptions {
 
 function createElectronCoordinatorTestAdapter(): PersistenceAdapter {
   return {
+    reserveLeadershipTerm: reserveTestLeadershipTerm,
     loadSubset: () => Promise.resolve([]),
     loadResumeSnapshot: () =>
       Promise.resolve({
@@ -377,32 +429,38 @@ describe(`electron sqlite persistence bridge`, () => {
       timeoutMs: electronRuntimeBridgeTimeoutMs,
     })
 
-    await rendererPersistence.adapter.applyCommittedTx(`todos`, {
-      txId: `tx-1`,
-      term: 1,
-      seq: 1,
-      rowVersion: 1,
-      mutations: [
-        {
-          type: `insert`,
-          key: `1`,
-          value: {
-            id: `1`,
-            title: `From renderer`,
-            score: 10,
+    await rendererPersistence.adapter.applyCommittedTx(
+      { kind: `eager`, collectionId: `todos` },
+      {
+        txId: `tx-1`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [
+          {
+            type: `insert`,
+            key: `1`,
+            value: {
+              id: `1`,
+              title: `From renderer`,
+              score: 10,
+            },
           },
-        },
-      ],
-      collectionMetadataMutations: [
-        {
-          type: `set`,
-          key: `resume:test`,
-          value: { offset: `1_0` },
-        },
-      ],
-    })
+        ],
+        collectionMetadataMutations: [
+          {
+            type: `set`,
+            key: `resume:test`,
+            value: { offset: `1_0` },
+          },
+        ],
+      },
+    )
 
-    const rows = await rendererPersistence.adapter.loadSubset(`todos`, {})
+    const rows = await rendererPersistence.adapter.loadSubset(
+      { kind: `eager`, collectionId: `todos` },
+      {},
+    )
     expect(rows).toEqual([
       {
         key: `1`,
@@ -415,7 +473,7 @@ describe(`electron sqlite persistence bridge`, () => {
     ])
 
     const resumeSnapshot = await rendererPersistence.adapter.loadResumeSnapshot(
-      `todos`,
+      { kind: `eager`, collectionId: `todos` },
       {
         includeRows: true,
       },
@@ -446,9 +504,12 @@ describe(`electron sqlite persistence bridge`, () => {
     })
 
     await expect(
-      rendererPersistence.adapter.loadResumeSnapshot(`todos`, {
-        includeRows: false,
-      }),
+      rendererPersistence.adapter.loadResumeSnapshot(
+        { kind: `eager`, collectionId: `todos` },
+        {
+          includeRows: false,
+        },
+      ),
     ).resolves.toEqual({
       ...resumeSnapshot,
       rows: [],
@@ -516,8 +577,14 @@ describe(`electron sqlite persistence bridge`, () => {
           getKey: (row) => row.id,
           persistence,
         })
-        await optionsV1.persistence.adapter.loadResumeSnapshot(collectionV1)
-        await optionsV2.persistence.adapter.loadResumeSnapshot(collectionV2)
+        await optionsV1.persistence.adapter.loadResumeSnapshot({
+          kind: `eager`,
+          collectionId: collectionV1,
+        })
+        await optionsV2.persistence.adapter.loadResumeSnapshot({
+          kind: `eager`,
+          collectionId: collectionV2,
+        })
 
         coordinator.subscribe(collectionV1, () => {})
         coordinator.subscribe(collectionV2, () => {})
@@ -548,12 +615,18 @@ describe(`electron sqlite persistence bridge`, () => {
         expect(resultV1.ok).toBe(true)
         expect(resultV2.ok).toBe(true)
         expect(
-          await optionsV1.persistence.adapter.loadSubset(collectionV1, {}),
+          await optionsV1.persistence.adapter.loadSubset(
+            { kind: `eager`, collectionId: collectionV1 },
+            {},
+          ),
         ).toMatchObject([
           { key: `v1`, value: { id: `v1`, title: `schema one` } },
         ])
         expect(
-          await optionsV2.persistence.adapter.loadSubset(collectionV2, {}),
+          await optionsV2.persistence.adapter.loadSubset(
+            { kind: `eager`, collectionId: collectionV2 },
+            {},
+          ),
         ).toMatchObject([
           { key: `v2`, value: { id: `v2`, title: `schema two` } },
         ])
@@ -566,6 +639,220 @@ describe(`electron sqlite persistence bridge`, () => {
       }
     },
   )
+
+  // A cache generation has a physical storage ID, while mode-aware adapter
+  // selection belongs to the logical Collection. IPC must keep both identities.
+  it(`routes cache-generation operations through the logical Collection adapter`, async () => {
+    const driver = new BetterSqlite3SQLiteDriver({
+      filename: createTempDbPath(),
+    })
+    registerCleanup(() => driver.close())
+    const mainPersistence = createNodeSQLitePersistence({
+      database: driver.getDatabase(),
+    })
+    const resolutions: Array<{
+      collectionId: string
+      mode: string
+      schemaVersion?: number
+    }> = []
+    let handler:
+      | ((
+          event: unknown,
+          request: ElectronPersistenceRequestEnvelope,
+        ) => Promise<ElectronPersistenceResponseEnvelope>)
+      | undefined
+    const dispose = exposeElectronSQLitePersistence({
+      ipcMain: {
+        handle: (_channel, listener) => {
+          handler = listener
+        },
+      },
+      persistence: {
+        ...mainPersistence,
+        resolvePersistenceForCollection: (selection) => {
+          const { collectionId } = selection
+          resolutions.push(selection)
+          if (collectionId !== `todos` && collectionId !== `manual`) {
+            throw new Error(`Wrong logical Collection: ${collectionId}`)
+          }
+          return mainPersistence.resolvePersistenceForCollection!(selection)
+        },
+      },
+    })
+    registerCleanup(dispose)
+    const rendererPersistence = createElectronSQLitePersistence({
+      invoke: async (_channel, request) => handler!(undefined, request),
+    })
+    const bound = rendererPersistence.resolvePersistenceForCollection!({
+      collectionId: `todos`,
+      mode: `sync-present`,
+      schemaVersion: 11,
+    })
+    const adapter = bound.adapter as HydrationPersistenceAdapter
+    for (const method of [
+      adapter.loadCollectionMetadata,
+      adapter.scanRows,
+      adapter.pullSince,
+      adapter.getStreamPosition,
+      adapter.markIndexRemoved,
+    ]) {
+      expect(method).toBeTypeOf(`function`)
+    }
+    const claim = await adapter.claimCacheGeneration!(`todos`)
+    expect(claim.storageCollectionId).not.toBe(`todos`)
+    const claimContext = { cacheGenerationClaimId: claim.claimId }
+    const claimTarget = {
+      kind: `managed` as const,
+      storageCollectionId: claim.storageCollectionId,
+      claimId: claim.claimId,
+    }
+    const claimedTx = (storageClaimId: string, txId: string) => ({
+      txId,
+      term: 1,
+      seq: 1,
+      rowVersion: 1,
+      cacheGenerationClaimId: storageClaimId,
+      mutations: [],
+    })
+    expect(
+      await bound.adapter.reserveLeadershipTerm?.(claimTarget, 0, claimContext),
+    ).toMatchObject({ latestTerm: 1, latestRowVersion: 0 })
+    expect(
+      await adapter.reconcileCommittedTx?.(
+        claimTarget,
+        claimedTx(claim.claimId, `old-claim-tx`),
+        { latestRowVersion: 0, resetEpoch: 0 },
+      ),
+    ).toMatchObject({ kind: `applied-now` })
+    await adapter.loadResumeSnapshot(claimTarget, claimContext)
+    await adapter.loadSubset(claimTarget, {}, claimContext)
+    await adapter.loadCollectionMetadata?.(claimTarget, claimContext)
+    await adapter.scanRows?.(claimTarget, {}, claimContext)
+    await adapter.pullSince?.(claimTarget, 0, claimContext)
+    await adapter.getStreamPosition?.(claimTarget, claimContext)
+    await adapter.ensureIndex(
+      claimTarget,
+      `title-index`,
+      { expressionSql: [`json_extract(value, '$.title')`] },
+      claimContext,
+    )
+    await adapter.markIndexRemoved?.(claimTarget, `title-index`, claimContext)
+    await expect(
+      adapter.renewCacheGenerationClaim!(
+        claim.storageCollectionId,
+        claim.claimId,
+      ),
+    ).resolves.toEqual(expect.any(Number))
+    const rotated = await adapter.rotateCacheGeneration!(`todos`, claim.claimId)
+    await expect(
+      bound.adapter.reserveLeadershipTerm?.(claimTarget, 1, claimContext),
+    ).rejects.toThrow(/cache claim is no longer active/)
+    await expect(
+      adapter.reconcileCommittedTx?.(
+        claimTarget,
+        claimedTx(claim.claimId, `late-old-claim-tx`),
+        { latestRowVersion: 1, resetEpoch: 0 },
+      ),
+    ).rejects.toThrow(/cache claim is no longer active/)
+    const rotatedContext = { cacheGenerationClaimId: rotated.claimId }
+    const rotatedTarget = {
+      kind: `managed` as const,
+      storageCollectionId: rotated.storageCollectionId,
+      claimId: rotated.claimId,
+    }
+    expect(
+      await bound.adapter.reserveLeadershipTerm?.(
+        rotatedTarget,
+        0,
+        rotatedContext,
+      ),
+    ).toMatchObject({ latestTerm: 1, latestRowVersion: 0 })
+    expect(
+      await adapter.reconcileCommittedTx?.(
+        rotatedTarget,
+        claimedTx(rotated.claimId, `new-claim-tx`),
+        { latestRowVersion: 0, resetEpoch: 0 },
+      ),
+    ).toMatchObject({ kind: `applied-now` })
+    await adapter.loadResumeSnapshot(
+      {
+        kind: `managed`,
+        storageCollectionId: rotated.storageCollectionId,
+        claimId: rotated.claimId,
+      },
+      {
+        cacheGenerationClaimId: rotated.claimId,
+      },
+    )
+    await adapter.releaseCacheGenerationClaim!(rotated.claimId)
+    // The shared adapter is a valid lower-level entry point too. Its claim
+    // identifies a logical Collection even though later data calls carry only
+    // the physical storage target. Main-process selection must retain that
+    // logical identity at the read checkpoint.
+    const directClaim =
+      await rendererPersistence.adapter.claimCacheGeneration!(`manual`)
+    await rendererPersistence.adapter.loadSubset(
+      {
+        kind: `managed`,
+        storageCollectionId: directClaim.storageCollectionId,
+        claimId: directClaim.claimId,
+      },
+      {},
+      { cacheGenerationClaimId: directClaim.claimId },
+    )
+    await rendererPersistence.adapter.releaseCacheGenerationClaim!(
+      directClaim.claimId,
+    )
+    const missingLogicalId = await handler!(undefined, {
+      v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
+      requestId: `missing-logical-id`,
+      method: `loadSubset`,
+      collectionId: directClaim.storageCollectionId,
+      storageTarget: {
+        kind: `managed`,
+        storageCollectionId: directClaim.storageCollectionId,
+        claimId: directClaim.claimId,
+      },
+      payload: { options: {} },
+    })
+    expect(missingLogicalId).toMatchObject({
+      ok: false,
+      error: {
+        message: `Electron managed cache request requires a logical Collection ID`,
+      },
+    })
+    expect(resolutions).toEqual([
+      ...Array(19).fill({
+        collectionId: `todos`,
+        mode: `sync-present`,
+        schemaVersion: 11,
+      }),
+      ...Array(3).fill({
+        collectionId: `manual`,
+        mode: `sync-present`,
+        schemaVersion: undefined,
+      }),
+    ])
+    await expect(
+      driver.query<{ schema_version: number }>(
+        `SELECT schema_version FROM collection_registry WHERE collection_id = ?`,
+        [rotated.storageCollectionId],
+      ),
+    ).resolves.toEqual([{ schema_version: 11 }])
+  })
+
+  it(`keeps the unsupported-cache fallback available for a custom main adapter`, () => {
+    const persistence = createElectronSQLitePersistence({
+      invoke: vi.fn(),
+      managedCacheGenerations: false,
+    })
+    expect([
+      persistence.adapter.claimCacheGeneration,
+      persistence.adapter.rotateCacheGeneration,
+      persistence.adapter.renewCacheGenerationClaim,
+      persistence.adapter.releaseCacheGenerationClaim,
+    ]).toEqual([undefined, undefined, undefined, undefined])
+  })
 
   it(`persists data across main process restarts`, async () => {
     const dbPath = createTempDbPath()
@@ -581,7 +868,43 @@ describe(`electron sqlite persistence bridge`, () => {
         timeoutMs: electronRuntimeBridgeTimeoutMs,
       })
 
-      await rendererPersistence.adapter.applyCommittedTx(`todos`, {
+      await rendererPersistence.adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: `todos` },
+        {
+          txId: `tx-restart-1`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [
+            {
+              type: `insert`,
+              key: `persisted`,
+              value: {
+                id: `persisted`,
+                title: `Survives restart`,
+                score: 42,
+              },
+            },
+          ],
+        },
+      )
+
+      const rows = await rendererPersistence.adapter.loadSubset(
+        { kind: `eager`, collectionId: `todos` },
+        {},
+      )
+      expect(rows[0]?.value.title).toBe(`Survives restart`)
+      return
+    }
+
+    const invokeHarnessA = createInvokeHarness(dbPath, `todos`)
+    const rendererPersistenceA = createElectronSQLitePersistence({
+      invoke: invokeHarnessA.invoke,
+      timeoutMs: electronRuntimeBridgeTimeoutMs,
+    })
+    await rendererPersistenceA.adapter.applyCommittedTx(
+      { kind: `eager`, collectionId: `todos` },
+      {
         txId: `tx-restart-1`,
         term: 1,
         seq: 1,
@@ -597,35 +920,8 @@ describe(`electron sqlite persistence bridge`, () => {
             },
           },
         ],
-      })
-
-      const rows = await rendererPersistence.adapter.loadSubset(`todos`, {})
-      expect(rows[0]?.value.title).toBe(`Survives restart`)
-      return
-    }
-
-    const invokeHarnessA = createInvokeHarness(dbPath, `todos`)
-    const rendererPersistenceA = createElectronSQLitePersistence({
-      invoke: invokeHarnessA.invoke,
-      timeoutMs: electronRuntimeBridgeTimeoutMs,
-    })
-    await rendererPersistenceA.adapter.applyCommittedTx(`todos`, {
-      txId: `tx-restart-1`,
-      term: 1,
-      seq: 1,
-      rowVersion: 1,
-      mutations: [
-        {
-          type: `insert`,
-          key: `persisted`,
-          value: {
-            id: `persisted`,
-            title: `Survives restart`,
-            score: 42,
-          },
-        },
-      ],
-    })
+      },
+    )
     invokeHarnessA.close()
 
     const invokeHarnessB = createInvokeHarness(dbPath, `todos`)
@@ -634,7 +930,10 @@ describe(`electron sqlite persistence bridge`, () => {
       invoke: invokeHarnessB.invoke,
       timeoutMs: electronRuntimeBridgeTimeoutMs,
     })
-    const rows = await rendererPersistenceB.adapter.loadSubset(`todos`, {})
+    const rows = await rendererPersistenceB.adapter.loadSubset(
+      { kind: `eager`, collectionId: `todos` },
+      {},
+    )
     expect(rows[0]?.value.title).toBe(`Survives restart`)
   })
 
@@ -646,19 +945,22 @@ describe(`electron sqlite persistence bridge`, () => {
       `electron-metadata-set`,
     )
 
-    await metadataSetHarness.persistence.adapter.applyCommittedTx(`todos`, {
-      txId: `seed-row`,
-      term: 1,
-      seq: 1,
-      rowVersion: 1,
-      mutations: [
-        {
-          type: `insert`,
-          key: `todo-1`,
-          value: { id: `todo-1`, title: `Before` },
-        },
-      ],
-    })
+    await metadataSetHarness.persistence.adapter.applyCommittedTx(
+      { kind: `eager`, collectionId: `todos` },
+      {
+        txId: `seed-row`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [
+          {
+            type: `insert`,
+            key: `todo-1`,
+            value: { id: `todo-1`, title: `Before` },
+          },
+        ],
+      },
+    )
     metadataSetHarness.appliedTransactions.length = 0
     metadataSetHarness.start()
     await waitForLeadership(metadataSetHarness.coordinator, `todos`)
@@ -675,7 +977,10 @@ describe(`electron sqlite persistence bridge`, () => {
         },
       ])
     const setScannedRows =
-      await metadataSetHarness.persistence.adapter.scanRows?.(`todos`)
+      await metadataSetHarness.persistence.adapter.scanRows?.({
+        kind: `eager`,
+        collectionId: `todos`,
+      })
     const setAppliedTransaction = metadataSetHarness.appliedTransactions[0]
     const setCommittedPayload = metadataSetHarness.committedPayloads[0]
 
@@ -750,7 +1055,10 @@ describe(`electron sqlite persistence bridge`, () => {
       `electron-metadata-delete`,
     )
     expect(
-      await metadataDeleteHarness.persistence.adapter.scanRows?.(`todos`),
+      await metadataDeleteHarness.persistence.adapter.scanRows?.({
+        kind: `eager`,
+        collectionId: `todos`,
+      }),
     ).toEqual([
       {
         key: `todo-1`,
@@ -775,7 +1083,10 @@ describe(`electron sqlite persistence bridge`, () => {
         ],
       )
     const deleteScannedRows =
-      await metadataDeleteHarness.persistence.adapter.scanRows?.(`todos`)
+      await metadataDeleteHarness.persistence.adapter.scanRows?.({
+        kind: `eager`,
+        collectionId: `todos`,
+      })
     const deleteAppliedTransaction =
       metadataDeleteHarness.appliedTransactions[0]
     const deleteCommittedPayload = metadataDeleteHarness.committedPayloads[0]
@@ -840,7 +1151,12 @@ describe(`electron sqlite persistence bridge`, () => {
       invoke: reopenedInvokeHarness.invoke,
       timeoutMs: electronRuntimeBridgeTimeoutMs,
     })
-    expect(await reopenedPersistence.adapter.scanRows?.(`todos`)).toEqual([
+    expect(
+      await reopenedPersistence.adapter.scanRows?.({
+        kind: `eager`,
+        collectionId: `todos`,
+      }),
+    ).toEqual([
       {
         key: `todo-1`,
         value: { id: `todo-1`, title: `After delete` },
@@ -861,19 +1177,22 @@ describe(`electron sqlite persistence bridge`, () => {
       `electron-rich-source`,
     )
 
-    await ownerHarness.persistence.adapter.applyCommittedTx(`todos`, {
-      txId: `stale-seed`,
-      term: 1,
-      seq: 1,
-      rowVersion: 1,
-      mutations: [
-        {
-          type: `insert`,
-          key: `stale`,
-          value: { id: `stale`, title: `Must be truncated` },
-        },
-      ],
-    })
+    await ownerHarness.persistence.adapter.applyCommittedTx(
+      { kind: `eager`, collectionId: `todos` },
+      {
+        txId: `stale-seed`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [
+          {
+            type: `insert`,
+            key: `stale`,
+            value: { id: `stale`, title: `Must be truncated` },
+          },
+        ],
+      },
+    )
     ownerHarness.appliedTransactions.length = 0
     ownerHarness.start()
     await waitForLeadership(ownerHarness.coordinator, `todos`)
@@ -949,7 +1268,12 @@ describe(`electron sqlite persistence bridge`, () => {
       invoke: reopenedInvokeHarness.invoke,
       timeoutMs: electronRuntimeBridgeTimeoutMs,
     })
-    expect(await reopenedPersistence.adapter.scanRows?.(`todos`)).toEqual([
+    expect(
+      await reopenedPersistence.adapter.scanRows?.({
+        kind: `eager`,
+        collectionId: `todos`,
+      }),
+    ).toEqual([
       {
         key: `fresh`,
         value: { id: `fresh`, title: `Durable through owner` },
@@ -957,7 +1281,10 @@ describe(`electron sqlite persistence bridge`, () => {
       },
     ])
     expect(
-      await reopenedPersistence.adapter.loadCollectionMetadata?.(`todos`),
+      await reopenedPersistence.adapter.loadCollectionMetadata?.({
+        kind: `eager`,
+        collectionId: `todos`,
+      }),
     ).toEqual([{ key: `resume`, value: { offset: 9 } }])
     closeReopenedHarness()
   })
@@ -972,6 +1299,7 @@ describe(`electron sqlite persistence bridge`, () => {
       const coordinator = new ElectronCollectionCoordinator({
         dbName: `electron-writer-callback-failure`,
         adapter: {
+          reserveLeadershipTerm: reserveTestLeadershipTerm,
           loadSubset: () => Promise.resolve([]),
           applyCommittedTx: () => {
             applyCalls++
@@ -1036,6 +1364,7 @@ describe(`electron sqlite persistence bridge`, () => {
     const coordinator = new ElectronCollectionCoordinator({
       dbName: `electron-requester-takeover`,
       adapter: {
+        reserveLeadershipTerm: reserveTestLeadershipTerm,
         loadSubset: () => Promise.resolve([]),
         applyCommittedTx: (_collectionId, tx) => {
           bEffects.push(tx)
@@ -1392,7 +1721,7 @@ describe(`electron sqlite persistence bridge`, () => {
     ])
   })
 
-  it(`binds committed transaction owners to each resolved collection adapter`, async () => {
+  it(`routes commits and reconciliation through each resolved collection adapter`, async () => {
     registerCleanup(installImmediatelyGrantedWebLocks())
     const requests: Array<ElectronPersistenceRequestEnvelope> = []
     const coordinator = new ElectronCollectionCoordinator({
@@ -1403,18 +1732,17 @@ describe(`electron sqlite persistence bridge`, () => {
       coordinator,
       invoke: (_channel, request) => {
         requests.push(structuredClone(request))
-        if (request.method === `getStreamPosition`) {
-          return Promise.resolve({
+        if (request.method === `reserveLeadershipTerm`) {
+          return reserveTestLeadershipTerm(
+            { kind: `eager`, collectionId: request.collectionId },
+            request.payload.observedTerm,
+          ).then((result) => ({
             v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
             requestId: request.requestId,
             method: request.method,
             ok: true,
-            result: {
-              latestTerm: 0,
-              latestSeq: 0,
-              latestRowVersion: 0,
-            },
-          })
+            result,
+          }))
         }
         if (request.method === `applyCommittedTx`) {
           return Promise.resolve({
@@ -1425,16 +1753,29 @@ describe(`electron sqlite persistence bridge`, () => {
             result: null,
           })
         }
+        if (request.method === `reconcileCommittedTx`) {
+          return Promise.resolve({
+            v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
+            requestId: request.requestId,
+            method: request.method,
+            ok: true,
+            result: {
+              kind: `already-applied`,
+              committed: { term: 1, seq: 1, rowVersion: 1 },
+              latestRowVersion: 1,
+            },
+          })
+        }
         throw new Error(`unexpected method ${request.method}`)
       },
     })
 
-    persistence.resolvePersistenceForCollection?.({
+    const alphaPersistence = persistence.resolvePersistenceForCollection?.({
       collectionId: `alpha`,
       mode: `sync-present`,
       schemaVersion: 1,
     })
-    persistence.resolvePersistenceForCollection?.({
+    const betaPersistence = persistence.resolvePersistenceForCollection?.({
       collectionId: `beta`,
       mode: `sync-present`,
       schemaVersion: 2,
@@ -1458,6 +1799,29 @@ describe(`electron sqlite persistence bridge`, () => {
       rowVersion: 0,
       mutations: [],
     })
+    const anchor = { latestRowVersion: 0, resetEpoch: 0 }
+    for (const [collectionId, resolved] of [
+      [`alpha`, alphaPersistence],
+      [`beta`, betaPersistence],
+    ] as const) {
+      expect(
+        await resolved?.adapter.reconcileCommittedTx?.(
+          { kind: `eager`, collectionId: collectionId },
+          {
+            txId: `${collectionId}-reconcile`,
+            term: 1,
+            seq: 1,
+            rowVersion: 1,
+            mutations: [],
+          },
+          anchor,
+        ),
+      ).toEqual({
+        kind: `already-applied`,
+        committed: { term: 1, seq: 1, rowVersion: 1 },
+        latestRowVersion: 1,
+      })
+    }
 
     expect(
       requests
@@ -1470,13 +1834,52 @@ describe(`electron sqlite persistence bridge`, () => {
     ).toEqual([
       {
         collectionId: `alpha`,
-        resolution: { mode: `sync-present`, schemaVersion: 1 },
+        resolution: {
+          mode: `sync-present`,
+          schemaVersion: 1,
+          logicalCollectionId: `alpha`,
+        },
         txId: `alpha-tx`,
       },
       {
         collectionId: `beta`,
-        resolution: { mode: `sync-present`, schemaVersion: 2 },
+        resolution: {
+          mode: `sync-present`,
+          schemaVersion: 2,
+          logicalCollectionId: `beta`,
+        },
         txId: `beta-tx`,
+      },
+    ])
+    expect(
+      requests
+        .filter((request) => request.method === `reconcileCommittedTx`)
+        .map((request) => ({
+          collectionId: request.collectionId,
+          resolution: request.resolution,
+          txId: request.payload.tx.txId,
+          anchor: request.payload.anchor,
+        })),
+    ).toEqual([
+      {
+        collectionId: `alpha`,
+        resolution: {
+          mode: `sync-present`,
+          schemaVersion: 1,
+          logicalCollectionId: `alpha`,
+        },
+        txId: `alpha-reconcile`,
+        anchor,
+      },
+      {
+        collectionId: `beta`,
+        resolution: {
+          mode: `sync-present`,
+          schemaVersion: 2,
+          logicalCollectionId: `beta`,
+        },
+        txId: `beta-reconcile`,
+        anchor,
       },
     ])
   })
@@ -1491,6 +1894,7 @@ describe(`electron sqlite persistence bridge`, () => {
     const coordinator = new ElectronCollectionCoordinator({
       dbName: `electron-committed-envelope-replay`,
       adapter: {
+        reserveLeadershipTerm: reserveTestLeadershipTerm,
         loadSubset: () => Promise.resolve([]),
         applyCommittedTx: async () => {
           applyCalls++
@@ -1552,6 +1956,7 @@ describe(`electron sqlite persistence bridge`, () => {
     const coordinator = new ElectronCollectionCoordinator({
       dbName: `electron-local-envelope-replay`,
       adapter: {
+        reserveLeadershipTerm: reserveTestLeadershipTerm,
         loadSubset: () => Promise.resolve([]),
         applyCommittedTx: () => {
           applyCalls++
@@ -1621,6 +2026,7 @@ describe(`electron sqlite persistence bridge`, () => {
     const coordinator = new ElectronCollectionCoordinator({
       dbName: `electron-cross-operation-envelope`,
       adapter: {
+        reserveLeadershipTerm: reserveTestLeadershipTerm,
         loadSubset: () => Promise.resolve([]),
         applyCommittedTx: () => {
           applyCalls++
@@ -1790,6 +2196,7 @@ describe(`electron sqlite persistence bridge`, () => {
     const coordinator = new ElectronCollectionCoordinator({
       dbName: `electron-dispose-held-committed`,
       adapter: {
+        reserveLeadershipTerm: reserveTestLeadershipTerm,
         loadSubset: () => Promise.resolve([]),
         applyCommittedTx: async (_collectionId, tx) => {
           applyEntered = true
@@ -1868,6 +2275,7 @@ describe(`electron sqlite persistence bridge`, () => {
     const coordinator = new ElectronCollectionCoordinator({
       dbName: `electron-dispose-held-local`,
       adapter: {
+        reserveLeadershipTerm: reserveTestLeadershipTerm,
         loadSubset: () => Promise.resolve([]),
         applyCommittedTx: async (_collectionId, tx) => {
           applyEntered = true
@@ -1944,6 +2352,7 @@ describe(`electron sqlite persistence bridge`, () => {
     const leader = new ElectronCollectionCoordinator({
       dbName: `electron-subset-wire-leader`,
       adapter: {
+        reserveLeadershipTerm: reserveTestLeadershipTerm,
         loadSubset: () => Promise.resolve([]),
         applyCommittedTx: () => Promise.resolve(),
         ensureIndex: () => Promise.resolve(),
@@ -2158,7 +2567,9 @@ describe(`electron sqlite persistence bridge`, () => {
     }
   })
 
-  it(`compacts a terminal same-stack Electron release after the real owner load finishes`, async () => {
+  // A held owner load may need unload to settle. Terminal release must reach
+  // unload before that load completes, including reentry on the same stack.
+  it(`compacts a terminal same-stack Electron release before the owner load finishes`, async () => {
     const coordinator = new ElectronCollectionCoordinator({
       dbName: `electron-subset-terminal-release`,
       adapter: createElectronCoordinatorTestAdapter(),
@@ -2201,10 +2612,10 @@ describe(`electron sqlite persistence bridge`, () => {
       const terminalRelease = release!.then(() => {
         releaseSettled = true
       })
-      await Promise.resolve()
+      await vi.waitFor(() => expect(releaseSettled).toBe(true))
       expect({ events: [...events], releaseSettled }).toEqual({
-        events: [`load`],
-        releaseSettled: false,
+        events: [`load`, `unload`],
+        releaseSettled: true,
       })
 
       releaseLoad()
@@ -2673,6 +3084,7 @@ describe(`electron sqlite persistence bridge`, () => {
     const leader = new ElectronCollectionCoordinator({
       dbName,
       adapter: {
+        reserveLeadershipTerm: reserveTestLeadershipTerm,
         loadSubset: () => Promise.resolve([]),
         applyCommittedTx: () => Promise.resolve(),
         ensureIndex: () => Promise.resolve(),
@@ -3843,6 +4255,7 @@ describe(`electron sqlite persistence bridge`, () => {
     const leader = new ElectronCollectionCoordinator({
       dbName: `electron-dispose-held-inbound`,
       adapter: {
+        reserveLeadershipTerm: reserveTestLeadershipTerm,
         loadSubset: () => Promise.resolve([]),
         applyCommittedTx: async (_collectionId, tx) => {
           applyEntered = true
@@ -3941,27 +4354,35 @@ describe(`electron sqlite persistence bridge`, () => {
     })
 
     await expect(
-      rendererPersistence.adapter.loadSubset(`todos`, {}),
+      rendererPersistence.adapter.loadSubset(
+        { kind: `eager`, collectionId: `todos` },
+        {},
+      ),
     ).rejects.toBeInstanceOf(InvalidPersistedCollectionConfigError)
   })
 
-  it(`rejects a version-1 main response before reading its result`, async () => {
-    const rendererPersistence = createElectronSQLitePersistence({
-      invoke: (_channel, request) =>
-        Promise.resolve({
-          v: 1,
-          requestId: request.requestId,
-          method: request.method,
-          ok: true,
-          result: null,
-        } as unknown as ElectronPersistenceResponseEnvelope),
-    })
+  it(`rejects older main responses before reading their result`, async () => {
+    for (const oldVersion of [1, 2, 3, 4, 5]) {
+      const rendererPersistence = createElectronSQLitePersistence({
+        invoke: (_channel, request) =>
+          Promise.resolve({
+            v: oldVersion,
+            requestId: request.requestId,
+            method: request.method,
+            ok: true,
+            result: null,
+          } as unknown as ElectronPersistenceResponseEnvelope),
+      })
 
-    await expect(
-      rendererPersistence.adapter.loadResumeSnapshot(`todos`),
-    ).rejects.toThrow(
-      `Unexpected electron persistence protocol version "1" in response`,
-    )
+      await expect(
+        rendererPersistence.adapter.loadResumeSnapshot({
+          kind: `eager`,
+          collectionId: `todos`,
+        }),
+      ).rejects.toThrow(
+        `Unexpected electron persistence protocol version "${oldVersion}" in response`,
+      )
+    }
   })
 
   it(`returns remote errors for unknown collections`, async () => {
@@ -3973,8 +4394,18 @@ describe(`electron sqlite persistence bridge`, () => {
       timeoutMs: electronRuntimeBridgeTimeoutMs,
     })
 
+    expect(
+      await rendererPersistence.adapter.loadSubset(
+        { kind: `eager`, collectionId: `known` },
+        {},
+      ),
+    ).toEqual([])
+
     await expect(
-      rendererPersistence.adapter.loadSubset(`missing`, {}),
+      rendererPersistence.adapter.loadSubset(
+        { kind: `eager`, collectionId: `missing` },
+        {},
+      ),
     ).rejects.toThrow(`Unknown electron persistence collection`)
   })
 
@@ -4011,6 +4442,10 @@ describe(`electron sqlite persistence bridge`, () => {
     const persistence = createNodeSQLitePersistence({
       database: driver.getDatabase(),
     })
+    const loadResumeSnapshot = vi.spyOn(
+      persistence.adapter,
+      `loadResumeSnapshot`,
+    )
 
     const dispose = exposeElectronSQLitePersistence({
       ipcMain: fakeIpcMain,
@@ -4024,6 +4459,7 @@ describe(`electron sqlite persistence bridge`, () => {
       v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
       requestId: `req-1`,
       collectionId: `todos`,
+      storageTarget: { kind: `eager`, collectionId: `todos` },
       method: `loadSubset`,
       payload: {
         options: {},
@@ -4039,6 +4475,7 @@ describe(`electron sqlite persistence bridge`, () => {
       v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
       requestId: `req-2`,
       collectionId: `todos`,
+      storageTarget: { kind: `eager`, collectionId: `todos` },
       method: `loadResumeSnapshot`,
       payload: {
         ctx: { includeRows: false },
@@ -4058,24 +4495,156 @@ describe(`electron sqlite persistence bridge`, () => {
       },
     })
 
-    const legacyVersionResponse = await registeredHandler?.(undefined, {
-      v: 1,
-      requestId: `req-v1`,
+    const missingTarget = await registeredHandler?.(undefined, {
+      v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
+      requestId: `req-missing-target`,
       collectionId: `todos`,
       method: `loadResumeSnapshot`,
       payload: {},
     })
-    expect(legacyVersionResponse).toMatchObject({
-      v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
-      requestId: `req-v1`,
-      method: `loadResumeSnapshot`,
+    expect(missingTarget).toMatchObject({
       ok: false,
       error: {
-        message: `Unsupported electron persistence protocol version "1"`,
+        message: `Electron persistence data request requires an explicit storage target`,
       },
     })
 
+    for (const oldVersion of [1, 2, 3, 4, 5]) {
+      const legacyVersionResponse = await registeredHandler?.(undefined, {
+        v: oldVersion,
+        requestId: `req-v${oldVersion}`,
+        collectionId: `todos`,
+        method: `loadResumeSnapshot`,
+        payload: {},
+      })
+      expect(legacyVersionResponse).toMatchObject({
+        v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
+        requestId: `req-v${oldVersion}`,
+        method: `loadResumeSnapshot`,
+        ok: false,
+        error: {
+          message: `Unsupported electron persistence protocol version "${oldVersion}"`,
+        },
+      })
+    }
+    expect(loadResumeSnapshot).toHaveBeenCalledTimes(1)
+
     dispose()
     expect(removedChannels).toEqual([DEFAULT_ELECTRON_PERSISTENCE_CHANNEL])
+  })
+
+  it(`returns an unknown reconciliation result when the main adapter lacks exact-ID support`, async () => {
+    const driver = new BetterSqlite3SQLiteDriver({
+      filename: createTempDbPath(),
+    })
+    activeCleanupFns.push(() => driver.close())
+    const persistence = createNodeSQLitePersistence({
+      database: driver.getDatabase(),
+    })
+    const adapter = new Proxy(persistence.adapter, {
+      get(target, property, receiver) {
+        return property === `reconcileCommittedTx`
+          ? undefined
+          : Reflect.get(target, property, receiver)
+      },
+    })
+    let handler:
+      | ((
+          event: unknown,
+          request: ElectronPersistenceRequestEnvelope,
+        ) => Promise<ElectronPersistenceResponseEnvelope>)
+      | undefined
+    exposeElectronSQLitePersistence({
+      ipcMain: {
+        handle: (_channel, listener) => {
+          handler = listener
+        },
+      },
+      persistence: { adapter },
+    })
+    const renderer = createElectronSQLitePersistence({
+      invoke: (_channel, request) => handler!(undefined, request),
+    })
+    const before = await persistence.adapter.loadResumeSnapshot({
+      kind: `eager`,
+      collectionId: `todos`,
+    })
+    const candidate: PersistedTx = {
+      txId: `crossing`,
+      term: 1,
+      seq: 1,
+      rowVersion: 1,
+      mutations: [
+        { type: `insert`, key: `crossing`, value: { id: `crossing` } },
+      ],
+    }
+
+    expect(
+      await renderer.adapter.reconcileCommittedTx?.(
+        { kind: `eager`, collectionId: `todos` },
+        candidate,
+        {
+          latestRowVersion: 0,
+          resetEpoch: 0,
+        },
+      ),
+    ).toEqual({ kind: `unknown` })
+    const after = await persistence.adapter.loadResumeSnapshot({
+      kind: `eager`,
+      collectionId: `todos`,
+    })
+    expect({ rows: after.rows, rowVersion: after.latestRowVersion }).toEqual({
+      rows: before.rows,
+      rowVersion: before.latestRowVersion,
+    })
+  })
+
+  it(`preserves main-process durability details across reconciliation IPC`, async () => {
+    const driver = new BetterSqlite3SQLiteDriver({
+      filename: createTempDbPath(),
+    })
+    activeCleanupFns.push(() => driver.close())
+    const persistence = createNodeSQLitePersistence({
+      database: driver.getDatabase(),
+    })
+    const failure = Object.assign(new Error(`database write failed`), {
+      code: `SQLITE_IOERR`,
+      path: [`database`, `wal`],
+    })
+    const adapter = new Proxy(persistence.adapter, {
+      get(target, property, receiver) {
+        return property === `reconcileCommittedTx`
+          ? () => Promise.reject(failure)
+          : Reflect.get(target, property, receiver)
+      },
+    })
+    let handler:
+      | ((
+          event: unknown,
+          request: ElectronPersistenceRequestEnvelope,
+        ) => Promise<ElectronPersistenceResponseEnvelope>)
+      | undefined
+    exposeElectronSQLitePersistence({
+      ipcMain: {
+        handle: (_channel, listener) => {
+          handler = listener
+        },
+      },
+      persistence: { adapter },
+    })
+    const renderer = createElectronSQLitePersistence({
+      invoke: (_channel, request) => handler!(undefined, request),
+    })
+
+    await expect(
+      renderer.adapter.reconcileCommittedTx?.(
+        { kind: `eager`, collectionId: `todos` },
+        { txId: `crossing`, term: 1, seq: 1, rowVersion: 1, mutations: [] },
+        { latestRowVersion: 0, resetEpoch: 0 },
+      ),
+    ).rejects.toMatchObject({
+      code: `SQLITE_IOERR`,
+      path: [`database`, `wal`],
+    })
   })
 })

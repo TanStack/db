@@ -110,6 +110,57 @@ describe(`Optimistic request outcome histories`, () => {
   )
 })
 
+// A failed persisting edit cancels a pending same-key manual transaction when
+// rollback cascades. A secondary rollback or a distinct key leaves that peer
+// pending, and its later commit must still settle its own request.
+const pendingPeerCases = [true, false].flatMap((sameKey) =>
+  [
+    { failure: `rollback` as const, cascade: true },
+    { failure: `rollback` as const, cascade: false },
+    { failure: `reject` as const, cascade: false },
+  ].map((decision) => ({ sameKey, ...decision })),
+)
+it.each(pendingPeerCases)(
+  `settles a pending manual peer after failure, sameKey=$sameKey failure=$failure cascade=$cascade`,
+  async ({ sameKey, failure, cascade }) => {
+    const peerSurvives = !sameKey || (failure === `rollback` && !cascade)
+    const counts = await runOptimisticHistory(
+      [],
+      [
+        {
+          type: `edit`,
+          key: 1,
+          fields: { a: 1 },
+          optimistic: true,
+          pending: true,
+        },
+        {
+          type: `edit`,
+          key: sameKey ? 1 : 2,
+          fields: { b: 2 },
+          optimistic: true,
+        },
+        { type: `settle`, slot: 1, success: false, cascade, failure },
+        ...(peerSurvives
+          ? [
+              {
+                type: `settle` as const,
+                slot: 0,
+                success: true,
+                cascade: false,
+              },
+            ]
+          : []),
+      ],
+    )
+    expect(counts).toMatchObject({
+      edits: 2,
+      settlements: peerSurvives ? 2 : 1,
+      failures: 1,
+    })
+  },
+)
+
 describe(`Outcome observer calibration`, () => {
   it.each([
     `early-success`,

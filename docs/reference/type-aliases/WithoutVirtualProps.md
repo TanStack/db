@@ -7,7 +7,7 @@ title: WithoutVirtualProps
 type WithoutVirtualProps<T> = T extends unknown ? Omit<T, keyof VirtualRowProps> : never;
 ```
 
-Defined in: [packages/db/src/virtual-props.ts:159](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L159)
+Defined in: [packages/db/src/virtual-props.ts:175](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L175)
 
 Extracts the base type from a type that may have virtual properties.
 Useful when you need to work with the raw data without virtual properties.

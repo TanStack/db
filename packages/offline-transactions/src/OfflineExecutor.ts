@@ -41,6 +41,9 @@ import type {
 } from './types'
 import type { Transaction } from '@tanstack/db'
 
+/** How many settled ids an executor remembers to reject late waiters. */
+const SETTLED_TRANSACTIONS_REMEMBERED = 1000
+
 export class OfflineExecutor {
   private config: OfflineConfig
 
@@ -74,6 +77,12 @@ export class OfflineExecutor {
       reject: (error: Error) => void
     }
   > = new Map()
+
+  /**
+   * Ids this executor settled, oldest first. A waiter for one of them has
+   * nothing left to wait for. An unknown id can still arrive from another tab.
+   */
+  private readonly settledTransactions = new Set<string>()
 
   // Track restoration transactions for cleanup when offline transactions complete
   private restorationTransactions: Map<string, Transaction> = new Map()
@@ -474,12 +483,24 @@ export class OfflineExecutor {
     )
   }
 
+  private rememberSettled(transactionId: string): void {
+    this.settledTransactions.add(transactionId)
+    if (this.settledTransactions.size > SETTLED_TRANSACTIONS_REMEMBERED)
+      this.settledTransactions.delete(
+        this.settledTransactions.values().next().value!,
+      )
+  }
+
   // Method for OfflineTransaction to wait for completion
   async waitForTransactionCompletion(transactionId: string): Promise<any> {
     const existing = this.pendingTransactionPromises.get(transactionId)
     if (existing) {
       return existing.promise
     }
+    if (this.settledTransactions.has(transactionId))
+      throw new Error(
+        `Offline transaction ${transactionId} already settled; wait for it before it settles`,
+      )
 
     const deferred: {
       promise: Promise<any>
@@ -498,6 +519,7 @@ export class OfflineExecutor {
 
   // Method for TransactionExecutor to signal completion
   resolveTransaction(transactionId: string, result: any): void {
+    this.rememberSettled(transactionId)
     const deferred = this.pendingTransactionPromises.get(transactionId)
     if (deferred) {
       deferred.resolve(result)
@@ -510,6 +532,7 @@ export class OfflineExecutor {
 
   // Method for TransactionExecutor to signal failure
   rejectTransaction(transactionId: string, error: Error): void {
+    this.rememberSettled(transactionId)
     const deferred = this.pendingTransactionPromises.get(transactionId)
     if (deferred) {
       deferred.reject(error)
@@ -547,26 +570,11 @@ export class OfflineExecutor {
       return
     }
 
-    // Mark as completed so recomputeOptimisticState removes it from consideration.
-    // The actual data will come from the sync.
+    // Mark as completed: every Collection that tracked it recomputes and
+    // releases it. The actual data will come from the sync.
     restorationTx.setState(`completed`)
-
-    // Remove from each collection's transaction map and recompute
-    const touchedCollections = new Set<string>()
-    for (const mutation of restorationTx.mutations) {
-      // Defensive check for corrupted deserialized data
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-      if (!mutation.collection) {
-        continue
-      }
-      const collectionId = mutation.collection.id
-      if (touchedCollections.has(collectionId)) {
-        continue
-      }
-      touchedCollections.add(collectionId)
-      mutation.collection._state.transactions.delete(restorationTx.id)
-      mutation.collection._state.recomputeOptimisticState(false)
-    }
+    restorationTx.isPersisted.resolve(restorationTx)
+    restorationTx.touchCollection()
   }
 
   async removeFromOutbox(id: string): Promise<void> {

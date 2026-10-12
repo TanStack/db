@@ -11,7 +11,7 @@ import {
   persistedCollectionOptions,
 } from '../src'
 import { createWASQLiteTestDatabase } from './helpers/wa-sqlite-test-db'
-import type { LoadSubsetOptions, Subscription } from '@tanstack/db'
+import type { LoadSubsetOptions, Subscription, SyncConfig } from '@tanstack/db'
 import type {
   ApplyCommittedTxRequest,
   ApplyCommittedTxResponse,
@@ -19,6 +19,7 @@ import type {
   ApplyLocalMutationsResponse,
   IndeterminateCommitError,
   PersistedCollectionDurabilityError,
+  PersistedStorageTarget,
   PersistedTx,
   PersistenceAdapter,
   RemoteSubsetOwner,
@@ -39,7 +40,10 @@ import type { BrowserCollectionCoordinatorOptions } from '../src/browser-coordin
  * acquisition has its own lease and release obligation. The Collection-level
  * mapping is documented in `per-collection-coordinator-oracle.test.ts`. A
  * passive heartbeat can update a route, but only a local participant may join
- * that collection's leadership. A mutation requested before the first leader
+ * that collection's leadership. After a no-write handoff, a passive follower
+ * that accepted the successor keeps that route through a delayed former
+ * heartbeat. The Web Lock holder also keeps its own route. A mutation
+ * requested before the first leader
  * is known waits for a route up to the RPC deadline. The sole participant
  * applies it locally if elected; an unsuccessful election cannot hold it forever.
  * A late follower requests the leader route without sending a mutation. A
@@ -81,6 +85,7 @@ const channels: Map<
   string,
   Set<{ onmessage: MessageHandler | null }>
 > = new Map()
+const durableTerms = new Map<string, number>()
 let dropNextMessageWhen: ((data: unknown) => boolean) | undefined
 let observePostedMessage: ((data: unknown) => void) | undefined
 let dropNextBroadcastMessage: ((data: unknown) => boolean) | undefined
@@ -275,15 +280,22 @@ function cleanupGlobals(): void {
   channels.clear()
   heldLocks.clear()
   lockQueues.clear()
+  durableTerms.clear()
 }
 
 // ---------------------------------------------------------------------------
 // Adapter stub
 // ---------------------------------------------------------------------------
 
+function storageId(target: PersistedStorageTarget): string {
+  return target.kind === `managed`
+    ? target.storageCollectionId
+    : target.collectionId
+}
+
 function createStubAdapter(): PersistenceAdapter & {
   pullSince: (
-    collectionId: string,
+    target: PersistedStorageTarget,
     fromRowVersion: number,
   ) => Promise<{
     latestRowVersion: number
@@ -291,7 +303,7 @@ function createStubAdapter(): PersistenceAdapter & {
     changedKeys: Array<string | number>
     deletedKeys: Array<string | number>
   }>
-  getStreamPosition: (collectionId: string) => Promise<{
+  getStreamPosition: (target: PersistedStorageTarget) => Promise<{
     latestTerm: number
     latestSeq: number
     latestRowVersion: number
@@ -313,8 +325,8 @@ function createStubAdapter(): PersistenceAdapter & {
         latestRowVersion: 0,
         resetEpoch: 0,
       }),
-    applyCommittedTx: (collectionId, tx) => {
-      appliedTxs.push({ collectionId, tx })
+    applyCommittedTx: (target, tx) => {
+      appliedTxs.push({ collectionId: storageId(target), tx })
       return Promise.resolve()
     },
     ensureIndex: () => Promise.resolve(),
@@ -331,6 +343,18 @@ function createStubAdapter(): PersistenceAdapter & {
         latestSeq: 0,
         latestRowVersion: 0,
       }),
+    async reserveLeadershipTerm(target, observedTerm) {
+      const collectionId = storageId(target)
+      const position = await this.getStreamPosition(target)
+      const latestTerm =
+        Math.max(
+          position.latestTerm,
+          durableTerms.get(collectionId) ?? 0,
+          observedTerm,
+        ) + 1
+      durableTerms.set(collectionId, latestTerm)
+      return { ...position, latestTerm }
+    },
   }
 }
 
@@ -628,6 +652,119 @@ describe(`BrowserCollectionCoordinator`, () => {
   })
 
   describe(`leadership`, () => {
+    /** Without a durable term reservation, a cold successor can reuse its predecessor's term. */
+    it(`rejects an adapter that cannot reserve a durable election term`, () => {
+      const adapter = createStubAdapter()
+      adapter.reserveLeadershipTerm = undefined
+      expect(() => createCoordinator(adapter)).toThrow(/reserveLeadershipTerm/)
+    })
+
+    /**
+     * A physical cache generation and its claim are one election authority.
+     * The reference records the claim registered for each physical ID before
+     * election; a term reservation must receive that same pair. A reservation
+     * without the claim could advance a retired generation after expiry.
+     */
+    it(`reserves a physical cache term under its registered claim`, async () => {
+      const adapter = createStubAdapter()
+      const calls: Array<{
+        target: PersistedStorageTarget
+        claimId?: string
+      }> = []
+      const reserve = adapter.reserveLeadershipTerm!.bind(adapter)
+      adapter.reserveLeadershipTerm = (target, observedTerm, ctx) => {
+        calls.push({
+          target,
+          claimId: ctx?.cacheGenerationClaimId,
+        })
+        return reserve(target, observedTerm, ctx)
+      }
+      const coordinator = createCoordinator(adapter)
+      coordinator.setAdapterForCollection(
+        `physical-cache`,
+        adapter,
+        `claim-for-physical-cache`,
+      )
+      coordinator.subscribe(`physical-cache`, () => {})
+      await vi.waitFor(() =>
+        expect(coordinator.isLeader(`physical-cache`)).toBe(true),
+      )
+      expect(calls).toEqual([
+        {
+          target: {
+            kind: `managed`,
+            storageCollectionId: `physical-cache`,
+            claimId: `claim-for-physical-cache`,
+          },
+          claimId: `claim-for-physical-cache`,
+        },
+      ])
+    })
+
+    // A local mutation originates without a persisted tx. Its coordinator
+    // request must carry the Collection's claim across leader and follower
+    // routing before the coordinator creates that tx. Otherwise the adapter sees an eager
+    // write to a physical cache ID and can resurrect it after collection.
+    it(`keeps a managed claim on coordinator local mutations`, async () => {
+      const adapter = createStubAdapter()
+      const targets: Array<PersistedStorageTarget> = []
+      const apply = adapter.applyCommittedTx.bind(adapter)
+      adapter.applyCommittedTx = (target, tx) => {
+        targets.push(target)
+        return apply(target, tx)
+      }
+      const coordinator = createCoordinator(adapter)
+      const storageCollectionId = `local-mutation-cache`
+      const claimId = `claim-for-local-mutation-cache`
+      coordinator.setAdapterForCollection(storageCollectionId, adapter, claimId)
+      coordinator.subscribe(storageCollectionId, () => {})
+      await vi.waitFor(() =>
+        expect(coordinator.isLeader(storageCollectionId)).toBe(true),
+      )
+
+      const mutations = [
+        {
+          mutationId: `local-managed-write`,
+          type: `insert` as const,
+          key: `row`,
+          value: { id: `row` },
+        },
+      ]
+      const response = await coordinator.requestApplyLocalMutations(
+        storageCollectionId,
+        mutations,
+        claimId,
+      )
+      expect(response.ok).toBe(true)
+      expect(targets).toEqual([
+        { kind: `managed`, storageCollectionId, claimId },
+      ])
+      expect(adapter.appliedTxs[0]?.tx.cacheGenerationClaimId).toBe(claimId)
+
+      const follower = createCoordinator(adapter)
+      follower.setAdapterForCollection(storageCollectionId, adapter, claimId)
+      follower.subscribe(storageCollectionId, () => {})
+      await vi.waitFor(() =>
+        expect(follower.isLeader(storageCollectionId)).toBe(false),
+      )
+      const followerResponse = await follower.requestApplyLocalMutations(
+        storageCollectionId,
+        [{ ...mutations[0]!, mutationId: `follower-managed-write` }],
+        claimId,
+      )
+      expect(followerResponse.ok).toBe(true)
+      expect(targets).toEqual([
+        { kind: `managed`, storageCollectionId, claimId },
+        { kind: `managed`, storageCollectionId, claimId },
+      ])
+      expect(adapter.appliedTxs[1]?.tx.cacheGenerationClaimId).toBe(claimId)
+
+      await expect(
+        coordinator.requestApplyLocalMutations(storageCollectionId, mutations),
+      ).rejects.toThrow(`requires a persisted cache claim`)
+      expect(targets).toHaveLength(2)
+    })
+
     it(`first coordinator becomes leader for a collection`, async () => {
       const coord = createCoordinator()
       coord.subscribe(`todos`, () => {})
@@ -835,6 +972,98 @@ describe(`BrowserCollectionCoordinator`, () => {
       coord2.dispose()
     })
 
+    // The wrapper may issue best-effort release for a refresh that retired
+    // before acquisition. Without an acquisition ID, the coordinator must not
+    // send a release RPC to any leader.
+    it(`sends no release RPC for an unacquired subset`, async () => {
+      const follower = createCoordinator()
+      const internals = follower as unknown as {
+        sendRPC: (collectionId: string, request: unknown) => Promise<unknown>
+      }
+      const sendRPC = vi.fn(() => Promise.reject(new Error(`unexpected RPC`)))
+      internals.sendRPC = sendRPC
+      try {
+        await follower.requestReleaseRemoteSubset(`todos`, { limit: 1 })
+        expect(sendRPC).not.toHaveBeenCalled()
+      } finally {
+        follower.dispose()
+      }
+    })
+
+    // A release can fail while the original acquisition is still in flight.
+    // Its later success must not cancel the retained release retry debt.
+    // The settled-acquisition neighbor checks that ordinary release retry
+    // remains possible without an overlapping acquisition.
+    it.each([false, true])(
+      `retains a release retry when acquisition overlaps release=%s`,
+      async (overlap) => {
+        const leader = createCoordinator()
+        const follower = createCoordinator()
+        const unsubscribeLeader = leader.subscribe(`todos`, () => {})
+        follower.subscribe(`todos`, () => {})
+        await flush(50)
+        const heldOwner = createDeferred()
+        const owner = Object.assign(
+          vi.fn(() => heldOwner.promise),
+          {
+            unloadSubset: vi.fn(),
+            onError: vi.fn(),
+          },
+        )
+        const unregisterOwner = leader.registerRemoteSubsetOwner(`todos`, owner)
+        const options: LoadSubsetOptions = { limit: 1 }
+        const internals = follower as unknown as {
+          sendRPC: (collectionId: string, request: unknown) => Promise<unknown>
+          outboundRemoteSubsetAcquisitions: Map<
+            string,
+            { retryTimer: ReturnType<typeof setTimeout> | null }
+          >
+        }
+        const sendRPC = internals.sendRPC.bind(follower)
+        let releaseAttempts = 0
+        internals.sendRPC = (collectionId, request) => {
+          if (
+            (request as { type?: string }).type ===
+            `rpc:releaseRemoteSubset:req`
+          ) {
+            releaseAttempts++
+            if (releaseAttempts === 1) {
+              return Promise.reject(
+                new Error(`review release transport failure`),
+              )
+            }
+          }
+          return sendRPC(collectionId, request)
+        }
+        const ensure = follower.requestEnsureRemoteSubset(`todos`, options)
+        try {
+          await vi.waitFor(() => expect(owner).toHaveBeenCalledTimes(1))
+          if (!overlap) {
+            heldOwner.resolve()
+            await ensure
+          }
+          await expect(
+            follower.requestReleaseRemoteSubset(`todos`, options),
+          ).rejects.toThrow(`review release transport failure`)
+          const acquisition = [
+            ...internals.outboundRemoteSubsetAcquisitions.values(),
+          ][0]!
+          expect(acquisition.retryTimer).not.toBeNull()
+          if (overlap) heldOwner.resolve()
+          await ensure
+          expect(acquisition.retryTimer).not.toBeNull()
+          await vi.waitFor(() => expect(releaseAttempts).toBe(2))
+        } finally {
+          heldOwner.resolve()
+          await Promise.allSettled([ensure])
+          unregisterOwner()
+          unsubscribeLeader()
+          leader.dispose()
+          follower.dispose()
+        }
+      },
+    )
+
     it.each([
       { schemaV1: 1, schemaV2: 2 },
       { schemaV1: 2, schemaV2: 4 },
@@ -862,7 +1091,10 @@ describe(`BrowserCollectionCoordinator`, () => {
             getKey: (row) => row.id,
             persistence,
           })
-          await optionsV1.persistence.adapter.loadResumeSnapshot(collectionV1)
+          await optionsV1.persistence.adapter.loadResumeSnapshot({
+            kind: `eager`,
+            collectionId: collectionV1,
+          })
 
           const optionsV2 = persistedCollectionOptions<
             { id: string; title: string },
@@ -873,7 +1105,10 @@ describe(`BrowserCollectionCoordinator`, () => {
             getKey: (row) => row.id,
             persistence,
           })
-          await optionsV2.persistence.adapter.loadResumeSnapshot(collectionV2)
+          await optionsV2.persistence.adapter.loadResumeSnapshot({
+            kind: `eager`,
+            collectionId: collectionV2,
+          })
 
           coordinator.subscribe(collectionV1, () => {})
           coordinator.subscribe(collectionV2, () => {})
@@ -904,12 +1139,18 @@ describe(`BrowserCollectionCoordinator`, () => {
           expect(resultV1.ok).toBe(true)
           expect(resultV2.ok).toBe(true)
           expect(
-            await optionsV1.persistence.adapter.loadSubset(collectionV1, {}),
+            await optionsV1.persistence.adapter.loadSubset(
+              { kind: `eager`, collectionId: collectionV1 },
+              {},
+            ),
           ).toMatchObject([
             { key: `v1`, value: { id: `v1`, title: `schema one` } },
           ])
           expect(
-            await optionsV2.persistence.adapter.loadSubset(collectionV2, {}),
+            await optionsV2.persistence.adapter.loadSubset(
+              { kind: `eager`, collectionId: collectionV2 },
+              {},
+            ),
           ).toMatchObject([
             { key: `v2`, value: { id: `v2`, title: `schema two` } },
           ])
@@ -971,7 +1212,7 @@ describe(`BrowserCollectionCoordinator`, () => {
         latestTerm: state?.latestTerm,
         joinedLeadership: coordinator.isLeader(`notes`),
         streamPositionCollections: getStreamPosition.mock.calls.map(
-          ([collectionId]) => collectionId,
+          ([target]) => storageId(target),
         ),
       }).toEqual({
         leaderId: `notes-owner`,
@@ -1658,7 +1899,7 @@ describe(`BrowserCollectionCoordinator`, () => {
             previousTerm: 1,
             currentLeaderId: (requester as unknown as { nodeId: string })
               .nodeId,
-            currentTerm: 1,
+            currentTerm: 2,
             cause: expect.objectContaining({
               message: expect.stringContaining(`timed out`),
             }),
@@ -2034,7 +2275,7 @@ describe(`BrowserCollectionCoordinator`, () => {
           firstApplyEntered.resolve()
           await releaseFirstApply.promise
         }
-        adapter.appliedTxs.push({ collectionId, tx })
+        adapter.appliedTxs.push({ collectionId: storageId(collectionId), tx })
       }
       const coordinator = createCoordinator(adapter)
       coordinator.subscribe(`todos`, () => {})
@@ -2399,7 +2640,12 @@ describe(`BrowserCollectionCoordinator`, () => {
         ])
         expect(response.ok).toBe(true)
         expect(
-          (await persistence.adapter.loadResumeSnapshot(`first-commit`)).rows,
+          (
+            await persistence.adapter.loadResumeSnapshot({
+              kind: `eager`,
+              collectionId: `first-commit`,
+            })
+          ).rows,
         ).toEqual([{ key: `first`, value: { id: `first` } }])
         expect(
           await database.execute<{ count: number }>(
@@ -2435,7 +2681,7 @@ describe(`BrowserCollectionCoordinator`, () => {
       if (
         !active ||
         !adapter?.runInHydrationScope ||
-        !adapter.getStreamPosition
+        !adapter.reserveLeadershipTerm
       ) {
         coordinator.dispose()
         await database.close?.()
@@ -2446,13 +2692,13 @@ describe(`BrowserCollectionCoordinator`, () => {
       const electionReadStarted = createDeferred()
       const releaseHydration = createDeferred()
       const sourceCommitStarted = createDeferred()
-      const getStreamPosition = adapter.getStreamPosition.bind(adapter)
-      adapter.getStreamPosition = async (collectionId) => {
-        if (collectionId === `cold`) {
+      const reserveLeadershipTerm = adapter.reserveLeadershipTerm.bind(adapter)
+      adapter.reserveLeadershipTerm = async (collectionId, observedTerm) => {
+        if (storageId(collectionId) === `cold`) {
           electionReadStarted.resolve()
           await releaseElectionRead.promise
         }
-        return getStreamPosition(collectionId)
+        return reserveLeadershipTerm(collectionId, observedTerm)
       }
 
       const unsubscribeActive = coordinator.subscribe(`active`, () => {})
@@ -2525,11 +2771,21 @@ describe(`BrowserCollectionCoordinator`, () => {
         ])
         expect(sourceResponse.ok).toBe(true)
         expect(otherResponse.ok).toBe(true)
-        expect((await adapter.loadResumeSnapshot(`cold`)).rows).toEqual([
-          { key: `cold`, value: { id: `cold` } },
-        ])
         expect(
-          (await active.adapter.loadResumeSnapshot(`active`)).rows,
+          (
+            await adapter.loadResumeSnapshot({
+              kind: `eager`,
+              collectionId: `cold`,
+            })
+          ).rows,
+        ).toEqual([{ key: `cold`, value: { id: `cold` } }])
+        expect(
+          (
+            await active.adapter.loadResumeSnapshot({
+              kind: `eager`,
+              collectionId: `active`,
+            })
+          ).rows,
         ).toEqual([{ key: `active`, value: { id: `active` } }])
       } finally {
         if (timeout) clearTimeout(timeout)
@@ -3190,7 +3446,7 @@ describe(`BrowserCollectionCoordinator`, () => {
             previousTerm: 1,
             currentLeaderId: (requester as unknown as { nodeId: string })
               .nodeId,
-            currentTerm: 1,
+            currentTerm: 2,
             cause: expect.objectContaining({
               message: expect.stringContaining(`timed out`),
             }),
@@ -3204,6 +3460,766 @@ describe(`BrowserCollectionCoordinator`, () => {
         retiredLeader.dispose()
         requester.dispose()
         vi.useRealTimers()
+      }
+    })
+
+    /**
+     * A source commit whose response is lost across leadership retains its
+     * applied receipt while the replacement leader certifies the exact txId.
+     * The receipt fulfills in the same Collection sync run, which admits a
+     * later source commit. A direct coordinator RPC remains indeterminate.
+     *
+     * Mock transport and Web Locks order durable leader application, response
+     * loss, disposal, election, and the next source commit. The independent
+     * check compares the receipt, sync-run count, public status, and next
+     * receipt after the RPC deadline. The shared applied-tx ledger here only
+     * certifies an exact ID; SQLite and OPFS own durable rows and cursor.
+     */
+    it(`keeps a surviving source Collection usable after a leader closes during a committed RPC`, async () => {
+      type Row = { id: string; title: string }
+      type SourceParams = Parameters<SyncConfig<Row, string>['sync']>[0]
+      const leaderAdapter = createStubAdapter()
+      const followerAdapter = createStubAdapter()
+      followerAdapter.reconcileCommittedTx = async (
+        _collectionId,
+        tx,
+        anchor,
+      ) => {
+        expect(anchor).toEqual({ latestRowVersion: 0, resetEpoch: 0 })
+        const applied = leaderAdapter.appliedTxs.find(
+          ({ tx: durable }) => durable.txId === tx.txId,
+        )?.tx
+        if (!applied) return { kind: `unknown` }
+        return {
+          kind: `already-applied`,
+          committed: {
+            term: applied.term,
+            seq: applied.seq,
+            rowVersion: applied.rowVersion,
+          },
+          latestRowVersion: applied.rowVersion,
+        }
+      }
+      const leader = createCoordinator(leaderAdapter)
+      const follower = createCoordinator(followerAdapter)
+      const releaseLeader = leader.subscribe(`source-close`, () => {})
+      let source!: SourceParams
+      let syncRuns = 0
+      const collection = createCollection(
+        persistedCollectionOptions<Row, string>({
+          id: `source-close`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: (params) => {
+              syncRuns++
+              source = params
+              params.markReady()
+            },
+          },
+          persistence: { adapter: followerAdapter, coordinator: follower },
+        }),
+      )
+      let firstReceipt: Promise<unknown> | undefined
+      let primaryFailure: unknown
+      let hasPrimaryFailure = false
+
+      try {
+        await collection.preload()
+        await flush(50)
+        expect(leader.isLeader(`source-close`)).toBe(true)
+        expect(follower.isLeader(`source-close`)).toBe(false)
+
+        vi.useFakeTimers()
+        let droppedSuccess = false
+        dropNextBroadcastMessage = (data) => {
+          const payload = (
+            data as { payload?: { type?: string; ok?: boolean } }
+          ).payload
+          if (payload?.type !== `rpc:applyCommittedTx:res`) return false
+          droppedSuccess = payload.ok === true
+          return true
+        }
+
+        source.begin()
+        source.write({
+          type: `insert`,
+          value: { id: `first`, title: `before close` },
+        })
+        firstReceipt = Promise.resolve(source.commit()).then(
+          () => ({ status: `fulfilled` as const }),
+          (error: unknown) => ({
+            status: `rejected` as const,
+            errorName: error instanceof Error ? error.name : String(error),
+          }),
+        )
+        await vi.advanceTimersByTimeAsync(0)
+        expect(droppedSuccess).toBe(true)
+        expect(leaderAdapter.appliedTxs).toHaveLength(1)
+
+        leader.dispose()
+        await vi.advanceTimersByTimeAsync(0)
+        expect(follower.isLeader(`source-close`)).toBe(true)
+        await vi.advanceTimersByTimeAsync(10_200)
+        const firstOutcome = await firstReceipt
+
+        let secondOutcome: {
+          status: `fulfilled` | `rejected`
+          errorName?: string
+        }
+        try {
+          source.begin()
+          source.write({
+            type: `insert`,
+            value: { id: `second`, title: `after close` },
+          })
+          await source.commit()
+          secondOutcome = { status: `fulfilled` }
+        } catch (error) {
+          secondOutcome = {
+            status: `rejected`,
+            errorName: error instanceof Error ? error.name : String(error),
+          }
+        }
+
+        // Reach witnesses above distinguish an RPC crossover from ordinary
+        // leadership transfer. The exact-ID answer must settle the wrapper's
+        // first receipt without cleanup or a second sync run.
+        const actual = {
+          firstOutcome,
+          collectionStatus: collection.status,
+          syncRuns,
+          secondOutcome,
+        }
+        expect(
+          actual,
+          `Source-close observation: ${JSON.stringify(actual)}`,
+        ).toMatchObject({
+          firstOutcome: { status: `fulfilled` },
+          collectionStatus: `ready`,
+          syncRuns: 1,
+          secondOutcome: { status: `fulfilled` },
+        })
+      } catch (error) {
+        hasPrimaryFailure = true
+        primaryFailure = error
+      }
+
+      dropNextBroadcastMessage = undefined
+      const cleanupFailures: Array<Error> = []
+      for (const cleanup of [
+        () => leader.dispose(),
+        () => releaseLeader(),
+        () => collection.cleanup(),
+        () => follower.dispose(),
+        () => firstReceipt?.catch(() => undefined),
+      ]) {
+        try {
+          await cleanup()
+        } catch (error) {
+          cleanupFailures.push(
+            error instanceof Error ? error : new Error(String(error)),
+          )
+        }
+      }
+      vi.useRealTimers()
+      if (hasPrimaryFailure && cleanupFailures.length > 0) {
+        throw new AggregateError(
+          cleanupFailures,
+          `Source-close oracle and cleanup both failed`,
+          { cause: primaryFailure },
+        )
+      }
+      if (hasPrimaryFailure) throw primaryFailure
+      expect(cleanupFailures).toEqual([])
+    })
+
+    /**
+     * Reconciliation and a later source commit share the writer lock. The
+     * replacement must advance its stream position before releasing that lock;
+     * otherwise the next commit can reuse the reconciled (term, seq) and be
+     * falsely acknowledged. The adapter log is the independent sequence
+     * reference, and both RPC receipts are checked after the queued write.
+     */
+    it(`reserves the reconciled stream position before a queued source write`, async () => {
+      const adapter = createStubAdapter()
+      const entered = createDeferred()
+      const release = createDeferred()
+      adapter.reconcileCommittedTx = async (collectionId, tx) => {
+        entered.resolve()
+        await release.promise
+        adapter.appliedTxs.push({ collectionId: storageId(collectionId), tx })
+        return {
+          kind: `applied-now`,
+          committed: {
+            term: tx.term,
+            seq: tx.seq,
+            rowVersion: tx.rowVersion,
+          },
+          latestRowVersion: tx.rowVersion,
+        }
+      }
+      const coordinator = createCoordinator(adapter)
+      const unsubscribe = coordinator.subscribe(`source-sequence`, () => {})
+      const transaction = (txId: string): PersistedTx => ({
+        txId,
+        term: 0,
+        seq: 0,
+        rowVersion: 0,
+        mutations: [],
+      })
+      try {
+        await flush(50)
+        expect(coordinator.isLeader(`source-sequence`)).toBe(true)
+        const first = coordinator.reconcileCommittedTx(
+          `source-sequence`,
+          transaction(`crossing`),
+          { latestRowVersion: 0, resetEpoch: 0 },
+        )
+        await entered.promise
+        const second = coordinator.requestApplyCommittedTx(
+          `source-sequence`,
+          transaction(`later`),
+        )
+        release.resolve()
+        expect(await first).toMatchObject({ ok: true, alreadyApplied: false })
+        expect(await second).toMatchObject({
+          ok: true,
+          seq: 2,
+          latestRowVersion: 2,
+        })
+        expect(
+          adapter.appliedTxs.map(({ tx }) => ({
+            id: tx.txId,
+            term: tx.term,
+            seq: tx.seq,
+            rowVersion: tx.rowVersion,
+          })),
+        ).toEqual([
+          { id: `crossing`, term: 1, seq: 1, rowVersion: 1 },
+          { id: `later`, term: 1, seq: 2, rowVersion: 2 },
+        ])
+      } finally {
+        release.resolve()
+        unsubscribe()
+        coordinator.dispose()
+      }
+    })
+
+    /**
+     * Each Web Lock election reserves a distinct durable term before its first
+     * heartbeat, including when the successor never heard the former owner.
+     * The independent ledger increments once per election. A passive follower
+     * may observe a successor and then a delayed former heartbeat; at that
+     * second delivery checkpoint its route must still name the successor.
+     * The controlled channel supplies delivery order, while the real
+     * coordinator supplies elections and route changes. This does not prove
+     * OPFS process scheduling or a real SQLite term reservation.
+     */
+    it.each([`known successor`, `cold successor`])(
+      `keeps a passive follower on the newer elected route after %s`,
+      async (successorHistory) => {
+        let durableTerm = 0
+        const reserveLeadershipTerm = async (
+          _collectionId: string,
+          observedTerm: number,
+        ) => ({
+          latestTerm: (durableTerm = Math.max(durableTerm, observedTerm) + 1),
+          latestSeq: 0,
+          latestRowVersion: 0,
+        })
+        const formerAdapter = Object.assign(createStubAdapter(), {
+          reserveLeadershipTerm,
+        })
+        const successorAdapter = Object.assign(createStubAdapter(), {
+          reserveLeadershipTerm,
+        })
+        const former = createCoordinator(formerAdapter)
+        const follower = createCoordinator()
+        const collectionId = `passive-delayed-heartbeat-${successorHistory}`
+        let successor: BrowserCollectionCoordinator | undefined
+        let unsubscribeSuccessor: (() => void) | undefined
+        const unsubscribeFormer = former.subscribe(collectionId, () => {})
+        let delayedHeartbeat: unknown
+        const followerState = () =>
+          (
+            follower as unknown as {
+              collections: Map<
+                string,
+                { leaderId: string | null; latestTerm: number }
+              >
+            }
+          ).collections.get(collectionId)
+        try {
+          await vi.waitFor(() =>
+            expect(former.isLeader(collectionId)).toBe(true),
+          )
+          await vi.waitFor(() =>
+            expect(followerState()?.leaderId).toBe(former.getNodeId()),
+          )
+          if (successorHistory === `known successor`) {
+            successor = createCoordinator(successorAdapter)
+            unsubscribeSuccessor = successor.subscribe(collectionId, () => {})
+            expect(successor.isLeader(collectionId)).toBe(false)
+          }
+          dropNextBroadcastMessage = (message) => {
+            const envelope = message as {
+              senderId?: string
+              payload?: { type?: string }
+            }
+            if (
+              envelope.senderId !== former.getNodeId() ||
+              envelope.payload?.type !== `leader:heartbeat`
+            ) {
+              return false
+            }
+            delayedHeartbeat = structuredClone(message)
+            return true
+          }
+          injectBroadcastMessage(`tsdb:coord:test-db`, {
+            v: 1,
+            dbName: `test-db`,
+            collectionId,
+            senderId: `route-probe`,
+            ts: Date.now(),
+            payload: { type: `leader:routeRequest` },
+          })
+          await vi.waitFor(() => expect(delayedHeartbeat).toBeDefined())
+          dropNextBroadcastMessage = undefined
+          former.dispose()
+          if (!successor) {
+            successor = createCoordinator(successorAdapter)
+            unsubscribeSuccessor = successor.subscribe(collectionId, () => {})
+          }
+          await vi.waitFor(() =>
+            expect(successor?.isLeader(collectionId)).toBe(true),
+          )
+          await vi.waitFor(() =>
+            expect(followerState()?.leaderId).toBe(successor?.getNodeId()),
+          )
+          injectBroadcastMessage(`tsdb:coord:test-db`, delayedHeartbeat)
+          await flush(0)
+          expect(followerState()).toMatchObject({
+            leaderId: successor.getNodeId(),
+            latestTerm: 2,
+          })
+          expect(
+            await follower.requestApplyCommittedTx(collectionId, {
+              txId: `after-delayed-heartbeat`,
+              term: 0,
+              seq: 0,
+              rowVersion: 0,
+              mutations: [],
+            }),
+          ).toMatchObject({ ok: true, term: 2, seq: 1 })
+          expect(successorAdapter.appliedTxs.map(({ tx }) => tx.txId)).toEqual([
+            `after-delayed-heartbeat`,
+          ])
+          expect(formerAdapter.appliedTxs).toEqual([])
+          expect(durableTerm).toBe(2)
+        } finally {
+          dropNextBroadcastMessage = undefined
+          unsubscribeFormer()
+          unsubscribeSuccessor?.()
+          former.dispose()
+          follower.dispose()
+          successor?.dispose()
+        }
+      },
+    )
+
+    /**
+     * A delayed former-owner heartbeat cannot reclaim the replacement Web
+     * Lock holder's route while exact-ID checking waits behind another writer.
+     * The receipt and later source write must use the replacement term.
+     */
+    it(`keeps the Web Lock owner's route after a delayed old-term heartbeat`, async () => {
+      const formerAdapter = createStubAdapter()
+      const successorAdapter = createStubAdapter()
+      successorAdapter.reconcileCommittedTx = vi.fn((collectionId, tx) => {
+        successorAdapter.appliedTxs.push({ collectionId, tx })
+        return Promise.resolve({
+          kind: `applied-now` as const,
+          committed: {
+            term: tx.term,
+            seq: tx.seq,
+            rowVersion: tx.rowVersion,
+          },
+          latestRowVersion: tx.rowVersion,
+        })
+      })
+      const former = createCoordinator(formerAdapter)
+      const successor = createCoordinator(successorAdapter)
+      const collectionId = `source-stale-heartbeat`
+      const unsubscribeFormer = former.subscribe(collectionId, () => {})
+      const unsubscribeSuccessor = successor.subscribe(collectionId, () => {})
+      const writerEntered = createDeferred()
+      const releaseWriter = createDeferred()
+      let blockingWriter: Promise<unknown> | undefined
+      let reconciliation: Promise<unknown> | undefined
+      let delayedHeartbeat: unknown
+      try {
+        await vi.waitFor(() => expect(former.isLeader(collectionId)).toBe(true))
+        expect(successor.isLeader(collectionId)).toBe(false)
+        dropNextBroadcastMessage = (message) => {
+          const envelope = message as {
+            senderId?: string
+            payload?: { type?: string }
+          }
+          if (
+            envelope.senderId !== former.getNodeId() ||
+            envelope.payload?.type !== `leader:heartbeat`
+          ) {
+            return false
+          }
+          delayedHeartbeat = structuredClone(message)
+          return true
+        }
+        injectBroadcastMessage(`tsdb:coord:test-db`, {
+          v: 1,
+          dbName: `test-db`,
+          collectionId,
+          senderId: `route-probe`,
+          ts: Date.now(),
+          payload: { type: `leader:routeRequest` },
+        })
+        await vi.waitFor(() =>
+          expect(delayedHeartbeat).toMatchObject({
+            senderId: former.getNodeId(),
+            payload: { type: `leader:heartbeat`, term: 1 },
+          }),
+        )
+        dropNextBroadcastMessage = undefined
+        former.dispose()
+        await vi.waitFor(() =>
+          expect(successor.isLeader(collectionId)).toBe(true),
+        )
+        const successorInternals = successor as unknown as {
+          collections: Map<
+            string,
+            { isLeader: boolean; leaderId: string | null; latestTerm: number }
+          >
+        }
+        expect(successorInternals.collections.get(collectionId)).toMatchObject({
+          isLeader: true,
+          leaderId: successor.getNodeId(),
+          latestTerm: 2,
+        })
+
+        blockingWriter = mockNavigatorLocks.request(
+          `tsdb:writer:test-db`,
+          async () => {
+            writerEntered.resolve()
+            await releaseWriter.promise
+          },
+        )
+        await writerEntered.promise
+        reconciliation = successor.reconcileCommittedTx(
+          collectionId,
+          { txId: `crossing`, term: 0, seq: 0, rowVersion: 0, mutations: [] },
+          { latestRowVersion: 0, resetEpoch: 0 },
+        )
+        await vi.waitFor(() =>
+          expect(lockQueues.get(`tsdb:writer:test-db`)).toHaveLength(1),
+        )
+        injectBroadcastMessage(`tsdb:coord:test-db`, delayedHeartbeat)
+        await flush(0)
+        releaseWriter.resolve()
+        await blockingWriter
+
+        expect(await reconciliation).toMatchObject({
+          ok: true,
+          alreadyApplied: false,
+          committed: { term: 2, seq: 1, rowVersion: 1 },
+        })
+        expect(successorAdapter.reconcileCommittedTx).toHaveBeenCalledTimes(1)
+        expect(
+          await successor.requestApplyCommittedTx(collectionId, {
+            txId: `later`,
+            term: 0,
+            seq: 0,
+            rowVersion: 0,
+            mutations: [],
+          }),
+        ).toMatchObject({ ok: true, term: 2, seq: 2, latestRowVersion: 2 })
+        expect(successorInternals.collections.get(collectionId)).toMatchObject({
+          isLeader: true,
+          leaderId: successor.getNodeId(),
+        })
+        expect(formerAdapter.appliedTxs).toEqual([])
+        expect(
+          successorAdapter.appliedTxs.map(({ tx }) => ({
+            id: tx.txId,
+            term: tx.term,
+            seq: tx.seq,
+            rowVersion: tx.rowVersion,
+          })),
+        ).toEqual([
+          { id: `crossing`, term: 2, seq: 1, rowVersion: 1 },
+          { id: `later`, term: 2, seq: 2, rowVersion: 2 },
+        ])
+      } finally {
+        dropNextBroadcastMessage = undefined
+        releaseWriter.resolve()
+        await blockingWriter
+        unsubscribeFormer()
+        unsubscribeSuccessor()
+        former.dispose()
+        successor.dispose()
+        await reconciliation?.catch(() => undefined)
+      }
+    })
+
+    /**
+     * The writer-lock callback must recheck the full owner identity before
+     * entering the adapter. This deliberately contradictory local state is an
+     * invariant witness, not a legal Browser route: a Web Lock holder normally
+     * names itself. It protects the same fail-closed boundary as ordinary
+     * apply when a future change accidentally corrupts leaderId.
+     */
+    it(`rejects reconciliation before adapter entry when owner identity conflicts`, async () => {
+      const adapter = createStubAdapter()
+      adapter.reconcileCommittedTx = vi.fn(async (_collectionId, tx) => ({
+        kind: `applied-now` as const,
+        committed: {
+          term: tx.term,
+          seq: tx.seq,
+          rowVersion: tx.rowVersion,
+        },
+        latestRowVersion: tx.rowVersion,
+      }))
+      const coordinator = createCoordinator(adapter)
+      const collectionId = `source-reconcile-owner-invariant`
+      const unsubscribe = coordinator.subscribe(collectionId, () => {})
+      const writerEntered = createDeferred()
+      const releaseWriter = createDeferred()
+      let blockingWriter: Promise<unknown> | undefined
+      let reconciliation: Promise<unknown> | undefined
+      try {
+        await vi.waitFor(() =>
+          expect(coordinator.isLeader(collectionId)).toBe(true),
+        )
+        blockingWriter = mockNavigatorLocks.request(
+          `tsdb:writer:test-db`,
+          async () => {
+            writerEntered.resolve()
+            await releaseWriter.promise
+          },
+        )
+        await writerEntered.promise
+        reconciliation = coordinator.reconcileCommittedTx(
+          collectionId,
+          { txId: `crossing`, term: 0, seq: 0, rowVersion: 0, mutations: [] },
+          { latestRowVersion: 0, resetEpoch: 0 },
+        )
+        await vi.waitFor(() =>
+          expect(lockQueues.get(`tsdb:writer:test-db`)).toHaveLength(1),
+        )
+        const state = (
+          coordinator as unknown as {
+            collections: Map<string, { leaderId: string | null }>
+          }
+        ).collections.get(collectionId)
+        if (!state) throw new Error(`missing coordinator state`)
+        state.leaderId = `contradictory-owner`
+        releaseWriter.resolve()
+        await blockingWriter
+        expect(await reconciliation).toMatchObject({
+          ok: false,
+          code: `NOT_LEADER`,
+        })
+        expect(adapter.reconcileCommittedTx).not.toHaveBeenCalled()
+      } finally {
+        releaseWriter.resolve()
+        await blockingWriter
+        await reconciliation?.catch(() => undefined)
+        unsubscribe()
+        coordinator.dispose()
+      }
+    })
+
+    /** A malformed wire request cannot turn missing proof into an ordinary write. */
+    it(`rejects a reconciliation RPC without its durable anchor`, async () => {
+      const adapter = createStubAdapter()
+      adapter.reconcileCommittedTx = vi.fn(async () => ({
+        kind: `unknown` as const,
+      }))
+      const coordinator = createCoordinator(adapter)
+      const unsubscribe = coordinator.subscribe(`source-anchor`, () => {})
+      let response: unknown
+      try {
+        await flush(50)
+        expect(coordinator.isLeader(`source-anchor`)).toBe(true)
+        observeBroadcastMessage = (message) => {
+          const payload = (message as { payload?: { type?: string } }).payload
+          if (payload?.type === `rpc:reconcileCommittedTx:res`) {
+            response = payload
+          }
+        }
+        injectBroadcastMessage(`tsdb:coord:test-db`, {
+          v: 1,
+          dbName: `test-db`,
+          collectionId: `source-anchor`,
+          senderId: `malformed-peer`,
+          ts: Date.now(),
+          payload: {
+            type: `rpc:reconcileCommittedTx:req`,
+            rpcId: `missing-anchor`,
+            tx: { txId: `unsafe`, mutations: [] },
+          },
+        })
+        await flush(50)
+        expect(response).toMatchObject({
+          rpcId: `missing-anchor`,
+          ok: false,
+          code: `UNDETERMINED`,
+        })
+        expect(adapter.reconcileCommittedTx).not.toHaveBeenCalled()
+        expect(adapter.appliedTxs).toEqual([])
+      } finally {
+        observeBroadcastMessage = undefined
+        unsubscribe()
+        coordinator.dispose()
+      }
+    })
+
+    /**
+     * Exact-ID reconciliation may follow lost transport answers and then a
+     * stale NOT_LEADER response. The same pending source receipt must survive
+     * both kinds of failure and reach the replacement route. This seam counts
+     * sends; it makes no wall-clock or real-network latency claim.
+     */
+    it(`reconciles after two lost answers and a stale owner rejection`, async () => {
+      const coordinator = createCoordinator()
+      const collectionId = `source-reconcile-work-bound`
+      const transportFailure = new Error(`lost reconciliation answer`)
+      const internals = coordinator as unknown as {
+        sendRPCOnce: (
+          collectionId: string,
+          request: { rpcId: string },
+        ) => Promise<unknown>
+      }
+      let sends = 0
+      internals.sendRPCOnce = vi.fn(async (_collectionId, request) => {
+        sends++
+        if (sends <= 2) throw transportFailure
+        return sends === 3
+          ? {
+              type: `rpc:reconcileCommittedTx:res`,
+              rpcId: request.rpcId,
+              ok: false,
+              code: `NOT_LEADER`,
+              error: `stale route`,
+            }
+          : {
+              type: `rpc:reconcileCommittedTx:res`,
+              rpcId: request.rpcId,
+              ok: true,
+              committed: { term: 2, seq: 1, rowVersion: 1 },
+            }
+      })
+      try {
+        injectBroadcastMessage(`tsdb:coord:test-db`, {
+          v: 1,
+          dbName: `test-db`,
+          collectionId,
+          senderId: `remote-owner`,
+          ts: Date.now(),
+          payload: {
+            type: `leader:heartbeat`,
+            leaderId: `remote-owner`,
+            term: 1,
+            latestSeq: 0,
+            latestRowVersion: 0,
+          },
+        })
+        await flush(0)
+        expect(
+          await coordinator.reconcileCommittedTx(
+            collectionId,
+            { txId: `crossing`, term: 0, seq: 0, rowVersion: 0, mutations: [] },
+            { latestRowVersion: 0, resetEpoch: 0 },
+          ),
+        ).toMatchObject({ ok: true, committed: { term: 2 } })
+        expect(sends).toBe(4)
+      } finally {
+        coordinator.dispose()
+      }
+    })
+
+    /** A NOT_LEADER response can race election before the durable check starts. */
+    it(`retries an unanswered source proof after a stale owner rejects its route`, async () => {
+      const oldOwner = createCoordinator(createStubAdapter())
+      const replacementAdapter = createStubAdapter()
+      replacementAdapter.reconcileCommittedTx = vi.fn(
+        async (collectionId, tx) => {
+          replacementAdapter.appliedTxs.push({ collectionId, tx })
+          return {
+            kind: `applied-now` as const,
+            committed: {
+              term: tx.term,
+              seq: tx.seq,
+              rowVersion: tx.rowVersion,
+            },
+            latestRowVersion: tx.rowVersion,
+          }
+        },
+      )
+      const requester = createCoordinator(replacementAdapter)
+      const releaseOld = oldOwner.subscribe(`source-route`, () => {})
+      const releaseRequester = requester.subscribe(`source-route`, () => {})
+      let rejectedRoute = false
+      try {
+        await flush(50)
+        expect(oldOwner.isLeader(`source-route`)).toBe(true)
+        dropNextBroadcastMessage = (message) => {
+          const payload = (
+            message as {
+              payload?: { type?: string; rpcId?: string }
+            }
+          ).payload
+          if (payload?.type !== `rpc:reconcileCommittedTx:req`) return false
+          rejectedRoute = true
+          queueMicrotask(() => {
+            injectBroadcastMessage(`tsdb:coord:test-db`, {
+              v: 1,
+              dbName: `test-db`,
+              collectionId: `source-route`,
+              senderId: oldOwner.getNodeId(),
+              ts: Date.now(),
+              payload: {
+                type: `rpc:reconcileCommittedTx:res`,
+                rpcId: payload.rpcId,
+                ok: false,
+                code: `NOT_LEADER`,
+                error: `the old owner released its route`,
+              },
+            })
+            oldOwner.dispose()
+          })
+          return true
+        }
+        const response = await requester.reconcileCommittedTx(
+          `source-route`,
+          { txId: `crossing`, term: 0, seq: 0, rowVersion: 0, mutations: [] },
+          { latestRowVersion: 0, resetEpoch: 0 },
+        )
+        expect(rejectedRoute).toBe(true)
+        expect(requester.isLeader(`source-route`)).toBe(true)
+        expect(response).toMatchObject({ ok: true, alreadyApplied: false })
+        expect(
+          replacementAdapter.appliedTxs.map(({ tx }) => ({
+            txId: tx.txId,
+            term: tx.term,
+            seq: tx.seq,
+            rowVersion: tx.rowVersion,
+          })),
+        ).toEqual([{ txId: `crossing`, term: 2, seq: 1, rowVersion: 1 }])
+      } finally {
+        dropNextBroadcastMessage = undefined
+        releaseOld()
+        releaseRequester()
+        oldOwner.dispose()
+        requester.dispose()
       }
     })
 
@@ -3840,7 +4856,10 @@ describe(`BrowserCollectionCoordinator`, () => {
       }
     })
 
-    it(`compacts a terminal same-stack Browser release after the real owner load finishes`, async () => {
+    // The owner can hold a load until unload cancels it. A terminal release
+    // must therefore reach unload before source settlement, even when release
+    // reenters from the owner's load callback on the same stack.
+    it(`compacts a terminal same-stack Browser release before the owner load finishes`, async () => {
       const coordinator = createCoordinator()
       coordinator.subscribe(`todos`, () => {})
       await flush(50)
@@ -3880,10 +4899,10 @@ describe(`BrowserCollectionCoordinator`, () => {
         const terminalRelease = release!.then(() => {
           releaseSettled = true
         })
-        await flush(0)
+        await vi.waitFor(() => expect(releaseSettled).toBe(true))
         expect({ events: [...events], releaseSettled }).toEqual({
-          events: [`load`],
-          releaseSettled: false,
+          events: [`load`, `unload`],
+          releaseSettled: true,
         })
 
         releaseLoad()
@@ -4114,6 +5133,74 @@ describe(`BrowserCollectionCoordinator`, () => {
         }
       },
     )
+
+    // A release may reach the old leader and unload its exact acquisition,
+    // while the reply is lost. The real RPC timer then expires after takeover;
+    // its retry must retire the outbound debt without replaying demand or
+    // unloading the old acquisition twice. The independent expectation is one
+    // old-owner unload, zero replacement-owner loads, and no outbound lease at
+    // the release settlement checkpoint.
+    it(`retries a timed-out old-leader release after takeover without replaying demand`, async () => {
+      const leader = createCoordinator()
+      const follower = createCoordinator()
+      const unsubscribeLeader = leader.subscribe(`todos`, () => {})
+      follower.subscribe(`todos`, () => {})
+      await flush(50)
+      const oldOwner = Object.assign(
+        vi.fn(() => Promise.resolve()),
+        {
+          unloadSubset: vi.fn(() => Promise.resolve()),
+          onError: vi.fn(),
+        },
+      )
+      const newOwner = Object.assign(
+        vi.fn(() => Promise.resolve()),
+        {
+          unloadSubset: vi.fn(() => Promise.resolve()),
+          onError: vi.fn(),
+        },
+      )
+      const unregisterOld = leader.registerRemoteSubsetOwner(`todos`, oldOwner)
+      const unregisterNew = follower.registerRemoteSubsetOwner(
+        `todos`,
+        newOwner,
+      )
+      const options: LoadSubsetOptions = { limit: 1 }
+      const internals = follower as unknown as {
+        outboundRemoteSubsetAcquisitions: Map<string, unknown>
+      }
+      let droppedResponses = 0
+
+      try {
+        await follower.requestEnsureRemoteSubset(`todos`, options)
+        dropNextBroadcastMessage = (data) => {
+          const type = (data as { payload?: { type?: string } }).payload?.type
+          if (type !== `rpc:releaseRemoteSubset:res`) return false
+          droppedResponses++
+          return true
+        }
+        const release = follower.requestReleaseRemoteSubset(`todos`, options)
+        void release.catch(() => undefined)
+        await vi.waitFor(() => expect(droppedResponses).toBe(1))
+        expect(oldOwner.unloadSubset).toHaveBeenCalledTimes(1)
+        expect(internals.outboundRemoteSubsetAcquisitions.size).toBe(1)
+
+        unsubscribeLeader()
+        await vi.waitFor(() => expect(follower.isLeader(`todos`)).toBe(true))
+        await release
+        expect(internals.outboundRemoteSubsetAcquisitions.size).toBe(0)
+        expect(oldOwner.unloadSubset).toHaveBeenCalledTimes(1)
+        expect(newOwner).not.toHaveBeenCalled()
+        expect(newOwner.unloadSubset).not.toHaveBeenCalled()
+      } finally {
+        dropNextBroadcastMessage = undefined
+        unsubscribeLeader()
+        unregisterOld()
+        unregisterNew()
+        leader.dispose()
+        follower.dispose()
+      }
+    }, 20_000)
 
     it(`keeps a Browser release tombstone when a transferred load rejects concurrently`, async () => {
       const coordinator = createCoordinator()
@@ -6082,9 +7169,13 @@ describe(`BrowserCollectionCoordinator`, () => {
         expressionSql: [`title`],
       })
 
-      expect(adapter.ensureIndex).toHaveBeenCalledWith(`todos`, `idx-1`, {
-        expressionSql: [`title`],
-      })
+      expect(adapter.ensureIndex).toHaveBeenCalledWith(
+        { kind: `eager`, collectionId: `todos` },
+        `idx-1`,
+        {
+          expressionSql: [`title`],
+        },
+      )
 
       coord.dispose()
     })
@@ -6126,10 +7217,14 @@ describe(`BrowserCollectionCoordinator`, () => {
       try {
         coord.subscribe(`todos`, () => {})
         await leadershipReadPromise
-        await Promise.resolve()
+        await vi.waitFor(() => expect(coord.isLeader(`todos`)).toBe(true))
 
         const spec = { expressionSql: [`title`] }
-        await adapter.ensureIndex(`todos`, `idx-once`, spec)
+        await adapter.ensureIndex(
+          { kind: `eager`, collectionId: `todos` },
+          `idx-once`,
+          spec,
+        )
         await coord.requestEnsurePersistedIndex(
           `todos`,
           `idx-once`,
@@ -6331,7 +7426,7 @@ describe(`BrowserCollectionCoordinator`, () => {
       try {
         coord.subscribe(`todos`, () => {})
         await leadershipReadPromise
-        await Promise.resolve()
+        await vi.waitFor(() => expect(coord.isLeader(`todos`)).toBe(true))
 
         await coord.requestEnsurePersistedIndex(
           `todos`,
@@ -6368,8 +7463,7 @@ describe(`BrowserCollectionCoordinator`, () => {
         leader.setAdapterForCollection(`todos`, todosAdapter)
         leader.subscribe(`todos`, () => {})
         await leadershipReadPromise
-        await Promise.resolve()
-        expect(leader.isLeader(`todos`)).toBe(true)
+        await vi.waitFor(() => expect(leader.isLeader(`todos`)).toBe(true))
         follower.subscribe(`todos`, () => {})
 
         // Resolving a later collection variant must not replace the adapter
@@ -6450,7 +7544,7 @@ describe(`BrowserCollectionCoordinator`, () => {
       try {
         coordinator.subscribe(`todos`, () => {})
         await leadershipReadPromise
-        await Promise.resolve()
+        await vi.waitFor(() => expect(coordinator.isLeader(`todos`)).toBe(true))
 
         await coordinator.requestEnsurePersistedIndex(`todos`, `idx-default`, {
           expressionSql: [`title`],
@@ -6465,7 +7559,7 @@ describe(`BrowserCollectionCoordinator`, () => {
         expect(defaultAdapter.ensureIndex).toHaveBeenCalledOnce()
         expect(replacementAdapter.ensureIndex).toHaveBeenCalledOnce()
         expect(replacementAdapter.ensureIndex).toHaveBeenCalledWith(
-          `todos`,
+          { kind: `eager`, collectionId: `todos` },
           `idx-replacement`,
           { expressionSql: [`title`] },
         )
@@ -6535,7 +7629,9 @@ describe(`BrowserCollectionCoordinator`, () => {
               }
               leader.subscribe(targetCollectionId, () => {})
               await leadershipReadPromise
-              await Promise.resolve()
+              await vi.waitFor(() =>
+                expect(leader.isLeader(targetCollectionId)).toBe(true),
+              )
               follower.subscribe(targetCollectionId, () => {})
 
               if (rpcKind === `index`) {

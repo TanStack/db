@@ -12,6 +12,7 @@ import {
 } from '../ir.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
 import { findIndexForField } from '../../utils/index-optimization.js'
+import { devBuild } from '../../error-message.js'
 import { compileExpression } from './evaluators.js'
 import { getSourceAliasesFromExpression } from './expressions.js'
 import { replaceAggregatesByRefs } from './group-by.js'
@@ -50,6 +51,8 @@ export type OrderByOptimizationInfo = {
    * plan, including when a custom local collation defines another order.
    */
   requiresFullSource: boolean
+  /** Whether the ordered source's installed rows are the whole source. */
+  sourceHoldsAllRows: boolean
   /** Source whose lazy demand must settle before a joined-filter page. */
   joinedFilterSourceId?: string
 }
@@ -205,7 +208,7 @@ export function processOrderBy(
         index = undefined
       }
 
-      if (!index) {
+      if (devBuild() && process.env.NODE_ENV !== `production` && !index) {
         const collectionId = followRefCollection.id
         const fieldPath = followRefResult.path.join(`.`)
         console.warn(
@@ -272,6 +275,8 @@ export function processOrderBy(
         index,
         orderBy: sourceOrderBy,
         joinedFilterSourceId,
+        sourceHoldsAllRows:
+          followRefResult.collection.config.syncMode !== `on-demand`,
         requiresFullSource:
           sourceOrderBy.some(
             ({ compareOptions }) => compareOptions.stringSort === `custom`,

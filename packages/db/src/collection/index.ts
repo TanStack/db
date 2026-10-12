@@ -1,10 +1,12 @@
 import { registerOpaqueHash } from '@tanstack/db-ivm'
 import { safeRandomUUID } from '../utils/uuid'
+import { collectionOptionsClaim } from '../collection-options.js'
 import {
   CollectionConfigurationError,
   CollectionRequiresConfigError,
   CollectionRequiresSyncConfigError,
 } from '../errors'
+import { codedMessage, devBuild } from '../error-message'
 import { validateCollectionConfig } from './validate-config'
 import { currentStateAsChanges } from './change-events'
 
@@ -347,20 +349,15 @@ export function createCollection(
     schema?: StandardSchemaV1
   },
 ): Collection<any, string | number, UtilsRecord, any, any> {
-  // The pure probe supports unbundled browsers. Keep the literal comparison
-  // outside it so production bundlers can erase the entire check and import.
-  if (
-    /* @__PURE__ */ (() => {
-      try {
-        return process.env.NODE_ENV !== `production`
-      } catch {
-        return false
-      }
-    })() &&
-    process.env.NODE_ENV !== `production`
-  ) {
+  // The literal comparison lets production bundlers erase the check and import.
+  if (devBuild() && process.env.NODE_ENV !== `production`) {
     validateCollectionConfig(options)
   }
+
+  const claimOptions = (
+    options as typeof options & { [collectionOptionsClaim]?: () => void }
+  )[collectionOptionsClaim]
+  claimOptions?.()
 
   const collection = new CollectionImpl<any, string | number, any, any, any>(
     options,
@@ -464,10 +461,12 @@ export class CollectionImpl<
 
     if (this.config.autoIndex === `eager` && !config.defaultIndexType) {
       throw new CollectionConfigurationError(
-        `autoIndex: 'eager' requires defaultIndexType to be set. ` +
-          `Import an index type and set it:\n` +
-          `  import { BasicIndex } from '@tanstack/db'\n` +
-          `  createCollection({ defaultIndexType: BasicIndex, autoIndex: 'eager', ... })`,
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `autoIndex: 'eager' requires defaultIndexType to be set. ` +
+              `Import an index type and set it:\n` +
+              `  import { BasicIndex } from '@tanstack/db'\n` +
+              `  createCollection({ defaultIndexType: BasicIndex, autoIndex: 'eager', ... })`
+          : codedMessage(206),
       )
     }
 
@@ -542,10 +541,11 @@ export class CollectionImpl<
   }
 
   /**
-   * Get the number of subscribers to the collection
+   * Get the number of subscribers that ask for this collection's data. A live
+   * query that has no subscriber or preload of its own does not count.
    */
   public get subscriberCount(): number {
-    return this._changes.activeSubscribersCount
+    return this._changes.acquiringSubscribersCount
   }
 
   /**
@@ -662,7 +662,38 @@ export class CollectionImpl<
    * Multiple concurrent calls will share the same promise
    */
   public preload(): Promise<void> {
-    return this._sync.preload()
+    // Preload asks for this Collection's data, so provider work may start.
+    return this.afterPreloadMark(() => this._sync.preload())
+  }
+
+  // Records a request for data, then continues. A source whose start throws
+  // on resumption rejects the returned promise instead of throwing.
+  private afterPreloadMark<T>(next: () => Promise<T>): Promise<T> {
+    try {
+      this._markPreload()
+    } catch (error) {
+      return Promise.reject(error)
+    }
+    return next()
+  }
+
+  /**
+   * @internal Record a preload without starting one, for a caller whose data
+   * request another promise answers, such as a DbClient stream for the same
+   * query. The request still counts: deferred acquisition may now resume.
+   */
+  public _markPreload(): void {
+    this._changes.markSubscriberOrPreload()
+  }
+
+  /** @internal Whether this Collection had a subscriber or a preload in this sync run. */
+  public _hasSubscriberOrPreload(): boolean {
+    return this._changes.hasSubscriberOrPreload()
+  }
+
+  /** @internal Listen for the first subscriber or preload in this sync run. */
+  public _onFirstSubscriberOrPreload(listener: () => void): () => void {
+    return this._changes.onFirstSubscriberOrPreload(listener)
   }
 
   /**
@@ -672,6 +703,15 @@ export class CollectionImpl<
    */
   public get base(): CollectionBase<TKey, TOutput> {
     return this._state.syncedData
+  }
+
+  /** @internal Applied metadata keys without a source row. */
+  public _syncedRowMetadataKeysOutsideBase(): Array<TKey> {
+    const keys: Array<TKey> = []
+    for (const key of this._state.syncedMetadata.keys()) {
+      if (!this._state.syncedData.has(key)) keys.push(key)
+    }
+    return keys
   }
 
   /**
@@ -1033,9 +1073,10 @@ export class CollectionImpl<
    * @returns Promise that resolves to a Map containing all items in the collection
    */
   stateWhenReady(): Promise<Map<TKey, WithVirtualProps<TOutput, TKey>>> {
-    // If we already have data or collection is ready, resolve immediately
+    // If we already have data or collection is ready, resolve immediately.
+    // This read still asks for data, so it counts as a preload.
     if (this.size > 0 || this.isReady()) {
-      return Promise.resolve(this.state)
+      return this.afterPreloadMark(() => Promise.resolve(this.state))
     }
 
     // Use preload to ensure the collection starts loading, then return the state
@@ -1058,9 +1099,10 @@ export class CollectionImpl<
    * @returns Promise that resolves to an Array containing all items in the collection
    */
   toArrayWhenReady(): Promise<Array<WithVirtualProps<TOutput, TKey>>> {
-    // If we already have data or collection is ready, resolve immediately
+    // If we already have data or collection is ready, resolve immediately.
+    // This read still asks for data, so it counts as a preload.
     if (this.size > 0 || this.isReady()) {
-      return Promise.resolve(this.toArray)
+      return this.afterPreloadMark(() => Promise.resolve(this.toArray))
     }
 
     // Use preload to ensure the collection starts loading, then return the array

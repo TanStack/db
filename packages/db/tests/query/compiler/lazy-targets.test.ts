@@ -14,19 +14,19 @@ describe(`lazy load target identity`, () => {
   const collection = { id: `items` } as CollectionImpl
 
   function targetsForAlias(alias: string) {
+    const source = new CollectionRef(collection, `inner`)
     const inner: QueryIR = {
-      from: new CollectionRef(collection, `inner`),
+      from: source,
     }
     const query: QueryIR = {
       from: new QueryRef(inner, `selected`),
     }
-    const optimizedSource = new CollectionRef(collection, `optimized`)
 
     return {
-      optimizedSource,
+      source,
       targets: getLazyLoadTargets(
         query,
-        optimizedSource,
+        source,
         `selected`,
         new PropRef([`selected`, `id`]),
         collection,
@@ -35,21 +35,29 @@ describe(`lazy load target identity`, () => {
     }
   }
 
-  it(`uses a fallback source when its lexical alias matches`, () => {
-    const { optimizedSource, targets } = targetsForAlias(`optimized`)
+  it(`resolves the lexical source even when alias remapping agrees`, () => {
+    const { source, targets } = targetsForAlias(`inner`)
 
     expect(targets).toEqual([
       {
-        sourceId: optimizedSource.sourceId,
-        alias: `optimized`,
+        sourceId: source.sourceId,
+        alias: `inner`,
         collection,
         path: [`id`],
       },
     ])
   })
 
-  it(`does not route demand through a fallback with another alias`, () => {
-    expect(targetsForAlias(`other`).targets).toEqual([])
+  it(`keeps the lexical source when alias remapping names another source`, () => {
+    const { source, targets } = targetsForAlias(`other`)
+    expect(targets).toEqual([
+      {
+        sourceId: source.sourceId,
+        alias: `inner`,
+        collection,
+        path: [`id`],
+      },
+    ])
   })
 
   it(`retains dotted and nested paths from one lazy source`, () => {

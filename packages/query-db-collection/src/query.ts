@@ -379,6 +379,7 @@ type AnyQuery = Query<any, any, any, any>
 let nextQueryCollectionFetchStart = 0
 const queryCollectionFetchActionStarts = new WeakMap<object, number>()
 const queryCollectionCurrentFetchStarts = new WeakMap<AnyQuery, number>()
+const queryCollectionSuccessfulFetchStarts = new WeakMap<AnyQuery, number>()
 const queryCollectionCacheOwners = new WeakMap<AnyQuery, Set<object>>()
 
 /**
@@ -844,6 +845,11 @@ export function queryCollectionOptions(
   let trackedCacheQueries: Set<AnyQuery>
   const logicalHashesByQuery = new WeakMap<AnyQuery, Set<string>>()
 
+  // A rotated persisted cache generation requires a successful fetch that
+  // started after rotation. Direct writes have no such fetch requirement.
+  let requiredCacheGenerationFetchStart: number | undefined
+  let scopedRecoveryEpoch = 0
+  let scopedRecoveryPending = false
   const trackCacheQuery = (query: AnyQuery, logicalHash?: string): void => {
     trackedCacheQueries.add(query)
     if (logicalHash !== undefined) {
@@ -943,6 +949,11 @@ export function queryCollectionOptions(
     for (const fetchStart of fetchStarts) recordsByStart.delete(fetchStart)
     if (recordsByStart.size === 0) fetchApplicationRecords.delete(query)
   }
+
+  const hasCurrentCacheGenerationFetch = (query: AnyQuery): boolean =>
+    requiredCacheGenerationFetchStart === undefined ||
+    (queryCollectionSuccessfulFetchStarts.get(query) ?? 0) >
+      requiredCacheGenerationFetchStart
 
   // hashedQueryKey → queryKey
   const hashToQueryKey = new Map<string, QueryKey>()
@@ -1088,6 +1099,8 @@ export function queryCollectionOptions(
     const syncSession = {}
     activeSyncSession = syncSession
     pendingResultApplications.clear()
+    requiredCacheGenerationFetchStart = undefined
+    scopedRecoveryPending = false
     // Rebuild on every start so caches created while sync was stopped are owned.
     trackedCacheQueries = new Set(
       queryClient.getQueryCache().findAll({ queryKey: baseKey }),
@@ -1098,6 +1111,22 @@ export function queryCollectionOptions(
       metadata === undefined
         ? null
         : validateSyncPersistenceCapability(metadata.persistence)
+    if (persistence?.startupCacheGenerationRotated === true) {
+      requiredCacheGenerationFetchStart = nextQueryCollectionFetchStart
+      for (const query of trackedCacheQueries) {
+        if (
+          query.state.fetchStatus !== `idle` &&
+          queryCollectionCurrentFetchStarts.get(query) === undefined
+        ) {
+          // This Query fetch began before our cache listener existed. It
+          // cannot establish the replacement persisted cache generation.
+          queryCollectionCurrentFetchStarts.set(
+            query,
+            requiredCacheGenerationFetchStart,
+          )
+        }
+      }
+    }
 
     // Track whether sync has been started
     let syncStarted = false
@@ -1455,6 +1484,7 @@ export function queryCollectionOptions(
         }
       >
     > => {
+      const recoveryEpoch = scopedRecoveryEpoch
       const knownRows = queryToRows.get(hashedQueryKey)
       if (
         knownRows &&
@@ -1503,6 +1533,9 @@ export function queryCollectionOptions(
         { value: any; owners: Set<string> }
       >()
       const scannedRows = await scanPersisted()
+      if (recoveryEpoch !== scopedRecoveryEpoch || scopedRecoveryPending) {
+        return baseline
+      }
 
       scannedRows.forEach((row) => {
         const rowMetadata = row.metadata as Record<string, unknown> | undefined
@@ -1539,7 +1572,11 @@ export function queryCollectionOptions(
         return
       }
 
+      const recoveryEpoch = scopedRecoveryEpoch
       const baseline = await loadPersistedBaselineForQuery(hashedQueryKey)
+      if (recoveryEpoch !== scopedRecoveryEpoch || scopedRecoveryPending) {
+        return
+      }
       const rowsToDelete: Array<any> = []
 
       begin()
@@ -1710,8 +1747,43 @@ export function queryCollectionOptions(
         const refetch = async () => {
           const waitsForDeferredApplication = !!collection.deferDataRefresh
           cancelPreWriteFetch(observer.getCurrentQuery(), hashedQueryKey)
-          await observer.refetch({ throwOnError: true })
-          if (waitsForDeferredApplication) {
+          for (;;) {
+            if (!active) return
+            try {
+              await observer.refetch({ throwOnError: true })
+            } catch (error) {
+              const fetchStart = queryCollectionCurrentFetchStarts.get(
+                observer.getCurrentQuery(),
+              )
+              if (
+                requiredCacheGenerationFetchStart === undefined ||
+                fetchStart === undefined ||
+                fetchStart > requiredCacheGenerationFetchStart
+              ) {
+                throw error
+              }
+              // An old in-flight fetch may fail after the cache rotates. Its
+              // failure cannot settle the replacement generation's demand.
+              continue
+            }
+            // A refetch may join an old in-flight Query fetch. Its result does
+            // not establish the new persisted cache generation, so start a
+            // fetch after that old work settles instead of waiting forever for
+            // a notification no one has arranged.
+            await new Promise<void>((resume) => queueMicrotask(resume))
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Cancellation can run while the refetch or microtask is pending.
+            if (!active) return
+            if (
+              requiredCacheGenerationFetchStart === undefined ||
+              hasCurrentCacheGenerationFetch(observer.getCurrentQuery())
+            ) {
+              break
+            }
+          }
+          if (
+            waitsForDeferredApplication ||
+            !hasCurrentCacheGenerationFetch(observer.getCurrentQuery())
+          ) {
             await waitForQueryReadyAndApplied(observer, hashedQueryKey)
             return
           }
@@ -1786,6 +1858,13 @@ export function queryCollectionOptions(
         const currentResult = observer.getCurrentResult()
 
         if (opts.refetch) {
+          return refetchAndWaitForApplication(observer, hashedQueryKey)
+        }
+
+        if (
+          requiredCacheGenerationFetchStart !== undefined &&
+          !hasCurrentCacheGenerationFetch(observer.getCurrentQuery())
+        ) {
           return refetchAndWaitForApplication(observer, hashedQueryKey)
         }
 
@@ -1877,6 +1956,12 @@ export function queryCollectionOptions(
         if (opts.refetch || unpatchedCacheVersions.has(localQuery)) {
           return refetchAndWaitForApplication(localObserver, hashedQueryKey)
         }
+        if (
+          requiredCacheGenerationFetchStart !== undefined &&
+          !hasCurrentCacheGenerationFetch(localObserver.getCurrentQuery())
+        ) {
+          return refetchAndWaitForApplication(localObserver, hashedQueryKey)
+        }
         if (currentResult.isError && !currentResult.isFetching) {
           return Promise.reject(currentResult.error)
         }
@@ -1887,6 +1972,16 @@ export function queryCollectionOptions(
           return waitForQueryReadyAndApplied(localObserver, hashedQueryKey)
         }
         return getResultApplicationSettlement(hashedQueryKey)
+      }
+
+      // A pending Query fetch may have started before a private startup cache
+      // rotation. Subscribe first, then join it and require another fetch if
+      // its result cannot establish the replacement generation.
+      if (requiredCacheGenerationFetchStart !== undefined) {
+        if (syncStarted || collection.subscriberCount > 0) {
+          subscribeToQuery(localObserver, hashedQueryKey)
+        }
+        return refetchAndWaitForApplication(localObserver, hashedQueryKey)
       }
 
       // Create a promise that resolves when the query result is first available
@@ -2345,21 +2440,58 @@ export function queryCollectionOptions(
     // eslint-disable-next-line no-shadow
     const makeQueryResultHandler = (queryKey: QueryKey) => {
       const hashedQueryKey = hashKey(queryKey)
+      const observerEpoch = scopedRecoveryEpoch
       const handleQueryResult: UpdateHandler = (result) => {
+        if (
+          activeSyncSession !== syncSession ||
+          scopedRecoveryPending ||
+          observerEpoch !== scopedRecoveryEpoch
+        ) {
+          return
+        }
         const observer = state.observers.get(hashedQueryKey)
         const observedQuery = observer?.getCurrentQuery()
         if (observer && observedQuery) {
           trackOwnedCacheQuery(observedQuery, hashedQueryKey)
         }
-        // The Collection already applied this direct write. The cache
-        // notification must not supersede a pending fetched result or clear
-        // a recorded fetch error.
+        // A direct cache write cannot establish fetched result authority or
+        // clear a recorded fetch error.
         if (writingDirectCache) return
-        if (observedQuery && result.isSuccess) {
-          const unpatchedVersion = unpatchedCacheVersions.get(observedQuery)
-          if (unpatchedVersion !== undefined) {
-            if (observedQuery.state.dataUpdateCount <= unpatchedVersion) return
-            unpatchedCacheVersions.delete(observedQuery)
+        if (observedQuery) {
+          const fetchStart =
+            queryCollectionCurrentFetchStarts.get(observedQuery)
+          if (
+            result.isError &&
+            requiredCacheGenerationFetchStart !== undefined &&
+            fetchStart !== undefined &&
+            fetchStart <= requiredCacheGenerationFetchStart
+          ) {
+            return
+          }
+          if (result.isSuccess) {
+            if (!hasCurrentCacheGenerationFetch(observedQuery)) {
+              // Observer callbacks precede the cache success event that
+              // records this fetch's persisted cache generation.
+              queueMicrotask(() => {
+                const currentObserver = state.observers.get(hashedQueryKey)
+                if (
+                  currentObserver &&
+                  currentObserver === observer &&
+                  hasCurrentCacheGenerationFetch(
+                    currentObserver.getCurrentQuery(),
+                  )
+                ) {
+                  handleQueryResult(currentObserver.getCurrentResult())
+                }
+              })
+              return
+            }
+            const unpatchedVersion = unpatchedCacheVersions.get(observedQuery)
+            if (unpatchedVersion !== undefined) {
+              if (observedQuery.state.dataUpdateCount <= unpatchedVersion)
+                return
+              unpatchedCacheVersions.delete(observedQuery)
+            }
           }
         }
         if (result.isSuccess && collection.deferDataRefresh) {
@@ -2841,6 +2973,7 @@ export function queryCollectionOptions(
               event.query,
             )
             if (fetchStart !== undefined) {
+              queryCollectionSuccessfulFetchStarts.set(event.query, fetchStart)
               captureFetchResult(event.query, fetchStart)
               // The observer result handler may attach its application promise
               // after the cache success action. Capture again in the microtask.
@@ -3015,6 +3148,43 @@ export function queryCollectionOptions(
       }
     }
 
+    const restartAfterScopedRecovery = async (
+      cacheRotated: Promise<void>,
+    ): Promise<void> => {
+      // This portion must run before the persistence wrapper yields for the
+      // rotation. Old Query callbacks and pending applications cannot write
+      // into the replacement persisted cache generation.
+      const recoveryEpoch = ++scopedRecoveryEpoch
+      scopedRecoveryPending = true
+      unsubscribeFromQueries()
+      for (const hashedQueryKey of state.observers.keys()) {
+        unsubscribePendingReadyListeners(hashedQueryKey)
+        invalidatePendingResultApplication(hashedQueryKey)
+      }
+
+      await cacheRotated
+      if (activeSyncSession !== syncSession) throw new CancelledError()
+      // An earlier rotation cannot reopen callbacks while a later rotation
+      // still owns the replacement cache boundary.
+      if (recoveryEpoch !== scopedRecoveryEpoch) return
+
+      // The wrapper has truncated the old public rows. Query's ownership and
+      // retention records describe those rows, not the new generation.
+      queryToRows.clear()
+      rowToQueries.clear()
+      retainedQueriesPendingRevalidation.clear()
+      directWriteKeyGenerations.clear()
+      persistedRetentionTimers.forEach((timer) => clearTimeout(timer))
+      persistedRetentionTimers.clear()
+      requiredCacheGenerationFetchStart = nextQueryCollectionFetchStart
+      scopedRecoveryPending = false
+      state.observers.forEach((observer, hashedQueryKey) => {
+        if ((queryRefCounts.get(hashedQueryKey) ?? 0) > 0) {
+          subscribeToQuery(observer, hashedQueryKey)
+        }
+      })
+    }
+
     // Create deduplicated loadSubset wrapper for non-eager modes
     // This prevents redundant snapshot requests when multiple concurrent
     // live queries request overlapping or subset predicates
@@ -3024,6 +3194,8 @@ export function queryCollectionOptions(
     return {
       loadSubset: loadSubsetDedupe,
       unloadSubset: syncMode === `eager` ? undefined : unloadSubset,
+      restartAfterScopedRecovery:
+        syncMode === `on-demand` ? restartAfterScopedRecovery : undefined,
       cleanup,
     }
   }
@@ -3061,7 +3233,9 @@ export function queryCollectionOptions(
     // on the same Query is applied explicitly below to avoid an extra fetch.
     ensureEagerSubscription()
     const syncSession = activeSyncSession
+    const recoveryEpoch = scopedRecoveryEpoch
     const refetchPromises = allQueryKeys.map(async (trackedQueryKey) => {
+      if (scopedRecoveryPending) throw new CancelledError()
       const hashedQueryKey = hashKey(trackedQueryKey)
       const queryObserver = state.observers.get(hashedQueryKey)
       if (!queryObserver) return undefined
@@ -3087,7 +3261,15 @@ export function queryCollectionOptions(
           )
         }
         result = await fetch
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Recovery can start while this fetch is pending.
+        if (scopedRecoveryPending || recoveryEpoch !== scopedRecoveryEpoch) {
+          throw new CancelledError()
+        }
       } catch (error) {
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Recovery can start while this fetch is pending.
+        if (scopedRecoveryPending || recoveryEpoch !== scopedRecoveryEpoch) {
+          throw new CancelledError()
+        }
         const currentResult = queryObserver.getCurrentResult()
         const appliedUnsubscribed = applyRefetchResultWhenUnsubscribed(
           hashedQueryKey,
@@ -3145,6 +3327,9 @@ export function queryCollectionOptions(
         }
         if (exceptionalSettlement?.type === `pending`) {
           const replacement = await exceptionalSettlement.promise
+          if (recoveryEpoch !== scopedRecoveryEpoch) {
+            throw new CancelledError()
+          }
           if (!replacement.isSuccess && opts?.throwOnError) {
             throw replacement.error
           }
@@ -3159,6 +3344,7 @@ export function queryCollectionOptions(
           await settlement.catch(() => undefined)
         }
       }
+      if (recoveryEpoch !== scopedRecoveryEpoch) throw new CancelledError()
       return causalResult
     })
 

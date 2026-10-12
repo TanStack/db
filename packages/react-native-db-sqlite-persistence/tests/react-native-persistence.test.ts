@@ -120,23 +120,26 @@ it(`reuses a pre-populated registry with exact stream and rows after close and r
         database: firstDatabase,
       }).adapter
 
-      await firstAdapter.applyCommittedTx(collectionId, {
-        txId: `tx-restart-1`,
-        term: 5,
-        seq: 8,
-        rowVersion: 13,
-        mutations: [
-          {
-            type: `insert`,
-            key: `1`,
-            value: {
-              id: `1`,
-              title: `Survives restart`,
-              score: 10,
+      await firstAdapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `tx-restart-1`,
+          term: 5,
+          seq: 8,
+          rowVersion: 13,
+          mutations: [
+            {
+              type: `insert`,
+              key: `1`,
+              value: {
+                id: `1`,
+                title: `Survives restart`,
+                score: 10,
+              },
             },
-          },
-        ],
-      })
+          ],
+        },
+      )
 
       const firstNativeDatabase = firstDatabase.getNativeDatabase?.()
       if (!firstNativeDatabase) {
@@ -158,9 +161,12 @@ it(`reuses a pre-populated registry with exact stream and rows after close and r
       if (!firstAdapter.getStreamPosition) {
         throw new Error(`restart oracle requires stream-position support`)
       }
-      expect(await firstAdapter.getStreamPosition(collectionId)).toEqual(
-        restartStreamPosition,
-      )
+      expect(
+        await firstAdapter.getStreamPosition({
+          kind: `eager`,
+          collectionId: collectionId,
+        }),
+      ).toEqual(restartStreamPosition)
 
       await closeFirstDatabase()
 
@@ -183,21 +189,27 @@ it(`reuses a pre-populated registry with exact stream and rows after close and r
       if (!secondAdapter.getStreamPosition) {
         throw new Error(`restart oracle requires stream-position support`)
       }
-      expect(await secondAdapter.getStreamPosition(collectionId)).toEqual(
-        restartStreamPosition,
-      )
-      await expect(secondAdapter.loadSubset(collectionId, {})).resolves.toEqual(
-        [
-          {
-            key: `1`,
-            value: {
-              id: `1`,
-              title: `Survives restart`,
-              score: 10,
-            },
+      expect(
+        await secondAdapter.getStreamPosition({
+          kind: `eager`,
+          collectionId: collectionId,
+        }),
+      ).toEqual(restartStreamPosition)
+      await expect(
+        secondAdapter.loadSubset(
+          { kind: `eager`, collectionId: collectionId },
+          {},
+        ),
+      ).resolves.toEqual([
+        {
+          key: `1`,
+          value: {
+            id: `1`,
+            title: `Survives restart`,
+            score: 10,
           },
-        ],
-      )
+        },
+      ])
       expect(
         secondNativeDatabase.prepare(collectionRegistryQuery).all(collectionId),
       ).toEqual(registryBeforeRestart)
@@ -216,23 +228,26 @@ it(`shared react-native api persists across expo-style restart`, async () => {
   })
   const firstAdapter = firstPersistence.adapter
 
-  await firstAdapter.applyCommittedTx(collectionId, {
-    txId: `tx-restart-expo-1`,
-    term: 1,
-    seq: 1,
-    rowVersion: 1,
-    mutations: [
-      {
-        type: `insert`,
-        key: `1`,
-        value: {
-          id: `1`,
-          title: `Expo survives restart`,
-          score: 10,
+  await firstAdapter.applyCommittedTx(
+    { kind: `eager`, collectionId: collectionId },
+    {
+      txId: `tx-restart-expo-1`,
+      term: 1,
+      seq: 1,
+      rowVersion: 1,
+      mutations: [
+        {
+          type: `insert`,
+          key: `1`,
+          value: {
+            id: `1`,
+            title: `Expo survives restart`,
+            score: 10,
+          },
         },
-      },
-    ],
-  })
+      ],
+    },
+  )
   await Promise.resolve(firstDatabase.close())
 
   const secondDatabase = createOpSQLiteTestDatabase({ filename: dbPath })
@@ -242,7 +257,10 @@ it(`shared react-native api persists across expo-style restart`, async () => {
   })
   const secondAdapter = secondPersistence.adapter
 
-  const rows = await secondAdapter.loadSubset(collectionId, {})
+  const rows = await secondAdapter.loadSubset(
+    { kind: `eager`, collectionId: collectionId },
+    {},
+  )
   expect(rows).toEqual([
     {
       key: `1`,
@@ -269,26 +287,32 @@ it(`keeps all committed rows under rapid mutation bursts`, async () => {
   const burstSize = 50
   for (let index = 0; index < burstSize; index++) {
     const rowId = String(index + 1)
-    await adapter.applyCommittedTx(collectionId, {
-      txId: `tx-burst-${rowId}`,
-      term: 1,
-      seq: index + 1,
-      rowVersion: index + 1,
-      mutations: [
-        {
-          type: `insert`,
-          key: rowId,
-          value: {
-            id: rowId,
-            title: `Todo ${rowId}`,
-            score: index,
+    await adapter.applyCommittedTx(
+      { kind: `eager`, collectionId: collectionId },
+      {
+        txId: `tx-burst-${rowId}`,
+        term: 1,
+        seq: index + 1,
+        rowVersion: index + 1,
+        mutations: [
+          {
+            type: `insert`,
+            key: rowId,
+            value: {
+              id: rowId,
+              title: `Todo ${rowId}`,
+              score: index,
+            },
           },
-        },
-      ],
-    })
+        ],
+      },
+    )
   }
 
-  const rows = await adapter.loadSubset(collectionId, {})
+  const rows = await adapter.loadSubset(
+    { kind: `eager`, collectionId: collectionId },
+    {},
+  )
   expect(rows).toHaveLength(burstSize)
 })
 
@@ -305,25 +329,31 @@ it(`uses a single react-native api across runtime aliases`, async () => {
     database,
   })
 
-  await reactNativePersistence.adapter.applyCommittedTx(collectionId, {
-    txId: `tx-entrypoint-1`,
-    term: 1,
-    seq: 1,
-    rowVersion: 1,
-    mutations: [
-      {
-        type: `insert`,
-        key: `1`,
-        value: {
-          id: `1`,
-          title: `Entry point parity`,
-          score: 1,
+  await reactNativePersistence.adapter.applyCommittedTx(
+    { kind: `eager`, collectionId: collectionId },
+    {
+      txId: `tx-entrypoint-1`,
+      term: 1,
+      seq: 1,
+      rowVersion: 1,
+      mutations: [
+        {
+          type: `insert`,
+          key: `1`,
+          value: {
+            id: `1`,
+            title: `Entry point parity`,
+            score: 1,
+          },
         },
-      },
-    ],
-  })
+      ],
+    },
+  )
 
-  const rows = await sharedApiPersistence.adapter.loadSubset(collectionId, {})
+  const rows = await sharedApiPersistence.adapter.loadSubset(
+    { kind: `eager`, collectionId: collectionId },
+    {},
+  )
   expect(rows[0]?.value.title).toBe(`Entry point parity`)
 })
 
@@ -368,7 +398,10 @@ it(`resumes persisted sync after simulated background/foreground transitions`, a
   await postResumeInsert.isPersisted.promise
   expect(collection.get(`2`)?.title).toBe(`Post resume write`)
 
-  const persistedRows = await persistence.adapter.loadSubset(collectionId, {})
+  const persistedRows = await persistence.adapter.loadSubset(
+    { kind: `eager`, collectionId: collectionId },
+    {},
+  )
   expect(persistedRows).toEqual(
     expect.arrayContaining([
       expect.objectContaining({
@@ -422,7 +455,10 @@ it(`shared api resumes persisted sync in expo-style lifecycle`, async () => {
   await postResumeInsert.isPersisted.promise
   expect(collection.get(`2`)?.title).toBe(`Post resume write`)
 
-  const persistedRows = await persistence.adapter.loadSubset(collectionId, {})
+  const persistedRows = await persistence.adapter.loadSubset(
+    { kind: `eager`, collectionId: collectionId },
+    {},
+  )
   expect(persistedRows).toEqual(
     expect.arrayContaining([
       expect.objectContaining({

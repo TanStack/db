@@ -885,6 +885,15 @@ captured by the manual transaction. The collection's `onInsert`, `onUpdate`, and
 manual transaction's `mutationFn` is responsible for persisting
 `transaction.mutations`.
 
+If a `tx.mutate()` callback throws, that call's optimistic changes are removed
+before the error reaches the caller. Earlier successful `tx.mutate()` calls
+remain in the pending transaction. Collection operations can notify subscribers
+while the callback runs, so a subscriber may see a change followed by its
+restoration when a later operation throws.
+If a subscriber also throws during restoration, `mutate()` throws an
+`AggregateError` whose cause is the original callback error; it still restores
+every touched Collection.
+
 This makes manual transactions a good fit for draft-style workflows where local
 state should update immediately, but persistence should wait for a later user
 action such as Save or Blur. Each `tx.mutate()` call updates the optimistic
@@ -962,7 +971,7 @@ const tx = createTransaction({
     await api.saveDraft(draftData)
 
     // After API succeeds, accept and persist local collection mutations
-    formDraft.utils.acceptMutations(transaction)
+    await formDraft.utils.acceptMutations(transaction)
   },
 })
 
@@ -1009,7 +1018,7 @@ const tx = createTransaction({
     )
 
     // After server mutations succeed, accept local collection mutations
-    localSettings.utils.acceptMutations(transaction)
+    await localSettings.utils.acceptMutations(transaction)
   },
 })
 
@@ -1034,7 +1043,7 @@ await tx.commit()
 ```ts
 mutationFn: async ({ transaction }) => {
   await api.save(data)  // API call first
-  localData.utils.acceptMutations(transaction)  // Persist after success
+  await localData.utils.acceptMutations(transaction)  // Persist after success
 }
 ```
 
@@ -1044,7 +1053,7 @@ mutationFn: async ({ transaction }) => {
 **Before API call (for independent local state):**
 ```ts
 mutationFn: async ({ transaction }) => {
-  localData.utils.acceptMutations(transaction)  // Persist first
+  await localData.utils.acceptMutations(transaction)  // Persist first
   await api.save(data)  // Then API call
 }
 ```
@@ -1056,7 +1065,7 @@ Choose based on whether your local data should be independent of or coupled to r
 
 #### Best Practices
 
-- Always call `utils.acceptMutations()` for local collections in manual transactions
+- Always call `utils.acceptMutations()` for local collections in manual transactions. LocalStorage transaction settlement waits for its storage write even if the returned Promise is not awaited; await it when later work depends on the write
 - Call `acceptMutations` **after** API success if you want transactional consistency
 - Call `acceptMutations` **before** API calls if local state should persist regardless
 - Filter mutations by collection if you need to process them separately
@@ -1350,9 +1359,21 @@ const mutate = createPacedMutations<{ id: string; changes: Partial<Item> }>({
 mutate({ id: '123', changes: { name: 'New Name' } })
 ```
 
+A paced mutation's returned transaction is a receipt for strategy-owned
+persistence. Await `tx.when('settled')` to observe completion, or call
+`tx.rollback()` to cancel it. Calling `tx.commit()` throws immediately because
+it would bypass the strategy's timer and serialization. Use `createTransaction`
+for a workflow that needs manual commit control.
+
+Calls admitted into the same pending paced transaction settle together. If an
+`onMutate` callback calls the paced mutation function again and then throws,
+the shared transaction rolls back: both the nested call and any earlier call
+merged into it reject with that error. A later call starts a new transaction.
+
 ### Understanding Queues and Hook Instances
 
-**Each unique `usePacedMutations` hook call creates its own independent queue.** This is an important design decision that affects how you structure your mutations.
+Each `usePacedMutations` hook call creates its own transaction group. With a
+fresh strategy object, it also has its own timer or queue.
 
 If you have multiple components calling `usePacedMutations` separately, each will have its own isolated queue:
 
@@ -1422,14 +1443,20 @@ function EmailDraftEditor2({ draftId }: { draftId: string }) {
 }
 ```
 
-With this approach, all mutations from both components share the same debounce timer and queue, ensuring they're processed in the correct order with a single debounce implementation.
+With this approach, calls from both components can merge into one pending
+transaction and share its debounce timer.
+
+Two separate managers can instead reuse the same strategy object when they
+need one timing boundary but separate transactions. A shared debounce timer
+waits for quiet across both managers, then persists each pending transaction.
+A shared throttle spaces their starts, and a shared queue processes their
+transactions in queue order. Each returned transaction settles independently.
 
 **Key takeaways:**
 
-- Each `usePacedMutations()` call = unique queue
-- Each `createPacedMutations()` call = unique queue
-- To share a queue: create one instance and import it everywhere you need it
-- Shared queues ensure mutations from different places are ordered correctly
+- One manager shared across components lets calls merge into one pending transaction.
+- One strategy object shared across managers gives them one timing boundary while retaining separate transactions.
+- Separate strategy objects give managers independent timers or queues.
 
 ## Mutation Merging
 

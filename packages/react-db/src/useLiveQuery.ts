@@ -64,8 +64,13 @@ const suspenseCollectionsByClient = new WeakMap<
 function getSourceQualifiedSuspenseKey(
   preparedValue: unknown,
   queryHash: string,
+  client: DbClient | undefined,
 ): string {
-  const sourceIds = getPreparedSources(preparedValue).map(getSourceObjectToken)
+  const sourceIds = getPreparedSources(
+    preparedValue,
+    client,
+    `useLiveSuspenseQuery`,
+  ).map(getSourceObjectToken)
   if (sourceIds.length === 0) return queryHash
   return `${sourceIds.join(`,`)}:${queryHash}`
 }
@@ -870,7 +875,7 @@ function useLiveQueryImpl(
     queryHash && forSuspense && !inputIsCollection
       ? canReuseSuspenseKey
         ? instance.suspenseKey
-        : getSourceQualifiedSuspenseKey(preparedQueryValue, queryHash)
+        : getSourceQualifiedSuspenseKey(preparedQueryValue, queryHash, dbClient)
       : queryHash
 
   const suspenseCollections =
@@ -930,12 +935,17 @@ function useLiveQueryImpl(
             instance.deferredCollections,
           )
         }
+        if (!dbClient) {
+          getPreparedSources(preparedQueryValue, dbClient, `useLiveQuery`)
+        }
         instance.collection = resolveLiveQueryValue(preparedQueryValue, {
           gcTime: forSuspense
             ? DEFAULT_SUSPENSE_GC_TIME_MS
             : DEFAULT_GC_TIME_MS,
           // Hydration and Suspense key the live-query Collection by identity.
           pool: !forSuspense && !dbClient,
+          // Without a DbClient, Suspense starts it through a preload below.
+          startSync: !forSuspense || dbClient !== undefined,
         }) as SuspenseCollection | null
         if (suspenseCollections && suspenseKey && instance.collection) {
           const collection = instance.collection
@@ -1000,6 +1010,18 @@ function useLiveQueryImpl(
     })
   }
   const observer = instance.observer!
+  // A Suspense render asks for its data. Preloading starts the sync run, so a
+  // source that already holds the rows makes it ready before the snapshot is
+  // read instead of suspending once. useLiveSuspenseQuery surfaces failures.
+  // A DbClient defers source starts past render and owns its streamed query.
+  if (
+    forSuspense &&
+    !dbClient &&
+    (instance.collection?.status === `idle` ||
+      instance.collection?.status === `cleaned-up`)
+  ) {
+    observer.preloadForInitialRender().catch(() => {})
+  }
 
   // Stable subscribe bound to the current observer; the observer owns the
   // subscription, ready-race, and disposal.

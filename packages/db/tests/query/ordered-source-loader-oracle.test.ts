@@ -58,6 +58,8 @@ function createOrderByInfo(
     index: {} as NonNullable<OrderByOptimizationInfo[`index`]>,
     dataNeeded: () => 1,
     requiresFullSource: false,
+    // A finite provider, not an eager source: its rows are not all installed.
+    sourceHoldsAllRows: false,
     ...overrides,
   }
 }
@@ -769,6 +771,90 @@ describe(`OrderedSourceLoader`, () => {
             ? [`snapshot`, `snapshot`]
             : [`limited`, `snapshot`],
         )
+      } finally {
+        loader.dispose()
+      }
+    },
+  )
+
+  // An eager prefix repair settles synchronously only when its local read is
+  // bounded: one order term over an index. A second term or a missing index
+  // keeps the full local read, so that repair keeps its asynchronous
+  // settlement, as does every on-demand source.
+  it.each([
+    {
+      name: `one indexed term`,
+      terms: 1,
+      indexed: true,
+      eager: true,
+      sync: true,
+    },
+    {
+      name: `two indexed terms`,
+      terms: 2,
+      indexed: true,
+      eager: true,
+      sync: false,
+    },
+    { name: `no index`, terms: 1, indexed: false, eager: true, sync: false },
+    {
+      name: `an on-demand source`,
+      terms: 1,
+      indexed: true,
+      eager: false,
+      sync: false,
+    },
+  ])(
+    `settles an eager prefix repair synchronously only for a bounded read ($name)`,
+    async ({ terms, indexed, eager, sync }) => {
+      const requests: Array<{ method: string; options: RequestOptions }> = []
+      const request = (method: string, options: RequestOptions): void => {
+        requests.push({ method, options })
+        options.onLoadSubsetResult?.(true, options, () => {})
+      }
+      const subscription = {
+        setOrderByIndex: () => {},
+        readOrderedSnapshot: () => [{ value: { rank: 1 } }],
+        requestLimitedSnapshot: (options: RequestOptions) =>
+          request(`limited`, options),
+        requestSnapshot: (options: RequestOptions) =>
+          request(`snapshot`, options),
+      }
+      const base = createOrderByInfo()
+      const loader = new OrderedSourceLoader(
+        createOrderByInfo({
+          dataNeeded: () => 0,
+          sourceHoldsAllRows: eager,
+          ...(indexed ? {} : { index: undefined }),
+          orderBy:
+            terms === 2
+              ? [
+                  ...base.orderBy,
+                  {
+                    expression: new PropRef([`row`, `id`]),
+                    compareOptions: base.orderBy[0]!.compareOptions,
+                  },
+                ]
+              : base.orderBy,
+        }),
+        subscription as unknown as CollectionSubscription,
+        `row`,
+        undefined,
+        undefined,
+        () => 0,
+      )
+      try {
+        loader.start()
+        expect(pendingPromise(loader)).toBeUndefined()
+        loader.invalidateSourceOrdering()
+        requests.length = 0
+        loader.loadMore()
+        expect(requests[0]?.options.limit, `a prefix repair ran`).toBe(1)
+        expect(
+          pendingPromise(loader) === undefined,
+          `repair settled before loadMore returned`,
+        ).toBe(sync)
+        await pendingPromise(loader)
       } finally {
         loader.dispose()
       }

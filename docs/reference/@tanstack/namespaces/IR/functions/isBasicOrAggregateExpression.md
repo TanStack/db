@@ -7,7 +7,7 @@ title: isBasicOrAggregateExpression
 function isBasicOrAggregateExpression(value): value is BasicExpression<any> | Aggregate<any>;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:232](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L232)
+Defined in: [packages/db/src/query/ir.ts:256](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L256)
 
 Distinguish compiler expressions from user objects with IR-like fields.
 

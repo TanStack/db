@@ -267,6 +267,19 @@ function createUnknownCollectionError(collectionId) {
   return error
 }
 
+function requireAllowedTarget(target, collectionId) {
+  const addressedId =
+    target?.kind === `managed`
+      ? target.storageCollectionId
+      : target?.kind === `eager`
+        ? target.collectionId
+        : undefined
+  if (addressedId !== collectionId) {
+    throw createUnknownCollectionError(addressedId)
+  }
+  return target
+}
+
 function createMainPersistence(input, driver) {
   const adapter = createSQLiteCorePersistenceAdapter({
     driver,
@@ -285,41 +298,79 @@ function createMainPersistence(input, driver) {
   return {
     persistence: {
       adapter: {
-        loadSubset: (collectionId, options, ctx) => {
-          if (collectionId !== input.collectionId) {
-            throw createUnknownCollectionError(collectionId)
-          }
-          return adapter.loadSubset(collectionId, options, ctx)
+        loadSubset: (target, options, ctx) => {
+          return adapter.loadSubset(
+            requireAllowedTarget(target, input.collectionId),
+            options,
+            ctx,
+          )
         },
-        loadResumeSnapshot: (collectionId, ctx) => {
-          if (collectionId !== input.collectionId) {
-            throw createUnknownCollectionError(collectionId)
-          }
-          return adapter.loadResumeSnapshot(collectionId, ctx)
+        loadResumeSnapshot: (target, ctx) => {
+          return adapter.loadResumeSnapshot(
+            requireAllowedTarget(target, input.collectionId),
+            ctx,
+          )
         },
-        applyCommittedTx: (collectionId, tx) => {
-          if (collectionId !== input.collectionId) {
-            throw createUnknownCollectionError(collectionId)
-          }
-          return adapter.applyCommittedTx(collectionId, tx)
+        loadCollectionMetadata: (target, ctx) => {
+          return adapter.loadCollectionMetadata(
+            requireAllowedTarget(target, input.collectionId),
+            ctx,
+          )
         },
-        ensureIndex: (collectionId, signature, spec) => {
-          if (collectionId !== input.collectionId) {
-            throw createUnknownCollectionError(collectionId)
-          }
-          return adapter.ensureIndex(collectionId, signature, spec)
+        scanRows: (target, options, ctx) => {
+          return adapter.scanRows(
+            requireAllowedTarget(target, input.collectionId),
+            options,
+            ctx,
+          )
         },
-        markIndexRemoved: (collectionId, signature) => {
-          if (collectionId !== input.collectionId) {
-            throw createUnknownCollectionError(collectionId)
-          }
-          return adapter.markIndexRemoved?.(collectionId, signature)
+        applyCommittedTx: (target, tx) => {
+          return adapter.applyCommittedTx(
+            requireAllowedTarget(target, input.collectionId),
+            tx,
+          )
         },
-        pullSince: (collectionId, fromRowVersion) => {
-          if (collectionId !== input.collectionId) {
-            throw createUnknownCollectionError(collectionId)
-          }
-          return adapter.pullSince?.(collectionId, fromRowVersion)
+        reconcileCommittedTx: (target, tx, anchor) => {
+          return adapter.reconcileCommittedTx(
+            requireAllowedTarget(target, input.collectionId),
+            tx,
+            anchor,
+          )
+        },
+        ensureIndex: (target, signature, spec, ctx) => {
+          return adapter.ensureIndex(
+            requireAllowedTarget(target, input.collectionId),
+            signature,
+            spec,
+            ctx,
+          )
+        },
+        markIndexRemoved: (target, signature, ctx) => {
+          return adapter.markIndexRemoved?.(
+            requireAllowedTarget(target, input.collectionId),
+            signature,
+            ctx,
+          )
+        },
+        pullSince: (target, fromRowVersion, ctx) => {
+          return adapter.pullSince?.(
+            requireAllowedTarget(target, input.collectionId),
+            fromRowVersion,
+            ctx,
+          )
+        },
+        getStreamPosition: (target, ctx) => {
+          return adapter.getStreamPosition(
+            requireAllowedTarget(target, input.collectionId),
+            ctx,
+          )
+        },
+        reserveLeadershipTerm: (target, observedTerm, ctx) => {
+          return adapter.reserveLeadershipTerm(
+            requireAllowedTarget(target, input.collectionId),
+            observedTerm,
+            ctx,
+          )
         },
       },
     },

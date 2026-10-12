@@ -7,7 +7,7 @@ title: getStableQueryIRHash
 function getStableQueryIRHash(query): string;
 ```
 
-Defined in: [packages/db/src/query/ir-stable-identity.ts:66](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir-stable-identity.ts#L66)
+Defined in: [packages/db/src/query/ir-stable-identity.ts:60](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir-stable-identity.ts#L60)
 
 ## Parameters
 

@@ -65,22 +65,19 @@ Use `queryCollectionOptions` to fetch data into collections using TanStack Query
 
 ### Local Collections
 
-Local storage and in-memory collections are included with the framework packages:
+LocalStorage, LocalOnly, and IndexedDB Collections are included in `@tanstack/db` and the framework packages:
 
-- **LocalStorageCollection** - For persistent local data that syncs across browser tabs
-- **LocalOnlyCollection** - For temporary in-memory data and UI state
+- **LocalStorage Collection** - For persistent local data that syncs across browser tabs
+- **LocalOnly Collection** - For temporary in-memory data and UI state
+- **IndexedDB Collection** - For asynchronous browser persistence and structured values
 
-Both use `localStorageCollectionOptions` and `localOnlyCollectionOptions` respectively, available from your framework package (e.g., `@tanstack/react-db`).
+Use `localStorageCollectionOptions`, `localOnlyCollectionOptions`, or `indexedDBCollectionOptions` from `@tanstack/db` or your framework package (e.g., `@tanstack/react-db`).
 
 ### IndexedDB Collection
 
-For local browser data stored in IndexedDB:
+For local browser data stored in IndexedDB, install `@tanstack/db` or a framework package that re-exports it.
 
-```sh
-npm install @tanstack/indexeddb-db-collection
-```
-
-Use `createIndexedDB` to open a database, then `indexedDBCollectionOptions` to create Collections for its stores. The [IndexedDB Collection guide](./collections/indexeddb-collection.md) covers setup, mutations, cross-tab synchronization, and connection ownership.
+Use `createIndexedDB` to open a database, then `indexedDBCollectionOptions` to create Collections for its stores. The [IndexedDB Collection guide](./collections/indexed-db-collection.md) covers setup, mutations, cross-tab synchronization, and connection ownership.
 
 ### SQLite Persistence
 
