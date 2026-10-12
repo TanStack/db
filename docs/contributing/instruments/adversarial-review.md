@@ -15,10 +15,33 @@ levels; they are different questions, not a mandatory sequence:
 | Level       | Attack                                                                                                                                                                                         |
 | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Enforcement | Find a legal history or wrong output that the model, generator, driver, or recorder cannot distinguish. Can the intended production path remain unexercised while the test passes?             |
-| Formulation | Find an omitted precondition, excessive guarantee, wrong checkpoint, or ambiguous observation. Try a correct alternative implementation as well as a wrong one.                                |
+| Formulation | Find omitted premises, excessive guarantees, wrong checkpoints, ambiguous observations, or missing information. Can two legal histories indistinguishable to production require different promised results? Try a correct and a wrong implementation. |
 | Suitability | Question whether the promised behavior is desirable, safe, or conventional. Name the external contract, standard, user consequence, or engineering reason that makes the objection applicable. |
 | Composition | Find obligations that conflict, duplicate each other, or require a shared ordering or authority rule. Use the tension or restructuring card if that is the material uncertainty.               |
 | Concepts    | Question the chosen identity, state, ownership, or boundary distinctions. Describe the same case without relying on its current names and check what is lost or becomes visible.               |
+
+The attack level names what to challenge. Once evidence shows a problem, locate
+what needs repair separately:
+
+| Finding or question | Possible repair location |
+| --- | --- |
+| Production disagrees with an accepted law. | Algorithm or code. |
+| The reference predicts the wrong behavior. | Model or specification; a change to an accepted law needs its own authority. |
+| The promise requires information the path does not receive. | Provider, protocol, architecture, or an authorized decision about the promise. |
+| A wrong result passes the evaluation. | History grammar, production driver, recorder, or comparison. Correct a coverage claim if the case lies outside declared scope. |
+| Behavior satisfies the specification but fails the user's need. | Requirement and its suitability for the intended use. |
+
+These locations can overlap. Name the evidence for each before choosing a
+repair; an assertion change cannot resolve a code defect or supply missing
+information.
+
+For an information-sufficiency attack, keep the path-visible initial state and
+inputs identical through the claimed checkpoint. Test a nearby receiving path
+that supplies the missing distinction before that checkpoint. An accepted
+contract remains an obligation even if the current path lacks the information
+needed to meet it. A repair might supply a provider signal. Moving the promised
+checkpoint or narrowing the guarantee needs an authorized contract decision;
+changing an assertion supplies no data.
 
 For each material attack, name the broken claim and construct a small legal
 history or concrete failure scene. State the competing expected observations,

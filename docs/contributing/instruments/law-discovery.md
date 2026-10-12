@@ -31,17 +31,35 @@ lead, not evidence that one contract governs every item.
    condition such as cardinality, ordering, identity, authority, or observation
    time. Keep other conditions fixed where possible. Check the boundary is
    within the claimed domain.
-5. Describe the smallest independent model that can make those predictions.
+5. Check whether the proposed result is determined by the information available
+   to the responsible production path at the named checkpoint. Seek two legal
+   underlying histories with the same path-visible initial state and inputs
+   through that checkpoint, but incompatible required public observations. If
+   they exist, name the missing information or provider obligation; do not
+   silently narrow an accepted promise.
+6. Describe the smallest independent model that can make those predictions.
    For any proposed merge of model states, ask whether a legal next action can
    distinguish them. Map model abstractions to the project vocabulary.
 
+The information check concerns what production can receive. The model-state
+check concerns what the reference must remember. A model may know a source row
+that the production path has never received. For example, after a known top-ten
+row is deleted, two source datasets can require different replacement rows even
+though the client has received the same top ten and the same deletion.
+
 **Return:** the candidate law and status, its source, rival predictions, a
 concrete distinguishing witness, and the next experiment or unresolved decision.
+For an information gap, include the indistinguishable histories and the
+unresolved source, protocol, or scope decision.
 For a simple law, a short paragraph and a worked example suffice.
 
 **Control:** try a legal alternative implementation. Does the proposed law
 reject it only because its scheduling or representation differs? Also try a
-plausible wrong result: could the proposed observation distinguish it?
+plausible wrong result: could the proposed observation distinguish it? If an
+information gap is claimed, try a nearby path that supplies the missing input,
+such as a provider backfill. Check whether that input distinguishes the
+histories before the checkpoint; if it does, the original impossibility
+argument no longer applies to that path.
 
 **Distortion:** freezing an implementation accident into a law; treating a vivid
 edge case as representative; or overstating what is owed at an intermediate cut.
