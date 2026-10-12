@@ -4,6 +4,7 @@ import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
+import { valueOrderBy } from './collection-subscription-ordered-fixture.js'
 import {
   createLifecycleModel,
   deferralCleanupHistories,
@@ -15,7 +16,6 @@ import {
 import { oracleRandomParameters, readOracleRunConfig } from './oracle-config.js'
 import { flushPromises } from './utils.js'
 import type { SyncConfig } from '../src/types.js'
-import type { OrderBy } from '../src/query/ir.js'
 import type {
   DeferralLifecycleCommand,
   DemandName,
@@ -1499,12 +1499,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       const index = collection.createIndex((row) => row.value, {
         indexType: BTreeIndex,
       })
-      const orderBy: OrderBy = [
-        {
-          expression: new PropRef([`value`]),
-          compareOptions: { direction: `asc`, nulls: `first` },
-        },
-      ]
+      const orderBy = valueOrderBy()
       let inFirstCallback = false
       let nested = false
       const subscription = collection.subscribeChanges(
@@ -1563,6 +1558,8 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
         )
         expect(invalidChanges).toEqual([])
         expect([...visible].sort()).toEqual([...selected].sort())
+        // Only an ordered local selection establishes this adapter hint.
+        // An unordered full snapshot selects keys but has no last ordered key.
         expect(loads.at(-1)?.cursor?.lastKey).toBe(
           nextOrderedChoice?.id ?? orderedChoice?.id,
         )
@@ -1601,12 +1598,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     const index = collection.createIndex((row) => row.value, {
       indexType: BTreeIndex,
     })
-    const orderBy: OrderBy = [
-      {
-        expression: new PropRef([`value`]),
-        compareOptions: { direction: `asc`, nulls: `first` },
-      },
-    ]
+    const orderBy = valueOrderBy()
     const batches: Array<Array<string>> = []
     const visible = new Set<string>()
     const invalidChanges: Array<string> = []
@@ -1659,6 +1651,143 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       await collection.cleanup()
     }
   })
+
+  // A subscriber's callback has already published each inserted key, whether
+  // it filters source changes or passes them through. The model keeps source
+  // and public keys in plain sets. Source deletes remove public keys; source
+  // inserts add them. An ordered snapshot may choose only an absent public
+  // key. These legal histories cross callback insertion, deletion, reinsert,
+  // and local selection in every filtering mode and ordered index path. Each
+  // callback is an observation cut. Retained-key count checks the separate
+  // long-lived tracking cost after deletion.
+  const callbackSelectionHistories = [
+    {
+      name: `new-insert`,
+      actions: [{ type: `insert`, row: { id: `two`, value: 2 } }],
+    },
+    {
+      name: `delete-reinsert`,
+      actions: [
+        { type: `delete`, id: `one` },
+        { type: `insert`, row: { id: `one`, value: 1 } },
+        { type: `insert`, row: { id: `two`, value: 2 } },
+      ],
+    },
+  ] as const
+  it.each(
+    ([`filtered`, `full`, `skip`] as const).flatMap((mode) =>
+      ([false, true] as const).flatMap((withCursor) =>
+        callbackSelectionHistories.map((history) => ({
+          mode,
+          withCursor,
+          history,
+        })),
+      ),
+    ),
+  )(
+    `does not reselect callback rows after $history.name: $mode, cursor=$withCursor`,
+    async ({ mode, withCursor, history }) => {
+      let operations!: Parameters<SyncConfig<SnapshotRow, string>[`sync`]>[0]
+      const collection = createCollection<SnapshotRow, string>({
+        id: `snapshot-callback-selection-${mode}-${withCursor}`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (sync) => {
+            operations = sync
+            sync.begin()
+            sync.write({ type: `insert`, value: { id: `one`, value: 1 } })
+            sync.commit()
+            sync.markReady()
+            return { loadSubset: () => true, unloadSubset: () => {} }
+          },
+        },
+      })
+      const index = collection.createIndex((row) => row.value, {
+        indexType: BTreeIndex,
+      })
+      const orderBy = valueOrderBy()
+      const batches: Array<Array<string>> = []
+      const visible = new Set<string>()
+      const invalidChanges: Array<string> = []
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          const batch = changes.map(({ type, key }) => `${type}:${key}`)
+          for (const change of changes) {
+            if (change.type === `insert`) {
+              if (visible.has(String(change.key)))
+                invalidChanges.push(`duplicate insert:${change.key}`)
+              visible.add(String(change.key))
+            } else if (change.type === `delete`) {
+              if (!visible.delete(String(change.key)))
+                invalidChanges.push(`delete absent:${change.key}`)
+            }
+          }
+          if (batch.length > 0) batches.push(batch)
+        },
+        { includeInitialState: mode === `skip` ? false : undefined },
+      )
+      subscription.setOrderByIndex(index)
+      try {
+        if (mode === `full`) subscription.requestSnapshot()
+        else
+          subscription.requestSnapshot({
+            where: new Func(`eq`, [new PropRef([`id`]), new Value(`one`)]),
+          })
+        // The first snapshot selects the sole source row. From here the model
+        // folds source actions without reading subscription tracking state.
+        const expectedSource = new Map<string, SnapshotRow>([
+          [`one`, { id: `one`, value: 1 }],
+        ])
+        const expectedVisible = new Set(expectedSource.keys())
+        const expectedBatches = [[`insert:one`]]
+        expect(batches).toEqual(expectedBatches)
+        let retainedAfterDelete: number | undefined
+        for (const action of history.actions) {
+          operations.begin()
+          if (action.type === `delete`) {
+            expectedSource.delete(action.id)
+            expectedVisible.delete(action.id)
+            expectedBatches.push([`delete:${action.id}`])
+            operations.write({ type: `delete`, key: action.id })
+          } else {
+            expectedSource.set(action.row.id, action.row)
+            expectedVisible.add(action.row.id)
+            expectedBatches.push([`insert:${action.row.id}`])
+            operations.write({ type: `insert`, value: action.row })
+          }
+          await operations.commit()
+          expect(batches).toEqual(expectedBatches)
+          if (action.type === `delete`) {
+            retainedAfterDelete = (
+              subscription as unknown as { sentKeys: ReadonlySet<string> }
+            ).sentKeys.size
+          }
+        }
+        const nextOrdered = [...expectedSource.values()]
+          .sort((left, right) => left.value - right.value)
+          .find(({ id }) => !expectedVisible.has(id))
+        if (nextOrdered) {
+          expectedVisible.add(nextOrdered.id)
+          expectedBatches.push([`insert:${nextOrdered.id}`])
+        }
+        subscription.requestLimitedSnapshot({
+          orderBy,
+          limit: 1,
+          ...(withCursor ? { minValues: [1] } : {}),
+        })
+
+        expect.soft(batches).toEqual(expectedBatches)
+        expect.soft(invalidChanges).toEqual([])
+        expect([...visible].sort()).toEqual([...expectedVisible].sort())
+        if (retainedAfterDelete !== undefined)
+          expect.soft(retainedAfterDelete).toBe(0)
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
 
   it(`reconstructs every bounded deferral cleanup history`, () => {
     expect(deferralCleanupHistories).toHaveLength(32)

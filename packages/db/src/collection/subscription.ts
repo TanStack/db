@@ -1297,9 +1297,8 @@ export class CollectionSubscription
         (!this.sentKeys.has(change.key) && !knownRows.has(change.key)),
     )
 
-    // Reserve the selected keys before publication. The callback wrapper does
-    // not track keys for full-state or skip-filtering subscriptions, and a
-    // truncate replay can keep this snapshot private until later.
+    // Reserve the selected keys before publication. A truncate replay can keep
+    // this snapshot private, so callback tracking cannot reserve it yet.
     for (const change of filteredSnapshot) {
       this.sentKeys.add(change.key)
     }
@@ -1552,9 +1551,8 @@ export class CollectionSubscription
     // Use the current count as the offset for this load
     const currentOffset = this.limitedSnapshotRowCount
 
-    // During a direct truncate replay the rows go to the private buffer, so
-    // the callback wrapper does not record them; a repeated ordered snapshot
-    // must still continue after them.
+    // Reserve rows before publication. A direct truncate replay keeps them in
+    // the private replacement, but repeated ordered snapshots must continue.
     for (const change of changes) {
       this.sentKeys.add(change.key)
     }
@@ -1652,15 +1650,14 @@ export class CollectionSubscription
       return changes
     }
 
-    // A truncate's deletes must enter the private replacement even when
-    // callback changes for full-state or skip-filtering subscriptions did not
-    // update sentKeys. Filtering them would retain stale published rows.
+    // A former full-state subscription is reset before truncate deletes arrive.
+    // Pass even unreserved deletes into its private replacement so stale
+    // published rows do not survive the replay.
     const skipDeleteFilter = this.isBufferingForTruncate
 
-    // sentKeys covers snapshot selections and callback rows when filtering is
-    // active. Keys inserted earlier in this batch are tracked locally, so a
-    // row the where clause drops cannot advance pagination or later look like
-    // a duplicate insert.
+    // sentKeys covers snapshot selections and callback rows. Keys inserted
+    // earlier in this batch are tracked locally, so a row the where clause
+    // drops cannot advance pagination or later look like a duplicate insert.
     const insertedInBatch = new Set<string | number>()
     const newChanges = []
     for (const change of changes) {
@@ -1763,12 +1760,6 @@ export class CollectionSubscription
   }
 
   private trackSentKeys(changes: Array<ChangeMessage<any, string | number>>) {
-    if (this.loadedInitialState || this.skipFiltering) {
-      // These callbacks pass source changes through without key filtering.
-      // Snapshot methods still reserve their own selections for later ordered requests.
-      return
-    }
-
     for (const change of changes) {
       if (change.type === `delete`) {
         this.sentKeys.delete(change.key)
@@ -1777,10 +1768,10 @@ export class CollectionSubscription
       }
     }
 
-    // Keep the limited snapshot offset in sync with keys we've actually sent.
-    // This matters when loadSubset resolves asynchronously and requestLimitedSnapshot
-    // didn't have local rows to count yet.
-    if (this.orderByIndex) {
+    // Filtered callback rows advance the ordered offset. Pass-through callbacks
+    // can include rows outside that adapter window; they still reserve keys
+    // against duplicate local snapshots without advancing its offset.
+    if (this.orderByIndex && !this.loadedInitialState && !this.skipFiltering) {
       this.limitedSnapshotRowCount = Math.max(
         this.limitedSnapshotRowCount,
         this.sentKeys.size,

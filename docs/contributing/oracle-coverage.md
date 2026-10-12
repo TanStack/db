@@ -475,12 +475,19 @@ The following related oracles own distinct production paths or observation cuts:
   Bounded three-row histories now compare a subscription's selected keys with
   exact callback batches across full, explicit, filtered, and empty snapshots,
   two later ordered selections, both initial-state modes, and callback reentry.
-  A delete and reinsert checks that selection can reset. The replay owner checks
-  a filtered snapshot followed by an ordered selection during a pending direct
-  truncate replay, including a callback that reenters before the target receives
-  the source transaction. These checks reject the removed snapshot reservation
-  at the callback and adapter-cursor checkpoints. They do not cover arbitrary
-  rankings, provider pagination results, or compiled live-query windows.
+  A delete and reinsert checks that selection can reset. A 12-case callback
+  matrix also crosses new insertion and delete/reinsert with filtered,
+  full-state, and skip-filtering subscriptions, with and without a cursor. It
+  checks callback batches after each source commit and checks retained-key
+  count after deletion. The replay owner checks a filtered snapshot followed
+  by an ordered selection during a pending direct truncate replay, including
+  callback reentry before the target receives the source transaction. It also
+  settles a repeated ordered replay and compares public batches before and
+  after settlement. The [snapshot-selection review](oracle-reviews/2026-10-12-snapshot-selection-review.md)
+  records the original RED, reservation-removal and early-publication mutant
+  kills, and repaired GREEN at the callback and adapter-cursor checkpoints.
+  These owners do not cover arbitrary rankings, provider pagination results,
+  or compiled live-query windows.
 - The [pagination oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/pagination-oracle.property.test.ts)
   owns general ordered-window rows and publication. The
   [ordered-work oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/ordered-work-oracle.property.test.ts)
