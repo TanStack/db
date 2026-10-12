@@ -4835,7 +4835,15 @@ class PersistedCollectionRuntime<
     // A subscriber may reacquire reentrantly from the truncate commit.
     this.hydratedDemands.clear()
     this.resetSequence++
-    if (this.syncControls.begin && this.syncControls.commit) {
+    // Without demand, current public keys are the validation scope. Keep
+    // them until the durable read can correct or remove them.
+    const validateVisibleRowsOnly =
+      this.syncMode === `on-demand` && this.activeSubsets.size === 0
+    if (
+      !validateVisibleRowsOnly &&
+      this.syncControls.begin &&
+      this.syncControls.commit
+    ) {
       const applied = this.withInternalApply(() => {
         this.syncControls.begin?.()
         this.syncControls.truncate?.()
@@ -4845,7 +4853,11 @@ class PersistedCollectionRuntime<
     }
 
     if (lifecycleGeneration !== this.lifecycleGeneration) return
-    await this.reloadActiveSubsetsUnsafe(adapter, false, true)
+    await this.reloadActiveSubsetsUnsafe(
+      adapter,
+      false,
+      this.syncMode === `eager`,
+    )
   }
 
   private async invalidateFromCommittedTxUnsafe(

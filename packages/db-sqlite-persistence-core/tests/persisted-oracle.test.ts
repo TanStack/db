@@ -14869,7 +14869,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   // immediately. The notice may not add unrelated durable rows. This history
   // checks both full-reload cuts and the later demand's public Collection and
   // adapter-call boundaries.
-  // Reset has a separate baseline contract.
+  // The reset history below applies the same demand law at a new cache epoch.
   it(`validates visible rows on a no-demand full reload without adding stored rows`, async () => {
     const stored = { id: `stored`, title: `Durable row` }
     const retained = { id: `retained`, title: `Still durable` }
@@ -14982,6 +14982,102 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       )
     }
   })
+
+  // A reset changes the durable cache epoch, not the Collection's demand.
+  // The independent snapshot rule permits only keys already public when no
+  // subset is retained: validate them against the new durable state, and add
+  // no unrelated key. These controlled histories enter through the reset
+  // notification and compare the public snapshot after its hydration scope
+  // settles. They cover empty, changed, and deleted visible-key scopes, not
+  // native-host notification delivery.
+  it.each([`empty`, `updated`, `deleted`] as const)(
+    `keeps a no-demand reset scoped to previously visible rows (%s)`,
+    async (history) => {
+      const visible = { id: `visible`, title: `Old row` }
+      const unrelated = { id: `unrelated`, title: `Stored only` }
+      const adapter = createRecordingAdapter(
+        history === `empty` ? [unrelated] : [visible],
+      )
+      const coordinator = createCoordinatorHarness()
+      const collectionId = `reset-visible-scope-${history}`
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: collectionId,
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: ({ markReady }) => {
+              markReady()
+              return { loadSubset: () => true }
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      )
+      let hasPrimaryFailure = false
+      try {
+        collection.startSyncImmediate()
+        await atPersistedOracleCheckpoint(
+          collection.stateWhenReady(),
+          `reset visible scope ready`,
+        )
+        if (history !== `empty`) {
+          const demand = {}
+          await collection._sync.loadSubset(demand)
+          collection._sync.unloadSubset(demand)
+        }
+        expect(collection.has(visible.id)).toBe(history !== `empty`)
+
+        if (history === `updated`) {
+          adapter.rows.set(visible.id, { ...visible, title: `New row` })
+        } else if (history === `deleted`) {
+          adapter.rows.delete(visible.id)
+        }
+        adapter.rows.set(unrelated.id, unrelated)
+
+        const resetSettled = createEventGate()
+        adapter.runInHydrationScope = async (task) => {
+          const result = await task(adapter)
+          resetSettled.resolve()
+          return result
+        }
+        const subsetReads = adapter.loadSubsetCalls.length
+        coordinator.emit(
+          { type: `collection:reset`, schemaVersion: 1, resetEpoch: 1 },
+          undefined,
+          collectionId,
+        )
+        await atPersistedOracleCheckpoint(
+          resetSettled.promise,
+          `reset visible scope published`,
+        )
+        expect({
+          publicRows: new Map(
+            Array.from(collection.values(), (row) => [
+              row.id,
+              stripVirtualProps(row),
+            ]),
+          ),
+          subsetReads: adapter.loadSubsetCalls.length,
+        }).toEqual({
+          publicRows: new Map(
+            history === `updated`
+              ? [[visible.id, { ...visible, title: `New row` }]]
+              : [],
+          ),
+          subsetReads,
+        })
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        await cleanupPersistedOracle(
+          [() => collection.cleanup()],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
 
   // A DbClient-hydrated row is already public but has not been confirmed by
   // the source. A complete persisted read can validate source-owned public
@@ -15500,7 +15596,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   // on-demand Collections also acquire a subset. A full reload with no demand
   // validates already public rows against durable state without publishing
   // unrelated stored rows. It preserves source transactions already accepted
-  // into the public Collection. Reset retains its separate baseline reread.
+  // into the public Collection. A reset has the same demand scope: with no
+  // active subset it validates already public keys without adding other rows.
   // The controlled coordinator does not prove cross-tab transport delivery.
   it.each(
     (
@@ -15607,8 +15704,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           : truncateReplay === `before`
             ? [`replacement`, `network`]
             : [`network`, `replacement`]
-      const noDemandFullReload =
-        syncMode === `on-demand` && route === `full-reload`
+      const noDemandRead = syncMode === `on-demand` && route !== `subset`
 
       // Independent snapshot algebra: a later replacement discards everything
       // before it. Otherwise the baseline survives only when there is no
@@ -15625,7 +15721,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
               ...(operation === `delete` ? [] : [networkRow]),
             ]
       const expectedPublicRows =
-        noDemandFullReload && truncateReplay === `none`
+        noDemandRead && truncateReplay === `none`
           ? [gateRow, ...(operation === `delete` ? [] : [networkRow])]
           : expectedRows
       const expectedMetadata = new Map<string, unknown>([
@@ -15748,13 +15844,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
             status: `fulfilled`,
             value: undefined,
           })),
-          trace: [
-            ...(noDemandFullReload ? [] : [`persisted read`]),
-            ...sourceSteps,
-          ],
-          readRows: noDemandFullReload
-            ? []
-            : [[storedRow, storedOnly, gateRow]],
+          trace: [...(noDemandRead ? [] : [`persisted read`]), ...sourceSteps],
+          readRows: noDemandRead ? [] : [[storedRow, storedOnly, gateRow]],
           status: `ready`,
           publicRows: new Map(expectedPublicRows.map((row) => [row.id, row])),
           durableRows: new Map(expectedRows.map((row) => [row.id, row])),
@@ -23372,7 +23463,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         expect(collection.get(`fresh`)).toBeUndefined()
         expect(publishedFreshTitles).toEqual([])
         releaseMutation.resolve()
-        await atPersistedOracleCheckpoint(
+        await atPersistedOracleCheckpoint<unknown>(
           mutation.isPersisted.promise,
           `optimistic publication released`,
         )

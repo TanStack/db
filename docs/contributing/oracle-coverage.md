@@ -928,9 +928,15 @@ validate visible keys remains O(table) per notice; there is no O(visible) read
 budget. A keyed atomic snapshot would need an adapter contract and receiving
 witness before that work bound can be claimed.
 
-Schema reset still restores an unconstrained baseline to preserve the existing
-accepted-source precedence contract. Avoiding that broad reset read requires a
-separate authority decision and history model.
+The user chose demand-scoped schema-reset publication for on-demand
+Collections. With no active subset, reset validates only already public keys
+against durable rows; an empty public Collection remains empty, and a changed
+or deleted visible row is corrected. Eager reset still restores its full
+baseline. Eighteen source-precedence histories cross on-demand reset with
+insert/update/delete, source truncate replay, and queued or serial reads;
+three focused reset histories distinguish empty, changed, and deleted visible
+scopes. They do not establish host notification delivery or a keyed SQLite
+read budget. The visible-key validation may read the full durable table.
 
 A controlled term-jump history recovers a missed row; a position-only
 certification history shows that observing a durable version
