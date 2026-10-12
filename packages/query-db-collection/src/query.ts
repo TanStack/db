@@ -2280,8 +2280,8 @@ export function queryCollectionOptions(
       ) {
         // A complete later result settles ownerless direct rows in its scope.
         // A window or cursor cannot prove omission outside the returned page.
-        const scope =
-          state.observers.get(hashedQueryKey)?.options.meta?.loadSubsetOptions
+        const scope = state.observers.get(hashedQueryKey)?.options.meta
+          ?.loadSubsetOptions
         if (
           scope &&
           scope.limit === undefined &&
