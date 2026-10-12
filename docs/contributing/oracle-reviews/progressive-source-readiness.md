@@ -161,6 +161,55 @@ in Electric that the new readiness rule exposed:
   that pin the complete-resume contract, and was narrowed to resets only.
   The resumed-stream phase is the neighboring witness.
 
+## High-effort review round
+
+A second `/code-review` pass (head `2812be07f`) made ten findings. Outcomes:
+
+- **Electric progressive loads now wait on the established snapshot.** The
+  separate reset waiter resolved on any abort, leaked its listener, and did
+  not follow the swap's applied receipt. Progressive streams now reuse the
+  `fullSnapshotReady` deferred. A must-refetch renews it, the up-to-date
+  commit resolves it with its receipt, a stream abort rejects it, and a
+  complete resume starts it resolved. The listener and abort findings are
+  fixed by removing that code path. For the receipt window, neither a
+  persisting transaction nor a held durable write made the swap's row
+  invisible after up-to-date. The repair covers that window by construction,
+  and the persisted test asserts the law ("ready implies the row is visible").
+  A witness that reaches the window is still missing.
+- **Refuted: early release of the Effect's hold.** An initial load's result
+  rejects only on cleanup, which disposes the Effect first (law 14), on demand
+  retirement, or on unsubscribe. Re-acquisition after detachment forwards the
+  replay's completion.
+- **Law wording.** The law said "every source that serves no subset demand",
+  but the code checks for eager sources. The law now names eager sources.
+- **Model independence.** Model D's mode rule mirrors production's
+  classification. Each on-demand cell now compares its consumer with a
+  metamorphic twin over a source that is ready from its start. Under the
+  original rule, the twin is ready while the lagging consumer is not, so the
+  twin alone rejects that design.
+- **Naming and duplication.** The Effect's source check is now
+  `sourcesPermitInitialReadiness`, and both Effect holds share one replacement
+  handoff while keeping their own failure policies.
+- **Open design decision.** A progressive source drops txids until its full
+  sync. A mutation on a ready progressive query can therefore wait for that
+  sync in `awaitTxId`. `useLiveQuery` already rendered rows in this window
+  before this change; Suspense now does too.
+
+## Predicted neighbors
+
+The law predicts behavior for other readiness consumers. Each prediction now
+has a witness that fails on the original rule:
+
+- `queryOnce` resolves when the subset settles (Model D's `query-once` lane:
+  the original rule fails 4 cells).
+- A live-query observer hands a hydration seed off at subset settlement
+  (`live-query-observer.test.ts`).
+- Network-first initial rendering cannot combine with an on-demand source.
+  The persisted-readiness oracle rejects that configuration, so the new rule
+  cannot bypass the network-first gate.
+- A ready progressive query's rows update only at the full sync's swap
+  (`electric-live-query.test.ts`, a pinned limit).
+
 ## Adapter audit
 
 The author checked when each on-demand adapter calls `markReady()` compared

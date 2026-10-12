@@ -13,6 +13,7 @@ import {
   createLiveQueryCollection,
   eq,
   materialize,
+  queryOnce,
   toArray,
 } from '../../src/query/index.js'
 import { runTrace } from '../trace-runner.js'
@@ -50,8 +51,8 @@ import type { Scheduler } from 'fast-check'
  *    a later demand or keep unrelated graph work private.
  * 6. Growth loads only uncovered keys. Churn replaces fragmented coverage only
  *    after the complete current union applies; failure preserves prior coverage.
- * 7. Source Collection readiness gates initial-query readiness only for a
- *    source that serves no subset demand. An on-demand source, including one
+ * 7. Source Collection readiness gates initial-query readiness only for an
+ *    eager source. An on-demand source, including one
  *    whose Collection readiness lags its settled subsets, gates it through
  *    demand alone. An Effect with `skipInitial` ends suppression at the same
  *    point.
@@ -2534,7 +2535,7 @@ async function expectProgressiveTraceMatches(
 }
 
 // Model D: source Collection readiness gates initial-query readiness only for
-// a source that serves no subset demand.
+// an eager source.
 //
 // An on-demand source serves a consumer through subset acquisitions, so its
 // settled demand is the evidence that the consumer's initial rows are present.
@@ -2545,9 +2546,17 @@ async function expectProgressiveTraceMatches(
 // is the only evidence. The architecture's initial-readiness law states this
 // rule; this lane is its executable owner.
 //
-// The law has two consumers. A live-query Collection becomes ready, and its
-// preload settles, at initial-query readiness. An Effect with `skipInitial`
+// The law has three consumers. A live-query Collection becomes ready, and its
+// preload settles, at initial-query readiness. A `queryOnce` read resolves at
+// the same point with the rows held then. An Effect with `skipInitial`
 // suppresses every delta until the same point and delivers every later delta.
+//
+// Each on-demand cell also runs a metamorphic twin: the same consumer over an
+// on-demand source that is ready from its start, receiving every other step.
+// The law says an on-demand source's Collection readiness never changes what
+// its consumer observes, so the two must agree at every checkpoint. The twin
+// does not use the model's eager/on-demand rule, so it still rejects a wrong
+// readiness design if that rule shares the mistake.
 //
 // The model keeps four facts for the lagging source: whether its initial row
 // was delivered, whether the consumer's acquisition settled, whether the
@@ -2606,7 +2615,7 @@ type LaggingSourceShape =
   | `join`
   | `eager-root`
   | `eager-default`
-type LaggingSourceConsumer = `live-query` | `effect`
+type LaggingSourceConsumer = `live-query` | `effect` | `query-once`
 type LaggingSourceStep =
   `deliver` | `settle` | `source-ready` | `change` | `rekey` | `truncate`
 
@@ -2690,6 +2699,7 @@ type LaggingSourceFacts = {
   posts: Array<{ id: number; userId: number }>
   writtenAfterReadiness: Array<number>
   exitsAfterReadiness: number
+  idsAtReadiness: Array<number> | undefined
 }
 
 function initiallyReady(mode: LaggingSourceMode, facts: LaggingSourceFacts) {
@@ -2700,6 +2710,14 @@ type LiveQueryObservation = {
   ready: boolean
   preloadSettled: boolean
   postIds: Array<number>
+  acquisitions: number
+}
+
+// A one-shot read waits for initial readiness, then returns the rows held at
+// that moment; later writes do not change its result. The query is unordered,
+// so the ids compare as a sorted set.
+type ReadObservation = {
+  resolvedIds: Array<number> | undefined
   acquisitions: number
 }
 
@@ -2735,6 +2753,16 @@ function expectedLiveQueryObservation(
           : facts.settled
             ? [Math.max(...heldIds)]
             : [],
+    acquisitions: mode === `on-demand` ? 1 : 0,
+  }
+}
+
+function expectedReadObservation(
+  mode: LaggingSourceMode,
+  facts: LaggingSourceFacts,
+): ReadObservation {
+  return {
+    resolvedIds: facts.idsAtReadiness,
     acquisitions: mode === `on-demand` ? 1 : 0,
   }
 }
@@ -2785,6 +2813,7 @@ type LaggingPosts = {
 function createLaggingPosts(
   mode: LaggingSourceMode,
   explicitMode: boolean,
+  readyAtStart = false,
 ): LaggingPosts {
   const acquisitions: Array<Deferred<void>> = []
   let sync:
@@ -2803,6 +2832,7 @@ function createLaggingPosts(
     sync: {
       sync: ({ begin, write, commit, markReady, truncate }) => {
         sync = { begin, write, commit, markReady, truncate }
+        if (readyAtStart) markReady()
         if (mode === `eager`) return undefined
         return {
           loadSubset: ({ signal }) => {
@@ -2925,14 +2955,11 @@ function rowPostIds(
   return [row.id as number]
 }
 
-type LaggingSourceContext = {
-  shape: LaggingSourceShape
-  mode: LaggingSourceMode
-  users: Collection<User> | undefined
-  rekeyUsers: (() => void) | undefined
-  posts: Collection<ProgressivePost>
+// One consumer of a lagging source: a live query with its preload, or a
+// `skipInitial` Effect with the deltas it reported.
+type LaggingSourceConsumerState = {
   source: LaggingPosts
-  facts: LaggingSourceFacts
+  resolvedIds: Array<number> | undefined
   live: ReturnType<typeof createLiveQueryCollection> | undefined
   preload: PreloadState
   effect: Effect | undefined
@@ -2940,16 +2967,73 @@ type LaggingSourceContext = {
   otherEvents: number
 }
 
+type LaggingSourceContext = {
+  shape: LaggingSourceShape
+  mode: LaggingSourceMode
+  users: Collection<User> | undefined
+  rekeyUsers: (() => void) | undefined
+  facts: LaggingSourceFacts
+  main: LaggingSourceConsumerState
+  // The metamorphic twin reads an on-demand source that is ready from its
+  // start and receives every other step. An on-demand source's Collection
+  // readiness must not change what its consumer observes, so the two
+  // consumers must agree at every checkpoint. The twin never consults the
+  // model's mode rule; it compares production with production.
+  twin: LaggingSourceConsumerState | undefined
+}
+
+function startLaggingSourceConsumer(
+  consumer: LaggingSourceConsumer,
+  shape: LaggingSourceShape,
+  source: LaggingPosts,
+  users: Collection<User> | undefined,
+): LaggingSourceConsumerState {
+  const state: LaggingSourceConsumerState = {
+    source,
+    resolvedIds: undefined,
+    live: undefined,
+    preload: { preloadSettled: false },
+    effect: undefined,
+    enteredPostIds: [],
+    otherEvents: 0,
+  }
+  const query = laggingSourceQuery(shape, source.collection, users)
+  if (consumer === `live-query`) {
+    state.live = createLiveQueryCollection(query)
+    void startPreload(state.live, state.preload)
+  } else if (consumer === `query-once`) {
+    void queryOnce(query).then((rows) => {
+      state.resolvedIds = (rows as Array<Record<string, unknown>>)
+        .flatMap((row) => rowPostIds(shape, row))
+        .sort((a, b) => a - b)
+    })
+  } else {
+    state.effect = createEffect({
+      query,
+      skipInitial: true,
+      onBatch: (events) => {
+        for (const event of events) {
+          if (event.type === `enter`)
+            state.enteredPostIds.push(...rowPostIds(shape, event.value))
+          else state.otherEvents += 1
+        }
+      },
+    })
+  }
+  return state
+}
+
 function applyLaggingSourceStep(
   step: LaggingSourceStep,
-  { shape, source, facts, rekeyUsers }: LaggingSourceContext,
+  { shape, main, twin, facts, rekeyUsers }: LaggingSourceContext,
 ): void {
+  const sources = [main.source, ...(twin ? [twin.source] : [])]
   if (step === `deliver` || step === `change`) {
     const post =
       step === `deliver`
         ? { id: INITIAL_POST_ID, userId: 2 }
         : { id: CHANGED_POST_ID, userId: facts.parentId }
-    source.write(post)
+    for (const source of sources) source.write(post)
     if (step === `deliver`) facts.delivered = true
     else facts.changed = true
     recordLaggingSourceWrite(shape, facts, post)
@@ -2958,15 +3042,26 @@ function applyLaggingSourceStep(
     facts.parentId = 3
     facts.disturbed = true
   } else if (step === `truncate`) {
-    source.truncate()
+    for (const source of sources) source.truncate()
     facts.posts = []
     facts.disturbed = true
   } else if (step === `settle`) {
-    for (const acquisition of source.acquisitions) acquisition.resolve()
+    for (const source of sources)
+      for (const acquisition of source.acquisitions) acquisition.resolve()
     facts.settled = true
   } else {
-    source.markReady()
+    // The twin's source has been ready since its start.
+    main.source.markReady()
     facts.sourceReady = true
+  }
+  if (
+    facts.idsAtReadiness === undefined &&
+    initiallyReady(LAGGING_SOURCE_SHAPES[shape], facts)
+  ) {
+    facts.idsAtReadiness = facts.posts
+      .filter(({ userId }) => userId === 2)
+      .map(({ id }) => id)
+      .sort((a, b) => a - b)
   }
 }
 
@@ -2977,7 +3072,6 @@ function createLaggingSourceDriver(
   const mode = LAGGING_SOURCE_SHAPES[shape]
   return {
     setup: () => {
-      const source = createLaggingPosts(mode, shape !== `eager-default`)
       const users =
         shape === `direct` ||
         shape === `find-one` ||
@@ -2991,8 +3085,6 @@ function createLaggingSourceDriver(
         mode,
         users: users?.collection,
         rekeyUsers: users?.rekey,
-        posts: source.collection,
-        source,
         facts: {
           delivered: false,
           changed: false,
@@ -3003,32 +3095,26 @@ function createLaggingSourceDriver(
           posts: [],
           writtenAfterReadiness: [],
           exitsAfterReadiness: 0,
+          idsAtReadiness: undefined,
         },
-        live: undefined,
-        preload: { preloadSettled: false },
-        effect: undefined,
-        enteredPostIds: [],
-        otherEvents: 0,
+        main: startLaggingSourceConsumer(
+          consumer,
+          shape,
+          createLaggingPosts(mode, shape !== `eager-default`),
+          users?.collection,
+        ),
+        twin:
+          mode === `on-demand`
+            ? startLaggingSourceConsumer(
+                consumer,
+                shape,
+                createLaggingPosts(mode, true, true),
+                users?.collection,
+              )
+            : undefined,
       }
     },
-    start: async (context) => {
-      const query = laggingSourceQuery(shape, context.posts, context.users)
-      if (consumer === `live-query`) {
-        context.live = createLiveQueryCollection(query)
-        void startPreload(context.live, context.preload)
-      } else {
-        context.effect = createEffect({
-          query,
-          skipInitial: true,
-          onBatch: (events) => {
-            for (const event of events) {
-              if (event.type === `enter`)
-                context.enteredPostIds.push(...rowPostIds(shape, event.value))
-              else context.otherEvents += 1
-            }
-          },
-        })
-      }
+    start: async () => {
       await flushPromises()
     },
     apply: async (step, context) => {
@@ -3036,24 +3122,36 @@ function createLaggingSourceDriver(
       await flushPromises()
       // An ordered window may issue continuation requests to reach its fixed
       // point. `settle` completes that whole chain without new rows.
+      const sources = [
+        context.main.source,
+        ...(context.twin ? [context.twin.source] : []),
+      ]
       while (
         step === `settle` &&
-        context.source.acquisitions.some(({ isPending }) => isPending())
+        sources.some((source) =>
+          source.acquisitions.some(({ isPending }) => isPending()),
+        )
       ) {
-        for (const acquisition of context.source.acquisitions)
-          acquisition.resolve()
+        for (const source of sources)
+          for (const acquisition of source.acquisitions) acquisition.resolve()
         await flushPromises()
       }
     },
-    cleanup: async ({ users, posts, live, effect, source, preload }) => {
-      for (const acquisition of source.acquisitions) acquisition.resolve()
-      await finishTemporalCleanup(undefined, [
-        () => live?.cleanup(),
-        () => (live ? finishPreload(preload) : undefined),
-        () => effect?.dispose(),
-        () => users?.cleanup(),
-        () => posts.cleanup(),
-      ])
+    cleanup: async ({ users, main, twin }) => {
+      const states = [main, ...(twin ? [twin] : [])]
+      for (const { source } of states)
+        for (const acquisition of source.acquisitions) acquisition.resolve()
+      await finishTemporalCleanup(
+        undefined,
+        states
+          .flatMap(({ live, effect, source, preload }) => [
+            () => live?.cleanup(),
+            () => (live ? finishPreload(preload) : undefined),
+            () => effect?.dispose(),
+            () => source.collection.cleanup(),
+          ])
+          .concat([() => users?.cleanup()]),
+      )
     },
   }
 }
@@ -3063,39 +3161,81 @@ function createLaggingSourceDriver(
 // Those cells record only that the consumer acquired.
 function observedAcquisitions(
   shape: LaggingSourceShape,
-  { source, facts }: LaggingSourceContext,
+  facts: LaggingSourceFacts,
+  source: LaggingPosts,
 ): number {
   const count = source.acquisitions.length
   return shape === `ordered` || facts.disturbed ? Math.min(count, 1) : count
 }
 
+function observeLaggingSourceConsumer(
+  consumer: LaggingSourceConsumer,
+  shape: LaggingSourceShape,
+  facts: LaggingSourceFacts,
+  state: LaggingSourceConsumerState,
+): LiveQueryObservation | EffectObservation | ReadObservation {
+  if (consumer === `query-once`)
+    return {
+      resolvedIds: state.resolvedIds,
+      acquisitions: observedAcquisitions(shape, facts, state.source),
+    }
+  return consumer === `live-query`
+    ? {
+        ready: state.live!.isReady(),
+        preloadSettled: state.preload.preloadSettled,
+        postIds: (
+          state.live!.toArray as Array<Record<string, unknown>>
+        ).flatMap((row) => rowPostIds(shape, row)),
+        acquisitions: observedAcquisitions(shape, facts, state.source),
+      }
+    : {
+        enteredPostIds: [...state.enteredPostIds],
+        otherEvents: state.otherEvents,
+        acquisitions: observedAcquisitions(shape, facts, state.source),
+      }
+}
+
+type LaggingSourceObservation =
+  LiveQueryObservation | EffectObservation | ReadObservation
+
+type LaggingSourceCheck = {
+  observation: LaggingSourceObservation
+  // Present only when the twin observed something else.
+  twinDisagreement: LaggingSourceObservation | undefined
+}
+
 function laggingSourceProjection(
   consumer: LaggingSourceConsumer,
   shape: LaggingSourceShape,
-): TraceProjection<
-  LaggingSourceContext,
-  LiveQueryObservation | EffectObservation
-> {
+): TraceProjection<LaggingSourceContext, LaggingSourceCheck> {
   return {
-    observe: (context) =>
-      consumer === `live-query`
-        ? {
-            ready: context.live!.isReady(),
-            preloadSettled: context.preload.preloadSettled,
-            postIds: (
-              context.live!.toArray as Array<Record<string, unknown>>
-            ).flatMap((row) => rowPostIds(shape, row)),
-            acquisitions: observedAcquisitions(shape, context),
-          }
-        : {
-            enteredPostIds: [...context.enteredPostIds],
-            otherEvents: context.otherEvents,
-            acquisitions: observedAcquisitions(shape, context),
-          },
-    recompute: ({ mode, facts }) =>
-      consumer === `live-query`
-        ? expectedLiveQueryObservation(shape, facts)
-        : expectedEffectObservation(mode, facts),
+    observe: ({ facts, main, twin }) => {
+      const observation = observeLaggingSourceConsumer(
+        consumer,
+        shape,
+        facts,
+        main,
+      )
+      const twinObservation =
+        twin && observeLaggingSourceConsumer(consumer, shape, facts, twin)
+      return {
+        observation,
+        twinDisagreement:
+          twinObservation &&
+          JSON.stringify(twinObservation) !== JSON.stringify(observation)
+            ? twinObservation
+            : undefined,
+      }
+    },
+    recompute: ({ mode, facts }) => ({
+      observation:
+        consumer === `live-query`
+          ? expectedLiveQueryObservation(shape, facts)
+          : consumer === `query-once`
+            ? expectedReadObservation(mode, facts)
+            : expectedEffectObservation(mode, facts),
+      twinDisagreement: undefined,
+    }),
     assertEqual: (observed, expected) => {
       expect(observed).toEqual(expected)
       return undefined
@@ -3295,7 +3435,7 @@ describe(`includes temporal oracle`, () => {
   it(`a nested progressive subset loads inside the fast-path window`, () =>
     expectProgressiveTraceMatches(`nested`))
 
-  describe(`source Collection readiness gates only a source without subset demand`, () => {
+  describe(`source Collection readiness gates only an eager source`, () => {
     const consumers: Record<
       LaggingSourceConsumer,
       ReadonlyArray<LaggingSourceShape>
@@ -3310,6 +3450,7 @@ describe(`includes temporal oracle`, () => {
         `eager-default`,
       ],
       effect: [`direct`, `join`, `eager-root`, `eager-default`],
+      'query-once': [`direct`, `eager-root`],
     }
     const cells = Object.entries(consumers).flatMap(([consumer, shapes]) =>
       shapes.flatMap((shape) =>

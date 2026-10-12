@@ -7,7 +7,7 @@ import {
   mockSyncCollectionOptions,
   mockSyncCollectionOptionsNoInitialState,
 } from './utils.js'
-import type { ChangeMessage } from '../src/types.js'
+import type { ChangeMessage, SyncConfig } from '../src/types.js'
 
 interface Row {
   id: string
@@ -387,6 +387,68 @@ describe(`createLiveQueryObserver`, () => {
     expect(visibleSnapshots[0]).toEqual([
       expect.objectContaining({ id: `2`, name: `From live sync` }),
     ])
+    observer.dispose()
+  })
+
+  // Initial-query readiness, not source readiness, makes the live result
+  // authoritative. An on-demand source whose Collection readiness lags its
+  // settled subset, as a progressive source's does, hands off at settlement.
+  it(`hands a hydration seed off when an on-demand source's subset settles`, async () => {
+    let settle: (() => void) | undefined
+    let sync: Parameters<SyncConfig<Row, string>[`sync`]>[0] | undefined
+    const source = createCollection<Row, string>({
+      id: `observer-lagging-${seq++}`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          sync = params
+          return {
+            loadSubset: () =>
+              new Promise<void>((resolve) => {
+                settle = resolve
+              }),
+          }
+        },
+      },
+    })
+    const live = createLiveQueryCollection((q) => q.from({ row: source }))
+    const client = new DbClient()
+    client.hydrate({
+      collections: [],
+      liveQueries: [
+        {
+          queryHash: `lagging`,
+          dehydratedAt: 1,
+          snapshot: {
+            rows: [{ key: `1`, value: { id: `1`, name: `From server` } }],
+          },
+        },
+      ],
+    })
+    const observer = createLiveQueryObserver<Row, string>(live as any, {
+      client,
+      queryHash: `lagging`,
+      mode: `wholesale`,
+    })
+    const unsubscribe = observer.subscribe(() => {})
+    await vi.waitFor(() => expect(settle).toBeDefined())
+
+    sync!.begin()
+    sync!.write({ type: `insert`, value: { id: `1`, name: `From live sync` } })
+    sync!.commit()
+    expect(observer.getSnapshot().data).toEqual([
+      { id: `1`, name: `From server` },
+    ])
+
+    settle!()
+    await vi.waitFor(() =>
+      expect(observer.getSnapshot().data).toEqual([
+        expect.objectContaining({ id: `1`, name: `From live sync` }),
+      ]),
+    )
+    expect(source.status).toBe(`loading`)
+    unsubscribe()
     observer.dispose()
   })
 

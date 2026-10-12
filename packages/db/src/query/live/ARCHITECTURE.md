@@ -1269,30 +1269,46 @@ source up-to-date protocol cannot express its ordering.
 
 **Initial readiness:** preload is complete when every demand currently
 reachable from the initial query graph is covered by a settled request, and
-every source Collection that serves no subset demand is ready. Demand that is
-no longer reachable does not block completion. An empty outer relation has no
-child demand, but its root demand must still settle. Later readiness
-transitions follow the existing Collection contract until an executable test
-defines another public behavior.
+every eager source Collection is ready. An on-demand source Collection's own
+readiness does not gate it. Demand that is no longer reachable does not block
+completion. An empty outer relation has no child demand, but its root demand
+must still settle. Later readiness transitions follow the existing Collection
+contract until an executable test defines another public behavior.
 
-Source Collection readiness and initial-query readiness are different
-boundaries. An eager source serves no subset demand, so its Collection
-readiness is the only evidence that the query's rows are present. An
-on-demand source serves the query through subset demand, so the settled
-request is the evidence, and its own Collection readiness does not gate the
-query. This includes a source whose Collection readiness lags its settled
-subsets: a progressive Electric source stays `loading` until its background
-full sync completes, while its "first query loads immediately (on-demand)"
+The simple rule would wait for every source Collection to be ready. A
+progressive Electric source shows why that rule is wrong. Its "first query
+loads immediately (on-demand)" while it "syncs full dataset in background"
 ([TanStack DB 0.5](https://tanstack.com/blog/tanstack-db-0.5-query-driven-sync)).
-Framework adapters derive `isReady` and Suspense release from this one
-readiness, so they release together. An Effect with `skipInitial` ends its
-initial suppression at the same point: its initial subset loads and lazy
-demand hold suppression until they settle, and an eager source must be ready.
-An obsolete or aborted initial load releases its hold, and a truncate
-replacement takes it over; neither can keep suppression open or close it for
-good. A real load failure disposes the Effect. Before an on-demand source completes a full sync, a ready query can
-hold rows that the source does not yet update; the source contract, not this
-law, decides when it delivers those changes.
+Its Collection stays `loading` until that full sync completes, so the simple
+rule holds a query whose rows are already present.
+
+The distinction is the evidence that a query's rows are present. An eager
+source loads everything it holds without per-query requests, so its Collection
+readiness is the only evidence. An on-demand source serves each query through
+subset requests, so a settled request is the evidence. Its Collection readiness
+says something about the rest of its data, not about this query. The adapter
+owns the other half of that bargain: a successful load settles only after its
+rows are visible (law 7). A load that installs no rows itself, such as a
+progressive load during a must-refetch, must settle when the sync that supplies
+the rows does.
+
+Every consumer of initial readiness uses the same rule:
+`sourcePermitsInitialReadiness()` in `utils.ts` holds it. Framework adapters
+derive `isReady` and Suspense release from live-query readiness, so they
+release together. A read that waits for readiness, such as `queryOnce`,
+resolves at the same point. An Effect with `skipInitial` ends its initial
+suppression there too. Its initial subset loads and lazy demand hold
+suppression until they settle. An obsolete or aborted initial load releases its
+hold, and a truncate replacement takes the hold over. Neither can keep
+suppression open or close it for good. A real load failure disposes the
+Effect.
+
+Two limits remain. Before an on-demand source completes a full sync, a ready
+query can hold rows that the source does not yet update. The source contract,
+not this law, decides when it delivers those changes; Electric applies them at
+its atomic swap. A source that resumes from complete local rows settles its
+loads at once, so its queries are ready on those rows before the network
+responds.
 
 **Deferred acquisition:** a live-query Collection reads local memory and
 starts no provider work on its own. Until it has a subscriber or a preload in
@@ -1489,9 +1505,8 @@ create recursive Collection machinery.
    succeeds. A failed replay with no remaining logical demand cannot gate other
    graph work.
 10. **Initial demand:** preload completes when every initially reachable demand
-    is covered and every source without subset demand is ready; obsolete
-    demand does not block it, and an on-demand source's own Collection
-    readiness does not gate it.
+    is covered and every eager source is ready; obsolete demand does not block
+    it, and an on-demand source's own Collection readiness does not gate it.
     Lazy-demand growth loads only uncovered keys. A fragmented churn replacement
     retires prior coverage only after its union applies; failure preserves it.
 11. **Ownership:** a query-db row exists exactly while an explicit owner

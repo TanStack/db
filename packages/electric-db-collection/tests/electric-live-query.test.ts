@@ -960,6 +960,36 @@ describe(`Electric Collection with Live Query - syncMode integration`, () => {
       ])
     })
 
+    // A known limit, pinned so that a change to Electric's buffering is
+    // visible: before the full sync, a ready progressive query shows its
+    // snapshot rows, and stream changes to them wait for the atomic swap.
+    it(`a ready query's rows update only when the full sync completes`, async () => {
+      const electricCollection = startProgressiveSubset()
+      const liveQuery = createLiveQueryCollection((q) =>
+        q
+          .from({ user: electricCollection })
+          .where(({ user }) => eq(user.id, selectedUser.id)),
+      )
+      await liveQuery.preload()
+      const renamed = { ...selectedUser, name: `Alice renamed` }
+
+      subscriber([
+        {
+          key: selectedUser.id.toString(),
+          value: renamed,
+          headers: { operation: `update` },
+        },
+      ])
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(liveQuery.toArray.map((user) => user.name)).toEqual([
+        selectedUser.name,
+      ])
+
+      completeFullSync([renamed])
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(liveQuery.toArray.map((user) => user.name)).toEqual([renamed.name])
+    })
+
     it(`a skipInitial effect suppresses only its subset rows`, async () => {
       const electricCollection = startProgressiveSubset()
       const entered: Array<number> = []
