@@ -413,6 +413,9 @@ class Transaction<T extends object = Record<string, unknown>> {
     this.state = `pending`
     this.mutations = []
     this.isPersisted = createDeferred<Transaction<T>>()
+    // A rejection nobody reads is not an unhandled rejection; a caller reads
+    // the outcome from `when('settled')`.
+    this.isPersisted.promise.catch(() => undefined)
     this.autoCommit = config.autoCommit ?? true
     this.createdAt = new Date()
     this.sequenceNumber = sequenceNumber
