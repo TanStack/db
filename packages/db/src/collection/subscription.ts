@@ -171,8 +171,8 @@ export class CollectionSubscription
     BasicExpression<boolean>
   >()
 
-  // Keep track of keys selected by snapshots or delivered through filtered
-  // callbacks. Ordered snapshots skip these keys until a valid reset.
+  // Keep track of keys selected by snapshots or delivered through callbacks.
+  // Ordered snapshots skip these keys until a valid reset.
   private sentKeys = new Set<string | number>()
   private publishedRows = new Map<string | number, object>()
   private stalePublishedRows = new Map<string | number, object>()

@@ -43,9 +43,9 @@ import type {
  * does not establish compiled live-query includes publication or provider
  * behavior beyond the controlled sync adapter below.
  * `requestLimitedSnapshot` promises not to resend keys. A direct snapshot
- * selects keys for this subscription. Later ordered local snapshots skip those
- * keys, even when the callback path does not update key tracking. A deletion
- * can release a key so a later insert is valid.
+ * selects keys for this subscription. A source callback can also publish a key
+ * that no snapshot selected. Later ordered local snapshots skip either kind of
+ * key. A deletion releases a key so a later insert is valid.
  *
  * `source` holds currently installed source rows; `visible` is the public
  * snapshot.
@@ -127,7 +127,10 @@ type PublicationModel = {
   sentKeys: Set<RowKey>
 }
 type PublicationPhase =
-  `public` | `private-pending` | `private-settling` | `private-failed`
+  | `public`
+  | `private-pending`
+  | `private-settling`
+  | `private-failed`
 type SourceEffect = `insert` | `update` | `delete`
 type PublicationObservation = {
   index: number
@@ -1412,8 +1415,8 @@ async function runDeferralCleanupHistory(
 
 describe(`CollectionSubscription lifecycle publication oracle`, () => {
   // A local snapshot selects source rows for this subscriber. Selection and
-  // publication are distinct: full-state and skip-filtering subscriptions do
-  // not track callback keys, and a replay can hold a selection privately.
+  // publication are distinct: replay can hold a selection privately, while
+  // every subscription mode tracks keys delivered through public callbacks.
   // For these static, distinct-ranked rows, the reference model selects the
   // requested predicate's rows, then the first unselected ordered row. A
   // callback consumer must never receive a second insert for a present key.
