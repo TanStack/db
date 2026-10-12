@@ -7,7 +7,7 @@ title: withCollectionSyncConfigFactory
 function withCollectionSyncConfigFactory<TSync>(sync, factory): CollectionSyncConfigWithFactory<TSync>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:79](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L79)
+Defined in: [packages/db/src/collection/index.ts:81](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L81)
 
 **`Internal`**
 

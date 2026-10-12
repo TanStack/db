@@ -7,7 +7,7 @@ title: materialize
 function materialize<TContext>(query): MaterializeWrapper<GetInlineResult<TContext>, TContext extends SingleResult ? true : false>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:867](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L867)
+Defined in: [packages/db/src/query/builder/functions.ts:878](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L878)
 
 Materialize an includes subquery into a plain value on the parent row.
 

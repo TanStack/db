@@ -10,8 +10,10 @@ import {
   TransactionNotPendingMutateError,
 } from './errors'
 import { transactionScopedScheduler } from './scheduler.js'
+import { takeTransactionCommitWork } from './transaction-commit-work.js'
 import { codedMessage, devBuild } from './error-message.js'
 import type { Deferred } from './deferred'
+import type { Collection } from './collection/index.js'
 import type {
   MutationFn,
   PendingMutation,
@@ -101,18 +103,18 @@ export class TransactionScope {
   }
 
   removeTransaction(transaction: Transaction<any>): void {
-    const index = this.transactions.findIndex(
-      (candidate) => candidate.id === transaction.id,
-    )
+    const index = this.transactions.indexOf(transaction)
     if (index !== -1) {
       this.transactions.splice(index, 1)
     }
   }
 
+  /** Rolls back every conflicting candidate, then throws the first error. */
   rollbackConflictingTransactions(
     transaction: Transaction<any>,
     mutationIds: Set<string>,
   ): void {
+    const errors: Array<unknown> = []
     for (const candidate of [...this.transactions]) {
       if (
         candidate !== transaction &&
@@ -121,9 +123,14 @@ export class TransactionScope {
           mutationIds.has(mutation.globalKey),
         )
       ) {
-        candidate.rollback({ isSecondaryRollback: true })
+        try {
+          candidate.rollback({ isSecondaryRollback: true })
+        } catch (error) {
+          errors.push(error)
+        }
       }
     }
+    if (errors.length > 0) throw errors[0]
   }
 
   clear(): void {
@@ -360,6 +367,12 @@ class Transaction<T extends object = Record<string, unknown>> {
   public state: TransactionState
   public mutationFn: MutationFn<T>
   public mutations: Array<PendingMutation<T>>
+  /**
+   * Every Collection that has tracked this transaction. Settlement recomputes
+   * each of them, including one whose mutations merged away.
+   */
+  public readonly collections: Set<Collection<any, any, any, any, any>> =
+    new Set()
   private captureMutations?: () => void
   /**
    * Deferred that settles when this transaction settles.
@@ -371,7 +384,8 @@ class Transaction<T extends object = Record<string, unknown>> {
    * For non-empty commits, the mutation function is the normal settlement
    * boundary. This does not inherently prove that a backend has uploaded,
    * confirmed, or read back the write unless the mutation function waits for
-   * that backend observation before returning.
+   * that backend observation before returning. An adapter can also register
+   * commit work during the mutation function; settlement waits for that work.
    *
    * @deprecated Use `when('settled')` instead. This alias will be removed in
    * the 1.0 RC.
@@ -399,6 +413,9 @@ class Transaction<T extends object = Record<string, unknown>> {
     this.state = `pending`
     this.mutations = []
     this.isPersisted = createDeferred<Transaction<T>>()
+    // A rejection nobody reads is not an unhandled rejection; a caller reads
+    // the outcome from `when('settled')`.
+    this.isPersisted.promise.catch(() => undefined)
     this.autoCommit = config.autoCommit ?? true
     this.createdAt = new Date()
     this.sequenceNumber = sequenceNumber
@@ -414,7 +431,8 @@ class Transaction<T extends object = Record<string, unknown>> {
    * the original error on failure (or `undefined` for a rollback without an
    * error). For non-empty commits, this
    * boundary is the mutation function's completion; it does not inherently
-   * prove backend acknowledgement or read-back.
+   * prove backend acknowledgement or read-back unless the mutation function
+   * or an adapter-registered commit work item waits for it.
    */
   when(_state: 'settled'): Promise<Transaction<T>> {
     return this.isPersisted.promise
@@ -660,40 +678,54 @@ class Transaction<T extends object = Record<string, unknown>> {
 
     this.setState(`failed`)
 
-    // See if there's any other transactions w/ mutations on the same ids
-    // and roll them back as well.
-    if (!isSecondaryRollback) {
-      const mutationIds = new Set(
-        this.mutations.map((mutation) => mutation.globalKey),
-      )
-      getTransactionScope(this).rollbackConflictingTransactions(
-        this,
-        mutationIds,
-      )
+    // A failing subscriber cannot leave this transaction unsettled.
+    try {
+      // See if there's any other transactions w/ mutations on the same ids
+      // and roll them back as well.
+      if (!isSecondaryRollback) {
+        const mutationIds = new Set(
+          this.mutations.map((mutation) => mutation.globalKey),
+        )
+        getTransactionScope(this).rollbackConflictingTransactions(
+          this,
+          mutationIds,
+        )
+      }
+    } finally {
+      // Reject the promise
+      this.isPersisted.reject(this.error?.error)
+      this.touchCollection()
     }
-
-    // Reject the promise
-    this.isPersisted.reject(this.error?.error)
-    this.touchCollection()
 
     return this
   }
 
-  // Tell collection that something has changed with the transaction
+  /**
+   * Tell every Collection that tracked this transaction that it changed. A
+   * failure in one Collection must not leave the others showing this
+   * transaction's settled optimistic state, so each one recomputes before the
+   * first error is thrown. A settled transaction then empties its set of
+   * tracking Collections. Its mutations still name their Collection.
+   */
   touchCollection(): void {
-    const hasCalled = new Set()
-    for (const mutation of this.mutations) {
-      if (!hasCalled.has(mutation.collection.id)) {
-        mutation.collection._state.onTransactionStateChange()
+    const collections = new Set(this.collections)
+    for (const mutation of this.mutations) collections.add(mutation.collection)
+    if (this.state === `completed` || this.state === `failed`)
+      this.collections.clear()
+    const errors: Array<unknown> = []
+    for (const collection of collections) {
+      try {
+        collection._state.onTransactionStateChange()
 
         // Only call commitPendingTransactions if there are pending sync transactions
-        if (mutation.collection._state.pendingSyncedTransactions.length > 0) {
-          mutation.collection._state.commitPendingTransactions()
+        if (collection._state.pendingSyncedTransactions.length > 0) {
+          collection._state.commitPendingTransactions()
         }
-
-        hasCalled.add(mutation.collection.id)
+      } catch (error) {
+        errors.push(error)
       }
     }
+    if (errors.length > 0) throw errors[0]
   }
 
   /**
@@ -744,7 +776,12 @@ class Transaction<T extends object = Record<string, unknown>> {
 
     if (this.mutations.length === 0) {
       this.setState(`completed`)
-      this.isPersisted.resolve(this)
+      // A Collection whose mutations merged away still tracks this transaction.
+      try {
+        this.touchCollection()
+      } finally {
+        this.isPersisted.resolve(this)
+      }
 
       return this
     }
@@ -757,11 +794,21 @@ class Transaction<T extends object = Record<string, unknown>> {
       await this.mutationFn({
         transaction: this as unknown as TransactionWithMutations<T>,
       })
+      const commitWork = takeTransactionCommitWork(this)
+      if (commitWork) await commitWork
     } catch (error) {
       if ((this.state as TransactionState) !== `persisting`) return this
 
       // Preserve the original error for rethrowing
       const originalError = normalizeError(error)
+
+      // A mutationFn can accept local work and then fail. That work remains
+      // accepted, so its storage effect must settle before this receipt does.
+      try {
+        await takeTransactionCommitWork(this)
+      } catch {
+        // The mutationFn error remains the transaction's reported cause.
+      }
 
       // Update transaction with error information
       this.error = {
@@ -769,8 +816,12 @@ class Transaction<T extends object = Record<string, unknown>> {
         error: originalError,
       }
 
-      // rollback the transaction
-      this.rollback()
+      // Roll back. The mutation error stays the reported cause.
+      try {
+        this.rollback()
+      } catch {
+        // Settlement still ran every step.
+      }
 
       // Re-throw the original error to preserve identity and stack
       throw originalError

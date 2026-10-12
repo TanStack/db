@@ -155,7 +155,10 @@ localStorageCollectionOptions({
 
 ### acceptMutations
 
-Same as LocalOnly -- call `collection.utils.acceptMutations(transaction)` in manual transactions.
+In a manual transaction's `mutationFn`, call
+`collection.utils.acceptMutations(transaction)`. Its persistence receipt waits
+for the LocalStorage write even when that call is not awaited. Await the call
+when later `mutationFn` work depends on the write.
 
 ---
 

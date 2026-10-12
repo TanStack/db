@@ -485,6 +485,16 @@ export class TransactionAlreadyCompletedRollbackError extends TransactionError {
   }
 }
 
+export class DuplicateTransactionIdError extends TransactionError {
+  constructor(id: string) {
+    super(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `A Collection already tracks an unsettled transaction with id "${id}". Give each transaction a unique id.`
+        : codedMessage(233, { id }),
+    )
+  }
+}
+
 export class TransactionNotPendingCommitError extends TransactionError {
   constructor() {
     super(
@@ -780,9 +790,10 @@ export class CollectionInputNotFoundError extends QueryCompilationError {
 }
 
 /**
- * Error thrown when a subquery uses the same alias as its parent query.
- * This causes issues because parent and subquery would share the same input streams,
- * leading to empty results or incorrect data (aggregation cross-leaking).
+ * Retained for callers that imported this formerly thrown error.
+ *
+ * @deprecated Nested queries may now shadow ancestor aliases. Duplicate aliases
+ * are rejected only within one lexical scope or union branch namespace.
  */
 export class DuplicateAliasInSubqueryError extends QueryCompilationError {
   constructor(alias: string, parentAliases: Array<string>) {
@@ -937,7 +948,7 @@ export class NonAggregateExpressionNotInGroupByError extends GroupByError {
   constructor(alias: string) {
     super(
       devBuild() && process.env.NODE_ENV !== `production`
-        ? `Non-aggregate expression '${alias}' in SELECT must also appear in GROUP BY clause`
+        ? `Non-aggregate expression '${alias}' must also appear in GROUP BY clause`
         : codedMessage(70, { alias }),
     )
   }

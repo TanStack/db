@@ -5,7 +5,7 @@ the local-storage rejection/successful-suffix tests, SQLite persistence ledger
 and restore oracles, and offline-transactions IndexedDB settlement owner.
 Their laws inform this suite; their host guarantees do not transfer to fake-IDB.
 
-## Owners and checkpoints
+## Initial owners and checkpoints
 
 | Owner                               | Independent judgment                                                                                               | Production path and checkpoint                                                                                                                                                                                                                                 |
 | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -142,8 +142,10 @@ These laws transfer the offline IndexedDB settlement distinction and OPFS
 resource-ownership checks to the IDB request boundary. They do not transfer the
 OPFS worker's cancellation mechanism: native IDB open/delete has no cancellation
 API. This adapter has no deadline or automatic in-memory fallback. An unmanaged blocker
-that never closes can leave the request pending indefinitely. The receiving
-cases use fake-IDB and controlled notifications, not native-browser lock proof.
+that never closes can leave the request pending indefinitely. The controlled
+unit cases use fake-IDB and controlled notifications. The named native browser
+cases below receive specific blocker and release schedules; they do not prove
+arbitrary browser lock scheduling.
 
 ## Managed connection ownership
 
@@ -242,7 +244,7 @@ the primary as cause.
 | ORC-011     | Named shared-fault risk: trusting adapter export as proof of storage. Raw native reads and fresh Collection restore are separately observed formulations of the same unordered keyed values, preserving multiplicity.                          |
 | ORC-012     | This audit and ORACLE-EVIDENCE.md identify the reviewed snapshot, red/green observations, mutants and remaining cells. No universal bug-class closure is claimed.                                                                              |
 | ORC-013     | Held versus released/rejected, request success versus abort/complete, first versus later bad row, and populated versus empty startup distinguish the bounded laws.                                                                             |
-| ORC-014     | Claims stop at fake-IDB and controlled transport. Native browser scheduling, failure shapes and crash durability remain unresolved under this package's coverage-map ownership.                                                                |
+| ORC-014     | Controlled premises have native receiving witnesses below for cross-tab publication, blocker release, closure, values, and host routing. Arbitrary browser scheduling, other failure shapes, and crash durability remain open.                 |
 
 ## Remaining boundaries
 

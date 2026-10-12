@@ -3,7 +3,7 @@ id: LocalStorageCollectionUtils
 title: LocalStorageCollectionUtils
 ---
 
-Defined in: [packages/db/src/local-storage.ts:102](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L102)
+Defined in: [packages/db/src/local-storage.ts:156](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L156)
 
 LocalStorage collection utilities type
 
@@ -22,13 +22,16 @@ LocalStorage collection utilities type
 ### acceptMutations()
 
 ```ts
-acceptMutations: (transaction) => void;
+acceptMutations: (transaction) => Promise<void>;
 ```
 
-Defined in: [packages/db/src/local-storage.ts:122](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L122)
+Defined in: [packages/db/src/local-storage.ts:179](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L179)
 
-Accepts mutations from a transaction that belong to this collection and persists them to localStorage.
-This should be called in your transaction's mutationFn to persist local-storage data.
+Accepts this Collection's manual mutations in write order and persists
+them to localStorage. Call it inside the transaction's mutationFn. The
+transaction's persistence receipt waits for this work even if the caller
+does not await the returned Promise. Await it when later mutationFn work
+depends on the storage write.
 
 #### Parameters
 
@@ -42,7 +45,7 @@ The transaction containing mutations to accept
 
 #### Returns
 
-`void`
+`Promise`\<`void`\>
 
 #### Example
 
@@ -54,7 +57,7 @@ const tx = createTransaction({
     // Make API call first
     await api.save(...)
     // Then persist local-storage mutations after success
-    localSettings.utils.acceptMutations(transaction)
+    await localSettings.utils.acceptMutations(transaction)
   }
 })
 ```
@@ -67,7 +70,7 @@ const tx = createTransaction({
 clearStorage: ClearStorageFn;
 ```
 
-Defined in: [packages/db/src/local-storage.ts:103](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L103)
+Defined in: [packages/db/src/local-storage.ts:157](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L157)
 
 ***
 
@@ -77,4 +80,4 @@ Defined in: [packages/db/src/local-storage.ts:103](https://github.com/TanStack/d
 getStorageSize: GetStorageSizeFn;
 ```
 
-Defined in: [packages/db/src/local-storage.ts:104](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L104)
+Defined in: [packages/db/src/local-storage.ts:158](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L158)

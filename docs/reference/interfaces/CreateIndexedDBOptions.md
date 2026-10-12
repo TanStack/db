@@ -3,7 +3,7 @@ id: CreateIndexedDBOptions
 title: CreateIndexedDBOptions
 ---
 
-Defined in: packages/db/src/indexed-db.ts:86
+Defined in: [packages/db/src/indexed-db.ts:95](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L95)
 
 ## Properties
 
@@ -13,7 +13,7 @@ Defined in: packages/db/src/indexed-db.ts:86
 optional idbFactory: IDBFactory;
 ```
 
-Defined in: packages/db/src/indexed-db.ts:94
+Defined in: [packages/db/src/indexed-db.ts:103](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L103)
 
 Custom IDBFactory for testing/mocking
 
@@ -25,7 +25,7 @@ Custom IDBFactory for testing/mocking
 name: string;
 ```
 
-Defined in: packages/db/src/indexed-db.ts:88
+Defined in: [packages/db/src/indexed-db.ts:97](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L97)
 
 Database name
 
@@ -37,7 +37,7 @@ Database name
 optional onBlocked: (event) => void;
 ```
 
-Defined in: packages/db/src/indexed-db.ts:96
+Defined in: [packages/db/src/indexed-db.ts:105](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L105)
 
 Reports a native blocker without settling the open request.
 
@@ -59,7 +59,7 @@ Reports a native blocker without settling the open request.
 stores: readonly string[];
 ```
 
-Defined in: packages/db/src/indexed-db.ts:92
+Defined in: [packages/db/src/indexed-db.ts:101](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L101)
 
 Object store names to create
 
@@ -71,6 +71,6 @@ Object store names to create
 version: number;
 ```
 
-Defined in: packages/db/src/indexed-db.ts:90
+Defined in: [packages/db/src/indexed-db.ts:99](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L99)
 
 Schema version (increment when adding stores)

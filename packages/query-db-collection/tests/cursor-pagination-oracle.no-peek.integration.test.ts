@@ -1,3 +1,19 @@
+/**
+ * This is a test-only no-peek continuation experiment, not the shipped opaque
+ * pagination contract. `cursor-pagination/NO-PEEK-RESULTS.md` states the
+ * candidate rule: a fact may replace the extra output row only when it names
+ * the same complete publication and output prefix; otherwise the candidate
+ * requests that row. The full-relation model in `cursor-pagination/model-oracle.ts`
+ * supplies expected rows and `hasNextPage`.
+ *
+ * Fixed histories use an immutable, unique-id ordered source. A narrow bridge
+ * feeds facts to the candidate after the real live-query window settles. The
+ * initial-size matrix compares candidate rows and continuation with the
+ * full-relation reference and current controller. Held and filtered cases
+ * check their named settlement and fallback cuts against the reference. This
+ * test does not exercise a second graph publication or claim generic compiler
+ * eligibility or an implemented public API.
+ */
 import {
   BasicIndex,
   createCollection,

@@ -70,8 +70,7 @@ it.each(cases)(
         ? createTransaction({
             autoCommit: false,
             mutationFn: ({ transaction }) => {
-              collection.utils.acceptMutations(transaction)
-              return Promise.resolve()
+              return collection.utils.acceptMutations(transaction)
             },
           })
         : mutate()

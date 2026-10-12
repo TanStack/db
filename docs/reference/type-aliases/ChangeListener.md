@@ -7,7 +7,7 @@ title: ChangeListener
 type ChangeListener<T, TKey> = (changes) => void;
 ```
 
-Defined in: [packages/db/src/types.ts:1173](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1173)
+Defined in: [packages/db/src/types.ts:1188](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1188)
 
 Function type for listening to collection changes
 Changes to the same key retain their causal order within a callback.

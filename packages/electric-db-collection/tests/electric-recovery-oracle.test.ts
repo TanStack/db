@@ -246,9 +246,13 @@ function fixture(
     },
     ensureIndex: () => Promise.resolve(),
   }
+  const collectionId = `persisted-recovery-${syncMode}`
   if (coordinator) {
-    coordinator.requestApplyCommittedTx = async (collectionId, tx) => {
-      await adapter.applyCommittedTx(collectionId, tx)
+    coordinator.requestApplyCommittedTx = async (requestedCollectionId, tx) => {
+      await adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: requestedCollectionId },
+        tx,
+      )
       return {
         type: `rpc:applyCommittedTx:res`,
         rpcId: tx.txId,
@@ -267,7 +271,7 @@ function fixture(
       ElectricCollectionUtils<Item>
     >({
       ...electricCollectionOptions<Item>({
-        id: `persisted-recovery-${syncMode}`,
+        id: collectionId,
         shapeOptions: {
           url: `http://test-url`,
           params: { table: `test_table` },
@@ -311,6 +315,12 @@ function fixture(
     exposures,
     record,
     subsetLoadCount: () => subsetLoads,
+    latestDurableRowVersion: () => latestRowVersion,
+    commitExternalTx: (tx: PersistedTx) =>
+      adapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        tx,
+      ),
     start,
     stopObserving: () => stopObserving(),
     pauseHydration: (gate: Promise<void>) => {
@@ -529,18 +539,21 @@ async function observePersistedRestart(
       driver,
       schemaVersion: 1,
     })
-    await originalAdapter.applyCommittedTx(collectionId, {
-      txId: `seed-electric-baseline`,
-      term: 1,
-      seq: 1,
-      rowVersion: 1,
-      mutations: productionSeedRows.map((row) => ({
-        type: `insert` as const,
-        key: row.id,
-        value: cloneItem(row),
-      })),
-      collectionMetadataMutations: resumeState,
-    })
+    await originalAdapter.applyCommittedTx(
+      { kind: `eager`, collectionId: collectionId },
+      {
+        txId: `seed-electric-baseline`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: productionSeedRows.map((row) => ({
+          type: `insert` as const,
+          key: row.id,
+          value: cloneItem(row),
+        })),
+        collectionMetadataMutations: resumeState,
+      },
+    )
 
     const usesSchemaReset =
       scenario.transition === `schema-reset` ||
@@ -551,17 +564,23 @@ async function observePersistedRestart(
       schemaVersion,
       schemaMismatchPolicy: `sync-present-reset`,
     })
-    await restartedAdapter.loadSubset(collectionId, {})
+    await restartedAdapter.loadSubset(
+      { kind: `eager`, collectionId: collectionId },
+      {},
+    )
     if (scenario.transition === `partial-restore`) {
-      await restartedAdapter.applyCommittedTx(collectionId, {
-        txId: `partial-electric-restore`,
-        term: 2,
-        seq: 1,
-        rowVersion: 2,
-        mutations: [
-          { type: `insert`, key: oldRow.id, value: cloneItem(oldRow) },
-        ],
-      })
+      await restartedAdapter.applyCommittedTx(
+        { kind: `eager`, collectionId: collectionId },
+        {
+          txId: `partial-electric-restore`,
+          term: 2,
+          seq: 1,
+          rowVersion: 2,
+          mutations: [
+            { type: `insert`, key: oldRow.id, value: cloneItem(oldRow) },
+          ],
+        },
+      )
     } else if (scenario.transition === `external-row-loss`) {
       const collectionTable = createPersistedTableName(collectionId, `c`)
       await driver.run(
@@ -632,9 +651,14 @@ async function observePersistedRestart(
       await new Promise((resolve) => setTimeout(resolve, 0))
       await new Promise((resolve) => setTimeout(resolve, 0))
 
-      const durableRows = await restartedAdapter.loadSubset(collectionId, {})
-      const durableMetadata =
-        await restartedAdapter.loadCollectionMetadata(collectionId)
+      const durableRows = await restartedAdapter.loadSubset(
+        { kind: `eager`, collectionId: collectionId },
+        {},
+      )
+      const durableMetadata = await restartedAdapter.loadCollectionMetadata({
+        kind: `eager`,
+        collectionId: collectionId,
+      })
       observation = {
         checkpoint: `post-restart-up-to-date`,
         requestedOffset: request.offset,
@@ -689,11 +713,14 @@ async function observePersistedRestart(
               ({ committed }) => committed,
             )
           const beforeLateRows = await restartedAdapter.loadSubset(
-            collectionId,
+            { kind: `eager`, collectionId: collectionId },
             {},
           )
           const beforeLateMetadata =
-            await restartedAdapter.loadCollectionMetadata(collectionId)
+            await restartedAdapter.loadCollectionMetadata({
+              kind: `eager`,
+              collectionId: collectionId,
+            })
           const beforeLateApplied = await driver.query<{
             term: number
             seq: number
@@ -716,11 +743,14 @@ async function observePersistedRestart(
             ({ id, name, stable }) => ({ id, name, stable }),
           ).sort((left, right) => left.id - right.id)
           const afterLateRows = await restartedAdapter.loadSubset(
-            collectionId,
+            { kind: `eager`, collectionId: collectionId },
             {},
           )
           const afterLateMetadata =
-            await restartedAdapter.loadCollectionMetadata(collectionId)
+            await restartedAdapter.loadCollectionMetadata({
+              kind: `eager`,
+              collectionId: collectionId,
+            })
           const afterLateApplied = await driver.query<{
             term: number
             seq: number
@@ -949,14 +979,36 @@ describe(`persisted Electric recovery laws`, () => {
     }
     return {
       coordinator,
-      publish: (
+      publish: async (
+        fixtureState: ReturnType<typeof fixture>,
         row: Item,
         deleted: boolean,
         fullReload: boolean,
-        metadata: Map<string, unknown>,
       ) => {
         const revision = term++
-        metadata.set(`oracle:publication`, revision)
+        const rowVersion = fixtureState.latestDurableRowVersion() + 1
+        const txId = `peer-${revision}`
+        // Commit the peer's rows, marker, and stream position before its
+        // notice. A notice with no matching durable position is not a legal
+        // ordinary publication history.
+        await fixtureState.commitExternalTx({
+          txId,
+          term: revision,
+          seq: 1,
+          rowVersion,
+          mutations: deleted
+            ? [{ type: `delete`, key: row.id, value: row }]
+            : [
+                {
+                  type: fixtureState.rows.has(row.id) ? `update` : `insert`,
+                  key: row.id,
+                  value: row,
+                },
+              ],
+          collectionMetadataMutations: [
+            { type: `set`, key: `oracle:publication`, value: revision },
+          ],
+        })
         receive?.({
           v: 1,
           dbName: id,
@@ -967,8 +1019,8 @@ describe(`persisted Electric recovery laws`, () => {
             type: `tx:committed`,
             term: revision,
             seq: 1,
-            txId: `peer-${term}`,
-            latestRowVersion: term,
+            txId,
+            latestRowVersion: rowVersion,
             requiresFullReload: fullReload,
             changedRows: deleted ? [] : [{ key: row.id, value: row }],
             deletedKeys: deleted ? [row.id] : [],
@@ -999,8 +1051,7 @@ describe(`persisted Electric recovery laws`, () => {
         subscribers[0]!([upToDate])
         const cut = f.exposures.length
         f.record(`before peer`)
-        f.rows.set(freshRow.id, structuredClone(freshRow))
-        peer.publish(freshRow, false, fullReload, f.metadata)
+        await peer.publish(f, freshRow, false, fullReload)
         f.record(`after peer delivery`)
         await vi.waitFor(() =>
           expect(f.publicRows()).toEqual([oldRow, freshRow]),
@@ -1091,19 +1142,14 @@ describe(`persisted Electric recovery laws`, () => {
             name: command.name,
             stable: `peer-${command.id}`,
           }
-          if (command.deleted) {
-            f.rows.delete(row.id)
-            expected.delete(row.id)
-          } else {
-            f.rows.set(row.id, structuredClone(row))
-            expected.set(row.id, structuredClone(row))
-          }
+          if (command.deleted) expected.delete(row.id)
+          else expected.set(row.id, structuredClone(row))
           const subsetLoadsBeforeSettlement = f.subsetLoadCount()
-          const revision = peer.publish(
+          const revision = await peer.publish(
+            f,
             row,
             command.deleted,
             command.fullReload,
-            f.metadata,
           )
           f.record(`after peer revision ${revision}`)
           // An unchanged row set is not proof that the peer publication ran.

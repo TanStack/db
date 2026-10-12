@@ -3,7 +3,7 @@ id: TransactionScope
 title: TransactionScope
 ---
 
-Defined in: [packages/db/src/transactions.ts:22](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L22)
+Defined in: [packages/db/src/transactions.ts:25](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L25)
 
 ## Constructors
 
@@ -25,7 +25,27 @@ new TransactionScope(): TransactionScope;
 clear(): void;
 ```
 
-Defined in: [packages/db/src/transactions.ts:120](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L120)
+Defined in: [packages/db/src/transactions.ts:136](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L136)
+
+#### Returns
+
+`void`
+
+***
+
+### clearTransactionContext()
+
+```ts
+clearTransactionContext(transaction): void;
+```
+
+Defined in: [packages/db/src/transactions.ts:100](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L100)
+
+#### Parameters
+
+##### transaction
+
+[`Transaction`](../interfaces/Transaction.md)\<`any`\>
 
 #### Returns
 
@@ -39,7 +59,7 @@ Defined in: [packages/db/src/transactions.ts:120](https://github.com/TanStack/db
 createTransaction<T>(config): Transaction<T>;
 ```
 
-Defined in: [packages/db/src/transactions.ts:27](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L27)
+Defined in: [packages/db/src/transactions.ts:30](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L30)
 
 #### Type Parameters
 
@@ -67,7 +87,7 @@ getActiveTransaction():
   | undefined;
 ```
 
-Defined in: [packages/db/src/transactions.ts:35](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L35)
+Defined in: [packages/db/src/transactions.ts:38](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L38)
 
 #### Returns
 
@@ -84,7 +104,7 @@ getActiveTransactionForCollection():
   | undefined;
 ```
 
-Defined in: [packages/db/src/transactions.ts:39](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L39)
+Defined in: [packages/db/src/transactions.ts:42](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L42)
 
 #### Returns
 
@@ -99,7 +119,7 @@ Defined in: [packages/db/src/transactions.ts:39](https://github.com/TanStack/db/
 registerTransaction(transaction): void;
 ```
 
-Defined in: [packages/db/src/transactions.ts:78](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L78)
+Defined in: [packages/db/src/transactions.ts:83](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L83)
 
 #### Parameters
 
@@ -119,7 +139,7 @@ Defined in: [packages/db/src/transactions.ts:78](https://github.com/TanStack/db/
 removeTransaction(transaction): void;
 ```
 
-Defined in: [packages/db/src/transactions.ts:94](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L94)
+Defined in: [packages/db/src/transactions.ts:105](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L105)
 
 #### Parameters
 
@@ -139,7 +159,9 @@ Defined in: [packages/db/src/transactions.ts:94](https://github.com/TanStack/db/
 rollbackConflictingTransactions(transaction, mutationIds): void;
 ```
 
-Defined in: [packages/db/src/transactions.ts:103](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L103)
+Defined in: [packages/db/src/transactions.ts:113](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L113)
+
+Rolls back every conflicting candidate, then throws the first error.
 
 #### Parameters
 
@@ -160,16 +182,20 @@ Defined in: [packages/db/src/transactions.ts:103](https://github.com/TanStack/db
 ### unregisterTransaction()
 
 ```ts
-unregisterTransaction(transaction): void;
+unregisterTransaction(transaction, contextAlreadyCleared): void;
 ```
 
-Defined in: [packages/db/src/transactions.ts:84](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L84)
+Defined in: [packages/db/src/transactions.ts:89](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L89)
 
 #### Parameters
 
 ##### transaction
 
 [`Transaction`](../interfaces/Transaction.md)\<`any`\>
+
+##### contextAlreadyCleared
+
+`boolean` = `false`
 
 #### Returns
 

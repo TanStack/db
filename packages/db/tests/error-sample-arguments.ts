@@ -71,6 +71,7 @@ export const errorSampleArguments: Record<string, Array<Array<unknown>>> = {
   MissingMutationFunctionError: [[]],
   OnMutateMustBeSynchronousError: [[]],
   TransactionNotPendingMutateError: [[]],
+  DuplicateTransactionIdError: [['tx-1']],
   TransactionAlreadyCompletedRollbackError: [[]],
   TransactionNotPendingCommitError: [[]],
   NoPendingSyncTransactionWriteError: [[]],

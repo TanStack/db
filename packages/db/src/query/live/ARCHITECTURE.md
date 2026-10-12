@@ -138,10 +138,28 @@ publication to the builder while the graph keeps its private contributions.
 ## Identity
 
 Aliases are lexical query-language names rather than source runtime identities.
-The query builder requires collection aliases to be unique within each lexical
-scope and rejects nested queries that shadow an ancestor alias. Sibling include
-scopes may reuse an alias because neither alias is visible to the other.
-Compilation then assigns opaque IDs to the accepted plan:
+The query builder requires source aliases to be unique within each lexical
+scope. A nested query may shadow an ancestor alias: a reference captured from
+an earlier callback retains that source's lexical binding, while a callback in
+the nested scope reads its local source. Sibling scopes may also reuse aliases.
+The builder gives each source reference a binding ID when it is created and
+preserves that ID when it places or rewrites the query. Compilation assigns
+separate opaque IDs to the accepted plan:
+
+A source declaration may be placed in sibling query scopes, but one builder's
+source declaration cannot serve as both an ancestor and a descendant in an
+include. Those scopes need distinct binding IDs. Start the descendant with a
+fresh `new Query().from(...)`, even when it reads the same Collection.
+A bound reference captured from an unrelated query is outside the lexical
+scope, even when its alias matches a local source, and must be rejected before
+its expression can accept rows. This applies to join operands, predicates,
+grouping, ordering, and projections. Functional callbacks receive row values
+at runtime and do not carry statically inspectable binding references.
+A `QueryRef` or union branch exports its result, not its internal source
+declarations, to the containing query or an include. A joined `QueryRef` may
+read actual ancestor route context, but it does not receive the enclosing
+query's sibling source rows. A captured sibling reference inside that joined
+source must be rejected; the enclosing join condition combines the two sources.
 
 ```ts
 type SourceId = Brand<string, 'SourceId'>
@@ -149,11 +167,15 @@ type RelationNodeId = Brand<string, 'RelationNodeId'>
 type MaterializationEdgeId = Brand<string, 'MaterializationEdgeId'>
 ```
 
-An explicit projection can alpha-normalize aliases because its field names
-define the public shape. Without a projection, joined and grouped queries return
-a namespaced row whose keys are the lexical aliases. Those observable keys are
-part of query identity. Alias text may otherwise remain as debug metadata
-without becoming source identity.
+An explicit structured projection can alpha-normalize aliases because its field
+names define the public shape. Its query identity resolves captured references
+by binding role, including when the captured alias is shadowed. A functional
+callback may inspect its input keys; alias equivalence applies to it only when
+the callback is alias-equivariant. Without a projection, joined and grouped
+queries return a namespaced row whose keys are the lexical aliases. Those
+observable keys are part of query identity. A functional callback still
+receives the user's lexical keys. Alias text may otherwise remain as debug
+metadata without becoming source identity.
 
 A plan rewrite must preserve each Collection reference's `SourceId`. The
 optimizer reuses the reference when it copies, wraps, or collapses a source,
@@ -200,40 +222,79 @@ match. Equality tokens collapse `-0` with `0`, compare Date, Temporal, and
 binary values by the same normalized value as `eq`/`in`, and retain runtime
 reference identity for other objects, functions, and symbols. These tokens are
 valid only for equality-keyed routing, grouping, and demand. Output values and
-arbitrary function arguments keep their exact runtime identity and value.
-Tree indexes give symbols a stable runtime-local order because JavaScript
-relational comparison throws for them; comparator equality still holds only
-for the same symbol. That order is a physical index detail: symbol range
-predicates fall back to the evaluator instead of treating it as query
-semantics. Range predicates also fall back when the live indexed values do not
-share the bound's relational domain. An index's advertised comparison options
-also define its executable comparator; metadata cannot claim an order that the
-index does not use. Explicit `undefined` range and cursor bounds denote the
-indexed nullish comparator group, while an absent bound denotes the start or
-end of the index. An ordered index groups exact value
-buckets that compare at the same position and keeps a live representative for
-each group, so range traversal and ordered limits cannot drop rows whose
-distinct values are comparator-equal.
-Compiler tokens belong to one compiled graph. This keeps every operator in the
-graph on the same identity relation. Objects, functions, and local symbols are
-weakly keyed where the runtime supports weak symbol keys. Older runtimes retain
-local symbols strongly within the scope rather than collapse distinct symbols
-and corrupt equality. Registered symbols use their registry key because the
-runtime registry already retains them. A demand controller owns a separate
-scope and discards it when the controller is cleared. Process-wide query
-identity and opaque public group keys keep their own runtime scope because
-equivalent query plans and retained public keys must survive graph replacement.
-For grouping, the equality token is the D2 group key. The group retains a raw
-value from a currently positive contributor only as the projected
-representative. The representative is chosen by stable source-row identity, so
-restoring the same source state restores the same value regardless of update
-history. D2 sees only safe exact-value identity for that representative, not
-the raw value itself. A separate public group key preserves primitive keys and
-serializes opaque equality identity; graph-local identity tokens never cross
-the Collection boundary. Compiler group fields use a query-local namespace
-disjoint from every selected alias. Direct correlated joins canonicalize both
-sides before the first D2 join; normalizing only the later group key is too
-late.
+arbitrary function arguments keep their exact runtime identity and value. Tree
+indexes give symbols a stable runtime-local order because JavaScript relational
+comparison throws for them; comparator equality still holds only for the same
+symbol. That order is a physical index detail: symbol range predicates fall back
+to the evaluator instead of treating it as query semantics. Range predicates
+also fall back when the live indexed values do not share the bound's relational
+domain. An index's advertised comparison options also define its executable
+comparator; metadata cannot claim an order that the index does not use. Explicit
+`undefined` range and cursor bounds denote the indexed nullish comparator group,
+while an absent bound denotes the start or end of the index. An ordered index
+groups exact value buckets that compare at the same position and keeps a live
+representative for each group, so range traversal and ordered limits cannot drop
+rows whose distinct values are comparator-equal. Compiler tokens belong to one
+compiled graph. This keeps every operator in the graph on the same identity
+relation. Objects, functions, and local symbols are weakly keyed where the
+runtime supports weak symbol keys. Older runtimes retain local symbols strongly
+within the scope rather than collapse distinct symbols and corrupt equality.
+Registered symbols use their registry key because the runtime registry already
+retains them. A demand controller owns a separate scope and discards it when the
+controller is cleared. Process-wide query identity and opaque public group keys
+keep their own runtime scope because equivalent query plans and retained public
+keys must survive graph replacement. For grouping, the equality token is the D2
+group key. The group retains a raw value from a currently positive contributor
+only as the projected representative. The representative is the contributor with
+the smallest exact value: another primitive before -0, and every primitive
+before an object. Objects are ordered by an explicit type tag (`Buffer`, `Date`,
+a Temporal type, then `Uint8Array`). Contributors of one tag are equal in
+content, so the contributor with the smallest row key supplies the instance; the
+choice does not depend on update history, and a deleted contributor's instance
+is never projected. Equal primitives share a representative key and consolidate.
+D2 consolidates contributions whose hashes match, and its hash treats -0 as 0
+and equal Dates as one value. Each contribution therefore carries the exact
+identity of every value a contributor can supply: the representative key, and
+the exact input of every min or max, taken from the value that the min or max
+compares. A primitive input is keyed by its exact value and an object input by
+its contributor's row key, because a rebuilt argument is a new instance at each
+evaluation and its retraction must still cancel its insert. A sum, avg, or count
+adds coerced numbers, so merging its equal inputs cannot change its result.
+Contributions merge only when those identities are equal, so a merged
+contribution supplies only a value that a positive contributor holds. A
+correlated include's route representative carries the correlation key and parent
+context instances. Members that read the correlation key from their own row hold
+distinct instances when the key is an object, such as a Date or a binary array,
+so those members do not consolidate. A count, sum, or avg over consolidated
+contributions updates without re-reading the group; a min or max over distinct
+primitive values keeps one contribution per distinct exact input, and a min or
+max over objects keeps one contribution per contributor. D2 sees only safe
+exact-value identity for a representative, not the raw value itself. A separate
+public group key preserves primitive keys and serializes opaque equality
+identity; graph-local identity tokens never cross the Collection boundary.
+Compiler group fields use a query-local namespace disjoint from every selected
+alias. Direct correlated joins canonicalize both sides before the first D2 join;
+normalizing only the later group key is too late.
+
+An aggregate query has one row per group: one group without `groupBy`, or one
+per group key, within each route inside an include. Each select value must
+have one value for its group outside its aggregates: a literal, a group key
+(a `groupBy` expression, a ref or a computed one), or a parent field that the
+route's parent context supplies. Every such value is evaluated with its group
+keys substituted, as the parts of a wrapped aggregate are. Any other field of
+the query's own sources has none, wherever it appears, so the query throws
+`NonAggregateExpressionNotInGroupByError`. A spread throws too, because a
+parent context holds only the parent fields the query names, and so does a
+nested include in a grouped or aggregate select, which has one Collection per
+row. A source ref is identified by its lexical binding, so a parent ref keeps
+its meaning when the include's source shadows the parent alias. Group keys
+match by structure, with literals compared by value. A HAVING condition
+follows the same rule: it reads group keys and parent fields, and a source
+field outside an aggregate throws. A HAVING aggregate reads the same aggregate
+that the select names as a top-level field. Recorded limit: parents that
+are equal under query equality but differ exactly, such as `x: 0` and `x: -0`,
+share a route, so a parent field can show the other parent's exact value,
+which is equal under query equality.
 
 ### Route-context transport
 
@@ -568,14 +629,37 @@ Route + BucketFacade -> CellValue(cell, Collection)
 
 Parents sharing a bucket share its facade. Child changes update that Collection
 without re-emitting every parent, and moving a route changes the parent field to
-the destination bucket's facade. A facade is never retargeted to another
-bucket. The D2 join retains inactive bucket rows and emits their current
-snapshot when the bucket becomes active; the facade adapter does not buffer
-discarded deltas. The adapter retains a facade only while at least one parent
-route uses its bucket. When the last route leaves, it retracts the facade's rows
-and drops its strong reference. An external holder may keep that empty
-Collection alive, but a later active interval gets a new facade. Inline modes
-do not create child Collections.
+the destination bucket's facade. A facade is never retargeted to another bucket.
+The D2 join retains inactive bucket rows and emits their current snapshot when
+the bucket becomes active; the facade adapter does not buffer discarded deltas.
+It keeps only the deltas a flush consumed until that flush publishes: if the
+root commit fails, the adapter restores them, so the next successful flush
+publishes each pending child change exactly once. The adapter retains a facade
+only while at least one parent route uses its bucket. When the last route
+leaves, it drops its strong reference. The graph has already retracted the
+bucket's rows, but a facade is a Collection: a user transaction can show an
+optimistic row in it, and a sync commit can be held behind a persisting
+transaction. Retiring a facade that still shows such rows is legal, not an
+invariant violation. Those rows have no synced row, so they leave when their
+transactions settle. A row that the graph sent and never retracted is
+different. The adapter reads each facade's projected synced rows: the synced
+rows once every queued sync transaction applies, including a transaction a
+persisting one holds and a transaction still open. It decides inserts, updates
+and deletes from them rather than from the visible rows. A projected row left
+at retirement is a
+contradictory graph signal: the retirement throws, and the flush aborts and
+restores every facade it wrote. The live query owns its facades:
+several parent rows can share one, so a holder's `cleanup()` rejects (code 241).
+The adapter disposes facades itself, when the live query is cleaned up and
+when a failed flush removes the facades it created. Ordinary Collections keep
+their cleanup and restart. A
+restore undoes only the keys the
+flush wrote, including writes that a persisting transaction still holds, so a
+held write cannot land after the rollback. A facade that `resolve()` created
+before its bucket activated can stay ready and empty after a failed flush; the
+next flush writes its rows (a recorded limit). An external holder may keep the
+retired Collection alive, but a later active interval gets a new facade. Inline
+modes do not create child Collections.
 
 Composition is pure. It constructs a new result along changed paths and does
 not mutate a previously published row or use public routing metadata:
@@ -1299,6 +1383,17 @@ queries must all observe the same fully materialized commit. The facade adapter
 may defer event delivery across its Collection transactions, but it must not
 defer state or index installation. Routing and identity remain inside D2.
 
+A failed flush is atomic. If a facade write or the root commit fails, every
+facade the flush wrote returns to its rows, order, and key mapping from before
+the flush, the facades it created are disposed, and no facade publishes an
+event or a layout revision. The child deltas that flush consumed stay pending
+with the builder's pending root rows, so the next successful flush publishes
+each of them exactly once. No graph output reaches the adapter between a flush
+and its rollback, because the flush runs inside the graph run; a rollback that
+finds new pending deltas is an invariant violation. It restores the facades and
+discards the deferred events first, so the facades keep delivering events, and
+then throws. A rollback after the adapter is cleaned up does nothing.
+
 ## External boundaries
 
 ### Query-db ownership
@@ -1339,11 +1434,18 @@ create recursive Collection machinery.
 
 ## Normative laws
 
-1. **Alpha-renaming:** changing any accepted alias to another unused name cannot
-   change an explicitly projected result. An implicit namespaced result keeps
-   its aliases as public field names. Aliases must be unique within one lexical
-   scope and cannot shadow an ancestor alias. Sibling scopes may reuse aliases,
-   except that the branches of one `unionAll()` share one alias namespace.
+1. **Alpha-renaming:** changing an accepted alias to another unused name in a
+   structured plan cannot change an explicitly projected result when references
+   are renamed with their binding. The same equivalence applies to a functional
+   callback only when it is alias-equivariant. A captured reference retains its
+   source even when a nested query shadows its alias. An implicit namespaced
+   result and a functional callback keep the user's aliases as public field
+   names. Aliases must be unique within one lexical scope. The branches of one
+   `unionAll()` share one alias namespace. A builder's source declaration may
+   be reused in sibling includes, but an include cannot reuse it across an
+   ancestor/descendant scope boundary; the descendant starts from a fresh
+   `new Query().from()`. A join operand captured outside the current and
+   ancestor scopes is rejected.
 2. **Contribution conservation:** a public row exists exactly when its reduced
    supporting weight and collision policy produce one.
 3. **Batch partition:** equivalent valid split and atomic deliveries converge.
@@ -1429,7 +1531,8 @@ keep the meanings defined there.
 | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | State equivalence, route lifecycle, transition history, and batch partition             | `packages/db/tests/query/includes-oracle.property.test.ts`                                                                      |
 | Joined multiplicity, alias identity, and null-key normalization                         | `packages/db/tests/query/includes-query-shape-oracle.test.ts`                                                                   |
-| Alias reuse across sibling scopes and `SourceId` preservation                           | `packages/db/tests/query/includes-oracle.property.test.ts` (sibling scopes), `packages/db/tests/query/validate-aliases.test.ts` |
+| Alias reuse, captured bindings, public keys, and `SourceId` preservation                | (`packages/db/tests/query/includes-oracle.property.test.ts`, `packages/db/tests/query/includes-alias-shadowing-oracle.test.ts`) |
+| Same-scope and union alias rejection                                                    | `packages/db/tests/query/validate-aliases.test.ts`                                                                              |
 | Demand, cancellation, and progressive timing                                            | `packages/db/tests/query/includes-temporal-oracle.test.ts`                                                                      |
 | Optimistic confirmation, rollback, and later reactivity                                 | `packages/db/tests/query/includes-optimistic-oracle.property.test.ts`                                                           |
 | Coherent layered publication                                                            | `packages/db/tests/query/includes-publication-oracle.test.ts`                                                                   |

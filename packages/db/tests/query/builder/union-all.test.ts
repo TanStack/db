@@ -12,6 +12,8 @@ import {
   getQueryIR,
 } from '../../../src/query/builder/index.js'
 import { eq } from '../../../src/query/builder/functions.js'
+import { prepareLiveQueryValue } from '../../../src/live-query-options.js'
+import { collectSourceRefs } from '../../../src/query/ir.js'
 
 interface Employee {
   id: number
@@ -99,7 +101,7 @@ describe(`QueryBuilder.unionAll`, () => {
     expect(builtQuery.from.queries).toHaveLength(2)
   })
 
-  it(`preserves descriptor resolution after unioning sources`, () => {
+  it(`binds descriptors after unioning sources and joining`, () => {
     const employeeDescriptor = collectionOptions(`union-employees`, () => ({
       id: `union-employees`,
       getKey: (item: Employee) => item.id,
@@ -111,9 +113,7 @@ describe(`QueryBuilder.unionAll`, () => {
       sync: { sync: () => {} },
     }))
     const client = new DbClient()
-    const builder = new BaseQueryBuilder({}, (options) =>
-      client.collection(options),
-    )
+    const builder = new BaseQueryBuilder()
 
     const query = builder
       .unionAll({ employees: employeeDescriptor })
@@ -124,10 +124,17 @@ describe(`QueryBuilder.unionAll`, () => {
         `inner`,
       )
 
-    expect(getQueryIR(query).join).toHaveLength(1)
+    expect(collectSourceRefs(getQueryIR(query)).map((ref) => ref.type)).toEqual(
+      [`descriptorRef`, `descriptorRef`],
+    )
+    const prepared = prepareLiveQueryValue(query, client) as typeof query
+    expect(getQueryIR(prepared).join).toHaveLength(1)
+    expect(
+      collectSourceRefs(getQueryIR(prepared)).map((ref) => ref.type),
+    ).toEqual([`collectionRef`, `collectionRef`])
   })
 
-  it(`preserves descriptor resolution after unioning query branches`, () => {
+  it(`binds descriptors after unioning query branches and joining`, () => {
     const employeeDescriptor = collectionOptions(`branch-employees`, () => ({
       id: `branch-employees`,
       getKey: (item: Employee) => item.id,
@@ -142,9 +149,7 @@ describe(`QueryBuilder.unionAll`, () => {
       }),
     )
     const client = new DbClient()
-    const builder = new BaseQueryBuilder({}, (options) =>
-      client.collection(options),
-    )
+    const builder = new BaseQueryBuilder()
     const employeeRows = builder
       .from({ employees: employeeDescriptor })
       .select(({ employees: employee }) => ({ id: employee.id }))
@@ -160,7 +165,14 @@ describe(`QueryBuilder.unionAll`, () => {
         `inner`,
       )
 
-    expect(getQueryIR(query).join).toHaveLength(1)
+    expect(collectSourceRefs(getQueryIR(query)).map((ref) => ref.type)).toEqual(
+      [`descriptorRef`, `descriptorRef`, `descriptorRef`],
+    )
+    const prepared = prepareLiveQueryValue(query, client) as typeof query
+    expect(getQueryIR(prepared).join).toHaveLength(1)
+    expect(
+      collectSourceRefs(getQueryIR(prepared)).map((ref) => ref.type),
+    ).toEqual([`collectionRef`, `collectionRef`, `collectionRef`])
   })
 
   it(`throws helpful errors for invalid source inputs`, () => {

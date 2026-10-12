@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { LocalStorageAdapter, startOfflineExecutor } from '../src/index'
 import { FakeStorageAdapter } from './harness'
+import { captureUnhandledRejections } from './oracle-lifecycle'
 import type { OfflineConfig } from '../src/types'
 
 describe(`OfflineExecutor`, () => {
@@ -82,9 +83,8 @@ describe(`OfflineExecutor`, () => {
         throw storageError
       }
     }
-    const unhandled: Array<unknown> = []
-    const onUnhandled = (error: unknown) => unhandled.push(error)
-    process.on(`unhandledRejection`, onUnhandled)
+    const { rejections: unhandled, cleanup: cleanupUnhandled } =
+      captureUnhandledRejections()
     const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
     const executor = startOfflineExecutor({
       ...config,
@@ -104,7 +104,7 @@ describe(`OfflineExecutor`, () => {
     } finally {
       executor.dispose()
       warning.mockRestore()
-      process.off(`unhandledRejection`, onUnhandled)
+      cleanupUnhandled()
     }
   })
 
@@ -141,9 +141,8 @@ describe(`OfflineExecutor`, () => {
     const previousTemporal = temporalGlobal.Temporal
     temporalGlobal.Temporal = {}
     const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
-    const unhandled: Array<unknown> = []
-    const onUnhandled = (error: unknown) => unhandled.push(error)
-    process.on(`unhandledRejection`, onUnhandled)
+    const { rejections: unhandled, cleanup: cleanupUnhandled } =
+      captureUnhandledRejections()
     const calls: Array<{ id: string; metadata: unknown }> = []
     let firstExecutor: ReturnType<typeof startOfflineExecutor> | undefined
     let secondExecutor: ReturnType<typeof startOfflineExecutor> | undefined
@@ -213,7 +212,7 @@ describe(`OfflineExecutor`, () => {
     } finally {
       firstExecutor?.dispose()
       secondExecutor?.dispose()
-      process.off(`unhandledRejection`, onUnhandled)
+      cleanupUnhandled()
       warning.mockRestore()
       if (previousTemporal === undefined) delete temporalGlobal.Temporal
       else temporalGlobal.Temporal = previousTemporal

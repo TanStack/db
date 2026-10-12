@@ -86,6 +86,8 @@ function resolveAdapterBaseOptions(
       options.appliedTxPruneMaxAgeSeconds ??
       DEFAULT_APPLIED_TX_PRUNE_MAX_AGE_SECONDS,
     pullSinceReloadThreshold: options.pullSinceReloadThreshold,
+    cacheGenerationClaimTtlMs: options.cacheGenerationClaimTtlMs,
+    now: options.now,
   }
 }
 
