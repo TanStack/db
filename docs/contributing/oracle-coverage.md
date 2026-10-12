@@ -520,8 +520,13 @@ reacquisition. A direct delete then requires an explicit refetch to start a
 post-write request and preserve the deleted public row at settlement; without
 a later write, the same refetch may reuse the in-flight request. A separate
 checkpoint keeps the detached fetch-start position until that request settles
-and retires it afterward. These controlled histories do not establish every
-persisted adapter or Query cache-removal schedule.
+and retires it afterward. Two further shared-Query histories add A's sync
+restart after a direct insert/delete while B's pre-write request remains in
+flight. Without an explicit refetch, the old result must preserve the delete;
+with one, A must start a post-write request. Both were RED before physical
+fetch-start positions survived the restart and are GREEN afterward. These
+controlled histories do not establish every persisted adapter or Query
+cache-removal schedule.
 The [PR #2065 review at 74e399150](oracle-reviews/pr-2065-74e399-review.md)
 adds ordinary-unload and unobserved-fetch histories to that request-order law.
 The ownership oracle also checks derived-select reacquisition and eager restart,
@@ -537,6 +542,34 @@ receiving oracles. Query Core 5.90.15 is the lowest version on which the full
 Query DB suite passed; 5.90.14 failed error-recovery witnesses, and 5.85.2
 failed the post-write refetch witness. Older versions are excluded by the peer
 minimum.
+
+The ownership oracle now checks a direct row's ownership lifetime across one
+and two subset claims, with and without Collection row metadata. A direct
+update preserves those claims; a direct delete ends them; a later insert or
+upsert of the same key starts unowned; a later Query result can claim the new
+row. Its 20 bounded histories compare accepted public rows and owner metadata
+after each action and subset release. Removing the delete-retirement repair
+fails nine histories at those checkpoints. One real SQLite receiving history
+releases both former subsets, restarts the Collection from the same storage,
+and keeps the reinserted unowned row. This does not establish every persisted
+adapter, overlapping result schedule, or ownership of an inferred window
+replacement; the persisted direct-write owner retains the wider durable
+receiving boundary. Shared-Query cached-result authority
+across an unobserved Collection is now an accepted law: a newer physical fetch
+may replace and claim a direct row on later acquisition, while an older cached
+result or another Collection's local cache edit may not. The 24-history matrix
+crosses fetch/write order, a later same-key or unrelated write, a local cache
+edit, and another real refetch. It compares public rows at acquisition and
+subset release and checks that acquisition did not start an extra request. The
+pre-repair implementation failed the post-write and unrelated-write orders;
+removing fetched-data provenance fails two local-cache-edit histories. Two real
+SQLite receiving histories restart A as a fresh Collection instance while B
+retains the shared Query, with and without a later local cache edit. An
+ownerless stored row colliding with the cached result has unknown order, so
+acquisition refetches once and the new server row wins. Without that guarded
+revalidation the original receiving history kept the direct value. These
+finite histories do not establish every persisted adapter, a cached result
+without a colliding key, or a cross-process Query cache hydration order.
 
 The alias-scope owner also has a compiler invariant witness for a malformed
 include plan: removing a captured ancestor's parent projection after the

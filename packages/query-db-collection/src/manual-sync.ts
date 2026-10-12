@@ -43,6 +43,7 @@ export type UpdateCacheData<
 > = (
   getItems: (keys?: Array<TKey>) => Array<TRow>,
   changedKeys: Array<TKey>,
+  position: number,
 ) => void
 
 export interface SyncContext<
@@ -309,6 +310,7 @@ function applyWriteOperations<
       ctx.updateCacheData(
         getItems,
         normalized.map((op) => op.key),
+        position,
       )
     else ctx.queryClient.setQueryData(ctx.queryKey, getItems())
   }

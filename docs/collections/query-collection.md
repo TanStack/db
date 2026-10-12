@@ -1201,6 +1201,24 @@ Direct writes update the collection when their sync commit is accepted, or when 
 
 In on-demand mode, each Query cache entry may represent a different predicate, order, limit, or offset. A direct write patches changed keys already present in active raw arrays or arrays exposed as a direct response property by `select`. It leaves derived projections unchanged and removes inactive entries under the Collection's query-key prefix when no other Collection or observer retains them. Keep unrelated Query entries outside that prefix. A direct write cannot infer whether an inserted row belongs in a scoped result or which row replaces a deleted item in a limited window. A new direct insert has no inferred subset owner and can survive subset unload; callers must manage its lifetime unless a later Query result takes ownership. A fetch started before an accepted direct write preserves that write's claimed keys in its result; a fetch started later may reconcile or replace the write. Cache patches do not clear a recorded Query error, pending invalidation, or staleness. Treat this as a lower-level API: use `collection.utils.refetch()` when the server must reestablish exact scoped results. If an older request is still in flight, that explicit refetch starts a new request.
 
+Deleting a fetched row ends its existing subset ownership. Inserting or
+upserting the same key afterward creates a new direct row without inheriting
+those old subset claims; it can survive their unload until a later Query result
+claims it or you delete it explicitly.
+
+When two Collections share an exact Query key, a successful server fetch that
+starts after one Collection's direct write can replace that written row when
+the Collection later loads the cached result. A fetch started before the write
+cannot claim or replace the new direct row, even if its cached result is loaded
+later. Another Collection's local cache edit is not a server fetch and does not
+gain that authority. An unrelated later direct write does not change the order
+for the original row.
+
+A fresh persisted Collection instance cannot recover the order of an ownerless
+stored row and a retained Query cache row with the same key. It refetches that
+Query when the subset is acquired, then applies the new server result. The
+earlier direct write still starts no request by itself.
+
 To use direct writes with persistence handlers, return `{ refetch: false }` to avoid the handler's separate automatic refetch during the pre-1.0 transition. An on-demand `queryFn` still needs to return the complete current result for its pushed-down predicate, order, limit, and offset when it does run. For robust real-time synchronization, use a collection backed by a sync engine that owns snapshot and change-stream ordering.
 
 ## Complete Direct Write API Reference
