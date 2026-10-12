@@ -531,6 +531,9 @@ The [intermediate review at 74e399150](oracle-reviews/pr-2065-74e399-review.md)
 adds ordinary-unload and unobserved-fetch histories to that request-order law.
 The [final direct-write authority review](oracle-reviews/2026-10-12-query-direct-write-authority.md)
 records the later law decisions, RED/GREEN evidence, and ten-item audit.
+The [four-review follow-up](oracle-reviews/2026-10-12-query-authority-oracle-followup.md)
+audits legal subset predicates, cache-projection boundaries, scoped omissions,
+and the generated cursor manual-write campaign against its repaired commit.
 The ownership oracle also checks derived-select reacquisition and eager restart,
 explicit subset refetch, a derived result held behind `deferDataRefresh`, a
 provisional cache row awaiting persisted application, aliased physical Queries,
