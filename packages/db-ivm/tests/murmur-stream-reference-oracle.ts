@@ -1,9 +1,7 @@
 /**
  * Reference model for the murmur stream oracle: the stream as it was before
- * it wrote whole words, one `writeByte`
- * call per byte. The stream oracle compares the current stream with it.
- * Load it after stubbing `Math.random`, so its seed and markers equal the
- * current module's.
+ * it wrote whole words, with one `writeByte` call per byte. Load it after
+ * stubbing `Math.random`, so its seed and markers equal the current module's.
  */
 
 const randomHash = () => (Math.random() * (2 ** 31 - 1)) >>> 0
