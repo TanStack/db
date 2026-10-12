@@ -698,9 +698,11 @@ describe(`CollectionSubscription status tracking`, () => {
         new Value(`second`),
       ])
       let releaseFirst:
-        ((primaryFailure?: { error: unknown }) => void) | undefined
+        | ((primaryFailure?: { error: unknown }) => void)
+        | undefined
       let releaseSecond:
-        ((primaryFailure?: { error: unknown }) => void) | undefined
+        | ((primaryFailure?: { error: unknown }) => void)
+        | undefined
 
       subscription.requestSnapshot({
         where: firstWhere,
@@ -878,7 +880,8 @@ describe(`CollectionSubscription status tracking`, () => {
     const unloads: Array<LoadSubsetOptions> = []
     const reported: Array<unknown> = []
     let releaseFailedDemand:
-      ((primaryFailure?: { error: unknown }) => void) | undefined
+      | ((primaryFailure?: { error: unknown }) => void)
+      | undefined
     let cleanupAttempts = 0
     let caughtCleanup: unknown
     const collection = createCollection<{ id: string }>({
@@ -1697,9 +1700,9 @@ describe(`CollectionSubscription status tracking`, () => {
     }
   })
 
-  // The next limited page starts after the rows this subscription published.
-  // A change its where clause drops is not published and cannot advance the
-  // offset, whether it arrives alone or beside a matching change. Change
+  // A change its where clause drops is not published and cannot count toward
+  // the safe provider prefix bound, whether it arrives alone or beside a
+  // matching change. Change
   // routing withholds dropped rows from an `eq` subscription before sent keys
   // are recorded, so an `or` predicate, which is not routed, is also needed to
   // reach that record.
@@ -1721,7 +1724,7 @@ describe(`CollectionSubscription status tracking`, () => {
       },
     ]),
   )(
-    `does not advance the page offset for a dropped change that arrives $grouping ($predicate)`,
+    `does not count a dropped change in the provider prefix after it arrives $grouping ($predicate)`,
     async ({ grouping, where }) => {
       type Row = { id: string; rank: number; status: string }
       const loads: Array<LoadSubsetOptions> = []
@@ -1802,7 +1805,8 @@ describe(`CollectionSubscription status tracking`, () => {
         expect([...published].sort()).toEqual(
           grouping === `alone` ? [`a1`] : [`a1`, `a2`],
         )
-        expect(loads.at(-1)?.offset).toBe(published.size)
+        expect(loads.at(-1)?.offset).toBe(0)
+        expect(loads.at(-1)?.limit).toBe(1 + published.size)
       } finally {
         subscription.unsubscribe()
         await collection.cleanup()

@@ -473,21 +473,32 @@ The following related oracles own distinct production paths or observation cuts:
   [replay oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-subscription-replay-oracle.property.test.ts)
   applies that law to competing replay schedules and same-key writes.
   Bounded three-row histories now compare a subscription's selected keys with
-  exact callback batches across full, explicit, filtered, and empty snapshots,
+  callback key/type batches across full, explicit, filtered, and empty snapshots,
   two later ordered selections, both initial-state modes, and callback reentry.
   A delete and reinsert checks that selection can reset. A 12-case callback
   matrix also crosses new insertion and delete/reinsert with filtered,
   full-state, and skip-filtering subscriptions, with and without a cursor. It
   checks callback batches after each source commit and checks retained-key
-  count after deletion. The replay owner checks a filtered snapshot followed
+  count after deletion. Source-callback reentry also selects an unseen ordered
+  row after publishing another key. A controlled three-row offset provider
+  checks sparse callback and ordered callback-reentry histories in both
+  initial-state modes: local selection does not establish a provider prefix.
+  A second offset-only adapter checks cursors near the end of three- and
+  seven-row sources: without an explicit offset, the request must be unbounded
+  because no finite prefix derived from local keys can reach an arbitrary
+  cursor value.
+  The replay owner checks a filtered snapshot followed
   by an ordered selection during a pending direct truncate replay, including
   callback reentry before the target receives the source transaction. It also
   settles a repeated ordered replay and compares public batches before and
-  after settlement. The [snapshot-selection review](oracle-reviews/2026-10-12-snapshot-selection-review.md)
-  records the original RED, reservation-removal and early-publication mutant
-  kills, and repaired GREEN at the callback and adapter-cursor checkpoints.
-  These owners do not cover arbitrary rankings, provider pagination results,
-  or compiled live-query windows.
+  after settlement. A sparse successful replacement checks that an adapter
+  honoring a last-key cursor can still acquire lower-ranked rows. The
+  [snapshot-selection review](oracle-reviews/2026-10-12-snapshot-selection-review.md)
+  records the baseline and reservation-removal mutant kills at public-row,
+  request-bound, and replay checkpoints. The controlled providers cover three
+  and seven distinct ranks and the tested request schedules; arbitrary rankings,
+  provider-specific pagination contracts, and compiled live-query windows
+  remain outside these owners.
 - The [pagination oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/pagination-oracle.property.test.ts)
   owns general ordered-window rows and publication. The
   [ordered-work oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/ordered-work-oracle.property.test.ts)

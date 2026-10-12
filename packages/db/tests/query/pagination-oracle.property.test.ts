@@ -1072,7 +1072,8 @@ async function runPaginationStateScenario(
         rows: Array<PublicPageRow>
       }> = []
       let publicationSubscription:
-        ReturnType<typeof live.subscribeChanges> | undefined
+        | ReturnType<typeof live.subscribeChanges>
+        | undefined
 
       const readCurrentWindow = () =>
         Array.from(live.values(), ({ id, rank }) => ({ id, rank }))
@@ -1999,7 +2000,7 @@ async function runPendingMutationScenario(
       if (transport !== `cursor`) {
         // Model providers whose opaque continuation token is indexed by the
         // last fetched row key, rather than by the predicate expression.
-        if (transport === `key` && options.cursor) {
+        if (transport === `key` && options.cursor?.lastKey !== undefined) {
           const boundary = orderedRows.findIndex(
             ({ id }) => id === options.cursor!.lastKey,
           )

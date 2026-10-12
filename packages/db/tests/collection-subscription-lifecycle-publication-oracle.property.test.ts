@@ -15,7 +15,7 @@ import {
 } from './collection-subscription-lifecycle-grammar-oracle.js'
 import { oracleRandomParameters, readOracleRunConfig } from './oracle-config.js'
 import { flushPromises } from './utils.js'
-import type { SyncConfig } from '../src/types.js'
+import type { LoadSubsetOptions, SyncConfig } from '../src/types.js'
 import type {
   DeferralLifecycleCommand,
   DemandName,
@@ -1561,11 +1561,11 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
         )
         expect(invalidChanges).toEqual([])
         expect([...visible].sort()).toEqual([...selected].sort())
-        // Only an ordered local selection establishes this adapter hint.
-        // An unordered full snapshot selects keys but has no last ordered key.
-        expect(loads.at(-1)?.cursor?.lastKey).toBe(
-          nextOrderedChoice?.id ?? orderedChoice?.id,
-        )
+        // Local selections do not certify a provider prefix. Without an
+        // explicit offset, the adapter request begins at the source prefix
+        // and carries no key-based cursor hint, including after a full read.
+        expect(loads.at(-1)).toMatchObject({ offset: 0 })
+        expect(loads.at(-1)?.cursor?.lastKey).toBeUndefined()
       } finally {
         subscription.unsubscribe()
         await collection.cleanup()
@@ -1648,7 +1648,8 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       ])
       expect(invalidChanges).toEqual([])
       expect([...visible].sort()).toEqual([`one`, `two`])
-      expect(loads.at(-1)?.cursor?.lastKey).toBe(`two`)
+      expect(loads.at(-1)).toMatchObject({ offset: 0 })
+      expect(loads.at(-1)?.cursor?.lastKey).toBeUndefined()
     } finally {
       subscription.unsubscribe()
       await collection.cleanup()
@@ -1785,6 +1786,330 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
         expect([...visible].sort()).toEqual([...expectedVisible].sort())
         if (retainedAfterDelete !== undefined)
           expect.soft(retainedAfterDelete).toBe(0)
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
+  // Selected keys and provider coverage answer different questions. A key
+  // delivered by a callback must not be selected again, but it does not prove
+  // that every lower-ranked provider row was fetched. These two legal histories
+  // challenge both directions: a sparse callback leaves a lower rank unseen,
+  // and an ordered callback may reenter before its outer request acquires a
+  // provider page. The plain remote array is the independent source model; the
+  // controlled adapter honors a key cursor when supplied and otherwise
+  // returns exactly the requested offset page. After a bounded sequence of
+  // requests, every remote key must be public once.
+  it.each(
+    ([undefined, false] as const).flatMap((includeInitialState) =>
+      ([`sparse-callback`, `ordered-reentry`] as const).flatMap((history) =>
+        ([false, true] as const).map((withCursor) => ({
+          includeInitialState,
+          history,
+          withCursor,
+        })),
+      ),
+    ),
+  )(
+    `loads unseen ordered rows after $history, includeInitialState=$includeInitialState, cursor=$withCursor`,
+    async ({ includeInitialState, history, withCursor }) => {
+      type ProviderRow = { id: string; value: number }
+      const remote: Array<ProviderRow> = [
+        { id: `one`, value: 1 },
+        { id: `two`, value: 2 },
+        { id: `three`, value: 3 },
+      ]
+      const initial =
+        history === `ordered-reentry` ? remote.slice(0, 2) : remote.slice(0, 1)
+      let operations!: Parameters<SyncConfig<ProviderRow, string>[`sync`]>[0]
+      const requests: Array<LoadSubsetOptions> = []
+      const collection = createCollection<ProviderRow, string>({
+        id: `snapshot-selection-provider-${history}-${includeInitialState}-${withCursor}`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (sync) => {
+            operations = sync
+            sync.begin()
+            for (const value of initial) sync.write({ type: `insert`, value })
+            sync.commit()
+            sync.markReady()
+            return {
+              loadSubset: (options) => {
+                requests.push(options)
+                if (options.orderBy) {
+                  const cursorKey = options.cursor?.lastKey
+                  const start =
+                    cursorKey === undefined
+                      ? (options.offset ?? 0)
+                      : remote.findIndex(({ id }) => id === cursorKey) + 1
+                  const page = remote.slice(
+                    start,
+                    options.limit === undefined
+                      ? undefined
+                      : start + options.limit,
+                  )
+                  const missing = page.filter(({ id }) => !collection.has(id))
+                  if (missing.length > 0) {
+                    operations.begin()
+                    for (const value of missing)
+                      operations.write({ type: `insert`, value })
+                    operations.commit()
+                  }
+                }
+                return true
+              },
+              unloadSubset: () => {},
+            }
+          },
+        },
+      })
+      const index = collection.createIndex((row) => row.value, {
+        indexType: BTreeIndex,
+      })
+      const orderBy = valueOrderBy()
+      const visible = new Map<string, ProviderRow>()
+      const violations: Array<string> = []
+      let reentered = false
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          for (const change of changes) {
+            if (change.type === `delete`) {
+              if (!visible.delete(String(change.key)))
+                violations.push(`delete absent:${change.key}`)
+            } else {
+              if (change.type === `insert` && visible.has(String(change.key)))
+                violations.push(`duplicate insert:${change.key}`)
+              visible.set(String(change.key), change.value)
+            }
+          }
+          if (
+            history === `ordered-reentry` &&
+            !reentered &&
+            changes.some(({ type, key }) => type === `insert` && key === `one`)
+          ) {
+            reentered = true
+            subscription.requestLimitedSnapshot({
+              orderBy,
+              limit: 1,
+              ...(withCursor ? { minValues: [0] } : {}),
+            })
+          }
+        },
+        { includeInitialState },
+      )
+      subscription.setOrderByIndex(index)
+      try {
+        if (history === `sparse-callback`) {
+          subscription.requestSnapshot({
+            where: new Func(`eq`, [new PropRef([`id`]), new Value(`one`)]),
+          })
+          operations.begin()
+          operations.write({ type: `insert`, value: remote[2]! })
+          await operations.commit()
+        }
+        for (const expectedRow of remote) {
+          subscription.requestLimitedSnapshot({
+            orderBy,
+            limit: 1,
+            ...(withCursor ? { minValues: [0] } : {}),
+          })
+          expect(visible.has(expectedRow.id)).toBe(true)
+        }
+        await flushPromises()
+
+        const orderedRequests = requests.filter(
+          ({ orderBy: requestedOrder }) => requestedOrder !== undefined,
+        )
+        expect(orderedRequests.length).toBeGreaterThan(0)
+        expect(
+          orderedRequests.every(({ limit }) =>
+            withCursor ? limit === undefined : limit !== undefined,
+          ),
+        ).toBe(true)
+        expect(violations).toEqual([])
+        expect([...visible.keys()].sort()).toEqual(
+          remote.map(({ id }) => id).sort(),
+        )
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
+  // A cursor expression alone does not move an offset-only provider. Here the
+  // cursor value is just before the last remote row, while the Collection has
+  // only the first row. The plain remote array defines the expected target.
+  // An adapter that ignores cursor expressions returns an offset page, so a
+  // finite prefix based only on local selections cannot guarantee progress.
+  it.each(
+    ([undefined, false] as const).flatMap((includeInitialState) =>
+      [3, 7].map((rowCount) => ({ includeInitialState, rowCount })),
+    ),
+  )(
+    `loads a high cursor boundary through an offset provider, includeInitialState=$includeInitialState, rows=$rowCount`,
+    async ({ includeInitialState, rowCount }) => {
+      type ProviderRow = { id: number; value: number }
+      const remote = Array.from({ length: rowCount }, (_, index) => ({
+        id: index + 1,
+        value: index + 1,
+      }))
+      let operations!: Parameters<SyncConfig<ProviderRow, number>[`sync`]>[0]
+      const requests: Array<{ offset?: number; limit?: number }> = []
+      const collection = createCollection<ProviderRow, number>({
+        id: `snapshot-high-cursor-offset-${includeInitialState}-${rowCount}`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (sync) => {
+            operations = sync
+            sync.begin()
+            sync.write({ type: `insert`, value: remote[0]! })
+            sync.commit()
+            sync.markReady()
+            return {
+              loadSubset: (options) => {
+                requests.push(options)
+                const start = options.offset ?? 0
+                const page = remote.slice(
+                  start,
+                  start + (options.limit ?? remote.length),
+                )
+                const missing = page.filter(({ id }) => !collection.has(id))
+                if (missing.length > 0) {
+                  operations.begin()
+                  for (const value of missing)
+                    operations.write({ type: `insert`, value })
+                  operations.commit()
+                }
+                return true
+              },
+              unloadSubset: () => {},
+            }
+          },
+        },
+      })
+      const index = collection.createIndex((row) => row.value, {
+        indexType: BTreeIndex,
+      })
+      const visible = new Set<number>()
+      const violations: Array<string> = []
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          for (const change of changes) {
+            if (change.type === `delete`) visible.delete(change.key)
+            else {
+              if (change.type === `insert` && visible.has(change.key))
+                violations.push(`duplicate insert:${change.key}`)
+              visible.add(change.key)
+            }
+          }
+        },
+        { includeInitialState },
+      )
+      subscription.setOrderByIndex(index)
+      try {
+        subscription.requestLimitedSnapshot({
+          orderBy: valueOrderBy(),
+          limit: 1,
+          minValues: [rowCount - 1],
+        })
+        await flushPromises()
+
+        expect(requests).toHaveLength(1)
+        expect(requests[0]).toMatchObject({ offset: 0 })
+        expect(requests[0]?.limit).toBeUndefined()
+        expect(visible.has(remote.at(-1)!.id)).toBe(true)
+        expect(violations).toEqual([])
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
+  // A callback insertion is public before user code runs. If that code asks
+  // for the next local ordered row, the callback key is excluded and another
+  // eligible key still advances selection. This crosses the positive and
+  // negative halves of the law at the callback observation cut.
+  it.each([undefined, false] as const)(
+    `selects an unseen row during a source callback, includeInitialState=%s`,
+    async (includeInitialState) => {
+      type SelectionRow = { id: string; value: number }
+      let operations!: Parameters<SyncConfig<SelectionRow, string>[`sync`]>[0]
+      const collection = createCollection<SelectionRow, string>({
+        id: `snapshot-source-callback-reentry-${includeInitialState}`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (sync) => {
+            operations = sync
+            sync.begin()
+            sync.write({ type: `insert`, value: { id: `one`, value: 1 } })
+            sync.write({ type: `insert`, value: { id: `three`, value: 3 } })
+            sync.commit()
+            sync.markReady()
+            return { loadSubset: () => true, unloadSubset: () => {} }
+          },
+        },
+      })
+      const index = collection.createIndex((row) => row.value, {
+        indexType: BTreeIndex,
+      })
+      const orderBy = valueOrderBy()
+      const batches: Array<Array<string>> = []
+      const visible = new Set<string>()
+      const violations: Array<string> = []
+      let reentered = false
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          if (changes.length > 0)
+            batches.push(changes.map(({ type, key }) => `${type}:${key}`))
+          for (const change of changes) {
+            if (change.type === `insert`) {
+              if (visible.has(String(change.key)))
+                violations.push(`duplicate insert:${change.key}`)
+              visible.add(String(change.key))
+            } else if (change.type === `delete`) {
+              visible.delete(String(change.key))
+            }
+          }
+          if (
+            !reentered &&
+            changes.some(({ type, key }) => type === `insert` && key === `two`)
+          ) {
+            reentered = true
+            subscription.requestLimitedSnapshot({
+              orderBy,
+              limit: 1,
+              minValues: [1],
+            })
+          }
+        },
+        { includeInitialState },
+      )
+      subscription.setOrderByIndex(index)
+      try {
+        subscription.requestSnapshot({
+          where: new Func(`eq`, [new PropRef([`id`]), new Value(`one`)]),
+        })
+        operations.begin()
+        operations.write({ type: `insert`, value: { id: `two`, value: 2 } })
+        await operations.commit()
+
+        // The independent fold is: select one, publish source two, then choose
+        // the lowest ordered source row absent from {one, two}, namely three.
+        expect(reentered).toBe(true)
+        expect(batches).toEqual([
+          [`insert:one`],
+          [`insert:two`],
+          [`insert:three`],
+        ])
+        expect(violations).toEqual([])
+        expect([...visible].sort()).toEqual([`one`, `three`, `two`])
       } finally {
         subscription.unsubscribe()
         await collection.cleanup()

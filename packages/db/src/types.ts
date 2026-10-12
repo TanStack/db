@@ -310,8 +310,10 @@ export type CursorExpressions = {
    */
   whereCurrent: BasicExpression<boolean>
   /**
-   * The key of the last item that was loaded.
-   * Can be used by sync layers for tracking or deduplication.
+   * Optional key of a provider-established continuation boundary. A local
+   * snapshot selection does not establish provider coverage, so
+   * CollectionSubscription does not infer this key from selected rows.
+   * Adapters must also handle requests without it.
    */
   lastKey?: string | number
 }

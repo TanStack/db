@@ -33,9 +33,9 @@ type OptionalConversions<
   OutputType extends ShapeOf<InputType>,
 > = {
   // Excludes all keys that require a conversation.
-  [
-    K in keyof InputType as InputType[K] extends OutputType[K] ? K : never
-  ]?: Conversion<InputType[K], OutputType[K]>
+  [K in keyof InputType as InputType[K] extends OutputType[K]
+    ? K
+    : never]?: Conversion<InputType[K], OutputType[K]>
 }
 
 type RequiredConversions<
@@ -43,9 +43,9 @@ type RequiredConversions<
   OutputType extends ShapeOf<InputType>,
 > = {
   // Excludes all keys that do not strictly require a conversation.
-  [
-    K in keyof InputType as InputType[K] extends OutputType[K] ? never : K
-  ]: Conversion<InputType[K], OutputType[K]>
+  [K in keyof InputType as InputType[K] extends OutputType[K]
+    ? never
+    : K]: Conversion<InputType[K], OutputType[K]>
 }
 
 type Conversions<
@@ -198,9 +198,10 @@ export function trailBaseCollectionOptions<
         }
       }
 
-      // NOTE: We cache cursors from prior fetches. TanStack/db expects that
-      // cursors can be derived from a key, which is not true for TB, since
-      // cursors are encrypted. This is leaky and therefore not ideal.
+      // TrailBase cursors are opaque. Cache a cursor by its last fetched key
+      // for callers that supply an established lastKey on a later request.
+      // CollectionSubscription does not derive lastKey from local snapshots,
+      // so its ordered requests use the offset fallback.
       const cursors = new Map<string | number, string>()
 
       // Load (more) data.
@@ -263,7 +264,7 @@ export function trailBaseCollectionOptions<
           for (let i = 0; i < Math.min(length, remaining); ++i) {
             write({
               type: `insert`,
-              value: parse(response.records[i]!),
+              value: parse(response.records[i]),
             })
           }
 
@@ -280,7 +281,7 @@ export function trailBaseCollectionOptions<
           if (length < limit || remaining <= 0) {
             if (response.cursor) {
               cursors.set(
-                getKey(parse(response.records.at(-1)!)),
+                getKey(parse(response.records.at(-1))),
                 response.cursor,
               )
             }
