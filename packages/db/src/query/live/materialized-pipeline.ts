@@ -37,11 +37,15 @@ type IncludeRoute = {
   parentContext: Record<string, any> | null
 }
 
-// Rows held in D2 state lead with their public key: the index partitions
-// values by a leading string or number, so distinct keys never need a
-// structural hash.
-type CanonicalResult = readonly [publicKey: unknown, tuple: ResultTuple]
+type CanonicalResult = {
+  publicKey: unknown
+  tuple: ResultTuple
+}
 
+// A bucket row leads with its public key. The D2 index tells apart values
+// with a different leading string or number without hashing them, so rows
+// of one bucket are hashed only when they share a key. A key of any other
+// type falls back to hashing the whole row, as every row did before.
 export type BucketRow = readonly [
   publicKey: unknown,
   value: Record<PropertyKey, any>,
@@ -229,7 +233,7 @@ function canonicalizeByPublicKey(
               routeKey(tuple[2], tuple[3], valueIdentity),
               publicKey,
             ])
-      return [relationKey, [publicKey, tuple]] as [string, CanonicalResult]
+      return [relationKey, { publicKey, tuple }] as [string, CanonicalResult]
     }),
     reduce((values: Array<[CanonicalResult, number]>) => {
       const totalMultiplicity = values.reduce(
@@ -261,7 +265,7 @@ function canonicalizeByPublicKey(
 
       return [[visible, 1]]
     }),
-    map(([relationKey, [publicKey, tuple]]) => [
+    map(([relationKey, { publicKey, tuple }]) => [
       scope === `root` ? publicKey : relationKey,
       tuple,
     ]),
@@ -272,11 +276,10 @@ function assertCongruentContributors(
   left: CanonicalResult,
   right: CanonicalResult,
 ): void {
-  const [publicKey, leftTuple] = left
   const [leftValue, leftOrder, leftCorrelation, leftContext, leftRouting] =
-    leftTuple
+    left.tuple
   const [rightValue, rightOrder, rightCorrelation, rightContext, rightRouting] =
-    right[1]
+    right.tuple
 
   if (
     leftOrder !== rightOrder ||
@@ -287,8 +290,8 @@ function assertCongruentContributors(
   ) {
     throw new Error(
       devBuild() && process.env.NODE_ENV !== `production`
-        ? `Query contributors for public key ${serializeValue(publicKey)} are not congruent`
-        : codedMessage(156, { publicKey }),
+        ? `Query contributors for public key ${serializeValue(left.publicKey)} are not congruent`
+        : codedMessage(156, { publicKey: left.publicKey }),
     )
   }
 }
@@ -478,8 +481,11 @@ function routeKey(
 }
 
 function compareBucketRows(left: BucketRow, right: BucketRow): number {
-  const [leftPublicKey, , leftOrder] = left
-  const [rightPublicKey, , rightOrder] = right
+  // Indexed reads: this comparator runs for every pair a bucket sort compares.
+  const leftPublicKey = left[0]
+  const rightPublicKey = right[0]
+  const leftOrder = left[2]
+  const rightOrder = right[2]
   if (leftOrder !== rightOrder) {
     if (leftOrder === undefined) return 1
     if (rightOrder === undefined) return -1

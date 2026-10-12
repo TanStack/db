@@ -142,7 +142,7 @@ export class BucketFacadeAdapter {
             snapshot,
             publications,
             [...changes.values()].map(
-              (change) => change.value[0] as string | number,
+              ({ value: [publicKey] }) => publicKey as string | number,
             ),
           )
           for (const change of changes.values()) {
@@ -241,7 +241,8 @@ export class BucketFacadeAdapter {
     const buckets = getOrCreate(this.pending, edgeId, () => new Map())
     const rows = getOrCreate(buckets, bucketKey, () => new Map())
 
-    const key = serializeValue(row[0])
+    const [publicKey] = row
+    const key = serializeValue(publicKey)
     const change = rows.get(key) ?? {
       deletes: 0,
       inserts: 0,
@@ -500,8 +501,9 @@ export class BucketFacadeAdapter {
 
   /** Resolve and validate every public key before opening a sync transaction. */
   private prepareChange(entry: FacadeEntry, change: PendingRow): void {
-    this.resolve(change.value[1])
-    entry.collection.getKeyFromItem({ $key: change.value[0] })
+    const [publicKey, value] = change.value
+    this.resolve(value)
+    entry.collection.getKeyFromItem({ $key: publicKey })
   }
 
   private resolveValue(value: unknown): unknown {
