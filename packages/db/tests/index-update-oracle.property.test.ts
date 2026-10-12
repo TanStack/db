@@ -37,6 +37,9 @@ import type { CompareOptions } from '../src/query/builder/types.js'
  * replacing a value with one in a different exact-equality bucket at the
  * same comparator position must move its exact lookup membership. These laws
  * concern returned index results, not bucket identity or maintenance work.
+ * A build is one of those direct actions even when a source value is
+ * `undefined`: default nulls-first order must hold after build just as it
+ * does after incremental add. The nullish lane below exercises both paths.
  */
 
 type IndexValue = number
@@ -483,8 +486,11 @@ describe.each(indexTypes)(`%s update properties`, (_indexName, IndexType) => {
  * classification. Fresh singleton histories preserve the old update cuts;
  * coexisting values expose a wrong union of nullish buckets. Fixed histories
  * also retain two undefined owners beside strings, a nonempty state without
- * undefined, and both mixed and undefined-only `IN` lists. The generated tail
- * adds nearby put/delete histories over three keys and five values, with both
+ * undefined, and both mixed and undefined-only `IN` lists. A fixed build
+ * history starts with `undefined` and 1 in both source orders, then continues
+ * with an add; it distinguishes full rebuild from incremental insertion.
+ * The generated tail
+ * adds nearby put/delete/build histories over three keys and five values, with both
  * orders of a mixed `IN` list, while a fixed four-key history keeps a third
  * defined distractor. An absent source key is added, while an owned key is
  * updated. A direct update of an absent key is outside this grammar. Each
@@ -502,7 +508,10 @@ describe.each(indexTypes)(`%s update properties`, (_indexName, IndexType) => {
  * neither expectation uses the production comparator or traversal. Fixed
  * histories keep three undefined owners, a remove-one-of-two cut, a mixed
  * four-row range, and explicit versus omitted lower bounds. The generated
- * tail varies owners and values at each returned-action cut. Removing the
+ * tail varies owners and values at each returned-action cut. Build replaces
+ * source ownership; duplicate generated keys are resolved by the Map before
+ * invoking production, so a raw duplicate-entry build is excluded. Removing
+ * build loses the native-sort path; removing the
  * nullish values loses the boundary distinction, one owner loses repeated
  * bucket traversal, and one defined value loses cursor continuation. Values
  * outside the positive 1..3 domain, mixed-type numeric/string order, custom options,
@@ -513,6 +522,7 @@ type NullishIndexValue = number | null | undefined
 type NullishIndexAction =
   | { type: `put`; key: string; value: NullishIndexValue }
   | { type: `delete`; key: string }
+  | { type: `build`; entries: Array<[string, NullishIndexValue]> }
 
 const nullishProbeValues: ReadonlyArray<NullishIndexValue> = [
   undefined,
@@ -541,6 +551,16 @@ const arbitraryNullishAction: fc.Arbitrary<NullishIndexAction> = fc.oneof(
   fc.record({
     type: fc.constant(`delete` as const),
     key: fc.constantFrom(`a`, `b`, `c`),
+  }),
+  fc.record({
+    type: fc.constant(`build` as const),
+    entries: fc.array(
+      fc.tuple(
+        fc.constantFrom(`a`, `b`, `c`),
+        fc.constantFrom(...nullishProbeValues),
+      ),
+      { maxLength: 3 },
+    ),
   }),
 )
 
@@ -721,6 +741,13 @@ function applyNullishAction(
       index.add(action.key, { value: action.value })
     }
     rows.set(action.key, action.value)
+  } else if (action.type === `build`) {
+    // Resolve duplicate generated source keys before calling build; their raw
+    // duplicate-entry policy is outside this law. Build replaces the Map.
+    const replacement = new Map(action.entries)
+    index.build([...replacement].map(([key, value]) => [key, { value }]))
+    rows.clear()
+    for (const [key, value] of replacement) rows.set(key, value)
   } else if (rows.has(action.key)) {
     index.remove(action.key, { value: rows.get(action.key) })
     rows.delete(action.key)
@@ -870,6 +897,41 @@ describe.each(indexTypes)(
       ] as const) {
         applyNullishAction(index, rows, { type: `put`, key, value })
       }
+    })
+
+    test(`build preserves nulls-first ordered reads and ranges`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>()
+      applyNullishAction(index, rows, {
+        type: `build`,
+        entries: [
+          [`undefined`, undefined],
+          [`one`, 1],
+        ],
+      })
+      // A second build changes insertion order; the model still predicts the
+      // same returned key order and complete upper-bound results.
+      applyNullishAction(index, rows, {
+        type: `build`,
+        entries: [
+          [`one`, 1],
+          [`undefined`, undefined],
+        ],
+      })
+      applyNullishAction(index, rows, {
+        type: `put`,
+        key: `two`,
+        value: 2,
+      })
+      applyNullishAction(index, rows, {
+        type: `build`,
+        entries: [
+          [`undef2`, undefined],
+          [`null`, null],
+          [`undef1`, undefined],
+          [`one`, 1],
+        ],
+      })
     })
 
     test.each([20261012, undefined])(

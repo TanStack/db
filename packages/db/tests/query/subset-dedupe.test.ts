@@ -416,11 +416,20 @@ describe(`DeduplicatedLoadSubset`, () => {
           eq(ref(`value`), val(value)),
           new Func<boolean>(`in`, [ref(`value`), val([value])]),
         ]) {
-          const request = captureRequest({ where })
+          const options = { where }
+          const request = captureRequest(options)
+          expect(request).toBe(options)
+          expect(request.where).toBe(where)
           const matches = compileSingleRowExpression(request.where!)
           expect(
             [foreign, local].map((item) => matches({ value: item })),
-          ).toEqual(realm === `foreign` ? [true, false] : [false, true])
+          ).toEqual(
+            type === `Date`
+              ? [true, true]
+              : realm === `foreign`
+                ? [true, false]
+                : [false, true],
+          )
         }
       })
     },

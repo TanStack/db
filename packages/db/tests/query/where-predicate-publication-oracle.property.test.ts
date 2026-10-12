@@ -64,6 +64,10 @@
  * source restarted after cleanup retracts a vanished row even when its first
  * batch cannot satisfy the predicate. A third witness checks that a same-key
  * update which stays TRUE publishes its new row and exact subscriber payload.
+ * A focused tagged-Date matrix checks native Dates from this and another
+ * JavaScript realm. It compares direct snapshot, filtered subscriber, and live
+ * query keys after preload and one sync transaction; an explicit BasicIndex
+ * lookup checks the indexed equality key when an index is present.
  *
  * Calibration: pinned histories separate Kleene from two-valued logic, and a
  * checker test requires the two-valued answer to fail. Hostile production
@@ -82,7 +86,10 @@
  * open; the lifecycle publication owner needs a predicate dimension to reach
  * them. The mock sync source is a controlled provider; this oracle claims only
  * how the Collection filters and routes the sync transactions it supplies.
+ * The tagged-Date matrix covers native `node:vm` Dates, not proxies, Date
+ * subclasses, spoofed tags, or all possible realm hosts.
  */
+import { runInNewContext } from 'node:vm'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
@@ -251,6 +258,37 @@ function equivalentFieldValues(a: FieldValue, b: FieldValue): boolean {
 
 function syncedModelRow(id: string, v: FieldValue): ModelRow {
   return { id, v, $synced: true, $origin: `remote`, $key: id }
+}
+
+// This focused model starts from tags, not runtime Date classification. A
+// native Date and a number with the same finite timestamp are equal. Invalid
+// Dates and NaN occupy one equality class under the documented float rule.
+type DateEqualityTag =
+  | {
+      kind: `date`
+      realm: `local` | `foreign`
+      timestamp: number | `invalid`
+    }
+  | { kind: `number`; value: number | `NaN` }
+
+type TaggedDateRow = { id: string; tag: DateEqualityTag }
+
+function dateEqualityClass(tag: DateEqualityTag): number | `unordered` {
+  if (tag.kind === `date`) {
+    return tag.timestamp === `invalid` ? `unordered` : tag.timestamp
+  }
+  return tag.value === `NaN` ? `unordered` : tag.value
+}
+
+function expectedTaggedDateKeys(
+  rows: ReadonlyArray<TaggedDateRow>,
+  literal: DateEqualityTag,
+): Array<string> {
+  const expectedClass = dateEqualityClass(literal)
+  return rows
+    .filter((row) => dateEqualityClass(row.tag) === expectedClass)
+    .map((row) => row.id)
+    .sort()
 }
 
 // ---------------------------------------------------------------------------
@@ -522,6 +560,36 @@ const pinnedChangeHistories: ReadonlyArray<History> = [
   },
 ]
 
+// The fixed realm grammar crosses the Date constructor's realm with equal,
+// unequal, and invalid timestamps. Number literals test the documented
+// Date/number and invalid-Date/NaN equality classes. A later sync transaction
+// moves three rows between those classes without changing their public keys.
+const taggedDateRows: ReadonlyArray<TaggedDateRow> = [
+  { id: `local-one`, tag: { kind: `date`, realm: `local`, timestamp: 1 } },
+  { id: `foreign-one`, tag: { kind: `date`, realm: `foreign`, timestamp: 1 } },
+  { id: `foreign-two`, tag: { kind: `date`, realm: `foreign`, timestamp: 2 } },
+  {
+    id: `local-invalid`,
+    tag: { kind: `date`, realm: `local`, timestamp: `invalid` },
+  },
+  {
+    id: `foreign-invalid`,
+    tag: { kind: `date`, realm: `foreign`, timestamp: `invalid` },
+  },
+  { id: `number-one`, tag: { kind: `number`, value: 1 } },
+  { id: `number-nan`, tag: { kind: `number`, value: `NaN` } },
+]
+
+const taggedDateLiterals: ReadonlyArray<DateEqualityTag> = [
+  { kind: `date`, realm: `local`, timestamp: 1 },
+  { kind: `date`, realm: `foreign`, timestamp: 1 },
+  { kind: `date`, realm: `foreign`, timestamp: 2 },
+  { kind: `date`, realm: `local`, timestamp: `invalid` },
+  { kind: `date`, realm: `foreign`, timestamp: `invalid` },
+  { kind: `number`, value: 1 },
+  { kind: `number`, value: `NaN` },
+]
+
 // ---------------------------------------------------------------------------
 // Production driver
 // ---------------------------------------------------------------------------
@@ -592,6 +660,132 @@ function irPredicate(predicate: Predicate): BasicExpression<boolean> {
 
 function sourceRow(id: string, v: FieldValue): Row {
   return v === MISSING ? { id } : { id, v }
+}
+
+function runtimeTaggedDateValue(tag: DateEqualityTag): Date | number {
+  if (tag.kind === `number`) {
+    return tag.value === `NaN` ? Number.NaN : tag.value
+  }
+  const timestamp = tag.timestamp === `invalid` ? Number.NaN : tag.timestamp
+  return tag.realm === `foreign`
+    ? (runInNewContext(`new Date(timestamp)`, { timestamp }) as Date)
+    : new Date(timestamp)
+}
+
+type TaggedValueRow = { id: string; v: Date | number }
+
+// The tag model predicts keys before the runtime values are constructed. The
+// driver observes the public live query, filtered subscription, and direct
+// Collection snapshot after preload and after a committed source transaction.
+// The explicit index lookup checks the physical equality key at both cuts.
+async function observeTaggedDateEquality(
+  literal: DateEqualityTag,
+  indexed: boolean,
+): Promise<void> {
+  const rows = taggedDateRows.map((row) => ({ ...row }))
+  const literalValue = runtimeTaggedDateValue(literal)
+  const collection = createCollection(
+    mockSyncCollectionOptions<TaggedValueRow>({
+      id: `where-publication-date-${collectionSerial++}`,
+      getKey: (row) => row.id,
+      autoIndex: `off`,
+      initialData: rows.map((row) => ({
+        id: row.id,
+        v: runtimeTaggedDateValue(row.tag),
+      })),
+    }),
+  )
+  const live = createLiveQueryCollection((q) =>
+    q.from({ row: collection }).where(({ row }) => eq(row.v, literalValue)),
+  )
+  const predicate = new Func(`eq`, [
+    new PropRef([`v`]),
+    new Value(literalValue),
+  ])
+  const visible = new Set<string | number>()
+  let subscription: { unsubscribe: () => void } | undefined
+
+  await withOracleCleanup(async () => {
+    await collection.stateWhenReady()
+    const index = indexed
+      ? collection.createIndex((row) => row.v, { indexType: BasicIndex })
+      : undefined
+    await live.preload()
+    subscription = collection.subscribeChanges(
+      (changes) => {
+        for (const change of changes) {
+          if (change.type === `delete`) visible.delete(change.key)
+          else visible.add(change.key)
+        }
+      },
+      { includeInitialState: true, whereExpression: predicate },
+    )
+
+    const check = (checkpoint: string) => {
+      const expected = expectedTaggedDateKeys(rows, literal)
+      const label = `${checkpoint}, ${indexed ? `indexed` : `unindexed`}, ${JSON.stringify(literal)}`
+      expect(
+        [...live.keys()].map(String).sort(),
+        `${label}: live query`,
+      ).toEqual(expected)
+      expect(
+        [...visible].map(String).sort(),
+        `${label}: filtered subscriber`,
+      ).toEqual(expected)
+      const snapshot = collection.currentStateAsChanges({ where: predicate })
+      expect(
+        snapshot?.map((change) => String(change.key)).sort(),
+        `${label}: direct snapshot`,
+      ).toEqual(expected)
+      if (index) {
+        expect(
+          [...index.lookup(`eq`, literalValue)].map(String).sort(),
+          `${label}: BasicIndex equality lookup`,
+        ).toEqual(expected)
+        const optimized = collection.currentStateAsChanges({
+          where: predicate,
+          optimizedOnly: true,
+        })
+        expect(
+          optimized?.map((change) => String(change.key)).sort(),
+          `${label}: optimized public snapshot`,
+        ).toEqual(expected)
+      }
+    }
+
+    check(`after subscribe`)
+    const transitions: ReadonlyArray<{ index: number; tag: DateEqualityTag }> =
+      [
+        {
+          index: 0,
+          tag: { kind: `date`, realm: `foreign`, timestamp: `invalid` },
+        },
+        { index: 2, tag: { kind: `date`, realm: `foreign`, timestamp: 1 } },
+        { index: 3, tag: { kind: `date`, realm: `foreign`, timestamp: 2 } },
+      ]
+    collection.utils.begin()
+    for (const transition of transitions) {
+      collection.utils.write({
+        type: `update`,
+        value: {
+          id: rows[transition.index]!.id,
+          v: runtimeTaggedDateValue(transition.tag),
+        },
+      })
+    }
+    collection.utils.commit()
+    for (const transition of transitions) {
+      rows[transition.index] = {
+        id: rows[transition.index]!.id,
+        tag: transition.tag,
+      }
+    }
+    check(`after transaction`)
+  }, [
+    () => subscription?.unsubscribe(),
+    () => live.cleanup(),
+    () => collection.cleanup(),
+  ])
 }
 
 type Consumer =
@@ -1101,6 +1295,23 @@ describe(`WHERE predicate publication oracle`, () => {
         markSourceReady()
         expect([...visible]).toEqual([])
       }, [() => subscription.unsubscribe(), () => collection.cleanup()])
+    })
+
+    it(`native Dates from another realm publish by timestamp and invalid-Date equality`, async () => {
+      const foreign = runtimeTaggedDateValue({
+        kind: `date`,
+        realm: `foreign`,
+        timestamp: 1,
+      })
+      // This checks the host premise: a native Date can fail local instanceof.
+      expect(foreign instanceof Date).toBe(false)
+      expect(Date.prototype.getTime.call(foreign)).toBe(1)
+
+      for (const indexed of [false, true]) {
+        for (const literal of taggedDateLiterals) {
+          await observeTaggedDateEquality(literal, indexed)
+        }
+      }
     })
 
     for (const history of [

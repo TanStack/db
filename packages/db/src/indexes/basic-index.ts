@@ -205,8 +205,11 @@ export class BasicIndex<
       }
     }
 
-    // Build sorted array from unique values
-    this.sortedValues = Array.from(this.valueMap.keys()).sort(this.compareFn)
+    // Native Array.sort moves raw undefined values last without comparing them.
+    // Wrap values so nulls-first comparison also runs during a full build.
+    const sortable = Array.from(this.valueMap.keys(), (value) => ({ value }))
+    sortable.sort((left, right) => this.compareFn(left.value, right.value))
+    this.sortedValues = sortable.map(({ value }) => value)
   }
 
   /**

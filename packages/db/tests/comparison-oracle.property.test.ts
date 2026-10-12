@@ -1,19 +1,29 @@
+import { runInNewContext } from 'node:vm'
 import { describe, expect, it } from 'vitest'
 import { fc, test as fcTest } from '@fast-check/vitest'
+import { createCollection } from '../src/collection/index'
+import { createLiveQueryCollection } from '../src/query/live-query-collection'
 import {
   areValuesEqual,
   ascComparator,
+  defaultComparator,
   descComparator,
+  isUnorderable,
   makeComparator,
   normalizeValue,
 } from '../src/utils/comparison'
+import { DEFAULT_COMPARE_OPTIONS } from '../src/utils'
 import type { CompareOptions } from '../src/query/builder/types'
 
 /**
  * Comparison defines the order and equality domains used by queries and
  * indexes. The laws are reflexivity, deterministic sign, antisymmetry, and
  * transitivity under one resolved option set. Null placement, direction, and
- * lexical/locale string modes are independent axes.
+ * lexical/locale string modes are independent axes. In the bounded default
+ * ascending domain below, NaN and invalid Dates share one non-finite order
+ * position and follow finite values; null remains first. The published NaN
+ * ordering change in `packages/db/CHANGELOG.md` (#1582) and the live-query
+ * guide establish that law for Dates regardless of their JavaScript realm.
  *
  * Authority: `OrderByOptions` and `CompareOptions` in the query builder's
  * option types declare these modes. The index comparator contract accepts
@@ -21,7 +31,12 @@ import type { CompareOptions } from '../src/query/builder/types'
  *
  * The model uses direct primitive, Date, array, and byte comparisons from the
  * declared domain. It excludes unrelated object identities because production
- * intentionally assigns those a creation-order ID. Equality laws separately
+ * intentionally assigns those a creation-order ID. The non-finite model uses
+ * input tags and finite epoch-day values, rather than the production
+ * unorderable classifier. It covers number-only and Date-only sorts with
+ * optional null. A separate realm-tagged Date model below checks native Date
+ * timestamps and invalidity across realms, plus one public ordered scan.
+ * Neither lane claims mixed-type order or every query/index path. Equality laws separately
  * cover the normalized value classes and changed-byte controls. Comparator
  * signs reject NaN and non-number results before reduction. Signed infinity
  * is a valid comparator result, including for custom string collation.
@@ -200,8 +215,9 @@ function comparisonProperty<
 // locale/lexical, and custom-collation cases reconstruct those boundaries.
 // Array length 0/1 and binary length 0/1/128/129 are marginal cases. Plain
 // objects are outside this order model because their IDs depend on creation
-// order. Mixed-type order and NaN inputs are outside this bounded grammar; an
-// invalid comparator result is rejected by the control below.
+// order. Mixed-type order is outside this bounded grammar. A separate tagged
+// grammar below admits NaN and invalid Date inputs; an invalid comparator
+// result is rejected by the control below.
 const arbitraryComparablePrimitive = fc.oneof(
   fc.string(),
   fc.integer(),
@@ -210,6 +226,181 @@ const arbitraryComparablePrimitive = fc.oneof(
 )
 
 const arbitraryDate = fc.date({ noInvalidDate: true })
+
+type NonFiniteFamily = `number` | `date`
+type NonFiniteInput = {
+  family: NonFiniteFamily
+  finiteDays: Array<number>
+  unorderedCount: number
+  includeNull: boolean
+}
+type TaggedOrderValue = {
+  id: string
+  value: number | Date | null
+  category: `null` | `finite` | `unordered`
+  order: number
+}
+
+// The generator's tags are reference facts: finite epoch days have ordinary
+// numeric order, null precedes them, and the family's non-finite values follow
+// them. Constructing expected signs from these tags avoids asking production
+// whether a Date or number is unorderable. Distinct IDs preserve duplicate
+// NaNs/invalid Dates in the sorted observation.
+function taggedOrderValues(input: NonFiniteInput): Array<TaggedOrderValue> {
+  const unordered = () =>
+    input.family === `number` ? Number.NaN : new Date(Number.NaN)
+  const finite = input.finiteDays.map((day, index) => ({
+    id: `finite:${index}`,
+    value: input.family === `number` ? day : new Date(day * 86_400_000),
+    category: `finite` as const,
+    order: day,
+  }))
+  const rows: Array<TaggedOrderValue> = [
+    finite[0]!,
+    { id: `unordered:0`, value: unordered(), category: `unordered`, order: 0 },
+    ...finite.slice(1),
+    ...Array.from({ length: input.unorderedCount - 1 }, (_, index) => ({
+      id: `unordered:${index + 1}`,
+      value: unordered(),
+      category: `unordered` as const,
+      order: 0,
+    })),
+  ]
+  if (input.includeNull) {
+    rows.splice(2, 0, { id: `null`, value: null, category: `null`, order: 0 })
+  }
+  return rows
+}
+
+function taggedOrderSign(a: TaggedOrderValue, b: TaggedOrderValue): -1 | 0 | 1 {
+  const rank = { null: 0, finite: 1, unordered: 2 }
+  const difference = rank[a.category] - rank[b.category]
+  const valueDifference =
+    difference || (a.category === `finite` ? a.order - b.order : 0)
+  return valueDifference < 0 ? -1 : valueDifference > 0 ? 1 : 0
+}
+
+// Production observes direct comparator returns and the order of a stable
+// JavaScript sort using the exported default comparator. The comparison runs
+// immediately after each call, so it detects wrong signs and lost or reordered
+// duplicate non-finite rows at the exact sort checkpoint.
+function assertNonFiniteOrder(
+  input: NonFiniteInput,
+  compare: (a: number | Date | null, b: number | Date | null) => number = (
+    a,
+    b,
+  ) => ascComparator(a, b, DEFAULT_COMPARE_OPTIONS),
+  sortCompare: (
+    a: number | Date | null,
+    b: number | Date | null,
+  ) => number = defaultComparator,
+): void {
+  const rows = taggedOrderValues(input)
+  for (const a of rows) {
+    for (const b of rows) {
+      const result = compare(a.value, b.value)
+      expect(sign(result)).toBe(taggedOrderSign(a, b))
+      // Preserve the legacy exact-zero assertion for NaN/NaN, including its
+      // distinction between positive and negative zero in Vitest.
+      if (a.category === `unordered` && b.category === `unordered`) {
+        expect(result).toBe(0)
+      }
+    }
+  }
+  const actual = [...rows].sort((a, b) => sortCompare(a.value, b.value))
+  const expected = [...rows].sort(taggedOrderSign)
+  expect(actual.map((row) => row.id)).toEqual(expected.map((row) => row.id))
+}
+
+// Legal inputs contain 1..5 distinct finite numbers or valid epoch-day Dates,
+// one or two NaNs/invalid Dates, and optional null. A singleton finite value,
+// duplicate non-finite values, negative days, and null presence are margins.
+// Removing the family axis misses invalid Dates; removing the duplicate count
+// misses equal non-finite rows; removing null misses its default placement.
+// Mixed families, Temporal values, symbols, and invalid option objects are not
+// generated. The fixed examples below reconstruct the legacy sort histories.
+const arbitraryNonFiniteInput: fc.Arbitrary<NonFiniteInput> = fc.record({
+  family: fc.constantFrom(`number` as const, `date` as const),
+  finiteDays: fc.uniqueArray(fc.integer({ min: -20_000, max: 20_000 }), {
+    minLength: 1,
+    maxLength: 5,
+  }),
+  unorderedCount: fc.integer({ min: 1, max: 2 }),
+  includeNull: fc.boolean(),
+})
+
+type RealmDateSample = {
+  leftTime: number | null
+  rightTime: number | null
+  leftForeign: boolean
+  rightForeign: boolean
+}
+
+function dateInRealm(time: number | null, foreign: boolean): Date {
+  const timestamp = time ?? Number.NaN
+  return foreign
+    ? (runInNewContext(`new Date(timestamp)`, { timestamp }) as Date)
+    : new Date(timestamp)
+}
+
+// `null` is a model-only invalid-Date tag; production receives a real Date
+// whose timestamp is NaN. Two valid tags compare by their supplied timestamp,
+// while an invalid tag follows every valid tag. The model never asks the
+// production Date detector, normalizer, or comparator for an expected sign.
+function modelDateSign(left: number | null, right: number | null): -1 | 0 | 1 {
+  if (left === null) return right === null ? 0 : 1
+  if (right === null) return -1
+  return left < right ? -1 : left > right ? 1 : 0
+}
+
+function assertRealmDateOrder(sample: RealmDateSample): void {
+  const left = dateInRealm(sample.leftTime, sample.leftForeign)
+  const right = dateInRealm(sample.rightTime, sample.rightForeign)
+  const expected = modelDateSign(sample.leftTime, sample.rightTime)
+  const reverseExpected = expected === 0 ? 0 : -expected
+  expect(isUnorderable(left)).toBe(sample.leftTime === null)
+  expect(isUnorderable(right)).toBe(sample.rightTime === null)
+  expect(sign(ascComparator(left, right, DEFAULT_COMPARE_OPTIONS))).toBe(
+    expected,
+  )
+  expect(sign(ascComparator(right, left, DEFAULT_COMPARE_OPTIONS))).toBe(
+    reverseExpected,
+  )
+  // Index equality keys use a Date's timestamp. This separate observation
+  // prevents a correct direct order from masking reference-key normalization.
+  expect(normalizeValue(left)).toBe(sample.leftTime ?? Number.NaN)
+  expect(normalizeValue(right)).toBe(sample.rightTime ?? Number.NaN)
+}
+
+// Legal pairs cross local and foreign native Dates, valid epoch milliseconds
+// in -1e12..1e12 and invalid Dates. The fixed witnesses below force the
+// foreign-valid and foreign-invalid paths; generated pairs add equal times,
+// both operand orders, and both invalid values. Spoofed Date tags, proxies,
+// non-Date objects, and user-defined Date subclasses are outside this grammar.
+const arbitraryDateTime = fc.oneof(
+  fc.integer({ min: -1_000_000_000_000, max: 1_000_000_000_000 }),
+  fc.constant(null),
+)
+const arbitraryRealmDateSample: fc.Arbitrary<RealmDateSample> = fc.oneof(
+  fc.record({
+    leftTime: arbitraryDateTime,
+    rightTime: arbitraryDateTime,
+    leftForeign: fc.boolean(),
+    rightForeign: fc.boolean(),
+  }),
+  fc
+    .record({
+      time: arbitraryDateTime,
+      leftForeign: fc.boolean(),
+      rightForeign: fc.boolean(),
+    })
+    .map(({ time, leftForeign, rightForeign }) => ({
+      leftTime: time,
+      rightTime: time,
+      leftForeign,
+      rightForeign,
+    })),
+)
 
 const arbitraryComparableArray = fc.array(arbitraryComparablePrimitive, {
   maxLength: 5,
@@ -674,6 +865,199 @@ describe(`ascComparator property-based tests`, () => {
         }
       },
     )
+  })
+})
+
+describe(`NaN and invalid Date default-order refinement`, () => {
+  it(`reconstructs the finite, duplicate NaN, null, and invalid Date witnesses`, () => {
+    assertNonFiniteOrder({
+      family: `number`,
+      finiteDays: [3, 1, 5],
+      unorderedCount: 2,
+      includeNull: false,
+    })
+    assertNonFiniteOrder({
+      family: `number`,
+      finiteDays: [5, 1],
+      unorderedCount: 1,
+      includeNull: true,
+    })
+    assertNonFiniteOrder({
+      family: `date`,
+      finiteDays: [19_358], // 2023-01-01, the legacy valid-Date operand.
+      unorderedCount: 1,
+      includeNull: false,
+    })
+  })
+
+  comparisonProperty([arbitraryNonFiniteInput])(
+    `default comparator refines tagged finite and non-finite order`,
+    (input) => assertNonFiniteOrder(input),
+  )
+
+  it(`rejects a wrong comparison that ties non-finite and finite values`, () => {
+    for (const family of [`number`, `date`] as const) {
+      let reachedFault = false
+      const faultyComparator = (
+        a: number | Date | null,
+        b: number | Date | null,
+      ) => {
+        const faultApplies =
+          family === `number`
+            ? typeof a === `number` &&
+              Number.isNaN(a) &&
+              typeof b === `number` &&
+              Number.isFinite(b)
+            : a instanceof Date &&
+              Number.isNaN(a.getTime()) &&
+              b instanceof Date &&
+              Number.isFinite(b.getTime())
+        if (faultApplies) {
+          reachedFault = true
+          return 0
+        }
+        return ascComparator(a, b, DEFAULT_COMPARE_OPTIONS)
+      }
+      expect(() =>
+        assertNonFiniteOrder(
+          {
+            family,
+            finiteDays: [1],
+            unorderedCount: 1,
+            includeNull: false,
+          },
+          faultyComparator,
+        ),
+      ).toThrowError()
+      expect(reachedFault).toBe(true)
+    }
+  })
+
+  it(`rejects a default sort that ties NaN to finite values`, () => {
+    let reachedFault = false
+    const faultySort = (a: number | Date | null, b: number | Date | null) => {
+      if (typeof a === `number` && Number.isNaN(a)) {
+        reachedFault = true
+        return 0
+      }
+      if (typeof b === `number` && Number.isNaN(b)) {
+        reachedFault = true
+        return 0
+      }
+      return defaultComparator(a, b)
+    }
+    expect(() =>
+      assertNonFiniteOrder(
+        {
+          family: `number`,
+          finiteDays: [3, 1, 5],
+          unorderedCount: 2,
+          includeNull: false,
+        },
+        (a, b) => ascComparator(a, b, DEFAULT_COMPARE_OPTIONS),
+        faultySort,
+      ),
+    ).toThrowError()
+    expect(reachedFault).toBe(true)
+  })
+})
+
+describe(`native Date order across JavaScript realms`, () => {
+  it(`rejects forged or throwing Date tags during native-brand checks`, () => {
+    const forged = { [Symbol.toStringTag]: `Date` }
+    const throwing = Object.defineProperty({}, Symbol.toStringTag, {
+      get() {
+        throw new Error(`tag read`)
+      },
+    })
+    expect(isUnorderable(forged)).toBe(false)
+    expect(normalizeValue(forged)).toBe(forged)
+    expect(
+      sign(ascComparator(forged, new Date(0), DEFAULT_COMPARE_OPTIONS)),
+    ).not.toBe(0)
+    expect(isUnorderable(throwing)).toBe(false)
+  })
+
+  it(`treats numeric NaN and invalid Dates as one non-finite order position`, () => {
+    for (const foreign of [false, true]) {
+      const invalid = dateInRealm(null, foreign)
+      expect(ascComparator(Number.NaN, invalid, DEFAULT_COMPARE_OPTIONS)).toBe(
+        0,
+      )
+      expect(ascComparator(invalid, Number.NaN, DEFAULT_COMPARE_OPTIONS)).toBe(
+        0,
+      )
+    }
+  })
+
+  it(`orders foreign valid and invalid Dates by the promised timestamp law`, () => {
+    const jan1 = Date.UTC(2023, 0, 1)
+    const jan2 = Date.UTC(2023, 0, 2)
+    assertRealmDateOrder({
+      leftTime: jan2,
+      rightTime: jan1,
+      leftForeign: true,
+      rightForeign: false,
+    })
+    assertRealmDateOrder({
+      leftTime: null,
+      rightTime: jan1,
+      leftForeign: true,
+      rightForeign: false,
+    })
+    assertRealmDateOrder({
+      leftTime: jan1,
+      rightTime: jan1,
+      leftForeign: true,
+      rightForeign: false,
+    })
+    assertRealmDateOrder({
+      leftTime: jan1,
+      rightTime: null,
+      leftForeign: false,
+      rightForeign: true,
+    })
+  })
+
+  comparisonProperty([arbitraryRealmDateSample])(
+    `local and foreign Dates refine timestamp and invalidity order`,
+    (sample) => assertRealmDateOrder(sample),
+  )
+
+  it(`orders a foreign invalid Date after a valid Date in a public scan`, async () => {
+    for (const foreign of [false, true]) {
+      const invalid = dateInRealm(null, foreign)
+      const valid = new Date(Date.UTC(2023, 0, 1))
+      const source = createCollection({
+        id: `realm-date-order-${foreign}`,
+        getKey: (row: { id: number; when: Date }) => row.id,
+        autoIndex: `off`,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: 1, when: invalid } })
+            write({ type: `insert`, value: { id: 2, when: valid } })
+            commit()
+            markReady()
+          },
+        },
+      })
+      const query = createLiveQueryCollection((q) =>
+        q
+          .from({ rows: source })
+          .orderBy(({ rows }) => rows.when, `asc`)
+          .select(({ rows }) => ({ id: rows.id, when: rows.when })),
+      )
+      try {
+        await query.preload()
+        // The local control proves that this public query actually orders
+        // rows; the foreign case must have the same promised result.
+        expect([...query.values()].map(({ id }) => id)).toEqual([2, 1])
+      } finally {
+        await query.cleanup()
+        await source.cleanup()
+      }
+    }
   })
 })
 

@@ -19,6 +19,29 @@ function getObjectId(obj: object): number {
   return id
 }
 
+// A native Date can arrive from another JavaScript realm, where `instanceof`
+// fails. Check its brand before borrowing the built-in method so a forged
+// Symbol.toStringTag cannot make an ordinary object look like a Date.
+function dateTimestamp(value: unknown): number | undefined {
+  if (value instanceof Date) return Date.prototype.getTime.call(value)
+  if (value === null || typeof value !== `object`) return undefined
+  try {
+    if (Object.prototype.toString.call(value) === `[object Date]`) {
+      return Date.prototype.getTime.call(value)
+    }
+  } catch {
+    // A proxy or forged Date tag has no native Date timestamp.
+  }
+  return undefined
+}
+
+function hasUnorderableValue(
+  value: unknown,
+  timestamp: number | undefined,
+): boolean {
+  return Number.isNaN(value) || Number.isNaN(timestamp)
+}
+
 /**
  * Whether a value has no IEEE-754 natural order: `NaN`, or an invalid Date
  * (whose timestamp is `NaN`). The query engine follows PostgreSQL float
@@ -27,11 +50,8 @@ function getObjectId(obj: object): number {
  * evaluator treat them explicitly instead of letting `NaN` compare unequal to
  * everything (which has no consistent order and cannot be indexed or sorted).
  */
-export function isUnorderable(value: any): boolean {
-  return (
-    (typeof value === `number` && Number.isNaN(value)) ||
-    (value instanceof Date && Number.isNaN(value.getTime()))
-  )
+export function isUnorderable(value: unknown): boolean {
+  return hasUnorderableValue(value, dateTimestamp(value))
 }
 
 /**
@@ -51,8 +71,10 @@ export const ascComparator = (a: any, b: any, opts: CompareOptions): number => {
   // all equal and sort greater than every other non-null value. This keeps the
   // order total (NaN would otherwise compare equal to everything), so such
   // values can be sorted and stored in tree-based indexes.
-  const aUnordered = isUnorderable(a)
-  const bUnordered = isUnorderable(b)
+  const aDateTime = dateTimestamp(a)
+  const bDateTime = dateTimestamp(b)
+  const aUnordered = hasUnorderableValue(a, aDateTime)
+  const bUnordered = hasUnorderableValue(b, bDateTime)
   if (aUnordered && bUnordered) return 0
   if (aUnordered) return 1
   if (bUnordered) return -1
@@ -81,8 +103,8 @@ export const ascComparator = (a: any, b: any, opts: CompareOptions): number => {
   }
 
   // If both are dates, compare them
-  if (a instanceof Date && b instanceof Date) {
-    return a.getTime() - b.getTime()
+  if (aDateTime !== undefined && bDateTime !== undefined) {
+    return aDateTime - bDateTime
   }
 
   // If both are Temporal objects, use compareTemporalValues for correct semantic ordering
@@ -239,9 +261,8 @@ export function normalizeValue(value: any): any {
     return value
   }
 
-  if (value instanceof Date) {
-    return value.getTime()
-  }
+  const timestamp = dateTimestamp(value)
+  if (timestamp !== undefined) return timestamp
 
   if (isTemporal(value)) {
     return normalizedKey(
