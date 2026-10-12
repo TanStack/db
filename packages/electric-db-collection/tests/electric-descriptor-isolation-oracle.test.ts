@@ -3,7 +3,10 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCollection, createTransaction } from '@tanstack/db'
 import { ShapeStream } from '@electric-sql/client'
-import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
+import {
+  InvalidPersistedCollectionConfigError,
+  persistedCollectionOptions,
+} from '../../db-sqlite-persistence-core/src'
 import { electricCollectionOptions } from '../src/electric'
 import { StreamAbortedError } from '../src/errors'
 import {
@@ -1665,13 +1668,21 @@ if (replayPath === undefined) {
   )
 }
 
-fixedCase(
-  `keeps insert acknowledgements on the owner of a reused Electric descriptor`,
-  async () => {
+// The Electric descriptor may be reused across independent persisted wrappers.
+// The wrappers may address the same or different durable Collection IDs; that
+// storage identity does not transfer an insert acknowledgement to a peer.
+// Reusing one wrapper itself is rejected before a second owner starts. The
+// public checkpoints are admission, the first receipt, and each Collection's
+// rows after only the first provider session acknowledges its transaction.
+fixedCase.each([`shared storage`, `distinct storage`] as const)(
+  `keeps insert acknowledgements on the owner of a reused Electric descriptor ($0)`,
+  async (storage) => {
+    const readTargets: Array<string> = []
     const adapter: PersistenceAdapter = {
       loadSubset: () => Promise.resolve([]),
-      loadResumeSnapshot: () =>
-        Promise.resolve({
+      loadResumeSnapshot: (target) => {
+        readTargets.push(storageTargetId(target))
+        return Promise.resolve({
           rows: [],
           keySet: { status: `consistent` },
           collectionMetadata: [],
@@ -1679,7 +1690,8 @@ fixedCase(
           latestSeq: 0,
           latestRowVersion: 0,
           resetEpoch: 0,
-        }),
+        })
+      },
       loadCollectionMetadata: () => Promise.resolve([]),
       applyCommittedTx: () => Promise.resolve(),
       ensureIndex: () => Promise.resolve(),
@@ -1702,8 +1714,16 @@ fixedCase(
         never,
         ElectricCollectionUtils<TestRow>
       >({ ...electricOptions, id, persistence: { adapter } })
-    const first = createCollection(persistedOptions(`first-persisted-owner`))
-    const second = createCollection(persistedOptions(`second-persisted-owner`))
+    const firstOptions = persistedOptions(`first-persisted-owner`)
+    const first = createCollection(firstOptions)
+    expect(() => createCollection(firstOptions)).toThrow(
+      InvalidPersistedCollectionConfigError,
+    )
+    const secondId =
+      storage === `shared storage`
+        ? `first-persisted-owner`
+        : `second-persisted-owner`
+    const second = createCollection(persistedOptions(secondId))
     try {
       first.startSyncImmediate()
       await vi.waitFor(() => expect(streams).toHaveLength(1))
@@ -1713,6 +1733,10 @@ fixedCase(
       await vi.waitFor(() => expect(streams).toHaveLength(2))
       streams[1]!.send([upToDate])
       await vi.waitFor(() => expect(second.status).toBe(`ready`))
+      expect(second.id).toBe(secondId)
+      expect(new Set(readTargets)).toEqual(
+        new Set([`first-persisted-owner`, secondId]),
+      )
 
       const transaction = first.insert({
         id: 1,

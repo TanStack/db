@@ -98,7 +98,7 @@ export function withCollectionConfigFactory<
 >(
   config: TConfig,
   factory: (client: DbClient) => TConfig,
-  claim?: () => void,
+  claim?: () => void | (() => void),
 ): CollectionConfigWithFactory<TConfig> {
   Object.defineProperty(config, collectionConfigFactory, {
     value: factory,

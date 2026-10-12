@@ -4255,6 +4255,40 @@ async function createTerminalFailureHarness(
 }
 
 describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
+  // A descriptor's one-owner claim is consumed by a constructed Collection,
+  // not by a constructor attempt that failed before binding the runtime.
+  // The independent admission model has unclaimed and claimed states; this
+  // invalid-then-corrected history must remain unclaimed after the first
+  // throw. The checkpoint is the second createCollection call and its later
+  // durable write. A successful first construction is checked below.
+  it(`permits a corrected descriptor after construction fails before owner binding`, async () => {
+    const adapter = createRecordingAdapter()
+    const options = persistedCollectionOptions<Todo, string>({
+      id: `failed-construction-retry`,
+      getKey: (row) => row.id,
+      autoIndex: `eager`,
+      persistence: { adapter },
+    })
+    expect(() => createCollection(options)).toThrow(/autoIndex/)
+    options.defaultIndexType = BasicIndex
+    const collection = createCollection(options)
+    try {
+      await collection.stateWhenReady()
+      const receipt = collection.insert({ id: `owned`, title: `Retried owner` })
+      await receipt.isPersisted.promise
+      expect(stripVirtualProps(collection.get(`owned`))).toEqual({
+        id: `owned`,
+        title: `Retried owner`,
+      })
+      expect(adapter.rows.get(`owned`)).toEqual({
+        id: `owned`,
+        title: `Retried owner`,
+      })
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
   // A persisted options descriptor owns one mutable runtime. The independent
   // ownership rule is one Collection per descriptor, including a spread copy:
   // copying fields cannot create a second runtime. The public creation boundary
@@ -14938,6 +14972,403 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       await collection._sync.loadSubset(emptyPage)
       expect(stripVirtualProps(collection.get(`retained`))).toEqual(retained)
       collection._sync.unloadSubset(emptyPage)
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      await cleanupPersistedOracle(
+        [() => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  // A DbClient-hydrated row is already public but has not been confirmed by
+  // the source. A complete persisted read can validate source-owned public
+  // rows, but an absent or older cache row cannot revoke the hydration seed.
+  // The independent model gives the seed precedence until a source change
+  // confirms its key. These histories cross an unconstrained demand, a
+  // no-demand peer notice, and a bounded empty-demand peer notice with absent,
+  // older, and equal durable rows. At the settled Collection checkpoint, the
+  // public row and change log must still equal the seed. The ordinary
+  // non-hydrated correction is checked above.
+  it.each(
+    (
+      [
+        `complete demand`,
+        `no-demand peer notice`,
+        `bounded peer notice`,
+      ] as const
+    ).flatMap((path) =>
+      ([`absent`, `older`, `equal`] as const).map((durable) => ({
+        path,
+        durable,
+      })),
+    ),
+  )(
+    `keeps a DbClient hydration seed across $path with $durable durable data`,
+    async ({ path, durable }) => {
+      const seed = { id: `seed`, title: `Hydrated row` }
+      const stored =
+        durable === `absent`
+          ? []
+          : [
+              {
+                id: `seed`,
+                title: durable === `equal` ? seed.title : `Old row`,
+              },
+            ]
+      const adapter = createRecordingAdapter(stored)
+      if (path === `bounded peer notice`) {
+        const loadSubset = adapter.loadSubset.bind(adapter)
+        adapter.loadSubset = async (...args) => {
+          const rows = await loadSubset(...args)
+          return args[1].limit === 0 ? [] : rows
+        }
+      }
+      const coordinator = createCoordinatorHarness()
+      const collectionId = `hydrated-validation-${path}-${durable}`
+      const descriptor = collectionOptions(
+        persistedCollectionOptions<Todo, string>({
+          id: collectionId,
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: ({ markReady }) => {
+              markReady()
+              return { loadSubset: () => true }
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      )
+      const client = new DbClient()
+      client.hydrate({
+        collections: [{ collectionId, rows: [{ key: seed.id, value: seed }] }],
+      })
+      const collection = client.collection(descriptor)
+      const changes: Array<string> = []
+      const subscription = collection.subscribeChanges((batch) => {
+        changes.push(...batch.map((change) => `${change.type}:${change.key}`))
+      })
+      let hasPrimaryFailure = false
+      const boundedDemand = { limit: 0 }
+      try {
+        await collection.stateWhenReady()
+        expect(stripVirtualProps(collection.get(seed.id))).toEqual(seed)
+        if (path === `bounded peer notice`) {
+          await collection._sync.loadSubset(boundedDemand)
+          expect(stripVirtualProps(collection.get(seed.id))).toEqual(seed)
+        }
+        if (path === `complete demand`) {
+          const demand = {}
+          await collection._sync.loadSubset(demand)
+          collection._sync.unloadSubset(demand)
+        } else {
+          const reads = adapter.loadResumeSnapshotCalls.length
+          const subsetReads = adapter.loadSubsetCalls.length
+          coordinator.emit(
+            {
+              type: `tx:committed`,
+              term: 1,
+              seq: 1,
+              txId: `hydrated-validation`,
+              latestRowVersion: 1,
+              requiresFullReload: true,
+            },
+            undefined,
+            collectionId,
+          )
+          await vi.waitFor(() => {
+            if (path === `bounded peer notice`)
+              expect(adapter.loadSubsetCalls).toHaveLength(subsetReads + 1)
+            else expect(adapter.loadResumeSnapshotCalls).toHaveLength(reads + 1)
+          })
+          await flushAsyncWork()
+          await flushAsyncWork()
+        }
+        expect({
+          publicRow: stripVirtualProps(collection.get(seed.id)),
+          changes,
+        }).toEqual({ publicRow: seed, changes: [] })
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        if (path === `bounded peer notice`)
+          collection._sync.unloadSubset(boundedDemand)
+        subscription.unsubscribe()
+        await cleanupPersistedOracle(
+          [() => client.cleanup()],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
+  // Preserving the seed cannot make an active reload ignore other rows. The
+  // independent snapshot rule keeps the unconfirmed seed, replaces complete
+  // durable values, removes absent ordinary keys, and admits new requested
+  // keys. A second notice checks that the seed's protection survived the first
+  // publication. The row values are observed after each settled peer notice.
+  it(`preserves a hydration seed while replacing the rest of an active snapshot`, async () => {
+    const seed = { id: `seed`, title: `Hydrated` }
+    const old = { id: `ordinary`, title: `Old`, detail: `remove this field` }
+    const removed = { id: `removed`, title: `Removed` }
+    const adapter = createRecordingAdapter([old, removed])
+    const coordinator = createCoordinatorHarness()
+    const collectionId = `mixed-hydration-replacement`
+    const descriptor = collectionOptions(
+      persistedCollectionOptions<Todo, string>({
+        id: collectionId,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    const client = new DbClient()
+    client.hydrate({
+      collections: [{ collectionId, rows: [{ key: seed.id, value: seed }] }],
+    })
+    const collection = client.collection(descriptor)
+    const demand = { limit: 10 }
+    let hasPrimaryFailure = false
+    try {
+      collection.startSyncImmediate()
+      await collection.stateWhenReady()
+      await collection._sync.loadSubset(demand)
+      expect(collection._hasHydratedKey(seed.id)).toBe(true)
+      const fresh = { id: `ordinary`, title: `Fresh` }
+      const added = { id: `added`, title: `New` }
+      adapter.rows.set(fresh.id, fresh)
+      adapter.rows.delete(removed.id)
+      adapter.rows.set(added.id, added)
+      const firstReads =
+        adapter.loadSubsetCalls.length + adapter.loadResumeSnapshotCalls.length
+      coordinator.emit(
+        {
+          type: `tx:committed`,
+          term: 1,
+          seq: 1,
+          txId: `mixed-first`,
+          latestRowVersion: 1,
+          requiresFullReload: true,
+        },
+        undefined,
+        collectionId,
+      )
+      await vi.waitFor(() =>
+        expect(
+          adapter.loadSubsetCalls.length +
+            adapter.loadResumeSnapshotCalls.length,
+        ).toBe(firstReads + 1),
+      )
+      await flushAsyncWork()
+      await flushAsyncWork()
+      expect({
+        seed: stripVirtualProps(collection.get(seed.id)),
+        ordinary: stripVirtualProps(collection.get(old.id)),
+        removed: collection.has(removed.id),
+        added: stripVirtualProps(collection.get(added.id)),
+        seedProtected: collection._hasHydratedKey(seed.id),
+      }).toEqual({
+        seed,
+        ordinary: fresh,
+        removed: false,
+        added,
+        seedProtected: true,
+      })
+
+      adapter.rows.set(seed.id, { id: seed.id, title: `Stale cache` })
+      const secondReads =
+        adapter.loadSubsetCalls.length + adapter.loadResumeSnapshotCalls.length
+      coordinator.emit(
+        {
+          type: `tx:committed`,
+          term: 1,
+          seq: 2,
+          txId: `mixed-second`,
+          latestRowVersion: 2,
+          requiresFullReload: true,
+        },
+        undefined,
+        collectionId,
+      )
+      await vi.waitFor(() =>
+        expect(
+          adapter.loadSubsetCalls.length +
+            adapter.loadResumeSnapshotCalls.length,
+        ).toBe(secondReads + 1),
+      )
+      await flushAsyncWork()
+      await flushAsyncWork()
+      expect(stripVirtualProps(collection.get(seed.id))).toEqual(seed)
+      expect(collection._hasHydratedKey(seed.id)).toBe(true)
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      collection._sync.unloadSubset(demand)
+      await cleanupPersistedOracle([() => client.cleanup()], hasPrimaryFailure)
+    }
+  })
+
+  // A full-reload notice makes row metadata for absent public keys obsolete,
+  // even when no subset demand remains. The reference snapshot has zero orphan
+  // metadata keys; a public row's presence changes whether the wrapper reads
+  // a durable row snapshot, but not that judgment. The sync metadata API is
+  // the observable boundary at the settled notice checkpoint. A source
+  // metadata-only transaction establishes the orphan through the real path.
+  it.each([false, true])(
+    `clears orphan row metadata after a no-demand peer reload (public row=%s)`,
+    async (hasPublicRow) => {
+      const row = { id: `visible`, title: `Visible row` }
+      const adapter = createRecordingAdapter(hasPublicRow ? [row] : [])
+      const coordinator = createCoordinatorHarness()
+      const collectionId = `zero-demand-orphan-${hasPublicRow}`
+      let source!: TodoSyncParams
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: collectionId,
+          syncMode: `on-demand`,
+          getKey: (value) => value.id,
+          sync: {
+            sync: (params) => {
+              source = params
+              params.markReady()
+              return { loadSubset: () => true }
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      )
+      let hasPrimaryFailure = false
+      try {
+        await collection.stateWhenReady()
+        if (hasPublicRow) {
+          const demand = {}
+          await collection._sync.loadSubset(demand)
+          collection._sync.unloadSubset(demand)
+        }
+        expect(collection.has(row.id)).toBe(hasPublicRow)
+        source.begin()
+        source.metadata?.row.set(`ghost`, { obsolete: true })
+        await whenSyncAccepted(source.commit())
+        expect(source.metadata?.row.get(`ghost`)).toEqual({ obsolete: true })
+        expect(collection.has(row.id)).toBe(hasPublicRow)
+        expect(adapter.rows.has(row.id)).toBe(hasPublicRow)
+        const metadataReads = adapter.loadCollectionMetadataCalls.length
+        const snapshotReads = adapter.loadResumeSnapshotCalls.length
+        coordinator.emit(
+          {
+            type: `tx:committed`,
+            term: 1,
+            seq: 2,
+            txId: `orphan-peer-reload`,
+            latestRowVersion: 2,
+            requiresFullReload: true,
+          },
+          undefined,
+          collectionId,
+        )
+        await vi.waitFor(() =>
+          expect(
+            adapter.loadCollectionMetadataCalls.length +
+              adapter.loadResumeSnapshotCalls.length,
+          ).toBe(metadataReads + snapshotReads + 1),
+        )
+        await flushAsyncWork()
+        await flushAsyncWork()
+        expect({
+          orphan: source.metadata?.row.get(`ghost`),
+          publicRow: stripVirtualProps(collection.get(row.id)),
+        }).toEqual({
+          orphan: undefined,
+          publicRow: hasPublicRow ? row : undefined,
+        })
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        await cleanupPersistedOracle(
+          [() => collection.cleanup()],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
+  // An equal durable value and row metadata require no public change batch.
+  // This controlled history reaches the real sync metadata controls, then
+  // retires its only demand before a peer notice. The Collection event log at
+  // the settled notice checkpoint distinguishes a no-op from a redundant
+  // update; core always supplies metadata controls to this adapter.
+  it(`does not republish an unchanged metadata-bearing row after demand retirement`, async () => {
+    const row = { id: `same`, title: `Unchanged` }
+    const adapter = createRecordingAdapter([row])
+    adapter.rowMetadata.set(row.id, { owner: `durable` })
+    const coordinator = createCoordinatorHarness()
+    const collectionId = `metadata-noop-peer`
+    let source!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: collectionId,
+        syncMode: `on-demand`,
+        getKey: (value) => value.id,
+        sync: {
+          sync: (params) => {
+            source = params
+            params.markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    let hasPrimaryFailure = false
+    try {
+      await collection.stateWhenReady()
+      const demand = {}
+      await collection._sync.loadSubset(demand)
+      collection._sync.unloadSubset(demand)
+      expect(source.metadata?.row.get(row.id)).toEqual({ owner: `durable` })
+      const changes: Array<string> = []
+      const subscription = collection.subscribeChanges((batch) => {
+        changes.push(...batch.map((change) => `${change.type}:${change.key}`))
+      })
+      try {
+        const reads = adapter.loadResumeSnapshotCalls.length
+        coordinator.emit(
+          {
+            type: `tx:committed`,
+            term: 1,
+            seq: 1,
+            txId: `same-metadata-peer`,
+            latestRowVersion: 1,
+            requiresFullReload: true,
+          },
+          undefined,
+          collectionId,
+        )
+        await vi.waitFor(() =>
+          expect(adapter.loadResumeSnapshotCalls).toHaveLength(reads + 1),
+        )
+        await flushAsyncWork()
+        await flushAsyncWork()
+        expect({
+          row: stripVirtualProps(collection.get(row.id)),
+          metadata: source.metadata?.row.get(row.id),
+          changes,
+        }).toEqual({ row, metadata: { owner: `durable` }, changes: [] })
+      } finally {
+        subscription.unsubscribe()
+      }
     } catch (error) {
       hasPrimaryFailure = true
       throw error

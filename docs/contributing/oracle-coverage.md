@@ -913,6 +913,21 @@ and direct options reuse both failed these new witnesses before repair.
 The notice corrects already public rows even during the idle interval after
 demand retirement. Arbitrary overlapping retired subsets and host scheduling
 remain outside these bounded controlled histories.
+A failed direct Collection constructor releases its options claim if the runtime
+never bound an owner; a corrected retry can then create the Collection. A
+successful owner still retains its claim through cleanup. The persisted owner
+also checks DbClient hydration seeds against absent, older, and equal durable
+rows through complete demand, zero-demand peer validation, and a bounded peer
+notice. The active-notice history combines a protected seed with ordinary row
+replacement, deletion, and insertion, then repeats the notice with an older
+durable seed. These controlled paths assert public rows and change batches;
+they do not prove every host-delivered peer schedule. Zero-demand validation
+clears orphan row metadata with zero or one public row, while an equal
+metadata-bearing row emits no change batch. The full durable snapshot used to
+validate visible keys remains O(table) per notice; there is no O(visible) read
+budget. A keyed atomic snapshot would need an adapter contract and receiving
+witness before that work bound can be claimed.
+
 Schema reset still restores an unconstrained baseline to preserve the existing
 accepted-source precedence contract. Avoiding that broad reset read requires a
 separate authority decision and history model.

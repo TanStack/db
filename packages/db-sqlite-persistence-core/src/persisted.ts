@@ -1977,6 +1977,10 @@ class PersistedCollectionRuntime<
     return this.scopedRecoveryPending
   }
 
+  hasBoundCollection(): boolean {
+    return this.boundCollection !== null
+  }
+
   setCollection(
     collection: Collection<T, TKey, PersistedCollectionUtils>,
     syncControls: SyncControlFns<T, TKey>,
@@ -2601,28 +2605,25 @@ class PersistedCollectionRuntime<
       return true
     }
 
-    const nextMetadata = new Map(
-      collectionMetadata.map(({ key, value }) => [key, value]),
-    )
-    const currentKeys = this.syncControls.metadata.collection
-      .list()
-      .map(({ key }) => key)
-
     return this.withInternalApply(() => {
       this.syncControls.begin?.()
-
-      currentKeys.forEach((key) => {
-        if (!nextMetadata.has(key)) {
-          this.syncControls.metadata?.collection.delete(key)
-        }
-      })
-
-      nextMetadata.forEach((value, key) => {
-        this.syncControls.metadata?.collection.set(key, value)
-      })
-
+      this.applyCollectionMetadataSnapshot(collectionMetadata)
       return this.syncControls.commit?.() ?? true
     })
+  }
+
+  private applyCollectionMetadataSnapshot(
+    collectionMetadata: Array<{ key: string; value: unknown }>,
+  ): void {
+    const metadata = this.syncControls.metadata
+    if (!metadata) return
+    const next = new Map(
+      collectionMetadata.map(({ key, value }) => [key, value]),
+    )
+    for (const { key } of metadata.collection.list()) {
+      if (!next.has(key)) metadata.collection.delete(key)
+    }
+    for (const [key, value] of next) metadata.collection.set(key, value)
   }
 
   async loadSubset(
@@ -3514,6 +3515,7 @@ class PersistedCollectionRuntime<
       if (validationRows) {
         const durableRows = new Map(validationRows.map((row) => [row.key, row]))
         for (const key of this.collection?.base.keys() ?? []) {
+          if (this.collection?._hasHydratedKey(key)) continue
           const durable = durableRows.get(key)
           if (!durable) {
             this.syncControls.write?.({ type: `delete`, key })
@@ -3542,6 +3544,10 @@ class PersistedCollectionRuntime<
             }
           }
         }
+        for (const key of this.collection?._syncedRowMetadataKeysOutsideBase() ??
+          []) {
+          this.syncControls.metadata?.row.delete(key)
+        }
       }
 
       for (const row of rows) {
@@ -3558,19 +3564,8 @@ class PersistedCollectionRuntime<
         })
       }
 
-      if (collectionMetadata && this.syncControls.metadata) {
-        const nextMetadata = new Map(
-          collectionMetadata.map(({ key, value }) => [key, value]),
-        )
-        for (const { key } of this.syncControls.metadata.collection.list()) {
-          if (!nextMetadata.has(key)) {
-            this.syncControls.metadata.collection.delete(key)
-          }
-        }
-        for (const [key, value] of nextMetadata) {
-          this.syncControls.metadata.collection.set(key, value)
-        }
-      }
+      if (collectionMetadata)
+        this.applyCollectionMetadataSnapshot(collectionMetadata)
 
       return this.syncControls.commit?.() ?? true
     })
@@ -3653,18 +3648,37 @@ class PersistedCollectionRuntime<
       return true
     }
 
-    const nextMetadata = new Map(
-      collectionMetadata.map(({ key, value }) => [key, value]),
+    const base = this.collection?.base
+    const hydratedKeys = new Set(
+      Array.from(base?.keys() ?? []).filter(
+        (key) => this.collection?._hasHydratedKey(key) === true,
+      ),
     )
-    const currentKeys = this.syncControls.metadata.collection
-      .list()
-      .map(({ key }) => key)
+    const rowKeys = new Set(rows.map((row) => row.key))
 
     return this.withInternalApply(() => {
       this.syncControls.begin?.()
-      this.syncControls.truncate?.()
+      if (hydratedKeys.size === 0) {
+        this.syncControls.truncate?.()
+      } else {
+        for (const key of base?.keys() ?? []) {
+          if (!hydratedKeys.has(key) && !rowKeys.has(key)) {
+            this.syncControls.write?.({ type: `delete`, key })
+          }
+        }
+        for (const key of this.collection?._syncedRowMetadataKeysOutsideBase() ??
+          []) {
+          this.syncControls.metadata?.row.delete(key)
+        }
+      }
 
       for (const row of rows) {
+        if (hydratedKeys.has(row.key)) continue
+        if (hydratedKeys.size > 0 && base?.has(row.key)) {
+          // Remove stale fields before applying a complete persisted row in
+          // the default partial-update mode, without truncating seed keys.
+          this.syncControls.write?.({ type: `delete`, key: row.key })
+        }
         this.syncControls.write?.({
           type: `update`,
           value: row.value,
@@ -3672,16 +3686,7 @@ class PersistedCollectionRuntime<
         })
       }
 
-      currentKeys.forEach((key) => {
-        if (!nextMetadata.has(key)) {
-          this.syncControls.metadata?.collection.delete(key)
-        }
-      })
-
-      nextMetadata.forEach((value, key) => {
-        this.syncControls.metadata?.collection.set(key, value)
-      })
-
+      this.applyCollectionMetadataSnapshot(collectionMetadata)
       return this.syncControls.commit?.() ?? true
     })
   }
@@ -5026,17 +5031,15 @@ class PersistedCollectionRuntime<
         // Retired demand does not hide already public rows. Validate only
         // those keys; do not publish unrelated durable rows without demand.
         await whenSyncAccepted(
-          validationSnapshot
-            ? this.applyRowsToCollection(
-                [],
-                validationSnapshot.rows as Array<{
-                  key: TKey
-                  value: T
-                  metadata?: unknown
-                }>,
-                collectionMetadata,
-              )
-            : this.replaceCollectionMetadataSnapshot(collectionMetadata),
+          this.applyRowsToCollection(
+            [],
+            (validationSnapshot?.rows ?? []) as Array<{
+              key: TKey
+              value: T
+              metadata?: unknown
+            }>,
+            collectionMetadata,
+          ),
         )
       } else if (
         skipUnchangedReplace &&
@@ -6634,6 +6637,7 @@ export function persistedCollectionOptions<
       : undefined
 
   let claimed = false
+  let claimedRuntime: PersistedCollectionRuntime<T, TKey> | undefined
   const claimOptions = () => {
     if (claimed) {
       throw new InvalidPersistedCollectionConfigError(
@@ -6641,6 +6645,9 @@ export function persistedCollectionOptions<
       )
     }
     claimed = true
+    return () => {
+      if (!claimedRuntime?.hasBoundCollection()) claimed = false
+    }
   }
 
   if (hasOwnSyncKey(options)) {
@@ -6674,6 +6681,7 @@ export function persistedCollectionOptions<
       collectionId,
       persistedReadinessTracker,
     )
+    claimedRuntime = runtime
 
     const result = {
       ...syncOptions,
@@ -6723,6 +6731,7 @@ export function persistedCollectionOptions<
     localOnlyOptions.id ?? DEFAULT_DB_NAME,
     persistedReadinessTracker,
   )
+  claimedRuntime = runtime
 
   const wrappedOnInsert = async (
     params: InsertMutationFnParams<T, TKey, TUtils & PersistedCollectionUtils>,

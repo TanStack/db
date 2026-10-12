@@ -227,6 +227,13 @@ export interface Collection<
  *
  */
 
+type CollectionConstructionConfig = CollectionConfig<
+  any,
+  string | number,
+  any,
+  UtilsRecord
+> & { schema?: StandardSchemaV1 }
+
 // Overload for when schema is provided and utils is required (not optional)
 // We can't infer the Utils type from the CollectionConfig because it will always be optional
 // So we omit it from that type and instead infer it from the extension `& { utils: TUtils }`
@@ -345,9 +352,7 @@ export function createCollection<
 
 // Implementation
 export function createCollection(
-  options: CollectionConfig<any, string | number, any, UtilsRecord> & {
-    schema?: StandardSchemaV1
-  },
+  options: CollectionConstructionConfig,
 ): Collection<any, string | number, UtilsRecord, any, any> {
   // The literal comparison lets production bundlers erase the check and import.
   if (devBuild() && process.env.NODE_ENV !== `production`) {
@@ -355,14 +360,23 @@ export function createCollection(
   }
 
   const claimOptions = (
-    options as typeof options & { [collectionOptionsClaim]?: () => void }
+    options as typeof options & {
+      [collectionOptionsClaim]?: () => void | (() => void)
+    }
   )[collectionOptionsClaim]
-  claimOptions?.()
+  return constructWithClaim(options, claimOptions?.())
+}
 
-  const collection = new CollectionImpl<any, string | number, any, any, any>(
-    options,
-  )
-  return collection
+function constructWithClaim(
+  options: CollectionConstructionConfig,
+  releaseClaim: void | (() => void),
+): Collection<any, string | number, UtilsRecord, any, any> {
+  try {
+    return new CollectionImpl<any, string | number, any, any, any>(options)
+  } catch (error) {
+    releaseClaim?.()
+    throw error
+  }
 }
 
 type CollectionImplConfig<
