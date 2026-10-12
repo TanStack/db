@@ -200,6 +200,9 @@ type StructuralStep =
   | null
   | { fresh: `object`; v: number }
   | { fresh: `array`; pair: [number, number] }
+  // Equal objects whose two keys tie under locale collation, inserted in
+  // either order. They must merge.
+  | { fresh: `collationTie`; reversed: boolean }
 
 type Mode =
   `keyed` | `keyedCollision` | `numbers` | `strings` | `structural` | `fallback`
@@ -317,6 +320,10 @@ const historyArb: fc.Arbitrary<History> = fc.oneof(
           fc
             .tuple(fc.nat(1), fc.nat(1))
             .map((pair): StructuralStep => ({ fresh: `array`, pair })),
+          fc.boolean().map((reversed): StructuralStep => ({
+            fresh: `collationTie`,
+            reversed,
+          })),
         ),
         multiplicityArb,
       ),
@@ -364,8 +371,17 @@ function buildRecords(history: History): MultiSetArray<Data> {
     if (history.mode === `numbers` || history.mode === `strings`)
       return [step, m]
     const value = step as StructuralStep
-    if (value !== null && typeof value === `object`)
+    if (value !== null && typeof value === `object`) {
+      if (value.fresh === `collationTie`) {
+        const entries: Array<[string, number]> = [
+          [`\u00C5`, 1],
+          [`A\u030A`, 2],
+        ]
+        if (value.reversed) entries.reverse()
+        return [Object.fromEntries(entries), m]
+      }
       return [value.fresh === `object` ? { v: value.v } : [...value.pair], m]
+    }
     return [value, m]
   })
   // One non-keyed record makes the whole multiset unkeyed.

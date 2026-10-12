@@ -1,5 +1,6 @@
 /**
- * The murmur stream as it was before it wrote whole words: one `writeByte`
+ * Reference model for the murmur stream oracle: the stream as it was before
+ * it wrote whole words, one `writeByte`
  * call per byte. The stream oracle compares the current stream with it.
  * Load it after stubbing `Math.random`, so its seed and markers equal the
  * current module's.

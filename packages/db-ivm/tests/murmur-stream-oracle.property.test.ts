@@ -12,13 +12,19 @@ import { fc } from '@fast-check/vitest'
  * change which bytes reach murmur.
  *
  * The reference is the earlier stream, which wrote one byte per call. Both
- * modules load under one `Math.random` stub, so their seed and markers are
- * equal and digests are comparable. Histories are generated chunk sequences.
- * Odd-length strings leave the stream two bytes into a block, so the words
- * after them take the merge path. The comparison runs on the digest of every
- * prefix of the sequence, so an error in an early chunk cannot be hidden by
- * a later one. Symbols are out of scope here: they hash as their identity
- * number, which the number lane covers.
+ * modules load under one `Math.random` stub that returns a distinct value
+ * for each marker, in declaration order, so the seed and each marker are
+ * equal across the two modules and different from each other. Swapping two
+ * markers therefore changes a digest. Histories are generated chunk
+ * sequences. Odd-length strings leave the stream two bytes into a block, so
+ * the words after them take the merge path. The comparison runs on the digest
+ * of every prefix of the sequence, so an error in an early chunk cannot be
+ * hidden by a later one.
+ *
+ * Scope: the law is the byte framing. The reference copies murmur3's block
+ * mixing and finalizer, so this oracle cannot find an error in those.
+ * Symbols are not generated: the reference has no symbol identity, so the
+ * symbol marker and identity lookup have no owner here.
  */
 
 type Chunk = string | number | bigint
@@ -33,10 +39,18 @@ let Reference: new () => {
 }
 
 beforeAll(async () => {
-  const random = vi.spyOn(Math, `random`).mockReturnValue(0.4375)
+  // One value per randomHash call: seed, string, bigint, negative bigint and
+  // symbol markers. The reference declares the first four in the same order.
+  const markers = [0.11, 0.23, 0.37, 0.41, 0.53]
+  let call = 0
+  const random = vi
+    .spyOn(Math, `random`)
+    .mockImplementation(() => markers[call++ % markers.length]!)
   vi.resetModules()
   Current = (await import(`../src/hashing/murmur`)).MurmurHashStream
-  Reference = (await import(`./murmur-stream-reference`)).ReferenceByteStream
+  call = 0
+  Reference = (await import(`./murmur-stream-reference-oracle`))
+    .ReferenceByteStream
   random.mockRestore()
 })
 
