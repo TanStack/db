@@ -472,6 +472,15 @@ The following related oracles own distinct production paths or observation cuts:
   owns exact public rows and change batches. The
   [replay oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-subscription-replay-oracle.property.test.ts)
   applies that law to competing replay schedules and same-key writes.
+  Bounded three-row histories now compare a subscription's selected keys with
+  exact callback batches across full, explicit, filtered, and empty snapshots,
+  two later ordered selections, both initial-state modes, and callback reentry.
+  A delete and reinsert checks that selection can reset. The replay owner checks
+  a filtered snapshot followed by an ordered selection during a pending direct
+  truncate replay, including a callback that reenters before the target receives
+  the source transaction. These checks reject the removed snapshot reservation
+  at the callback and adapter-cursor checkpoints. They do not cover arbitrary
+  rankings, provider pagination results, or compiled live-query windows.
 - The [pagination oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/pagination-oracle.property.test.ts)
   owns general ordered-window rows and publication. The
   [ordered-work oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/ordered-work-oracle.property.test.ts)

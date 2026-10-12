@@ -171,7 +171,8 @@ export class CollectionSubscription
     BasicExpression<boolean>
   >()
 
-  // Keep track of the keys we've sent (needed for join and orderBy optimizations)
+  // Keep track of keys selected by snapshots or delivered through filtered
+  // callbacks. Ordered snapshots skip these keys until a valid reset.
   private sentKeys = new Set<string | number>()
   private publishedRows = new Map<string | number, object>()
   private stalePublishedRows = new Map<string | number, object>()
@@ -1296,8 +1297,13 @@ export class CollectionSubscription
         (!this.sentKeys.has(change.key) && !knownRows.has(change.key)),
     )
 
-    // The callback wrapper records these keys before user code runs, so a
-    // change that arrives during the callback is filtered against them.
+    // Reserve the selected keys before publication. The callback wrapper does
+    // not track keys for full-state or skip-filtering subscriptions, and a
+    // truncate replay can keep this snapshot private until later.
+    for (const change of filteredSnapshot) {
+      this.sentKeys.add(change.key)
+    }
+
     this.snapshotSent = true
     this.publishSnapshot(
       this.isBufferingForTruncate
@@ -1646,16 +1652,13 @@ export class CollectionSubscription
       return changes
     }
 
-    // When buffering for truncate, we need all changes (including deletes) to pass through.
-    // This is important because:
-    // 1. If loadedInitialState was previously true, sentKeys will be empty
-    //    (trackSentKeys early-returns when loadedInitialState is true)
-    // 2. The truncate deletes are for keys that WERE sent to the subscriber
-    // 3. We're collecting all changes atomically, so filtering doesn't make sense
+    // A truncate's deletes must enter the private replacement even when
+    // callback changes for full-state or skip-filtering subscriptions did not
+    // update sentKeys. Filtering them would retain stale published rows.
     const skipDeleteFilter = this.isBufferingForTruncate
 
-    // sentKeys records only published rows; trackSentKeys adds them after
-    // delivery. Keys inserted earlier in this batch are tracked locally, so a
+    // sentKeys covers snapshot selections and callback rows when filtering is
+    // active. Keys inserted earlier in this batch are tracked locally, so a
     // row the where clause drops cannot advance pagination or later look like
     // a duplicate insert.
     const insertedInBatch = new Set<string | number>()
@@ -1761,8 +1764,8 @@ export class CollectionSubscription
 
   private trackSentKeys(changes: Array<ChangeMessage<any, string | number>>) {
     if (this.loadedInitialState || this.skipFiltering) {
-      // No need to track sent keys if we loaded the entire state or filtering is skipped.
-      // Since filtering won't be applied, all keys are effectively "observed".
+      // These callbacks pass source changes through without key filtering.
+      // Snapshot methods still reserve their own selections for later ordered requests.
       return
     }
 

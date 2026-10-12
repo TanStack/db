@@ -2,6 +2,7 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
+import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
 import {
   createLifecycleModel,
@@ -14,6 +15,7 @@ import {
 import { oracleRandomParameters, readOracleRunConfig } from './oracle-config.js'
 import { flushPromises } from './utils.js'
 import type { SyncConfig } from '../src/types.js'
+import type { OrderBy } from '../src/query/ir.js'
 import type {
   DeferralLifecycleCommand,
   DemandName,
@@ -40,6 +42,10 @@ import type {
  * Collection lifecycle entry limits this owner to Collection publication; it
  * does not establish compiled live-query includes publication or provider
  * behavior beyond the controlled sync adapter below.
+ * `requestLimitedSnapshot` promises not to resend keys. A direct snapshot
+ * selects keys for this subscription. Later ordered local snapshots skip those
+ * keys, even when the callback path does not update key tracking. A deletion
+ * can release a key so a later insert is valid.
  *
  * `source` holds currently installed source rows; `visible` is the public
  * snapshot.
@@ -121,7 +127,10 @@ type PublicationModel = {
   sentKeys: Set<RowKey>
 }
 type PublicationPhase =
-  `public` | `private-pending` | `private-settling` | `private-failed`
+  | `public`
+  | `private-pending`
+  | `private-settling`
+  | `private-failed`
 type SourceEffect = `insert` | `update` | `delete`
 type PublicationObservation = {
   index: number
@@ -1405,6 +1414,255 @@ async function runDeferralCleanupHistory(
 }
 
 describe(`CollectionSubscription lifecycle publication oracle`, () => {
+  // A local snapshot selects source rows for this subscriber. Selection and
+  // publication are distinct: full-state and skip-filtering subscriptions do
+  // not track callback keys, and a replay can hold a selection privately.
+  // For these static, distinct-ranked rows, the reference model selects the
+  // requested predicate's rows, then the first unselected ordered row. A
+  // callback consumer must never receive a second insert for a present key.
+  const snapshotRows = [
+    { id: `one`, value: 1 },
+    { id: `two`, value: 2 },
+    { id: `three`, value: 3 },
+  ] as const
+  type SnapshotRow = { id: string; value: number }
+  type FirstSnapshot = `full` | `explicit` | `one` | `none`
+  const selectionCases = ([undefined, false] as const)
+    .flatMap((includeInitialState) =>
+      ([`full`, `explicit`, `one`, `none`] as const).map((first) => ({
+        includeInitialState,
+        first,
+        reenter: false,
+      })),
+    )
+    .concat([
+      { includeInitialState: undefined, first: `full`, reenter: true },
+      { includeInitialState: false, first: `full`, reenter: true },
+      { includeInitialState: undefined, first: `explicit`, reenter: true },
+      { includeInitialState: false, first: `explicit`, reenter: true },
+      { includeInitialState: undefined, first: `one`, reenter: true },
+      { includeInitialState: false, first: `one`, reenter: true },
+    ]) satisfies Array<{
+    includeInitialState: undefined | false
+    first: FirstSnapshot
+    reenter: boolean
+  }>
+
+  it.each(selectionCases)(
+    `selects each local key once across $first then ordered, includeInitialState=$includeInitialState, reenter=$reenter`,
+    async ({ includeInitialState, first, reenter }) => {
+      // The model's selected set is an abstraction of local choices by both
+      // methods; visible is the independent callback consumer's row set.
+      const selected = new Set<string>()
+      const expectedBatches: Array<Array<string>> = []
+      const firstRows =
+        first === `one`
+          ? snapshotRows.filter(({ id }) => id === `one`)
+          : first === `none`
+            ? []
+            : snapshotRows
+      const choose = (rows: ReadonlyArray<SnapshotRow>) => {
+        const batch = rows
+          .filter(({ id }) => !selected.has(id))
+          .map(({ id }) => `insert:${id}`)
+        for (const row of rows) selected.add(row.id)
+        if (batch.length > 0) expectedBatches.push(batch)
+      }
+      choose(firstRows)
+      const orderedChoice = snapshotRows.find(({ id }) => !selected.has(id))
+      choose(orderedChoice ? [orderedChoice] : [])
+      const nextOrderedChoice = snapshotRows.find(({ id }) => !selected.has(id))
+      choose(nextOrderedChoice ? [nextOrderedChoice] : [])
+
+      const observedBatches: Array<Array<string>> = []
+      const visible = new Set<string>()
+      const invalidChanges: Array<string> = []
+      const loads: Array<{ cursor?: { lastKey?: string | number } }> = []
+      const collection = createCollection<SnapshotRow>({
+        id: `snapshot-selection-${first}-${includeInitialState}-${reenter}`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (operations) => {
+            operations.begin()
+            for (const value of snapshotRows)
+              operations.write({ type: `insert`, value })
+            operations.commit()
+            operations.markReady()
+            return {
+              loadSubset: (options) => {
+                loads.push(options)
+                return true
+              },
+              unloadSubset: () => {},
+            }
+          },
+        },
+      })
+      const index = collection.createIndex((row) => row.value, {
+        indexType: BTreeIndex,
+      })
+      const orderBy: OrderBy = [
+        {
+          expression: new PropRef([`value`]),
+          compareOptions: { direction: `asc`, nulls: `first` },
+        },
+      ]
+      let inFirstCallback = false
+      let nested = false
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          const batch: Array<string> = []
+          for (const change of changes) {
+            batch.push(`${change.type}:${change.key}`)
+            if (change.type === `insert`) {
+              if (visible.has(String(change.key)))
+                invalidChanges.push(`duplicate insert:${change.key}`)
+              visible.add(String(change.key))
+            } else if (change.type === `delete`) {
+              visible.delete(String(change.key))
+            }
+          }
+          if (batch.length > 0) observedBatches.push(batch)
+          if (reenter && inFirstCallback && !nested) {
+            nested = true
+            subscription.requestLimitedSnapshot({
+              orderBy,
+              limit: 1,
+              minValues: [1],
+            })
+          }
+        },
+        { includeInitialState },
+      )
+      subscription.setOrderByIndex(index)
+      try {
+        inFirstCallback = true
+        if (first === `full`) subscription.requestSnapshot()
+        else if (first === `explicit`) subscription.requestSnapshot({})
+        else
+          subscription.requestSnapshot({
+            where: new Func(`eq`, [
+              new PropRef([`id`]),
+              new Value(first === `one` ? `one` : `missing`),
+            ]),
+          })
+        inFirstCallback = false
+        if (!reenter)
+          subscription.requestLimitedSnapshot({
+            orderBy,
+            limit: 1,
+            minValues: [1],
+          })
+        subscription.requestLimitedSnapshot({
+          orderBy,
+          limit: 1,
+          minValues: [1],
+        })
+
+        // Snapshot enumeration order is not part of the key-selection law.
+        expect(observedBatches.map((batch) => [...batch].sort())).toEqual(
+          expectedBatches.map((batch) => [...batch].sort()),
+        )
+        expect(invalidChanges).toEqual([])
+        expect([...visible].sort()).toEqual([...selected].sort())
+        expect(loads.at(-1)?.cursor?.lastKey).toBe(
+          nextOrderedChoice?.id ?? orderedChoice?.id,
+        )
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
+  it(`reselects a key only after its deletion and next publication`, async () => {
+    let operations!: Parameters<SyncConfig<SnapshotRow, string>[`sync`]>[0]
+    const loads: Array<{ cursor?: { lastKey?: string | number } }> = []
+    const collection = createCollection<SnapshotRow>({
+      id: `snapshot-selection-after-delete`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (sync) => {
+          operations = sync
+          sync.begin()
+          sync.write({ type: `insert`, value: { id: `one`, value: 1 } })
+          sync.write({ type: `insert`, value: { id: `two`, value: 2 } })
+          sync.commit()
+          sync.markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              return true
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const index = collection.createIndex((row) => row.value, {
+      indexType: BTreeIndex,
+    })
+    const orderBy: OrderBy = [
+      {
+        expression: new PropRef([`value`]),
+        compareOptions: { direction: `asc`, nulls: `first` },
+      },
+    ]
+    const batches: Array<Array<string>> = []
+    const visible = new Set<string>()
+    const invalidChanges: Array<string> = []
+    const subscription = collection.subscribeChanges((changes) => {
+      const batch: Array<string> = []
+      for (const change of changes) {
+        batch.push(`${change.type}:${change.key}`)
+        if (change.type === `insert`) {
+          if (visible.has(String(change.key)))
+            invalidChanges.push(`duplicate insert:${change.key}`)
+          visible.add(String(change.key))
+        } else if (change.type === `delete`) {
+          if (!visible.delete(String(change.key)))
+            invalidChanges.push(`delete absent:${change.key}`)
+        }
+      }
+      if (batch.length > 0) batches.push(batch)
+    })
+    subscription.setOrderByIndex(index)
+    try {
+      subscription.requestSnapshot({
+        where: new Func(`eq`, [new PropRef([`id`]), new Value(`one`)]),
+      })
+      operations.begin()
+      operations.write({ type: `delete`, key: `one` })
+      await operations.commit()
+      operations.begin()
+      operations.write({ type: `insert`, value: { id: `one`, value: 1 } })
+      await operations.commit()
+      subscription.requestLimitedSnapshot({
+        orderBy,
+        limit: 1,
+        minValues: [1],
+      })
+
+      // The independent fold is select(one), remove(one), publish(one), then
+      // select the first remaining ranked row. A permanent reservation loses
+      // the source reinsert; a missing reservation repeats it in the window.
+      expect(batches).toEqual([
+        [`insert:one`],
+        [`delete:one`],
+        [`insert:one`],
+        [`insert:two`],
+      ])
+      expect(invalidChanges).toEqual([])
+      expect([...visible].sort()).toEqual([`one`, `two`])
+      expect(loads.at(-1)?.cursor?.lastKey).toBe(`two`)
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
   it(`reconstructs every bounded deferral cleanup history`, () => {
     expect(deferralCleanupHistories).toHaveLength(32)
     expect(new Set(deferralCleanupHistories.map(({ name }) => name)).size).toBe(
