@@ -4883,6 +4883,34 @@ describe(`eager indexed ordered windows`, () => {
   )
 
   it.each([`sync`, `local-only`] as const)(
+    `refills a joined-filter window when a row leaves only through the join (%s)`,
+    async (path) => {
+      // The bounded prefix holds rows 3 and 1; row 0 then enters the query's
+      // input past it. Row 3 loses its marker without a root delete, so row 0
+      // must not stand in for row 4, which the prefix never sent.
+      // Shrunk from seed -1253945411.
+      await checkEagerWindow({
+        path,
+        filter: `joined`,
+        indexed: true,
+        direction: `asc`,
+        terms: 1,
+        limit: 1,
+        offset: 1,
+        initial: [
+          { id: 1, rank: 0, eligible: true },
+          { id: 3, rank: null, eligible: true },
+          { id: 4, rank: 1, eligible: true },
+        ],
+        history: [
+          { type: `upsert`, id: 0, rank: 2, eligible: true },
+          { type: `upsert`, id: 3, rank: null, eligible: false },
+        ],
+      })
+    },
+  )
+
+  it.each([`sync`, `local-only`] as const)(
     `refills a joined-filter window past a retained distant row (%s)`,
     async (path) => {
       // A label update brings eligible row 10 into the query's input. After
