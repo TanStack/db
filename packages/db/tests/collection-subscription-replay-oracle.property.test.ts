@@ -4345,11 +4345,10 @@ describe(`CollectionSubscription replay oracle`, () => {
         reacquireOnReady = reacquireTiming === `during-ready`
         reacquireInUnload = reacquireTiming === `during-unload`
         subscription.releaseSnapshot(where)
+        // Releasing the final demand retires the replay, which publishes the
+        // row it holds, so the replacement resolves.
         if (reacquireTiming === `after-release`) {
-          await expect(settlement).resolves.toMatchObject({
-            status: `rejected`,
-            error: { name: `AbortError` },
-          })
+          await expect(settlement).resolves.toEqual({ status: `resolved` })
           subscription.requestSnapshot({ where })
         } else if (reacquireTiming === `during-unload`) {
           let settled = false
@@ -4373,10 +4372,7 @@ describe(`CollectionSubscription replay oracle`, () => {
           await expect(settlement).resolves.toEqual({ status: `resolved` })
         } else {
           expect(subscription.pendingTruncateReplacement).toBeUndefined()
-          await expect(settlement).resolves.toMatchObject({
-            status: `rejected`,
-            error: { name: `AbortError` },
-          })
+          await expect(settlement).resolves.toEqual({ status: `resolved` })
         }
 
         expect(subscription.pendingTruncateReplacement).toBeUndefined()

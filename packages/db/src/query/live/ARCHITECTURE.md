@@ -1246,9 +1246,10 @@ that demand retires, its failure cannot poison a successful replacement for the
 remaining demand. If the last logical demand retires, the now-unreachable source
 replay rejects its completion with `AbortError` and stops gating the shared
 graph; unrelated parent or sibling changes may then publish. A direct
-subscriber's replay whose current attempt has not failed publishes the rows it
-holds at that retirement, because nothing can complete it and keeping the old
-snapshot would leave values the source replaced or deleted. A replay whose
+subscriber's replay whose current attempt has not failed instead publishes the
+rows it holds at that retirement and resolves its completion, because nothing
+can complete it and keeping the old snapshot would leave values the source
+replaced or deleted. A replay whose
 current attempt failed keeps the last public snapshot, even after its failed
 owner was released; a later request reconciles a row it still shows. If release
 publication or adapter unload synchronously acquires new demand, core checks

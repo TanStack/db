@@ -1404,12 +1404,11 @@ export class CollectionSubscription
     if (this.subsetDemands.length !== 0 || !replayState) {
       return
     }
-    this.discardTruncateReplay()
-    // Only a direct subscriber holds private rows; it has no delegate to release.
     if (replayState.privateRows && !replayState.failed) {
-      this.publishReplayRows(replayState.privateRows)
+      this.flushTruncateReplay(replayState)
       return
     }
+    this.discardTruncateReplay()
     this.stalePublishedRows = new Map(this.publishedRows)
     this.restorePublishedSnapshotTracking()
     this.options.truncateReplayPublication?.succeed()

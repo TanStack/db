@@ -333,8 +333,8 @@ describe(`Replay publication storage`, () => {
 
       sub.releaseSnapshot(where)
       const [outcome] = await settled
-      expect(outcome.status).toBe(`rejected`)
-      expect((outcome as PromiseRejectedResult).reason.name).toBe(`AbortError`)
+      // The retired replay published its rows, so its replacement resolves.
+      expect(outcome.status).toBe(`fulfilled`)
       expect(sub.status).toBe(`ready`)
       expect(sub.hasPendingTruncateReplacement).toBe(false)
       // Nothing can complete the retired replay, and its attempt did not
