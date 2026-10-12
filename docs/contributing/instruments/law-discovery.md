@@ -33,19 +33,23 @@ lead, not evidence that one contract governs every item.
    within the claimed domain.
 5. Check whether the proposed result is determined by the information available
    to the responsible production path at the named checkpoint. Seek two legal
-   underlying histories with the same path-visible initial state and inputs
-   through that checkpoint, but incompatible required public observations. If
-   they exist, name the missing information or provider obligation; do not
-   silently narrow an accepted promise.
-6. Describe the smallest independent model that can make those predictions.
+   underlying histories that give the production path the same initial state
+   and inputs through that checkpoint, but require incompatible public
+   observations. If they exist, name the missing information or provider
+   obligation; do not silently narrow an accepted promise.
+6. Describe the smallest independent model that can make the rival and boundary
+   predictions from steps 3–4.
    For any proposed merge of model states, ask whether a legal next action can
    distinguish them. Map model abstractions to the project vocabulary.
 
-The information check concerns what production can receive. The model-state
-check concerns what the reference must remember. A model may know a source row
-that the production path has never received. For example, after a known top-ten
-row is deleted, two source datasets can require different replacement rows even
-though the client has received the same top ten and the same deletion.
+The information check concerns what production can receive. The test of model
+state concerns what the reference must remember. A model may know a source row
+that the production path has never received. For example, suppose a path must
+publish a full top-ten result after a deletion but receives only the old top
+ten and the deletion. If it cannot receive replacement rows before publication,
+two source datasets can require incompatible results while the path sees the
+same inputs. A live query that receives replacement rows through `loadSubset`
+has more information; judge it at its own promised publication checkpoint.
 
 **Return:** the candidate law and status, its source, rival predictions, a
 concrete distinguishing witness, and the next experiment or unresolved decision.

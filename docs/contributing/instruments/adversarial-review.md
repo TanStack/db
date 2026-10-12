@@ -12,34 +12,43 @@ validation. Delegation remains subject to the task's authorization and tools.
 Start with a plausible way this account could be wrong. Select the relevant
 levels; they are different questions, not a mandatory sequence:
 
-| Level       | Attack                                                                                                                                                                                         |
-| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Enforcement | Find a legal history or wrong output that the model, generator, driver, or recorder cannot distinguish. Can the intended production path remain unexercised while the test passes?             |
-| Formulation | Find omitted premises, excessive guarantees, wrong checkpoints, ambiguous observations, or missing information. Can two legal histories indistinguishable to production require different promised results? Try a correct and a wrong implementation. |
-| Suitability | Question whether the promised behavior is desirable, safe, or conventional. Name the external contract, standard, user consequence, or engineering reason that makes the objection applicable. |
-| Composition | Find obligations that conflict, duplicate each other, or require a shared ordering or authority rule. Use the tension or restructuring card if that is the material uncertainty.               |
-| Concepts    | Question the chosen identity, state, ownership, or boundary distinctions. Describe the same case without relying on its current names and check what is lost or becomes visible.               |
+| Level       | Attack                                                                                   |
+| ----------- | ---------------------------------------------------------------------------------------- |
+| Enforcement | Seek a legal history or wrong output the oracle cannot distinguish. Check path reach.    |
+| Formulation | Challenge premises, guarantees, checkpoints, observations, and available information.    |
+| Suitability | Ask whether the law serves its intended use, citing authority or a concrete consequence. |
+| Composition | Find obligations that conflict, duplicate, or need shared ordering or authority.         |
+| Concepts    | Challenge identity, state, ownership, and boundary distinctions.                         |
 
-The attack level names what to challenge. Once evidence shows a problem, locate
-what needs repair separately:
+For formulation, seek legal histories that require incompatible public
+observations. Try a correct alternative implementation and a plausible wrong
+one. For suitability, name the external contract, standard, user consequence,
+or engineering reason that applies. For composition, use the tension or
+restructuring card when needed. For concepts, describe the case without its
+current names and check what becomes visible or gets lost.
 
-| Finding or question | Possible repair location |
-| --- | --- |
-| Production disagrees with an accepted law. | Algorithm or code. |
-| The reference predicts the wrong behavior. | Model or specification; a change to an accepted law needs its own authority. |
-| The promise requires information the path does not receive. | Provider, protocol, architecture, or an authorized decision about the promise. |
-| A wrong result passes the evaluation. | History grammar, production driver, recorder, or comparison. Correct a coverage claim if the case lies outside declared scope. |
-| Behavior satisfies the specification but fails the user's need. | Requirement and its suitability for the intended use. |
+### Locate the repair
+
+The attack level names what to challenge. Once evidence shows a problem, use
+this table to locate the repair:
+
+| Finding or question                                                             | Possible repair location                                                  |
+| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Production disagrees with an accepted law.                                      | Production code.                                                          |
+| The reference predicts behavior the law does not allow.                         | Reference model; revise an accepted law only with authority.              |
+| The law needs information the production path lacks at the promised checkpoint. | Provider, protocol, architecture, or an authorized contract decision.     |
+| The check rejects an allowed intermediate observation or accepts a wrong one.   | Evaluation: checkpoint, history grammar, driver, recorder, or comparison. |
+| Correct behavior still fails the user's need.                                   | Requirement and its suitability for the intended use.                     |
 
 These locations can overlap. Name the evidence for each before choosing a
 repair; an assertion change cannot resolve a code defect or supply missing
 information.
 
-For an information-sufficiency attack, keep the path-visible initial state and
-inputs identical through the claimed checkpoint. Test a nearby receiving path
-that supplies the missing distinction before that checkpoint. An accepted
-contract remains an obligation even if the current path lacks the information
-needed to meet it. A repair might supply a provider signal. Moving the promised
+To test whether a path has enough information, keep its initial state and inputs
+identical through the claimed checkpoint. Test a nearby production path that
+receives the missing distinction before that checkpoint. An accepted contract
+remains an obligation even if the current path lacks the information needed to
+meet it. A repair might require additional provider data. Moving the promised
 checkpoint or narrowing the guarantee needs an authorized contract decision;
 changing an assertion supplies no data.
 

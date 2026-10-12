@@ -127,8 +127,17 @@ presence of a preferred heading, class, comment template, or helper.
   path and comparison ran. The recorder can represent the violations relevant
   to the law, including duplicates, omissions, order, or partial output when
   those are contractual.
+- **Conditional information sufficiency:** When a claimed result depends on
+  source facts outside the named production path's established input at the
+  checkpoint, the evidence MUST show how that path receives the missing
+  distinction in time or mark the claim unresolved. If two legal histories give
+  the path identical initial state and inputs through the checkpoint but require
+  incompatible public observations, a passing comparison MUST NOT be cited as
+  proof that the path satisfies both. A later checkpoint or narrower guarantee
+  needs an authorized contract decision.
 - **Not required:** Observation of internal facts that the contract does not
-  expose.
+  expose, or an exhaustive search for indistinguishable histories without a
+  concrete information-gap hypothesis.
 
 ### ORC-006: Checker calibration
 
@@ -950,8 +959,8 @@ legal histories, and observation cuts fixed. An index or cache may be removable
 without changing public results; measure its resource cost under a stated
 workload separately. If instead a premise changes—delivery may duplicate,
 ordering may tie, or the client may see only part of the source—derive which
-guarantees still follow. A failure under a changed premise may call for a
-provider signal or a contract decision rather than another algorithm.
+guarantees still follow. A failure under a changed premise may call for more
+provider data or a contract decision rather than another algorithm.
 
 ### Report evidence and open work separately
 
@@ -975,7 +984,7 @@ This card is an optional presentation for the ORC-012 evidence. For a new oracle
 or a claimed repair, ask:
 
 1. What exact promise authorizes this expected result?
-2. Can two legal histories be indistinguishable to the production path
+2. Under ORC-005, can two legal histories be indistinguishable to the production path
    through the claimed checkpoint yet require incompatible public observations?
    If so, where must the missing information come from?
 3. Which legal history distinguishes the proposed model from a weaker one?
@@ -987,8 +996,8 @@ or a claimed repair, ask:
 9. If a reusable boundary law is claimed, which case rejects a nearby wrong
    boundary? If a controlled premise supports a real-provider claim, where is
    that exact premise received?
-10. If the result exposes a problem, what needs repair: production, the model or
-    law, information supply, the evaluation, or the user-facing requirement?
+10. If the result exposes a problem, which [repair location](instruments/adversarial-review.md#locate-the-repair)
+    does the evidence support?
 
 ### Reusable boundary-law checklist
 
