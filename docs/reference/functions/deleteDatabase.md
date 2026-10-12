@@ -5,12 +5,12 @@ title: deleteDatabase
 
 ```ts
 function deleteDatabase(
-   name,
-   idbFactory?,
+   name, 
+   idbFactory?, 
 onBlocked?): Promise<void>;
 ```
 
-Defined in: packages/db/src/indexed-db-wrapper.ts:505
+Defined in: [packages/db/src/indexed-db-wrapper.ts:558](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db-wrapper.ts#L558)
 
 Deletes an entire IndexedDB database.
 A blocked request stays pending until native success or error.

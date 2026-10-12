@@ -124,9 +124,22 @@ the transaction to the resolved adapter for that collection.
 If a mutating RPC loses its response, Browser coordination replays it only
 while the requester still knows the same non-null leader id and term. An
 unknown initial route or any leader/term change rejects with
-`IndeterminateCommitError`; the application must reconcile the outcome. The
-coordinator does not retry that mutation against an unknown or replacement
-leader.
+`IndeterminateCommitError`. The coordinator does not retry that mutation
+against an unknown or replacement leader. Direct mutation callers must
+reconcile the outcome.
+
+For a source sync transaction, the persisted wrapper keeps its applied receipt
+pending while the replacement leader checks the exact transaction ID in SQLite
+under the writer lock. If the ID is present, the receipt fulfills and peers
+reload any committed rows they missed. If the ID is absent and the durable row
+version and reset epoch still match the pre-send snapshot, the replacement
+applies that transaction once and the receipt fulfills. The Collection and its
+dependent live queries stay in the same sync run. If another write, reset, or
+pruning makes the outcome unsafe to certify, the receipt rejects with the
+original `IndeterminateCommitError` and the source run enters error. This
+reconciliation applies only when both the coordinator and adapter provide the
+exact-ID operation; it does not change direct RPC behavior. Tabs running an
+older protocol version do not participate in this same-run recovery contract.
 
 ### Remote subset requests
 

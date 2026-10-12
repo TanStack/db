@@ -7,7 +7,7 @@ title: createPacedMutations
 function createPacedMutations<TVariables, T>(config): (variables) => Transaction<T>;
 ```
 
-Defined in: [packages/db/src/paced-mutations.ts:93](https://github.com/TanStack/db/blob/main/packages/db/src/paced-mutations.ts#L93)
+Defined in: [packages/db/src/paced-mutations.ts:99](https://github.com/TanStack/db/blob/main/packages/db/src/paced-mutations.ts#L99)
 
 Creates a paced mutations manager with pluggable timing strategies.
 
@@ -18,7 +18,10 @@ and the actual persistence is controlled by the strategy.
 
 The returned function accepts variables of type TVariables and returns a
 Transaction object that can be awaited to know when persistence completes
-or to handle errors.
+or to handle errors. The strategy owns `commit()`; calling it on the returned
+transaction throws before persistence starts. `rollback()` remains available.
+If a synchronous `onMutate` calls this manager again and then throws, every
+call merged into that pending transaction rejects together.
 
 ## Type Parameters
 

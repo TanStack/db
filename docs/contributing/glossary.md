@@ -50,11 +50,23 @@ production queues, caches, or semantic helpers merely to share their names.
 | readiness | Evidence that a named consumer may proceed. Always qualify Collection readiness, subscription readiness, or initial-query readiness; they settle at different boundaries. | Provider completion or publication in general. |
 | persisted restore | The eager persisted source Collection's startup read and publication of its durable rows, including an empty snapshot, in the current sync run. | Upstream/provider readiness or an SSR seed. |
 | persisted readiness | An opt-in live-query signal that every source Collection completed persisted restore in the current sync run; it is unavailable if any source did not opt in. | Collection readiness, network availability, or row nonemptiness. |
+| persisted cache generation | One version of an on-demand Collection's durable rows and resume metadata, identified by a monotonic generation number and a distinct storage ID. One current generation accepts new claims; a retired generation remains available to sync runs that already claim it. A stale run may create a new retired generation for its own recovery without replacing the current one. Rotating a generation does not change the public Collection identity. | Sync run, provider session, or source snapshot. |
+| persisted cache claim | A sync run's expiring authority to read and write one persisted cache generation. It is checked before durable access and is separate from a TanStack DB acquisition lease. | Acquisition lease, subset demand, or proof that cached rows are authoritative. |
 | network-first initial render | An opt-in Suspense gate that prefers Collection readiness until a configured deadline or network failure, then permits a completed persisted restore. A failed client query stream counts as network failure; a failed derived query does not. The gate does not stop network sync. | The persisted-readiness status itself or a change to ordinary live-query row publication. |
 
 `source` names a role in a data flow; it does not own a lifecycle. Do not coin a
 `source session`. Use `sync run` for the local Collection sync invocation
 and a provider-qualified `provider session` for a remote lifecycle.
+
+## Persistence coordination terms
+
+| Term | Meaning |
+| --- | --- |
+| durable election term | A per-Collection leadership term reserved in SQLite before a Browser or Electron coordinator announces ownership. Each election gets a greater term even when the previous owner committed no row. |
+| publicly applied row version | The durable row version whose rows the persisted wrapper has applied to the public Collection. A position-only resume snapshot can observe a later version without applying its rows. A schema reset rebinds this version to the new reset epoch. |
+| durable anchor | The row version and reset epoch observed before one source sync transaction is sent to a coordinator. If both still match and the exact transaction ID is absent, the replacement leader may apply that transaction once. |
+| exact-ID reconciliation | The replacement leader checks one immutable source transaction ID under the SQLite writer lock after its RPC result becomes indeterminate. A present ID acknowledges the original commit; an absent ID needs an unchanged durable anchor. |
+| reconciliation reload | A peer notification after exact-ID reconciliation that reloads persisted rows even when the receiver has already observed the same stream position. Equal public rows do not publish a second change batch. |
 
 ## Offline outbox terms
 
@@ -146,6 +158,7 @@ crossing subsystem boundaries; these comparisons are not interchangeable.
 | D2 value identity | The value domain compared by `hash` and `equalHashValues`, including their documented reference leaves. A matching hash digest alone does not establish identity. The [identity oracle](https://github.com/TanStack/db/blob/main/packages/db-ivm/tests/hash-identity-oracle.property.test.ts) defines its bounded value rules. Map/Set insertion-order sensitivity is pinned current behavior, not a universal D2 operator contract. |
 | change-event equality | The `deepEquals` comparison used for Collection change-event suppression. Its supported domain ignores Map/Set insertion order, RegExp `lastIndex`, and array holes versus `undefined`. The [change-event equality oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/utils-oracle.property.test.ts) defines its value-class rules. |
 | draft equality | The comparison that recognizes a reverted draft value. Its [revert oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/proxy-revert-oracle.property.test.ts) preserves Map/Set insertion order, RegExp `lastIndex`, and array holes, with explicit snapshot rules for class instances. Native mutator methods have separate change-tracking laws. |
+| persisted-snapshot equality | The value-shape comparison used before skipping a reconciliation reload. It preserves array holes, enumerable array properties, and exact nested prototypes. Equal keyed class, null-prototype, or cross-realm records with different prototypes require reload; Map and Set insertion order remains significant. |
 
 ## Oracle and model terms
 

@@ -26,7 +26,7 @@ type DeltaEvent<TRow, TKey> =
 };
 ```
 
-Defined in: [packages/db/src/query/effect.ts:52](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L52)
+Defined in: [packages/db/src/query/effect.ts:53](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L53)
 
 Delta event emitted when a row enters, exits, or updates within a query result
 

@@ -7,7 +7,7 @@ title: isLiveQueryWindowCollection
 function isLiveQueryWindowCollection(collection): collection is LiveQueryWindowCollection;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:389](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L389)
+Defined in: [packages/db/src/live-query-window-controller.ts:421](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L421)
 
 **`Internal`**
 

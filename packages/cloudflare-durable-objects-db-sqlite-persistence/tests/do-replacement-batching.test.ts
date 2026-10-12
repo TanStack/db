@@ -56,13 +56,14 @@ describe(`Cloudflare Durable Object replacement batching`, () => {
     async (rowCount) => {
       const { adapter, boundParameterCounts, close } = createLimitedHost()
       const collectionId = `cloudflare-batch-${rowCount}`
+      const target = { kind: `eager`, collectionId } as const
       const keys = Array.from(
         { length: rowCount },
         (_, index) => `row-${index}`,
       )
 
       try {
-        await adapter.applyCommittedTx(collectionId, {
+        await adapter.applyCommittedTx(target, {
           txId: `replacement`,
           term: 1,
           seq: 1,
@@ -75,7 +76,7 @@ describe(`Cloudflare Durable Object replacement batching`, () => {
           })),
         })
 
-        const snapshot = await adapter.loadResumeSnapshot(collectionId)
+        const snapshot = await adapter.loadResumeSnapshot(target)
         expect(snapshot.rows.map(({ key }) => key).sort()).toEqual(
           [...keys].sort(),
         )
@@ -107,8 +108,9 @@ describe(`Cloudflare Durable Object replacement batching`, () => {
         mode === `native`,
       )
       const collectionId = `cloudflare-predicate-${kind}`
+      const target = { kind: `eager`, collectionId } as const
       try {
-        await adapter.applyCommittedTx(collectionId, {
+        await adapter.applyCommittedTx(target, {
           txId: `seed`,
           term: 1,
           seq: 1,
@@ -138,7 +140,7 @@ describe(`Cloudflare Durable Object replacement batching`, () => {
             ),
           )
           const attemptStart = boundParameterCounts.length
-          const rows = await adapter.loadSubset(collectionId, { where })
+          const rows = await adapter.loadSubset(target, { where })
           expect(rows.map((row) => row.key)).toEqual([`target`])
           expect(
             Math.max(...boundParameterCounts.slice(attemptStart)),
@@ -155,15 +157,16 @@ describe(`Cloudflare Durable Object replacement batching`, () => {
     async (rowCount) => {
       const { adapter, boundParameterCounts, close } = createLimitedHost()
       const collectionId = `cloudflare-ordinary-${rowCount}`
+      const target = { kind: `eager`, collectionId } as const
       const keys = Array.from(
         { length: rowCount },
         (_, index) => `row-${index}`,
       )
 
       try {
-        await adapter.loadResumeSnapshot(collectionId)
+        await adapter.loadResumeSnapshot(target)
         boundParameterCounts.length = 0
-        await adapter.applyCommittedTx(collectionId, {
+        await adapter.applyCommittedTx(target, {
           txId: `ordinary`,
           term: 1,
           seq: 1,
@@ -186,7 +189,7 @@ describe(`Cloudflare Durable Object replacement batching`, () => {
         })
         const writeCalls = boundParameterCounts.length
         const maxBindings = Math.max(...boundParameterCounts)
-        const snapshot = await adapter.loadResumeSnapshot(collectionId)
+        const snapshot = await adapter.loadResumeSnapshot(target)
 
         expect(snapshot.rows.map(({ key }) => key).sort()).toEqual(
           [...keys].sort(),

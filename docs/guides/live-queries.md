@@ -1525,11 +1525,16 @@ const departmentStats = createCollection(liveQueryCollectionOptions({
 ```
 
 > [!NOTE]
-> In `groupBy` queries, the properties in your `select` clause must either be:
+> In `groupBy` queries, and in a `select` that uses an aggregate without
+> `groupBy`, every property in your `select` clause must have one value per group.
+> Each property must be one of these, or an expression built only from them:
 > - An aggregate function (like `count`, `sum`, `avg`)
 > - A property that was used in the `groupBy` clause
+> - A literal value
+> - In an included subquery, a field of the parent row
 >
-> You cannot select properties that are neither aggregated nor grouped.
+> A source field outside an aggregate throws, and so does a spread. The same rule
+> applies to `having`, which can also read `$selected`.
 
 > [!WARNING]
 > `fn.select()` cannot be used with `groupBy()`. The `groupBy` operator needs to statically analyze the `select` clause to discover which aggregate functions (`count`, `sum`, `max`, etc.) to compute for each group. Since `fn.select()` is an opaque JavaScript function, the compiler cannot inspect it. Use the standard `.select()` API when combining with `groupBy()`.

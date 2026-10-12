@@ -7,6 +7,7 @@ export default defineConfig({
     `electric-resume-two-tab.opfs.spec.ts`,
     `electric-hydration-straddle.opfs.spec.ts`,
     `electric-immediate-reload.opfs.spec.ts`,
+    `electric-leader-close.opfs.spec.ts`,
   ],
   timeout: 180_000,
 })

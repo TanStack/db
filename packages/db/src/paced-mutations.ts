@@ -173,7 +173,6 @@ export function createPacedMutations<
       if (newlyCreated || frame.admittedNestedCall) {
         // Calls merged into this pending transaction share a failure. A newly
         // created transaction also needs release when no receipt was returned.
-        void transaction.isPersisted.promise.catch(() => {})
         transaction.rollback({
           error: normalizeError(error),
           isSecondaryRollback: !frame.admittedNestedCall,

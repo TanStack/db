@@ -3,7 +3,7 @@ id: QueueStrategy
 title: QueueStrategy
 ---
 
-Defined in: [packages/db/src/strategies/types.ts:66](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L66)
+Defined in: [packages/db/src/strategies/types.ts:73](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L73)
 
 Queue strategy that processes all executions in order
 FIFO: { addItemsTo: 'back', getItemsFrom: 'front' }
@@ -37,7 +37,7 @@ Type discriminator for strategy identification
 cleanup: () => void;
 ```
 
-Defined in: [packages/db/src/strategies/types.ts:23](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L23)
+Defined in: [packages/db/src/strategies/types.ts:30](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L30)
 
 Clean up any resources held by the strategy
 Should be called when the strategy is no longer needed
@@ -55,10 +55,10 @@ Should be called when the strategy is no longer needed
 ### execute()
 
 ```ts
-execute: <T>(fn) => boolean | void | Promise<void>;
+execute: <T>(fn, onAdmit?, onCommit?) => boolean | void | Promise<void>;
 ```
 
-Defined in: [packages/db/src/strategies/types.ts:69](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L69)
+Defined in: [packages/db/src/strategies/types.ts:76](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L76)
 
 Explicit false rejects the transaction; void preserves custom strategies.
 
@@ -73,6 +73,14 @@ Explicit false rejects the transaction; void preserves custom strategies.
 ##### fn
 
 () => [`Transaction`](Transaction.md)\<`T`\>
+
+##### onAdmit?
+
+() => `void` \| [`Transaction`](Transaction.md)\<`T`\>
+
+##### onCommit?
+
+() => `Promise`\<`unknown`\> \| `undefined`
 
 #### Returns
 
@@ -90,4 +98,4 @@ Explicit false rejects the transaction; void preserves custom strategies.
 optional options: QueueStrategyOptions;
 ```
 
-Defined in: [packages/db/src/strategies/types.ts:67](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L67)
+Defined in: [packages/db/src/strategies/types.ts:74](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L74)

@@ -3,7 +3,7 @@ id: IndexedDBCollectionConfig
 title: IndexedDBCollectionConfig
 ---
 
-Defined in: packages/db/src/indexed-db.ts:136
+Defined in: [packages/db/src/indexed-db.ts:145](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L145)
 
 Configuration options for creating an IndexedDB Collection
 
@@ -30,7 +30,7 @@ Configuration options for creating an IndexedDB Collection
 ### autoIndex?
 
 ```ts
-optional autoIndex: "off" | "eager";
+optional autoIndex: "eager" | "off";
 ```
 
 Defined in: [packages/db/src/types.ts:773](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L773)
@@ -106,7 +106,7 @@ compare: (x, y) => x.createdAt.getTime() - y.createdAt.getTime()
 db: IndexedDBInstance;
 ```
 
-Defined in: packages/db/src/indexed-db.ts:145
+Defined in: [packages/db/src/indexed-db.ts:154](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L154)
 
 IndexedDB instance from createIndexedDB()
 REQUIRED - must create database before collections
@@ -239,7 +239,7 @@ Defined in: [packages/db/src/types.ts:732](https://github.com/TanStack/db/blob/m
 name: string;
 ```
 
-Defined in: packages/db/src/indexed-db.ts:151
+Defined in: [packages/db/src/indexed-db.ts:160](https://github.com/TanStack/db/blob/main/packages/db/src/indexed-db.ts#L160)
 
 Name of the object store within the database
 Must exist in the underlying database
@@ -249,7 +249,7 @@ Must exist in the underlying database
 ### onDelete?
 
 ```ts
-optional onDelete:
+optional onDelete: 
   | DeleteMutationFn<T, TKey, UtilsRecord, void>
 | DeleteMutationFn<T, TKey, UtilsRecord, any>;
 ```
@@ -326,7 +326,7 @@ onDelete: async ({ transaction, collection }) => {
 ### onInsert?
 
 ```ts
-optional onInsert:
+optional onInsert: 
   | InsertMutationFn<T, TKey, UtilsRecord, void>
 | InsertMutationFn<T, TKey, UtilsRecord, any>;
 ```
@@ -401,7 +401,7 @@ onInsert: async ({ transaction, collection }) => {
 ### onUpdate?
 
 ```ts
-optional onUpdate:
+optional onUpdate: 
   | UpdateMutationFn<T, TKey, UtilsRecord, void>
 | UpdateMutationFn<T, TKey, UtilsRecord, any>;
 ```
