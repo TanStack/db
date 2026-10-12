@@ -150,13 +150,14 @@ export class Index<TKey, TValue, TPrefix = any> {
    *   hash to identify identical values, storing them in a third level value map.
    */
   #inner: IndexMap<TKey, TValue, TPrefix>
-  #consolidatedMultiplicity: Map<TKey, number> = new Map() // sum of multiplicities per key
-  // Only joins read presence; a reduce index skips this bookkeeping.
-  #trackConsolidated: boolean
+  // Sum of multiplicities per key, for presence. Only joins read presence; a
+  // reduce index is built without it.
+  #consolidatedMultiplicity: Map<TKey, number> | undefined
 
-  constructor(options?: { trackConsolidated?: boolean }) {
+  constructor(options?: { trackPresence?: boolean }) {
     this.#inner = new Map()
-    this.#trackConsolidated = options?.trackConsolidated ?? true
+    if (options?.trackPresence ?? true)
+      this.#consolidatedMultiplicity = new Map()
   }
 
   /**
@@ -197,9 +198,10 @@ export class Index<TKey, TValue, TPrefix = any> {
     return this.#inner.size
   }
 
-  #assertTracksPresence(): void {
-    if (!this.#trackConsolidated)
+  #presence(): Map<TKey, number> {
+    if (this.#consolidatedMultiplicity === undefined)
       throw new Error(`This Index does not track presence`)
+    return this.#consolidatedMultiplicity
   }
 
   /**
@@ -217,8 +219,7 @@ export class Index<TKey, TValue, TPrefix = any> {
    * @returns True if the key has non-zero consolidated multiplicity, false otherwise.
    */
   hasPresence(key: TKey): boolean {
-    this.#assertTracksPresence()
-    return (this.#consolidatedMultiplicity.get(key) || 0) !== 0
+    return (this.#presence().get(key) || 0) !== 0
   }
 
   /**
@@ -227,8 +228,7 @@ export class Index<TKey, TValue, TPrefix = any> {
    * @returns The consolidated multiplicity for the key.
    */
   getConsolidatedMultiplicity(key: TKey): number {
-    this.#assertTracksPresence()
-    return this.#consolidatedMultiplicity.get(key) || 0
+    return this.#presence().get(key) || 0
   }
 
   /**
@@ -236,8 +236,7 @@ export class Index<TKey, TValue, TPrefix = any> {
    * @returns An iterator of keys with non-zero consolidated multiplicity.
    */
   getPresenceKeys(): Iterable<TKey> {
-    this.#assertTracksPresence()
-    return this.#consolidatedMultiplicity.keys()
+    return this.#presence().keys()
   }
 
   /**
@@ -329,13 +328,14 @@ export class Index<TKey, TValue, TPrefix = any> {
     if (multiplicity === 0) return
 
     // Update consolidated multiplicity tracking
-    if (this.#trackConsolidated) {
+    const presence = this.#consolidatedMultiplicity
+    if (presence) {
       const newConsolidatedMultiplicity =
-        (this.#consolidatedMultiplicity.get(key) || 0) + multiplicity
+        (presence.get(key) || 0) + multiplicity
       if (newConsolidatedMultiplicity === 0) {
-        this.#consolidatedMultiplicity.delete(key)
+        presence.delete(key)
       } else {
-        this.#consolidatedMultiplicity.set(key, newConsolidatedMultiplicity)
+        presence.set(key, newConsolidatedMultiplicity)
       }
     }
 

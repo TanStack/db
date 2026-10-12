@@ -32,7 +32,7 @@
  * `addValue`.
  *
  * Refinement check: after each addition, `get` and `has` for both keys equal
- * the model.
+ * the model, and `get` returns what `getIterator` yields, in its order.
  *
  * Calibration: comparing prefixes with `===` kept a cancelled `NaN`-prefixed
  * value, or threw `Mismatching prefixes`, and fails the pinned histories and
@@ -199,6 +199,10 @@ function expectRefinement(additions: ReadonlyArray<Addition>): void {
         model.get(key) ?? new Map(),
       )
       expect(index.has(key), `${checkpoint} has`).toBe(model.has(key))
+      // get and getIterator walk the storage separately; they must agree.
+      expect(index.get(key), `${checkpoint} get matches getIterator`).toEqual([
+        ...index.getIterator(key),
+      ])
     }
   }
 }

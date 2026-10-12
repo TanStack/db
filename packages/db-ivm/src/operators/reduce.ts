@@ -5,13 +5,18 @@ import { Index } from '../indexes.js'
 import type { DifferenceStreamReader } from '../graph.js'
 import type { IStreamBuilder, KeyValue } from '../types.js'
 
+/** The key identity of a Map: SameValueZero, so NaN equals NaN. */
+function sameOutput(left: unknown, right: unknown): boolean {
+  return left === right || (left !== left && right !== right)
+}
+
 /**
  * Base operator for reduction operations (version-free)
  */
 export class ReduceOperator<K, V1, V2> extends UnaryOperator<[K, V1], [K, V2]> {
   // Reduce never reads presence, so its indexes skip that bookkeeping.
-  #index = new Index<K, V1>({ trackConsolidated: false })
-  #indexOut = new Index<K, V2>({ trackConsolidated: false })
+  #index = new Index<K, V1>({ trackPresence: false })
+  #indexOut = new Index<K, V2>({ trackPresence: false })
   #f: (values: Array<[V1, number]>) => Array<[V2, number]>
 
   constructor(
@@ -43,14 +48,14 @@ export class ReduceOperator<K, V1, V2> extends UnaryOperator<[K, V1], [K, V2]> {
       const out = this.#f(curr)
 
       // Most keys have at most one output before and after. Compare the two
-      // directly, by the same reference identity the maps below use.
+      // directly, by the SameValueZero identity the maps below use.
       if (out.length <= 1 && currOut.length <= 1) {
         const before = currOut[0]
         const after = out[0]
         if (
           before !== undefined &&
           after !== undefined &&
-          before[0] === after[0]
+          sameOutput(before[0], after[0])
         ) {
           const delta = after[1] - before[1]
           if (delta !== 0) {
