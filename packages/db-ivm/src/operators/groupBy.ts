@@ -26,7 +26,8 @@ const MAX_IDENTITY_DEPTH = 3
 /**
  * One part of a contribution's identity, normalized as the structural hash
  * normalizes it, or undefined when the value has no cheap exact identity.
- * Every part is self-delimiting, so joined parts cannot run together.
+ * Every part is self-delimiting, so joined parts cannot run together. Tags
+ * are punctuation, so they never read as identifiers in this source.
  */
 function identityPart(
   value: unknown,
@@ -36,20 +37,20 @@ function identityPart(
   switch (typeof value) {
     case `number`:
       // The hash treats -0 as 0 and every NaN as one value.
-      return `n${value === 0 ? 0 : value}`
+      return `#${value === 0 ? 0 : value}`
     case `string`:
-      return `s${value.length}:${value}`
+      return `"${value.length}:${value}`
     case `boolean`:
-      return value ? `t` : `f`
+      return value ? `+` : `-`
     case `undefined`:
-      return `u`
+      return `~`
     case `bigint`:
-      return `g${value}`
+      return `%${value}`
     case `object`: {
-      if (value === null) return `l`
+      if (value === null) return `!`
       if (identity) {
         const id = identity(value)
-        return id === undefined ? undefined : `o${id.length}:${id}`
+        return id === undefined ? undefined : `@${id.length}:${id}`
       }
       return arrayIdentity(value, depth)
     }
@@ -79,7 +80,7 @@ function arrayIdentity(value: object, depth: number): string | undefined {
     parts.push(part)
   }
   const joined = parts.join(`|`)
-  return `a${value.length}:${joined.length}:${joined}`
+  return `[${value.length}:${joined.length}:${joined}`
 }
 
 /**
