@@ -533,8 +533,10 @@ The ordinary-unload, provisional-row, and alias tests reject their respective
 hostile classifiers at public-row or cache checkpoints. These finite histories
 do not establish every persistence schedule, every Query hash collision, or a
 full offline replay; those remain owned by the Query DB ownership and offline
-receiving oracles. Query Core 5.90.20 is the tested cancellation boundary;
-older supported versions are excluded by the package peer minimum.
+receiving oracles. Query Core 5.90.15 is the lowest version on which the full
+Query DB suite passed; 5.90.14 failed error-recovery witnesses, and 5.85.2
+failed the post-write refetch witness. Older versions are excluded by the peer
+minimum.
 
 The alias-scope owner also has a compiler invariant witness for a malformed
 include plan: removing a captured ancestor's parent projection after the
