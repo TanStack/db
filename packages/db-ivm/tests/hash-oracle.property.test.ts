@@ -52,9 +52,15 @@ function expectEqualHashes(
 
 // Prefixing preserves arbitrary string content while excluding integer-index
 // keys. Unique keys and at least two entries make reversal consequential.
+// Canonically equivalent spellings are distinct keys that locale collation
+// ranks as equal, so the order the hash visits keys must not depend on
+// collation.
+const collationTies = [`Å`, `Å`, `é`, `é`, `Å`]
 const arbitraryNonIndexEntries = fc.uniqueArray(
   fc.tuple(
-    fc.string().map((key) => `key:${key}`),
+    fc
+      .oneof(fc.string(), fc.constantFrom(...collationTies))
+      .map((key) => `key:${key}`),
     fc.integer(),
   ),
   { minLength: 2, maxLength: 5, selector: ([key]) => key },

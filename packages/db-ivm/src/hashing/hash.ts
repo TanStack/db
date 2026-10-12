@@ -285,8 +285,10 @@ function cachedReferenceHash(fn: object): number {
 }
 
 /**
- * Strings sorted lexicographically.
+ * Strings sorted by UTF-16 code unit. Unlike `localeCompare`, this is a total
+ * order: two distinct keys never compare equal, so equal objects always visit
+ * their keys in the same order.
  */
 function keySort(a: string, b: string): number {
-  return a.localeCompare(b)
+  return a < b ? -1 : a > b ? 1 : 0
 }
