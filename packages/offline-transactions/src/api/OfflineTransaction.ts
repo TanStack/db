@@ -13,6 +13,8 @@ export class OfflineTransaction {
   private idempotencyKey: string
   private metadata: Record<string, any>
   private transaction: Transaction | null = null
+  /** The mutation function ran, so the executor settles the waiter. */
+  private persisting = false
   private persistTransaction: (tx: OfflineTransactionType) => Promise<void>
   private executor: any // Will be typed properly - reference to OfflineExecutor
 
@@ -37,50 +39,72 @@ export class OfflineTransaction {
     // live transactions. Repeated calls add to it while it is pending. With
     // autoCommit, it commits after this callback and reports a failure
     // through `when('settled')`, so a later call throws: it is no longer pending.
-    this.transaction ??= createTransaction({
-      id: this.offlineId,
-      autoCommit: this.autoCommit,
-      mutationFn: async () => {
-        // This is the blocking mutationFn that waits for the executor
-        // First persist the transaction to the outbox
-        const offlineTransaction: OfflineTransactionType = {
-          id: this.offlineId,
-          mutationFnName: this.mutationFnName,
-          mutations: this.transaction!.mutations,
-          keys: this.extractKeys(this.transaction!.mutations),
-          idempotencyKey: this.idempotencyKey,
-          createdAt: new Date(),
-          retryCount: 0,
-          nextAttemptAt: Date.now(),
-          metadata: this.metadata,
-          spanContext: undefined,
-          version: 1,
-        }
+    if (!this.transaction) {
+      this.transaction = createTransaction({
+        id: this.offlineId,
+        autoCommit: this.autoCommit,
+        mutationFn: async () => {
+          this.persisting = true
+          // This is the blocking mutationFn that waits for the executor
+          // First persist the transaction to the outbox
+          const offlineTransaction: OfflineTransactionType = {
+            id: this.offlineId,
+            mutationFnName: this.mutationFnName,
+            mutations: this.transaction!.mutations,
+            keys: this.extractKeys(this.transaction!.mutations),
+            idempotencyKey: this.idempotencyKey,
+            createdAt: new Date(),
+            retryCount: 0,
+            nextAttemptAt: Date.now(),
+            metadata: this.metadata,
+            spanContext: undefined,
+            version: 1,
+          }
 
-        const completionPromise = this.executor.waitForTransactionCompletion(
-          this.offlineId,
-        )
+          const completionPromise = this.executor.waitForTransactionCompletion(
+            this.offlineId,
+          )
 
-        try {
-          // Persistence also drives the shared queue. This transaction can finish
-          // before that queue drains; observe both promises from the outset.
-          await Promise.race([
-            this.persistTransaction(offlineTransaction),
-            completionPromise,
-          ])
-          // A queue pause (offline or retry) is not transaction completion.
-          await completionPromise
-        } catch (error) {
-          const normalizedError =
-            error instanceof Error ? error : new Error(String(error))
-          this.executor.rejectTransaction(this.offlineId, normalizedError)
-          throw error
-        }
+          try {
+            // Persistence also drives the shared queue. This transaction can finish
+            // before that queue drains; observe both promises from the outset.
+            await Promise.race([
+              this.persistTransaction(offlineTransaction),
+              completionPromise,
+            ])
+            // A queue pause (offline or retry) is not transaction completion.
+            await completionPromise
+          } catch (error) {
+            const normalizedError =
+              error instanceof Error ? error : new Error(String(error))
+            this.executor.rejectTransaction(this.offlineId, normalizedError)
+            throw error
+          }
 
-        return
-      },
-      metadata: this.metadata,
-    })
+          return
+        },
+        metadata: this.metadata,
+      })
+      // A transaction without mutations completes, and one rolled back before
+      // it commits fails, without its mutation function, so the executor never
+      // settles its waiter. Settle that waiter here with the same outcome. Once
+      // the mutation function runs, only the executor settles it.
+      void this.transaction.when(`settled`).then(
+        () => {
+          if (!this.persisting)
+            this.executor.resolveTransaction(this.offlineId, undefined)
+        },
+        (error: unknown) => {
+          if (!this.persisting)
+            this.executor.rejectTransaction(
+              this.offlineId,
+              error instanceof Error
+                ? error
+                : new Error(`Offline transaction was rolled back`),
+            )
+        },
+      )
+    }
 
     this.transaction.mutate(() => {
       callback()

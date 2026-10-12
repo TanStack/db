@@ -47,10 +47,20 @@ import type {
  * `autoCommit: true`, with the option omitted, or as an `OfflineAction`. An
  * auto-commit has no `commit()` caller, so its `isPersisted` is the commit
  * receipt. No failure, manual or auto-committed, may escape as an unhandled
- * process rejection, be logged again, or write debug output. When nobody
- * reads an auto-commit's receipt, the Collection that tracks the transaction
- * owns its rejection; every generated transaction writes to one. A caller may
- * also register its completion waiter before the transaction is admitted. Pinned examples
+ * process rejection, be logged again, or write debug output. Any position may
+ * be preceded by an empty transaction on the same commit path: its callback
+ * writes nothing, so it completes without the provider or the outbox, and its
+ * receipt and `waitForTransactionCompletion` fulfil before any provider
+ * settles. A manual transaction that rolls back before it commits may also
+ * precede a position. It also settles without the provider, so its waiter
+ * must reject with an Error that names the rollback. Once a transaction's
+ * mutation function runs, only the executor settles its waiter. A callback that
+ * throws leaves its transaction pending, as core
+ * transactions do, so its waiter stays pending too; that case is not
+ * generated. When nobody reads an auto-commit's receipt, the Collection that
+ * tracks the transaction owns its rejection; every generated transaction
+ * writes to one. A caller may also register its completion waiter before the
+ * transaction is admitted. Pinned examples
  * reconstruct all-success, middle-failure, all-failure, and alternating
  * outcomes. Shared keys distinguish sibling rollback from disjoint-key
  * survival. Width distinguishes complete optimistic state for several rows
@@ -201,19 +211,28 @@ function expectLocalRows(
  * How a generated transaction commits: by `commit()`, by auto-commit with the
  * option set or omitted, or as an `OfflineAction`, which always auto-commits.
  */
+type SettlementCommit = `manual` | `auto` | `default` | `action`
+
 const settlementTransaction = fc
   .record({
     succeeds: fc.boolean(),
-    commit: fc.constantFrom(
-      `manual` as const,
-      `auto` as const,
-      `default` as const,
-      `action` as const,
+    commit: fc.constantFrom<SettlementCommit>(
+      `manual`,
+      `auto`,
+      `default`,
+      `action`,
     ),
     readReceipt: fc.boolean(),
     // The caller may wait for completion before the transaction is admitted,
     // which only a transaction object made before mutate() allows.
     waitBefore: fc.boolean(),
+    // An empty transaction on the same commit path runs first. Its callback
+    // writes nothing, so it completes without the provider or the outbox.
+    emptyBefore: fc.boolean(),
+    // A manual transaction writes a row of its own and rolls back before it
+    // commits. It also settles without the provider, and its waiter rejects
+    // with an Error that names the rollback.
+    rolledBackBefore: fc.boolean(),
   })
   .map((tx) =>
     // An OfflineAction has no transaction object before mutate().
@@ -308,8 +327,15 @@ it.each(oracleSeeds(20260913, settlementOracle))(
                 status instanceof Error ? status.message : status,
               ]),
             )
-            const expectedStatuses = Object.fromEntries(
-              ids.flatMap((_id, index) => {
+            const expectedStatuses = Object.fromEntries([
+              ...emptyReceipts.map((name) => [name, `fulfilled`]),
+              // A plain rollback rejects isPersisted with no reason (core
+              // contract); the waiter names the rollback with an Error.
+              ...rolledBack.flatMap(({ wait, receipt }) => [
+                [receipt, undefined],
+                [wait, `Offline transaction was rolled back`],
+              ]),
+              ...ids.flatMap((_id, index) => {
                 const status =
                   index < completed
                     ? succeeds[index]
@@ -321,7 +347,7 @@ it.each(oracleSeeds(20260913, settlementOracle))(
                   [`wait-${index}`, status],
                 ]
               }),
-            )
+            ])
             expect(actualStatuses).toEqual(expectedStatuses)
             if (completed === 1) {
               expect(() =>
@@ -360,6 +386,43 @@ it.each(oracleSeeds(20260913, settlementOracle))(
               (await env.executor.peekOutbox()).map((tx) => tx.id),
             ).toEqual(ids.slice(completed))
           }
+          // Receipts of empty transactions, which settle before any provider.
+          const emptyReceipts: Array<string> = []
+          // Receipts of transactions rolled back before they commit.
+          const rolledBack: Array<{ wait: string; receipt: string }> = []
+          // Start a transaction on one commit path. An auto-commit has no
+          // commit() caller; its receipt is isPersisted, which settles like a
+          // manual commit's.
+          const start = (
+            commit: SettlementCommit,
+            write: () => void,
+            beforeMutate?: (id: string) => void,
+          ) => {
+            if (commit === `action`) {
+              const transaction = env.executor.createOfflineAction({
+                mutationFnName: env.mutationFnName,
+                onMutate: write,
+              })(undefined)
+              return {
+                transaction,
+                receipt: () => transaction.when(`settled`),
+              }
+            }
+            const tx = env.executor.createOfflineTransaction({
+              mutationFnName: env.mutationFnName,
+              // A transaction auto-commits when the option is omitted.
+              ...(commit === `default`
+                ? {}
+                : { autoCommit: commit === `auto` }),
+            })
+            beforeMutate?.(tx.id)
+            const transaction = tx.mutate(write)
+            return {
+              transaction,
+              receipt: (): Promise<unknown> =>
+                commit === `manual` ? tx.commit() : transaction.when(`settled`),
+            }
+          }
           let hasPrimaryFailure = false
           // No failure, manual or auto-committed, escapes as an unhandled
           // process rejection, and none is logged again: isPersisted reports
@@ -372,7 +435,47 @@ it.each(oracleSeeds(20260913, settlementOracle))(
           try {
             await env.waitForLeader()
             for (let index = 0; index < succeeds.length; index++) {
-              const { commit } = transactions[index]!
+              const { commit, emptyBefore, rolledBackBefore } =
+                transactions[index]!
+              if (rolledBackBefore) {
+                const tx = env.executor.createOfflineTransaction({
+                  mutationFnName: env.mutationFnName,
+                  autoCommit: false,
+                })
+                const transaction = tx.mutate(() =>
+                  env.collection.insert({
+                    id: `rolled-${index}`,
+                    value: `rolled`,
+                    completed: false,
+                    updatedAt: new Date(0),
+                  }),
+                )
+                const names = {
+                  wait: `rolled-wait-${index}`,
+                  receipt: `rolled-receipt-${index}`,
+                }
+                observe(
+                  names.wait,
+                  env.executor.waitForTransactionCompletion(transaction.id),
+                )
+                observe(names.receipt, transaction.when(`settled`))
+                rolledBack.push(names)
+                tx.rollback()
+              }
+              if (emptyBefore) {
+                const empty = start(commit, () => {})
+                observe(
+                  `empty-wait-${index}`,
+                  env.executor.waitForTransactionCompletion(
+                    empty.transaction.id,
+                  ),
+                )
+                emptyReceipts.push(`empty-wait-${index}`)
+                if (!unread[index]) {
+                  observe(`empty-commit-${index}`, empty.receipt())
+                  emptyReceipts.push(`empty-commit-${index}`)
+                }
+              }
               const write = () => {
                 for (const row of expectedRows[index]!) {
                   if (sharedKeys && index > 0) {
@@ -383,44 +486,20 @@ it.each(oracleSeeds(20260913, settlementOracle))(
                   } else env.collection.insert(row)
                 }
               }
-              let transaction: Transaction
-              let tx: ReturnType<typeof env.executor.createOfflineTransaction>
-              if (commit === `action`) {
-                transaction = env.executor.createOfflineAction({
-                  mutationFnName: env.mutationFnName,
-                  onMutate: write,
-                })(undefined)
-              } else {
-                tx = env.executor.createOfflineTransaction({
-                  mutationFnName: env.mutationFnName,
-                  // A transaction auto-commits when the option is omitted.
-                  ...(commit === `default`
-                    ? {}
-                    : { autoCommit: commit === `auto` }),
-                })
-                if (transactions[index]!.waitBefore)
-                  observe(
-                    `wait-${index}`,
-                    env.executor.waitForTransactionCompletion(tx.id),
-                  )
-                transaction = tx.mutate(write)
-              }
-              ids.push(transaction.id)
-              made.push(transaction)
-              if (!(`wait-${index}` in statuses))
+              const waitFor = (id: string) =>
                 observe(
                   `wait-${index}`,
-                  env.executor.waitForTransactionCompletion(transaction.id),
+                  env.executor.waitForTransactionCompletion(id),
                 )
-              // An auto-commit has no commit() caller; its receipt is
-              // isPersisted, which settles like a manual commit's.
-              if (!unread[index])
-                observe(
-                  `commit-${index}`,
-                  autoCommits[index]
-                    ? transaction.when(`settled`)
-                    : tx!.commit(),
-                )
+              const { transaction, receipt } = start(
+                commit,
+                write,
+                transactions[index]!.waitBefore ? waitFor : undefined,
+              )
+              ids.push(transaction.id)
+              made.push(transaction)
+              if (!(`wait-${index}` in statuses)) waitFor(transaction.id)
+              if (!unread[index]) observe(`commit-${index}`, receipt())
               if (index === 0)
                 await atOracleCheckpoint(
                   entered[0]!.promise,
@@ -498,12 +577,16 @@ it.each(oracleSeeds(20260913, settlementOracle))(
                   succeeds: true,
                   commit: `manual`,
                   readReceipt: true,
+                  emptyBefore: false,
+                  rolledBackBefore: false,
                   waitBefore: true,
                 },
                 {
                   succeeds: true,
                   commit: `manual`,
                   readReceipt: true,
+                  emptyBefore: false,
+                  rolledBackBefore: false,
                   waitBefore: true,
                 },
               ],
@@ -518,18 +601,24 @@ it.each(oracleSeeds(20260913, settlementOracle))(
                   succeeds: true,
                   commit: `manual`,
                   readReceipt: true,
+                  emptyBefore: false,
+                  rolledBackBefore: false,
                   waitBefore: true,
                 },
                 {
                   succeeds: false,
                   commit: `manual`,
                   readReceipt: true,
+                  emptyBefore: false,
+                  rolledBackBefore: false,
                   waitBefore: true,
                 },
                 {
                   succeeds: true,
                   commit: `manual`,
                   readReceipt: true,
+                  emptyBefore: false,
+                  rolledBackBefore: false,
                   waitBefore: true,
                 },
               ],
@@ -544,18 +633,24 @@ it.each(oracleSeeds(20260913, settlementOracle))(
                   succeeds: false,
                   commit: `manual`,
                   readReceipt: true,
+                  emptyBefore: false,
+                  rolledBackBefore: false,
                   waitBefore: true,
                 },
                 {
                   succeeds: false,
                   commit: `manual`,
                   readReceipt: true,
+                  emptyBefore: false,
+                  rolledBackBefore: false,
                   waitBefore: true,
                 },
                 {
                   succeeds: false,
                   commit: `manual`,
                   readReceipt: true,
+                  emptyBefore: false,
+                  rolledBackBefore: false,
                   waitBefore: true,
                 },
               ],
@@ -570,18 +665,24 @@ it.each(oracleSeeds(20260913, settlementOracle))(
                   succeeds: false,
                   commit: `manual`,
                   readReceipt: true,
+                  emptyBefore: false,
+                  rolledBackBefore: false,
                   waitBefore: true,
                 },
                 {
                   succeeds: true,
                   commit: `manual`,
                   readReceipt: true,
+                  emptyBefore: false,
+                  rolledBackBefore: false,
                   waitBefore: true,
                 },
                 {
                   succeeds: false,
                   commit: `manual`,
                   readReceipt: true,
+                  emptyBefore: false,
+                  rolledBackBefore: false,
                   waitBefore: true,
                 },
               ],
@@ -596,18 +697,24 @@ it.each(oracleSeeds(20260913, settlementOracle))(
                   succeeds: false,
                   commit: `auto`,
                   readReceipt: false,
+                  emptyBefore: false,
+                  rolledBackBefore: false,
                   waitBefore: false,
                 },
                 {
                   succeeds: true,
                   commit: `manual`,
                   readReceipt: true,
+                  emptyBefore: false,
+                  rolledBackBefore: false,
                   waitBefore: true,
                 },
                 {
                   succeeds: false,
                   commit: `auto`,
                   readReceipt: true,
+                  emptyBefore: false,
+                  rolledBackBefore: false,
                   waitBefore: false,
                 },
               ],
@@ -624,12 +731,58 @@ it.each(oracleSeeds(20260913, settlementOracle))(
                   succeeds: false,
                   commit: `default`,
                   readReceipt: false,
+                  emptyBefore: false,
+                  rolledBackBefore: false,
                   waitBefore: false,
                 },
                 {
                   succeeds: false,
                   commit: `action`,
                   readReceipt: true,
+                  emptyBefore: false,
+                  rolledBackBefore: false,
+                  waitBefore: false,
+                },
+              ],
+            },
+          ],
+          // Empty transactions on every commit path complete without the
+          // provider, before and between real ones.
+          [
+            {
+              sharedKeys: false,
+              width: 1,
+              transactions: [
+                {
+                  succeeds: true,
+                  commit: `manual`,
+                  readReceipt: true,
+                  emptyBefore: true,
+                  rolledBackBefore: true,
+                  waitBefore: false,
+                },
+                {
+                  succeeds: false,
+                  commit: `auto`,
+                  readReceipt: false,
+                  emptyBefore: true,
+                  rolledBackBefore: true,
+                  waitBefore: false,
+                },
+                {
+                  succeeds: true,
+                  commit: `default`,
+                  readReceipt: true,
+                  emptyBefore: true,
+                  rolledBackBefore: true,
+                  waitBefore: false,
+                },
+                {
+                  succeeds: true,
+                  commit: `action`,
+                  readReceipt: true,
+                  emptyBefore: true,
+                  rolledBackBefore: true,
                   waitBefore: false,
                 },
               ],
@@ -3951,6 +4104,70 @@ it(`stops after failed deletion without rerunning the provider`, async () => {
     delay.mockRestore()
   }
 })
+
+// Focused witness, not a generated history: the FIFO model keeps a queued
+// transaction's optimistic rows, and a rollback while the transaction
+// persists removes them. Once the mutation function runs, the executor alone
+// settles the waiter, so a rollback must not settle it early or change its
+// outcome.
+it.each([true, false])(
+  `keeps the executor's outcome for a rollback while persisting (succeeds: %s)`,
+  async (succeeds) => {
+    const providerError = new NonRetriableError(`provider failed`)
+    const entered = gate()
+    const release = gate()
+    const env = createTestOfflineEnvironment({
+      mutationFn: async (params) => {
+        entered.resolve()
+        await release.promise
+        if (!succeeds) throw providerError
+        env.applyMutations(params.transaction.mutations)
+      },
+    })
+    const { rejections: unhandled, cleanup: cleanupUnhandled } =
+      captureUnhandledRejections()
+    const logged = vi.spyOn(console, `error`).mockImplementation(() => {})
+    try {
+      await env.waitForLeader()
+      const tx = env.executor.createOfflineTransaction({
+        mutationFnName: env.mutationFnName,
+        autoCommit: false,
+      })
+      tx.mutate(() =>
+        env.collection.insert({
+          id: `held`,
+          value: `v`,
+          completed: false,
+          updatedAt: new Date(0),
+        }),
+      )
+      const statuses: Array<unknown> = []
+      const wait = env.executor.waitForTransactionCompletion(tx.id).then(
+        () => statuses.push(`fulfilled`),
+        (error: unknown) => statuses.push(error),
+      )
+      void tx.commit().catch(() => undefined)
+      await atOracleCheckpoint(entered.promise, `provider entered`)
+      tx.rollback()
+      await turn()
+      expect(statuses, `waiter before the executor settles`).toEqual([])
+      release.resolve()
+      await atOracleCheckpoint(wait, `waiter settled`)
+      expect(statuses, `waiter outcome`).toEqual([
+        succeeds ? `fulfilled` : providerError,
+      ])
+      expect(env.serverState.has(`held`), `server row`).toBe(succeeds)
+      expect(await env.executor.peekOutbox(), `outbox`).toEqual([])
+      await turn()
+      expect(unhandled, `unhandled rejections`).toEqual([])
+    } finally {
+      release.resolve()
+      cleanupUnhandled()
+      logged.mockRestore()
+      env.executor.dispose()
+    }
+  },
+)
 
 // Focused witness, not a generated history: a failed outbox write stops the
 // executor, so a FIFO history cannot continue past it. For every commit path,
