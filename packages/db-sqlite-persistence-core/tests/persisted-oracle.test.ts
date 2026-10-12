@@ -22383,7 +22383,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         expect(collection.get(`fresh`)).toBeUndefined()
         expect(publishedFreshTitles).toEqual([])
         releaseMutation.resolve()
-        await atPersistedOracleCheckpoint(
+        await atPersistedOracleCheckpoint<unknown>(
           mutation.isPersisted.promise,
           `optimistic publication released`,
         )
