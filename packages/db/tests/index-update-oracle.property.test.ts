@@ -109,10 +109,10 @@ const arbitraryAction: fc.Arbitrary<IndexAction> = fc.oneof(
 const probeValues: Array<IndexValue> = [-3, -2, -1, -0, 0, 1, 2, 3, 99]
 const rangeBoundaries: Array<IndexValue> = [-2, 0, 2]
 
-function groupKeysByValue(
-  rows: Map<string, IndexValue>,
-): Map<IndexValue, Set<string>> {
-  const groups = new Map<IndexValue, Set<string>>()
+function groupKeysByValue<T>(
+  rows: ReadonlyMap<string, T>,
+): Map<T, Set<string>> {
+  const groups = new Map<T, Set<string>>()
   for (const [key, value] of rows) {
     const keys = groups.get(value)
     if (keys) {
@@ -469,6 +469,194 @@ describe.each(indexTypes)(`%s update properties`, (_indexName, IndexType) => {
     expect(index.rangeQuery({ to: 1 })).toEqual(new Set([`one`]))
   })
 })
+
+/**
+ * Direct index equality keeps `undefined` and `null` in distinct exact-value
+ * buckets, even though the default ordering comparator places both at one
+ * position. The established direct-index tests below exercise this distinction
+ * through `equalityLookup` and `lookup('eq')`. This law does not describe the
+ * live-query WHERE evaluator, which uses three-valued nullish equality.
+ *
+ * A source Map predicts membership without index normalization or comparator
+ * classification. Fresh singleton histories preserve the old update cuts;
+ * coexisting values expose a wrong union of nullish buckets. The generated
+ * tail adds nearby put/delete histories over three keys and four values. An
+ * absent source key is added, while an owned key is updated. A direct update
+ * of an absent key is outside this grammar. Removing either nullish value
+ * loses the distinction; removing the defined values loses transitions across
+ * it; one key cannot expose surviving peers after a move or deletion.
+ * After each direct action returns, both exact-lookup methods and key count
+ * must agree with the Map. Ordered reads, range queries, `IN`, and bucket
+ * object identity belong to other observations.
+ */
+type NullishIndexValue = number | null | undefined
+type NullishIndexAction =
+  | { type: `put`; key: string; value: NullishIndexValue }
+  | { type: `delete`; key: string }
+
+const nullishProbeValues: ReadonlyArray<NullishIndexValue> = [
+  undefined,
+  null,
+  1,
+  2,
+]
+const arbitraryNullishAction: fc.Arbitrary<NullishIndexAction> = fc.oneof(
+  fc.record({
+    type: fc.constant(`put` as const),
+    key: fc.constantFrom(`a`, `b`, `c`),
+    value: fc.constantFrom(...nullishProbeValues),
+  }),
+  fc.record({
+    type: fc.constant(`delete` as const),
+    key: fc.constantFrom(`a`, `b`, `c`),
+  }),
+)
+
+function expectNullishMembership(
+  index: BaseIndex<string>,
+  rows: ReadonlyMap<string, NullishIndexValue>,
+): void {
+  // Map key identity distinguishes null from undefined without consulting the
+  // index's normalized keys or its ordering comparator.
+  const groups = groupKeysByValue(rows)
+  expect(index.keyCount).toBe(rows.size)
+  expect(indexedKeysSet(index)).toEqual(new Set(rows.keys()))
+  for (const value of nullishProbeValues) {
+    const expected = groups.get(value) ?? new Set<string>()
+    expect(index.equalityLookup(value)).toEqual(expected)
+    expect(index.lookup(`eq`, value)).toEqual(expected)
+  }
+}
+
+function applyNullishAction(
+  index: BaseIndex<string>,
+  rows: Map<string, NullishIndexValue>,
+  action: NullishIndexAction,
+): void {
+  // The driver maps source ownership to the real add, update, and remove API.
+  if (action.type === `put`) {
+    if (rows.has(action.key)) {
+      index.update(
+        action.key,
+        { value: rows.get(action.key) },
+        { value: action.value },
+      )
+    } else {
+      index.add(action.key, { value: action.value })
+    }
+    rows.set(action.key, action.value)
+  } else if (rows.has(action.key)) {
+    index.remove(action.key, { value: rows.get(action.key) })
+    rows.delete(action.key)
+  }
+  expectNullishMembership(index, rows)
+}
+
+describe.each(indexTypes)(
+  `%s nullish exact membership`,
+  (_indexName, IndexType) => {
+    test.each([
+      [`undefined to null`, undefined, null],
+      [`null to undefined`, null, undefined],
+      [`defined to undefined`, 1, undefined],
+      [`undefined to defined`, undefined, 1],
+      [`undefined to undefined`, undefined, undefined],
+    ] as const)(`keeps membership after %s`, (_label, before, after) => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>()
+      applyNullishAction(index, rows, { type: `put`, key: `a`, value: before })
+      applyNullishAction(index, rows, { type: `put`, key: `a`, value: after })
+    })
+
+    test(`keeps coexisting null and undefined buckets distinct`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>()
+      for (const [key, value] of [
+        [`null1`, null],
+        [`undef1`, undefined],
+        [`num1`, 1],
+      ] as const) {
+        applyNullishAction(index, rows, { type: `put`, key, value })
+      }
+    })
+
+    test.each([20261012, undefined])(
+      `refines nullish membership histories (seed %s)`,
+      async (seed) => {
+        await fc.assert(
+          fc.asyncProperty(
+            fc.array(arbitraryNullishAction, { minLength: 1, maxLength: 40 }),
+            async (actions) => {
+              const index = new IndexType(1, new PropRef([`value`]))
+              const rows = new Map<string, NullishIndexValue>()
+              expectNullishMembership(index, rows)
+              for (const action of actions) {
+                applyNullishAction(index, rows, action)
+              }
+            },
+          ),
+          seed === undefined
+            ? oraclePropertyOptions(100, `index-update.nullish-membership`)
+            : { seed, numRuns: oracleRuns(100) },
+        )
+      },
+    )
+
+    test(`rejects a skipped undefined-to-null update`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>()
+      applyNullishAction(index, rows, {
+        type: `put`,
+        key: `a`,
+        value: undefined,
+      })
+      const skipped = vi.spyOn(index, `update`).mockImplementation(() => {})
+      try {
+        expect(() =>
+          applyNullishAction(index, rows, {
+            type: `put`,
+            key: `a`,
+            value: null,
+          }),
+        ).toThrowError(/expected/)
+        expect(skipped).toHaveBeenCalledOnce()
+      } finally {
+        skipped.mockRestore()
+      }
+    })
+
+    test(`rejects lookup dispatch that unites nullish buckets`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>()
+      applyNullishAction(index, rows, {
+        type: `put`,
+        key: `null1`,
+        value: null,
+      })
+      applyNullishAction(index, rows, {
+        type: `put`,
+        key: `undef1`,
+        value: undefined,
+      })
+      const lookup = index.lookup.bind(index)
+      const united = vi
+        .spyOn(index, `lookup`)
+        .mockImplementation((op, value) =>
+          op === `eq` && value === undefined
+            ? new Set([`null1`, `undef1`])
+            : lookup(op, value),
+        )
+      try {
+        expect(() => expectNullishMembership(index, rows)).toThrowError(
+          /expected/,
+        )
+        expect(united).toHaveBeenCalledWith(`eq`, undefined)
+      } finally {
+        united.mockRestore()
+      }
+    })
+  },
+)
 
 /**
  * A custom index comparator must return a number that is not NaN.

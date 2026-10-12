@@ -209,21 +209,6 @@ describe(`BTreeIndex - undefined value handling`, () => {
 
       expect(orderedEntriesArray(index)[0]![0]).toBe(undefined)
     })
-
-    it(`should handle mixed undefined and null values`, () => {
-      const index = createIndex(`value`)
-      index.add(`null1`, { value: null })
-      index.add(`undef1`, { value: undefined })
-      index.add(`num1`, { value: 1 })
-
-      const nullItems = index.equalityLookup(null)
-      const undefItems = index.equalityLookup(undefined)
-
-      expect(nullItems.size).toBe(1)
-      expect(nullItems).toContain(`null1`)
-      expect(undefItems.size).toBe(1)
-      expect(undefItems).toContain(`undef1`)
-    })
   })
 
   describe(`rangeQuery with undefined bounds`, () => {
@@ -348,40 +333,6 @@ describe(`BTreeIndex - undefined value handling`, () => {
       expect(result.size).toBe(2)
       expect(result).toContain(`undef1`)
       expect(result).toContain(`undef2`)
-    })
-  })
-
-  describe(`update operation with undefined`, () => {
-    it(`should update item from defined to undefined value`, () => {
-      const index = createIndex(`value`)
-      index.add(`a`, { value: 1 })
-
-      index.update(`a`, { value: 1 }, { value: undefined })
-
-      expect(index.equalityLookup(1).size).toBe(0)
-      expect(index.equalityLookup(undefined).size).toBe(1)
-      expect(index.equalityLookup(undefined)).toContain(`a`)
-    })
-
-    it(`should update item from undefined to defined value`, () => {
-      const index = createIndex(`value`)
-      index.add(`a`, { value: undefined })
-
-      index.update(`a`, { value: undefined }, { value: 1 })
-
-      expect(index.equalityLookup(undefined).size).toBe(0)
-      expect(index.equalityLookup(1).size).toBe(1)
-      expect(index.equalityLookup(1)).toContain(`a`)
-    })
-
-    it(`should update item from undefined to undefined (same value)`, () => {
-      const index = createIndex(`value`)
-      index.add(`a`, { value: undefined })
-
-      index.update(`a`, { value: undefined }, { value: undefined })
-
-      expect(index.equalityLookup(undefined).size).toBe(1)
-      expect(index.equalityLookup(undefined)).toContain(`a`)
     })
   })
 

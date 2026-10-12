@@ -428,7 +428,7 @@ describe(`named oracle replay manifest`, () => {
     const direct = oracleReplayManifest.filter(({ property }) =>
       /^(index-update|pagination\.matrix)\./.test(property),
     )
-    expect(direct).toHaveLength(19)
+    expect(direct).toHaveLength(20)
     for (const entry of direct) {
       expect(entry.status).toBe(`assertion`)
       expect(entry.testNamePattern).toBeDefined()
