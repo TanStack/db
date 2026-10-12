@@ -62,8 +62,9 @@ The sweep deletes by map entry, so a same-id successor that replaced its
 predecessor's entry stays tracked.
 
 The removed `isPersisted` handlers also kept a rejected `isPersisted` promise
-from reaching `unhandledrejection`, as `main` does. A Collection now marks the
-promise handled once, when it first owns the transaction. Without that, the db
+from reaching `unhandledrejection`, as `main` does. Every transaction now
+marks the promise handled when it is created, so an empty transaction that no
+Collection tracks is covered too. Without that, the db
 and offline-transactions suites reported 48 and 154 unhandled rejections while
 every test passed.
 

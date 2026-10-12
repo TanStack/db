@@ -264,11 +264,17 @@ describe(`shared logical scheduling`, () => {
       const regularAdapter = createSQLiteCorePersistenceAdapter({ driver })
 
       const hydrate = hydrateAdapter.runInHydrationScope!(async (scoped) => {
-        await scoped.loadCollectionMetadata!(`hydrate`)
+        await scoped.loadCollectionMetadata!({
+          kind: `eager`,
+          collectionId: `hydrate`,
+        })
       })
       await underlying.firstQueryEntered.promise
 
-      const regular = regularAdapter.loadCollectionMetadata!(`regular`)
+      const regular = regularAdapter.loadCollectionMetadata!({
+        kind: `eager`,
+        collectionId: `regular`,
+      })
 
       expect(underlying.admissions).toHaveLength(
         underlying.firstQueryAdmissionCount,
@@ -286,11 +292,17 @@ describe(`shared logical scheduling`, () => {
     const regularAdapter = createSQLiteCorePersistenceAdapter({ driver })
 
     const hydrate = hydrateAdapter.runInHydrationScope!(async (scoped) => {
-      await scoped.loadCollectionMetadata!(`hydrate`)
+      await scoped.loadCollectionMetadata!({
+        kind: `eager`,
+        collectionId: `hydrate`,
+      })
     })
     await driver.firstQueryEntered.promise
 
-    const regular = regularAdapter.loadCollectionMetadata!(`regular`)
+    const regular = regularAdapter.loadCollectionMetadata!({
+      kind: `eager`,
+      collectionId: `regular`,
+    })
 
     expect(driver.admissions).toHaveLength(driver.firstQueryAdmissionCount)
 
@@ -316,14 +328,20 @@ describe(`shared logical scheduling`, () => {
           const hydrate = hydrateAdapter.runInHydrationScope!(
             async (scoped) => {
               for (let index = 0; index < hydrateQueries; index++) {
-                await scoped.loadCollectionMetadata!(`hydrate-${index}`)
+                await scoped.loadCollectionMetadata!({
+                  kind: `eager`,
+                  collectionId: `hydrate-${index}`,
+                })
               }
             },
           )
           await driver.firstQueryEntered.promise
 
           const peers = peerAdapters.map((adapter, index) =>
-            adapter.loadCollectionMetadata!(`peer-${index}`),
+            adapter.loadCollectionMetadata!({
+              kind: `eager`,
+              collectionId: `peer-${index}`,
+            }),
           )
           expect(driver.admissions).toHaveLength(
             driver.firstQueryAdmissionCount,
@@ -346,7 +364,10 @@ describe(`shared logical scheduling`, () => {
     const regularAdapter = createSQLiteCorePersistenceAdapter({ driver })
     const events: Array<string> = []
 
-    const initialRegular = regularAdapter.loadCollectionMetadata!(`initial`)
+    const initialRegular = regularAdapter.loadCollectionMetadata!({
+      kind: `eager`,
+      collectionId: `initial`,
+    })
     await driver.firstQueryEntered.promise
     driver.onQuery = () => events.push(`query`)
 
@@ -357,10 +378,16 @@ describe(`shared logical scheduling`, () => {
     const failedHydrateExpectation = expect(failedHydrate).rejects.toThrow(
       `expected hydrate failure`,
     )
-    const regular = regularAdapter.loadCollectionMetadata!(`regular`)
+    const regular = regularAdapter.loadCollectionMetadata!({
+      kind: `eager`,
+      collectionId: `regular`,
+    })
     const nextHydrate = hydrateAdapter.runInHydrationScope!(async (scoped) => {
       events.push(`next-hydrate`)
-      await scoped.loadCollectionMetadata!(`hydrate`)
+      await scoped.loadCollectionMetadata!({
+        kind: `eager`,
+        collectionId: `hydrate`,
+      })
     })
 
     driver.releaseFirstQuery()
@@ -378,8 +405,14 @@ describe(`shared logical scheduling`, () => {
     const driver = new UnbrandedPromiseLookupDriver()
     const adapter = createSQLiteCorePersistenceAdapter({ driver })
 
-    await adapter.loadCollectionMetadata!(`first`)
-    await adapter.loadCollectionMetadata!(`second`)
+    await adapter.loadCollectionMetadata!({
+      kind: `eager`,
+      collectionId: `first`,
+    })
+    await adapter.loadCollectionMetadata!({
+      kind: `eager`,
+      collectionId: `second`,
+    })
 
     expect(driver.schedulingKeyLookups).toBe(1)
   })

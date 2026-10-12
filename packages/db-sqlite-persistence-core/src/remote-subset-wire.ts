@@ -73,6 +73,7 @@ export type TransportedLoadSubsetOptions = {
   limit?: number
   cursor?: RemoteSubsetWireCursor
   offset?: number
+  refetch?: boolean
 }
 
 export class RemoteSubsetWireValueError extends TypeError {
@@ -157,6 +158,7 @@ function visitLoadSubsetOptions(
     `limit`,
     `cursor`,
     `offset`,
+    `refetch`,
     `signal`,
     `subscription`,
   ])
@@ -180,6 +182,7 @@ function visitLoadSubsetOptions(
   const limit = readDataProperty(options, `limit`, `options.limit`)
   const cursor = readDataProperty(options, `cursor`, `options.cursor`)
   const offset = readDataProperty(options, `offset`, `options.offset`)
+  const refetch = readDataProperty(options, `refetch`, `options.refetch`)
 
   if (where.present && where.value !== undefined) {
     const result = projectExpression(where.value, `options.where`, state)
@@ -200,6 +203,15 @@ function visitLoadSubsetOptions(
   if (offset.present && offset.value !== undefined) {
     const result = projectNumber(offset.value, `options.offset`)
     if (!state.validateOnly) projected.offset = result
+  }
+  if (refetch.present && refetch.value !== undefined) {
+    if (typeof refetch.value !== `boolean`) {
+      throw new RemoteSubsetWireValueError(
+        `options.refetch`,
+        `expected boolean`,
+      )
+    }
+    if (!state.validateOnly) projected.refetch = refetch.value
   }
 
   return projected

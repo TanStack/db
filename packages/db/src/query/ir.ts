@@ -1,3 +1,4 @@
+import { codedMessage, devBuild } from '../error-message.js'
 import { isRefProxy } from './builder/ref-proxy-identity.js'
 
 /*
@@ -6,6 +7,7 @@ This is the intermediate representation of the query.
 
 import type { CompareOptions } from './builder/types'
 import type { Collection, CollectionImpl } from '../collection/index.js'
+import type { CollectionOptionsIdentity } from '../collection-options.js'
 import type { NamespacedRow } from '../types'
 
 export interface QueryIR {
@@ -32,7 +34,9 @@ export type IncludesMaterialization =
 
 export const INCLUDES_SCALAR_FIELD = `__includes_scalar__`
 
-export type From = CollectionRef | QueryRef | UnionFrom | UnionAll
+export type CollectionSourceRef = CollectionRef | DescriptorRef
+
+export type From = CollectionSourceRef | QueryRef | UnionFrom | UnionAll
 
 export type Select = {
   [alias: string]:
@@ -42,7 +46,7 @@ export type Select = {
 export type Join = Array<JoinClause>
 
 export interface JoinClause {
-  from: CollectionRef | QueryRef
+  from: CollectionSourceRef | QueryRef
   type: `left` | `right` | `inner` | `outer` | `full` | `cross`
   on: BasicExpression<boolean>
 }
@@ -83,13 +87,17 @@ export class CollectionRef extends BaseExpression {
   public type = `collectionRef` as const
   // Not an own property, so structural identity and hashing ignore it.
   readonly #sourceId = `source-${++nextCollectionSourceId}`
+  declare public collection: CollectionImpl
+  public alias: string
   readonly #bindingId: string
   constructor(
-    public collection: CollectionImpl,
-    public alias: string,
+    collection: CollectionImpl<any, string | number, any, any, any>,
+    alias: string,
     bindingId?: string,
   ) {
     super()
+    this.collection = collection as CollectionImpl
+    this.alias = alias
     this.#bindingId = bindingId ?? `binding-${++nextLexicalBindingId}`
   }
 
@@ -101,6 +109,47 @@ export class CollectionRef extends BaseExpression {
   get bindingId(): string {
     return this.#bindingId
   }
+}
+
+export class DescriptorRef extends BaseExpression {
+  public type = `descriptorRef` as const
+  readonly #sourceId = `source-${++nextCollectionSourceId}`
+  readonly #bindingId: string
+  constructor(
+    public descriptor: CollectionOptionsIdentity<any, any, any, any, any>,
+    public alias: string,
+    bindingId?: string,
+  ) {
+    super()
+    this.#bindingId = bindingId ?? `binding-${++nextLexicalBindingId}`
+  }
+
+  /** Opaque runtime identity for this unbound source placement. */
+  get sourceId(): string {
+    return this.#sourceId
+  }
+
+  get bindingId(): string {
+    return this.#bindingId
+  }
+}
+
+/** A descriptor must bind to a DbClient before a Collection is required. */
+export function requireCollectionSource(source: DescriptorRef): never
+export function requireCollectionSource(
+  source: CollectionSourceRef,
+): CollectionImpl
+export function requireCollectionSource(
+  source: CollectionSourceRef,
+): CollectionImpl {
+  if (source.type === `descriptorRef`) {
+    throw new Error(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `Collection descriptor "${source.alias}" requires a DbClient when the query is consumed. Bind the query through a client-aware API or use a concrete Collection.`
+        : codedMessage(113, { alias: source.alias }),
+    )
+  }
+  return source.collection
 }
 
 export class QueryRef extends BaseExpression {
@@ -122,7 +171,7 @@ export class QueryRef extends BaseExpression {
 
 export class UnionFrom extends BaseExpression {
   public type = `unionFrom` as const
-  constructor(public sources: Array<CollectionRef | QueryRef>) {
+  constructor(public sources: Array<CollectionSourceRef | QueryRef>) {
     super()
   }
 
@@ -218,6 +267,16 @@ export class Aggregate<T = any> extends BaseExpression<T> {
   }
 }
 
+/** Collect refs from an IR expression, including aggregate arguments. */
+export function collectPropRefs(
+  expression: BasicExpression | Aggregate,
+): Array<PropRef> {
+  if (expression.type === `ref`) return [expression]
+  return expression.type === `func` || expression.type === `agg`
+    ? expression.args.flatMap(collectPropRefs)
+    : []
+}
+
 export class IncludesSubquery extends BaseExpression {
   public type = `includesSubquery` as const
   constructor(
@@ -272,13 +331,13 @@ export function isExpressionLike(value: unknown): boolean {
   )
 }
 
-/** Returns each lexical Collection source in a query tree once. */
-export function collectCollectionSources(query: QueryIR): Array<CollectionRef> {
-  const sources: Array<CollectionRef> = []
+/** Returns each lexical Collection or descriptor source in a query tree once. */
+export function collectSourceRefs(query: QueryIR): Array<CollectionSourceRef> {
+  const sources: Array<CollectionSourceRef> = []
   const seen = new Set<string>()
 
   const visitSource = (source: QueryIR[`from`]): void => {
-    if (source.type === `collectionRef`) {
+    if (source.type === `collectionRef` || source.type === `descriptorRef`) {
       if (!seen.has(source.sourceId)) {
         seen.add(source.sourceId)
         sources.push(source)
@@ -319,6 +378,13 @@ export function collectCollectionSources(query: QueryIR): Array<CollectionRef> {
 
   visitQuery(query)
   return sources
+}
+
+/** Returns concrete Collection sources after requiring client binding. */
+export function collectCollectionSources(query: QueryIR): Array<CollectionRef> {
+  return collectSourceRefs(query).map((source) =>
+    source.type === `descriptorRef` ? requireCollectionSource(source) : source,
+  )
 }
 
 /**
@@ -367,7 +433,9 @@ export function createResidualWhere(
 }
 
 /** Sources declared by a FROM clause. UnionAll branches own their sources. */
-export function getFromSources(from: From): Array<CollectionRef | QueryRef> {
+export function getFromSources(
+  from: From,
+): Array<CollectionSourceRef | QueryRef> {
   if (from.type === `unionFrom`) return from.sources
   if (from.type === `unionAll`) return []
   return [from]
@@ -377,7 +445,7 @@ function getRefFromAlias(
   query: QueryIR,
   alias: string,
   bindingId?: string,
-): CollectionRef | QueryRef | void {
+): CollectionSourceRef | QueryRef | void {
   for (const source of getFromSources(query.from)) {
     if (
       source.alias === alias &&
@@ -427,7 +495,7 @@ export function followRef(
     }
 
     return {
-      collection: aliasRef.collection,
+      collection: requireCollectionSource(aliasRef),
       path: propertyPath,
       alias: explicitAlias,
       sourceId: aliasRef.sourceId,
@@ -484,7 +552,7 @@ export function followRef(
       // Report the alias too: when the ref crossed a join, this is the source
       // that actually holds the field (which may differ from the from clause).
       return {
-        collection: aliasRef.collection,
+        collection: requireCollectionSource(aliasRef),
         path: rest,
         alias,
         sourceId: aliasRef.sourceId,

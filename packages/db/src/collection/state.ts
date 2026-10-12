@@ -879,6 +879,11 @@ export class CollectionStateManager<
     this.commitPendingTransactions()
   }
 
+  /** Whether the newest sync transaction is still open for writes. */
+  hasOpenSyncTransaction(): boolean {
+    return this.pendingSyncedTransactions.at(-1)?.committed === false
+  }
+
   /** Every synced row once every accepted sync transaction applies. */
   *acceptedSyncedEntries(): IterableIterator<[TKey, TOutput]> {
     const { states, truncated } = this.pendingSyncedProjection

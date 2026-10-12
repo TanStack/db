@@ -98,6 +98,10 @@ function createUnknownCollectionError(collectionId) {
   return error
 }
 
+function eagerTarget(collectionId) {
+  return { kind: `eager`, collectionId }
+}
+
 export class PersistenceObject extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env)
@@ -114,7 +118,7 @@ export class PersistenceObject extends DurableObject {
       schemaVersion: this.schemaVersion,
     })
     this.ready = this.collectionPersistence.adapter.loadSubset(
-      this.collectionId,
+      eagerTarget(this.collectionId),
       {
         limit: 0,
       },
@@ -182,7 +186,7 @@ export class PersistenceObject extends DurableObject {
               ? requestBody.rowVersion
               : seq
           await this.collectionPersistence.adapter.applyCommittedTx(
-            collectionId,
+            eagerTarget(collectionId),
             {
               txId,
               term: 1,
@@ -217,7 +221,7 @@ export class PersistenceObject extends DurableObject {
         }
         if (this.syncEnabled) {
           const rows = await this.collectionPersistence.adapter.loadSubset(
-            collectionId,
+            eagerTarget(collectionId),
             {},
           )
           return jsonResponse(200, {
@@ -248,7 +252,7 @@ export class PersistenceObject extends DurableObject {
           throw createUnknownCollectionError(unknownCollectionId)
         }
         const rows = await this.persistence.adapter.loadSubset(
-          unknownCollectionId,
+          eagerTarget(unknownCollectionId),
           {},
         )
         return jsonResponse(200, {

@@ -578,6 +578,9 @@ export class CollectionSyncManager<
   public preload(): Promise<void> {
     try {
       this.lifecycle.assertCanStartSync()
+      // A direct reader owns this demand even if an earlier render left a
+      // sync start deferred. Its preload must be able to start the source.
+      if (this.syncStartDeferred) this.resumeStart()
     } catch (error) {
       return Promise.reject(error)
     }
