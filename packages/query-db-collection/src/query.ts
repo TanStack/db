@@ -803,7 +803,6 @@ export function queryCollectionOptions(
 
   // Validate required parameters
 
-   
   if (!queryKey) {
     throw new QueryKeyRequiredError()
   }
@@ -813,7 +812,6 @@ export function queryCollectionOptions(
     throw new QueryFnRequiredError()
   }
 
-   
   if (!queryClient) {
     throw new QueryClientRequiredError()
   }
