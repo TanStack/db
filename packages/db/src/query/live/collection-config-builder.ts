@@ -850,6 +850,7 @@ export class CollectionConfigBuilder<
     Object.keys(this.subscriptions).forEach(
       (key) => delete this.subscriptions[key],
     )
+    this.collectionSubscribers.clear()
   }
 
   /**
