@@ -918,5 +918,10 @@
     "literals": [
       "A live query's child collection cannot be cleaned up directly. Clean up the live query instead."
     ]
+  },
+  "242": {
+    "file": "local-storage.ts",
+    "template": "LocalStorage sync belongs to its options Collection.",
+    "literals": ["LocalStorage sync belongs to its options Collection."]
   }
 }

@@ -5,6 +5,7 @@ import {
   SYNC_PERSISTENCE_PROTOCOL,
   SYNC_PERSISTENCE_VERSION,
   SyncTransactionAbortedError,
+  collectionOptionsClaim,
   compileSingleRowExpression,
   equalPersistedSnapshotValues,
   getLoadSubsetDemandKey,
@@ -1329,6 +1330,21 @@ class ApplyMutex {
   }
 }
 
+function matchesAnySubset(
+  value: object,
+  evaluators: ReadonlyArray<ReturnType<
+    typeof compileSingleRowExpression
+  > | null>,
+): boolean {
+  return evaluators.some(
+    (evaluator) =>
+      !evaluator ||
+      toBooleanPredicate(
+        evaluator(value as Record<string, unknown>) as boolean | null,
+      ),
+  )
+}
+
 function toStableSerializable(value: unknown): unknown {
   if (value == null) {
     return value
@@ -1523,6 +1539,12 @@ class PersistedCollectionRuntime<
 
   private collection: Collection<T, TKey, PersistedCollectionUtils> | null =
     null
+  // Cleanup ends the active sync run, but cannot transfer this runtime's owner.
+  private boundCollection: Collection<
+    T,
+    TKey,
+    PersistedCollectionUtils
+  > | null = null
   private syncControls: SyncControlFns<T, TKey> = {
     begin: null,
     write: null,
@@ -1590,6 +1612,7 @@ class PersistedCollectionRuntime<
     private readonly syncMode: `eager` | `on-demand`,
     private readonly dbName: string,
     private readonly persistedReadiness?: PersistedReadinessTracker,
+    private readonly optionsClaim?: () => void | (() => void),
   ) {}
 
   private get storageCollectionId(): string {
@@ -1971,21 +1994,53 @@ class PersistedCollectionRuntime<
     return this.scopedRecoveryPending
   }
 
+  hasBoundCollection(): boolean {
+    return this.boundCollection !== null
+  }
+
   setCollection(
     collection: Collection<T, TKey, PersistedCollectionUtils>,
+    syncControls: SyncControlFns<T, TKey>,
   ): void {
-    if (this.collection === collection) {
-      return
+    if (
+      (
+        collection.config as typeof collection.config & {
+          [collectionOptionsClaim]?: unknown
+        }
+      )[collectionOptionsClaim] !== this.optionsClaim
+    ) {
+      throw new InvalidPersistedCollectionConfigError(
+        `Persisted sync belongs to its options Collection`,
+      )
+    }
+    if (this.boundCollection && this.boundCollection !== collection) {
+      throw new InvalidPersistedCollectionConfigError(
+        `Persisted options cannot own more than one Collection`,
+      )
     }
 
-    this.collection = collection
-    if (
-      !this.persistence.adapter.claimCacheGeneration ||
-      this.mode !== `sync-present` ||
-      this.syncMode !== `on-demand`
-    ) {
-      this.attachCoordinatorSubscription()
+    const previousCollection = this.collection
+    const previousControls = this.syncControls
+    this.setSyncControls(syncControls)
+    if (this.collection === collection) {
+      this.boundCollection ??= collection
+      return
     }
+    this.collection = collection
+    try {
+      if (
+        !this.persistence.adapter.claimCacheGeneration ||
+        this.mode !== `sync-present` ||
+        this.syncMode !== `on-demand`
+      ) {
+        this.attachCoordinatorSubscription()
+      }
+    } catch (error) {
+      this.collection = previousCollection
+      this.syncControls = previousControls
+      throw error
+    }
+    this.boundCollection ??= collection
   }
 
   getLeadershipState(): PersistedCollectionLeadershipState {
@@ -2589,28 +2644,25 @@ class PersistedCollectionRuntime<
       return true
     }
 
-    const nextMetadata = new Map(
-      collectionMetadata.map(({ key, value }) => [key, value]),
-    )
-    const currentKeys = this.syncControls.metadata.collection
-      .list()
-      .map(({ key }) => key)
-
     return this.withInternalApply(() => {
       this.syncControls.begin?.()
-
-      currentKeys.forEach((key) => {
-        if (!nextMetadata.has(key)) {
-          this.syncControls.metadata?.collection.delete(key)
-        }
-      })
-
-      nextMetadata.forEach((value, key) => {
-        this.syncControls.metadata?.collection.set(key, value)
-      })
-
+      this.applyCollectionMetadataSnapshot(collectionMetadata)
       return this.syncControls.commit?.() ?? true
     })
+  }
+
+  private applyCollectionMetadataSnapshot(
+    collectionMetadata: Array<{ key: string; value: unknown }>,
+  ): void {
+    const metadata = this.syncControls.metadata
+    if (!metadata) return
+    const next = new Map(
+      collectionMetadata.map(({ key, value }) => [key, value]),
+    )
+    for (const { key } of metadata.collection.list()) {
+      if (!next.has(key)) metadata.collection.delete(key)
+    }
+    for (const [key, value] of next) metadata.collection.set(key, value)
   }
 
   async loadSubset(
@@ -3241,6 +3293,14 @@ class PersistedCollectionRuntime<
         } else {
           rows = await this.loadSubsetRowsUnsafe(options, adapter)
         }
+        const complete =
+          this.syncMode === `on-demand` &&
+          !this.scopedRecovery &&
+          options.where === undefined &&
+          options.limit === undefined &&
+          options.offset === undefined &&
+          options.cursor === undefined
+        const validationRows = complete ? rows : undefined
         rowsLoaded = true
         if (config.lifecycleGeneration !== this.lifecycleGeneration) return true
         if (resetSequence !== this.resetSequence) return true
@@ -3265,7 +3325,7 @@ class PersistedCollectionRuntime<
           for (const row of rows) {
             hydrationContext.suppliedRowKeys.add(row.key)
           }
-          const applied = this.applyRowsToCollection(rows)
+          const applied = this.applyRowsToCollection(rows, validationRows)
           await whenSyncAccepted(applied)
           if (boundRowVersion !== undefined) {
             this.publicRowVersion = Math.max(
@@ -3475,6 +3535,8 @@ class PersistedCollectionRuntime<
 
   private applyRowsToCollection(
     rows: Array<{ key: TKey; value: T; metadata?: unknown }>,
+    validationRows?: Array<{ key: TKey; value: T; metadata?: unknown }>,
+    collectionMetadata?: Array<{ key: string; value: unknown }>,
   ): SyncAppliedReceipt {
     if (
       !this.syncControls.begin ||
@@ -3487,9 +3549,67 @@ class PersistedCollectionRuntime<
     return this.withInternalApply(() => {
       this.syncControls.begin?.()
 
+      // A full durable snapshot validates already public keys. Only the
+      // requested subset may add keys to the public Collection.
+      if (validationRows) {
+        const durableRows = new Map(validationRows.map((row) => [row.key, row]))
+        for (const key of this.collection?.base.keys() ?? []) {
+          if (this.collection?._hasHydratedKey(key)) continue
+          const durable = durableRows.get(key)
+          if (!durable) {
+            this.syncControls.write?.({ type: `delete`, key })
+          } else {
+            const valueChanged = !equalPersistedSnapshotValues(
+              this.collection?.base.get(key),
+              durable.value,
+            )
+            const metadataChanged = !equalPersistedSnapshotValues(
+              this.syncControls.metadata?.row.get(key),
+              durable.metadata,
+            )
+            if (
+              valueChanged ||
+              (metadataChanged && durable.metadata !== undefined)
+            ) {
+              // A persisted read supplies a complete row. In partial-update
+              // mode, deleting it within this sync transaction removes fields
+              // that are absent from the durable value before replacement.
+              if (valueChanged) {
+                this.syncControls.write?.({ type: `delete`, key })
+              }
+              this.syncControls.write?.({
+                type: `update`,
+                value: durable.value,
+                metadata: durable.metadata as
+                  Record<string, unknown> | undefined,
+              })
+            }
+            if (metadataChanged && durable.metadata === undefined) {
+              this.syncControls.metadata?.row.delete(key)
+            }
+          }
+        }
+        for (const key of this.collection?._syncedRowMetadataKeysOutsideBase() ??
+          []) {
+          this.syncControls.metadata?.row.delete(key)
+        }
+      }
+
       for (const row of rows) {
-        if (this.collection?._hasHydratedKey(row.key)) {
+        if (
+          (validationRows && this.collection?.base.has(row.key)) ||
+          this.collection?._hasHydratedKey(row.key)
+        ) {
           continue
+        }
+        if (
+          this.collection?.base.has(row.key) &&
+          !equalPersistedSnapshotValues(
+            this.collection.base.get(row.key),
+            row.value,
+          )
+        ) {
+          this.syncControls.write?.({ type: `delete`, key: row.key })
         }
         this.syncControls.write?.({
           type: `update`,
@@ -3497,6 +3617,9 @@ class PersistedCollectionRuntime<
           metadata: row.metadata as Record<string, unknown> | undefined,
         })
       }
+
+      if (collectionMetadata)
+        this.applyCollectionMetadataSnapshot(collectionMetadata)
 
       return this.syncControls.commit?.() ?? true
     })
@@ -3579,18 +3702,37 @@ class PersistedCollectionRuntime<
       return true
     }
 
-    const nextMetadata = new Map(
-      collectionMetadata.map(({ key, value }) => [key, value]),
+    const base = this.collection?.base
+    const hydratedKeys = new Set(
+      Array.from(base?.keys() ?? []).filter(
+        (key) => this.collection?._hasHydratedKey(key) === true,
+      ),
     )
-    const currentKeys = this.syncControls.metadata.collection
-      .list()
-      .map(({ key }) => key)
+    const rowKeys = new Set(rows.map((row) => row.key))
 
     return this.withInternalApply(() => {
       this.syncControls.begin?.()
-      this.syncControls.truncate?.()
+      if (hydratedKeys.size === 0) {
+        this.syncControls.truncate?.()
+      } else {
+        for (const key of base?.keys() ?? []) {
+          if (!hydratedKeys.has(key) && !rowKeys.has(key)) {
+            this.syncControls.write?.({ type: `delete`, key })
+          }
+        }
+        for (const key of this.collection?._syncedRowMetadataKeysOutsideBase() ??
+          []) {
+          this.syncControls.metadata?.row.delete(key)
+        }
+      }
 
       for (const row of rows) {
+        if (hydratedKeys.has(row.key)) continue
+        if (hydratedKeys.size > 0 && base?.has(row.key)) {
+          // Remove stale fields before applying a complete persisted row in
+          // the default partial-update mode, without truncating seed keys.
+          this.syncControls.write?.({ type: `delete`, key: row.key })
+        }
         this.syncControls.write?.({
           type: `update`,
           value: row.value,
@@ -3598,16 +3740,7 @@ class PersistedCollectionRuntime<
         })
       }
 
-      currentKeys.forEach((key) => {
-        if (!nextMetadata.has(key)) {
-          this.syncControls.metadata?.collection.delete(key)
-        }
-      })
-
-      nextMetadata.forEach((value, key) => {
-        this.syncControls.metadata?.collection.set(key, value)
-      })
-
+      this.applyCollectionMetadataSnapshot(collectionMetadata)
       return this.syncControls.commit?.() ?? true
     })
   }
@@ -4756,7 +4889,14 @@ class PersistedCollectionRuntime<
     // A subscriber may reacquire reentrantly from the truncate commit.
     this.hydratedDemands.clear()
     this.resetSequence++
-    if (this.syncControls.begin && this.syncControls.commit) {
+    // On-demand reset keeps previously public rows and hydration seeds until
+    // the new durable snapshot can replace them in one publication. Active
+    // demand may add rows; retired demand may only validate visible keys.
+    if (
+      this.syncMode === `eager` &&
+      this.syncControls.begin &&
+      this.syncControls.commit
+    ) {
       const applied = this.withInternalApply(() => {
         this.syncControls.begin?.()
         this.syncControls.truncate?.()
@@ -4766,7 +4906,11 @@ class PersistedCollectionRuntime<
     }
 
     if (lifecycleGeneration !== this.lifecycleGeneration) return
-    await this.reloadActiveSubsetsUnsafe(adapter)
+    await this.reloadActiveSubsetsUnsafe(
+      adapter,
+      false,
+      this.syncMode === `eager`,
+    )
   }
 
   private async invalidateFromCommittedTxUnsafe(
@@ -4800,6 +4944,38 @@ class PersistedCollectionRuntime<
       (opt) => opt.limit != null || opt.offset != null || opt.cursor != null,
     )
 
+    // A targeted envelope separates changed rows from deleted keys and omits
+    // insert/update identity. A same-key insert replaces the durable row,
+    // while an update merges omitted fields. The public row cannot decide
+    // which operation produced a changed value. A previously unseen key also
+    // has no public baseline with which to complete a source patch. Read the
+    // durable result whenever that ambiguity affects a public row or demand.
+    const changedKeys = new Set(txCommitted.changedRows.map((row) => row.key))
+    const hasRepeatedChange =
+      changedKeys.size !== txCommitted.changedRows.length
+    const hasChangedAndDeletedKey = txCommitted.deletedKeys.some((key) =>
+      changedKeys.has(key),
+    )
+    const hasChangedPublicKey = txCommitted.changedRows.some((row) =>
+      this.collection?.base.has(row.key as TKey),
+    )
+    const hasUnseenDemandedKey =
+      this.activeSubsets.size > 0 &&
+      txCommitted.changedRows.some(
+        (row) =>
+          !this.collection?.base.has(row.key as TKey) &&
+          !this.collection?._hasHydratedKey(row.key as TKey),
+      )
+    if (
+      hasRepeatedChange ||
+      hasChangedAndDeletedKey ||
+      hasChangedPublicKey ||
+      (this.syncMode === `on-demand` && hasUnseenDemandedKey)
+    ) {
+      await reloadActiveSubsets()
+      return
+    }
+
     if (!hasPaginatedSubset || changedKeyCount === 0) {
       await this.applyTargetedInvalidationUnsafe(txCommitted)
       return
@@ -4824,23 +5000,40 @@ class PersistedCollectionRuntime<
         key: changedKey,
         value: newValue,
       } of txCommitted.changedRows) {
-        const matchesAnySubset = subsetEvaluators.some((evaluator) => {
-          if (!evaluator) return true
-          return toBooleanPredicate(evaluator(newValue) as boolean | null)
-        })
+        const key = changedKey as TKey
+        if (this.collection?._hasHydratedKey(key)) continue
+        const previous = this.collection?.base.get(key)
+        if (previous === undefined && this.activeSubsets.size === 0) continue
+        const completeValue = {
+          ...(previous as object | undefined),
+          ...newValue,
+        } as T
+        const currentlyDemanded = matchesAnySubset(
+          completeValue,
+          subsetEvaluators,
+        )
+        const previouslyOutsideDemand =
+          previous !== undefined &&
+          !matchesAnySubset(previous, subsetEvaluators)
 
-        if (matchesAnySubset) {
-          this.syncControls.write?.({ type: `update`, value: newValue as T })
-        } else if (this.collection?.get(changedKey as TKey) !== undefined) {
-          this.syncControls.write?.({ type: `delete`, key: changedKey as TKey })
+        if (currentlyDemanded || previouslyOutsideDemand) {
+          this.syncControls.write?.({ type: `update`, value: completeValue })
+        } else if (previous !== undefined) {
+          this.syncControls.write?.({ type: `delete`, key })
         }
       }
 
       for (const deletedKey of txCommitted.deletedKeys) {
-        this.syncControls.write?.({ type: `delete`, key: deletedKey as TKey })
+        const key = deletedKey as TKey
+        if (!this.collection?._hasHydratedKey(key)) {
+          this.syncControls.write?.({ type: `delete`, key })
+        }
       }
 
       txCommitted.rowMetadataMutations?.forEach((mutation) => {
+        // A DbClient hydration seed owns both its row and row metadata until
+        // an accepted source transaction confirms the key.
+        if (this.collection?._hasHydratedKey(mutation.key as TKey)) return
         if (mutation.type === `delete`) {
           this.syncControls.metadata?.row.delete(mutation.key as TKey)
         } else {
@@ -4870,6 +5063,7 @@ class PersistedCollectionRuntime<
   private async reloadActiveSubsetsUnsafe(
     adapter: HydrationPersistenceAdapter,
     skipUnchangedReplace = false,
+    restoreResetBaseline = false,
   ): Promise<void> {
     if (this.scopedRecovery) {
       this.refreshScopedSubsets()
@@ -4877,10 +5071,30 @@ class PersistedCollectionRuntime<
     }
     const lifecycleGeneration = this.lifecycleGeneration
     const truncateGeneration = this.sourceTruncateGeneration
-    const activeSubsetOptions =
-      this.activeSubsets.size > 0
-        ? Array.from(this.activeSubsets.values())
-        : [{}]
+    const activeSubsetOptions = Array.from(this.activeSubsets.values())
+    if (restoreResetBaseline && activeSubsetOptions.length === 0) {
+      activeSubsetOptions.push({})
+    }
+    const evaluators = activeSubsetOptions.map((options) =>
+      options.where ? compileSingleRowExpression(options.where) : null,
+    )
+    // A filtered read has no authority over public rows that were already
+    // outside every active predicate. Validate those keys against the complete
+    // durable snapshot; only active demand may admit previously unseen keys.
+    const outsideDemandKeys = activeSubsetOptions.some(
+      (options) =>
+        options.limit != null ||
+        options.offset != null ||
+        options.cursor != null,
+    )
+      ? []
+      : Array.from(this.collection?.base ?? [])
+          .filter(
+            ([key, row]) =>
+              !this.collection?._hasHydratedKey(key) &&
+              !matchesAnySubset(row, evaluators),
+          )
+          .map(([key]) => key)
 
     this.hydratedDemands.clear()
     this.hydrationSequence++
@@ -4889,9 +5103,22 @@ class PersistedCollectionRuntime<
     this.hydratingGeneration = lifecycleGeneration
     try {
       const mergedRows = new Map<TKey, { value: T; metadata?: unknown }>()
+      let validationSnapshot:
+        Awaited<ReturnType<typeof adapter.loadResumeSnapshot>> | undefined
       let collectionMetadata: Array<{ key: string; value: unknown }> = []
       try {
-        collectionMetadata = await this.loadCollectionMetadataSnapshot(adapter)
+        validationSnapshot =
+          (activeSubsetOptions.length === 0 || outsideDemandKeys.length > 0) &&
+          this.collection?.base.size
+            ? await adapter.loadResumeSnapshot(this.storageTargetFor(), {
+                requiredIndexSignatures: this.getRequiredIndexSignatures(),
+                includeRows: true,
+                cacheGenerationClaimId: this.cacheGenerationClaim?.claimId,
+              })
+            : undefined
+        collectionMetadata = validationSnapshot
+          ? validationSnapshot.collectionMetadata
+          : await this.loadCollectionMetadataSnapshot(adapter)
         if (lifecycleGeneration !== this.lifecycleGeneration) return
         for (const options of activeSubsetOptions) {
           const subsetRows = await this.loadSubsetRowsUnsafe(options, adapter)
@@ -4901,6 +5128,21 @@ class PersistedCollectionRuntime<
               value: row.value,
               metadata: row.metadata,
             })
+          }
+        }
+        if (outsideDemandKeys.length > 0 && validationSnapshot) {
+          const durableRows = new Map(
+            validationSnapshot.rows.map((row) => [row.key, row]),
+          )
+          for (const key of outsideDemandKeys) {
+            if (mergedRows.has(key)) continue
+            const row = durableRows.get(key)
+            if (row) {
+              mergedRows.set(key, {
+                value: row.value as T,
+                metadata: row.metadata,
+              })
+            }
           }
         }
       } catch (error) {
@@ -4935,7 +5177,21 @@ class PersistedCollectionRuntime<
         hydrationContext.suppliedRowKeys.add(key)
       }
 
-      if (
+      if (activeSubsetOptions.length === 0) {
+        // Retired demand does not hide already public rows. Validate only
+        // those keys; do not publish unrelated durable rows without demand.
+        await whenSyncAccepted(
+          this.applyRowsToCollection(
+            [],
+            (validationSnapshot?.rows ?? []) as Array<{
+              key: TKey
+              value: T
+              metadata?: unknown
+            }>,
+            collectionMetadata,
+          ),
+        )
+      } else if (
         skipUnchangedReplace &&
         this.matchesCollectionSnapshot(mergedRows, collectionMetadata)
       ) {
@@ -5505,16 +5761,16 @@ function createWrappedSyncConfig<
           throw error
         }
       }
-      runtime.setSyncControls({
-        begin: params.begin,
-        write: params.write as SyncControlFns<T, TKey>[`write`],
-        commit: params.commit,
-        truncate: params.truncate,
-        metadata: params.metadata ?? null,
-        markError: params.markError,
-      })
       runtime.setCollection(
         params.collection as Collection<T, TKey, PersistedCollectionUtils>,
+        {
+          begin: params.begin,
+          write: params.write as SyncControlFns<T, TKey>[`write`],
+          commit: params.commit,
+          truncate: params.truncate,
+          metadata: params.metadata ?? null,
+          markError: params.markError,
+        },
       )
 
       const persistenceCapability: SyncPersistenceCapabilityV1<TKey> = {
@@ -6401,16 +6657,16 @@ function createLoopbackSyncConfig<
 >(runtime: PersistedCollectionRuntime<T, TKey>): SyncConfig<T, TKey> {
   return {
     sync: (params) => {
-      runtime.setSyncControls({
-        begin: params.begin,
-        write: params.write as SyncControlFns<T, TKey>[`write`],
-        commit: params.commit,
-        truncate: params.truncate,
-        metadata: params.metadata ?? null,
-        markError: params.markError,
-      })
       runtime.setCollection(
         params.collection as Collection<T, TKey, PersistedCollectionUtils>,
+        {
+          begin: params.begin,
+          write: params.write as SyncControlFns<T, TKey>[`write`],
+          commit: params.commit,
+          truncate: params.truncate,
+          metadata: params.metadata ?? null,
+          markError: params.markError,
+        },
       )
 
       void runtime
@@ -6530,6 +6786,20 @@ export function persistedCollectionOptions<
       ? new PersistedReadinessTracker(networkTimeoutMs)
       : undefined
 
+  let claimed = false
+  let claimedRuntime: PersistedCollectionRuntime<T, TKey> | undefined
+  const claimOptions = () => {
+    if (claimed) {
+      throw new InvalidPersistedCollectionConfigError(
+        `Persisted options can create only one Collection. Create fresh options for each Collection.`,
+      )
+    }
+    claimed = true
+    return () => {
+      if (!claimedRuntime?.hasBoundCollection()) claimed = false
+    }
+  }
+
   if (hasOwnSyncKey(options)) {
     if (!isValidSyncConfig(options.sync)) {
       throw new InvalidSyncConfigError(
@@ -6560,7 +6830,9 @@ export function persistedCollectionOptions<
       syncOptions.syncMode ?? `eager`,
       collectionId,
       persistedReadinessTracker,
+      claimOptions,
     )
+    claimedRuntime = runtime
 
     const result = {
       ...syncOptions,
@@ -6583,6 +6855,7 @@ export function persistedCollectionOptions<
           ...options,
           id: collectionId,
         } as never) as typeof result,
+      claimOptions,
     )
   }
 
@@ -6608,7 +6881,9 @@ export function persistedCollectionOptions<
     localOnlyOptions.syncMode ?? `eager`,
     localOnlyOptions.id ?? DEFAULT_DB_NAME,
     persistedReadinessTracker,
+    claimOptions,
   )
+  claimedRuntime = runtime
 
   const wrappedOnInsert = async (
     params: InsertMutationFnParams<T, TKey, TUtils & PersistedCollectionUtils>,
@@ -6705,6 +6980,7 @@ export function persistedCollectionOptions<
         ...options,
         id: collectionId,
       } as never) as typeof result,
+    claimOptions,
   )
 }
 
