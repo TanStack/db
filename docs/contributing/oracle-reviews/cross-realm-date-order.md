@@ -130,3 +130,14 @@ object and Temporal comparison. Hostile microbenchmarks found a substantial
 Temporal cost. The final shape gate avoids that hot path without trusting tag
 text as a Date brand. Dates with a replaced or stripped Date prototype, Date
 subclasses, and proxies remain outside this claim.
+
+At clean commit `636e71e3d6084da6badeb0055fef5aae19ca4f58`, the fresh
+hostile reviewer `/root/exact_review_comparison_round5` found no blocker for
+the declared Date and retired-test scope. The focused suite passed 103 tests
+with no type errors. The reviewer checked that genuine tagged foreign Dates
+retain timestamp semantics, forged ordinary objects fail the native brand
+check, unrelated display-tag getters remain unread, and the comparator avoids
+the rejected exception-heavy path for Temporal values. The public scan cleanup
+preserves a primary mismatch if cleanup also fails. This verdict does not
+extend to replaced Date prototypes or `getTime` methods, proxies, subclasses,
+indexed order, range queries, or cursor continuation.

@@ -104,4 +104,17 @@ number-one]`; production returned `[foreign-one, local-one, number-one]`.
 Vitest reported an assertion failure with no type errors. The unmodified
 matrix passed against the same archived code. After the guarded intrinsic
 repair, the expanded matrix passed in both indexed and unindexed modes. A
-fresh committed-head review of the repaired matrix remains pending.
+fresh committed-head review of the repaired matrix follows.
+
+At clean commit `636e71e3d6084da6badeb0055fef5aae19ca4f58`, the fresh
+hostile reviewer `/root/exact_review_where_realm` found no blocker for this
+bounded WHERE Date equality matrix. The focused WHERE and subset suites passed
+53 tests with no type errors. The reviewer reconstructed the model classes,
+checked tagged source rows and literals at initial and post-commit cuts, and
+traced the live keys, subscriber reconstruction, and public snapshots in both
+modes. The explicit BasicIndex lookup and `optimizedOnly: true` snapshot prove
+an indexed public read, without claiming the live-query planner selected it.
+The archived `9a145fba1` run failed at the intended unindexed public equality
+comparison by omitting `foreign-tagged-one`; its unmodified controls passed.
+The verdict does not cover other hosts, public ranges, indexed order,
+arbitrary histories, or Date objects with replaced prototypes or methods.
