@@ -13,6 +13,7 @@ import {
 } from '../../src/operators/groupBy.js'
 import { output } from '../../src/operators/index.js'
 import { serializeValue } from '../../src/utils.js'
+import { hash } from '../../src/hashing/index.js'
 
 describe(`Operators`, () => {
   describe(`GroupBy operation`, () => {
@@ -622,6 +623,155 @@ describe(`Operators`, () => {
       ]
 
       expect(latestMessage.getInner()).toEqual(expectedResult)
+    })
+
+    // Contract for callers, not a replay witness: the generated groupBy law in
+    // incrementalization-law-oracle.property.test.ts compares JSON values and
+    // cannot see -0 or Date identity. groupBy's reduce keeps a group's
+    // contributions in an Index keyed by the hash of each row's record of
+    // pre-mapped aggregate inputs. Rows whose records hash equal share one
+    // entry, which sums their multiplicities and keeps the instance it was
+    // last given, a retraction's included. The hash
+    // treats -0 as 0 and equal Dates as one value. So after a delete, min and
+    // max return a value hash-equal to a remaining member's, not necessarily
+    // that member's instance. This holds while every member has positive
+    // multiplicity: min and max do not look at multiplicities. An aggregate
+    // input that tells the rows apart keeps their records apart. The query
+    // compiler adds one for min and max: an exact-value key that separates -0
+    // from 0 and gives each object its row key. A distinct remaining value is
+    // returned as is. For -0/0 and equal Dates, hash equality is all the
+    // contract promises, so those cases only show the result stays in the
+    // remaining value's class; the distinct and per-row cases are the ones a
+    // wrong value fails.
+    //
+    // The group's row after the delete is integrated from the output's
+    // multiplicities by hash, keeping the instance of the latest insertion: a
+    // retraction is a new object. Whether a hash-equal row is published again
+    // is not part of this.
+    const extremes = (
+      deletedValue: number | Date,
+      keptValue: number | Date,
+      options: { deletedFirst?: boolean; perRowInput?: boolean } = {},
+    ) => {
+      const { deletedFirst = true, perRowInput = false } = options
+      const graph = new D2()
+      const input = graph.newInput<{
+        g: string
+        id: number
+        v: number | Date
+      }>()
+      const rows = new Map<string | number, { row: unknown; count: number }>()
+      input.pipe(
+        groupBy((row) => ({ g: row.g }), {
+          lo: min((row) => row.v),
+          hi: max((row) => row.v),
+          ...(perRowInput ? { id: max((row) => row.id) } : {}),
+        }),
+        output((message) => {
+          for (const [[, row], multiplicity] of message.getInner()) {
+            const entry = rows.get(hash(row)) ?? { row, count: 0 }
+            entry.count += multiplicity
+            if (multiplicity > 0) entry.row = row
+            rows.set(hash(row), entry)
+          }
+        }),
+      )
+      graph.finalize()
+      const deleted = { g: `x`, id: 1, v: deletedValue }
+      const kept = { g: `x`, id: 2, v: keptValue }
+      input.sendData(
+        new MultiSet(
+          deletedFirst
+            ? [
+                [deleted, 1],
+                [kept, 1],
+              ]
+            : [
+                [kept, 1],
+                [deleted, 1],
+              ],
+        ),
+      )
+      graph.run()
+      input.sendData(new MultiSet([[deleted, -1]]))
+      graph.run()
+      const present = [...rows.values()].filter((entry) => entry.count !== 0)
+      expect(
+        present.map((entry) => entry.count),
+        `one row for the group`,
+      ).toEqual([1])
+      return present[0]!.row as { lo: unknown; hi: unknown }
+    }
+
+    test(`min and max after a delete return a value hash-equal to the remaining one`, () => {
+      for (const deletedFirst of [true, false]) {
+        for (const [deleted, kept] of [
+          [-0, 0],
+          [0, -0],
+        ] as const) {
+          const zero = extremes(deleted, kept, { deletedFirst })
+          expect(hash(zero.lo)).toBe(hash(kept))
+          expect(hash(zero.hi)).toBe(hash(kept))
+        }
+        const keptDate = new Date(5)
+        const date = extremes(new Date(5), keptDate, { deletedFirst })
+        expect(hash(date.lo)).toBe(hash(keptDate))
+        expect(hash(date.hi)).toBe(hash(keptDate))
+
+        // A distinct remaining value is returned as is, whether the delete
+        // removes the minimum or the maximum.
+        expect(extremes(1, 2, { deletedFirst })).toMatchObject({ lo: 2, hi: 2 })
+        expect(extremes(2, 1, { deletedFirst })).toMatchObject({ lo: 1, hi: 1 })
+        const distinct = new Date(6)
+        const distinctDates = extremes(new Date(5), distinct, { deletedFirst })
+        expect(distinctDates.lo).toBe(distinct)
+        expect(distinctDates.hi).toBe(distinct)
+        const earlier = new Date(5)
+        const earlierDates = extremes(new Date(6), earlier, { deletedFirst })
+        expect(earlierDates.lo).toBe(earlier)
+        expect(earlierDates.hi).toBe(earlier)
+
+        // An input that differs per row keeps the records apart, so the
+        // remaining instance comes back.
+        const exactDate = new Date(5)
+        const exact = extremes(new Date(5), exactDate, {
+          deletedFirst,
+          perRowInput: true,
+        })
+        expect(exact.lo).toBe(exactDate)
+        expect(exact.hi).toBe(exactDate)
+        for (const [deleted, kept] of [
+          [-0, 0],
+          [0, -0],
+        ] as const) {
+          const zero = extremes(deleted, kept, {
+            deletedFirst,
+            perRowInput: true,
+          })
+          expect(Object.is(zero.lo, kept)).toBe(true)
+          expect(Object.is(zero.hi, kept)).toBe(true)
+        }
+      }
+    })
+
+    test(`min and max can return the deleted instance of a hash-equal value`, () => {
+      // Current behavior, pinned so a db-ivm change alerts the compiler owner.
+      // The delete's retraction is the last record the shared entry gets, so
+      // its instance, the deleted value, is the one that comes back, in either
+      // insertion order.
+      for (const deletedFirst of [true, false]) {
+        for (const deleted of [-0, 0]) {
+          const zero = extremes(deleted, deleted === 0 ? -0 : 0, {
+            deletedFirst,
+          })
+          expect(Object.is(zero.lo, deleted)).toBe(true)
+          expect(Object.is(zero.hi, deleted)).toBe(true)
+        }
+        const deletedDate = new Date(5)
+        const date = extremes(deletedDate, new Date(5), { deletedFirst })
+        expect(date.lo).toBe(deletedDate)
+        expect(date.hi).toBe(deletedDate)
+      }
     })
 
     // These are readable replay witnesses. The generated groupBy law lives in
