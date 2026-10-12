@@ -140,37 +140,40 @@ export function groupBy<
 
     // Then reduce to compute aggregates
     const reduced = withKeysAndValues.pipe(
-      reduce((contributions) => {
-        const values = contributions.map(
-          ([[, value], multiplicity]) => [value, multiplicity] as const,
-        )
-        // Calculate total multiplicity to check if the group should exist
-        let totalMultiplicity = 0
-        for (const [_, multiplicity] of values) {
-          totalMultiplicity += multiplicity
-        }
-
-        // If total multiplicity is 0 or negative, the group should be removed completely
-        if (totalMultiplicity <= 0) {
-          return []
-        }
-
-        const result: Record<PropertyKey, unknown> = {}
-
-        // Get the original key from first value in group
-        const originalKey = values[0]?.[0]?.[KEY_SENTINEL]
-        result[KEY_SENTINEL] = originalKey
-
-        // Apply each aggregate function
-        for (const [name, aggregate] of Object.entries(basicAggregates)) {
-          const preValues = values.map(
-            ([v, m]) => [v[name], m] as [any, number],
+      reduce(
+        (contributions) => {
+          const values = contributions.map(
+            ([[, value], multiplicity]) => [value, multiplicity] as const,
           )
-          result[name] = aggregate.reduce(preValues)
-        }
+          // Calculate total multiplicity to check if the group should exist
+          let totalMultiplicity = 0
+          for (const [_, multiplicity] of values) {
+            totalMultiplicity += multiplicity
+          }
 
-        return [[result, 1]]
-      }, { prefixIdentity: true }),
+          // If total multiplicity is 0 or negative, the group should be removed completely
+          if (totalMultiplicity <= 0) {
+            return []
+          }
+
+          const result: Record<PropertyKey, unknown> = {}
+
+          // Get the original key from first value in group
+          const originalKey = values[0]?.[0]?.[KEY_SENTINEL]
+          result[KEY_SENTINEL] = originalKey
+
+          // Apply each aggregate function
+          for (const [name, aggregate] of Object.entries(basicAggregates)) {
+            const preValues = values.map(
+              ([v, m]) => [v[name], m] as [any, number],
+            )
+            result[name] = aggregate.reduce(preValues)
+          }
+
+          return [[result, 1]]
+        },
+        { prefixIdentity: true },
+      ),
     )
 
     // Finally map to extract the key and include all values
