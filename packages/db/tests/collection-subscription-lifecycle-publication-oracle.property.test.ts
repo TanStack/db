@@ -1576,7 +1576,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
   it(`reselects a key only after its deletion and next publication`, async () => {
     let operations!: Parameters<SyncConfig<SnapshotRow, string>[`sync`]>[0]
     const loads: Array<{ cursor?: { lastKey?: string | number } }> = []
-    const collection = createCollection<SnapshotRow>({
+    const collection = createCollection<SnapshotRow, string>({
       id: `snapshot-selection-after-delete`,
       getKey: ({ id }) => id,
       syncMode: `on-demand`,
