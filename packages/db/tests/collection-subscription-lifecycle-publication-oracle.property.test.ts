@@ -1657,12 +1657,12 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
 
   // A subscriber's callback has already published each inserted key, whether
   // it filters source changes or passes them through. The model keeps source
-  // and public keys in plain sets. Source deletes remove public keys; source
-  // inserts add them. An ordered snapshot may choose only an absent public
-  // key. These legal histories cross callback insertion, deletion, reinsert,
-  // and local selection in every filtering mode and ordered index path. Each
-  // callback is an observation cut. Retained-key count checks the separate
-  // long-lived tracking cost after deletion.
+  // rows in a plain Map and public keys in a Set. Source deletes remove public
+  // keys; source inserts add them. An ordered snapshot may choose only an
+  // absent public key. These legal histories cross callback insertion,
+  // deletion, reinsert, and local selection in every filtering mode and ordered
+  // index path. Each callback is an observation cut. Retained-key count checks
+  // the long-lived tracking cost after deletion separately.
   const callbackSelectionHistories = [
     {
       name: `new-insert`,
