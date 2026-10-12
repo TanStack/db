@@ -14,10 +14,10 @@ again. A later ordered local snapshot must skip every key still present in the
 subscriber's public snapshot. The Collection API and the method contract in
 `packages/db/src/collection/subscription.ts` authorize these rules.
 
-The lifecycle publication owner models source and subscriber-visible keys in
-separate plain sets. It runs two source-action histories: a new insert and a
-delete followed by reinsert and a new insert. Each history runs with filtering,
-full-state pass-through, and `includeInitialState: false` pass-through. Each
+The lifecycle publication owner models source rows in a plain Map. A separate
+Set models subscriber-visible keys. It runs two source-action histories: a new
+insert, and a delete followed by reinsert and a new insert. Each history runs
+with filtering, full-state pass-through, and `includeInitialState: false` pass-through. Each
 mode runs with and without a cursor. The driver uses a real Collection, its
 ordered index, sync transactions, and a subscription. It checks exact callback
 batches after each source commit and after the ordered request. It also checks
@@ -53,7 +53,7 @@ replay witness owns that reservation law because its snapshot is private.
 | Requirement | Outcome |
 | --- | --- |
 | ORC-001 | The Collection callback and ordered-snapshot contracts authorize the public-key law. The capacity check is an internal work bound; it does not claim an API memory limit. |
-| ORC-002 | Plain source and visible sets choose the expected row independently of subscription tracking. Replay expectations fold source rows into a separate public map. |
+| ORC-002 | The source Map and visible Set choose the expected row independently of subscription tracking. Replay expectations derive from initial and replacement row sets; a separate callback map records actual public rows. |
 | ORC-003 | Each owner states its law and limits. The new comments place the model rule, legal histories, real driver, public cuts, and comparisons beside their code. |
 | ORC-004 | The 12-case bounded grammar reconstructs the duplicate and retention reports. Removing pass-through modes loses the original fault. Removing delete/reinsert loses the retention cut. Removing cursor or no-cursor loses one local-index path. The domain has two ranks and excludes deleting a missing key. |
 | ORC-005 | The driver calls real snapshot methods and source sync transactions. Raw callback batches retain duplicate inserts and their order. The replay driver checks before and after promise settlement. |
@@ -62,7 +62,7 @@ replay witness owns that reservation law because its snapshot is private.
 | ORC-008 | The new model keeps source and visible keys separate: a source row absent from the subscriber can be selected by the next ordered request. Deletion and reinsertion distinguish a prior selection from current visibility. |
 | ORC-009 | Model source rows map to installed source Collection rows; model visible keys map to the subscriber's public snapshot. The retained-key count is an internal observation, not model ownership state. |
 | ORC-010 | The replay fixtures resolve the held promise in `finally`. The selected mutant failures reached value assertions and cleanup succeeded. These fixed witnesses do not implement separate reporting for a future simultaneous cleanup failure. |
-| ORC-011 | The cursor check and public-batch fold give distinct formulations for a lost reservation. A model that looked only at final keys would miss early duplicate inserts. |
+| ORC-011 | A last-enumerated-row mutant challenges the proposed full-snapshot cursor rule. It fails although all three keys were selected. The callback fold separately detects duplicate inserts that a final-key check would miss. |
 | ORC-012 | This record ties the law, finite boundary, guide audit, and mutant outcomes to the reviewed head and versioned follow-up diff. |
 | ORC-013 | Full-state and skip-filtering cases reach the pass-through premise; filtering is the neighboring control. Delete/reinsert and new-insert histories distinguish release from permanent reservation. |
 | ORC-014 | The controlled sync adapter supplies replay timing and source changes. No real-provider pagination claim follows from this record. |
