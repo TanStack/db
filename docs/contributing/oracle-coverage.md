@@ -527,8 +527,10 @@ with one, A must start a post-write request. Both were RED before physical
 fetch-start positions survived the restart and are GREEN afterward. These
 controlled histories do not establish every persisted adapter or Query
 cache-removal schedule.
-The [PR #2065 review at 74e399150](oracle-reviews/pr-2065-74e399-review.md)
+The [intermediate review at 74e399150](oracle-reviews/pr-2065-74e399-review.md)
 adds ordinary-unload and unobserved-fetch histories to that request-order law.
+The [final direct-write authority review](oracle-reviews/2026-10-12-query-direct-write-authority.md)
+records the later law decisions, RED/GREEN evidence, and ten-item audit.
 The ownership oracle also checks derived-select reacquisition and eager restart,
 explicit subset refetch, a derived result held behind `deferDataRefresh`, a
 provisional cache row awaiting persisted application, aliased physical Queries,
