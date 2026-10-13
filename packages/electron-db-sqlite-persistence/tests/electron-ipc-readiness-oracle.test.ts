@@ -451,6 +451,15 @@ function coordinatedRenderer(options: {
       trace.push(`ensure-settled`),
     )
   }
+  // Record when the owner's commit notice reaches this renderer, so the lane
+  // can check the premise it relies on: the notice precedes the reply.
+  const subscribe = coordinator.subscribe.bind(coordinator)
+  coordinator.subscribe = (collectionId, onMessage) =>
+    subscribe(collectionId, (message) => {
+      const payload = message.payload as { type?: string } | undefined
+      if (payload?.type === `tx:committed`) trace.push(`broadcast`)
+      onMessage(message)
+    })
   const persistence = createElectronSQLitePersistence({
     timeoutMs: isElectronFullE2EEnabled() ? 90_000 : undefined,
     coordinator,
@@ -566,6 +575,12 @@ async function observeCoordinatedRendererHistory(
   )
   for (let turn = 0; turn < 20; turn++)
     await new Promise((resolve) => setImmediate(resolve))
+  // Checkpoint: the owner has replied while the follower's apply is held.
+  // The premise transferred: its notice reached the follower before the reply.
+  expect(follower.trace.indexOf(`broadcast`)).toBeGreaterThan(-1)
+  expect(follower.trace.indexOf(`broadcast`)).toBeLessThan(
+    follower.trace.indexOf(`ensure-settled`),
+  )
   const settledWhileApplyHeld = settledAt !== undefined
   // The topology this lane claims: the owner loads upstream, and the
   // follower routes its demand instead of running its own source.
