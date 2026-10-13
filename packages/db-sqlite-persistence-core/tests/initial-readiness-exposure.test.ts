@@ -234,6 +234,7 @@ function followerTab(
   let ensures = 0
   const coordinator: PersistedCollectionCoordinator = {
     getNodeId: () => `follower`,
+    getLeaderId: () => `leader`,
     subscribe: (_collectionId, onMessage) => {
       subscriber = onMessage
       return () => {
@@ -393,26 +394,22 @@ describe(`a persisted follower tab's load settles with the leader's rows`, () =>
     expect(seen.rows).toEqual([`remote`])
   })
 
-  // Open, and the same on main: after the claim rotates, the reacquired
-  // demand has not hydrated in the new generation, so the leader's broadcast
-  // invalidates nothing and its row never becomes visible here. This pins the
-  // gap; it also means the rotated route's wait has no distinguishing witness.
-  it.fails(
-    `settles a demand reacquired under a rotated cache with the leader's rows`,
-    async () => {
-      // The claim is lost right after read 1, so that read is discarded and
-      // the demand reacquires under the rotated generation through the leader.
-      const tab = followerTab(undefined, undefined, true)
-      let visibleAtSettlement: boolean | undefined
-      await Promise.resolve(tab.source._sync.loadSubset({ limit: 10 })).then(
-        () => {
-          visibleAtSettlement = tab.source.has(`remote`)
-        },
-      )
+  // Replay example for the follower generation-notice lane in
+  // persisted-oracle.test.ts: after the claim rotates, the elected owner's
+  // notice is source evidence, so the reacquired demand shows its rows.
+  it(`settles a demand reacquired under a rotated cache with the leader's rows`, async () => {
+    // The claim is lost right after read 1, so that read is discarded and
+    // the demand reacquires under the rotated generation through the leader.
+    const tab = followerTab(undefined, undefined, true)
+    let visibleAtSettlement: boolean | undefined
+    await Promise.resolve(tab.source._sync.loadSubset({ limit: 10 })).then(
+      () => {
+        visibleAtSettlement = tab.source.has(`remote`)
+      },
+    )
 
-      expect(visibleAtSettlement).toBe(true)
-    },
-  )
+    expect(visibleAtSettlement).toBe(true)
+  })
 
   it(`rejects when the leader's broadcast fails to apply`, async () => {
     quietErrors()

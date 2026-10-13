@@ -131,7 +131,9 @@ import type {
  * conformance portfolio have separate owners. This file proves the role
  * partition for non-single-process remote demand: an ownerless elected node
  * does not route, while a follower may route to the elected owner's registered
- * source. Native SQLite hosts, live Electric service behavior, adapter
+ * source. During scoped recovery a follower takes a current-generation commit
+ * notice from the elected owner as source evidence and publishes its demanded
+ * durable rows; a notice from any other sender still requests a refetch. Native SQLite hosts, live Electric service behavior, adapter
  * cancellation, and the open B2-failure/E4 schedule remain separate evidence.
  */
 
@@ -212,7 +214,8 @@ const requestedOracleReplayProperty = readOracleRunConfig().replayProperty
 const describeUnlessOracleReplay =
   requestedOracleReplayProperty === undefined ||
   requestedOracleReplayProperty === `persistence.retained-demand` ||
-  requestedOracleReplayProperty === `persistence.generation-notice`
+  requestedOracleReplayProperty === `persistence.generation-notice` ||
+  requestedOracleReplayProperty === `persistence.follower-generation-notice`
     ? describe
     : describe.skip
 
@@ -25507,6 +25510,320 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   )(
     `checks generated cache-generation notice histories (random or replayed)`,
     assertGenerationNoticeHistory,
+  )
+
+  /**
+   * A follower has no local source. It routes demand to the elected owner,
+   * and the owner's commits reach it only as durable rows plus a commit
+   * notice. After a cache rotation the follower is in scoped recovery, where
+   * durable rows cannot replace source rows. For a follower, a
+   * current-generation commit notice from the elected owner is that source
+   * evidence: the owner wrote those durable rows for this generation. The
+   * law is therefore that an owner notice publishes the follower's demanded
+   * durable rows, while a notice from any other sender is not source
+   * evidence. It keeps scoped recovery's refetch: the follower asks the
+   * owner for source evidence and keeps its public rows until that evidence
+   * arrives.
+   *
+   * The independent model is `expectedScopedSnapshot` with complete demand
+   * over the authored durable rows of the current generation. It knows
+   * nothing about notices or scoped recovery; the driver applies it only at
+   * checkpoints where the owner's evidence has arrived. The ensure log is a
+   * separate observation: one acquisition, one reacquisition after
+   * rotation, and one refetch per peer notice. A bounded leader that
+   * re-commits on every ensure makes the alternative design (answer every
+   * notice with a refetch) loop, and the bound turns that loop into an
+   * assertion failure.
+   *
+   * The grammar crosses when the owner first commits the row (before or
+   * after the rotation) with a later broadcast for the same key: none, an
+   * owner update, or a peer notice that claims a different value. The
+   * observations are the follower's rows when its first load settles, after
+   * the rotation's reacquisition, and after the later broadcast, plus the
+   * ensure log at quiescence. The coordinator is a controlled double of an
+   * elected owner; it does not prove the browser transport.
+   */
+  type FollowerGenerationNoticeHistory = {
+    ownerCommit: `before-rotation` | `after-rotation`
+    later: `none` | `owner` | `peer`
+  }
+  const assertFollowerGenerationNoticeHistory = async ({
+    ownerCommit,
+    later,
+  }: FollowerGenerationNoticeHistory): Promise<void> => {
+    const oldStorageId = `follower-notice-old`
+    const newStorageId = `follower-notice-new`
+    const ownerId = `elected-owner`
+    const v1: Todo = { id: `remote`, title: `Owner row` }
+    const v2: Todo = { id: `remote`, title: `Owner update` }
+    const durable = new Map<string, Map<string, Todo>>([
+      [oldStorageId, new Map()],
+      [newStorageId, new Map()],
+    ])
+    let storageId = oldStorageId
+    // The owner's upstream row: present from the start, or only once the
+    // owner fetched it after the rotation began.
+    let upstream: Todo | undefined =
+      ownerCommit === `before-rotation` ? v1 : undefined
+    const ensures: Array<{ id: string; refetch: boolean }> = []
+    const subscribers = new Map<
+      string,
+      (message: ProtocolEnvelope<unknown>) => void
+    >()
+    const versions = new Map<string, number>()
+    // Enough commits for every legal history; a refetch loop exceeds it.
+    const commitBudget = 8
+    let commits = 0
+    const notify = (id: string, row: Todo, senderId: string) => {
+      const version = (versions.get(id) ?? 0) + 1
+      versions.set(id, version)
+      subscribers.get(id)?.({
+        v: 1,
+        dbName: `test-db`,
+        collectionId: id,
+        senderId,
+        ts: Date.now(),
+        payload: {
+          type: `tx:committed`,
+          term: 1,
+          seq: version,
+          txId: `${senderId}-${id}-${version}`,
+          latestRowVersion: version,
+          requiresFullReload: false,
+          changedRows: [{ key: row.id, value: { ...row } }],
+          deletedKeys: [],
+        } satisfies TxCommitted,
+      })
+    }
+    const ownerCommits = (id: string, row: Todo) => {
+      if (commits++ >= commitBudget) return
+      durable.get(id)!.set(row.id, structuredClone(row))
+      notify(id, row, ownerId)
+    }
+    const adapter: PersistenceAdapter = {
+      loadSubset: async (target) =>
+        Array.from(
+          durable.get(recordedStorageId(target))!.values(),
+          (value) => ({
+            key: value.id,
+            value: structuredClone(value),
+          }),
+        ),
+      claimCacheGeneration: async () => ({
+        storageCollectionId: oldStorageId,
+        claimId: `follower-notice-claim`,
+        expiresAtMs: Date.now() + 60_000,
+      }),
+      renewCacheGenerationClaim: async () => Date.now() + 60_000,
+      rotateCacheGeneration: async () => {
+        storageId = newStorageId
+        if (ownerCommit === `after-rotation`) upstream = v1
+        return {
+          storageCollectionId: newStorageId,
+          claimId: `follower-notice-claim`,
+          expiresAtMs: Date.now() + 60_000,
+        }
+      },
+      releaseCacheGenerationClaim: async () => {},
+      loadResumeSnapshot: async () => ({
+        rows: [],
+        keySet: { status: `consistent` },
+        collectionMetadata: [],
+        latestTerm: 0,
+        latestSeq: 0,
+        latestRowVersion: 0,
+        resetEpoch: 0,
+      }),
+      applyCommittedTx: async () => {},
+      ensureIndex: async () => {},
+    }
+    const coordinator: PersistedCollectionCoordinator & {
+      getLeaderId: (collectionId: string) => string | null
+    } = {
+      getNodeId: () => `follower-node`,
+      getLeaderId: () => ownerId,
+      subscribe: (id, onMessage) => {
+        subscribers.set(id, onMessage)
+        return () => {
+          if (subscribers.get(id) === onMessage) subscribers.delete(id)
+        }
+      },
+      publish: () => {},
+      isLeader: () => false,
+      ensureLeadership: async () => {},
+      requestEnsurePersistedIndex: async () => {},
+      // The elected owner loads its upstream and commits it into the
+      // requested generation before it replies, on every ensure.
+      requestEnsureRemoteSubset: async (id, options) => {
+        ensures.push({ id, refetch: options.refetch === true })
+        if (upstream) ownerCommits(id, upstream)
+      },
+      requestReleaseRemoteSubset: async () => {},
+      registerRemoteSubsetOwner: () => () => {},
+      requestApplyCommittedTx: (_id, tx) =>
+        Promise.resolve({
+          type: `rpc:applyCommittedTx:res`,
+          rpcId: tx.txId,
+          ok: true,
+          term: tx.term,
+          seq: tx.seq,
+          latestRowVersion: tx.rowVersion,
+        }),
+      pullSince: () =>
+        Promise.resolve({
+          type: `rpc:pullSince:res`,
+          rpcId: `follower-notice-pull`,
+          ok: true,
+          latestTerm: 1,
+          latestSeq: 0,
+          latestRowVersion: 0,
+          requiresFullReload: false,
+          changedKeys: [],
+          deletedKeys: [],
+        }),
+    }
+    let source!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `follower-generation-notice`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            source = params
+            params.markReady()
+            return {
+              loadSubset: async () => {},
+              restartAfterScopedRecovery: async (cacheRotated) => {
+                await cacheRotated
+              },
+            }
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    const demand: LoadSubsetOptions = { limit: 10 }
+    const publicRows = () =>
+      new Map(
+        Array.from(collection.state, ([key, row]) => [
+          String(key),
+          stripVirtualProps(row) as Todo,
+        ]),
+      )
+    // A checkpoint after the follower has processed every delivered notice:
+    // the scan crosses the same apply mutex the notices use.
+    const settled = async (label: string) => {
+      await flushAsyncWork()
+      await atPersistedOracleCheckpoint(
+        source.metadata!.persistence!.scanPersistedRows(),
+        label,
+      )
+      await flushAsyncWork()
+    }
+    const expectOwnerEvidence = (previous: ReadonlyMap<string, Todo>) => {
+      const expected = expectedScopedSnapshot(
+        previous,
+        durable.get(storageId)!,
+        new Map(),
+        true,
+      )
+      expectExactSnapshot(publicRows(), expected)
+      return expected
+    }
+    let hasPrimaryFailure = false
+    try {
+      collection.startSyncImmediate()
+      await collection.stateWhenReady()
+      await atPersistedOracleCheckpoint(
+        Promise.resolve(collection._sync.loadSubset(demand)),
+        `follower demand settled`,
+      )
+      await settled(`first-ready notices processed`)
+      let visible = expectOwnerEvidence(new Map())
+
+      const persistence = source.metadata?.persistence
+      if (!persistence?.startScopedRecovery) {
+        throw new Error(`Expected scoped recovery capability`)
+      }
+      await atPersistedOracleCheckpoint(
+        persistence.startScopedRecovery(),
+        `follower cache rotation settled`,
+      )
+      await atPersistedOracleCheckpoint(
+        vi.waitFor(() =>
+          expect(ensures.map(({ id }) => id)).toContain(newStorageId),
+        ),
+        `reacquisition reached the owner`,
+      )
+      await settled(`reacquisition notices processed`)
+      // Answering the owner's notice with another refetch would make the
+      // owner commit again, and the follower would refetch forever.
+      expect.soft(ensures).toHaveLength(2)
+      visible = expectOwnerEvidence(visible)
+
+      if (later === `owner`) {
+        upstream = v2
+        ownerCommits(newStorageId, v2)
+        await settled(`owner update processed`)
+        expectOwnerEvidence(visible)
+      } else if (later === `peer`) {
+        // A non-owner claims a change. It is not source evidence: the rows
+        // stay as they were, and the follower asks the owner again.
+        notify(newStorageId, { id: `remote`, title: `Peer claim` }, `peer-node`)
+        await settled(`peer notice processed`)
+        expectOwnerEvidence(visible)
+      }
+
+      expect(ensures).toEqual([
+        { id: oldStorageId, refetch: false },
+        { id: newStorageId, refetch: true },
+        ...(later === `peer` ? [{ id: newStorageId, refetch: true }] : []),
+      ])
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      await cleanupPersistedOracle(
+        [() => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  }
+
+  it.each([
+    { ownerCommit: `before-rotation`, later: `none` },
+    { ownerCommit: `after-rotation`, later: `none` },
+    { ownerCommit: `after-rotation`, later: `owner` },
+    { ownerCommit: `before-rotation`, later: `peer` },
+  ] as const)(
+    `publishes an elected owner's rows to a follower after rotation: commit $ownerCommit, later $later`,
+    (history) => assertFollowerGenerationNoticeHistory(history),
+  )
+
+  const followerGenerationNoticeHistory = fc.record({
+    ownerCommit: fc.constantFrom<
+      FollowerGenerationNoticeHistory[`ownerCommit`]
+    >(`before-rotation`, `after-rotation`),
+    later: fc.constantFrom<FollowerGenerationNoticeHistory[`later`]>(
+      `none`,
+      `owner`,
+      `peer`,
+    ),
+  })
+  fcTest.prop([followerGenerationNoticeHistory], {
+    seed: 2128,
+    numRuns: oracleRuns(12),
+  })(
+    `checks generated follower generation-notice histories (fixed)`,
+    assertFollowerGenerationNoticeHistory,
+  )
+  fcTest.prop(
+    [followerGenerationNoticeHistory],
+    oraclePropertyOptions(12, `persistence.follower-generation-notice`),
+  )(
+    `checks generated follower generation-notice histories (random or replayed)`,
+    assertFollowerGenerationNoticeHistory,
   )
 
   // The model has one one-shot refresh lease. The grammar crosses cleanup

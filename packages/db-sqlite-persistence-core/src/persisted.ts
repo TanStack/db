@@ -694,6 +694,8 @@ export interface PersistedCollectionCoordinator {
   ) => () => void
   publish: (collectionId: string, message: ProtocolEnvelope<unknown>) => void
   isLeader: (collectionId: string) => boolean
+  /** The elected owner's node ID, when this node knows it. */
+  getLeaderId?: (collectionId: string) => string | null
   ensureLeadership: (collectionId: string) => Promise<void>
   requestEnsureRemoteSubset: (
     collectionId: string,
@@ -1533,6 +1535,7 @@ class PersistedCollectionRuntime<
     txCommitted: TxCommitted
     lifecycleGeneration: number
     storageCollectionId: string
+    fromElectedOwner: boolean
   }> = []
   private readonly requestIds = new WeakMap<LoadSubsetOptions, string>()
   private readonly hydratedDemands = new Set<string | undefined>()
@@ -3214,8 +3217,9 @@ class PersistedCollectionRuntime<
   private loadSubsetRowsUnsafe(
     options: LoadSubsetOptions,
     adapter: HydrationPersistenceAdapter,
+    ownerEvidence = false,
   ): Promise<Array<{ key: TKey; value: T; metadata?: unknown }>> {
-    if (this.scopedRecovery) return Promise.resolve([])
+    if (this.scopedRecovery && !ownerEvidence) return Promise.resolve([])
     return adapter.loadSubset(this.storageTargetFor(), options, {
       requiredIndexSignatures: this.getRequiredIndexSignatures(),
       cacheGenerationClaimId: this.cacheGenerationClaim?.claimId,
@@ -4565,11 +4569,18 @@ class PersistedCollectionRuntime<
     // of both local and remote mutations. The seq dedup in
     // processCommittedTxUnsafe prevents double-processing of our own writes.
     if (isTxCommittedPayload(payload)) {
+      // The elected owner writes a follower's demanded rows. Its notice is
+      // source evidence even during scoped recovery; another sender's is not.
+      const fromElectedOwner =
+        !isSelf &&
+        message.senderId ===
+          this.persistence.coordinator.getLeaderId?.(message.collectionId)
       if (this.isHydratingNow()) {
         this.queuedTxCommitted.push({
           txCommitted: payload,
           lifecycleGeneration,
           storageCollectionId: message.collectionId,
+          fromElectedOwner,
         })
         return
       }
@@ -4577,7 +4588,11 @@ class PersistedCollectionRuntime<
       void this.applyMutex
         .run(() => {
           if (message.collectionId !== this.storageCollectionId) return
-          return this.processCommittedTxUnsafe(payload, lifecycleGeneration)
+          return this.processCommittedTxUnsafe(
+            payload,
+            lifecycleGeneration,
+            fromElectedOwner,
+          )
         })
         .catch((error) => {
           this.markTerminalFailure(error, lifecycleGeneration)
@@ -4630,6 +4645,7 @@ class PersistedCollectionRuntime<
         await this.processCommittedTxUnsafe(
           queued.txCommitted,
           queued.lifecycleGeneration,
+          queued.fromElectedOwner,
         )
       } catch (error) {
         throw this.markTerminalFailure(error, queued.lifecycleGeneration)
@@ -4640,6 +4656,7 @@ class PersistedCollectionRuntime<
   private async processCommittedTxUnsafe(
     txCommitted: TxCommitted,
     lifecycleGeneration = this.lifecycleGeneration,
+    fromElectedOwner = false,
   ): Promise<void> {
     if (lifecycleGeneration !== this.lifecycleGeneration) return
     if (this.hasExpiredCacheClaim()) {
@@ -4709,6 +4726,7 @@ class PersistedCollectionRuntime<
     await this.invalidateFromCommittedTxUnsafe(
       txCommitted,
       this.persistence.adapter,
+      fromElectedOwner,
     )
     if (lifecycleGeneration === this.lifecycleGeneration) {
       this.publicRowVersion = Math.max(
@@ -4935,15 +4953,21 @@ class PersistedCollectionRuntime<
   private async invalidateFromCommittedTxUnsafe(
     txCommitted: TxCommitted,
     adapter: HydrationPersistenceAdapter,
+    fromElectedOwner = false,
   ): Promise<void> {
-    if (this.scopedRecovery) {
+    if (this.scopedRecovery && !fromElectedOwner) {
       this.refreshScopedSubsets()
       return
     }
     const reloadActiveSubsets = (skipUnchangedReplace = false) =>
       this.runInHydrationScope(
         (scopedAdapter) =>
-          this.reloadActiveSubsetsUnsafe(scopedAdapter, skipUnchangedReplace),
+          this.reloadActiveSubsetsUnsafe(
+            scopedAdapter,
+            skipUnchangedReplace,
+            false,
+            fromElectedOwner,
+          ),
         adapter,
       )
 
@@ -5083,8 +5107,9 @@ class PersistedCollectionRuntime<
     adapter: HydrationPersistenceAdapter,
     skipUnchangedReplace = false,
     restoreResetBaseline = false,
+    ownerEvidence = false,
   ): Promise<void> {
-    if (this.scopedRecovery) {
+    if (this.scopedRecovery && !ownerEvidence) {
       this.refreshScopedSubsets()
       return
     }
@@ -5140,7 +5165,11 @@ class PersistedCollectionRuntime<
           : await this.loadCollectionMetadataSnapshot(adapter)
         if (lifecycleGeneration !== this.lifecycleGeneration) return
         for (const options of activeSubsetOptions) {
-          const subsetRows = await this.loadSubsetRowsUnsafe(options, adapter)
+          const subsetRows = await this.loadSubsetRowsUnsafe(
+            options,
+            adapter,
+            ownerEvidence,
+          )
           if (lifecycleGeneration !== this.lifecycleGeneration) return
           for (const row of subsetRows) {
             mergedRows.set(row.key, {
@@ -5166,7 +5195,7 @@ class PersistedCollectionRuntime<
         }
       } catch (error) {
         // Recovery may have started while the adapter read was awaited.
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+         
         if (this.scopedRecovery) return
         // SQLite may reject its second read-admission check after a claim
         // expires. A read from that cache has no authority to fail the
