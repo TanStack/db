@@ -2522,6 +2522,7 @@ class PersistedCollectionRuntime<
         this.canRouteRemoteDemandThroughCoordinator() &&
         !this.persistence.coordinator.isLeader(this.storageCollectionId)
       if (followsLeader) this.reacquiringRotatedDemand = true
+      let everyDemandReacquires = true
       for (const options of this.activeSubsets.values()) {
         if (options.signal?.aborted) continue
         const rotatedOptions = this.rotatedAcquisitions.get(options)
@@ -2534,19 +2535,26 @@ class PersistedCollectionRuntime<
           reacquisitions.push(ensure)
           void ensure.catch((error) => this.reportSyncError(error))
         } else {
+          everyDemandReacquires = false
           this.refreshScopedSubsets()
           break
         }
       }
-      // Then durable rows are authoritative again: end scoped recovery and
-      // apply the held notices.
+      // Once every demand has reacquired, durable rows are authoritative
+      // again: end scoped recovery and apply the held notices. A failed
+      // reacquisition leaves the generation incomplete, so recovery stays.
       if (followsLeader) {
         void Promise.allSettled(reacquisitions)
-          .then(() =>
+          .then((results) =>
             this.applyMutex.run(async () => {
               if (recoverySequence !== this.scopedRecoverySequence) return
               this.reacquiringRotatedDemand = false
-              this.scopedRecovery = false
+              if (
+                everyDemandReacquires &&
+                results.every(({ status }) => status === `fulfilled`)
+              ) {
+                this.scopedRecovery = false
+              }
               await this.flushQueuedTxCommittedUnsafe()
             }),
           )
