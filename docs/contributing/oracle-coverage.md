@@ -474,9 +474,19 @@ The [round 1](oracle-reviews/index-unit-retirement-round-1.md),
 [round 3](oracle-reviews/index-unit-retirement-round-3.md), and
 [round 4](oracle-reviews/index-unit-retirement-round-4.md) ledgers retain each
 retired assertion. The [build review](oracle-reviews/basic-index-nullish-build.md)
-records the direct RED/GREEN repair. This owner does not establish public
-Collection publication, arbitrary custom callbacks, or all JavaScript value
-kinds.
+records the direct RED/GREEN repair. A separate mixed number/string lane
+checks that full direct traversals and one indexed, bounded public Collection
+snapshot return each live source key once after deletion and after a direct
+delete/update/re-add history. Two more direct histories keep an ordinary string
+beside ordered ZonedDateTime or Duration keys and verify key conservation after
+one Temporal deletion. An en-US locale and a custom string-collation cell compare
+the first bounded public row through a scan and each index when an ordinary
+string begins the internal encoding prefix. An `origin/main` probe failed the
+default-locale public prefix case. The pre-classifier PR comparator failed all
+four public prefix cases and both BTree Temporal-deletion histories. This owner
+does not prescribe mixed-kind order or cover arbitrary custom index callbacks,
+all JavaScript value kinds, or
+general Collection publication histories.
 
 The [comparison oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/comparison-oracle.property.test.ts)
 owns the transferred same-realm NaN and invalid-Date default-order cases,
@@ -494,11 +504,34 @@ The [round 7 ledger](oracle-reviews/utils-unit-retirement-round-7.md) retains
 the retired examples. Caller-modified built-ins and Collection publication
 are outside this direct-return owner.
 
-The [deferred findings record](oracle-reviews/pr-2116-deferred-findings.md)
-assigns unclosed Duration equality and Collection publication, Temporal index
-admission, mixed-kind order, and custom-comparator questions to future owners.
-Earlier PR-branch counterexamples do not by themselves establish a current
-`origin/main` failure; each future repair needs its own baseline witness.
+The [Duration query equality oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/duration-query-equality-oracle.test.ts)
+uses ten public fields to predict direct BasicIndex/BTreeIndex exact lookups and
+public `eq` snapshots before and after indexing. The `in` evaluator owner also
+checks same-display Duration forms through constant and row-supplied lists.
+The deep-equality and Collection change-event history owners check a Duration
+field replacement and its subscriber mirror. These fixed histories do not
+establish arbitrary multirow Duration updates or live-query publication.
+
+The [Temporal index order oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/temporal-index-order-oracle.test.ts)
+owns ZonedDateTime instant ordering and time-only Duration ordering for direct
+BasicIndex/BTreeIndex reads and bounded public first-row reads. It separates
+exact Duration fields from order ties, including exclusive cursor behavior.
+Calendar-unit Duration order, mixed Temporal kinds, arbitrary updates, and
+custom index callbacks remain outside this owner.
+
+The [custom-index selection oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/custom-index-order-selection-oracle.test.ts)
+checks that a reverse manual index cannot change an ascending limited public
+snapshot or eager live-query result. Its two distinct numeric ranks avoid any
+claim about per-row custom callback order inside a comparator tie. On-demand
+acquisition and later updates remain outside this witness.
+
+The [PR #2116 confirmed-fixes review](oracle-reviews/pr-2116-confirmed-fixes.md)
+records baseline failures, hostile controls, and the bounded scope of these
+repairs. The [deferred findings record](oracle-reviews/pr-2116-deferred-findings.md)
+tracks remaining design and coverage questions, including valid Temporal kinds
+without public order, extended-year PlainDate under lexical string collation,
+and mixed-kind query order. Earlier PR-branch
+counterexamples do not by themselves establish an `origin/main` failure.
 
 The Query DB ownership oracle owns the direct-write no-automatic-refetch law
 ([review](oracle-reviews/issue-1935-direct-write-refetch.md)).

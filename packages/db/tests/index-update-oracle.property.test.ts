@@ -1,15 +1,22 @@
 import { describe, expect, expectTypeOf, test, vi } from 'vitest'
 import { fc } from '@fast-check/vitest'
+import { Temporal } from 'temporal-polyfill'
 import { createCollection } from '../src/collection/index.js'
 import { CollectionInErrorStateError } from '../src/errors.js'
 import { BasicIndex } from '../src/indexes/basic-index.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { PropRef } from '../src/query/ir.js'
 import { DEFAULT_COMPARE_OPTIONS } from '../src/utils.js'
-import { indexedKeysSet, orderedEntriesArray, valueMapData } from './utils'
+import {
+  indexedKeysSet,
+  mockSyncCollectionOptions,
+  orderedEntriesArray,
+  valueMapData,
+} from './utils'
 import { oraclePropertyOptions, oracleRuns } from './oracle-config'
 import type { BaseIndex, IndexInterface } from '../src/indexes/base-index.js'
 import type { CompareOptions } from '../src/query/builder/types.js'
+import type { StringCollationConfig } from '../src/types.js'
 
 /**
  * An index is a derived multimap from indexed value to source keys.
@@ -40,6 +47,9 @@ import type { CompareOptions } from '../src/query/builder/types.js'
  * A build is one of those direct actions even when a source value is
  * `undefined`: default nulls-first order must hold after build just as it
  * does after incremental add. The nullish lane below exercises both paths.
+ * A separate mixed number/string lane checks key conservation only. A full
+ * ordered read and an indexed public snapshot must contain each live source
+ * key once, even when unlike values have no declared relative sort order.
  */
 
 type IndexValue = number
@@ -2160,7 +2170,7 @@ const collationCases = [
 ] as const
 
 function createCollationCollection(
-  collation: (typeof collationCases)[number][`collation`],
+  collation: StringCollationConfig,
   autoIndex: `off` | `eager`,
   defaultIndexType?: typeof BasicIndex | typeof BTreeIndex,
   labels: ReadonlyArray<string> = [`item10`, `item2`],
@@ -2174,8 +2184,8 @@ function createCollationCollection(
     sync: {
       sync: ({ begin, write, commit, markReady }) => {
         begin()
-        for (const label of labels) {
-          write({ type: `insert`, value: { id: label, label } })
+        for (const [ordinal, label] of labels.entries()) {
+          write({ type: `insert`, value: { id: String(ordinal), label } })
         }
         commit()
         markReady()
@@ -2279,5 +2289,253 @@ test(`ordered scan resolves inherited collation outside each comparison`, async 
     // One resolution can check the index path; the scan needs only one more.
     expect(optionReads.mock.calls.length).toBeLessThanOrEqual(2)
     expect(collection.indexes.size).toBe(0)
+  })
+})
+
+/**
+ * Public ordered reads compare the user's string values. An index escapes a
+ * leading internal prefix for exact-key storage; that storage encoding must
+ * not change the Collection's declared string order. The en-US locale and a
+ * custom callback both place the prefixed value first. The scan and the
+ * bounded indexed read must return that same first row.
+ */
+const prefixedLabel = `\u0000tanstack-db:a`
+const plainLabel = `tanstack-db:r`
+const prefixedStringCases = [
+  {
+    name: `locale`,
+    collation: { stringSort: `locale`, locale: `en-US` },
+  },
+  {
+    name: `custom collation`,
+    collation: {
+      stringSort: `custom`,
+      compare: (left: string, right: string) =>
+        left.localeCompare(right, `en-US`),
+    },
+  },
+] as const satisfies ReadonlyArray<{
+  name: string
+  collation: StringCollationConfig
+}>
+
+describe.each([
+  [`BasicIndex`, BasicIndex],
+  [`BTreeIndex`, BTreeIndex],
+] as const)(`%s prefixed-string public order`, (_name, IndexType) => {
+  test.each(prefixedStringCases)(
+    `$name scan and bounded index return the same first row`,
+    async ({ collation }) => {
+      const labels = [plainLabel, prefixedLabel]
+      expect(prefixedLabel.localeCompare(plainLabel, `en-US`)).toBeLessThan(0)
+      const orderBy = [
+        {
+          expression: new PropRef([`label`]),
+          compareOptions: {
+            direction: `asc` as const,
+            nulls: `first` as const,
+          },
+        },
+      ]
+
+      const scan = createCollationCollection(
+        collation,
+        `off`,
+        undefined,
+        labels,
+      )
+      await withCollectionCleanup(scan, async () => {
+        await scan.stateWhenReady()
+        const changes = scan.currentStateAsChanges({ orderBy, limit: 1 })
+        expect(changes?.map(({ value }) => value.label)).toEqual([
+          prefixedLabel,
+        ])
+        expect(scan.indexes.size, `scan path reached`).toBe(0)
+      })
+
+      const indexed = createCollationCollection(
+        collation,
+        `eager`,
+        IndexType,
+        labels,
+      )
+      await withCollectionCleanup(indexed, async () => {
+        await indexed.stateWhenReady()
+        const changes = indexed.currentStateAsChanges({
+          orderBy,
+          limit: 1,
+          optimizedOnly: true,
+        })
+        expect(changes?.map(({ value }) => value.label)).toEqual([
+          prefixedLabel,
+        ])
+        expect(indexed.indexes.size, `index path reached`).toBe(1)
+      })
+    },
+  )
+})
+
+/**
+ * Mixed primitive values can share a comparator position without sharing an
+ * exact value. The source Map owns each key once. This model intentionally
+ * predicts membership and multiplicity, not the relative order of a number
+ * and a string. Its fixed grammar adds 2, "2", and "10", then removes each
+ * possible owner in a fresh history. A second history deletes, updates across
+ * value kinds, then re-adds an earlier key. A third history adds two ordered
+ * Temporal values beside an ordinary string that resembles an internal key,
+ * then deletes one Temporal owner. After each returned action, both full index
+ * traversals must contain exactly the live source keys.
+ *
+ * In the public lane a ready Collection receives the same rows and deletes
+ * the number. A manual index serves a bounded `currentStateAsChanges` read
+ * with room for one more row than the source contains. The returned change
+ * messages must contain each live key once. `optimizedOnly` and the take spy
+ * establish that this observation came through the index. No mixed-kind
+ * `orderBy` sequence, custom callback, or modified built-in is claimed.
+ */
+const mixedRows: ReadonlyArray<{ id: string; value: number | string }> = [
+  { id: `a`, value: 2 },
+  { id: `b`, value: `2` },
+  { id: `c`, value: `10` },
+]
+
+function expectConservedIndexKeys(
+  index: BaseIndex<string>,
+  rows: ReadonlyMap<string, unknown>,
+): void {
+  const expected = new Set(rows.keys())
+  expect(index.keyCount).toBe(expected.size)
+  for (const keys of [
+    index.takeFromStart(rows.size + 1),
+    index.takeReversedFromEnd(rows.size + 1),
+  ]) {
+    expect(keys).toHaveLength(expected.size)
+    expect(new Set(keys)).toEqual(expected)
+  }
+}
+
+describe.each(indexTypes)(
+  `%s mixed-value key conservation`,
+  (_indexName, IndexType) => {
+    test.each(mixedRows)(
+      `keeps every surviving key once after deleting $id`,
+      (removed) => {
+        const index = new IndexType(1, new PropRef([`value`]))
+        const rows = new Map<string, number | string>()
+        for (const row of mixedRows) {
+          index.add(row.id, row)
+          rows.set(row.id, row.value)
+          expectConservedIndexKeys(index, rows)
+        }
+        index.remove(removed.id, removed)
+        rows.delete(removed.id)
+        expectConservedIndexKeys(index, rows)
+      },
+    )
+
+    test(`keeps one copy of each key after a mixed-value delete, update, and add`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, number | string>()
+      const add = (id: string, value: number | string) => {
+        index.add(id, { id, value })
+        rows.set(id, value)
+        expectConservedIndexKeys(index, rows)
+      }
+
+      add(`a`, 2)
+      add(`b`, `2`)
+      add(`d`, `10`)
+      index.remove(`a`, { id: `a`, value: 2 })
+      rows.delete(`a`)
+      expectConservedIndexKeys(index, rows)
+      index.update(`b`, { id: `b`, value: `2` }, { id: `b`, value: 2 })
+      rows.set(`b`, 2)
+      expectConservedIndexKeys(index, rows)
+      add(`a`, `2`)
+    })
+
+    test.each([
+      {
+        name: `ZonedDateTime`,
+        first:
+          Temporal.Instant.fromEpochNanoseconds(9n).toZonedDateTimeISO(`UTC`),
+        second:
+          Temporal.Instant.fromEpochNanoseconds(10n).toZonedDateTimeISO(`UTC`),
+        text: `tanstack-db:temporal:Temporal.ZonedDateTime:5:fake`,
+      },
+      {
+        name: `Duration`,
+        first: Temporal.Duration.from({ nanoseconds: 9 }),
+        second: Temporal.Duration.from({ nanoseconds: 10 }),
+        text: `tanstack-db:temporal:Temporal.Duration:time:5:fake`,
+      },
+    ])(
+      `keeps $name and ordinary-string owners after deletion`,
+      ({ first, second, text }) => {
+        const index = new IndexType(1, new PropRef([`value`]))
+        const rows = new Map<string, unknown>()
+        for (const [id, value] of [
+          [`a`, first],
+          [`b`, second],
+          [`c`, text],
+        ] as const) {
+          index.add(id, { id, value })
+          rows.set(id, value)
+          expectConservedIndexKeys(index, rows)
+        }
+        index.remove(`b`, { id: `b`, value: second })
+        rows.delete(`b`)
+        expectConservedIndexKeys(index, rows)
+      },
+    )
+  },
+)
+
+describe.each([
+  [`BasicIndex`, BasicIndex],
+  [`BTreeIndex`, BTreeIndex],
+] as const)(`%s mixed-value public snapshot`, (_indexName, IndexType) => {
+  test(`returns each surviving key once after a source deletion`, async () => {
+    const options = mockSyncCollectionOptions<{
+      id: string
+      value: number | string
+    }>({
+      id: `mixed-value-public-snapshot-${IndexType.name}`,
+      getKey: (row) => row.id,
+      initialData: mixedRows.map((row) => ({ ...row })),
+      autoIndex: `off`,
+    })
+    const collection = createCollection(options)
+    await withCollectionCleanup(collection, async () => {
+      await collection.stateWhenReady()
+      const index = collection.createIndex((row) => row.value, {
+        indexType: IndexType,
+      })
+      const take = vi.spyOn(index, `takeFromStart`)
+      const rows = new Map(mixedRows.map((row) => [row.id, row.value]))
+
+      options.utils.begin()
+      options.utils.write({ type: `delete`, value: mixedRows[0]! })
+      options.utils.commit()
+      rows.delete(mixedRows[0]!.id)
+
+      take.mockClear()
+
+      const changes = collection.currentStateAsChanges({
+        orderBy: [
+          {
+            expression: new PropRef([`value`]),
+            compareOptions: { direction: `asc`, nulls: `first` },
+          },
+        ],
+        limit: rows.size + 1,
+        optimizedOnly: true,
+      })
+      expect(take).toHaveBeenCalled()
+      expect(changes).toBeDefined()
+      const keys = changes!.map((change) => change.key)
+      expect(keys).toHaveLength(rows.size)
+      expect(new Set(keys)).toEqual(new Set(rows.keys()))
+    })
   })
 })

@@ -10,26 +10,15 @@ import {
   builtInIndexResolverNames,
   warnRemovalFailure,
 } from './base-index.js'
-import type { CompareOptions } from '../query/builder/types.js'
-import type { IndexOperation } from './base-index.js'
+import type { IndexComparisonOptions, IndexOperation } from './base-index.js'
+import type { RangeQueryOptions } from './btree-index.js'
 
-/**
- * Options for range queries
- */
-export interface RangeQueryOptions {
-  from?: any
-  to?: any
-  fromInclusive?: boolean
-  toInclusive?: boolean
-}
+export type { RangeQueryOptions } from './btree-index.js'
 
 /**
  * Options for Basic index
  */
-export interface BasicIndexOptions {
-  compareFn?: (a: any, b: any) => number
-  compareOptions?: CompareOptions
-}
+export type BasicIndexOptions = IndexComparisonOptions
 
 /**
  * Basic index using Map + sorted Array.
@@ -44,23 +33,12 @@ export interface BasicIndexOptions {
 export class BasicIndex<
   TKey extends string | number = string | number,
 > extends BaseIndex<TKey> {
-  public readonly supportedOperations = new Set<IndexOperation>([
-    `eq`,
-    `gt`,
-    `gte`,
-    `lt`,
-    `lte`,
-    `in`,
-  ])
-
   // Map for O(1) equality lookups: indexedValue -> Set of PKs
   private valueMap = new Map<any, Set<TKey>>()
   // Sorted array of unique indexed values for range queries
   private sortedValues: Array<any> = []
   // Set of all indexed PKs
   private indexedKeys = new Set<TKey>()
-
-  protected initialize(_options?: BasicIndexOptions): void {}
 
   /**
    * Adds a value to the index
@@ -218,35 +196,13 @@ export class BasicIndex<
    * Performs a lookup operation
    */
   lookup(operation: IndexOperation, value: any): Set<TKey> {
-    let result: Set<TKey>
-
-    switch (operation) {
-      case `eq`:
-        result = this.equalityLookup(value)
-        break
-      case `gt`:
-        result = this.rangeQuery({ from: value, fromInclusive: false })
-        break
-      case `gte`:
-        result = this.rangeQuery({ from: value, fromInclusive: true })
-        break
-      case `lt`:
-        result = this.rangeQuery({ to: value, toInclusive: false })
-        break
-      case `lte`:
-        result = this.rangeQuery({ to: value, toInclusive: true })
-        break
-      case `in`:
-        result = this.inArrayLookup(value)
-        break
-      default:
-        throw new Error(
-          devBuild() && process.env.NODE_ENV !== `production`
-            ? `Operation ${operation} not supported by BasicIndex`
-            : codedMessage(100, { operation }),
-        )
-    }
-    return result
+    const result = this.lookupSupportedOperation(operation, value)
+    if (result !== undefined) return result
+    throw new Error(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `Operation ${operation} not supported by BasicIndex`
+        : codedMessage(100, { operation }),
+    )
   }
 
   /**
@@ -426,21 +382,8 @@ export class BasicIndex<
     return result
   }
 
-  /**
-   * Performs an IN array lookup - O(k) where k is values.length
-   */
-  inArrayLookup(values: Array<any>): Set<TKey> {
-    const result = new Set<TKey>()
-
-    for (const value of values) {
-      const normalizedValue = normalizeValue(value)
-      const keys = this.valueMap.get(normalizedValue)
-      if (keys) {
-        keys.forEach((key) => result.add(key))
-      }
-    }
-
-    return result
+  protected exactBucketKeys(value: any): Set<TKey> | undefined {
+    return this.valueMap.get(normalizeValue(value))
   }
 }
 

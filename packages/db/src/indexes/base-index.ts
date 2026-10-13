@@ -42,6 +42,11 @@ export const builtInIndexResolverNames = new WeakMap<object, string>()
  */
 export type IndexOperation = (typeof comparisonFunctions)[number]
 
+export interface IndexComparisonOptions {
+  compareFn?: (a: any, b: any) => number
+  compareOptions?: CompareOptions
+}
+
 /** The read-side surface consumers use on a resolved (possibly reversed) index. */
 export type IndexReader<TKey extends string | number = string | number> = Pick<
   IndexInterface<TKey>,
@@ -122,7 +127,7 @@ export abstract class BaseIndex<
   public readonly id: number
   public readonly name?: string
   public readonly expression: BasicExpression
-  public abstract readonly supportedOperations: Set<IndexOperation>
+  public readonly supportedOperations: Set<IndexOperation>
   protected readonly compareOptions: CompareOptions
   /**
    * Orders indexed values. Every result is checked, because a custom
@@ -148,9 +153,17 @@ export abstract class BaseIndex<
     this.compareOptions = options?.compareOptions ?? DEFAULT_COMPARE_OPTIONS
     this.hasCustomComparator = options?.compareFn != null
     this.compareFn = makeCheckedComparator(
-      options?.compareFn ?? makeComparator(this.compareOptions),
+      options?.compareFn ?? makeComparator(this.compareOptions, `index`),
     )
     this.name = name
+    this.supportedOperations = new Set<IndexOperation>([
+      `eq`,
+      `gt`,
+      `gte`,
+      `lt`,
+      `lte`,
+      `in`,
+    ])
     this.initialize(options)
   }
 
@@ -181,10 +194,38 @@ export abstract class BaseIndex<
   ): Array<TKey>
   abstract get keyCount(): number
   abstract equalityLookup(value: any): Set<TKey>
-  abstract inArrayLookup(values: Array<any>): Set<TKey>
+  protected exactBucketKeys(value: any): Set<TKey> | undefined {
+    return this.equalityLookup(value)
+  }
   abstract rangeQuery(options: RangeQueryOptions): Set<TKey>
 
   // Common methods
+  protected lookupSupportedOperation(
+    operation: IndexOperation,
+    value: any,
+  ): Set<TKey> | undefined {
+    if (operation === `eq`) return this.equalityLookup(value)
+    if (operation === `in`) return this.inArrayLookup(value)
+    if (operation === `gt` || operation === `gte`)
+      return this.rangeQuery({
+        from: value,
+        fromInclusive: operation === `gte`,
+      })
+    if (operation === `lt` || operation === `lte`)
+      return this.rangeQuery({ to: value, toInclusive: operation === `lte` })
+    return undefined
+  }
+
+  /** Combine exact buckets without copying each bucket first. */
+  inArrayLookup(values: Array<any>): Set<TKey> {
+    const result = new Set<TKey>()
+    for (const value of values) {
+      const keys = this.exactBucketKeys(value)
+      if (keys) keys.forEach((key) => result.add(key))
+    }
+    return result
+  }
+
   rangeQueryReversed(options: RangeQueryOptions = {}): Set<TKey> {
     const { from, to, fromInclusive = true, toInclusive = true } = options
     const reversed: RangeQueryOptions = {}
@@ -295,7 +336,7 @@ export abstract class BaseIndex<
     return this.compareOptions.direction === direction
   }
 
-  protected abstract initialize(options?: any): void
+  protected initialize(_options?: any): void {}
 
   protected evaluateIndexExpression(item: any): any {
     const evaluator = (this.compiledIndexEvaluator ??=

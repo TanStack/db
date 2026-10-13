@@ -12,8 +12,12 @@ import { deepEquals, equalPersistedSnapshotValues } from '../src/utils'
  * structure, and changed-leaf inequality for primitives, arrays, records,
  * dates, regexes, typed bytes, and selected Temporal types. Named cross-type
  * pairs remain unequal, even when a primitive displays or encodes a Date or
- * RegExp value. Separate bounded graph laws construct corresponding rings
- * and acyclic copies without reusing the production walk.
+ * RegExp value. Published #1519 keeps equivalent Temporal.Duration forms
+ * distinct for query `eq`. The `deepEquals` API and #1901's change-message
+ * reconstruction law carry that field distinction to Collection events: a
+ * changed public Duration row cannot be suppressed because its display text
+ * matches. Separate bounded graph laws construct corresponding rings and
+ * acyclic copies without reusing the production walk.
  *
  * Arbitrary different cycle topologies are outside this model. Naming that
  * exclusion matters: more random examples cannot establish semantics the
@@ -122,6 +126,30 @@ const arbitraryTemporalDuration = fc
   .map(([hours, minutes, seconds]) =>
     Temporal.Duration.from({ hours, minutes, seconds }),
   )
+
+// One nonzero intrinsic field at a time is a legal Duration. Every campaign
+// enumerates all ten fields at generated magnitudes 1–9 and both signs. Each
+// field has an equal fresh copy, a changed-field neighbor, and an opposite-sign
+// value, so its exact value affects change-event equality independently of
+// production comparison.
+const durationFields = [
+  `years`,
+  `months`,
+  `weeks`,
+  `days`,
+  `hours`,
+  `minutes`,
+  `seconds`,
+  `milliseconds`,
+  `microseconds`,
+  `nanoseconds`,
+] as const
+
+const adjacentDurationUnits = [
+  [`seconds`, `milliseconds`],
+  [`milliseconds`, `microseconds`],
+  [`microseconds`, `nanoseconds`],
+] as const
 
 // Same-type value arbitraries for testing equivalence properties
 // Mixed Date/Temporal inequality has its own generated and fixed witnesses below.
@@ -1231,6 +1259,56 @@ describe(`deepEquals property-based tests`, () => {
     utilsProperty([arbitraryRegExp])(
       `RegExp differs from its source text in both directions`,
       (regex) => assertDistinctTypes(regex, regex.source, deepEquals),
+    )
+
+    // The source fields, rather than Temporal's display or ordered duration,
+    // form the reference identity. The production path is deepEquals in both
+    // directions; its direct result is compared after each constructed pair.
+    // Every field is exercised at a positive magnitude, its neighbor, and its
+    // negative counterpart. No one field may be ignored or compared by magnitude.
+    utilsProperty([fc.integer({ min: 1, max: 9 })])(
+      `each Temporal.Duration field determines change-event equality`,
+      (value) => {
+        for (const field of durationFields) {
+          const original = Temporal.Duration.from({ [field]: value })
+          const copy = Temporal.Duration.from({ [field]: value })
+          const changed = Temporal.Duration.from({ [field]: value + 1 })
+          const opposite = Temporal.Duration.from({ [field]: -value })
+          expectCopyAndChanged(original, copy, changed)
+          expectEqualityPair(original, opposite, false)
+        }
+      },
+    )
+
+    it(`keeps one second distinct from 1000 milliseconds with the same display`, () => {
+      const seconds = Temporal.Duration.from({ seconds: 1 })
+      const milliseconds = Temporal.Duration.from({ milliseconds: 1000 })
+      expect(seconds.toString()).toBe(milliseconds.toString())
+      expectEqualityPair(seconds, milliseconds, false)
+    })
+
+    // This generated grammar varies magnitude and sign while enumerating every
+    // adjacent subsecond unit boundary. Both constructors encode the same
+    // displayed elapsed time, but the single nonzero source field differs.
+    // #1519's query equality distinction and #1901's event reconstruction
+    // law together predict inequality in both directions here. This rejects
+    // a comparator that checks seconds alone before using display text.
+    utilsProperty([fc.integer({ min: 1, max: 9 })])(
+      `adjacent Duration units remain unequal despite matching display`,
+      (magnitude) => {
+        for (const sign of [-1, 1] as const) {
+          for (const [coarser, finer] of adjacentDurationUnits) {
+            const left = Temporal.Duration.from({
+              [coarser]: sign * magnitude,
+            })
+            const right = Temporal.Duration.from({
+              [finer]: sign * magnitude * 1000,
+            })
+            expect(left.toString()).toBe(right.toString())
+            expectEqualityPair(left, right, false)
+          }
+        }
+      },
     )
   })
 })

@@ -1,22 +1,7 @@
-import { isTemporal } from '../utils'
+import { durationFields, isTemporal } from '../utils'
 import { getRuntimeReferenceIdentity } from '../query/runtime-reference-identity'
 import { codedMessage, devBuild } from '../error-message'
 import type { CompareOptions } from '../query/builder/types'
-
-// WeakMap to store stable IDs for objects
-const objectIds = new WeakMap<object, number>()
-let nextObjectId = 1
-
-/**
- * Get or create a stable ID for an object
- */
-function getObjectId(obj: object): number {
-  const existing = objectIds.get(obj)
-  if (existing !== undefined) return existing
-  const id = nextObjectId++
-  objectIds.set(obj, id)
-  return id
-}
 
 /**
  * Whether a value has no IEEE-754 natural order: `NaN`, or an invalid Date
@@ -106,10 +91,10 @@ export const ascComparator = (a: any, b: any, opts: CompareOptions): number => {
   const bIsObject = typeof b === `object`
 
   if (aIsObject || bIsObject) {
-    // If both are objects, compare their stable IDs
+    // Symbols and objects share the runtime's reference-identity sequence.
     if (aIsObject && bIsObject) {
-      const aId = getObjectId(a)
-      const bId = getObjectId(b)
+      const aId = getRuntimeReferenceIdentity(a)[2]
+      const bId = getRuntimeReferenceIdentity(b)[2]
       return aId - bId
     }
 
@@ -141,8 +126,44 @@ export const descComparator = (
 
 export function makeComparator(
   opts: CompareOptions,
+  scope: `values` | `index` = `values`,
 ): (a: any, b: any) => number {
+  const direction = opts.direction === `asc` ? 1 : -1
   return (a, b) => {
+    // Index storage needs a transitive order across primitive kinds. Native
+    // coercion can make 2 tie "2", yet put them on opposite sides of "10".
+    if (scope === `index` && a != null && b != null && typeof a !== typeof b) {
+      const order = typeof a < typeof b ? -1 : 1
+      return order * direction
+    }
+    if (scope === `index` && typeof a === `string` && typeof b === `string`) {
+      const aKind = indexStringKind(a)
+      const bKind = indexStringKind(b)
+      if (aKind !== bKind) {
+        const order = aKind < bKind ? -1 : 1
+        return order * direction
+      }
+      if (aKind === `string`) {
+        a = a.startsWith(ESCAPED_STRING_PREFIX)
+          ? a.slice(ESCAPED_STRING_PREFIX.length)
+          : a
+        b = b.startsWith(ESCAPED_STRING_PREFIX)
+          ? b.slice(ESCAPED_STRING_PREFIX.length)
+          : b
+      } else {
+        if (aKind === ZONED_EPOCH_PREFIX || aKind === DURATION_TIME_PREFIX) {
+          // Exact index keys retain identity; these ordinals define order ties.
+          const aOrdinal = BigInt(
+            a.slice(aKind.length, a.indexOf(`:`, aKind.length)),
+          )
+          const bOrdinal = BigInt(
+            b.slice(aKind.length, b.indexOf(`:`, aKind.length)),
+          )
+          const order = aOrdinal < bOrdinal ? -1 : aOrdinal > bOrdinal ? 1 : 0
+          return order * direction
+        }
+      }
+    }
     if (opts.direction === `asc`) {
       return ascComparator(a, b, opts)
     } else {
@@ -199,6 +220,24 @@ function areUint8ArraysEqual(a: Uint8Array, b: Uint8Array): boolean {
 }
 
 const NORMALIZED_KEY_PREFIX = `\u0000tanstack-db:`
+const ESCAPED_STRING_PREFIX = `${NORMALIZED_KEY_PREFIX}string:`
+const TEMPORAL_PREFIX = `${NORMALIZED_KEY_PREFIX}temporal:`
+const ZONED_EPOCH_PREFIX = `${NORMALIZED_KEY_PREFIX}temporal:Temporal.ZonedDateTime:`
+const DURATION_TIME_PREFIX = `${NORMALIZED_KEY_PREFIX}temporal:Temporal.Duration:time:`
+
+function indexStringKind(value: string): string {
+  if (
+    !value.startsWith(NORMALIZED_KEY_PREFIX) ||
+    value.startsWith(ESCAPED_STRING_PREFIX)
+  ) {
+    return `string`
+  }
+  if (value.startsWith(DURATION_TIME_PREFIX)) return DURATION_TIME_PREFIX
+  const afterKind = value.startsWith(TEMPORAL_PREFIX)
+    ? TEMPORAL_PREFIX.length
+    : NORMALIZED_KEY_PREFIX.length
+  return value.slice(0, value.indexOf(`:`, afterKind) + 1)
+}
 
 function normalizedKey(kind: string, value: string): string {
   return `${NORMALIZED_KEY_PREFIX}${kind}:${value}`
@@ -210,6 +249,20 @@ function normalizeBinary(value: Uint8Array): string {
     bytes += String.fromCharCode(value[index]!)
   }
   return normalizedKey(`binary`, bytes)
+}
+
+type DurationFields = Record<(typeof durationFields)[number], number>
+
+function durationTimeNanoseconds(value: DurationFields): bigint {
+  return (
+    BigInt(value.days) * 86_400_000_000_000n +
+    BigInt(value.hours) * 3_600_000_000_000n +
+    BigInt(value.minutes) * 60_000_000_000n +
+    BigInt(value.seconds) * 1_000_000_000n +
+    BigInt(value.milliseconds) * 1_000_000n +
+    BigInt(value.microseconds) * 1_000n +
+    BigInt(value.nanoseconds)
+  )
 }
 
 /**
@@ -243,10 +296,22 @@ export function normalizeValue(value: any): any {
   }
 
   if (isTemporal(value)) {
-    return normalizedKey(
-      `temporal`,
-      `${value[Symbol.toStringTag]}:${value.toString()}`,
-    )
+    const tag = value[Symbol.toStringTag]
+    if (tag === `Temporal.Duration`) {
+      const fields = value as unknown as DurationFields
+      const exact = durationFields.map((field) => fields[field]).join(`,`)
+      const order =
+        fields.years || fields.months || fields.weeks
+          ? ``
+          : `time:${durationTimeNanoseconds(fields)}:`
+      return normalizedKey(`temporal`, `${tag}:${order}${exact}`)
+    }
+    if (tag === `Temporal.ZonedDateTime`) {
+      const epoch = (value as unknown as { epochNanoseconds: bigint })
+        .epochNanoseconds
+      return normalizedKey(`temporal`, `${tag}:${epoch}:${value.toString()}`)
+    }
+    return normalizedKey(`temporal`, `${tag}:${value.toString()}`)
   }
 
   // Normalize Uint8Arrays/Buffers to a string representation for Map key usage

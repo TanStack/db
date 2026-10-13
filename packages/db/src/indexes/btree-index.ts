@@ -12,16 +12,12 @@ import {
   builtInIndexResolverNames,
   warnRemovalFailure,
 } from './base-index.js'
-import type { CompareOptions } from '../query/builder/types.js'
-import type { IndexOperation } from './base-index.js'
+import type { IndexComparisonOptions, IndexOperation } from './base-index.js'
 
 /**
  * Options for Ordered index
  */
-export interface BTreeIndexOptions {
-  compareFn?: (a: any, b: any) => number
-  compareOptions?: CompareOptions
-}
+export type BTreeIndexOptions = IndexComparisonOptions
 
 /**
  * Options for range queries
@@ -46,15 +42,6 @@ type OrderedBucket<TKey> = {
 export class BTreeIndex<
   TKey extends string | number = string | number,
 > extends BaseIndex<TKey> {
-  public readonly supportedOperations = new Set<IndexOperation>([
-    `eq`,
-    `gt`,
-    `gte`,
-    `lt`,
-    `lte`,
-    `in`,
-  ])
-
   // Internal data structures - private to hide implementation details
   // The `orderedEntries` B+ tree groups values that occupy the same comparator
   // position. The `valueMap` keeps exact values separate for equality lookups.
@@ -72,8 +59,6 @@ export class BTreeIndex<
   private compareStored(a: any, b: any): number {
     return this.compareFn(denormalizeUndefined(a), denormalizeUndefined(b))
   }
-
-  protected initialize(_options?: BTreeIndexOptions): void {}
 
   /**
    * Adds a value to the index
@@ -224,35 +209,13 @@ export class BTreeIndex<
    * Performs a lookup operation
    */
   lookup(operation: IndexOperation, value: any): Set<TKey> {
-    let result: Set<TKey>
-
-    switch (operation) {
-      case `eq`:
-        result = this.equalityLookup(value)
-        break
-      case `gt`:
-        result = this.rangeQuery({ from: value, fromInclusive: false })
-        break
-      case `gte`:
-        result = this.rangeQuery({ from: value, fromInclusive: true })
-        break
-      case `lt`:
-        result = this.rangeQuery({ to: value, toInclusive: false })
-        break
-      case `lte`:
-        result = this.rangeQuery({ to: value, toInclusive: true })
-        break
-      case `in`:
-        result = this.inArrayLookup(value)
-        break
-      default:
-        throw new Error(
-          devBuild() && process.env.NODE_ENV !== `production`
-            ? `Operation ${operation} not supported by BTreeIndex`
-            : codedMessage(101, { operation }),
-        )
-    }
-    return result
+    const result = this.lookupSupportedOperation(operation, value)
+    if (result !== undefined) return result
+    throw new Error(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `Operation ${operation} not supported by BTreeIndex`
+        : codedMessage(101, { operation }),
+    )
   }
 
   /**
@@ -409,21 +372,8 @@ export class BTreeIndex<
     return this.takeInternal(n, nextPair, undefined, filterFn, true)
   }
 
-  /**
-   * Performs an IN array lookup
-   */
-  inArrayLookup(values: Array<any>): Set<TKey> {
-    const result = new Set<TKey>()
-
-    for (const value of values) {
-      const normalizedValue = normalizeForBTree(value)
-      const keys = this.valueMap.get(normalizedValue)?.keys
-      if (keys) {
-        keys.forEach((key) => result.add(key))
-      }
-    }
-
-    return result
+  protected exactBucketKeys(value: any): Set<TKey> | undefined {
+    return this.valueMap.get(normalizeForBTree(value))?.keys
   }
 }
 
