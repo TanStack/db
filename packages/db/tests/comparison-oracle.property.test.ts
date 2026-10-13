@@ -53,7 +53,8 @@ import type { CompareOptions } from '../src/query/builder/types'
  * recorded in `packages/db/CHANGELOG.md` (#779). The bounded key-size and
  * indexed-byte checks retain the regression contract introduced with #1797;
  * they constrain this internal utility, not a public serialized format or a
- * universal performance bound. The 32-character margin is the existing
+ * universal performance bound. Own `length` and `byteLength` properties do
+ * not change native byte content. The 32-character margin is the existing
  * constant-overhead budget for the sampled 0..200-byte keys.
  */
 
@@ -1093,6 +1094,18 @@ describe(`native Date order across JavaScript realms`, () => {
       ),
     ).toBeUndefined()
 
+    const assertEarlierDateOrder = (
+      value: Date,
+      compare: typeof ascComparator = ascComparator,
+    ) => {
+      expect(
+        sign(compare(value, new Date(timestamp - 1), DEFAULT_COMPARE_OPTIONS)),
+      ).toBe(1)
+      expect(
+        sign(compare(new Date(timestamp - 1), value, DEFAULT_COMPARE_OPTIONS)),
+      ).toBe(-1)
+    }
+
     for (const value of [localSubclass, foreignSubclass]) {
       expect(normalizeValue(value)).toBe(timestamp)
       expect(
@@ -1101,6 +1114,9 @@ describe(`native Date order across JavaScript realms`, () => {
       expect(
         ascComparator(new Date(timestamp), value, DEFAULT_COMPARE_OPTIONS),
       ).toBe(0)
+      // A subclass-first comparator would put this value before both
+      // unequal Dates. The earlier Date must instead precede it.
+      assertEarlierDateOrder(value)
       expect(
         sign(
           ascComparator(
@@ -1120,6 +1136,20 @@ describe(`native Date order across JavaScript realms`, () => {
         ),
       ).toBe(1)
     }
+    // Feed a subclass-first answer through the same earlier-Date comparison.
+    // It reaches the comparison and fails at the expected sign assertion.
+    let reachedWrongOrder = false
+    expect(() =>
+      assertEarlierDateOrder(foreignSubclass, (left, right, options) => {
+        if (left === foreignSubclass && right instanceof Date) {
+          reachedWrongOrder = true
+          return -1
+        }
+        return ascComparator(left, right, options)
+      }),
+    ).toThrowError()
+    expect(reachedWrongOrder).toBe(true)
+
     expect(normalizeValue(foreignInvalid)).toBeNaN()
     expect(isUnorderable(foreignInvalid)).toBe(true)
     expect(
@@ -1150,9 +1180,15 @@ describe(`native Date order across JavaScript realms`, () => {
     Object.defineProperty(forged, Symbol.toStringTag, { value: `Other` })
     expect(() => Date.prototype.getTime.call(forged)).toThrow(TypeError)
     expect(normalizeValue(forged)).toBe(forged)
-    expect(
+    expect(isUnorderable(forged)).toBe(false)
+    const forward = sign(
       ascComparator(forged, foreignSubclass, DEFAULT_COMPARE_OPTIONS),
-    ).not.toBe(0)
+    )
+    const reverse = sign(
+      ascComparator(foreignSubclass, forged, DEFAULT_COMPARE_OPTIONS),
+    )
+    expect(forward).not.toBe(0)
+    expect(reverse).toBe(-forward)
   })
 
   it(`rejects a local Date subclass prototype without a native Date slot`, () => {
@@ -1352,6 +1388,28 @@ describe(`makeComparator property-based tests`, () => {
 })
 
 describe(`normalizeValue property-based tests`, () => {
+  it(`binary keys ignore own byte-count shadows`, () => {
+    // Supplied native bytes, rather than public count properties, establish
+    // the key relation. The function return is the comparison checkpoint.
+    const equalKey = normalizeValue(new Uint8Array([1, 2]))
+    const unequalKey = normalizeValue(new Uint8Array([9, 9]))
+    expect(equalKey).not.toBe(unequalKey)
+    for (const field of [`length`, `byteLength`] as const) {
+      const equal = Object.defineProperty(new Uint8Array([1, 2]), field, {
+        value: 0,
+      })
+      const unequal = Object.defineProperty(new Uint8Array([9, 9]), field, {
+        value: 0,
+      })
+      expect(equal[field]).toBe(0)
+      expect(unequal[field]).toBe(0)
+      expect(Array.from(equal)).toEqual([1, 2])
+      expect(Array.from(unequal)).toEqual([9, 9])
+      expect(normalizeValue(equal)).toBe(equalKey)
+      expect(normalizeValue(unequal)).toBe(unequalKey)
+    }
+  })
+
   it(`binary key size and content laws reach the bounded length margins`, () => {
     for (const length of [0, 1, 128, 129, 200]) {
       const bytes = Uint8Array.from({ length }, (_, index) => index % 256)

@@ -23,6 +23,9 @@ admission, reversed source order, exact lookup, and key conservation after
 deletion and replacement for both BasicIndex and BTreeIndex. A source Map
 predicts live keys and exact members. The test checks string collation only
 within the string family; it does not prescribe where the number appears.
+The public WHERE check establishes that writes and publication complete with
+the right keys. It does not prove that a public indexed lookup ran after each
+update; the direct index owner supplies exact lookup observations there.
 
 The same comparison fault reached other legal values. A fixed
 PlainDate/ordinary-object history updated one row from an ordinary object to

@@ -2,6 +2,7 @@ import { compileSingleRowExpression } from '../query/compiler/evaluators.js'
 import { comparisonFunctions } from '../query/builder/functions.js'
 import { DEFAULT_COMPARE_OPTIONS, deepEquals } from '../utils.js'
 import {
+  dateTimestamp,
   indexCustomComparatorValue,
   indexOrderValue,
   makeCheckedComparator,
@@ -339,7 +340,7 @@ export abstract class BaseIndex<
 
 function rangeValueDomain(value: unknown): string | undefined {
   if (value == null) return undefined
-  if (value instanceof Date) return `date`
+  if (dateTimestamp(value) !== undefined) return `date`
   return typeof value
 }
 

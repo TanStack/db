@@ -179,3 +179,15 @@ call, so this object falls through as an ordinary object. The direct witness
 failed before the repair and passed after it. The separate WHERE record owns
 the public key-set witness. Proxies, arbitrary prototype changes, and indexed
 behavior for the impostor remain outside this addition.
+
+At `3668d1b88`, the next hostile comparison review found two direct-order
+sensitivity gaps. Valid local and foreign Date subclasses were compared with
+an equal and a later Date, but not an earlier Date. The owner now requires
+opposite finite signs in both directions against that earlier Date; an
+injected subclass-first comparator fails the new assertion. A foreign
+borrowed-prototype control now also requires `isUnorderable` to be false and
+opposite nonzero signs, rather than accepting any result other than zero.
+The focused comparison oracle passed 111 tests with no type, lint, formatting,
+or diff-check errors. These additions do not establish indexed range behavior;
+the separate [range-domain review](borrowed-date-indexed-range.md) owns that
+public boundary.

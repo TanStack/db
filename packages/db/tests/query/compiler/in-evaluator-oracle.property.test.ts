@@ -22,7 +22,8 @@ import { oraclePropertyOptions, oracleRuns } from '../../oracle-config.js'
  * - `NaN` and an invalid Date equal each other and nothing else.
  * - A valid Date equals its millisecond timestamp, and another Date with the
  *   same timestamp.
- * - Two Uint8Arrays (Buffers included) are equal when their bytes are equal.
+ * - Two Uint8Arrays (Buffers included) are equal when their native bytes are
+ *   equal. Own `length` or `byteLength` properties cannot change that result.
  * - Temporal kinds with an intrinsic `.equals()` use that relation. This
  *   includes equivalent time-zone aliases for ZonedDateTime, but excludes a
  *   distinct fixed-offset zone. PlainMonthDay and PlainYearMonth also retain
@@ -42,11 +43,12 @@ import { oraclePropertyOptions, oracleRuns } from '../../oracle-config.js'
  * internal normalization prefix, booleans, `0`, `-0`, `1`, `NaN`, `1n`, a
  * valid Date and its timestamp, an invalid Date, equal and unequal byte
  * arrays, a Buffer, native bytes from another realm with equal and unequal
- * content, genuine local and foreign bytes with own display-tag shadows, a
- * wide typed array with a spoofed byte tag, Temporal values including ZonedDateTime
- * zone aliases, a forged tag, a borrowed prototype, shadowed display and
- * field members,
- * unequal values within each modeled Temporal kind, reference ISO year/day
+ * content, genuine local and foreign bytes with own display-tag shadows, bytes
+ * with own `length` or `byteLength` shadows, and a wide typed array with a
+ * spoofed byte tag. A fixed control also shadows byte iteration. Temporal
+ * values include ZonedDateTime zone aliases, a forged tag, a borrowed
+ * prototype, shadowed display and field members, unequal values within each
+ * modeled Temporal kind, reference ISO year/day
  * differences hidden by default display, and Duration carry forms with equal
  * display but distinct fields, one shared object and a structurally equal
  * copy, `null` and `undefined`. Lists have zero to six
@@ -93,6 +95,23 @@ const unequalForeignBytes = runInNewContext(
 const shadowedForeignBytes = runInNewContext(
   `Object.defineProperty(new Uint8Array([1, 2]), Symbol.toStringTag, { value: 'ordinary' })`,
 ) as Uint8Array
+const byteLengthShadowedForeignBytes = Object.defineProperty(
+  runInNewContext(`new Uint8Array([1, 2])`) as Uint8Array,
+  `byteLength`,
+  { value: 0 },
+)
+function shadowByteCount(
+  bytes: ReadonlyArray<number>,
+  field: `length` | `byteLength`,
+): Uint8Array {
+  return Object.defineProperty(Uint8Array.from(bytes), field, { value: 0 })
+}
+const byteLengthShadowed = shadowByteCount([1, 2], `byteLength`)
+const equalByteLengthShadowed = shadowByteCount([1, 2], `byteLength`)
+const unequalByteLengthShadowed = shadowByteCount([9, 9], `byteLength`)
+const lengthShadowed = shadowByteCount([1, 2], `length`)
+const equalLengthShadowed = shadowByteCount([1, 2], `length`)
+const unequalLengthShadowed = shadowByteCount([9, 9], `length`)
 const spoofedWideBytes = new Uint16Array([1, 2])
 Object.defineProperty(spoofedWideBytes, Symbol.toStringTag, {
   value: `Uint8Array`,
@@ -198,6 +217,13 @@ const pool: ReadonlyArray<unknown> = [
   foreignBytes,
   unequalForeignBytes,
   shadowedForeignBytes,
+  byteLengthShadowedForeignBytes,
+  byteLengthShadowed,
+  equalByteLengthShadowed,
+  unequalByteLengthShadowed,
+  lengthShadowed,
+  equalLengthShadowed,
+  unequalLengthShadowed,
   spoofedWideBytes,
   otherSpoofedWideBytes,
   plainDate,
@@ -250,6 +276,11 @@ const typedArrayTag = Object.getOwnPropertyDescriptor(
   Object.getPrototypeOf(Uint8Array.prototype),
   Symbol.toStringTag,
 )!.get!
+const typedArrayLength = Object.getOwnPropertyDescriptor(
+  Object.getPrototypeOf(Uint8Array.prototype),
+  `length`,
+)!.get!
+const typedArrayValues = Uint8Array.prototype.values
 
 function isBytes(value: unknown): value is Uint8Array {
   return (
@@ -333,11 +364,21 @@ function referenceEqual(left: unknown, right: unknown): boolean {
     return isNotANumber(left) && isNotANumber(right)
   }
   if (isBytes(left) || isBytes(right)) {
+    if (!isBytes(left) || !isBytes(right)) return false
+    // Captured native length and value iteration ignore own properties. The
+    // model materializes the two byte sequences before comparing them;
+    // production walks indexes directly.
+    const leftLength = Reflect.apply(typedArrayLength, left, []) as number
+    const rightLength = Reflect.apply(typedArrayLength, right, []) as number
+    const leftBytes = Array.from(
+      Reflect.apply(typedArrayValues, left, []) as Iterable<number>,
+    )
+    const rightBytes = Array.from(
+      Reflect.apply(typedArrayValues, right, []) as Iterable<number>,
+    )
     return (
-      isBytes(left) &&
-      isBytes(right) &&
-      left.length === right.length &&
-      Array.from(left).every((byte, index) => byte === right[index])
+      leftLength === rightLength &&
+      leftBytes.every((byte, index) => byte === rightBytes[index])
     )
   }
   const leftTemporal = temporalBrand(left)
@@ -549,6 +590,43 @@ describe(`in evaluator`, () => {
     checkEqualityPaths(shadowedForeignBytes, shadowedTagBytes, true)
     checkEqualityPaths(unequalForeignBytes, new Uint8Array([1, 2]), false)
     checkEqualityPaths(foreignBytes, spoofedWideBytes, false)
+  })
+
+  it(`ignores own byte-count shadows in every compiled equality path`, () => {
+    // Both shadowed arrays still hold two native bytes. Pairing two zero
+    // shadows catches a comparison that stops before reading their content;
+    // pairing one with an unshadowed array catches a false inequality.
+    expect(byteLengthShadowed.byteLength).toBe(0)
+    expect(lengthShadowed.length).toBe(0)
+    expect(Reflect.apply(typedArrayLength, byteLengthShadowed, [])).toBe(2)
+    expect(Reflect.apply(typedArrayLength, lengthShadowed, [])).toBe(2)
+    expect(byteLengthShadowedForeignBytes instanceof Uint8Array).toBe(false)
+    expect(byteLengthShadowedForeignBytes.byteLength).toBe(0)
+    checkEqualityPaths(byteLengthShadowed, new Uint8Array([1, 2]), true)
+    checkEqualityPaths(byteLengthShadowed, equalByteLengthShadowed, true)
+    checkEqualityPaths(byteLengthShadowed, unequalByteLengthShadowed, false)
+    checkEqualityPaths(byteLengthShadowedForeignBytes, byteLengthShadowed, true)
+    checkEqualityPaths(
+      byteLengthShadowedForeignBytes,
+      unequalByteLengthShadowed,
+      false,
+    )
+    checkEqualityPaths(lengthShadowed, new Uint8Array([1, 2]), true)
+    checkEqualityPaths(lengthShadowed, equalLengthShadowed, true)
+    checkEqualityPaths(lengthShadowed, unequalLengthShadowed, false)
+  })
+
+  it(`reads native byte values when an array shadows its iterator`, () => {
+    const bytes = new Uint8Array([1, 2])
+    Object.defineProperty(bytes, Symbol.iterator, {
+      value: function* () {
+        yield 9
+        yield 9
+      },
+    })
+    expect(Array.from(bytes)).toEqual([9, 9])
+    checkEqualityPaths(bytes, new Uint8Array([1, 2]), true)
+    checkEqualityPaths(bytes, new Uint8Array([9, 9]), false)
   })
 
   it(`distinguishes unequal intrinsic values within each Temporal kind`, () => {

@@ -22,7 +22,7 @@ function getObjectId(obj: object): number {
 // The Date intrinsic checks the native brand across realms. Cheap shape gates
 // avoid that throwing probe for ordinary objects and Temporal values. A Date
 // display tag cannot hide its timestamp, and a forged tag cannot supply one.
-function dateTimestamp(value: unknown): number | undefined {
+export function dateTimestamp(value: unknown): number | undefined {
   if (value === null || typeof value !== `object`) return undefined
   try {
     if (value instanceof Date) return Date.prototype.getTime.call(value)
@@ -249,6 +249,14 @@ const typedArrayTag = Object.getOwnPropertyDescriptor(
   Object.getPrototypeOf(Uint8Array.prototype),
   Symbol.toStringTag,
 )!.get!
+const typedArrayByteLength = Object.getOwnPropertyDescriptor(
+  Object.getPrototypeOf(Uint8Array.prototype),
+  `byteLength`,
+)!.get!
+
+function nativeByteLength(value: Uint8Array): number {
+  return Reflect.apply(typedArrayByteLength, value, []) as number
+}
 
 /** Recognize native Uint8Array values, including Buffers and foreign realms. */
 export function isUint8Array(value: unknown): value is Uint8Array {
@@ -260,10 +268,11 @@ export function isUint8Array(value: unknown): value is Uint8Array {
 
 /** Compare two Uint8Arrays for content equality. */
 function areUint8ArraysEqual(a: Uint8Array, b: Uint8Array): boolean {
-  if (a.byteLength !== b.byteLength) {
+  const length = nativeByteLength(a)
+  if (length !== nativeByteLength(b)) {
     return false
   }
-  for (let i = 0; i < a.byteLength; i++) {
+  for (let i = 0; i < length; i++) {
     if (a[i] !== b[i]) {
       return false
     }
@@ -297,7 +306,8 @@ function canonicalTemporalZone(zoneId: string): string {
 
 function normalizeBinary(value: Uint8Array): string {
   let bytes = ``
-  for (let index = 0; index < value.byteLength; index++) {
+  const length = nativeByteLength(value)
+  for (let index = 0; index < length; index++) {
     bytes += String.fromCharCode(value[index]!)
   }
   return normalizedKey(`binary`, bytes)

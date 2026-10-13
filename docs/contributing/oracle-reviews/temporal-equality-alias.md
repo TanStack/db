@@ -227,3 +227,29 @@ witness failed in twelve intended assertions before that repair and passed
 after it; 359 related tests and static checks passed. This proves compiled
 boolean equality in the `node:vm` realm, not browser iframe behavior or public
 WHERE publication. The null-only-list law question above remains open.
+
+## Native byte-content follow-up at `3668d1b88`
+
+The next compiled `in` reviewer found that two unequal native Uint8Arrays
+could each define an own `byteLength = 0` property and compare equal. A
+one-sided shadow could also make equal arrays compare unequal. The compiled
+`eq`, constant-list `in`, and row-supplied `in` paths all reached the wrong
+result. Direct `normalizeValue` also generated the empty-byte key for a
+nonempty shadowed array. These are production defects under the native
+byte-content law, beyond the retired Temporal and comparison examples.
+
+The receiving `in` reference now reads captured native length and iteration
+intrinsics, while production compares indexed bytes. Fixed controls cross
+equal and unequal native bytes with own `byteLength` or `length` shadows, a
+foreign byte array with a count shadow, and an iterator that yields values
+different from the native bytes. Every compiled equality path checks both
+operand directions. The comparison owner separately checks normalized key
+equality and inequality under count shadows. Before the source repair, the
+three compiled paths failed at their boolean comparisons and direct
+normalization collided with the empty-byte key. The repaired focused set
+passed 362 tests with no type, lint, formatting, or diff-check errors.
+
+These witnesses cover native Uint8Array and Buffer content at the compiled
+equality and direct-key boundaries. They do not establish public indexed
+publication, detached buffers, proxies, or browser iframe behavior. A fresh
+hostile review of the committed repair is pending.

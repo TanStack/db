@@ -524,6 +524,13 @@ equal and unequal content, including an own tag shadow, also reach compiled
 `eq`, constant `in`, and row-supplied `in` in both operand directions; the
 original classifier failed equal foreign/local byte pairs. The `in` property has a guarded
 direct replay selector that runs only its random/replay campaign.
+Own `length` and `byteLength` shadows, including a foreign byte view, and a
+shadowed iterator cannot redefine native byte content. The compiled owner
+checks equal and unequal pairs in both operand directions through `eq` and
+both `in` forms; the comparison owner checks direct normalized-key relations.
+The old byte-count read failed both boolean equality and direct key
+normalization. Public indexed publication, detached buffers, and proxies
+need separate witnesses.
 The alias owner also checks a public unindexed `eq` scan with two native-equal
 PlainMonthDay rows and a distinct reference year. Direct BasicIndex/BTreeIndex
 add, build, removal, re-add, and public indexed `eq` cover the orderable
@@ -593,6 +600,15 @@ A focused unindexed public query also keeps one local
 `Object.create(DateSubclass.prototype)` impostor outside Date equality while
 retaining its same-object match. Indexed publication for that local impostor
 remains open.
+
+The [borrowed-Date range review](oracle-reviews/borrowed-date-indexed-range.md)
+records a separate public range owner in `index-path-collision-oracle.test.ts`.
+Fixed `gt` and `lt` histories compare public snapshots before and after
+BasicIndex or BTreeIndex is installed. An ordinary object borrowing a local
+Date subclass prototype must take the scan path whether it is a source value
+or the predicate bound. A genuine foreign Date subclass is a positive indexed
+range control. Arbitrary coercion methods, invalid Dates, later publication,
+other range operators, and proxies remain open there.
 
 The [mixed-value index order review](oracle-reviews/mixed-value-index-order.md)
 links the direct index and public WHERE owners. The direct owner checks

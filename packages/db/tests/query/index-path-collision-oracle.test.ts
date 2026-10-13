@@ -18,6 +18,13 @@
  * argument order, bound inclusivity, reversed operands, and bound field.
  * A selected-field ordering reads both paths through the public `$selected`
  * callback proxy.
+ * A separate range history stores genuine Dates, a native Date subclass, and
+ * an ordinary object with a borrowed Date subclass prototype. Its public
+ * `gt` result must be the same before and after installing either index type.
+ * Another range history uses the borrowed object as the predicate bound.
+ * Both mixed domains require scan fallback after installation.
+ * A foreign Date subclass is the adjacent valid-domain control: its native
+ * timestamp keeps the range eligible for index lookup across realms.
  *
  * Production driver: `currentStateAsChanges`, Collection subscriptions, and
  * live-query Collections run the real predicates and callback compilers.
@@ -34,9 +41,13 @@
  * Known omissions: This bounded owner does not claim arbitrary path segments,
  * nullish values, custom collation, or incremental publication histories.
  * Lazy demand target deduplication has a separate compiler-boundary witness.
+ * The Date-domain history does not cover arbitrary coercion methods, invalid
+ * Dates, or publication after later writes.
  */
+import { runInNewContext } from 'node:vm'
 import { expect, it, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
+import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { add, and, gt, lt, lte } from '../../src/query/builder/functions.js'
 import { PropRef } from '../../src/query/ir.js'
@@ -159,6 +170,174 @@ it.each(cases)(
       const lookup = vi.spyOn(index, `lookup`)
       expect(queryKeys(), `indexed result`).toEqual(expected)
       expect(lookup, `indexed path reached`).toHaveBeenCalled()
+    })
+  },
+)
+
+it.each([
+  { name: `BasicIndex`, indexType: BasicIndex },
+  { name: `BTreeIndex`, indexType: BTreeIndex },
+])(
+  `keeps borrowed Date prototypes outside indexed range results: $name`,
+  async ({ name, indexType }) => {
+    await checkWithCleanup(async (register) => {
+      class NativeDate extends Date {}
+      const borrowed = Object.create(NativeDate.prototype) as object
+      const bound = new Date(1)
+      const dateRows: Array<{ id: string; v: object }> = [
+        { id: `before`, v: new Date(0) },
+        { id: `borrowed`, v: borrowed },
+        { id: `after`, v: new Date(2) },
+        { id: `subclass`, v: new NativeDate(3) },
+      ]
+      const collection = createCollection(
+        mockSyncCollectionOptions({
+          id: `index-borrowed-date-${name}`,
+          getKey: (row: (typeof dateRows)[number]) => row.id,
+          initialData: dateRows,
+          autoIndex: `off`,
+        }),
+      )
+      register(() => collection.cleanup())
+      await collection.stateWhenReady()
+
+      // The reference uses JavaScript numeric coercion for this Date bound.
+      // Borrowing a Date prototype cannot supply its native timestamp, so the
+      // coercion fails and that source row cannot satisfy `v > bound`.
+      const expected = dateRows
+        .filter(({ v }) => {
+          try {
+            return Number(v) > bound.getTime()
+          } catch {
+            return false
+          }
+        })
+        .map(({ id }) => id)
+        .sort()
+      expect(expected).toEqual([`after`, `subclass`])
+
+      const where = gt(new PropRef([`v`]), bound)
+      const snapshotKeys = () =>
+        collection
+          .currentStateAsChanges({ where })!
+          .map((change) => String(change.key))
+          .sort()
+
+      // An unindexed public snapshot establishes the first checkpoint. The
+      // indexed snapshot must refine the same result; optimizedOnly may decline
+      // this mixed-domain index rather than claiming a complete answer.
+      expect(snapshotKeys(), `before ${name}`).toEqual(expected)
+      const index = collection.createIndex((row) => row.v, { indexType })
+      const lookup = vi.spyOn(index, `lookup`)
+      expect(snapshotKeys(), `after ${name}`).toEqual(expected)
+      expect(lookup, `unsafe range index not used`).not.toHaveBeenCalled()
+      expect(
+        collection.currentStateAsChanges({ where, optimizedOnly: true }),
+      ).toBeUndefined()
+    })
+  },
+)
+
+it.each([
+  { name: `BasicIndex`, indexType: BasicIndex },
+  { name: `BTreeIndex`, indexType: BTreeIndex },
+])(
+  `does not treat a borrowed Date prototype as a range bound: $name`,
+  async ({ name, indexType }) => {
+    await checkWithCleanup(async (register) => {
+      class NativeDate extends Date {}
+      const borrowed = Object.create(NativeDate.prototype) as Date
+      const dateRows = [
+        { id: `before`, v: new Date(0) },
+        { id: `after`, v: new NativeDate(2) },
+      ]
+      const collection = createCollection(
+        mockSyncCollectionOptions({
+          id: `index-borrowed-date-bound-${name}`,
+          getKey: (row: (typeof dateRows)[number]) => row.id,
+          initialData: dateRows,
+          autoIndex: `off`,
+        }),
+      )
+      register(() => collection.cleanup())
+      await collection.stateWhenReady()
+
+      // Numeric coercion of the borrowed bound throws. No source row can
+      // satisfy the relational predicate, regardless of index availability.
+      const expected = dateRows
+        .filter(({ v }) => {
+          try {
+            return Number(v) < Number(borrowed)
+          } catch {
+            return false
+          }
+        })
+        .map(({ id }) => id)
+      expect(expected).toEqual([])
+
+      const where = lt(new PropRef([`v`]), borrowed)
+      const snapshotKeys = () =>
+        collection
+          .currentStateAsChanges({ where })!
+          .map((change) => String(change.key))
+          .sort()
+      expect(snapshotKeys(), `before ${name}`).toEqual(expected)
+      const index = collection.createIndex((row) => row.v, { indexType })
+      const lookup = vi.spyOn(index, `lookup`)
+      expect(snapshotKeys(), `after ${name}`).toEqual(expected)
+      expect(lookup, `unsafe range index not used`).not.toHaveBeenCalled()
+      expect(
+        collection.currentStateAsChanges({ where, optimizedOnly: true }),
+      ).toBeUndefined()
+    })
+  },
+)
+
+it.each([
+  { name: `BasicIndex`, indexType: BasicIndex },
+  { name: `BTreeIndex`, indexType: BTreeIndex },
+])(
+  `keeps foreign Date subclasses in the indexed Date domain: $name`,
+  async ({ name, indexType }) => {
+    await checkWithCleanup(async (register) => {
+      const bound = new Date(1)
+      const dateRows = [
+        { id: `before`, v: new Date(0) },
+        {
+          id: `foreign-subclass`,
+          v: runInNewContext(`new (class extends Date {})(2)`) as Date,
+        },
+      ]
+      const collection = createCollection(
+        mockSyncCollectionOptions({
+          id: `index-foreign-date-${name}`,
+          getKey: (row: (typeof dateRows)[number]) => row.id,
+          initialData: dateRows,
+          autoIndex: `off`,
+        }),
+      )
+      register(() => collection.cleanup())
+      await collection.stateWhenReady()
+
+      // A foreign subclass has a native Date timestamp, so the direct numeric
+      // relation predicts the same key on scans and both indexed paths.
+      const expected = dateRows
+        .filter(({ v }) => Number(v) > bound.getTime())
+        .map(({ id }) => id)
+      expect(expected).toEqual([`foreign-subclass`])
+      const where = gt(new PropRef([`v`]), bound)
+      const snapshotKeys = () =>
+        collection.currentStateAsChanges({ where })!.map((change) => change.key)
+      expect(snapshotKeys(), `before ${name}`).toEqual(expected)
+      const index = collection.createIndex((row) => row.v, { indexType })
+      const lookup = vi.spyOn(index, `lookup`)
+      expect(snapshotKeys(), `after ${name}`).toEqual(expected)
+      expect(lookup, `native Date range index reached`).toHaveBeenCalled()
+      expect(
+        collection
+          .currentStateAsChanges({ where, optimizedOnly: true })
+          ?.map((change) => change.key),
+      ).toEqual(expected)
     })
   },
 )

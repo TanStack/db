@@ -18,7 +18,7 @@
 import { DEFAULT_COMPARE_OPTIONS } from '../utils.js'
 import { ReverseIndex } from '../indexes/reverse-index.js'
 import { hasVirtualPropPath } from '../virtual-props.js'
-import { makeComparator } from './comparison.js'
+import { dateTimestamp, makeComparator } from './comparison.js'
 import type { CompareOptions } from '../query/builder/types.js'
 import type { IndexOperation, IndexReader } from '../indexes/base-index.js'
 import type { BasicExpression } from '../query/ir.js'
@@ -173,7 +173,7 @@ function isRangeOrderingDivergent(
       if (value === null) return false
       // Dates order consistently with the evaluator: valid Dates by time, and
       // invalid Dates as the greatest value under PostgreSQL float semantics.
-      return !(value instanceof Date)
+      return dateTimestamp(value) === undefined
     }
     default:
       return false
