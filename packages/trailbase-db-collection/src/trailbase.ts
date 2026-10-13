@@ -211,26 +211,31 @@ export function trailBaseCollectionOptions<
       const cursors = new Map<string | number, string>()
 
       // Subscribe before any fetch, so a change committed during a fetch
-      // reaches the listener. `start` awaits this first and starts listening
-      // in the same continuation, before any waiting `load` resumes.
+      // reaches the listener.
       const subscribing = new Promise<ReadableStream<Event>>((resolve) =>
         resolve(config.recordApi.subscribe(`*`)),
       )
       let listening = false
-      // Set when the listener could not start after the subscription resolved.
+      // Set when the subscription or the listener could not start.
       let startFailure: { error: unknown } | undefined
+      // `start` settles this once the listener runs or cannot start, so a
+      // waiting load never depends on the order of their continuations.
+      let settleListener!: () => void
+      const listenerSettled = new Promise<void>((resolve) => {
+        settleListener = resolve
+      })
 
-      // Wait for the subscription, but let cleanup or the caller's abort end
-      // the wait even when the subscription never resolves.
+      // Wait for the listener, but let cleanup or the caller's abort end the
+      // wait even when the subscription never resolves.
       async function waitForSubscription(signal: AbortSignal | undefined) {
-        if (!signal) return Promise.race([subscribing, stopped])
+        if (!signal) return Promise.race([listenerSettled, stopped])
         let onAbort!: () => void
         const aborted = new Promise<void>((resolve) => {
           onAbort = resolve
           signal.addEventListener(`abort`, onAbort, { once: true })
         })
         try {
-          await Promise.race([subscribing, stopped, aborted])
+          await Promise.race([listenerSettled, stopped, aborted])
         } finally {
           // The request signal can outlive this wait; do not keep its listener.
           signal.removeEventListener(`abort`, onAbort)
@@ -385,8 +390,6 @@ export function trailBaseCollectionOptions<
       async function start() {
         let reader: ReadableStreamDefaultReader<Event> | undefined
         try {
-          // No await may come before this one. Waiting loads resume after
-          // start's continuation, so the listener runs before they fetch.
           const eventStream = await subscribing
           if (cancelled) {
             await eventStream.cancel()
@@ -416,6 +419,7 @@ export function trailBaseCollectionOptions<
               }
             })
           listening = true
+          settleListener()
 
           // Eager mode: perform initial fetch to populate everything
           if (internalSyncMode === `eager`) {
@@ -431,6 +435,7 @@ export function trailBaseCollectionOptions<
           // An abandoned startup must not cancel a replacement session's reader.
           if (cancelled) return
           startFailure = { error }
+          settleListener()
           cancelEventReader()
           if (collection.status === `loading`) {
             markError(error)

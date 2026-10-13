@@ -14,7 +14,8 @@ The same interpreter runs a fixed corpus and generated histories.
 - Eager startup waits for its list; on-demand startup does not claim to load rows.
 - A list starts only after the change subscription is established, in both
   modes, so a change committed during or after a fetch reaches the listener.
-  An on-demand subset load that arrives before the subscription waits for it.
+  An on-demand subset load that arrives before the listener runs waits until
+  `start` reports that the listener runs or cannot start.
   Since #2115 a live query is ready when its subset load settles, not at the
   source's `markReady()`, so the load itself must carry this ordering.
   `initial-readiness-exposure.test.ts` holds two witnesses under a real live
@@ -22,10 +23,12 @@ The same interpreter runs a fixed corpus and generated histories.
   subscription starts. Both fail when the load does not wait. The wait still
   honors its caller: an abort rejects a waiting load, cleanup ends it quietly,
   and a listener that cannot start rejects it instead of fetching. Each of
-  those three has its own witness. Starting the listener before waiting loads
-  resume relies on `start` awaiting the subscription first; a mutant that adds
-  an earlier await survives, because the established stream buffers events
-  until the listener reads them.
+  those three has its own witness. Because a load waits for the listener and
+  not for the subscription, it does not depend on the order in which `start`
+  and the load resume. A mutant that adds an await before `start` subscribes
+  is therefore equivalent. A mutant that lets loads skip the wait fails five
+  witnesses, and one that never settles the wait after a start failure fails
+  the listener witness.
   Required startup failures reject. Later stream failures retain rows and report
   the error, matching the adapter's current policy.
 - Graceful closure drains buffered events before releasing the reader.
