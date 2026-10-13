@@ -72,6 +72,12 @@ import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
  * applying a relation hint.
  */
 
+// A joined filter's marker in the eager harness. `rowId` is the join key,
+// matched against a root row's `link`; `key` identifies the marker.
+type JoinMarker = { key: number; rowId: number }
+// Result-row ids at or above this name a matched (root row, marker) pair.
+const PAIR_ID = 1_000_000
+
 type Row = {
   id: number
   rank: number
@@ -4385,8 +4391,16 @@ describe(`ordered source work oracle`, () => {
  * from the Collection's `currentStateAsChanges`, and rows the source delivers
  * to the query's subscription, which include index refills. Scan is counted
  * as the rows the Collection's `entries()` yields.
- * This owner does not cover on-demand providers, which have their own work
- * laws above.
+ * The sync path also runs against an on-demand source. Its provider serves
+ * each request from the rows, filtered with the reference evaluator, sorted
+ * by the model's order, with the offset only when there is no cursor, up to
+ * the limit; it returns the commit's applied receipt. On that path the rows
+ * law holds after each step, but only the last publication of a step must
+ * show the final window (#2131), and the work and scan laws do not apply:
+ * the on-demand work laws above own them.
+ * Joined filters can match a row through several markers, by `dup`, so a
+ * LEFT-joined filter and a full join keep one result row per matched
+ * (row, marker) pair, and an anti-join keeps a row once.
  */
 type EagerCommand =
   | { type: `upsert`; id: number; rank: number; eligible: boolean }
@@ -4397,10 +4411,16 @@ type EagerCommand =
   // Changes only eligibility. The order value stays, so a joined plan sees
   // the row leave or return only through the join.
   | { type: `flip`; id: number }
+  // Adds another marker to a row that already has one, so a join matches
+  // the row more than once.
+  | { type: `dup`; id: number }
   | { type: `delete-visible` }
 
 type EagerCase = {
-  path: `sync` | `local-only`
+  // How rows reach the source: sync writes to an eager source, local-only
+  // direct writes, or an on-demand source whose provider serves each
+  // request from the rows and installs only what it returns.
+  path: `sync` | `local-only` | `on-demand`
   // Where eligibility is decided: a predicate on the ordered source itself,
   // a JavaScript function filter, or a filter on a LEFT-joined marker, where
   // a marker admits its row (`joined`) or excludes it (`anti-joined`). The
@@ -4482,6 +4502,10 @@ function eagerHistory(
           id: fc.integer({ min: 0, max: maxId }),
         }),
       },
+      fc.record({
+        type: fc.constant(`dup` as const),
+        id: fc.integer({ min: 0, max: maxId }),
+      }),
       // Deletes the first visible row, so a repair runs on most histories.
       fc.constant({ type: `delete-visible` as const }),
     ),
@@ -4490,7 +4514,11 @@ function eagerHistory(
 }
 
 const eagerCase: fc.Arbitrary<EagerCase> = fc.record({
-  path: fc.constantFrom(`sync` as const, `local-only` as const),
+  path: fc.constantFrom(
+    `sync` as const,
+    `local-only` as const,
+    `on-demand` as const,
+  ),
   filter: fc.constantFrom(
     `source` as const,
     `function` as const,
@@ -4536,6 +4564,10 @@ const eagerJoinedHistory: fc.Arbitrary<Array<EagerCommand>> = fc.array(
         id: fc.integer({ min: 0, max: 9 }),
       }),
     },
+    fc.record({
+      type: fc.constant(`dup` as const),
+      id: fc.integer({ min: 0, max: 9 }),
+    }),
     fc.record({
       type: fc.constant(`touch` as const),
       id: fc.integer({ min: 0, max: 19 }),
@@ -4744,7 +4776,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
           type: `insert` | `update` | `delete`
           value: Row
         }) => void
-        commit: () => void
+        commit: Parameters<SyncConfig<Row, number>[`sync`]>[0][`commit`]
       }
     | undefined
   const id = `eager-window-${Math.random()}`
@@ -4760,20 +4792,86 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       : createCollection<Row, number>({
           id,
           getKey: (row) => row.id,
-          syncMode: `eager`,
+          syncMode: testCase.path === `on-demand` ? `on-demand` : `eager`,
           startSync: true,
           sync: {
             sync: ({ begin, write, commit, markReady }) => {
               syncControls = { begin, write, commit }
+              if (testCase.path === `on-demand`) {
+                markReady()
+                return {
+                  loadSubset: (options) => servePage(options),
+                  unloadSubset: () => {},
+                }
+              }
               begin()
               for (const row of rows.values()) {
                 write({ type: `insert`, value: row })
               }
               commit()
               markReady()
+              return undefined
             },
           },
         })
+  // The on-demand provider: rows matching the request's predicate and
+  // cursor, in the model's order, after the offset when there is no cursor,
+  // up to the limit. It
+  // installs each returned row that the source does not hold yet. It
+  // evaluates predicates with the reference evaluator, not production's.
+  function servePage(options: LoadSubsetOptions): true | Promise<void> {
+    const matches = (expression: unknown, row: Row) =>
+      evaluateReferenceExpression(
+        expression as Parameters<typeof evaluateReferenceExpression>[0],
+        row,
+      ) === true
+    let page = [...rows.values()].filter(
+      (row) =>
+        (!options.where || matches(options.where, row)) &&
+        (!options.cursor || matches(options.cursor.whereFrom, row)),
+    )
+    if (options.orderBy) {
+      const order = eagerOrder(
+        new Map(page.map((row) => [row.id, { ...row, eligible: true }])),
+        testCase,
+      ).map((row) => row.id)
+      page = order.map((rowId) => page.find((row) => row.id === rowId)!)
+      // `offset` is the alternative to `cursor` (LoadSubsetOptions), so a
+      // provider applies it only to a request without a cursor.
+      if (!options.cursor) page = page.slice(options.offset ?? 0)
+      if (options.limit !== undefined) page = page.slice(0, options.limit)
+    }
+    const fresh = page.filter((row) => !source.has(row.id))
+    if (fresh.length === 0) return true
+    syncControls!.begin()
+    for (const row of fresh) {
+      syncControls!.write({ type: `insert`, value: { ...row } })
+    }
+    // A load settles only after its writes apply, so it returns the commit's
+    // applied receipt, which is a promise while the transaction is queued.
+    const applied = syncControls!.commit()
+    return applied === true ? true : applied.then(() => undefined)
+  }
+  // A live source write. An on-demand source holds only the rows it has
+  // received, so a change to a row it lacks inserts it, and a delete of
+  // such a row writes nothing.
+  const sourceWrite = (type: `insert` | `update` | `delete`, value: Row) => {
+    const installed = source.has(value.id)
+    if (testCase.path === `on-demand` && type === `delete` && !installed) return
+    syncControls!.begin()
+    syncControls!.write({
+      type:
+        type === `delete`
+          ? `delete`
+          : testCase.path === `on-demand`
+            ? installed
+              ? `update`
+              : `insert`
+            : type,
+      value,
+    })
+    syncControls!.commit()
+  }
   if (testCase.indexed) {
     source.createIndex((row) => row.rank, {
       indexType: BTreeIndex,
@@ -4786,18 +4884,24 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       },
     })
   }
-  // A joined filter keeps eligibility on a marker per matched row.
+  // A joined filter keeps eligibility on markers. A marker has its own key;
+  // its `rowId` is the join key, so several markers can match one row.
+  let nextMarkerKey = 100_000
+  const marker = (rowId: number): JoinMarker => ({
+    key: nextMarkerKey++,
+    rowId,
+  })
   const markers = createCollection(
-    localOnlyCollectionOptions<{ rowId: number }, number>({
+    localOnlyCollectionOptions<JoinMarker, number>({
       id: `${id}-markers`,
-      getKey: (marker) => marker.rowId,
+      getKey: (entry) => entry.key,
       initialData: !(joined || fullJoin)
         ? []
         : viaLink
           ? [
               ...Array.from({ length: 30 }, (_, rowId) => rowId),
               ...[...rows.keys()].filter((rowId) => rowId >= 1000),
-            ].map((rowId) => ({ rowId }))
+            ].map(marker)
           : [...rows.values()]
               // A full join's markers are sparse: fillers have none, so a
               // window can need far fewer root rows than the source holds.
@@ -4806,8 +4910,8 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
                   row.eligible === admitsWhenMatched &&
                   !(fullJoin && row.id >= 1000),
               )
-              .map((row) => ({ rowId: row.id }))
-              .concat((testCase.orphans ?? []).map((rowId) => ({ rowId }))),
+              .map((row) => marker(row.id))
+              .concat((testCase.orphans ?? []).map(marker)),
     }),
   )
   // Source changes committed by the current step. A joined step can change a
@@ -4817,11 +4921,21 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
     // Under `link`, the root write already moved the row's join key.
     if (!(joined || fullJoin) || viaLink) return
     const matched = eligible === admitsWhenMatched
-    if (markers.has(rowId) === matched) return
+    const current = markersOf(rowId)
+    if (matched === current.length > 0) return
     commits++
-    await (matched ? markers.insert({ rowId }) : markers.delete(rowId))
-      .isPersisted.promise
+    await (
+      matched
+        ? markers.insert(marker(rowId))
+        : markers.delete(current.map(({ key }) => key))
+    ).isPersisted.promise
   }
+  const markersOf = (rowId: number) =>
+    [...markers.values()].filter((entry) => entry.rowId === rowId)
+  // One result row's identity: a matched pair is its marker, a root row
+  // without a marker is the row, and a rootless row is -1 - its marker.
+  const resultId = (row: Row | undefined, match: JoinMarker | undefined) =>
+    row && match ? PAIR_ID + match.key : row ? row.id : -1 - match!.key
   // Work has two counts: rows a local snapshot reads for the query, and rows
   // the source delivers to it, which include index refills. Both are bounded.
   let read = 0
@@ -4895,11 +5009,11 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
                 effectRows.delete(event.key)
                 continue
               }
-              const { row, marker } = event.value as {
+              const { row, marker: match } = event.value as {
                 row?: Row
-                marker?: { rowId: number }
+                marker?: JoinMarker
               }
-              effectRows.set(event.key, row ? row.id : -1 - marker!.rowId)
+              effectRows.set(event.key, resultId(row, match))
             }
           },
         })
@@ -4918,36 +5032,52 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       (left, right) => order.indexOf(left) - order.indexOf(right),
     )
   }
-  // A joined query's rows nest the source row under its alias.
-  // A full join's rootless row stands for its marker, as id -1 - marker.
+  // A joined query's rows nest the source row and its marker under their
+  // aliases; resultId names each one.
   const visibleIds = () =>
     query.toArray.map((result) => {
-      if (fullJoin) {
-        const { row, marker } = result as unknown as {
-          row?: Row
-          marker: { rowId: number }
-        }
-        return row ? row.id : -1 - marker.rowId
+      if (!(joined || fullJoin)) return (result as Row).id
+      const { row, marker: match } = result as unknown as {
+        row?: Row
+        marker?: JoinMarker
       }
-      return joined
-        ? (result as unknown as { row: Row }).row.id
-        : (result as Row).id
+      return resultId(row, match)
     })
-  // What the query's rows are, from the fixture inputs: for a full join every
-  // root row, plus a null-ranked rootless row per marker no root row matches.
+  // The query's result rows, from the fixture inputs alone (root rows'
+  // `link` and markers' `rowId`), as join semantics define them:
+  // - a LEFT-join filter keeps one row per matched (root row, marker) pair;
+  // - an anti-join keeps each root row that no marker matches, once;
+  // - a full join keeps every pair, each unmatched root row once, and each
+  //   unmatched marker as a rootless row, which sorts with the null ranks.
   const modelRows = (): ReadonlyMap<number, Row> => {
-    if (!fullJoin) return rows
+    if (!(joined || fullJoin)) return rows
     const model = new Map<number, Row>()
-    for (const [rowId, row] of rows)
-      model.set(rowId, { ...row, eligible: true })
-    for (const markerId of markers.keys()) {
-      if (rows.has(markerId)) continue
-      model.set(-1 - markerId, {
-        id: -1 - markerId,
-        rank: null as unknown as number,
-        eligible: true,
-        label: `marker`,
-      })
+    const matchedRoots = new Set<number>()
+    for (const entry of markers.values()) {
+      const roots = [...rows.values()].filter((row) => row.link === entry.rowId)
+      for (const row of roots) {
+        matchedRoots.add(row.id)
+        if (testCase.filter === `anti-joined`) continue
+        model.set(PAIR_ID + entry.key, {
+          ...row,
+          id: PAIR_ID + entry.key,
+          eligible: true,
+        })
+      }
+      if (fullJoin && roots.length === 0) {
+        model.set(-1 - entry.key, {
+          id: -1 - entry.key,
+          rank: null as unknown as number,
+          eligible: true,
+          label: `marker`,
+        })
+      }
+    }
+    if (testCase.filter === `anti-joined` || fullJoin) {
+      for (const row of rows.values()) {
+        if (!matchedRoots.has(row.id))
+          model.set(row.id, { ...row, eligible: true })
+      }
     }
     return model
   }
@@ -4959,6 +5089,9 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
     // bounded prefix cannot prove the window is the first eligible rows; the
     // loader reads the full source and only the rows law applies.
     if (!testCase.indexed || testCase.terms !== 1) return undefined
+    // An on-demand source holds only what it received; its provider work
+    // laws are the on-demand ones above, so only the rows law applies here.
+    if (testCase.path === `on-demand`) return undefined
     // A full join reads its full source too: a rootless row cannot be shown
     // unmatched until every root row has loaded.
     if (testCase.filter !== `source`) return undefined
@@ -5025,10 +5158,8 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       if (command.type === `delete`) {
         if (!before) continue
         rows.delete(command.id)
-        if (testCase.path === `sync`) {
-          syncControls!.begin()
-          syncControls!.write({ type: `delete`, value: before })
-          syncControls!.commit()
+        if (testCase.path !== `local-only`) {
+          sourceWrite(`delete`, before)
         } else {
           await source.delete(command.id).isPersisted.promise
         }
@@ -5043,10 +5174,8 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
           link: linkFor(command.id, eligible),
         }
         rows.set(command.id, next)
-        if (testCase.path === `sync`) {
-          syncControls!.begin()
-          syncControls!.write({ type: `update`, value: next })
-          syncControls!.commit()
+        if (testCase.path !== `local-only`) {
+          sourceWrite(`update`, next)
         } else {
           await source.update(command.id, (draft) => {
             draft.eligible = next.eligible
@@ -5054,14 +5183,17 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
           }).isPersisted.promise
         }
         await setMarker(command.id, eligible)
+      } else if (command.type === `dup`) {
+        if (!(joined || fullJoin) || viaLink || !before) continue
+        if (markersOf(before.link ?? before.id).length === 0) continue
+        await markers.insert(marker(before.link ?? before.id)).isPersisted
+          .promise
       } else if (command.type === `touch`) {
         if (!before) continue
         const next = { ...before, label: `touched-${step}` }
         rows.set(command.id, next)
-        if (testCase.path === `sync`) {
-          syncControls!.begin()
-          syncControls!.write({ type: `update`, value: next })
-          syncControls!.commit()
+        if (testCase.path !== `local-only`) {
+          sourceWrite(`update`, next)
         } else {
           await source.update(command.id, (draft) => {
             draft.label = next.label
@@ -5076,13 +5208,8 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
           link: linkFor(command.id, command.eligible),
         }
         rows.set(command.id, next)
-        if (testCase.path === `sync`) {
-          syncControls!.begin()
-          syncControls!.write({
-            type: before ? `update` : `insert`,
-            value: next,
-          })
-          syncControls!.commit()
+        if (testCase.path !== `local-only`) {
+          sourceWrite(before ? `update` : `insert`, next)
         } else if (before) {
           await source.update(command.id, (draft) => {
             draft.rank = next.rank
@@ -5111,12 +5238,19 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       }
       // Each commit publishes at most once, and the commit that completes
       // the step publishes the final window. With one commit, every batch
-      // shows it.
-      expect(
-        published.length,
-        `publications by step ${step}`,
-      ).toBeLessThanOrEqual(commits)
-      for (const window of commits === 1 ? published : published.slice(-1)) {
+      // shows it. An on-demand repair or refill can publish an intermediate
+      // window first (#2131), so on that path only the last publication must
+      // show the final window.
+      const onDemand = testCase.path === `on-demand`
+      if (!onDemand) {
+        expect(
+          published.length,
+          `publications by step ${step}`,
+        ).toBeLessThanOrEqual(commits)
+      }
+      for (const window of commits === 1 && !onDemand
+        ? published
+        : published.slice(-1)) {
         expectEagerWindow(
           window,
           modelRows(),
@@ -5127,7 +5261,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       // A post-limit filter plan reads its full source more than once per
       // change on main too (402 of 201 rows here), so the scan law covers
       // source-filter plans, whose bounded read could add a second pass.
-      if (testCase.filter === `source`) {
+      if (testCase.filter === `source` && testCase.path !== `on-demand`) {
         expect(scanned, `rows scanned by step ${step}`).toBeLessThanOrEqual(
           Math.max(sizeBefore, rows.size),
         )

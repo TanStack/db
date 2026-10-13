@@ -313,10 +313,11 @@ export function processOrderBy(
       optimizableOrderByCollections[orderBySourceId] = info
 
       // Set up lazy loading callback to track how much more data is needed
-      // This is used by loadMoreIfNeeded to determine if more data should be loaded
-      // Only enable when an index exists — without an index, lazy loading can't work
-      // and all data is loaded eagerly via requestSnapshot instead.
-      if (index) {
+      // This is used by loadMoreIfNeeded to determine if more data should be loaded.
+      // Without an index, an eager source's snapshot holds every row. An
+      // on-demand source holds only what it received, so a filtered prefix
+      // can leave the window short, and the loader then reads the full source.
+      if (index || !info.sourceHoldsAllRows) {
         setSizeCallback = (getSize) => {
           optimizableOrderByCollections[orderBySourceId]![`dataNeeded`] = (
             boundary,
