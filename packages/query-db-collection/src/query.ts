@@ -1896,6 +1896,10 @@ export function queryCollectionOptions(
         fullSourceHash === undefined
           ? undefined
           : state.observers.get(fullSourceHash)
+      const hasFullSourceDependent = fullSourceDependents.has(requestedHash)
+      if (hasFullSourceDependent && fullObserver === undefined) {
+        throw new Error(`A full-source dependent lost its Query observer`)
+      }
       const fullQuery = fullObserver?.getCurrentQuery()
       // Existing dependents keep their original observer lease even if an
       // explicit refetch creates an exact Query for the same requested scope.
@@ -1903,7 +1907,7 @@ export function queryCollectionOptions(
         !opts.refetch &&
         fullSourceKey !== undefined &&
         fullSourceHash !== requestedHash &&
-        (fullSourceDependents.has(requestedHash) ||
+        (hasFullSourceDependent ||
           (!state.observers.has(requestedHash) &&
             (queryRefCounts.get(fullSourceHash!) ?? 0) > 0 &&
             fullObserver?.getCurrentResult().isSuccess === true &&
