@@ -38,7 +38,7 @@ supports only its legal histories, paths, and observations.
 ## Production-code weight
 
 Against the recorded `origin/main` baseline, the source diff under
-`packages/db/src` adds 360 lines and removes 536, for **176 fewer production
+`packages/db/src` adds 356 lines and removes 535, for **179 fewer production
 lines**. The built DB ESM entry bundled with esbuild (`bundle`, `minify`,
 `format: esm`, `platform: neutral`, `target: es2020`,
 `NODE_ENV=production`; DB IVM, pacer-lite, and standard-schema external) is
