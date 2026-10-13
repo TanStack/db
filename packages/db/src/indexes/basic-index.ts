@@ -1,10 +1,5 @@
 import { compareKeys } from '@tanstack/db-ivm'
-import {
-  areSameValueZeroEqual,
-  cacheBinaryKey,
-  isUint8Array,
-  normalizeValue,
-} from '../utils/comparison.js'
+import { areSameValueZeroEqual, normalizeValue } from '../utils/comparison.js'
 import { codedMessage, devBuild } from '../error-message.js'
 import {
   compareKeysReversed,
@@ -27,15 +22,6 @@ export type BasicIndexOptions = IndexComparisonOptions
 
 function orderValue(value: unknown): unknown {
   return value instanceof Date ? value.getTime() : value
-}
-
-function storedOrderValue(value: unknown, exact: unknown): unknown {
-  if (isUint8Array(value)) {
-    const copy = new Uint8Array(value)
-    cacheBinaryKey(copy, exact as string)
-    return copy
-  }
-  return orderValue(value)
 }
 
 /**
@@ -83,7 +69,7 @@ export class BasicIndex<
     } else {
       // New value. Find its sorted position first: a comparator failure must
       // throw before the index changes.
-      const orderedValue = storedOrderValue(value, normalizedValue)
+      const orderedValue = orderValue(value)
       const insertIdx = findInsertPositionInArray(
         this.sortedValues,
         orderedValue,
@@ -200,7 +186,7 @@ export class BasicIndex<
       if (keys) keys.add(key)
       else {
         this.valueMap.set(value, new Set([key]))
-        this.sortedValues.push(storedOrderValue(indexedValue, value))
+        this.sortedValues.push(orderValue(indexedValue))
       }
       this.addRangeValue(indexedValue)
       this.indexedKeys.add(key)

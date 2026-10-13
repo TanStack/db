@@ -229,10 +229,6 @@ function normalizedKey(kind: string, value: string): string {
 
 const binaryKeys = new WeakMap<Uint8Array, string>()
 
-export function cacheBinaryKey(value: Uint8Array, key: string): void {
-  binaryKeys.set(value, key)
-}
-
 function normalizeBinary(value: Uint8Array): string {
   const cached = binaryKeys.get(value)
   if (cached) return cached

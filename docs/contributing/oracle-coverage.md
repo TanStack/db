@@ -496,8 +496,9 @@ returns a non-number or `NaN` and checks rejected removal atomicity; it does
 not require a comparison merely because one comparator-equal row is removed.
 The binary lane checks fresh equal-content removal, re-addition, and
 replacement beside another byte value. It compares complete forward and
-reverse key reads to a source Map and exact membership for short and wide
-values that differ in their last byte. A pre-repair BTree lost a surviving key
+reverse key reads to a source Map. Separate short and 8193-byte pairs check
+exact membership and complete forward and reverse key conservation when only
+the last byte differs. An intermediate PR BTree rewrite lost a surviving key
 after one equal-content owner left; the expanded lane rejected that result.
 This owner does not prescribe mixed-kind order or cover arbitrary custom index
 callbacks, binary range ordering, all JavaScript value kinds, or general

@@ -2616,6 +2616,13 @@ describe.each(indexTypes)(`%s binary-value ownership`, (_name, IndexType) => {
       index.add(`right`, { value: right })
       expect(index.equalityLookup(left.slice())).toEqual(new Set([`left`]))
       expect(index.equalityLookup(right.slice())).toEqual(new Set([`right`]))
+      for (const read of [
+        index.takeFromStart(3),
+        index.takeReversedFromEnd(3),
+      ]) {
+        expect(read).toHaveLength(2)
+        expect(new Set(read)).toEqual(new Set([`left`, `right`]))
+      }
     },
   )
 })
