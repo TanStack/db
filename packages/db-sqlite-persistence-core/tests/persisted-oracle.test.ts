@@ -532,7 +532,6 @@ function createCoordinatorHarness(): CoordinatorHarness {
     },
     publish: () => {},
     isLeader: () => true,
-    getLeaderId: () => `coordinator-node`,
     ensureLeadership: async () => {},
     requestEnsurePersistedIndex: async () => {},
     requestEnsureRemoteSubset: async () => {},
@@ -628,7 +627,6 @@ function createFailStopCoordinatorHarness(
       harness.publishCalls.push(message)
     },
     isLeader: () => true,
-    getLeaderId: () => `fail-stop-coordinator`,
     ensureLeadership: async () => {},
     requestEnsurePersistedIndex: async () => {},
     requestEnsureRemoteSubset: async (_collectionId, options) => {
@@ -6359,7 +6357,6 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     `subscribe`,
     `publish`,
     `isLeader`,
-    `getLeaderId`,
     `ensureLeadership`,
     `requestEnsureRemoteSubset`,
     `requestReleaseRemoteSubset`,
@@ -6372,7 +6369,6 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       subscribe: () => () => {},
       publish: () => {},
       isLeader: () => true,
-      getLeaderId: () => `node-1`,
       ensureLeadership: async () => {},
       requestEnsureRemoteSubset: async () => {},
       requestReleaseRemoteSubset: async () => {},
@@ -6419,7 +6415,6 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       subscribe: () => () => {},
       publish: () => {},
       isLeader: () => false,
-      getLeaderId: () => null,
       ensureLeadership: () => Promise.resolve(),
       requestEnsurePersistedIndex: () => Promise.resolve(),
       // Remote subset routing is complete so this fixture isolates the
@@ -6630,7 +6625,6 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       },
       publish: (_collectionId, message) => published.push(message),
       isLeader: () => false,
-      getLeaderId: () => null,
       ensureLeadership: async () => {},
       requestEnsurePersistedIndex: async () => {},
       requestEnsureRemoteSubset: async () => {},
@@ -21617,7 +21611,6 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       subscribe: () => () => {},
       publish: () => {},
       isLeader: () => false,
-      getLeaderId: () => null,
       ensureLeadership: async () => {},
       requestEnsurePersistedIndex: async () => {},
       requestApplyCommittedTx: (_collectionId, tx) =>
@@ -21723,7 +21716,6 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         subscribe: () => () => {},
         publish: () => {},
         isLeader: () => true,
-        getLeaderId: () => `cancel-ensure`,
         ensureLeadership: async () => {},
         requestEnsurePersistedIndex: async () => {},
         requestApplyCommittedTx: (_collectionId, tx) =>
@@ -22361,7 +22353,6 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       subscribe: () => () => {},
       publish: () => {},
       isLeader: () => true,
-      getLeaderId: () => `retry-node`,
       ensureLeadership: async () => {},
       requestEnsurePersistedIndex: async () => {},
       requestApplyCommittedTx: (_collectionId, tx) =>
@@ -22426,7 +22417,6 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       subscribe: () => () => {},
       publish: () => {},
       isLeader: () => true,
-      getLeaderId: () => `ownerless-node`,
       ensureLeadership: async () => {},
       requestEnsurePersistedIndex: async () => {},
       requestApplyCommittedTx: (_collectionId, tx) =>
@@ -22500,7 +22490,6 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       subscribe: () => () => {},
       publish: () => {},
       isLeader: () => isLeader,
-      getLeaderId: () => (isLeader ? `transitioning-node` : null),
       ensureLeadership: async () => {},
       requestEnsurePersistedIndex: async () => {},
       requestApplyCommittedTx: (_collectionId, tx) =>
@@ -22554,7 +22543,6 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       subscribe: () => () => {},
       publish: () => {},
       isLeader: () => false,
-      getLeaderId: () => null,
       ensureLeadership: async () => {},
       requestEnsurePersistedIndex: async () => {},
       requestApplyCommittedTx: (_collectionId, tx) =>
@@ -22612,7 +22600,6 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       subscribe: () => () => {},
       publish: () => {},
       isLeader: () => false,
-      getLeaderId: () => null,
       ensureLeadership: async () => {},
       requestEnsurePersistedIndex: async () => {},
       requestApplyCommittedTx: (_collectionId, tx) =>
@@ -25738,7 +25725,6 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
     const coordinator: PersistedCollectionCoordinator = {
       getNodeId: () => `follower-node`,
-      getLeaderId: () => ownerId,
       subscribe: (id, onMessage) => {
         subscribers.set(id, onMessage)
         return () => {
@@ -26141,7 +26127,6 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     let resetPending = false
     const coordinator: PersistedCollectionCoordinator = {
       getNodeId: () => `follower`,
-      getLeaderId: () => `owner`,
       subscribe: (_collectionId, onMessage) => {
         subscriber = onMessage
         return () => {
@@ -26476,7 +26461,6 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     } as unknown as PersistenceAdapter
     const coordinator = {
       getNodeId: () => `follower`,
-      getLeaderId: () => `owner`,
       subscribe: (
         _collectionId: string,
         onMessage: (message: ProtocolEnvelope<unknown>) => void,

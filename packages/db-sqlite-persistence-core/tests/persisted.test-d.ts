@@ -271,20 +271,6 @@ describe(`persisted collection types`, () => {
     ).toMatchTypeOf<PersistedCollectionCoordinator>()
   })
 
-  it(`requires every coordinator to report the elected owner`, () => {
-    // A follower tells its owner's commit notices from a peer's by the
-    // elected owner's node ID, so getLeaderId is part of every coordinator.
-    const withoutLeaderId = {} as Omit<
-      PersistedCollectionCoordinator,
-      `getLeaderId`
-    >
-    // @ts-expect-error getLeaderId is required for every coordinator
-    const coordinator: PersistedCollectionCoordinator = withoutLeaderId
-    expectTypeOf(coordinator.getLeaderId).toEqualTypeOf<
-      (collectionId: string) => string | null
-    >()
-  })
-
   it(`requires an exact atomic resume snapshot contract`, () => {
     type LoadResumeSnapshot = PersistenceAdapter[`loadResumeSnapshot`]
     type ResumeSnapshot = Awaited<ReturnType<LoadResumeSnapshot>>

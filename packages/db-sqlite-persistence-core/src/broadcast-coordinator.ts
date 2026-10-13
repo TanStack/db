@@ -411,7 +411,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     this.channel.postMessage(message)
   }
 
-  getLeaderId(collectionId: string): string | null {
+  private getLeaderId(collectionId: string): string | null {
     const state = this.collections.get(collectionId)
     return state?.isLeader ? this.nodeId : (state?.leaderId ?? null)
   }
