@@ -97,8 +97,6 @@ type TruncateReplayPublicationControl = Readonly<{
 type TruncatePublicationState = {
   loadedInitialState: boolean
   snapshotSent: boolean
-  limitedSnapshotRowCount: number
-  lastSentKey: string | number | undefined
 }
 
 /** Internal record spanning a tentative attempt and any accepted acquisition. */
@@ -171,16 +169,11 @@ export class CollectionSubscription
     BasicExpression<boolean>
   >()
 
-  // Keep track of the keys we've sent (needed for join and orderBy optimizations)
+  // Keep track of keys selected by snapshots or delivered through callbacks.
+  // Ordered snapshots skip these keys until a valid reset.
   private sentKeys = new Set<string | number>()
   private publishedRows = new Map<string | number, object>()
   private stalePublishedRows = new Map<string | number, object>()
-
-  // Track the count of rows sent via requestLimitedSnapshot for offset-based pagination
-  private limitedSnapshotRowCount = 0
-
-  // Track the last key sent via requestLimitedSnapshot for cursor-based pagination
-  private lastSentKey: string | number | undefined
 
   private filteredCallback: (changes: Array<ChangeMessage<any, any>>) => boolean
 
@@ -649,8 +642,6 @@ export class CollectionSubscription
     const publicationState = replayState.publicationState
     this.loadedInitialState = publicationState.loadedInitialState
     this.snapshotSent = publicationState.snapshotSent
-    this.limitedSnapshotRowCount = publicationState.limitedSnapshotRowCount
-    this.lastSentKey = publicationState.lastSentKey
   }
 
   /** Publish the buffered replacement as one batch, or release the delegate. */
@@ -682,14 +673,6 @@ export class CollectionSubscription
 
   private restorePublishedSnapshotTracking(): void {
     this.sentKeys = new Set(this.publishedRows.keys())
-    if (!this.orderByIndex) return
-
-    this.limitedSnapshotRowCount = this.sentKeys.size
-    const orderedSentKeys = this.orderByIndex.takeFromStart(
-      this.sentKeys.size,
-      (key) => this.sentKeys.has(key),
-    )
-    this.lastSentKey = orderedSentKeys.at(-1)
   }
 
   /** Fold changes into the private replacement; false when they publish now. */
@@ -773,8 +756,6 @@ export class CollectionSubscription
   private resetSnapshotTracking(): void {
     this.snapshotSent = false
     this.loadedInitialState = false
-    this.limitedSnapshotRowCount = 0
-    this.lastSentKey = undefined
   }
 
   /** One replay state; only direct subscribers buffer a private replacement. */
@@ -787,8 +768,6 @@ export class CollectionSubscription
       publicationState: {
         loadedInitialState: this.loadedInitialState,
         snapshotSent: this.snapshotSent,
-        limitedSnapshotRowCount: this.limitedSnapshotRowCount,
-        lastSentKey: this.lastSentKey,
       },
       privateRows: this.options.truncateReplayPublication
         ? undefined
@@ -1228,7 +1207,11 @@ export class CollectionSubscription
       subscription: this,
       // Include orderBy and limit if provided so sync layer can optimize the query
       orderBy: opts?.orderBy,
-      limit: opts?.limit,
+      // A local optimistic row can hide one source row from a bounded prefix.
+      limit:
+        opts?.limit === undefined
+          ? undefined
+          : opts.limit + this.collection._optimisticOverlaySize(),
     }
     // The loader can reenter releaseSnapshot before startSubsetDemand returns.
     if (opts?.where) this.requestedSubsetWhere.set(loadOptions, opts.where)
@@ -1296,9 +1279,8 @@ export class CollectionSubscription
         (!this.sentKeys.has(change.key) && !knownRows.has(change.key)),
     )
 
-    // Add keys to sentKeys BEFORE calling callback to prevent race condition.
-    // If a change event arrives while the callback is executing, it will see
-    // the keys already in sentKeys and filter out duplicates correctly.
+    // Reserve the selected keys before publication. A truncate replay can keep
+    // this snapshot private, so callback tracking cannot reserve it yet.
     for (const change of filteredSnapshot) {
       this.sentKeys.add(change.key)
     }
@@ -1387,7 +1369,7 @@ export class CollectionSubscription
     this.options.truncateReplayPublication?.succeed()
   }
 
-  /** Read the applied rows in an ordered acquisition without starting demand. */
+  /** Read source-derived ordered rows without starting demand. */
   readOrderedSnapshot(
     options: LoadSubsetOptions,
   ): Array<ChangeMessage<Record<string, unknown>, string | number>> {
@@ -1404,7 +1386,14 @@ export class CollectionSubscription
           ? predicates.reduce((left, right) => and(left, right))
           : undefined,
     })
-    return Array.isArray(snapshot) ? snapshot : []
+    // Optimistic rows can fill the visible window but cannot establish a
+    // provider offset or cursor boundary. Excluding their keys is conservative
+    // when an optimistic update hides a source row in the local ordered view.
+    return Array.isArray(snapshot)
+      ? snapshot.filter(
+          ({ key }) => !this.collection._hasOptimisticOverlay(key),
+        )
+      : []
   }
 
   /**
@@ -1498,7 +1487,7 @@ export class CollectionSubscription
       if (allRowsWithMinValue) {
         const keysWithMinValue = allRowsWithMinValue
           .map((change) => change.key)
-          .filter((key) => !this.sentKeys.has(key) && filterFn(key))
+          .filter(filterFn)
 
         // Add items with the minValue first
         keys.push(...keysWithMinValue)
@@ -1547,13 +1536,8 @@ export class CollectionSubscription
       keys = index.take(valuesNeeded(), biggestObservedValue!, filterFn)
     }
 
-    // Track row count for offset-based pagination (before sending to callback)
-    // Use the current count as the offset for this load
-    const currentOffset = this.limitedSnapshotRowCount
-
-    // Add keys to sentKeys BEFORE calling callback to prevent race condition.
-    // If a change event arrives while the callback is executing, it will see
-    // the keys already in sentKeys and filter out duplicates correctly.
+    // Reserve rows before publication. A direct truncate replay keeps them in
+    // the private replacement, but repeated ordered snapshots must continue.
     for (const change of changes) {
       this.sentKeys.add(change.key)
     }
@@ -1563,23 +1547,15 @@ export class CollectionSubscription
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (this.unsubscribed) return
 
-    // Update the row count and last key after sending (for next call's offset/cursor)
-    this.limitedSnapshotRowCount = Math.max(
-      this.limitedSnapshotRowCount,
-      currentOffset + changes.length,
-    )
-    if (changes.length > 0) {
-      this.lastSentKey = changes[changes.length - 1]!.key
-    }
-
     // Build cursor expressions for sync layer loadSubset
     // The cursor expressions are separate from the main where clause
-    // so the sync layer can choose cursor-based or offset-based pagination
+    // so the sync layer can choose cursor-based or offset-based pagination.
+    // A local key is not an authoritative provider cursor: sparse source rows
+    // and callback reentry can leave lower-ranked provider rows unseen.
     let cursorExpressions:
       | {
           whereFrom: BasicExpression<boolean>
           whereCurrent: BasicExpression<boolean>
-          lastKey?: string | number
         }
       | undefined
 
@@ -1589,10 +1565,23 @@ export class CollectionSubscription
         cursorExpressions = {
           whereFrom: whereFromCursor,
           whereCurrent: whereCurrentCursor,
-          lastKey: this.lastSentKey,
         }
       }
     }
+
+    // A cursor value does not bound how many provider rows precede it. When an
+    // adapter ignores cursor expressions and no offset was supplied, only a
+    // full-source request can reach an arbitrary cursor value. Otherwise,
+    // selected keys and optimistic overlays can each hide source rows from a
+    // local page. Their cardinalities bound how many extra provider rows the
+    // request may need to reach `limit` visible rows.
+    const overlaySize = this.collection._optimisticOverlaySize()
+    const providerLimit =
+      offset !== undefined
+        ? limit + overlaySize
+        : hasMinValue
+          ? undefined
+          : limit + this.sentKeys.size + overlaySize
 
     // Request the sync layer to load more data
     // don't await it, we will load the data into the collection when it comes in
@@ -1601,10 +1590,10 @@ export class CollectionSubscription
     const loadOptions: LoadSubsetOptions = {
       ...(refetch ? { refetch: true } : {}),
       where, // Main filter only, no cursor
-      limit,
+      limit: providerLimit,
       orderBy,
       cursor: cursorExpressions, // Cursor expressions passed separately
-      offset: offset ?? currentOffset, // Use provided offset, or auto-tracked offset
+      offset: offset ?? 0,
       subscription: this,
     }
 
@@ -1651,18 +1640,14 @@ export class CollectionSubscription
       return changes
     }
 
-    // When buffering for truncate, we need all changes (including deletes) to pass through.
-    // This is important because:
-    // 1. If loadedInitialState was previously true, sentKeys will be empty
-    //    (trackSentKeys early-returns when loadedInitialState is true)
-    // 2. The truncate deletes are for keys that WERE sent to the subscriber
-    // 3. We're collecting all changes atomically, so filtering doesn't make sense
+    // A former full-state subscription is reset before truncate deletes arrive.
+    // Pass even unreserved deletes into its private replacement so stale
+    // published rows do not survive the replay.
     const skipDeleteFilter = this.isBufferingForTruncate
 
-    // sentKeys records only published rows; trackSentKeys adds them after
-    // delivery. Keys inserted earlier in this batch are tracked locally, so a
-    // row the where clause drops cannot advance pagination or later look like
-    // a duplicate insert.
+    // sentKeys covers snapshot selections and callback rows. Keys inserted
+    // earlier in this batch are tracked locally, so a row the where clause
+    // drops cannot advance pagination or later look like a duplicate insert.
     const insertedInBatch = new Set<string | number>()
     const newChanges = []
     for (const change of changes) {
@@ -1765,28 +1750,12 @@ export class CollectionSubscription
   }
 
   private trackSentKeys(changes: Array<ChangeMessage<any, string | number>>) {
-    if (this.loadedInitialState || this.skipFiltering) {
-      // No need to track sent keys if we loaded the entire state or filtering is skipped.
-      // Since filtering won't be applied, all keys are effectively "observed".
-      return
-    }
-
     for (const change of changes) {
       if (change.type === `delete`) {
         this.sentKeys.delete(change.key)
       } else {
         this.sentKeys.add(change.key)
       }
-    }
-
-    // Keep the limited snapshot offset in sync with keys we've actually sent.
-    // This matters when loadSubset resolves asynchronously and requestLimitedSnapshot
-    // didn't have local rows to count yet.
-    if (this.orderByIndex) {
-      this.limitedSnapshotRowCount = Math.max(
-        this.limitedSnapshotRowCount,
-        this.sentKeys.size,
-      )
     }
   }
 
