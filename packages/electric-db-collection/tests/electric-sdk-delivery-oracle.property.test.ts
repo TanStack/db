@@ -2096,6 +2096,11 @@ fixedCase.each([
  * initial failure: the Collection must enter `error` and a waiting full-log
  * demand must reject. Otherwise the Collection stays `loading` with no live
  * stream, and every readiness wait hangs.
+ *
+ * These cases are the installed-client receiving witnesses for the
+ * retry-decision law in `electric-oracle.property.test.ts`. That oracle drives
+ * the client's give-up through a controlled stream; these show the installed
+ * client reaches the same subscriber error callback.
  */
 fixedCase.each([
   [`a response without Electric headers`, `missing-headers`],

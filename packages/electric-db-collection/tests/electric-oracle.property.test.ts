@@ -43,6 +43,7 @@ const historyPropertyIds = new Set([
   `electric.subset-request-row-validity`,
   `electric.resume-metadata-merge`,
   `electric.metadata-merge-complete-state`,
+  `electric.retry-decision`,
 ])
 
 if (
@@ -574,9 +575,11 @@ function createOracleCollection(
   } = {},
 ) {
   let subscriber!: (messages: Array<Message<OracleRow>>) => void
+  let sdkError!: (error: unknown) => void
   const unsubscribe = vi.fn()
-  mockSubscribe.mockImplementationOnce((callback) => {
+  mockSubscribe.mockImplementationOnce((callback, onSubscriberError) => {
     subscriber = callback
+    sdkError = onSubscriberError
     return unsubscribe
   })
   const options = electricCollectionOptions<OracleRow>({
@@ -600,6 +603,7 @@ function createOracleCollection(
       },
     }),
     subscriber,
+    sdkError,
     unsubscribe,
   }
 }
@@ -5366,182 +5370,435 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     },
   )
 
-  // The user may decide to retry asynchronously. Until that decision, no
-  // acquisition fails: a retry is a legal continuation of this source run,
-  // and a retry that succeeds is a success. This controlled callback holds the
-  // decision, observes both settlements, and then supplies an applied
-  // replacement through the real Collection. A give-up fails both.
-  it(`keeps a new full recovery demand pending during an async retry decision`, async () => {
-    const retryDecision = createDeferred<Record<string, never> | undefined>()
-    const metadata = createMetadata(
-      new Map([[`electric:resume`, { kind: `reset`, updatedAt: 1 }]]),
-    )
-    const trace = createOracleCollection(
-      `full-recovery-async-retry`,
-      `on-demand`,
-      metadata.api,
-      { onError: () => retryDecision.promise },
-    )
-    const error = new Error(`transient provider error`)
-
-    await withElectricCleanup(async () => {
-      const first = Promise.resolve(
-        trace.collection._sync.loadSubset({ limit: 1 }),
-      )
-      const streamOptions = vi.mocked(ShapeStream).mock.calls.at(-1)?.[0] as
-        { onError?: (error: unknown) => unknown } | undefined
-      let firstOutcome: `pending` | `fulfilled` | `rejected` = `pending`
-      const firstSettled = first.then(
-        () => {
-          firstOutcome = `fulfilled`
-        },
-        () => {
-          firstOutcome = `rejected`
-        },
-      )
-      const decision = Promise.resolve(streamOptions!.onError!(error))
-
-      let secondOutcome: `pending` | `fulfilled` | `rejected` = `pending`
-      const second = Promise.resolve(
-        trace.collection._sync.loadSubset({ limit: 2 }),
-      ).then(
-        () => {
-          secondOutcome = `fulfilled`
-        },
-        () => {
-          secondOutcome = `rejected`
-        },
-      )
-      await new Promise<void>((resolve) => setTimeout(resolve, 0))
-      expect(firstOutcome).toBe(`pending`)
-      expect(secondOutcome).toBe(`pending`)
-      expect(trace.collection.status).toBe(`loading`)
-      retryDecision.resolve({})
-      await decision
-      trace.subscriber([change(`insert`, 1, `recovered`), upToDate])
-      await atCheckpoint(second, `async retry replacement`)
-      await atCheckpoint(firstSettled, `async retry pre-error demand`)
-      expect(firstOutcome).toBe(`fulfilled`)
-      expect(secondOutcome).toBe(`fulfilled`)
-      expect(trace.collection.get(1)?.name).toBe(`recovered`)
-    }, [
-      () => retryDecision.resolve(undefined),
-      () => trace.collection.cleanup(),
-    ])
-  })
-
-  // Record a demand's settlement at an explicit checkpoint, so a demand that
-  // never settles fails an assertion rather than timing out.
-  function settlement(result: unknown) {
-    const record: {
-      outcome:
-        | { state: `pending` }
-        | { state: `fulfilled` }
-        | { state: `rejected`; reason: unknown }
-    } = { outcome: { state: `pending` } }
-    void Promise.resolve(result).then(
-      () => {
-        record.outcome = { state: `fulfilled` }
-      },
-      (reason: unknown) => {
-        record.outcome = { state: `rejected`, reason }
-      },
-    )
-    return record
+  /**
+   * ## Does a source that still tries ever look failed?
+   *
+   * Law: an Electric source that is still trying is `loading`. While the
+   * user's `onError` decides, and after it asks for a retry, no initial wait
+   * fails: the Collection stays `loading`, and a waiting full-log or
+   * progressive demand settles, with its rows visible, when the retried
+   * stream delivers its snapshot. A retry that succeeds is a success. The
+   * source fails its initial sync only when it gives up: there is no
+   * `onError`, `onError` returns no retry or throws, the Electric client gives
+   * up by itself, or the stream's external signal aborts. Then the Collection
+   * enters `error` and every waiting demand rejects with that cause. After
+   * the first ready, a later failure does not change the status. Cleanup ends
+   * a waiting demand quietly.
+   *
+   * The independent model keeps four facts: whether the first up-to-date was
+   * delivered, the final failure cause, the pending `onError` decision, and
+   * each demand's settlement. It does not read production state.
+   *
+   * The history grammar crosses the full-log and progressive waits, with and
+   * without `onError`, over errors whose decisions are a synchronous retry, a
+   * synchronous give-up, a throw, an asynchronous retry, or an asynchronous
+   * give-up; a later error after a retry; an Electric client give-up; an
+   * external abort before or during a decision; new demands; the first
+   * up-to-date; and cleanup. It omits histories the client cannot produce:
+   * a stream message or a second error while `onError` decides, because the
+   * client awaits the decision; and stream steps after a final failure or an
+   * abort, because the stream has stopped. A progressive history starts with
+   * a must-refetch, so its demands wait on the established snapshot.
+   *
+   * The driver runs the real adapter and Collection behind the controlled
+   * ShapeStream. After each step and a timer turn it compares the status,
+   * every demand's settlement and cause, and whether the snapshot's row is
+   * visible. Installed-client evidence for the client's own give-up is in
+   * `electric-sdk-delivery-oracle.property.test.ts`.
+   */
+  type RetryWait = `full-log` | `progressive`
+  type RetryDecision =
+    `sync-retry` | `sync-give-up` | `throw` | `async-retry` | `async-give-up`
+  type RetryStep =
+    | { kind: `demand` }
+    | { kind: `error`; decision: RetryDecision }
+    | { kind: `decide` }
+    | { kind: `up-to-date` }
+    | { kind: `client-give-up` }
+    | { kind: `abort` }
+  type RetryHistory = {
+    wait: RetryWait
+    hasOnError: boolean
+    steps: Array<RetryStep>
+  }
+  type RetrySettlement = `pending` | `fulfilled` | `rejected:${string}`
+  type RetryObservation = {
+    status: string
+    demands: Array<RetrySettlement>
+    rowVisible: boolean
   }
 
-  it(`fails every waiting full recovery demand when an async retry decision gives up`, async () => {
-    const retryDecision = createDeferred<Record<string, never> | undefined>()
+  type RetryModel = {
+    ready: boolean
+    failed: string | undefined
+    aborted: boolean
+    deciding: { decision: RetryDecision; cause: string } | undefined
+    demands: Array<RetrySettlement>
+  }
+
+  // Each error, throw, and abort has a tag, so a rejection's cause can be
+  // compared by identity without reading production state.
+  function retryModelFail(model: RetryModel, cause: string): void {
+    if (model.ready || model.failed !== undefined) return
+    model.failed = cause
+    model.demands = model.demands.map((settlement): RetrySettlement =>
+      settlement === `pending` ? `rejected:${cause}` : settlement,
+    )
+  }
+
+  function retryStepIsLegal(model: RetryModel, step: RetryStep): boolean {
+    if (step.kind === `decide`) return model.deciding !== undefined
+    if (model.failed !== undefined || model.aborted) return false
+    switch (step.kind) {
+      case `demand`:
+        return true
+      case `error`:
+      case `client-give-up`:
+        return model.deciding === undefined
+      case `up-to-date`:
+        return !model.ready && model.deciding === undefined
+      case `abort`:
+        return true
+    }
+  }
+
+  // The model: what a source that still tries, or has given up, promises.
+  function applyRetryModel(
+    model: RetryModel,
+    step: RetryStep,
+    hasOnError: boolean,
+    tag: string,
+  ): void {
+    switch (step.kind) {
+      case `demand`:
+        model.demands.push(
+          model.ready
+            ? `fulfilled`
+            : model.failed !== undefined
+              ? `rejected:${model.failed}`
+              : `pending`,
+        )
+        return
+      case `error`:
+        if (!hasOnError || step.decision === `sync-give-up`) {
+          retryModelFail(model, tag)
+        } else if (step.decision === `throw`) {
+          retryModelFail(model, `thrown-${tag}`)
+        } else if (
+          step.decision === `async-retry` ||
+          step.decision === `async-give-up`
+        ) {
+          model.deciding = { decision: step.decision, cause: tag }
+        }
+        return
+      case `decide`: {
+        const deciding = model.deciding!
+        model.deciding = undefined
+        if (deciding.decision === `async-give-up` && !model.aborted) {
+          retryModelFail(model, deciding.cause)
+        }
+        return
+      }
+      case `up-to-date`:
+        model.ready = true
+        model.demands = model.demands.map((settlement): RetrySettlement =>
+          settlement === `pending` ? `fulfilled` : settlement,
+        )
+        return
+      case `client-give-up`:
+        retryModelFail(model, tag)
+        return
+      case `abort`:
+        retryModelFail(model, `StreamAbortedError`)
+        model.aborted = true
+        return
+    }
+  }
+
+  function expectedRetryObservation(
+    model: RetryModel,
+    cleanedUp: boolean,
+  ): RetryObservation {
+    return {
+      status: cleanedUp
+        ? `cleaned-up`
+        : model.failed !== undefined
+          ? `error`
+          : model.ready
+            ? `ready`
+            : `loading`,
+      demands: model.demands.map((settlement): RetrySettlement =>
+        cleanedUp && settlement === `pending` ? `fulfilled` : settlement,
+      ),
+      rowVisible: !cleanedUp && model.ready,
+    }
+  }
+
+  const retryDecisionArb = fc.constantFrom<RetryDecision>(
+    `sync-retry`,
+    `sync-give-up`,
+    `throw`,
+    `async-retry`,
+    `async-give-up`,
+  )
+  const retryStepArb: fc.Arbitrary<RetryStep> = fc.oneof(
+    fc.constant({ kind: `demand` as const }),
+    retryDecisionArb.map((decision) => ({ kind: `error` as const, decision })),
+    fc.constant({ kind: `decide` as const }),
+    fc.constant({ kind: `up-to-date` as const }),
+    fc.constant({ kind: `client-give-up` as const }),
+    fc.constant({ kind: `abort` as const }),
+  )
+  // Generated steps that the client cannot produce in the current model state
+  // are dropped, so every history is legal.
+  const retryHistoryArb: fc.Arbitrary<RetryHistory> = fc
+    .record({
+      wait: fc.constantFrom<RetryWait>(`full-log`, `progressive`),
+      hasOnError: fc.boolean(),
+      steps: fc.array(retryStepArb, { minLength: 1, maxLength: 8 }),
+    })
+    .map(({ wait, hasOnError, steps }) => {
+      const model: RetryModel = {
+        ready: false,
+        failed: undefined,
+        aborted: false,
+        deciding: undefined,
+        demands: [],
+      }
+      const legal: Array<RetryStep> = [{ kind: `demand` }]
+      applyRetryModel(model, legal[0]!, hasOnError, `e0`)
+      for (const step of steps) {
+        if (!retryStepIsLegal(model, step)) continue
+        legal.push(step)
+        applyRetryModel(model, step, hasOnError, `e${legal.length - 1}`)
+      }
+      return { wait, hasOnError, steps: legal }
+    })
+
+  function retrySettlementTag(error: unknown, tags: Map<unknown, string>) {
+    const tag = tags.get(error)
+    if (tag !== undefined) return tag
+    return error instanceof Error ? error.name : String(error)
+  }
+
+  async function runRetryHistory(
+    history: RetryHistory,
+    id: string,
+  ): Promise<void> {
     const metadata = createMetadata(
       new Map([[`electric:resume`, { kind: `reset`, updatedAt: 1 }]]),
     )
+    const controller = new AbortController()
+    const tags = new Map<unknown, string>()
+    let decide: ((retry: Record<string, never> | undefined) => void) | undefined
+    let decision: RetryDecision = `sync-retry`
+    let thrown: Error | undefined
+    const onError = () => {
+      if (decision === `throw`) throw thrown
+      if (decision === `sync-retry`) return {}
+      if (decision === `sync-give-up`) return undefined
+      return new Promise<Record<string, never> | undefined>((resolve) => {
+        decide = resolve
+      })
+    }
     const trace = createOracleCollection(
-      `full-recovery-async-give-up`,
-      `on-demand`,
-      metadata.api,
-      { onError: () => retryDecision.promise },
-    )
-    const error = new Error(`permanent provider error`)
-
-    await withElectricCleanup(async () => {
-      const first = settlement(trace.collection._sync.loadSubset({ limit: 1 }))
-      const streamOptions = vi.mocked(ShapeStream).mock.calls.at(-1)?.[0] as
-        { onError?: (error: unknown) => unknown } | undefined
-      const decision = Promise.resolve(streamOptions!.onError!(error))
-      const second = settlement(trace.collection._sync.loadSubset({ limit: 2 }))
-      // The source is still deciding, so nothing has failed yet.
-      await new Promise<void>((resolve) => setTimeout(resolve, 0))
-      expect(trace.collection.status).toBe(`loading`)
-      retryDecision.resolve(undefined)
-      await decision
-      await new Promise<void>((resolve) => setTimeout(resolve, 0))
-      expect(first.outcome).toEqual({ state: `rejected`, reason: error })
-      expect(second.outcome).toEqual({ state: `rejected`, reason: error })
-      expect(trace.collection.status).toBe(`error`)
-    }, [() => trace.collection.cleanup()])
-  })
-
-  // An onError handler that throws gives up too: the waiting demand rejects
-  // with what it threw, and the initial sync fails.
-  it(`fails a waiting full recovery demand when onError throws`, async () => {
-    const thrown = new Error(`onError failed`)
-    const metadata = createMetadata(
-      new Map([[`electric:resume`, { kind: `reset`, updatedAt: 1 }]]),
-    )
-    const trace = createOracleCollection(
-      `full-recovery-throwing-on-error`,
-      `on-demand`,
+      id,
+      history.wait === `progressive` ? `progressive` : `on-demand`,
       metadata.api,
       {
-        onError: () => {
-          throw thrown
-        },
+        signal: controller.signal,
+        ...(history.hasOnError
+          ? {
+              onError: onError as unknown as () => Promise<
+                Record<string, never> | undefined
+              >,
+            }
+          : {}),
       },
     )
+    const streamOnError = (
+      vi.mocked(ShapeStream).mock.calls.at(-1)?.[0] as unknown as {
+        onError: (error: unknown) => Promise<unknown>
+      }
+    ).onError
+    const settlements: Array<RetrySettlement> = []
+    const model: RetryModel = {
+      ready: false,
+      failed: undefined,
+      aborted: false,
+      deciding: undefined,
+      demands: [],
+    }
+    const turn = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
+    const observe = (): RetryObservation => ({
+      status: trace.collection.status,
+      demands: [...settlements],
+      rowVisible: trace.collection.has(1),
+    })
+    const decisions: Array<Promise<unknown>> = []
 
     await withElectricCleanup(async () => {
-      const first = settlement(trace.collection._sync.loadSubset({ limit: 1 }))
-      const streamOptions = vi.mocked(ShapeStream).mock.calls.at(-1)?.[0] as
-        { onError?: (error: unknown) => unknown } | undefined
-      await expect(
-        Promise.resolve(streamOptions!.onError!(new Error(`provider error`))),
-      ).rejects.toBe(thrown)
-      await new Promise<void>((resolve) => setTimeout(resolve, 0))
-      expect(first.outcome).toEqual({ state: `rejected`, reason: thrown })
-      expect(trace.collection.status).toBe(`error`)
+      if (history.wait === `progressive`) {
+        trace.subscriber([{ headers: { control: `must-refetch` } }])
+        await turn()
+      }
+      for (const [index, step] of history.steps.entries()) {
+        const tag = `e${index}`
+        switch (step.kind) {
+          case `demand`: {
+            const slot = settlements.push(`pending`) - 1
+            void Promise.resolve(
+              trace.collection._sync.loadSubset({ limit: slot + 1 }),
+            ).then(
+              () => {
+                settlements[slot] = `fulfilled`
+              },
+              (reason: unknown) => {
+                settlements[slot] =
+                  `rejected:${retrySettlementTag(reason, tags)}`
+              },
+            )
+            break
+          }
+          case `error`: {
+            const error = new Error(`provider error ${tag}`)
+            tags.set(error, tag)
+            decision = step.decision
+            thrown = new Error(`onError threw ${tag}`)
+            tags.set(thrown, `thrown-${tag}`)
+            decisions.push(
+              Promise.resolve(streamOnError(error)).catch(() => undefined),
+            )
+            break
+          }
+          case `decide`:
+            decide!(model.deciding!.decision === `async-retry` ? {} : undefined)
+            break
+          case `up-to-date`:
+            trace.subscriber([change(`insert`, 1, `recovered`), upToDate])
+            break
+          case `client-give-up`: {
+            const error = new Error(`client gave up ${tag}`)
+            tags.set(error, tag)
+            trace.sdkError(error)
+            break
+          }
+          case `abort`:
+            controller.abort()
+            break
+        }
+        applyRetryModel(model, step, history.hasOnError, tag)
+        await turn()
+        await turn()
+        expect(
+          observe(),
+          `after ${JSON.stringify(history.steps.slice(0, index + 1))}`,
+        ).toEqual(expectedRetryObservation(model, false))
+      }
+      await trace.collection.cleanup()
+      // A decision still pending at cleanup cannot change the stopped run.
+      decide?.(undefined)
+      await Promise.all(decisions)
+      await turn()
+      expect(observe(), `after cleanup`).toEqual(
+        expectedRetryObservation(model, true),
+      )
     }, [() => trace.collection.cleanup()])
-  })
+  }
 
-  // A retry keeps the source trying; a later error that gives up is still a
-  // final failure for the demand that waited through both.
-  it(`fails a waiting full recovery demand when a later error gives up after a retry`, async () => {
-    const decisions: Array<Record<string, never> | undefined> = [{}, undefined]
-    const metadata = createMetadata(
-      new Map([[`electric:resume`, { kind: `reset`, updatedAt: 1 }]]),
-    )
-    const trace = createOracleCollection(
-      `full-recovery-retry-then-give-up`,
-      `on-demand`,
-      metadata.api,
-      { onError: () => Promise.resolve(decisions.shift()) },
-    )
-    const second = new Error(`second provider error`)
-
-    await withElectricCleanup(async () => {
-      const first = settlement(trace.collection._sync.loadSubset({ limit: 1 }))
-      const streamOptions = vi.mocked(ShapeStream).mock.calls.at(-1)?.[0] as
-        { onError?: (error: unknown) => unknown } | undefined
-      await streamOptions!.onError!(new Error(`first provider error`))
-      await new Promise<void>((resolve) => setTimeout(resolve, 0))
-      expect(first.outcome).toEqual({ state: `pending` })
-      expect(trace.collection.status).toBe(`loading`)
-
-      await streamOptions!.onError!(second)
-      await new Promise<void>((resolve) => setTimeout(resolve, 0))
-      expect(first.outcome).toEqual({ state: `rejected`, reason: second })
-      expect(trace.collection.status).toBe(`error`)
-    }, [() => trace.collection.cleanup()])
-  })
+  let retryHistoryRun = 0
+  electricHistoryProperty(
+    `electric.retry-decision`,
+    `a source that still tries stays loading, and only a give-up fails its waits`,
+    retryHistoryArb,
+    30,
+    42_731,
+    async (history) => {
+      const consoleError = vi
+        .spyOn(console, `error`)
+        .mockImplementation(() => {})
+      const consoleWarn = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      try {
+        resetElectricOracleMocks()
+        await runRetryHistory(history, `retry-decision-${++retryHistoryRun}`)
+      } finally {
+        consoleError.mockRestore()
+        consoleWarn.mockRestore()
+      }
+    },
+    60_000,
+    [
+      // Named replays: an asynchronous retry decision with a waiting and a new
+      // demand; an asynchronous give-up; a retry, then a give-up; a throwing
+      // onError; an Electric client give-up; and an abort during a decision.
+      [
+        {
+          wait: `full-log`,
+          hasOnError: true,
+          steps: [
+            { kind: `demand` },
+            { kind: `error`, decision: `async-retry` },
+            { kind: `demand` },
+            { kind: `decide` },
+            { kind: `up-to-date` },
+          ],
+        },
+      ],
+      [
+        {
+          wait: `full-log`,
+          hasOnError: true,
+          steps: [
+            { kind: `demand` },
+            { kind: `error`, decision: `async-give-up` },
+            { kind: `demand` },
+            { kind: `decide` },
+          ],
+        },
+      ],
+      [
+        {
+          wait: `full-log`,
+          hasOnError: true,
+          steps: [
+            { kind: `demand` },
+            { kind: `error`, decision: `sync-retry` },
+            { kind: `error`, decision: `sync-give-up` },
+          ],
+        },
+      ],
+      [
+        {
+          wait: `full-log`,
+          hasOnError: true,
+          steps: [{ kind: `demand` }, { kind: `error`, decision: `throw` }],
+        },
+      ],
+      [
+        {
+          wait: `progressive`,
+          hasOnError: true,
+          steps: [
+            { kind: `demand` },
+            { kind: `error`, decision: `sync-retry` },
+            { kind: `client-give-up` },
+          ],
+        },
+      ],
+      [
+        {
+          wait: `progressive`,
+          hasOnError: true,
+          steps: [
+            { kind: `demand` },
+            { kind: `error`, decision: `async-retry` },
+            { kind: `abort` },
+            { kind: `decide` },
+          ],
+        },
+      ],
+    ] satisfies Array<[RetryHistory]> as Array<[RetryHistory]>,
+  )
 
   /**
    * A scoped source snapshot owes applied settlement at subset-end, even

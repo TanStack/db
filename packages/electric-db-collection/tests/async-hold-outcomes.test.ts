@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '@tanstack/db'
-import { ShapeStream } from '@electric-sql/client'
 import { electricCollectionOptions } from '../src/electric'
 import type { Message } from '@electric-sql/client'
 
@@ -12,18 +11,18 @@ import type { Message } from '@electric-sql/client'
  * rows. It settles when the sync that establishes its rows completes, so its
  * success never precedes them (applied settlement, ARCHITECTURE.md law 7).
  * `electric-live-query.test.ts` owns the settle outcome for a reset before
- * and during the fetch, and the renewal after a retried stream error. This
- * file pins the other outcomes of the same wait:
+ * and during the fetch. The retry-decision law in
+ * `electric-oracle.property.test.ts` owns the outcomes of a stream error, an
+ * `onError` decision, an Electric client give-up, an external abort, and
+ * cleanup. This file pins two outcomes outside that grammar:
  *
  * - a must-refetch after the first full sync renews the wait, so a new load
  *   settles only with the replacement snapshot;
  * - an aborted demand rejects with its abort reason, before or during the
- *   wait, and a later snapshot does not settle it;
- * - collection cleanup ends the wait quietly;
- * - a stream error rejects the wait, including when `onError` retries.
+ *   wait, and a later snapshot does not settle it.
  *
- * Each history reaches the wait through a must-refetch before the first
- * up-to-date, except the renewal history, which resets after it.
+ * The abort history reaches the wait through a must-refetch before the first
+ * up-to-date; the renewal history resets after it.
  */
 
 type User = { id: number; name: string }
@@ -57,22 +56,13 @@ beforeEach(() => {
 const alice: User = { id: 1, name: `Alice` }
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
 
-function createProgressive(
-  id: string,
-  onError?: () =>
-    | Record<string, never>
-    | undefined
-    | Promise<Record<string, never> | undefined>,
-  signal?: AbortSignal,
-) {
+function createProgressive(id: string) {
   return createCollection({
     ...electricCollectionOptions({
       id,
       shapeOptions: {
         url: `http://test-url`,
         params: { table: `users` },
-        ...(onError ? { onError } : {}),
-        ...(signal ? { signal } : {}),
       },
       syncMode: `progressive`,
       getKey: (user: User) => user.id,
@@ -93,14 +83,6 @@ function fullSync(users: Array<User>) {
 }
 
 const mustRefetch = () => subscriber([{ headers: { control: `must-refetch` } }])
-
-function streamOnError() {
-  return (
-    vi.mocked(ShapeStream).mock.calls.at(-1)![0] as {
-      onError: (error: Error) => Promise<unknown>
-    }
-  ).onError
-}
 
 // Record a load's outcome without leaving a rejection unhandled.
 function observe(result: true | Promise<void>) {
@@ -161,113 +143,4 @@ describe(`progressive load waiting on the established snapshot`, () => {
       await collection.cleanup()
     },
   )
-
-  it(`ends the wait quietly when the collection is cleaned up`, async () => {
-    const collection = createProgressive(`hold-cleanup`)
-    mustRefetch()
-    const load = observe(collection._sync.loadSubset({ limit: 1 }))
-    await flush()
-    expect(load.state).toBe(`pending`)
-
-    await collection.cleanup()
-    await flush()
-    expect(load.state).toBe(`fulfilled`)
-  })
-
-  // A stream error fails the wait only when no retry follows.
-  it.each([`without onError`, `when onError gives up`] as const)(
-    `rejects the wait on a stream error %s`,
-    async (handling) => {
-      const collection = createProgressive(
-        `hold-stream-error-${handling}`,
-        handling === `when onError gives up` ? () => undefined : undefined,
-      )
-      const consoleError = vi
-        .spyOn(console, `error`)
-        .mockImplementation(() => {})
-      mustRefetch()
-      const load = observe(collection._sync.loadSubset({ limit: 1 }))
-      await flush()
-      expect(load.state).toBe(`pending`)
-
-      const error = new Error(`stream failed`)
-      await streamOnError()(error)
-      await flush()
-      expect(load.state).toBe(`rejected`)
-      expect(load.error).toBe(error)
-      expect(collection.status).toBe(`error`)
-      consoleError.mockRestore()
-      await collection.cleanup()
-    },
-  )
-
-  // Aborting the stream's external signal stops the source for good. Before
-  // the first ready, that is a final initial failure, even while an
-  // asynchronous onError decision is still pending.
-  it.each([`while loading`, `during a pending onError decision`] as const)(
-    `fails the initial sync when the external signal aborts %s`,
-    async (when) => {
-      const controller = new AbortController()
-      let decide!: (retry: Record<string, never>) => void
-      const collection = createProgressive(
-        `hold-external-abort-${when}`,
-        when === `while loading`
-          ? undefined
-          : () =>
-              new Promise<Record<string, never>>((resolve) => {
-                decide = resolve
-              }),
-        controller.signal,
-      )
-      mustRefetch()
-      const load = observe(collection._sync.loadSubset({ limit: 1 }))
-      const preload = observe(collection.preload())
-      await flush()
-      if (when === `during a pending onError decision`) {
-        void streamOnError()(new Error(`stream failed`))
-        await flush()
-        expect(collection.status).toBe(`loading`)
-      }
-
-      controller.abort()
-      await flush()
-      expect(collection.status).toBe(`error`)
-      expect(load.state).toBe(`rejected`)
-      expect(preload.state).toBe(`rejected`)
-      if (when === `during a pending onError decision`) {
-        decide({})
-        await flush()
-        expect(collection.status).toBe(`error`)
-      }
-      await collection.cleanup()
-    },
-  )
-
-  it(`cleanup does not fail the initial sync`, async () => {
-    const collection = createProgressive(`hold-cleanup-status`)
-    mustRefetch()
-    await flush()
-    await collection.cleanup()
-    expect(collection.status).toBe(`cleaned-up`)
-  })
-
-  // A retry that succeeds is a success: the wait settles on the snapshot the
-  // retried stream establishes, and the initial sync never fails.
-  it(`settles the wait on the retried snapshot after an onError retry`, async () => {
-    const collection = createProgressive(`hold-stream-error-retry`, () => ({}))
-    mustRefetch()
-    const load = observe(collection._sync.loadSubset({ limit: 1 }))
-    await flush()
-
-    await streamOnError()(new Error(`stream failed`))
-    await flush()
-    expect(load.state).toBe(`pending`)
-    expect(collection.status).toBe(`loading`)
-
-    fullSync([alice])
-    await flush()
-    expect(load.state).toBe(`fulfilled`)
-    expect(collection.get(1)?.name).toBe(`Alice`)
-    await collection.cleanup()
-  })
 })
