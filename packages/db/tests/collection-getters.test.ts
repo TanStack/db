@@ -420,11 +420,36 @@ describe(`Collection getters`, () => {
   })
 
   describe(`stateWhenReady`, () => {
-    it(`resolves immediately if data is already available`, async () => {
-      const statePromise = collection.stateWhenReady()
-      const state = await statePromise
-      expect(state).toBeInstanceOf(Map)
-      expect(state.size).toBe(2)
+    // Rows visible while the source is loading do not resolve it; readiness does.
+    it(`waits for readiness even when rows are already visible`, async () => {
+      let markReady!: () => void
+      const loading = createCollection<Item>({
+        id: `stateWhenReady-loading`,
+        getKey: (item) => item.id,
+        startSync: true,
+        sync: {
+          sync: ({ begin, write, commit, markReady: ready }) => {
+            begin()
+            write({ type: `insert`, value: { id: `item1`, name: `Item 1` } })
+            write({ type: `insert`, value: { id: `item2`, name: `Item 2` } })
+            commit()
+            markReady = ready
+          },
+        },
+      })
+      expect(loading.size).toBe(2)
+      let resolved = false
+      const pending = loading.stateWhenReady().then((value) => {
+        resolved = true
+        return value
+      })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(resolved).toBe(false)
+
+      markReady()
+      const result = await pending
+      expect(result).toBeInstanceOf(Map)
+      expect(result.size).toBe(2)
     })
 
     it(`waits for data if not yet available`, async () => {
@@ -483,11 +508,35 @@ describe(`Collection getters`, () => {
   })
 
   describe(`toArrayWhenReady`, () => {
-    it(`resolves immediately if data is already available`, async () => {
-      const arrayPromise = collection.toArrayWhenReady()
-      const array = stripValues(await arrayPromise)
-      expect(Array.isArray(array)).toBe(true)
-      expect(array.length).toBe(2)
+    // Rows visible while the source is loading do not resolve it; readiness does.
+    it(`waits for readiness even when rows are already visible`, async () => {
+      let markReady!: () => void
+      const loading = createCollection<Item>({
+        id: `toArrayWhenReady-loading`,
+        getKey: (item) => item.id,
+        startSync: true,
+        sync: {
+          sync: ({ begin, write, commit, markReady: ready }) => {
+            begin()
+            write({ type: `insert`, value: { id: `item1`, name: `Item 1` } })
+            write({ type: `insert`, value: { id: `item2`, name: `Item 2` } })
+            commit()
+            markReady = ready
+          },
+        },
+      })
+      expect(loading.size).toBe(2)
+      let resolved = false
+      const pending = loading.toArrayWhenReady().then((value) => {
+        resolved = true
+        return value
+      })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(resolved).toBe(false)
+
+      markReady()
+      const result = await pending
+      expect(result).toHaveLength(2)
     })
 
     it(`waits for data if not yet available`, async () => {

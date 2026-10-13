@@ -265,7 +265,6 @@
   "startTruncateReplayDemand": "eu",
   "subscribeToAllCollections": "ev",
   "buildSubscriptionOptions": "ew",
-  "checkAllCollectionsReady": "ex",
   "collectOptimisticChanges": "ey",
   "inflight": "ez",
   "maybeCompileBasePipeline": "eA",

@@ -161,7 +161,7 @@ function change(
   operation: `insert` | `update` | `delete`,
   value: Partial<Item>,
 ): Message<Item> {
-  return { key: String(value.id), value: value, headers: { operation } }
+  return { key: String(value.id), value: value as Item, headers: { operation } }
 }
 
 function fixture(
@@ -307,7 +307,7 @@ function fixture(
         $collectionId: _collectionId,
         ...value
       } = row
-      return structuredClone(value)
+      return structuredClone(value) as Item
     }).sort((a, b) => a.id - b.id)
   const durableRows = () =>
     structuredClone([...rows.values()].sort((a, b) => a.id - b.id))

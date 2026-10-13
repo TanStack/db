@@ -1096,19 +1096,13 @@ export class CollectionImpl<
   }
 
   /**
-   * Gets the current state of the collection as a Map, but only resolves when data is available
-   * Waits for the first sync commit to complete before resolving
+   * Gets the current state of the collection as a Map once the collection is ready
+   * Resolves when `preload()` does. For a live query, that is initial-query
+   * readiness, so visible rows alone do not resolve it.
    *
    * @returns Promise that resolves to a Map containing all items in the collection
    */
   stateWhenReady(): Promise<Map<TKey, WithVirtualProps<TOutput, TKey>>> {
-    // If we already have data or collection is ready, resolve immediately.
-    // This read still asks for data, so it counts as a preload.
-    if (this.size > 0 || this.isReady()) {
-      return this.afterPreloadMark(() => Promise.resolve(this.state))
-    }
-
-    // Use preload to ensure the collection starts loading, then return the state
     return this.preload().then(() => this.state)
   }
 
@@ -1122,19 +1116,13 @@ export class CollectionImpl<
   }
 
   /**
-   * Gets the current state of the collection as an Array, but only resolves when data is available
-   * Waits for the first sync commit to complete before resolving
+   * Gets the current state of the collection as an Array once the collection is ready
+   * Resolves when `preload()` does. For a live query, that is initial-query
+   * readiness, so visible rows alone do not resolve it.
    *
    * @returns Promise that resolves to an Array containing all items in the collection
    */
   toArrayWhenReady(): Promise<Array<WithVirtualProps<TOutput, TKey>>> {
-    // If we already have data or collection is ready, resolve immediately.
-    // This read still asks for data, so it counts as a preload.
-    if (this.size > 0 || this.isReady()) {
-      return this.afterPreloadMark(() => Promise.resolve(this.toArray))
-    }
-
-    // Use preload to ensure the collection starts loading, then return the array
     return this.preload().then(() => this.toArray)
   }
 
