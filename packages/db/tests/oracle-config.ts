@@ -62,6 +62,7 @@ const staticOracleProperties = [
   `cursor.partial-local-order`,
   `cursor.repeat-construction`,
   `index-update.reference-model`,
+  `index-update.nullish-membership`,
   `index-update.exact-identity`,
   `index-update.custom-comparator`,
   `query-identity.compiled-output`,
