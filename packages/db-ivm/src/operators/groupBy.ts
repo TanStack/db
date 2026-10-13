@@ -1,9 +1,14 @@
+import { structuralIdentity } from '../hashing/hash.js'
 import { serializeValue } from '../utils.js'
 import { map } from './map.js'
 import { reduce } from './reduce.js'
 import type { IStreamBuilder, KeyValue } from '../types.js'
 
 type GroupKey = Record<string, unknown>
+type ProjectedGroupInput = KeyValue<
+  string,
+  [string | null, Record<string | symbol, unknown>]
+>
 
 type BasicAggregateFunction<T, R, V = unknown> = {
   preMap: (data: T) => V
@@ -45,8 +50,8 @@ export function groupBy<
   aggregates: A = {} as A,
   mapInput?: (
     stream: IStreamBuilder<T>,
-    project: (data: T) => KeyValue<string, Record<PropertyKey, unknown>>,
-  ) => IStreamBuilder<KeyValue<string, Record<PropertyKey, unknown>>>,
+    project: (data: T) => ProjectedGroupInput,
+  ) => IStreamBuilder<ProjectedGroupInput>,
 ) {
   type ResultType = K & AggregatesReturnType<T, A>
 
@@ -70,26 +75,36 @@ export function groupBy<
     // Special key to store the original key object
     const KEY_SENTINEL = Symbol(`original_group_key`)
 
-    // First map to extract keys and pre-aggregate values
-    const project = (data: T) => {
+    const aggregateEntries = Object.entries(basicAggregates)
+
+    // First map to extract keys and pre-aggregate values. Each contribution
+    // leads with an identity built from its group key and pre-aggregate
+    // values when every one of them has one. Within one group the reduce
+    // index then merges equal contributions by that identity instead of
+    // hashing them. A null identity falls back to the structural hash.
+    const project = (data: T): ProjectedGroupInput => {
       const key = keyExtractor(data)
       const keyString = serializeValue(key)
 
       // Create values object with pre-aggregated values
       const values: Record<string | symbol, unknown> = {}
 
-      // Store the original key object
+      // Store the original key object. Contributions whose keys serialize
+      // alike but hash apart must not merge, so the key is part of the
+      // identity.
       values[KEY_SENTINEL] = key
 
       // Add pre-aggregated values
-      for (const [name, aggregate] of Object.entries(basicAggregates)) {
-        values[name] = aggregate.preMap(data)
+      let identity: string | null = structuralIdentity(key) ?? null
+      for (const [name, aggregate] of aggregateEntries) {
+        const value = aggregate.preMap(data)
+        values[name] = value
+        if (identity === null) continue
+        const part = structuralIdentity(value)
+        identity = part === undefined ? null : `${identity}|${part}`
       }
 
-      return [keyString, values] as KeyValue<
-        string,
-        Record<string | symbol, unknown>
-      >
+      return [keyString, [identity, values]]
     }
     const withKeysAndValues = mapInput
       ? mapInput(stream, project)
@@ -97,34 +112,37 @@ export function groupBy<
 
     // Then reduce to compute aggregates
     const reduced = withKeysAndValues.pipe(
-      reduce((values) => {
-        // Calculate total multiplicity to check if the group should exist
-        let totalMultiplicity = 0
-        for (const [_, multiplicity] of values) {
-          totalMultiplicity += multiplicity
-        }
+      reduce(
+        (contributions) => {
+          // Calculate total multiplicity to check if the group should exist
+          let totalMultiplicity = 0
+          for (const [_, multiplicity] of contributions) {
+            totalMultiplicity += multiplicity
+          }
 
-        // If total multiplicity is 0 or negative, the group should be removed completely
-        if (totalMultiplicity <= 0) {
-          return []
-        }
+          // If total multiplicity is 0 or negative, the group should be removed completely
+          if (totalMultiplicity <= 0) {
+            return []
+          }
 
-        const result: Record<PropertyKey, unknown> = {}
+          const result: Record<PropertyKey, unknown> = {}
 
-        // Get the original key from first value in group
-        const originalKey = values[0]?.[0]?.[KEY_SENTINEL]
-        result[KEY_SENTINEL] = originalKey
+          // Get the original key from first value in group
+          const originalKey = contributions[0]?.[0][1][KEY_SENTINEL]
+          result[KEY_SENTINEL] = originalKey
 
-        // Apply each aggregate function
-        for (const [name, aggregate] of Object.entries(basicAggregates)) {
-          const preValues = values.map(
-            ([v, m]) => [v[name], m] as [any, number],
-          )
-          result[name] = aggregate.reduce(preValues)
-        }
+          // Apply each aggregate function
+          for (const [name, aggregate] of aggregateEntries) {
+            const preValues = contributions.map(
+              ([[, v], m]) => [v[name], m] as [any, number],
+            )
+            result[name] = aggregate.reduce(preValues)
+          }
 
-        return [[result, 1]]
-      }),
+          return [[result, 1]]
+        },
+        { prefixIdentity: true },
+      ),
     )
 
     // Finally map to extract the key and include all values
@@ -140,7 +158,7 @@ export function groupBy<
         Object.assign(result, key)
 
         // Apply postMap if provided
-        for (const [name, aggregate] of Object.entries(basicAggregates)) {
+        for (const [name, aggregate] of aggregateEntries) {
           if (aggregate.postMap) {
             result[name] = aggregate.postMap(values[name])
           } else {

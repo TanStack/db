@@ -34,6 +34,20 @@ export function extractCollectionsFromQuery(
 export { collectCollectionSources as extractCollectionSources }
 
 /**
+ * Whether a source permits initial-query readiness, which live queries and
+ * `skipInitial` Effects share. An on-demand source serves its consumer through
+ * subset demand, whose settlement each consumer tracks, so its own Collection
+ * readiness does not gate the consumer; that readiness can lag, as a
+ * progressive source's background full sync does. An eager source serves no
+ * subset demand, so it must reach ready.
+ */
+export function sourcePermitsInitialReadiness(
+  collection: Pick<Collection, `config` | `isReady`>,
+): boolean {
+  return collection.config.syncMode === `on-demand` || collection.isReady()
+}
+
+/**
  * Helper function to extract the collection that is referenced in the query's FROM clause.
  * The FROM clause may refer directly to a collection or indirectly to a subquery.
  */
@@ -184,13 +198,16 @@ export function reconcileChangesForD2<
  * Returns normalised orderBy and effective limit suitable for passing to
  * `subscribeChanges`, or `undefined` values when the query's orderBy cannot
  * be scoped to the given alias (e.g. cross-collection refs or aggregates), or
- * when its resolved string collation is a local custom comparator.
+ * when its resolved string collation is a local custom comparator. A captured
+ * mutable list requires the full source without ordering hints.
  */
 export function computeSubscriptionOrderByHints(
   query: { orderBy?: OrderBy; limit?: number; offset?: number },
   alias: string,
   queryCompareOptions: StringCollationConfig,
+  hasCapturedMutableList: boolean,
 ): { orderBy: OrderBy | undefined; limit: number | undefined } {
+  if (hasCapturedMutableList) return { orderBy: undefined, limit: undefined }
   const { orderBy, limit, offset } = query
   const effectiveLimit =
     limit !== undefined && offset !== undefined ? limit + offset : limit

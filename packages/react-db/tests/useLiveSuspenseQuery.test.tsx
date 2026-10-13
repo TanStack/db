@@ -707,6 +707,79 @@ describe(`useLiveSuspenseQuery`, () => {
     })
   })
 
+  // Suspense releases at initial-query readiness, the same point where
+  // useLiveQuery reports isReady. An on-demand source whose Collection
+  // readiness lags its settled subset, as a progressive source's does before
+  // its full sync, must not hold either one.
+  it(`releases with useLiveQuery isReady when a lagging source's subset settles`, async () => {
+    let resolveLoad: (() => void) | undefined
+    let sync:
+      | { begin: () => void; write: (row: Person) => void; commit: () => void }
+      | undefined
+    const source = createCollection<Person>({
+      id: `test-persons-suspense-lagging-source`,
+      getKey: (person) => person.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ begin, write, commit }) => {
+          sync = {
+            begin,
+            write: (row) => write({ type: `insert`, value: row }),
+            commit,
+          }
+          return {
+            loadSubset: () =>
+              new Promise<void>((resolve) => {
+                resolveLoad = resolve
+              }),
+          }
+        },
+      },
+    })
+    const liveQuery = createLiveQueryCollection((q) =>
+      q.from({ persons: source }).where(({ persons }) => eq(persons.id, `3`)),
+    )
+
+    function SuspendedNames() {
+      const { data } = useLiveSuspenseQuery(liveQuery)
+      return <div>names: {data.map((person) => person.name).join(`,`)}</div>
+    }
+    function Readiness() {
+      const { isReady } = useLiveQuery(liveQuery)
+      return <div>ready: {String(isReady)}</div>
+    }
+
+    const view = renderComponent(
+      <>
+        <Readiness />
+        <SuspenseWrapper>
+          <SuspendedNames />
+        </SuspenseWrapper>
+      </>,
+    )
+    await waitFor(() => expect(resolveLoad).toBeDefined())
+    await act(async () => {
+      sync!.begin()
+      sync!.write(initialPersons[2]!)
+      sync!.commit()
+      await Promise.resolve()
+    })
+    expect(view.getByText(`Loading...`)).toBeTruthy()
+    expect(view.getByText(`ready: false`)).toBeTruthy()
+
+    await act(async () => {
+      resolveLoad!()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+
+    expect(source.status).toBe(`loading`)
+    expect(view.getByText(`ready: true`)).toBeTruthy()
+    expect(view.getByText(`names: John Smith`)).toBeTruthy()
+    view.unmount()
+    await liveQuery.cleanup()
+    await source.cleanup()
+  })
+
   it(`should return data that is always defined (type-safe)`, async () => {
     const collection = createCollection(
       mockSyncCollectionOptions<Person>({

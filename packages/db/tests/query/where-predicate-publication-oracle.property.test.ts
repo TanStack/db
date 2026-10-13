@@ -85,7 +85,11 @@
  * snapshot, retained live query, ordered limit, on-demand source, join,
  * filtered QueryRef, and correlated include witnesses compare public results
  * with that model. On-demand ordered, joined, and include receivers check that
- * the first acquisition is unfiltered when the captured list is mutable.
+ * the first acquisition is unfiltered when the captured list is mutable. An
+ * unbounded ordered receiver also requires no source order hint, checks local
+ * order after unsorted delivery, and checks readiness when its full-source
+ * request settles while the source is loading.
+ * An Effect receiver checks that the same acquisition rule reaches its source.
  * The retained direct query also checks that a list edit alone preserves the
  * old public snapshot and sends no callback, including after a microtask turn.
  * At the next source transaction, one subscriber callback contains the
@@ -148,6 +152,7 @@ import {
   or,
 } from '../../src/query/builder/functions.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
+import { createEffect } from '../../src/query/effect.js'
 import { createLiveQueryCollection } from '../../src/query/index.js'
 import {
   oraclePropertyOptions,
@@ -1762,6 +1767,162 @@ describe(`WHERE predicate publication oracle`, () => {
         commit()
         expect([...live.keys()]).toEqual([`0`])
       }, [() => live.cleanup(), () => source.cleanup()])
+    })
+
+    it(`an unbounded ordered inArray query requests unsorted full source and readies at subset settlement`, async () => {
+      type MembershipRow = { id: string; v: number; revision: number }
+      const rows: Array<MembershipRow> = [
+        { id: `a-two`, v: 2, revision: 0 },
+        { id: `z-one`, v: 1, revision: 0 },
+        { id: `trigger`, v: 3, revision: 0 },
+      ]
+      const requests: Array<{
+        hasWhere: boolean
+        hasOrder: boolean
+        hasLimit: boolean
+      }> = []
+      let settleLoad!: () => void
+      let begin!: () => void
+      let write!: (message: { type: `update`; value: MembershipRow }) => void
+      let commit!: () => unknown
+      const source = createCollection<MembershipRow>({
+        id: `where-publication-unbounded-ordered-demand-${collectionSerial++}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            begin = params.begin
+            write = params.write
+            commit = params.commit
+            // This source deliberately stays loading. Its full-source subset
+            // receipt, rather than source readiness, releases the live query.
+            return {
+              loadSubset: (options) => {
+                requests.push({
+                  hasWhere: options.where !== undefined,
+                  hasOrder: options.orderBy !== undefined,
+                  hasLimit: options.limit !== undefined,
+                })
+                if (
+                  options.where !== undefined ||
+                  options.orderBy !== undefined ||
+                  options.limit !== undefined
+                ) {
+                  return Promise.reject(new Error(`full-source-only adapter`))
+                }
+                params.begin()
+                for (const row of rows) {
+                  params.write({ type: `insert`, value: row })
+                }
+                params.commit()
+                return new Promise<void>((resolve) => {
+                  settleLoad = resolve
+                })
+              },
+            }
+          },
+        },
+      })
+      const members = [1]
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ row: source })
+          .where(({ row }) => inArray(row.v, members))
+          .orderBy(({ row }) => row.v),
+      )
+      await withOracleCleanup(async () => {
+        const preload = live.preload()
+        let preloadSettled = false
+        void preload.then(
+          () => {
+            preloadSettled = true
+          },
+          () => {
+            preloadSettled = true
+          },
+        )
+        void preload.catch(() => {})
+        await Promise.resolve()
+        expect(requests).toEqual([
+          { hasWhere: false, hasOrder: false, hasLimit: false },
+        ])
+        expect(live.status).toBe(`loading`)
+
+        // The independent model filters every retained source row against
+        // the current list when an unrelated source update clocks the graph.
+        members.splice(0, members.length, 2, 1)
+        begin()
+        write({ type: `update`, value: { id: `trigger`, v: 3, revision: 1 } })
+        commit()
+        await Promise.resolve()
+        expect(live.status).toBe(`loading`)
+        expect(source.status).toBe(`loading`)
+        expect(preloadSettled).toBe(false)
+        settleLoad()
+        await preload
+        expect(preloadSettled).toBe(true)
+        expect(source.status).toBe(`loading`)
+        expect(live.status).toBe(`ready`)
+        expect([...live.keys()]).toEqual([`z-one`, `a-two`])
+      }, [() => live.cleanup(), () => source.cleanup()])
+    })
+
+    it(`an Effect with captured inArray membership requests unsorted full source`, async () => {
+      type MembershipRow = { id: string; v: number }
+      const rows: Array<MembershipRow> = [
+        { id: `one`, v: 1 },
+        { id: `two`, v: 2 },
+      ]
+      const requests: Array<{
+        hasWhere: boolean
+        hasOrder: boolean
+        hasLimit: boolean
+      }> = []
+      const source = createCollection<MembershipRow>({
+        id: `where-publication-effect-demand-${collectionSerial++}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            params.markReady()
+            return {
+              loadSubset: (options) => {
+                requests.push({
+                  hasWhere: options.where !== undefined,
+                  hasOrder: options.orderBy !== undefined,
+                  hasLimit: options.limit !== undefined,
+                })
+                params.begin()
+                for (const row of rows) {
+                  params.write({ type: `insert`, value: row })
+                }
+                params.commit()
+                return true
+              },
+            }
+          },
+        },
+      })
+      const members = [2]
+      const entered: Array<string> = []
+      let effect: ReturnType<typeof createEffect> | undefined
+      await withOracleCleanup(async () => {
+        effect = createEffect<MembershipRow>({
+          query: (q) =>
+            q
+              .from({ row: source })
+              .where(({ row }) => inArray(row.v, members))
+              .orderBy(({ row }) => row.v),
+          onEnter: ({ value }) => {
+            entered.push(value.id)
+          },
+        })
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        expect(requests).toEqual([
+          { hasWhere: false, hasOrder: false, hasLimit: false },
+        ])
+        expect(entered).toEqual([`two`])
+      }, [() => effect?.dispose(), () => source.cleanup()])
     })
 
     it(`an on-demand query acquires rows for a captured inArray list's future members`, async () => {

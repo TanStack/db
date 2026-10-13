@@ -212,11 +212,23 @@ export class CollectionSubscriber<
       update.ready instanceof Promise,
     )
     if (update.ready instanceof Promise) {
-      void update.ready.then(
-        () => this.collectionConfigBuilder.settleDemand(plan.id, generation),
-        (error) =>
-          this.collectionConfigBuilder.failDemand(plan.id, generation, error),
-      )
+      const settleWith = (ready: Promise<unknown>) =>
+        void ready.then(
+          () => this.collectionConfigBuilder.settleDemand(plan.id, generation),
+          (error) => {
+            // A truncate replay aborts the acquisition it supersedes. Its
+            // replacement decides the demand; a real failure rejects it too.
+            const replacement = subscription.pendingTruncateReplacement
+            if (replacement) settleWith(replacement)
+            else
+              this.collectionConfigBuilder.failDemand(
+                plan.id,
+                generation,
+                error,
+              )
+          },
+        )
+      settleWith(update.ready)
     } else {
       this.collectionConfigBuilder.settleDemand(plan.id, generation)
     }
@@ -259,6 +271,7 @@ export class CollectionSubscriber<
       this.collectionConfigBuilder.query,
       this.alias,
       this.collectionConfigBuilder.queryCompareOptions,
+      this.collectionConfigBuilder.hasCapturedMutableList,
     )
 
     // Track loading via the loadSubset promise directly.

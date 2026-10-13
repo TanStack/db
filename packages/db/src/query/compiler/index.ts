@@ -341,6 +341,9 @@ export interface CompilationResult {
   /** Map of opaque source IDs to their WHERE clauses for index optimization */
   sourceWhereClauses: Map<string, BasicExpression<boolean>>
 
+  /** Captured membership requires unfiltered source rows without order hints. */
+  hasCapturedMutableList: boolean
+
   /**
    * Maps FROM and JOIN source aliases to collection IDs within this compiled
    * query. Includes keep their own alias maps in their child results.
@@ -1213,6 +1216,7 @@ function compileQueryInternal(
       valueIdentity,
       collectionId: mainCollectionId,
       sourceWhereClauses,
+      hasCapturedMutableList: unfilteredQueryCaches.has(cache),
       aliasToCollectionId,
       aliasRemapping,
     })
@@ -1510,6 +1514,7 @@ function compileQueryInternal(
     pipeline: resultPipeline,
     valueIdentity,
     sourceWhereClauses,
+    hasCapturedMutableList: unfilteredQueryCaches.has(cache),
     aliasToCollectionId,
     aliasRemapping,
     includes: includesResults.length > 0 ? includesResults : undefined,

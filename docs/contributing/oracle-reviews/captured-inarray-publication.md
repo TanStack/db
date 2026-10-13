@@ -234,3 +234,49 @@ control calibrates event coherence, but no separate delayed-schedule mutant
 calibrates the new microtask checkpoint. Nested microtasks, timers, arbitrary
 list/event histories, and real providers remain outside this witness. It does
 not retire an additional legacy test block.
+
+## Unbounded ordered acquisition after merging `origin/main`
+
+A fresh hostile merge review found that the finite ordered receiver did not
+cover an unbounded `orderBy` over a captured mutable list. The unbounded path
+used ordinary subscription hints and sent `orderBy` with its unfiltered
+full-source request. A controlled on-demand adapter that accepts full-source
+requests but rejects sorted requests made preload reject and put the
+live-query Collection in error. This contradicted the architecture's
+full-source-without-hints rule. The main branch's new readiness law was not
+the cause: a separate held-load probe reached the correct row and became
+ready at subset settlement while the source remained loading.
+
+The WHERE publication owner now has an unbounded ordered receiver with a
+lagging on-demand source. Its independent model filters all three authored
+source rows against the list's current members and orders the matches by
+`v`. The adapter delivers `a-two` before `z-one`, records the complete first
+request, and rejects any `where`, `orderBy`, or `limit` hint. While the subset
+is pending, the list changes from `[1]` to `[2, 1]` and an unrelated source
+update clocks the graph. The live-query Collection and its preload stay
+pending through that event. After subset settlement, the live query becomes
+ready and publishes `[z-one, a-two]` in local order, even though the source
+Collection remains loading. The request assertion failed before the repair
+with `{hasOrder:true}` and passed after it. A companion Effect receiver checks
+the same unbounded acquisition shape and its initial `enter` event.
+
+A hostile comparator mutant returned equality for every local comparison in
+this unbounded captured-list path. The first fixture let it pass because key
+order matched value order. With opposing key and value orders, the mutant
+publishes `[a-two, z-one]` and fails at the public key-order assertion. The
+unchanged implementation passes. The Effect receiver checks initial
+acquisition and initial entry only; later membership refresh is outside it.
+
+Compilation now carries the graph-wide captured-list finding to live-query
+and Effect subscriptions, which omit order and limit hints for that graph.
+This witness covers one first acquisition and one pending source event. It
+does not establish repeated acquisitions, cleanup/restart, or every graph
+shape. A separate hostile source review found no further production defect
+in the acquisition flag path. It identified a remaining composition: an
+unbounded ordered include child with mutable membership, a second eager
+source, and child subset settlement while the child Collection stays loading.
+That composition needs a receiving witness for request hints, readiness, and
+whole-result refresh. An Effect with `skipInitial` and a lagging on-demand
+source is another untested intersection. These are coverage limits, not
+observed production failures. The execution-based hostile review found no
+further defect in the two new witnesses.
