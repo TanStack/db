@@ -12260,6 +12260,56 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   /**
+   * A complete, applied full-source result establishes its own Query scope.
+   * It does not silently retire a historical filtered owner's durable edge.
+   * Once that filtered demand is acquired, its old owner must be reconciled
+   * before the acquisition settles. An implementation may fetch the exact
+   * subset or reconcile it from authoritative full-source rows; the public
+   * and durable result is the same. The unrelated full-source row survives.
+   */
+  it(`reconciles a historical filtered owner beside an applied full source`, async () => {
+    const id = `pre-upgrade-singleton-beside-full-source`
+    const oldHash = hashKey([id, legacySingletonCategoryDemandKey])
+    const filtered = { where: eq(new IR.PropRef([`category`]), `shared`) }
+    const storage = createOwnershipStorage({
+      rows: new Map([[shared.id, shared]]),
+      rowMetadata: new Map([
+        [shared.id, { queryCollection: { owners: { [oldHash]: true } } }],
+      ]),
+      collectionMetadata: new Map([
+        [
+          `queryCollection:gc:${oldHash}`,
+          { queryHash: oldHash, mode: `until-revalidated` },
+        ],
+      ]),
+    })
+    const { collection, queryFn } = createPersistedOwnershipFixture(
+      id,
+      storage,
+      [detailOnly],
+    )
+    await collection.stateWhenReady()
+    await collection._sync.loadSubset({})
+    expect(queryFn).toHaveBeenCalledTimes(1)
+    expect(rows(collection)).toEqual([detailOnly.id, shared.id])
+    expect(persistedOwners(storage.snapshot().rowMetadata, shared.id)).toEqual([
+      oldHash,
+    ])
+    expect([...storage.snapshot().collectionMetadata.keys()]).toEqual([
+      `queryCollection:gc:${oldHash}`,
+    ])
+
+    await collection._sync.loadSubset(filtered)
+    await vi.waitFor(() => {
+      const snapshot = storage.snapshot()
+      expect(rows(collection)).toEqual([detailOnly.id])
+      expect(storedItems(storage)).toEqual([detailOnly])
+      expect(persistedOwners(snapshot.rowMetadata, shared.id)).toEqual([])
+      expect(snapshot.collectionMetadata.size).toBe(0)
+    })
+  })
+
+  /**
    * A cached current-key result is not evidence that a historical owner has
    * revalidated. The old singleton-IN row and marker survive until the new EQ
    * demand's physical empty result applies. The held response distinguishes
