@@ -16,6 +16,12 @@ import {
   readOracleRunConfig,
 } from '../../db/tests/oracle-config'
 import { atCheckpoint, withElectricCleanup } from './electric-oracle-lifecycle'
+import {
+  applyRetryModel,
+  createRetryModel,
+  expectedRetryObservation,
+  retryStepIsLegal,
+} from './electric-retry-decision-model'
 import type { Collection, SyncMetadataApi } from '@tanstack/db'
 import type { ChangeMessage, Message, Offset, Row } from '@electric-sql/client'
 import type {
@@ -23,6 +29,14 @@ import type {
   PersistenceAdapter,
 } from '../../db-sqlite-persistence-core/src'
 import type { ElectricCollectionUtils, ElectricSyncMode } from '../src/electric'
+import type {
+  RetryDecision,
+  RetryHistory,
+  RetryObservation,
+  RetrySettlement,
+  RetryStep,
+  RetryWait,
+} from './electric-retry-decision-model'
 
 // Replays one generated law directly with
 // TANSTACK_DB_ELECTRIC_HISTORY_PROPERTY=<property>
@@ -5313,168 +5327,10 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
    * The driver runs the real adapter and Collection behind the controlled
    * ShapeStream. After each step and a timer turn it compares the status,
    * every demand's settlement and cause, and whether the snapshot's row is
-   * visible. Installed-client evidence for the client's own give-up is in
-   * `electric-sdk-delivery-oracle.property.test.ts`.
+   * visible. The model lives in `electric-retry-decision-model.ts`. An
+   * installed-client lane in `electric-sdk-delivery-oracle.property.test.ts`
+   * drives the same model through the real Electric client and HTTP.
    */
-  type RetryWait = `full-log` | `progressive`
-  type RetryDecision =
-    `sync-retry` | `sync-give-up` | `throw` | `async-retry` | `async-give-up`
-  type RetryStep =
-    | { kind: `demand` }
-    | { kind: `error`; decision: RetryDecision }
-    | { kind: `decide` }
-    | { kind: `up-to-date` }
-    | { kind: `client-give-up` }
-    | { kind: `abort` }
-    | { kind: `hold` }
-    | { kind: `release` }
-  type RetryHistory = {
-    wait: RetryWait
-    hasOnError: boolean
-    steps: Array<RetryStep>
-  }
-  type RetrySettlement = `pending` | `fulfilled` | `rejected:${string}`
-  type RetryObservation = {
-    status: string
-    demands: Array<RetrySettlement>
-    rowVisible: boolean
-  }
-
-  type RetryModel = {
-    truncates: boolean
-    ready: boolean
-    visible: boolean
-    held: boolean
-    failed: string | undefined
-    aborted: boolean
-    deciding: { decision: RetryDecision; cause: string } | undefined
-    demands: Array<RetrySettlement>
-  }
-
-  // Each error, throw, and abort has a tag, so a rejection's cause can be
-  // compared by identity without reading production state.
-  function retryModelFail(model: RetryModel, cause: string): void {
-    if (model.ready || model.failed !== undefined) return
-    model.failed = cause
-    model.demands = model.demands.map((settlement): RetrySettlement =>
-      settlement === `pending` ? `rejected:${cause}` : settlement,
-    )
-  }
-
-  function retryStepIsLegal(model: RetryModel, step: RetryStep): boolean {
-    if (step.kind === `decide`) return model.deciding !== undefined
-    if (step.kind === `release`) return model.held
-    // A failed or aborted Collection refuses new optimistic writes.
-    if (model.failed !== undefined || model.aborted) return false
-    if (step.kind === `hold`) return !model.held && !model.ready
-    switch (step.kind) {
-      case `demand`:
-        return true
-      case `error`:
-      case `client-give-up`:
-        return model.deciding === undefined
-      case `up-to-date`:
-        return !model.ready && model.deciding === undefined
-      case `abort`:
-        return true
-    }
-  }
-
-  // The ready snapshot's rows become visible; every waiting demand settles.
-  function retryModelApply(model: RetryModel): void {
-    model.visible = true
-    model.demands = model.demands.map((settlement): RetrySettlement =>
-      settlement === `pending` ? `fulfilled` : settlement,
-    )
-  }
-
-  // The model: what a source that still tries, or has given up, promises.
-  function applyRetryModel(
-    model: RetryModel,
-    step: RetryStep,
-    hasOnError: boolean,
-    tag: string,
-  ): void {
-    switch (step.kind) {
-      case `demand`:
-        model.demands.push(
-          model.visible
-            ? `fulfilled`
-            : model.failed !== undefined
-              ? `rejected:${model.failed}`
-              : `pending`,
-        )
-        return
-      case `error`:
-        if (!hasOnError || step.decision === `sync-give-up`) {
-          retryModelFail(model, tag)
-        } else if (step.decision === `throw`) {
-          retryModelFail(model, `thrown-${tag}`)
-        } else if (
-          step.decision === `async-retry` ||
-          step.decision === `async-give-up`
-        ) {
-          model.deciding = { decision: step.decision, cause: tag }
-        }
-        return
-      case `decide`: {
-        const deciding = model.deciding!
-        model.deciding = undefined
-        if (deciding.decision === `async-give-up` && !model.aborted) {
-          retryModelFail(model, deciding.cause)
-        }
-        return
-      }
-      case `up-to-date`:
-        model.ready = true
-        if (!model.held || model.truncates) retryModelApply(model)
-        return
-      case `hold`:
-        model.held = true
-        return
-      case `release`:
-        model.held = false
-        if (model.ready) retryModelApply(model)
-        return
-      case `client-give-up`:
-        retryModelFail(model, tag)
-        return
-      case `abort`:
-        // An external abort is a provider failure. Before the first ready it
-        // fails the initial sync. After it, the snapshot has already arrived,
-        // so a waiting demand still settles when its rows apply.
-        if (!model.ready) retryModelFail(model, `StreamAbortedError`)
-        model.aborted = true
-        return
-    }
-  }
-
-  function expectedRetryObservation(
-    model: RetryModel,
-    cleanedUp: boolean,
-  ): RetryObservation {
-    return {
-      status: cleanedUp
-        ? `cleaned-up`
-        : model.failed !== undefined
-          ? `error`
-          : model.ready
-            ? `ready`
-            : `loading`,
-      // Cleanup ends a waiting demand quietly, unless an earlier external
-      // abort already failed the provider: then rows that never became
-      // visible cannot fulfill it.
-      demands: model.demands.map((settlement): RetrySettlement =>
-        cleanedUp && settlement === `pending`
-          ? model.aborted
-            ? `rejected:AbortError`
-            : `fulfilled`
-          : settlement,
-      ),
-      rowVisible: !cleanedUp && model.visible,
-    }
-  }
-
   const retryDecisionArb = fc.constantFrom<RetryDecision>(
     `sync-retry`,
     `sync-give-up`,
@@ -5501,16 +5357,7 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
       steps: fc.array(retryStepArb, { minLength: 1, maxLength: 8 }),
     })
     .map(({ wait, hasOnError, steps }) => {
-      const model: RetryModel = {
-        truncates: wait === `progressive`,
-        ready: false,
-        visible: false,
-        held: false,
-        failed: undefined,
-        aborted: false,
-        deciding: undefined,
-        demands: [],
-      }
+      const model = createRetryModel(wait === `progressive`)
       const legal: Array<RetryStep> = [{ kind: `demand` }]
       applyRetryModel(model, legal[0]!, hasOnError, `e0`)
       for (const step of steps) {
@@ -5568,16 +5415,7 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
       }
     ).onError
     const settlements: Array<RetrySettlement> = []
-    const model: RetryModel = {
-      truncates: history.wait === `progressive`,
-      ready: false,
-      visible: false,
-      held: false,
-      failed: undefined,
-      aborted: false,
-      deciding: undefined,
-      demands: [],
-    }
+    const model = createRetryModel(history.wait === `progressive`)
     const turn = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
     const observe = (): RetryObservation => ({
       status: trace.collection.status,

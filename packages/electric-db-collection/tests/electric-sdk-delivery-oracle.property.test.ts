@@ -27,7 +27,18 @@ import {
   withElectricCleanup,
   withElectricSetup,
 } from './electric-oracle-lifecycle'
+import {
+  applyRetryModel,
+  createRetryModel,
+  expectedRetryObservation,
+} from './electric-retry-decision-model'
 import type { TestRow } from './electric-persistence-fixture'
+import type {
+  RetryDecision,
+  RetryModel,
+  RetryObservation,
+  RetryStep,
+} from './electric-retry-decision-model'
 import type { ElectricCollectionUtils } from '../src/electric'
 import type { SyncMetadataApi, SyncPersistenceCapabilityV1 } from '@tanstack/db'
 import type {
@@ -1241,170 +1252,6 @@ fixedCase(
   },
 )
 
-/**
- * The controlled provider exhausts SDK backoff with one 503, then the user's
- * onError retry continues the same ShapeStream. A retry that succeeds is a
- * success, so the independent demand model keeps both the pre-error demand
- * and a new one pending while the retry transport is open, then accepts both
- * after the complete snapshot applies.
- * This receives the adapter law through the actual
- * installed SDK, including its retry decision and HTTP delivery boundary.
- * Live service timing and nonretryable SDK errors remain outside this case.
- */
-fixedCase(
-  `settles a new full recovery demand after SDK error retry`,
-  async () => {
-    const http = controlledHttp()
-    const metadata = resetResumeMetadata()
-    let errors = 0
-    const options = electricCollectionOptions<Item>({
-      id: `sdk-full-retry-${++sequence}`,
-      shapeOptions: {
-        url: `http://test-url/full-retry`,
-        params: { table: `rows` },
-        fetchClient: http.fetchClient,
-        backoffOptions: {
-          initialDelay: 0,
-          maxDelay: 0,
-          multiplier: 1,
-          maxRetries: 0,
-        },
-        onError: () => {
-          errors++
-          return {}
-        },
-      },
-      syncMode: `on-demand`,
-      startSync: true,
-      getKey: (row) => row.id,
-    })
-    const originalSync = options.sync
-    const collection = createCollection({
-      ...options,
-      sync: {
-        sync: (params: Parameters<typeof originalSync.sync>[0]) =>
-          originalSync.sync({ ...params, metadata }),
-      },
-    })
-
-    await withElectricCleanup(async () => {
-      let firstOutcome = `pending`
-      const first = Promise.resolve(
-        collection._sync.loadSubset({ limit: 1 }),
-      ).then(
-        () => {
-          firstOutcome = `fulfilled`
-        },
-        () => {
-          firstOutcome = `rejected`
-        },
-      )
-      const initial = await atCheckpoint(http.take(), `full retry initial HTTP`)
-      expect(initial.url.searchParams.get(`log`)).toBe(`full`)
-      initial.respond(new Response(`transient`, { status: 503 }))
-      await vi.waitFor(() => expect(errors).toBe(1))
-      await new Promise<void>((resolve) => setTimeout(resolve, 0))
-      expect(firstOutcome).toBe(`pending`)
-
-      const retry = await atCheckpoint(http.take(), `full retry HTTP`)
-      expect(retry.url.searchParams.get(`log`)).toBe(`full`)
-      // The provider has accepted a retry transport but has not supplied a
-      // replacement source snapshot. Every demand waits for that evidence;
-      // neither inherits the 503 that the retry answered.
-      let duringRetryOutcome = `pending`
-      const duringRetry = Promise.resolve(
-        collection._sync.loadSubset({ limit: 3 }),
-      ).then(
-        () => {
-          duringRetryOutcome = `fulfilled`
-        },
-        () => {
-          duringRetryOutcome = `rejected`
-        },
-      )
-      await new Promise<void>((resolve) => setTimeout(resolve, 0))
-      expect(duringRetryOutcome).toBe(`pending`)
-      retry.respond(
-        new Response(
-          JSON.stringify([
-            {
-              key: `1`,
-              value: { id: `1`, name: `recovered` },
-              headers: { operation: `insert` },
-            },
-            { headers: { control: `up-to-date`, global_last_seen_lsn: `1` } },
-          ]),
-          { headers: headers(1) },
-        ),
-      )
-      await vi.waitFor(() => expect(collection.status).toBe(`ready`))
-      await atCheckpoint(duringRetry, `retry-interval full demand`)
-      await atCheckpoint(first, `pre-error full demand`)
-      expect(firstOutcome).toBe(`fulfilled`)
-      expect(duringRetryOutcome).toBe(`fulfilled`)
-      await atCheckpoint(
-        Promise.resolve(collection._sync.loadSubset({ limit: 2 })),
-        `post-retry full demand`,
-      )
-      expect(collection.get(1)?.name).toBe(`recovered`)
-    }, [() => collection.cleanup(), () => http.close()])
-  },
-)
-
-// The SDK can refuse the user's retry object for a non-retryable protocol
-// error. The model then has no future source snapshot: both the first and any
-// later demand reject instead of waiting forever on a renewed gate. This HTTP
-// response omits required Electric headers to exercise that SDK decision.
-fixedCase(
-  `rejects later full recovery demand when SDK declines retry`,
-  async () => {
-    const http = controlledHttp()
-    const metadata = resetResumeMetadata()
-    let errors = 0
-    const options = electricCollectionOptions<Item>({
-      id: `sdk-full-terminal-${++sequence}`,
-      shapeOptions: {
-        url: `http://test-url/full-terminal`,
-        params: { table: `rows` },
-        fetchClient: http.fetchClient,
-        onError: () => {
-          errors++
-          return {}
-        },
-      },
-      syncMode: `on-demand`,
-      startSync: true,
-      getKey: (row) => row.id,
-    })
-    const originalSync = options.sync
-    const collection = createCollection({
-      ...options,
-      sync: {
-        sync: (params: Parameters<typeof originalSync.sync>[0]) =>
-          originalSync.sync({ ...params, metadata }),
-      },
-    })
-
-    await withElectricCleanup(async () => {
-      const first = Promise.resolve(collection._sync.loadSubset({ limit: 1 }))
-      void first.catch(() => undefined)
-      const initial = await atCheckpoint(http.take(), `terminal full HTTP`)
-      initial.respond(
-        new Response(JSON.stringify([{ headers: { control: `up-to-date` } }])),
-      )
-      await vi.waitFor(() => expect(errors).toBe(1))
-      await expect(first).rejects.toThrow(/required headers/)
-      await expect(
-        atCheckpoint(
-          Promise.resolve(collection._sync.loadSubset({ limit: 2 })),
-          `terminal full demand`,
-        ),
-      ).rejects.toThrow(/required headers/)
-      expect(http.activeCount()).toBe(0)
-    }, [() => collection.cleanup(), () => http.close()])
-  },
-)
-
 async function checkMembership(
   leftWidth: number,
   rightWidth: number,
@@ -2089,71 +1936,228 @@ fixedCase.each([
 )
 
 /**
- * A retry object from `onError` does not guarantee that the SDK retries. The
- * SDK gives up by itself on a response without Electric headers and when its
- * consecutive-retry budget is spent, and then reports the error only to its
- * subscribers. Before the first ready, that give-up is the source's final
- * initial failure: the Collection must enter `error` and a waiting full-log
- * demand must reject. Otherwise the Collection stays `loading` with no live
- * stream, and every readiness wait hangs.
+ * # The retry-decision law through the installed Electric client
  *
- * These cases are the installed-client receiving witnesses for the
- * retry-decision law in `electric-oracle.property.test.ts`. That oracle drives
- * the client's give-up through a controlled stream; these show the installed
- * client reaches the same subscriber error callback.
+ * The retry-decision oracle in `electric-oracle.property.test.ts` drives the
+ * adapter through a controlled ShapeStream. This lane receives the same law
+ * through the installed `@electric-sql/client`, its retry policy, and HTTP.
+ * It uses the same independent model (`electric-retry-decision-model.ts`).
+ *
+ * The client turns three provider behaviors into the model's steps:
+ *
+ * - A 503 the client retries, then a complete snapshot: an error whose
+ *   decision is a retry, then the first up-to-date.
+ * - A response without Electric headers: an error whose decision is a retry,
+ *   then the client gives up by itself, because the error is not retryable.
+ * - Repeated 503 responses: an error and a retry for each one, until the
+ *   client spends its budget of 50 consecutive retries and gives up by
+ *   itself on the 51st error.
+ *
+ * The client gives up in the same continuation that receives the decision,
+ * so the checkpoint after that decision already includes the give-up.
+ *
+ * The grammar crosses those three behaviors with the eager, on-demand
+ * full-log, and progressive sync modes, and with a synchronous or an
+ * asynchronous retry from `onError`. Each history starts one waiting demand
+ * and, after the outcome, one later demand. A full-log demand is a subset
+ * load. An eager or progressive Collection has no subset demand before its
+ * first ready, so its demand is the readiness wait (`preload()`).
+ *
+ * At each checkpoint the lane compares the Collection status, each demand's
+ * settlement, and whether the snapshot's row is visible with the model:
+ * after the first error reaches `onError`, after an asynchronous decision,
+ * after the outcome, and after the later demand. It also checks that a
+ * full-log Collection requests the full log, and that a client that gave up
+ * keeps no provider transport open. A rejection's cause is
+ * compared only as a rejection here; the retry-decision oracle checks causes.
  */
-fixedCase.each([
-  [`a response without Electric headers`, `missing-headers`],
-  [`an exhausted retry budget`, `exhausted`],
-] as const)(
-  `fails the initial sync when the SDK gives up after %s`,
-  async (_label, giveUp) => {
-    const metadata = resetResumeMetadata()
-    const fetchClient: typeof fetch = () =>
-      Promise.resolve(
-        giveUp === `missing-headers`
-          ? new Response(`[]`, { status: 200 })
-          : new Response(`transient`, { status: 503 }),
-      )
-    const options = electricCollectionOptions<Item>({
-      id: `sdk-give-up-${giveUp}-${++sequence}`,
-      shapeOptions: {
-        url: `http://test-url/give-up`,
-        params: { table: `rows` },
-        fetchClient,
-        backoffOptions: {
-          initialDelay: 0,
-          maxDelay: 0,
-          multiplier: 1,
-          maxRetries: 0,
-        },
-        onError: () => ({}),
-      },
-      syncMode: `on-demand`,
-      startSync: true,
-      getKey: (row) => row.id,
-    })
-    const originalSync = options.sync
-    const collection = createCollection({
-      ...options,
-      sync: {
-        sync: (params: Parameters<typeof originalSync.sync>[0]) =>
-          originalSync.sync({ ...params, metadata }),
-      },
-    })
-    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
-    const consoleWarn = vi.spyOn(console, `warn`).mockImplementation(() => {})
+type ClientOutcome = `retried-503` | `missing-headers` | `exhausted`
+type ClientMode = `eager` | `full-log` | `progressive`
 
-    await withElectricCleanup(async () => {
-      const waiting = Promise.resolve(collection._sync.loadSubset({ limit: 1 }))
-      void waiting.catch(() => undefined)
-      await vi.waitFor(() => expect(collection.status).toBe(`error`))
-      await expect(waiting).rejects.toBeDefined()
-      await expect(collection.preload()).rejects.toBeDefined()
-    }, [
-      () => collection.cleanup(),
-      () => consoleError.mockRestore(),
-      () => consoleWarn.mockRestore(),
-    ])
-  },
+const clientRetryCells = (
+  [`retried-503`, `missing-headers`, `exhausted`] as const
+).flatMap((outcome) =>
+  ([`eager`, `full-log`, `progressive`] as const).flatMap((mode) =>
+    ([`sync-retry`, `async-retry`] as const).map(
+      (decision) => [outcome, mode, decision] as const,
+    ),
+  ),
+)
+
+// The installed client's documented consecutive-retry budget.
+const CLIENT_RETRY_BUDGET = 50
+
+// A rejection's cause is checked by the controlled retry-decision oracle.
+function clientObservation(observation: RetryObservation): RetryObservation {
+  return {
+    ...observation,
+    demands: observation.demands.map((settlement) =>
+      settlement.startsWith(`rejected`) ? `rejected:any` : settlement,
+    ),
+  }
+}
+
+async function runClientRetryCell(
+  outcome: ClientOutcome,
+  mode: ClientMode,
+  decision: Extract<RetryDecision, `sync-retry` | `async-retry`>,
+): Promise<void> {
+  const http = controlledHttp()
+  const decisions: Array<() => void> = []
+  let onErrorCalls = 0
+  const options = electricCollectionOptions<Item>({
+    id: `sdk-retry-${outcome}-${mode}-${decision}-${++sequence}`,
+    shapeOptions: {
+      url: `http://test-url/retry-${sequence}`,
+      params: { table: `rows` },
+      fetchClient: http.fetchClient,
+      backoffOptions: {
+        initialDelay: 0,
+        maxDelay: 0,
+        multiplier: 1,
+        maxRetries: 0,
+      },
+      onError: () => {
+        onErrorCalls++
+        if (decision === `sync-retry`) return {}
+        return new Promise<Record<string, never>>((resolve) => {
+          decisions.push(() => resolve({}))
+        })
+      },
+    },
+    syncMode:
+      mode === `eager`
+        ? `eager`
+        : mode === `progressive`
+          ? `progressive`
+          : `on-demand`,
+    startSync: true,
+    getKey: (row) => row.id,
+  })
+  const metadata = resetResumeMetadata()
+  const originalSync = options.sync
+  const collection = createCollection({
+    ...options,
+    sync:
+      mode === `full-log`
+        ? {
+            sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+              originalSync.sync({ ...params, metadata }),
+          }
+        : originalSync,
+  })
+  const model: RetryModel = createRetryModel(false)
+  const settlements: Array<`pending` | `fulfilled` | `rejected:any`> = []
+  const track = (result: unknown) => {
+    const slot = settlements.push(`pending`) - 1
+    void Promise.resolve(result).then(
+      () => {
+        settlements[slot] = `fulfilled`
+      },
+      () => {
+        settlements[slot] = `rejected:any`
+      },
+    )
+  }
+  const demand = () =>
+    track(
+      mode === `full-log`
+        ? collection._sync.loadSubset({ limit: settlements.length + 1 })
+        : collection.preload(),
+    )
+  const step = (next: RetryStep) => applyRetryModel(model, next, true, `e`)
+  const turn = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
+  const check = async (label: string) => {
+    await turn()
+    await turn()
+    expect(
+      clientObservation({
+        status: collection.status,
+        demands: [...settlements],
+        rowVisible: collection.has(1),
+      }),
+      `${outcome} ${mode} ${decision}: ${label}`,
+    ).toEqual(clientObservation(expectedRetryObservation(model, false)))
+  }
+  // Answer one request with an error, and settle its decision. When the
+  // client gives up after this decision, the same checkpoint shows it.
+  const failOnce = async (
+    response: Response,
+    label: string,
+    givesUp: boolean,
+  ) => {
+    const calls = onErrorCalls
+    const request = await atCheckpoint(http.take(), `${label} HTTP`)
+    // A full-log Collection asks the provider for the full log.
+    if (mode === `full-log`)
+      expect(request.url.searchParams.get(`log`)).toBe(`full`)
+    request.respond(response)
+    await vi.waitFor(() => expect(onErrorCalls).toBe(calls + 1))
+    step({ kind: `error`, decision })
+    if (decision === `async-retry`) {
+      await check(`${label} reached onError`)
+      decisions.shift()!()
+      step({ kind: `decide` })
+    }
+    if (givesUp) step({ kind: `client-give-up` })
+    await check(`${label} decided`)
+  }
+
+  const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+  const consoleWarn = vi.spyOn(console, `warn`).mockImplementation(() => {})
+  await withElectricCleanup(async () => {
+    demand()
+    step({ kind: `demand` })
+    if (outcome === `retried-503`) {
+      await failOnce(
+        new Response(`transient`, { status: 503 }),
+        `first 503`,
+        false,
+      )
+      const retry = await atCheckpoint(http.take(), `retried HTTP`)
+      retry.respond(
+        new Response(
+          JSON.stringify([
+            {
+              key: `1`,
+              value: { id: `1`, name: `recovered` },
+              headers: { operation: `insert` },
+            },
+            { headers: { control: `up-to-date`, global_last_seen_lsn: `1` } },
+          ]),
+          { headers: headers(1) },
+        ),
+      )
+      await vi.waitFor(() => expect(collection.status).not.toBe(`loading`))
+      step({ kind: `up-to-date` })
+    } else if (outcome === `missing-headers`) {
+      await failOnce(new Response(`[]`, { status: 200 }), `headerless`, true)
+    } else {
+      // The client retries while its budget lasts, then gives up.
+      for (let attempt = 1; attempt <= CLIENT_RETRY_BUDGET + 1; attempt++) {
+        await failOnce(
+          new Response(`transient`, { status: 503 }),
+          `503 #${attempt}`,
+          attempt === CLIENT_RETRY_BUDGET + 1,
+        )
+      }
+    }
+    await check(`outcome`)
+    // A client that gave up keeps no provider transport open.
+    if (outcome !== `retried-503`) expect(http.activeCount()).toBe(0)
+    demand()
+    step({ kind: `demand` })
+    await check(`later demand`)
+  }, [
+    () => collection.cleanup(),
+    () => http.close(),
+    () => consoleError.mockRestore(),
+    () => consoleWarn.mockRestore(),
+  ])
+}
+
+fixedCase.each(clientRetryCells)(
+  `installed client: %s in %s mode with an onError %s follows the retry-decision model`,
+  (outcome, mode, decision) => runClientRetryCell(outcome, mode, decision),
+  60_000,
 )
