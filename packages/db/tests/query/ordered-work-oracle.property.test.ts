@@ -4420,6 +4420,10 @@ describe(`ordered source work oracle`, () => {
  * its refill is in flight during the later changes. On either provider a step may
  * publish one intermediate window per provider request it made, and only
  * its last publication must show the final window (#2131).
+ * A `move` step changes the first query's window with `setWindow`; its laws
+ * then follow the moved window. A refetching provider drops an unloaded
+ * request and removes the rows no remaining served range holds, as
+ * query-db-collection does. Work laws skip move steps.
  * One case in four adds a peer: a second live query over the same sources
  * with its own window, the first `offset + limit + 1` rows. Its rows law
  * holds beside the first query's at every checkpoint; the work laws count one
@@ -4449,6 +4453,9 @@ type EagerCommand =
   // left. Any other provider skips both.
   | { type: `release` }
   | { type: `drain` }
+  // Moves the first query's window with `setWindow`. The Effect and the peer
+  // keep their windows.
+  | { type: `move`; offset: number; limit: number }
 
 type EagerCase = {
   // How rows reach the source: sync writes to an eager source, local-only
@@ -4560,6 +4567,11 @@ function eagerHistory(
       fc.constant({ type: `delete-visible` as const }),
       fc.constant({ type: `refetch` as const }),
       fc.constant({ type: `release` as const }),
+      fc.record({
+        type: fc.constant(`move` as const),
+        offset: fc.integer({ min: 0, max: 2 }),
+        limit: fc.integer({ min: 1, max: 4 }),
+      }),
     ),
     { minLength: 1, maxLength: 12 },
   )
@@ -4640,6 +4652,11 @@ const eagerJoinedHistory: fc.Arbitrary<Array<EagerCommand>> = fc.array(
     fc.constant({ type: `delete-visible` as const }),
     fc.constant({ type: `refetch` as const }),
     fc.constant({ type: `release` as const }),
+    fc.record({
+      type: fc.constant(`move` as const),
+      offset: fc.integer({ min: 0, max: 2 }),
+      limit: fc.integer({ min: 1, max: 4 }),
+    }),
   ),
   { minLength: 1, maxLength: 8 },
 )
@@ -4896,7 +4913,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
                 markReady()
                 return {
                   loadSubset: (options) => servePage(options),
-                  unloadSubset: () => {},
+                  unloadSubset: (options) => unload(options),
                 }
               }
               begin()
@@ -5039,6 +5056,18 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
         ordered.findIndex((row) => row.id === sentinel.id),
       )
       .map((row) => rows.get(row.id)!)
+  }
+  // A refetching provider, like query-db-collection, drops an unloaded
+  // request and removes the rows that no remaining served range holds.
+  // A forwarding provider keeps what it sent.
+  function unload(options: LoadSubsetOptions): void {
+    const index = servedRequests.indexOf(options)
+    if (!refetching || index === -1) return
+    servedRequests.splice(index, 1)
+    rangeEnds.delete(options)
+    const held = new Set(servedRequests.flatMap(coverage).map((row) => row.id))
+    const removed = [...sent.keys()].filter((rowId) => !held.has(rowId))
+    if (removed.length > 0) void send([], removed)
   }
   async function refetch(): Promise<void> {
     const current = new Map(
@@ -5239,6 +5268,8 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
     startSync: true,
     query: (q) => buildQuery(q),
   })
+  // The first query's current window, which `move` changes.
+  let shown: EagerCase = testCase
   const peerCase: EagerCase = {
     ...testCase,
     offset: 0,
@@ -5358,7 +5389,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
     expectEagerWindow(
       visibleIds(),
       modelRows(sent),
-      testCase,
+      shown,
       `${label}: rows over the provider ledger`,
     )
     if (peer) {
@@ -5399,7 +5430,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
           (other) => other.id !== row.id && Object.is(other.rank, row.rank),
         ),
     ).length
-    return 2 * window + ties + 1
+    return 2 * (shown.offset + shown.limit) + ties + 1
   }
   // Publication: a change publishes its window once. Each batch a subscriber
   // receives must already show the window the change produces.
@@ -5504,7 +5535,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       }
       if (generated.type === `release` && !inFlight()) continue
       // Resolve a visible-row delete against the model's current window.
-      const visibleId = eagerWindow(rows, testCase)[0]
+      const visibleId = eagerWindow(rows, shown)[0]
       if (generated.type === `delete-visible` && visibleId === undefined) {
         continue
       }
@@ -5513,7 +5544,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
           ? { type: `delete`, id: visibleId! }
           : generated
       const before = `id` in command ? rows.get(command.id) : undefined
-      const boundaryBefore = boundaryRanks(rows, testCase)
+      const boundaryBefore = boundaryRanks(rows, shown)
       const sizeBefore = rows.size
       read = 0
       delivered = 0
@@ -5525,6 +5556,16 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       const visibleBefore = JSON.stringify(visibleIds())
       if (command.type === `refetch`) {
         await refetch()
+      } else if (command.type === `move`) {
+        shown = { ...testCase, offset: command.offset, limit: command.limit }
+        // A held load can block the move's settlement, so a holding history
+        // moves without waiting; `drain` settles it.
+        const settled = query.utils.setWindow({
+          offset: command.offset,
+          limit: command.limit,
+        })
+        if (settled !== true && !held) await settled
+        else if (settled !== true) settled.catch(() => {})
       } else if (command.type === `release`) {
         await releaseOldest()
       } else if (command.type === `drain`) {
@@ -5609,7 +5650,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
         expectEagerWindow(
           visibleIds(),
           modelRows(),
-          testCase,
+          shown,
           `rows after step ${step}`,
         )
         if (peer) {
@@ -5657,7 +5698,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
         expectEagerWindow(
           window,
           modelRows(),
-          testCase,
+          shown,
           `published window at step ${step}`,
         )
       }
@@ -5667,7 +5708,10 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       if (
         testCase.filter === `source` &&
         testCase.path !== `on-demand` &&
-        !peer
+        !peer &&
+        // A window move is not a row change; a two-term move can scan the
+        // source four times, which no law here bounds.
+        command.type !== `move`
       ) {
         expect(scanned, `rows scanned by step ${step}`).toBeLessThanOrEqual(
           Math.max(sizeBefore, rows.size),
@@ -5679,9 +5723,9 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       // A refetching provider's loads follow the Collection's older state,
       // so the work law applies only to a forwarding provider.
       const bound =
-        refetching || held || peer
+        refetching || held || peer || command.type === `move`
           ? undefined
-          : workBound([...boundaryBefore, ...boundaryRanks(rows, testCase)])
+          : workBound([...boundaryBefore, ...boundaryRanks(rows, shown)])
       if (bound !== undefined && testCase.path === `on-demand`) {
         expect(served, `rows served by step ${step}`).toBeLessThanOrEqual(bound)
       } else if (bound !== undefined) {
