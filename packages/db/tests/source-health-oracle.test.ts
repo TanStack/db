@@ -69,6 +69,7 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createLiveQueryCollection } from '../src/query/live-query-collection.js'
+import { createEffect } from '../src/query/effect.js'
 import { eq } from '../src/query/builder/functions.js'
 import { toArray } from '../src/query/index.js'
 import { InvalidCollectionStatusTransitionError } from '../src/errors.js'
@@ -679,4 +680,102 @@ describe(`request errors`, () => {
       })
       await expect(preload).rejects.toBeDefined()
     }))
+})
+
+// ---------------------------------------------------------------------------
+// Effect lane
+// ---------------------------------------------------------------------------
+
+/**
+ * An Effect has the same two axes. A source failure before the Effect's first
+ * ready disposes it through `onSourceError`. After its first ready, a source
+ * problem does not dispose it: `onHealthChange` receives the error tree, with
+ * one node per source alias. An on-demand source can fail its own initial
+ * sync after the Effect is ready, because the Effect's readiness follows its
+ * settled loads; that failure is health too.
+ */
+describe(`effect health`, () => {
+  type EffectHistory = {
+    syncMode: `eager` | `on-demand`
+    failBeforeReady: boolean
+    failure: `markError` | `reportFinal`
+  }
+  const histories: Array<EffectHistory> = [
+    { syncMode: `eager`, failBeforeReady: true, failure: `markError` },
+    { syncMode: `eager`, failBeforeReady: false, failure: `markError` },
+    { syncMode: `eager`, failBeforeReady: false, failure: `reportFinal` },
+    { syncMode: `on-demand`, failBeforeReady: false, failure: `markError` },
+  ]
+
+  it.each(histories)(`%j`, async ({ syncMode, failBeforeReady, failure }) => {
+    let params!: SyncParams
+    const source = createCollection<Row, number>({
+      id: `health-effect-${syncMode}-${Math.random().toString(36).slice(2)}`,
+      getKey: (row) => row.id,
+      syncMode,
+      gcTime: 0,
+      sync: {
+        sync: (next) => {
+          params = next
+          if (syncMode === `on-demand`) return { loadSubset: () => true }
+          return undefined
+        },
+      },
+    })
+    const sourceErrors: Array<Error> = []
+    const trees: Array<ErrorTreeNode> = []
+    const effect = createEffect({
+      query: (q) => q.from({ row: source }),
+      onBatch: () => {},
+      onSourceError: (error) => sourceErrors.push(error),
+      onHealthChange: (errors) => trees.push(errors),
+    })
+    const consoleError = console.error
+    console.error = () => {}
+    try {
+      await flushPromises()
+      if (failBeforeReady) {
+        params.markError(new Error(`gave up`))
+        await flushPromises()
+        // Model: the Effect never reached ready, so the failure ends it.
+        expect(effect.disposed).toBe(true)
+        expect(sourceErrors).toHaveLength(1)
+        expect(trees).toEqual([])
+        return
+      }
+      if (syncMode === `eager`) {
+        params.begin()
+        params.write({ type: `insert`, value: { id: 1, parentId: 1 } })
+        params.commit()
+        params.markReady()
+        await flushPromises()
+      }
+      if (failure === `markError`) params.markError(new Error(`gave up`))
+      else params.reportError(new Error(`problem`), { final: true })
+      await flushPromises()
+
+      // Model: after the Effect's first ready, the failure is health.
+      expect(effect.disposed).toBe(false)
+      expect(sourceErrors).toEqual([])
+      expect(trees.length).toBeGreaterThan(0)
+      expect(trees.at(-1)).toMatchObject({
+        kind: `live-query`,
+        hasErrors: true,
+        sources: [
+          {
+            alias: `row`,
+            isError: true,
+            error: {
+              phase: syncMode === `on-demand` ? `initial` : `sync`,
+              final: true,
+            },
+          },
+        ],
+      })
+    } finally {
+      console.error = consoleError
+      await effect.dispose()
+      await source.cleanup()
+    }
+  })
 })

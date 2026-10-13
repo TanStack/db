@@ -1,6 +1,11 @@
 import { SortedMap } from '../SortedMap.js'
+import { codedMessage, devBuild } from '../error-message.js'
 import { CleanupQueue } from '../collection/cleanup-queue.js'
-import { UNSUBSCRIBED_GC_FLOOR_MS } from '../collection/lifecycle.js'
+import {
+  UNSUBSCRIBED_GC_FLOOR_MS,
+  describeProblem,
+} from '../collection/lifecycle.js'
+import { buildErrorTree } from '../collection/error-tree.js'
 import { makeComparator } from '../utils/comparison.js'
 import { isVirtualPropName } from '../virtual-props.js'
 import { getPersistedReadinessSource } from '../persisted-readiness.js'
@@ -13,7 +18,11 @@ import type { BasicExpression, OrderBy, QueryIR } from './ir.js'
 import type { BaseQueryBuilder } from './builder/index.js'
 import type { Collection, CollectionImpl } from '../collection/index.js'
 import type { CollectionSubscription } from '../collection/subscription.js'
-import type { ChangeMessage, CollectionStatus } from '../types.js'
+import type {
+  ChangeMessage,
+  CollectionStatus,
+  ErrorTreeNode,
+} from '../types.js'
 import type {
   CollectionEventHandler,
   CollectionStatusChangeEvent,
@@ -494,12 +503,42 @@ class PooledLiveQuery {
     private readonly gcTime: number,
     // The query's conjuncts beyond its group's equalities, if any.
     private readonly passes: ((row: Row) => boolean) | undefined,
+    private readonly alias: string,
   ) {
     partition.retain(gcTime)
   }
 
   get status(): CollectionStatus {
     return this.partition.terminated ? `error` : this.source.status
+  }
+
+  /** The same error tree a live-query Collection over this source exposes. */
+  get errors(): ErrorTreeNode {
+    const source = buildErrorTree(this.source, this.alias)
+    // A terminated partition ended this view, for example when its source
+    // was cleaned up under it.
+    const error = this.partition.terminated
+      ? (this.source._lifecycle.gateProblem ??
+        describeProblem(
+          new Error(
+            devBuild() && process.env.NODE_ENV !== `production`
+              ? `The pooled live query's source ended`
+              : codedMessage(244),
+          ),
+          `initial`,
+          true,
+        ))
+      : null
+    return {
+      alias: `root`,
+      collectionId: this.source.id,
+      kind: `live-query`,
+      status: this.status,
+      isError: error !== null,
+      hasErrors: error !== null || source.hasErrors,
+      error,
+      sources: [source],
+    }
   }
 
   // Read by key: the partition drops a group nobody watches once it empties.
@@ -722,5 +761,6 @@ export function createPooledLiveQuery(
     shape.residual.length > 0
       ? rowPredicate(shape.residual, ir.from.alias)
       : undefined,
+    ir.from.alias,
   ) as unknown as Collection<any, any, any>
 }

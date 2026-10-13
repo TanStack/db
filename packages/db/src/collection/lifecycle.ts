@@ -612,7 +612,8 @@ export class CollectionLifecycleManager<
   }
 }
 
-function describeProblem(
+/** @internal Error tree detail for a problem value. */
+export function describeProblem(
   error: unknown,
   phase: CollectionErrorInfo[`phase`],
   final: boolean,

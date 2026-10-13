@@ -10,7 +10,7 @@ import { getPersistedReadinessSource } from './persisted-readiness.js'
 import type { Collection } from './collection/index.js'
 import type { DbClient, DehydratedLiveQueryResult } from './client.js'
 import type { PersistedReadinessSource } from './persisted-readiness.js'
-import type { ChangeMessage, CollectionStatus } from './types.js'
+import type { ChangeMessage, CollectionStatus, ErrorTreeNode } from './types.js'
 
 export type LiveQueryPersistedStatus =
   `unavailable` | `loading` | `ready` | `error`
@@ -96,6 +96,13 @@ export interface LiveQuerySnapshot<
   isError: boolean
   isCleanedUp: boolean
   isEnabled: boolean
+  /**
+   * The error tree for the query and every Collection it depends on, or
+   * `undefined` for a disabled query. `isError` describes only the initial
+   * load; after the first ready, a source problem shows here and the data
+   * stays.
+   */
+  errors: ErrorTreeNode | undefined
 }
 
 /**
@@ -185,6 +192,7 @@ const DISABLED_SNAPSHOT: LiveQuerySnapshot<any, any> = {
   isError: false,
   isCleanedUp: false,
   isEnabled: false,
+  errors: undefined,
 }
 
 class LiveQueryObserverImpl<
@@ -324,6 +332,7 @@ class LiveQueryObserverImpl<
         isPersistedReady: persistedStatus === `ready`,
         persistedError: local.error,
         isEnabled: true,
+        errors: (collection as { errors?: ErrorTreeNode }).errors,
       }
       this.snapshotDirty = false
     }
@@ -754,6 +763,10 @@ class LiveQueryObserverImpl<
     const statusUnsub = collection.on(`status:change`, ({ status }) =>
       notify(undefined, status),
     )
+    // A health change below the query changes its error tree, not its rows.
+    const healthUnsub = collection.on(`health:change`, () =>
+      notify(undefined, collection.status),
+    )
     const subscribeLayoutChanges = (
       collection as Collection<T, TKey, any> & {
         _subscribeLayoutChanges?: (listener: () => void) => () => void
@@ -809,6 +822,7 @@ class LiveQueryObserverImpl<
     const release = () => {
       clientUnsub()
       statusUnsub()
+      healthUnsub()
       layoutUnsub()
       persistedUnsubs?.forEach((unsubscribe) => unsubscribe())
       subscription?.unsubscribe()

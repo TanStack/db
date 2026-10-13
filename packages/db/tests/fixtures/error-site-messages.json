@@ -932,5 +932,10 @@
       "\" is ",
       ". Before the first ready, retry without reporting, or call markError() when the source gives up."
     ]
+  },
+  "244": {
+    "file": "query/pooled-live-query.ts",
+    "template": "The pooled live query's source ended",
+    "literals": ["The pooled live query's source ended"]
   }
 }

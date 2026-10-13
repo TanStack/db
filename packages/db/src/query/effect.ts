@@ -5,6 +5,7 @@ import { runAllCallbacks } from '../utils/callbacks.js'
 import { normalizeError } from '../utils/error.js'
 import { deepEquals } from '../utils.js'
 import { codedMessage, devBuild } from '../error-message.js'
+import { buildErrorTree } from '../collection/error-tree.js'
 import { compileQuery } from './compiler/index.js'
 import { normalizeExpressionPaths } from './compiler/expressions.js'
 import { getCollectionBuilder } from './live/collection-registry.js'
@@ -39,6 +40,7 @@ import type {
 } from './compiler/joins.js'
 import type {
   ChangeMessage,
+  ErrorTreeNode,
   KeyedStream,
   StringCollationConfig,
 } from '../types.js'
@@ -131,11 +133,18 @@ export interface EffectConfig<
   onError?: (error: Error, event: DeltaEvent<TRow, TKey>) => void
 
   /**
-   * Called when a source collection enters an error or cleaned-up state.
-   * The effect is automatically disposed after this callback fires.
-   * If not provided, the error is logged to console.error.
+   * Called when a source collection fails before the effect's first ready, or
+   * is cleaned up. The effect is automatically disposed after this callback
+   * fires. If not provided, the error is logged to console.error.
    */
   onSourceError?: (error: Error) => void
+
+  /**
+   * Called after the effect's first ready whenever a source's status or health
+   * changes. A source problem after the first ready does not dispose the
+   * effect; read the error tree to decide what to do.
+   */
+  onHealthChange?: (errors: ErrorTreeNode) => void
 
   /**
    * Skip deltas during initial collection load.
@@ -305,6 +314,7 @@ export function createEffect<
     query: config.query,
     skipInitial: config.skipInitial ?? false,
     onBatchProcessed,
+    onHealthChange: config.onHealthChange,
     onSourceError: (error: Error) => {
       if (disposed) return
 
@@ -375,6 +385,7 @@ interface EffectPipelineRunnerConfig<
   onBatchProcessed: (events: Array<DeltaEvent<TRow, TKey>>) => void
   /** Called when a source collection enters error or cleaned-up state */
   onSourceError: (error: Error) => void
+  onHealthChange?: (errors: ErrorTreeNode) => void
 }
 
 /**
@@ -458,6 +469,10 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   // skipInitial state
   private readonly skipInitial: boolean
   private initialLoadComplete = false
+  // Latched when the effect's initial load can complete, with or without
+  // skipInitial. After it, a source problem is health, not disposal.
+  private reachedReady = false
+  private readonly onHealthChange: ((errors: ErrorTreeNode) => void) | undefined
 
   // Scheduler integration
   private subscribedToAllCollections = false
@@ -477,6 +492,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     this.skipInitial = config.skipInitial
     this.onBatchProcessed = config.onBatchProcessed
     this.onSourceError = config.onSourceError
+    this.onHealthChange = config.onHealthChange
 
     // Parse query
     this.query = buildQueryFromConfig({ query: config.query })
@@ -713,7 +729,12 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
         const { status } = event
 
-        // Source entered error state — effect can no longer function
+        // A source failure before the effect's first ready ends the effect.
+        // After it, the failure is health and the effect keeps running.
+        if (status === `error` && this.reachedReady) {
+          this.reportHealth()
+          return
+        }
         if (status === `error`) {
           this.onSourceError(
             new Error(
@@ -739,8 +760,13 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         ) {
           this.initialLoadComplete = true
         }
+        const wasReady = this.reachedReady
+        if (this.latchReady() && wasReady) this.reportHealth()
       })
       this.unsubscribeCallbacks.add(statusUnsubscribe)
+      this.unsubscribeCallbacks.add(
+        collection.on(`health:change`, () => this.reportHealth()),
+      )
       const cleanupStartUnsubscribe =
         collection._onCleanupStart(handleSourceCleanup)
       // Registration reports an already-active cleanup synchronously. That
@@ -778,6 +804,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     // Initial graph run to process any synchronously-available data.
     // For skipInitial, this run's output is discarded (initialLoadComplete is still false).
     this.runGraph()
+    this.latchReady()
 
     // After the initial graph run, if all sources are ready,
     // mark initial load as complete so future events are processed.
@@ -968,6 +995,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       }
       // Emit all accumulated events once the graph reaches quiescence
       this.flushPendingChanges()
+      this.latchReady()
       if (
         this.skipInitial &&
         !this.initialLoadComplete &&
@@ -1030,6 +1058,35 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   }
 
   /** Initial callbacks start only after every source served its initial data. */
+  /** Latch the effect's first ready and report whether it has happened. */
+  private latchReady(): boolean {
+    if (!this.reachedReady && this.canCompleteInitialLoad())
+      this.reachedReady = true
+    return this.reachedReady
+  }
+
+  /** The error tree for this effect's sources, in query order. */
+  private errorTree(): ErrorTreeNode {
+    const sources = this.collectionSources.map(({ alias, collection }) =>
+      buildErrorTree(collection, alias),
+    )
+    return {
+      alias: `root`,
+      collectionId: `effect`,
+      kind: `live-query`,
+      status: this.reachedReady ? `ready` : `loading`,
+      isError: false,
+      hasErrors: sources.some((node) => node.hasErrors),
+      error: null,
+      sources,
+    }
+  }
+
+  private reportHealth(): void {
+    if (this.disposed || !this.reachedReady || !this.onHealthChange) return
+    this.onHealthChange(this.errorTree())
+  }
+
   private canCompleteInitialLoad(): boolean {
     return (
       !this.orderedPublicationFailed &&

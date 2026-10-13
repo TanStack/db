@@ -2459,3 +2459,13 @@ Development builds show this message, with `${...}` replaced by values:
 ```text
 ${operation}() reports a problem after the first ready, but Collection "${this.id}" is ${this.status}. Before the first ready, retry without reporting, or call markError() when the source gives up.
 ```
+
+<a id="error-244"></a>
+
+## Error 244: `query/pooled-live-query.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+The pooled live query's source ended
+```

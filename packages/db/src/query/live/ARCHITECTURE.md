@@ -825,16 +825,18 @@ live query itself. This differs from a source truncate, which keeps the live
 query active behind its replay publication barrier.
 
 An initial sync error also leaves newly requested demand detached, even when
-the adapter has installed a loader. `markReady()` in the same sync run resumes that
-demand; releasing it before recovery creates no physical acquisition or unload.
-Queued reacquisition must not retry a failed attempt merely because both
-loading and ready notifications scheduled it.
+the adapter has installed a loader. The error is final for its sync attempt:
+`markReady()` in the same sync run is a contract violation and throws, and
+only a restart, which begins a new sync run, acquires that demand. Releasing it
+before the restart creates no physical acquisition or unload. Queued
+reacquisition must not retry a failed attempt merely because both loading and
+ready notifications scheduled it.
 
 Requests waiting for a loader report one pending promise synchronously through
 `onLoadSubsetResult`, including requests made during initial error or after
 cleanup. The callback is not delayed until acquisition: query callers capture
 its result before the snapshot request returns. This promise waits for the
-recovery's publication barrier, not just adapter return. Failure rejects it with
+restart's publication barrier, not just adapter return. Failure rejects it with
 the replay error; release, external abort, unsubscribe, or another cleanup
 rejects it with `AbortError`. Later transport settlement cannot change that
 outcome. Cleanup may retain logical demand for the next sync run, but it does
@@ -1566,6 +1568,20 @@ create recursive Collection machinery.
     counts as a preload. A deferring live query keeps its sources from
     garbage collection but is not counted in their `subscriberCount` or
     `subscribers:change`, which adapters read as a request for live data.
+16. **Final initial errors and source health:** a sync attempt's initial
+    error is final for that attempt; a Collection moves from `error` to
+    `ready` only through a restart. Before a live query's first ready, a
+    source that fails fails the query's attempt, for every shape. After its
+    first ready, a source's later problem is health metadata: the query keeps
+    its status and rows, and its error tree reports the problem. A lazy load
+    that fails after the first ready is a request error on the query's node,
+    cleared when that demand settles or is released. Query failures and
+    contract violations, such as a graph failure or a source cleaned up under
+    the query, still end the query.
+17. **Error tree:** a live query's `errors` has one node for itself and one per
+    source alias in query order, recursing through nested live queries. The
+    shape is fixed by the query. Each node mirrors its Collection when read,
+    and the query emits `health:change` whenever a node below it changes.
 
 ## Glossary
 
