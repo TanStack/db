@@ -5,7 +5,7 @@ import { runAllCallbacks } from '../utils/callbacks.js'
 import { normalizeError } from '../utils/error.js'
 import { deepEquals } from '../utils.js'
 import { codedMessage, devBuild } from '../error-message.js'
-import { buildErrorTree } from '../collection/error-tree.js'
+import { buildErrorTree, errorTreeNode } from '../collection/error-tree.js'
 import { compileQuery } from './compiler/index.js'
 import { normalizeExpressionPaths } from './compiler/expressions.js'
 import { getCollectionBuilder } from './live/collection-registry.js'
@@ -469,8 +469,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   // skipInitial state
   private readonly skipInitial: boolean
   private initialLoadComplete = false
-  // Latched when the effect's initial load can complete, with or without
-  // skipInitial. After it, a source problem is health, not disposal.
+  // The Effect's gate, as a live query's first ready: latched when every
+  // initial load has settled, with or without skipInitial. After it, a
+  // source problem is health, not disposal.
   private reachedReady = false
   private readonly onHealthChange: ((errors: ErrorTreeNode) => void) | undefined
 
@@ -883,16 +884,12 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     })
   }
 
-  /** Keep `skipInitial` suppression open until a pending initial load settles. */
+  /** Keep the Effect's gate, and `skipInitial` suppression, open until a pending initial load settles. */
   private trackInitialLoad(
     result: true | Promise<unknown>,
     replacementAfterFailure: () => Promise<void> | undefined,
   ): void {
-    if (
-      !(result instanceof Promise) ||
-      this.initialLoadComplete ||
-      this.disposed
-    )
+    if (!(result instanceof Promise) || this.reachedReady || this.disposed)
       return
     this.pendingInitialLoads.add(result)
     const release = () => {
@@ -1057,8 +1054,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     )
   }
 
-  /** Initial callbacks start only after every source served its initial data. */
-  /** Latch the effect's first ready and report whether it has happened. */
+  /** Latch the Effect's gate, its first ready, and report whether it has passed. */
   private latchReady(): boolean {
     if (!this.reachedReady && this.canCompleteInitialLoad())
       this.reachedReady = true
@@ -1067,19 +1063,16 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
   /** The error tree for this effect's sources, in query order. */
   private errorTree(): ErrorTreeNode {
-    const sources = this.collectionSources.map(({ alias, collection }) =>
-      buildErrorTree(collection, alias),
-    )
-    return {
+    return errorTreeNode(this, {
       alias: `root`,
       collectionId: `effect`,
       kind: `live-query`,
       status: this.reachedReady ? `ready` : `loading`,
-      isError: false,
-      hasErrors: sources.some((node) => node.hasErrors),
       error: null,
-      sources,
-    }
+      sources: this.collectionSources.map(({ alias, collection }) =>
+        buildErrorTree(collection, alias),
+      ),
+    })
   }
 
   private reportHealth(): void {
