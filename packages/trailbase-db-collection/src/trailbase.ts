@@ -188,15 +188,9 @@ export function trailBaseCollectionOptions<
       const { begin, write, commit, markReady, markError, collection } = params
       let cancelled = false
       let periodicCleanupTask: ReturnType<typeof setInterval> | undefined
-      // Ends loads that wait for a subscription when the session cleans up.
-      let endWaits!: () => void
-      const stopped = new Promise<void>((resolve) => {
-        endWaits = resolve
-      })
-
       const cleanup = () => {
         cancelled = true
-        endWaits()
+        settleListener()
         cancelEventReader()
         if (periodicCleanupTask !== undefined) {
           clearInterval(periodicCleanupTask)
@@ -210,32 +204,28 @@ export function trailBaseCollectionOptions<
       // so its ordered requests use the offset fallback.
       const cursors = new Map<string | number, string>()
 
-      // Subscribe before any fetch, so a change committed during a fetch
-      // reaches the listener.
-      const subscribing = new Promise<ReadableStream<Event>>((resolve) =>
-        resolve(config.recordApi.subscribe(`*`)),
-      )
       let listening = false
-      // Set when the subscription or the listener could not start.
-      let startFailure: { error: unknown } | undefined
-      // `start` settles this once the listener runs or cannot start, so a
-      // waiting load never depends on the order of their continuations.
-      let settleListener!: () => void
-      const listenerSettled = new Promise<void>((resolve) => {
-        settleListener = resolve
-      })
+      // Settles when the listener runs, cannot start (with the failure), or
+      // the session cleans up, so a waiting load never depends on the order
+      // of their continuations.
+      let settleListener!: (failure?: { error: unknown }) => void
+      const listenerSettled = new Promise<{ error: unknown } | undefined>(
+        (resolve) => {
+          settleListener = resolve
+        },
+      )
 
-      // Wait for the listener, but let cleanup or the caller's abort end the
-      // wait even when the subscription never resolves.
-      async function waitForSubscription(signal: AbortSignal | undefined) {
-        if (!signal) return Promise.race([listenerSettled, stopped])
+      // Wait for the listener, but let the caller's abort end the wait even
+      // when the subscription never resolves.
+      async function waitForListener(signal: AbortSignal | undefined) {
+        if (!signal) return listenerSettled
         let onAbort!: () => void
-        const aborted = new Promise<void>((resolve) => {
-          onAbort = resolve
+        const aborted = new Promise<undefined>((resolve) => {
+          onAbort = () => resolve(undefined)
           signal.addEventListener(`abort`, onAbort, { once: true })
         })
         try {
-          await Promise.race([listenerSettled, stopped, aborted])
+          return await Promise.race([listenerSettled, aborted])
         } finally {
           // The request signal can outlive this wait; do not keep its listener.
           signal.removeEventListener(`abort`, onAbort)
@@ -249,10 +239,10 @@ export function trailBaseCollectionOptions<
         if (cancelled) return
         if (opts.signal?.aborted) throw new LoadSubsetOperationAbortedError()
         if (!listening) {
-          await waitForSubscription(opts.signal)
+          const failure = await waitForListener(opts.signal)
           if (cancelled) return
           if (opts.signal?.aborted) throw new LoadSubsetOperationAbortedError()
-          if (startFailure) throw startFailure.error
+          if (failure) throw failure.error
         }
 
         const lastKey = opts.cursor?.lastKey
@@ -390,7 +380,7 @@ export function trailBaseCollectionOptions<
       async function start() {
         let reader: ReadableStreamDefaultReader<Event> | undefined
         try {
-          const eventStream = await subscribing
+          const eventStream = await config.recordApi.subscribe(`*`)
           if (cancelled) {
             await eventStream.cancel()
             return
@@ -434,8 +424,7 @@ export function trailBaseCollectionOptions<
         } catch (error) {
           // An abandoned startup must not cancel a replacement session's reader.
           if (cancelled) return
-          startFailure = { error }
-          settleListener()
+          settleListener({ error })
           cancelEventReader()
           if (collection.status === `loading`) {
             markError(error)
