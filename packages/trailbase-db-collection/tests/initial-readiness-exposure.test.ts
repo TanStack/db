@@ -13,8 +13,9 @@ import type { Event, ListResponse } from 'trailbase'
  * for an on-demand source, and law 7 says a successful load settles only after
  * its rows are visible. These witnesses drive the TrailBase sync through a
  * scripted record API under a real live query and record the rows visible at
- * the first-ready transition. The last witness pins the older fetch/listen gap
- * that `tests/ORACLE.md` owns: it is expected to fail.
+ * the first-ready transition. The last two witnesses check that an on-demand
+ * load fetches only after the change subscription starts, so no change falls
+ * between the fetch and the listener (`tests/ORACLE.md` owns that law).
  */
 
 type Data = { id: number | null; updated: number | null; data: string }
@@ -118,29 +119,57 @@ describe(`TrailBase initial readiness follows applied subset settlement`, () => 
     expect(seen.rows).toEqual([1, 2])
   })
 
-  // Pins the older fetch/listen gap owned by tests/ORACLE.md. Before the
-  // readiness change a query waited for the source's `markReady()`, which
-  // TrailBase calls only after its change subscription starts.
-  it.fails(
-    `an on-demand query is first ready only after its change subscription starts`,
-    async () => {
-      const recordApi = new MockRecordApi<Data>()
-      const subscribe = createDeferred<ReadableStream<Event>>()
-      recordApi.list.mockResolvedValue(rows)
-      recordApi.subscribe.mockReturnValue(subscribe.promise)
-      const query = visible(createSource(recordApi))
-      // Set before resolving, so TrailBase's own continuation cannot run first.
-      let subscribed = false
-      let subscribedAtReady: boolean | undefined
-      query.onFirstReady(() => {
-        subscribedAtReady = subscribed
-      })
-      void query.preload()
-      await new Promise((resolve) => setTimeout(resolve, 20))
-      subscribed = true
-      subscribe.resolve(new TransformStream<Event>().readable)
-      await query.preload()
-      expect(subscribedAtReady).toBe(true)
-    },
-  )
+  // A query no longer waits for the source's `markReady()`, which follows the
+  // subscription, so the load itself must wait for the subscription.
+  it(`an on-demand query is first ready only after its change subscription starts`, async () => {
+    const recordApi = new MockRecordApi<Data>()
+    const subscribe = createDeferred<ReadableStream<Event>>()
+    recordApi.list.mockResolvedValue(rows)
+    recordApi.subscribe.mockReturnValue(subscribe.promise)
+    const query = visible(createSource(recordApi))
+    // Set before resolving, so TrailBase's own continuation cannot run first.
+    let subscribed = false
+    let subscribedAtReady: boolean | undefined
+    query.onFirstReady(() => {
+      subscribedAtReady = subscribed
+    })
+    void query.preload()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    subscribed = true
+    subscribe.resolve(new TransformStream<Event>().readable)
+    await query.preload()
+    expect(subscribedAtReady).toBe(true)
+  })
+
+  // A small service model: `list` answers from the current rows, and a change
+  // reaches only a subscription that was established when it was committed.
+  it(`an on-demand query keeps a change committed after its fetch began`, async () => {
+    const recordApi = new MockRecordApi<Data>()
+    const server = new Map(rows.records.map((row) => [row.id, row]))
+    const listeners: Array<WritableStreamDefaultWriter<Event>> = []
+    const subscribe = createDeferred<ReadableStream<Event>>()
+    recordApi.list.mockImplementation(() =>
+      Promise.resolve({ records: [...server.values()] }),
+    )
+    recordApi.subscribe.mockReturnValue(subscribe.promise)
+    const establish = () => {
+      const stream = new TransformStream<Event>()
+      listeners.push(stream.writable.getWriter())
+      subscribe.resolve(stream.readable)
+    }
+    const commitChange = (row: Data) => {
+      server.set(row.id, row)
+      for (const writer of listeners) void writer.write({ Update: row })
+    }
+
+    const query = visible(createSource(recordApi))
+    void query.preload()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    commitChange({ id: 1, updated: 1, data: `hidden` })
+    establish()
+    await query.preload()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(query.toArray.map((row) => row.id)).toEqual([2])
+  })
 })

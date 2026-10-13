@@ -204,12 +204,25 @@ export function trailBaseCollectionOptions<
       // so its ordered requests use the offset fallback.
       const cursors = new Map<string | number, string>()
 
+      // Subscribe before any fetch, so a change committed during a fetch
+      // reaches the listener. `start` awaits this first and starts listening
+      // in the same continuation, before any waiting `load` resumes.
+      const subscribing = new Promise<ReadableStream<Event>>((resolve) =>
+        resolve(config.recordApi.subscribe(`*`)),
+      )
+      let listening = false
+
       // Load (more) data.
       // A caller that aborts sees `AbortError`. Pages a commit accepted still
       // apply, and the load waits until they are visible; cleanup is quiet.
       async function load(opts: LoadSubsetOptions) {
         if (cancelled) return
         if (opts.signal?.aborted) throw new LoadSubsetOperationAbortedError()
+        if (!listening) {
+          await subscribing
+          if (cancelled) return
+          if (opts.signal?.aborted) throw new LoadSubsetOperationAbortedError()
+        }
 
         const lastKey = opts.cursor?.lastKey
         let cursor: string | undefined =
@@ -346,7 +359,7 @@ export function trailBaseCollectionOptions<
       async function start() {
         let reader: ReadableStreamDefaultReader<Event> | undefined
         try {
-          const eventStream = await config.recordApi.subscribe(`*`)
+          const eventStream = await subscribing
           if (cancelled) {
             await eventStream.cancel()
             return
@@ -374,6 +387,7 @@ export function trailBaseCollectionOptions<
                 console.error(`TrailBase subscription failed`, error)
               }
             })
+          listening = true
 
           // Eager mode: perform initial fetch to populate everything
           if (internalSyncMode === `eager`) {

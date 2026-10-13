@@ -12,6 +12,15 @@ The same interpreter runs a fixed corpus and generated histories.
 
 - Published inserts, updates and deletes agree with the model after each event.
 - Eager startup waits for its list; on-demand startup does not claim to load rows.
+- A list starts only after the change subscription is established, in both
+  modes, so a change committed during or after a fetch reaches the listener.
+  An on-demand subset load that arrives before the subscription waits for it.
+  Since #2115 a live query is ready when its subset load settles, not at the
+  source's `markReady()`, so the load itself must carry this ordering.
+  `initial-readiness-exposure.test.ts` holds two witnesses under a real live
+  query: readiness before the subscription, and a change committed after the
+  fetch began but before the subscription. Both fail when the load does not
+  wait.
   Required startup failures reject. Later stream failures retain rows and report
   the error, matching the adapter's current policy.
 - Graceful closure drains buffered events before releasing the reader.
@@ -42,6 +51,10 @@ separately from command scalars, so provider mutation cannot change the answer.
 
 This is not a model of pagination, filtered subsets, optimistic mutation
 acknowledgements, service reconnects, or arbitrary event/list interleavings.
+In particular, a change event that applies before a concurrent fetch's page
+for the same row can be overwritten by that older page. No witness or model
+covers that ordering yet. Loads after the stream ends do not wait for a new
+subscription.
 The generated event phase starts after loading; existing loading-time unit
 matrices and the two held-cancellation startup controls remain valuable. Those
 controls were both RED when listener failure awaited cancellation, and GREEN
