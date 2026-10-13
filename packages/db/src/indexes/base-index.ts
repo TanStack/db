@@ -101,8 +101,10 @@ export interface IndexInterface<
    * Whether range lookups (gt/gte/lt/lte) on this index can be trusted to
    * return every matching key. Range traversal relies on the index ordering, so
    * it is unsafe when the index uses a custom comparator, whose order may not
-   * match the WHERE evaluator's relational operators. Callers must fall back to
-   * a full scan when this is `false`.
+   * match the WHERE evaluator's relational operators. A custom comparator is
+   * also not represented by compareOptions, so an ordered Collection read must
+   * not select this index by compareOptions alone. Callers must fall back to a
+   * full scan when this is `false`.
    */
   get supportsRangeOptimization(): boolean
 

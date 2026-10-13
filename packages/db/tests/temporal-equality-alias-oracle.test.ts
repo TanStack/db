@@ -12,14 +12,18 @@ import { withOracleCleanup } from './utils.js'
  * order. At one instant, UTC and Etc/UTC are equivalent zone aliases, while
  * the fixed-offset +00:00 zone remains a different identity.
  *
- * This bounded oracle covers ordinary values from one polyfill copy and one
- * instant. The fixture assigns equality classes independently of production
- * normalization. Direct BasicIndex/BTreeIndex add and build histories compare
- * exact key sets after each returned action. Public Collection reads compare
- * an unindexed scan and an optimized-only indexed snapshot after readiness.
- * A forged display tag and an own property shadowing a genuine Temporal zone
- * must not join UTC's class. This oracle does not claim all IANA aliases,
- * mixed implementations, joins, live-query publication, or provider behavior.
+ * The ZonedDateTime lane covers ordinary values from one polyfill copy and one
+ * instant. A neighboring PlainDate lane checks that native brand and equality
+ * survive own display shadows while forged tags retain ordinary object
+ * identity. Fixture-assigned classes, not production normalization, predict
+ * exact key sets. Direct BasicIndex/BTreeIndex add, build, and removal
+ * histories compare those sets after each returned action. Public Collection
+ * reads compare an unindexed scan and an optimized-only indexed snapshot after
+ * readiness. The mixed forged/genuine PlainDate Collection has no index:
+ * default range order across an ordinary object and Temporal is unspecified.
+ * This oracle does not claim all IANA aliases, arbitrary spoofed prototypes,
+ * mixed Temporal implementations, joins, live-query publication, or provider
+ * behavior.
  */
 type Row = { id: string; when: Temporal.ZonedDateTime }
 type Sample = {
@@ -119,6 +123,14 @@ describe.each(indexTypes)(`%s Temporal alias equality`, (_name, IndexType) => {
       expect(index.lookup(`eq`, aliasProbe)).toEqual(expectedKeys(`utc`))
       expect(index.inArrayLookup([aliasProbe])).toEqual(expectedKeys(`utc`))
       expect(index.equalityLookup(offsetProbe)).toEqual(expectedKeys(`offset`))
+      // The neighboring instant and calendar classes ensure that a repair
+      // does not collapse every Temporal value sharing a named zone.
+      expect(index.equalityLookup(source[3]!.when)).toEqual(
+        expectedKeys(`later`),
+      )
+      expect(index.equalityLookup(source[4]!.when)).toEqual(
+        expectedKeys(`calendar`),
+      )
 
       index.remove(source[0]!.id, source[0]!)
       expect(index.equalityLookup(aliasProbe)).toEqual(new Set([`utc-alias`]))
@@ -229,5 +241,102 @@ it(`keeps a forged tag and shadowed zone outside genuine UTC equality`, async ()
         ?.map(({ value }) => value.id),
     )
     expect(keys).toEqual(new Set())
+  }, [() => collection.cleanup()])
+})
+
+it(`uses the PlainDate brand for direct lookups and a public unindexed snapshot`, async () => {
+  const genuine = Temporal.PlainDate.from(`2024-01-01`)
+  const fake = {
+    [Symbol.toStringTag]: `Temporal.PlainDate`,
+    toString: () => `2024-01-01`,
+  }
+  const borrowed = Object.assign(
+    Object.create(Temporal.PlainDate.prototype) as object,
+    { toString: () => `2024-01-01` },
+  )
+  const shadowedTag = Temporal.PlainDate.from(`2024-01-01`)
+  Object.defineProperty(shadowedTag, Symbol.toStringTag, {
+    value: `ordinary`,
+  })
+  const shadowedText = Temporal.PlainDate.from(`2024-01-01`)
+  Object.defineProperty(shadowedText, `toString`, {
+    value: () => `unrelated text`,
+  })
+  expect(Temporal.PlainDate.prototype.equals.call(shadowedTag, genuine)).toBe(
+    true,
+  )
+  expect(Temporal.PlainDate.prototype.equals.call(shadowedText, genuine)).toBe(
+    true,
+  )
+
+  const brandSamples: ReadonlyArray<{
+    id: string
+    when: unknown
+    matches: boolean
+  }> = [
+    { id: `genuine`, when: genuine, matches: true },
+    { id: `forged-tag`, when: fake, matches: false },
+    { id: `borrowed-prototype`, when: borrowed, matches: false },
+    { id: `shadowed-tag`, when: shadowedTag, matches: true },
+    { id: `shadowed-text`, when: shadowedText, matches: true },
+  ]
+  const probe = Temporal.PlainDate.from(`2024-01-01`)
+  expect(() =>
+    Reflect.apply(Temporal.PlainDate.prototype.equals, fake, [probe]),
+  ).toThrow()
+  expect(() =>
+    Reflect.apply(Temporal.PlainDate.prototype.equals, borrowed, [probe]),
+  ).toThrow()
+
+  // A one-row index tests each exact equality class without ordering mixed
+  // ordinary objects and Temporal values, whose range order is unspecified.
+  for (const [, IndexType] of indexTypes) {
+    for (const sample of brandSamples) {
+      const index = new IndexType(1, new PropRef([`when`]))
+      index.add(sample.id, sample)
+      expect(index.equalityLookup(probe)).toEqual(
+        sample.matches ? new Set([sample.id]) : new Set(),
+      )
+    }
+    // Both insertion orders must retain the same equality class when a live
+    // representative is removed. The forged objects are intentionally kept
+    // out of this ordered index: the default comparator has no promised order
+    // for a mixed ordinary-object and Temporal domain.
+    for (const first of [genuine, shadowedTag]) {
+      const second = first === genuine ? shadowedTag : genuine
+      const index = new IndexType(1, new PropRef([`when`]))
+      index.add(`first`, { when: first })
+      index.add(`second`, { when: second })
+      expect(index.equalityLookup(probe)).toEqual(new Set([`first`, `second`]))
+      index.remove(`first`, { when: first })
+      expect(index.equalityLookup(probe)).toEqual(new Set([`second`]))
+    }
+  }
+
+  const collection = createCollection<{ id: string; when: unknown }, string>({
+    id: `temporal-plain-date-brand`,
+    getKey: (row) => row.id,
+    autoIndex: `off`,
+    startSync: true,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        begin()
+        for (const { id, when } of brandSamples) {
+          write({ type: `insert`, value: { id, when } })
+        }
+        commit()
+        markReady()
+      },
+    },
+  })
+  await withOracleCleanup(async () => {
+    await collection.stateWhenReady()
+    const predicate = new Func(`eq`, [new PropRef([`when`]), new Value(probe)])
+    const keys = new Set(
+      collection
+        .currentStateAsChanges({ where: predicate })
+        ?.map(({ value }) => value.id),
+    )
+    expect(keys).toEqual(new Set([`genuine`, `shadowed-tag`, `shadowed-text`]))
   }, [() => collection.cleanup()])
 })

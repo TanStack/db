@@ -1,0 +1,58 @@
+# Deep equality unit retirement: Date and RegExp
+
+Two source-isolated Field Lab loss audits compared the Date and RegExp blocks
+of `packages/db/tests/utils.test.ts` at frozen head `1265abeb5` with the
+existing `utils-oracle.property.test.ts`. The proposed deletion said that the
+oracle's copy/change and cross-type laws already covered both blocks. The
+audits found three missing primitive boundaries before either block was
+removed. No production behavior was changed for this transfer.
+
+| Retired block and source observation | Frozen receiver | Receiving law and checkpoint |
+| --- | --- | --- |
+| Date: separately allocated 2023-01-01 Dates are equal; 2023-01-02 differs. | Date copy/change properties and a fixed Date-time triple covered the law, but not those exact operands. | The fixed 2023 triple reconstructs both results; the existing generated Date copy/change property checks neighboring timestamps at `deepEquals` return. |
+| Date: a Date differs from its ISO string. | No Date/string pair; the broad cross-type description had compressed away this boundary. | A fixed 2023 probe and generated finite Dates compare with their own ISO text in both directions. |
+| Date: a Date differs from its numeric timestamp. | No Date/number pair, even when the number encoded the same instant. | The same fixed and generated law compares with `getTime()` in both directions. |
+| RegExp: separate `/abc/g` and `/test/i` copies are equal; changed flags or source differ. | Source/flags fixed triples and a generated copy/changed-flags property covered the law, but not those exact operands. | Fixed `/abc/g`, `/abc/i`, `/def/g`, and `/test/i` checks reconstruct each return; generated RegExps vary source and flags. |
+| RegExp: `/abc/g` differs from its source string `abc`. | The receiver had RegExp/object and number/string pairs, but no RegExp/string pair. | A fixed source-text probe and generated RegExps compare with their own source text in both directions. |
+
+The `deepEquals` documentation names Date and RegExp as supported value
+classes. The old examples supply the more precise rule that their primitive
+encodings are not coerced into those classes. The receiving model assigns
+expected inequality from those distinct value classes; it does not call the
+production classifier. The fixed operands preserve every old assertion, and
+the generated properties extend each missing boundary across finite Dates and
+valid RegExps. A deliberately coercing Date/number, Date/string, or
+RegExp/string comparator fails the receiving checker at its forward inequality
+assertion. Both directions are checked for the real production function.
+
+The two legacy blocks contained six tests. After transfer, the focused oracle
+and remaining unit file passed 208 tests with no type errors. The generator
+uses finite Date timestamps from -1,000,000,000,000 through 2,000,000,000,000
+milliseconds and the existing valid RegExp source/flag grammar; fixed and
+seedless campaigns use the same properties. This establishes the direct
+`deepEquals` return for those pairs. It does not establish cross-realm values,
+RegExp subclasses, arbitrary prototype changes, every cross-type pair, or a
+public change-event trace. Those need their own owner or receiving witness.
+
+## Oracle guide audit
+
+| Requirement | Evidence and limit |
+| --- | --- |
+| ORC-001 | Existing `deepEquals` documentation and retained examples supply the class-preserving law; the direct value classes and return checkpoint are explicit. |
+| ORC-002 | Separate constructors and primitive encodings determine expected copy, change, and cross-type outcomes without production classification. |
+| ORC-003 | The receiver explains its law, bounded grammar, production call, and return comparison beside the checks. |
+| ORC-004 | Every removed operand and outcome has a fixed reconstruction; generated finite Dates and RegExps vary the new cross-type boundaries. |
+| ORC-005 | Each check calls exported `deepEquals` and observes the immediate boolean return. No public publication claim is made. |
+| ORC-006 | Injected primitive-coercing comparators fail the exact inequality assertion for all three newly recovered boundaries. |
+| ORC-007 | Existing `utilsProperty` runs each property with fixed seed and random seed and supports direct seed/path replay. |
+| ORC-008 | Not triggered: the value model has no mutable state. |
+| ORC-009 | Date, RegExp, ISO text, epoch number, and source text are distinct value classes in this model; no production storage state is modeled. |
+| ORC-010 | The direct check owns no cleanup resource; its assertion is the failure checkpoint. |
+| ORC-011 | The source-isolated audits found a shared broad-category omission. The old exact examples and generated checks now enforce each primitive boundary; no independent second production formulation is claimed. |
+| ORC-012 | This ledger records the source assertions, recovered losses, receiving checks, execution, limits, and pending exact-commit review. |
+| ORC-013 | A primitive with matching displayed or numeric content distinguishes class-preserving equality from a plausible coercing design. |
+| ORC-014 | Not triggered: the direct call has no provider or host boundary. |
+
+## Exact-commit hostile review
+
+Pending fresh review of the final committed oracle and the removed blocks.

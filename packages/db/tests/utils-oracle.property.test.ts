@@ -11,8 +11,9 @@ import { deepEquals, equalPersistedSnapshotValues } from '../src/utils'
  *
  * Independent value constructors exercise reflexivity, symmetry, copied
  * structure, and changed-leaf inequality for primitives, arrays, records,
- * dates, regexes, typed bytes, and selected Temporal types. Cross-type values
- * remain unequal. Separate bounded graph laws construct corresponding rings
+ * dates, regexes, typed bytes, and selected Temporal types. Named cross-type
+ * pairs remain unequal, even when a primitive displays or encodes a Date or
+ * RegExp value. Separate bounded graph laws construct corresponding rings
  * and acyclic copies without reusing the production walk.
  *
  * Arbitrary different cycle topologies are outside this model. Naming that
@@ -88,6 +89,9 @@ const arbitraryPrimitive = fc.oneof(
 )
 
 const arbitraryDate = fc.date().map((d) => new Date(d.getTime()))
+const arbitraryFiniteDate = fc
+  .integer({ min: -1_000_000_000_000, max: 2_000_000_000_000 })
+  .map((time) => new Date(time))
 
 const arbitraryRegExp = fc
   .tuple(fc.string(), fc.constantFrom(``, `g`, `i`, `gi`, `m`, `gim`))
@@ -190,8 +194,9 @@ const arbitraryDefinedValue = arbitrarySingleValue.filter(
 // independently generated values, so both equal and unequal pairs are legal.
 // The fixed witnesses exercise those two outcomes; deleting either outcome
 // would leave an always-true or always-false comparator undetected. The
-// distinct-type grammar is deliberately restricted to Date/Temporal pairs;
-// it does not claim every cross-class combination. String lengths, integer
+// generated distinct-type grammar names Date/Temporal pairs, Date versus its
+// ISO text and epoch number, and RegExp versus its source text; it does not
+// claim every cross-class combination. String lengths, integer
 // magnitude, and object keys are fast-check defaults; explicit array/record
 // bounds are 0–5 for equivalence and 0–10 for structural copies, bytes 0–50,
 // Float32Array 0–10, Temporal years 1–9999/months 1–12/days 1–28, and
@@ -691,6 +696,66 @@ describe(`deepEquals property-based tests`, () => {
   })
 
   describe(`cross-type comparisons`, () => {
+    // A Date's display and numeric timestamp encode the same instant, but
+    // change-event equality keeps the Date value class distinct. The finite
+    // generator makes both encodings legal; the 2023 case preserves the old
+    // unit test's exact operands.
+    utilsProperty([arbitraryFiniteDate])(
+      `Date differs from its ISO text and epoch number in both directions`,
+      (date) => {
+        assertDistinctTypes(date, date.toISOString(), deepEquals)
+        assertDistinctTypes(date, date.getTime(), deepEquals)
+      },
+    )
+
+    it(`keeps a 2023 Date distinct from its old primitive probes`, () => {
+      const date = new Date(`2023-01-01T00:00:00Z`)
+      expectCopyAndChanged(
+        date,
+        new Date(`2023-01-01T00:00:00Z`),
+        new Date(`2023-01-02T00:00:00Z`),
+      )
+      assertDistinctTypes(date, `2023-01-01T00:00:00Z`, deepEquals)
+      assertDistinctTypes(date, date.getTime(), deepEquals)
+    })
+
+    // RegExp source text does not acquire the regex's value class, even when
+    // it spells the same pattern. The source and flags still govern equality
+    // between two genuine RegExps in the laws below.
+    utilsProperty([arbitraryRegExp])(
+      `RegExp differs from its source text in both directions`,
+      (regex) => assertDistinctTypes(regex, regex.source, deepEquals),
+    )
+
+    it(`keeps /abc/g distinct from its old source-text probe`, () => {
+      expectCopyAndChanged(/abc/g, /abc/g, /abc/i)
+      expectCopyAndChanged(/abc/g, /abc/g, /def/g)
+      expectEqualityPair(/test/i, /test/i, true)
+      assertDistinctTypes(/abc/g, `abc`, deepEquals)
+    })
+
+    it(`rejects primitive-coercing equality for Date and RegExp`, () => {
+      const date = new Date(`2023-01-01T00:00:00Z`)
+      const dateAsNumber = (left: unknown, right: unknown) =>
+        (left instanceof Date ? left.getTime() : left) ===
+        (right instanceof Date ? right.getTime() : right)
+      const dateAsString = (left: unknown, right: unknown) =>
+        (left instanceof Date ? left.toISOString() : left) ===
+        (right instanceof Date ? right.toISOString() : right)
+      const regexpAsSource = (left: unknown, right: unknown) =>
+        (left instanceof RegExp ? left.source : left) ===
+        (right instanceof RegExp ? right.source : right)
+      expect(() =>
+        assertDistinctTypes(date, date.getTime(), dateAsNumber),
+      ).toThrow(`distinct types must be unequal (forward)`)
+      expect(() =>
+        assertDistinctTypes(date, date.toISOString(), dateAsString),
+      ).toThrow(`distinct types must be unequal (forward)`)
+      expect(() => assertDistinctTypes(/abc/g, `abc`, regexpAsSource)).toThrow(
+        `distinct types must be unequal (forward)`,
+      )
+    })
+
     utilsProperty([arbitraryDate, arbitraryTemporalDuration])(
       `generated Date and Temporal.Duration are unequal in both directions`,
       (date, duration) => assertDistinctTypes(date, duration, deepEquals),

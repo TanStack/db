@@ -32,8 +32,9 @@ The existing index refinement oracle also rejects the version that removed
 the replacement. The original repaired commit passed 13 focused tests and
 the index refinement oracle's 412 tests, then the full DB suite passed
 12,154 tests in 278 files. After the alias and comparator controls, the full
-DB suite passed 12,171 tests in 279 files with no type errors. The final
-exact-commit review remains pending.
+DB suite passed 12,171 tests in 279 files with no type errors. A later exact
+commit review found the custom alias gap below, so those counts describe an
+intermediate commit rather than final verification.
 
 The independent fixture supplies epoch nanoseconds and zone-identity classes.
 It never calls the index's normalization or comparator to compute expected
@@ -60,11 +61,33 @@ new epoch tuple; a pre-epoch callback witness rejected its wrong direct
 ordered result in both index types. The repair now passes the former display
 key to custom callbacks while storing raw values for index order. This is a
 bounded compatibility decision; published types do not promise the operand
-representation. A custom comparator that distinguishes two values in one
-query-equality class remains open. Mixed domains, other Temporal kinds,
-public WHERE ranges, provider cursors, longer histories, and live-query
-publication also remain outside this oracle. Existing range optimization
-does not claim Temporal WHERE correctness.
+representation. The exact-commit reviewer then found that a callback could
+distinguish UTC and Etc/UTC values in one query-equality class. Both indexes
+merged the exact key before comparing those rows, so ordered takes, ranges,
+and cursors disagreed with the callback. Six new add/build/update witnesses
+failed at `takeFromStart` on `1265abeb5`, with no type errors. The repair keeps
+exact lookup and comparator positions as separate partitions. The witnesses
+now check the callback's exact former display-string operands, equality lookup,
+range boundaries, both cursor directions, representative removal, and a
+same-class update. The focused 470-test index campaign passed with no type
+errors after repair. Direct removal supplies the actual prior source value;
+no equivalence-substitution guarantee is claimed for a different old item.
+For this PR, the maintainer selected per-row callback order when a comparator
+distinguishes values in one query-equality class. This is the contract the
+separate partitions implement.
+Mixed domains, other Temporal kinds, public WHERE ranges, provider cursors,
+longer histories, and live-query publication remain outside this oracle.
+Existing range optimization does not claim Temporal WHERE correctness.
+
+A subsequent direct comparison witness found that a genuine ZonedDateTime
+with an own shadowed `Symbol.toStringTag` lost its native instant order.
+The matching index witness failed in all four BasicIndex/BTreeIndex add/build
+histories at the value cursor: it returned the equal-instant peer instead of
+the one-nanosecond successor. Classification now reads a slot-checking
+prototype method, so the own display tag cannot choose an ordinary-object
+position. The direct and index witnesses pass after that repair. The fixed
+index witness does not establish custom comparator behavior with a shadowed
+tag or mixed Temporal implementations.
 
 ## Oracle guide audit
 
@@ -74,11 +97,11 @@ does not claim Temporal WHERE correctness.
 | ORC-002 | Supplied BigInt instants and zone classes determine expected order and exact matches independently of normalization and comparison code. |
 | ORC-003 | The oracle describes its law, fixture model, legal actions, direct and public drivers, observations, and checkpoints beside executable code. |
 | ORC-004 | Not triggered: the bounded fixture matrix and one continuation are fixed histories, not a generated-history claim. The nearby invalid mixed-kind domain is excluded. |
-| ORC-005 | Direct takes and equality lookups observe both index implementations. An optimized-only Collection snapshot invokes the explicit index's `takeFromStart` after readiness. |
-| ORC-006 | The original normalized-string design failed at direct ordered takes and the public `limit: 1` snapshot. A stable wrong-result control rejects that later-instant first row while allowing both legitimate equal-instant ties. The first BTree repair failed the live-bucket representative check; a tuple-fed custom comparator failed the pre-epoch take check. |
+| ORC-005 | Direct takes, ranges, cursors, and equality lookups observe both index implementations. An optimized-only Collection snapshot invokes the explicit index's `takeFromStart` after readiness. |
+| ORC-006 | The original normalized-string design failed at direct ordered takes and the public `limit: 1` snapshot. A stable wrong-result control rejects that later-instant first row while allowing both legitimate equal-instant ties. The first BTree repair failed the live-bucket representative check; a tuple-fed custom comparator failed the pre-epoch take check; the merged-exact-key design failed six alias/callback takes. Own-tag shadows failed all four value-cursor checks before the branded dispatch repair. |
 | ORC-007 | Not triggered: this is a bounded fixed oracle, not an important generated property. The existing index refinement property keeps its own campaigns. |
 | ORC-008 | Not triggered: the fixture's independent model has no mutable reference state. |
-| ORC-009 | The model's instant label represents order only; its zone class represents exact equality. One comparator position can contain two exact values. The custom callback witness checks backward compatibility for its input text, not Temporal's default instant law. |
+| ORC-009 | The model's instant label represents default order only; its zone class represents exact equality. One comparator position can contain two exact values, and a custom callback can split one exact value into two positions. The callback-argument witness checks exact former input text. |
 | ORC-010 | `withOracleCleanup` preserves a primary public mismatch and releases the Collection. Direct indexes own no external resources. |
 | ORC-011 | The unindexed public scan is a second production formulation for the ordered result. The numeric BigInt model also distinguishes a shared display-string mistake. |
 | ORC-012 | This record contains RED/GREEN evidence, a hostile review, and scoped unresolved cells. An exact-commit verdict follows below. |
@@ -87,4 +110,4 @@ does not claim Temporal WHERE correctness.
 
 ## Exact committed-head review
 
-Pending.
+Pending fresh hostile review of the final committed repair.

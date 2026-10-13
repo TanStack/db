@@ -18,11 +18,15 @@ import { orderedEntriesArray, withOracleCleanup } from './utils.js'
  * around the epoch. Equal-instant peers may appear in either key order. It
  * checks direct BasicIndex/BTreeIndex adds, builds, and value cursors, one
  * removal/insertion/update continuation, then the public ordered Collection
- * snapshot with limit 1. A separate direct-index witness preserves a custom
- * comparator that accepts the string keys supplied before raw Temporal
- * ordering was introduced. It does not claim arbitrary Temporal kinds,
- * time-zone transitions, longer mutation histories, public/provider cursor
- * continuation, or live-query publication.
+ * snapshot with limit 1. Direct custom-comparator witnesses preserve the
+ * former display-string operands and let the callback order two rows whose
+ * values share one query-equality class. They check add/build, exact lookup,
+ * range and cursor boundaries, representative removal, and an update that
+ * changes callback order without changing query equality. Fixed add/build
+ * histories also shadow a genuine value's display tag; the value cursor must
+ * still cross its native instant position. These checks do not claim arbitrary
+ * Temporal kinds, time-zone transitions, longer histories,
+ * public/provider cursor continuation, or live-query publication.
  */
 
 type Row = { id: string; when: Temporal.ZonedDateTime }
@@ -276,6 +280,28 @@ describe.each(indexTypes)(
       },
     )
 
+    it.each([`add`, `build`] as const)(
+      `keeps instant order when a genuine value shadows its display tag after %s`,
+      (construction) => {
+        const rows = rowsFromFixtures().slice(0, 3)
+        Object.defineProperty(rows[0]!.when, Symbol.toStringTag, {
+          value: `ordinary`,
+        })
+        const index = new IndexType(1, new PropRef([`when`]))
+        if (construction === `add`) {
+          for (const row of rows) index.add(row.id, row)
+        } else {
+          index.build(rows.map((row): [string, Row] => [row.id, row]))
+        }
+
+        // The source fixture supplies the instant labels. An instance display
+        // property cannot move its row out of the shared earliest position.
+        expectOrderedPrefix(index.takeFromStart(3), 3, fixtures.slice(0, 3))
+        expectOrderedPrefix(index.takeFromStart(1), 1, fixtures.slice(0, 3))
+        expect(index.take(1, rows[0]!.when)).toEqual([`a-one-nanosecond-later`])
+      },
+    )
+
     it(`retains a string-compatible custom comparator across negative instants`, () => {
       const [minusTen, minusHundred] = rowsFromFixtures(negativeFixtures)
       const index = new IndexType(1, new PropRef([`when`]), undefined, {
@@ -291,6 +317,98 @@ describe.each(indexTypes)(
       expect(index.equalityLookup(minusHundred!.when)).toEqual(
         new Set([`b-minus-hundred`]),
       )
+    })
+
+    it.each([`add`, `build`] as const)(
+      `orders equal UTC aliases by a custom callback after %s`,
+      (construction) => {
+        const source = [
+          {
+            id: `a-utc`,
+            when: Temporal.ZonedDateTime.from(`2024-01-15T09:00:00+00:00[UTC]`),
+          },
+          {
+            id: `z-alias`,
+            when: Temporal.ZonedDateTime.from(
+              `2024-01-15T09:00:00+00:00[Etc/UTC]`,
+            ),
+          },
+        ]
+        const [utc, alias] = source
+        expect(utc!.when.equals(alias!.when)).toBe(true)
+        const callbackArguments: Array<[string, string]> = []
+        const index = new IndexType(1, new PropRef([`when`]), undefined, {
+          compareFn: (left: string, right: string) => {
+            callbackArguments.push([left, right])
+            return left.localeCompare(right)
+          },
+        })
+
+        // The exact-equality class has both keys. The callback's legacy
+        // display keys place Etc/UTC before UTC, despite the opposite key order.
+        if (construction === `add`) {
+          for (const row of source) index.add(row.id, row)
+        } else {
+          index.build(source.map((row): [string, Row] => [row.id, row]))
+        }
+        expect(index.equalityLookup(utc!.when)).toEqual(
+          new Set([`a-utc`, `z-alias`]),
+        )
+        expect(index.takeFromStart(2)).toEqual([`z-alias`, `a-utc`])
+        expect(index.rangeQuery({ to: alias!.when })).toEqual(
+          new Set([`z-alias`]),
+        )
+        expect(
+          index.rangeQuery({ from: alias!.when, fromInclusive: false }),
+        ).toEqual(new Set([`a-utc`]))
+        expect(index.take(2, alias!.when)).toEqual([`a-utc`])
+        expect(index.takeReversed(2, utc!.when)).toEqual([`z-alias`])
+        expect(callbackArguments.length).toBeGreaterThan(0)
+        const expectedOperands = new Set(
+          source.map(
+            ({ when }) =>
+              `\u0000tanstack-db:temporal:Temporal.ZonedDateTime:${when.toString()}`,
+          ),
+        )
+        for (const [left, right] of callbackArguments) {
+          expect(expectedOperands.has(left)).toBe(true)
+          expect(expectedOperands.has(right)).toBe(true)
+        }
+
+        // Removal supplies the exact prior source row. The first stored
+        // representative must be replaced by a surviving row's value.
+        index.remove(utc!.id, utc)
+        expect(index.takeFromStart(2)).toEqual([`z-alias`])
+        expect(orderedEntriesArray(index)[0]?.[0]).toBe(alias!.when)
+        expect(index.equalityLookup(alias!.when)).toEqual(new Set([`z-alias`]))
+      },
+    )
+
+    it(`moves one row within its exact class when its custom order changes`, () => {
+      const utc = {
+        id: `a-utc`,
+        when: Temporal.ZonedDateTime.from(`2024-01-15T09:00:00+00:00[UTC]`),
+      }
+      const alias = {
+        id: `z-alias`,
+        when: Temporal.ZonedDateTime.from(`2024-01-15T09:00:00+00:00[Etc/UTC]`),
+      }
+      const index = new IndexType(1, new PropRef([`when`]), undefined, {
+        compareFn: (left: string, right: string) => left.localeCompare(right),
+      })
+      index.add(utc.id, utc)
+      index.add(alias.id, alias)
+      expect(index.takeFromStart(2)).toEqual([`z-alias`, `a-utc`])
+
+      // The query equality class stays fixed, while the callback position
+      // changes from the later UTC display string to the earlier alias text.
+      const moved = { id: utc.id, when: alias.when }
+      index.update(utc.id, utc, moved)
+      expect(index.equalityLookup(alias.when)).toEqual(
+        new Set([`a-utc`, `z-alias`]),
+      )
+      expect(index.takeFromStart(2)).toEqual([`a-utc`, `z-alias`])
+      expect(index.take(2, alias.when)).toEqual([])
     })
 
     it(`publishes the earliest instant from an indexed ordered Collection snapshot`, async () => {

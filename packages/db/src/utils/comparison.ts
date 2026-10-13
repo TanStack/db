@@ -119,8 +119,10 @@ export const ascComparator = (a: any, b: any, opts: CompareOptions): number => {
   }
 
   // If both are Temporal objects, use compareTemporalValues for correct semantic ordering
-  if (isTemporal(a) && isTemporal(b)) {
-    return compareTemporalValues(a, b)
+  const aTemporal = brandedTemporal(a)
+  const bTemporal = brandedTemporal(b)
+  if (aTemporal && bTemporal) {
+    return compareBrandedTemporalValues(a, b, aTemporal, bTemporal)
   }
 
   // Symbols have identity but no built-in order: relational comparison throws.
@@ -264,6 +266,27 @@ function normalizeBinary(value: Uint8Array): string {
   return normalizedKey(`binary`, bytes)
 }
 
+/** Read a Temporal brand and display through its prototype, not own shadows. */
+type BrandedTemporal = { prototype: object; kind: string; text: string }
+
+function brandedTemporal(value: unknown): BrandedTemporal | undefined {
+  if (value === null || typeof value !== `object`) return undefined
+  const prototype = Object.getPrototypeOf(value)
+  if (!prototype || !isTemporal(prototype)) return undefined
+  const toString = Object.getOwnPropertyDescriptor(prototype, `toString`)?.value
+  if (typeof toString !== `function`) return undefined
+  try {
+    // The native/polyfill method checks internal slots. A forged tag or a
+    // borrowed Temporal prototype cannot claim a Temporal ordered position.
+    const text = Reflect.apply(toString, value, [])
+    return typeof text === `string`
+      ? { prototype, kind: prototype[Symbol.toStringTag], text }
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
 /**
  * Sentinel value representing undefined in normalized form.
  * This allows distinguishing between "start from beginning" (undefined parameter)
@@ -293,13 +316,13 @@ export function normalizeValue(value: any): any {
   const timestamp = dateTimestamp(value)
   if (timestamp !== undefined) return timestamp
 
-  if (isTemporal(value)) {
-    const kind = value[Symbol.toStringTag]
+  // Query equality comes from the branded value, never an own display shadow.
+  const temporal = brandedTemporal(value)
+  if (temporal) {
+    const { prototype, kind, text } = temporal
     if (kind === `Temporal.ZonedDateTime`) {
       // Read Temporal's internal slots through its prototype getters. Own
       // properties can shadow the public accessors without changing equals().
-      const prototype = Object.getPrototypeOf(value)
-      if (prototype?.[Symbol.toStringTag] !== kind) return value
       let epochNanoseconds: unknown
       let timeZoneId: unknown
       let calendarId: unknown
@@ -339,7 +362,7 @@ export function normalizeValue(value: any): any {
       }
       return value
     }
-    return normalizedKey(`temporal`, `${kind}:${value.toString()}`)
+    return normalizedKey(`temporal`, `${kind}:${text}`)
   }
 
   // Normalize Uint8Arrays/Buffers to a string representation for Map key usage
@@ -366,22 +389,20 @@ export function normalizeForBTree(value: any): any {
 
 /** Keep Temporal's native order separate from its exact index lookup key. */
 export function indexOrderValue(value: any, exactKey: any): any {
-  return isTemporal(value) ? value : exactKey
+  return brandedTemporal(value) ? value : exactKey
 }
 
 /** Supply custom comparators the Temporal display key used before raw ordering. */
 export function indexCustomComparatorValue(value: unknown): unknown {
-  return isTemporal(value)
-    ? normalizedKey(
-        `temporal`,
-        `${value[Symbol.toStringTag]}:${value.toString()}`,
-      )
+  const temporal = brandedTemporal(value)
+  return temporal
+    ? normalizedKey(`temporal`, `${temporal.kind}:${temporal.text}`)
     : value
 }
 
 /** Recover the exact lookup key from a stored ordered value. */
 export function indexExactKey(value: any): any {
-  return isTemporal(value) ? normalizeValue(value) : value
+  return brandedTemporal(value) ? normalizeValue(value) : value
 }
 
 /**
@@ -413,16 +434,30 @@ export function denormalizeUndefined(value: any): any {
  * Callers must ensure both arguments are Temporal objects; mixed types throw.
  */
 export function compareTemporalValues(a: unknown, b: unknown): number {
-  const aTag = (a as Record<symbol, unknown>)[Symbol.toStringTag] as string
-  const bTag = (b as Record<symbol, unknown>)[Symbol.toStringTag] as string
-  if (aTag !== bTag) {
+  return compareBrandedTemporalValues(
+    a,
+    b,
+    brandedTemporal(a),
+    brandedTemporal(b),
+  )
+}
+
+function compareBrandedTemporalValues(
+  a: unknown,
+  b: unknown,
+  aTemporal: BrandedTemporal | undefined,
+  bTemporal: BrandedTemporal | undefined,
+): number {
+  const aTag = aTemporal?.kind ?? `unbranded`
+  const bTag = bTemporal?.kind ?? `unbranded`
+  if (!aTemporal || !bTemporal || aTag !== bTag) {
     throw new TypeError(
       devBuild() && process.env.NODE_ENV !== `production`
         ? `Cannot order Temporal values of different types: ${aTag} vs ${bTag}`
         : codedMessage(167, { aTag, bTag }),
     )
   }
-  const prototype = Object.getPrototypeOf(a) as {
+  const prototype = aTemporal.prototype as {
     constructor?: { compare?: (x: unknown, y: unknown) => number }
   } | null
   const compare = prototype?.constructor?.compare
@@ -448,8 +483,10 @@ export function compareTemporalValues(a: unknown, b: unknown): number {
  * arguments are non-null.
  */
 export function compareValues(a: unknown, b: unknown): number {
-  if (isTemporal(a) && isTemporal(b)) {
-    return compareTemporalValues(a, b)
+  const aTemporal = brandedTemporal(a)
+  const bTemporal = brandedTemporal(b)
+  if (aTemporal && bTemporal) {
+    return compareBrandedTemporalValues(a, b, aTemporal, bTemporal)
   }
   return (a as any) < (b as any) ? -1 : (a as any) > (b as any) ? 1 : 0
 }

@@ -232,9 +232,11 @@ domain. An index's advertised comparison options also define its executable
 comparator; metadata cannot claim an order that the index does not use. Explicit
 `undefined` range and cursor bounds denote the indexed nullish comparator group,
 while an absent bound denotes the start or end of the index. An ordered index
-groups exact value buckets that compare at the same position and keeps a live
-representative for each group, so range traversal and ordered limits cannot drop
-rows whose distinct values are comparator-equal. Compiler tokens belong to one
+groups row values by comparator position independently of exact equality
+buckets and keeps a live representative for each group. One exact bucket may
+span several positions under a custom comparator, while distinct exact values
+may share a position. Range traversal and ordered limits must retain every row
+in either case. Compiler tokens belong to one
 compiled graph. This keeps every operator in the graph on the same identity
 relation. Objects, functions, and local symbols are weakly keyed where the
 runtime supports weak symbol keys. Older runtimes retain local symbols strongly

@@ -36,6 +36,8 @@ import type { CompareOptions } from '../src/query/builder/types.js'
  * Exact equality membership also stays distinct from comparator position:
  * replacing a value with one in a different exact-equality bucket at the
  * same comparator position must move its exact lookup membership. These laws
+ * also allow a custom callback to put signed zero values in different order
+ * positions while Map equality keeps them in one exact bucket. These laws
  * concern returned index results, not bucket identity or maintenance work.
  * A build is one of those direct actions even when a source value is
  * `undefined`: default nulls-first order must hold after build just as it
@@ -1618,6 +1620,44 @@ describe.each([
 )
 
 describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
+  test.each([`add`, `build`] as const)(
+    `follows a custom callback that separates signed zero after %s`,
+    (construction) => {
+      const rows = [
+        { key: `negative`, value: -0 },
+        { key: `positive`, value: 0 },
+        { key: `later`, value: 1 },
+      ]
+      const rank = (value: unknown): number =>
+        Object.is(value, -0) ? 0 : value === 0 ? 1 : 2
+      const index = new IndexType(1, new PropRef([`value`]), undefined, {
+        compareFn: (left, right) => rank(left) - rank(right),
+      })
+      if (construction === `add`) {
+        for (const row of rows) index.add(row.key, row)
+      } else {
+        index.build(
+          rows.map((row): [string, { value: number }] => [row.key, row]),
+        )
+      }
+
+      // Map's SameValueZero defines the expected exact membership; the
+      // independent rank labels define the callback's three order positions.
+      expect(index.equalityLookup(-0)).toEqual(
+        new Set([`negative`, `positive`]),
+      )
+      expect(index.takeFromStart(3)).toEqual([`negative`, `positive`, `later`])
+      expect(index.rangeQuery({ from: -0, to: -0 })).toEqual(
+        new Set([`negative`]),
+      )
+      expect(index.take(2, -0)).toEqual([`positive`, `later`])
+
+      index.remove(`negative`, rows[0])
+      expect(index.equalityLookup(0)).toEqual(new Set([`positive`]))
+      expect(index.takeFromStart(2)).toEqual([`positive`, `later`])
+    },
+  )
+
   test(`rejects stale retired identity outputs without rejecting live reuse`, () => {
     const symbol = Symbol(`same group`)
     const retired = { key: `old`, groupId: 0, value: [symbol] }

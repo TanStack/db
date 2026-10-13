@@ -8,8 +8,8 @@ import { oraclePropertyOptions, oracleRuns } from '../../oracle-config.js'
 /**
  * # Which values does `in` find in a list?
  *
- * Contract: `in(value, list)` is SQL `IN` under three-valued logic. A null or
- * undefined value is UNKNOWN (`null`). A list that is not an array is FALSE.
+ * Contract: TanStack DB's `inArray(value, list)` returns UNKNOWN (`null`) for a
+ * null or undefined value. A list that is not an array is FALSE.
  * Otherwise the result is TRUE when some list item equals the value under the
  * evaluator's equality, and FALSE when none does. A null or undefined item
  * never equals a value. The equality is the one `eq` documents in
@@ -19,9 +19,10 @@ import { oraclePropertyOptions, oracleRuns } from '../../oracle-config.js'
  * - A valid Date equals its millisecond timestamp, and another Date with the
  *   same timestamp.
  * - Two Uint8Arrays (Buffers included) are equal when their bytes are equal.
- * - A Temporal value equals another of the same kind when its native
- *   `.equals()` relation holds. This includes equivalent time-zone aliases
- *   for ZonedDateTime, but excludes a distinct fixed-offset zone.
+ * - Temporal kinds with an intrinsic `.equals()` use that relation. This
+ *   includes equivalent time-zone aliases for ZonedDateTime, but excludes a
+ *   distinct fixed-offset zone. Duration has no `.equals()`; its ten fields
+ *   must match, so PT1H and PT60M are distinct.
  * - Every other pair compares with `===`, so `-0` equals `0`, `1n` does not
  *   equal `1`, and objects compare by reference.
  *
@@ -34,7 +35,8 @@ import { oraclePropertyOptions, oracleRuns } from '../../oracle-config.js'
  * internal normalization prefix, booleans, `0`, `-0`, `1`, `NaN`, `1n`, a
  * valid Date and its timestamp, an invalid Date, equal and unequal byte
  * arrays, a Buffer, Temporal values including ZonedDateTime zone aliases,
- * a forged tag and shadowed zone accessor, one shared object and a
+ * a forged tag, a borrowed prototype, shadowed display members, and Duration
+ * forms, one shared object and a
  * structurally equal copy, `null` and `undefined`. Lists have zero to six
  * items and may repeat. The list is a constant `Value`, the shape that join
  * demand builds, or a row field, so changing lists are also checked.
@@ -47,13 +49,44 @@ import { oraclePropertyOptions, oracleRuns } from '../../oracle-config.js'
  * A calibration test feeds the checker an evaluator that compares raw values
  * without normalization and requires the checker to reject it.
  *
- * Limits: this owner checks the boolean result of `in` only. WHERE
+ * Limits: this owner checks the boolean result of `in` for ordinary values
+ * from one Temporal polyfill copy and the listed display shadows. It does not
+ * claim mixed Temporal implementations, replaced genuine prototypes, or
+ * arbitrary custom prototypes that imitate Temporal intrinsics. WHERE
  * publication, indexes, and subset loading have other owners.
  */
 
 const PROPERTY = `evaluators.in`
 const PREFIX = `\u0000tanstack-db:binary:`
 const shared = { id: 1 }
+const plainDate = Temporal.PlainDate.from(`2024-01-01`)
+const forgedPlainDate = {
+  [Symbol.toStringTag]: `Temporal.PlainDate`,
+  toString: () => `2024-01-01`,
+}
+const borrowedPlainDate = Object.assign(
+  Object.create(Temporal.PlainDate.prototype) as object,
+  { toString: () => `2024-01-01` },
+)
+const shadowedTagPlainDate = Temporal.PlainDate.from(`2024-01-01`)
+Object.defineProperty(shadowedTagPlainDate, Symbol.toStringTag, {
+  value: `ordinary`,
+})
+const shadowedTextPlainDate = Temporal.PlainDate.from(`2024-01-01`)
+Object.defineProperty(shadowedTextPlainDate, `toString`, {
+  value: () => `unrelated text`,
+})
+const hourDuration = Temporal.Duration.from(`PT1H`)
+const sameHourDuration = Temporal.Duration.from(`PT1H`)
+const sixtyMinuteDuration = Temporal.Duration.from(`PT60M`)
+const shadowedHourDuration = Temporal.Duration.from(`PT1H`)
+Object.defineProperty(shadowedHourDuration, `toString`, {
+  value: () => `PT2H`,
+})
+const forgedHourDuration = {
+  [Symbol.toStringTag]: `Temporal.Duration`,
+  toString: () => `PT1H`,
+}
 const utcZoned = Temporal.ZonedDateTime.from(`2024-01-15T09:00:00+00:00[UTC]`)
 const aliasZoned = Temporal.ZonedDateTime.from(
   `2024-01-15T09:00:00+00:00[Etc/UTC]`,
@@ -91,9 +124,18 @@ const pool: ReadonlyArray<unknown> = [
   new Uint8Array([1, 2]),
   new Uint8Array([1, 3]),
   Buffer.from([1, 2]),
-  Temporal.PlainDate.from(`2024-01-01`),
+  plainDate,
   Temporal.PlainDate.from(`2024-01-01`),
   Temporal.PlainTime.from(`10:00`),
+  forgedPlainDate,
+  borrowedPlainDate,
+  shadowedTagPlainDate,
+  shadowedTextPlainDate,
+  hourDuration,
+  sameHourDuration,
+  sixtyMinuteDuration,
+  shadowedHourDuration,
+  forgedHourDuration,
   utcZoned,
   aliasZoned,
   offsetZoned,
@@ -114,22 +156,63 @@ function isBytes(value: unknown): value is Uint8Array {
   )
 }
 
-function isTemporalValue(value: unknown): value is {
-  [Symbol.toStringTag]: string
-  equals: (other: unknown) => boolean
-} {
-  const tag =
-    typeof value === `object` && value !== null
-      ? (value as { [Symbol.toStringTag]?: unknown })[Symbol.toStringTag]
-      : undefined
-  return (
-    typeof value === `object` &&
-    value !== null &&
-    typeof (value as { equals?: unknown }).equals === `function` &&
-    typeof tag === `string` &&
-    tag.startsWith(`Temporal.`) &&
-    Object.getPrototypeOf(value)?.[Symbol.toStringTag] === tag
-  )
+// The trusted polyfill methods inspect Temporal's internal slots. A user can
+// shadow an instance's tag, equals, or toString, and can borrow its prototype;
+// none of those visible properties establishes the brand. The bounded model
+// tests the trusted methods directly and never imports production's classifier.
+const temporalEqualities = [
+  [`Instant`, Temporal.Instant.prototype.equals],
+  [`PlainDate`, Temporal.PlainDate.prototype.equals],
+  [`PlainDateTime`, Temporal.PlainDateTime.prototype.equals],
+  [`PlainMonthDay`, Temporal.PlainMonthDay.prototype.equals],
+  [`PlainTime`, Temporal.PlainTime.prototype.equals],
+  [`PlainYearMonth`, Temporal.PlainYearMonth.prototype.equals],
+  [`ZonedDateTime`, Temporal.ZonedDateTime.prototype.equals],
+] as const
+
+const durationFields = [
+  `years`,
+  `months`,
+  `weeks`,
+  `days`,
+  `hours`,
+  `minutes`,
+  `seconds`,
+  `milliseconds`,
+  `microseconds`,
+  `nanoseconds`,
+] as const
+const durationGetters = durationFields.map(
+  (field) =>
+    Object.getOwnPropertyDescriptor(Temporal.Duration.prototype, field)!.get!,
+)
+
+type TemporalBrand =
+  | { kind: string; equals: (other: unknown) => boolean }
+  | { kind: `Duration`; fields: ReadonlyArray<number> }
+
+function temporalBrand(value: unknown): TemporalBrand | undefined {
+  if (typeof value !== `object` || value === null) return undefined
+  for (const [kind, equals] of temporalEqualities) {
+    try {
+      if (Reflect.apply(equals, value, [value]) === true) {
+        return {
+          kind,
+          equals: (other) => Reflect.apply(equals, value, [other]),
+        }
+      }
+    } catch {
+      // A borrowed or forged prototype has no Temporal internal slots.
+    }
+  }
+  try {
+    return {
+      kind: `Duration`,
+      fields: durationGetters.map((get) => Reflect.apply(get, value, [])),
+    }
+  } catch {
+    return undefined
+  }
 }
 
 function isNotANumber(value: unknown): boolean {
@@ -155,13 +238,22 @@ function referenceEqual(left: unknown, right: unknown): boolean {
       Array.from(left).every((byte, index) => byte === right[index])
     )
   }
-  if (isTemporalValue(left) || isTemporalValue(right)) {
-    return (
-      isTemporalValue(left) &&
-      isTemporalValue(right) &&
-      left[Symbol.toStringTag] === right[Symbol.toStringTag] &&
-      left.equals(right)
-    )
+  const leftTemporal = temporalBrand(left)
+  const rightTemporal = temporalBrand(right)
+  if (leftTemporal || rightTemporal) {
+    if (
+      !leftTemporal ||
+      !rightTemporal ||
+      leftTemporal.kind !== rightTemporal.kind
+    ) {
+      return false
+    }
+    if (`fields` in leftTemporal && `fields` in rightTemporal) {
+      return leftTemporal.fields.every(
+        (field, index) => field === rightTemporal.fields[index],
+      )
+    }
+    return `equals` in leftTemporal && leftTemporal.equals(right)
   }
   return asComparable(left) === asComparable(right)
 }
@@ -175,7 +267,7 @@ function referenceIn(value: unknown, list: unknown): boolean | null {
   )
 }
 
-type InCase = { value: unknown; list: Array<unknown>; listFromRow: boolean }
+type InCase = { value: unknown; list: unknown; listFromRow: boolean }
 
 const item = fc.constantFrom(...pool)
 const inCase: fc.Arbitrary<InCase> = fc.record({
@@ -210,8 +302,14 @@ function check(evaluate: Evaluate, testCase: InCase): void {
 }
 
 function describeCase(testCase: InCase): string {
-  const show = (value: unknown): string =>
-    typeof value === `bigint`
+  const show = (value: unknown): string => {
+    if (value === forgedPlainDate) return `forged PlainDate tag`
+    if (value === borrowedPlainDate) return `borrowed PlainDate prototype`
+    if (value === shadowedTagPlainDate) return `PlainDate with shadowed tag`
+    if (value === shadowedTextPlainDate) return `PlainDate with shadowed text`
+    if (value === shadowedHourDuration) return `Duration with shadowed text`
+    if (value === forgedHourDuration) return `forged Duration tag`
+    return typeof value === `bigint`
       ? `${value}n`
       : Object.is(value, -0)
         ? `-0`
@@ -222,11 +320,21 @@ function describeCase(testCase: InCase): string {
             : value === shared
               ? `shared`
               : typeof value === `object` && value !== null
-                ? String(value)
+                ? (() => {
+                    try {
+                      return String(value)
+                    } catch {
+                      return `object with borrowed Temporal prototype`
+                    }
+                  })()
                 : typeof value === `string`
                   ? JSON.stringify(value)
                   : String(value)
-  return `value=${show(testCase.value)} list=[${testCase.list.map(show).join(`, `)}] listFromRow=${testCase.listFromRow}`
+  }
+  const list = Array.isArray(testCase.list)
+    ? `[${testCase.list.map(show).join(`, `)}]`
+    : show(testCase.list)
+  return `value=${show(testCase.value)} list=${list} listFromRow=${testCase.listFromRow}`
 }
 
 describe(`in evaluator`, () => {
@@ -256,6 +364,13 @@ describe(`in evaluator`, () => {
     expect(referenceIn(value, testCase.list)).toBe(expected)
     check(evaluateWithProduction, testCase)
   })
+
+  it.each([false, true])(
+    `returns false for a non-array %s list`,
+    (listFromRow) => {
+      check(evaluateWithProduction, { value: `a`, list: `a`, listFromRow })
+    },
+  )
 
   it.each([false, true])(
     `matches equivalent zone aliases in a %s list and rejects a distinct zone`,
@@ -291,8 +406,55 @@ describe(`in evaluator`, () => {
     },
   )
 
+  it.each(
+    [false, true].flatMap((listFromRow) =>
+      [
+        [`forged own tag`, forgedPlainDate],
+        [`borrowed prototype`, borrowedPlainDate],
+        [`shadowed own tag`, shadowedTagPlainDate],
+        [`shadowed toString`, shadowedTextPlainDate],
+      ].map(([name, value]) => ({ name, value, listFromRow })),
+    ),
+  )(
+    `uses the native brand for $name with listFromRow=$listFromRow`,
+    ({ value, listFromRow }) => {
+      check(evaluateWithProduction, {
+        value,
+        list: [plainDate],
+        listFromRow,
+      })
+    },
+  )
+
+  it.each([false, true])(
+    `matches Duration fields, while keeping equivalent representations distinct in a %s list`,
+    (listFromRow) => {
+      check(evaluateWithProduction, {
+        value: sameHourDuration,
+        list: [hourDuration],
+        listFromRow,
+      })
+      check(evaluateWithProduction, {
+        value: sixtyMinuteDuration,
+        list: [hourDuration],
+        listFromRow,
+      })
+      check(evaluateWithProduction, {
+        value: shadowedHourDuration,
+        list: [hourDuration],
+        listFromRow,
+      })
+      check(evaluateWithProduction, {
+        value: forgedHourDuration,
+        list: [hourDuration],
+        listFromRow,
+      })
+    },
+  )
+
   it(`rejects display-string equality for equivalent zone aliases`, () => {
     const lexical: Evaluate = ({ value, list }) =>
+      Array.isArray(list) &&
       list.some((candidate) => String(candidate) === String(value))
     expect(() =>
       check(lexical, {
@@ -309,7 +471,7 @@ describe(`in evaluator`, () => {
     const raw: Evaluate = ({ value, list }) =>
       value === null || value === undefined
         ? null
-        : list.some((entry) => entry === value)
+        : Array.isArray(list) && list.some((entry) => entry === value)
     expect(() =>
       fc.assert(
         fc.property(inCase, (testCase) => check(raw, testCase)),

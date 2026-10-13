@@ -4,6 +4,7 @@ import { BTree } from '../utils/btree.js'
 import {
   areSameValueZeroEqual,
   denormalizeUndefined,
+  indexCustomComparatorValue,
   normalizeForBTree,
 } from '../utils/comparison.js'
 import { codedMessage, devBuild } from '../error-message.js'
@@ -35,11 +36,14 @@ export interface RangeQueryOptions {
 
 type OrderedBucket<TKey> = {
   representative: unknown
-  // Exact equality keys can share one comparator position. Their ordered
-  // values let removal replace a departing representative without a scan.
-  exactValues: Map<unknown, unknown>
+  // One comparator position may contain several exact values, while one
+  // exact value may occupy several custom comparator positions.
+  values: Map<TKey, unknown>
   keys: Set<TKey>
 }
+
+// Map uses SameValueZero, but a custom callback may order -0 apart from +0.
+const NEGATIVE_ZERO_ORDER_OPERAND = Symbol(`negative zero order operand`)
 
 /**
  * B+Tree index for sorted data with range queries
@@ -63,9 +67,12 @@ export class BTreeIndex<
   private orderedEntries = new BTree<any, OrderedBucket<TKey>>((a, b) =>
     this.compareStored(a, b),
   )
-  private valueMap = new Map<
+  private valueMap = new Map<unknown, { keys: Set<TKey> }>()
+  // Repeated identical callback operands belong to the same comparator
+  // position. This avoids another tree search for every row in a hot bucket.
+  private orderOperands = new Map<
     unknown,
-    { keys: Set<TKey>; ordered: OrderedBucket<TKey> }
+    { bucket: OrderedBucket<TKey>; owners: number }
   >()
   private indexedKeys = new Set<TKey>()
 
@@ -73,6 +80,13 @@ export class BTreeIndex<
   // user-supplied, expects undefined.
   private compareStored(a: any, b: any): number {
     return this.compareFn(denormalizeUndefined(a), denormalizeUndefined(b))
+  }
+
+  private orderOperand(value: unknown): unknown {
+    const operand = this.hasCustomComparator
+      ? indexCustomComparatorValue(value)
+      : value
+    return Object.is(operand, -0) ? NEGATIVE_ZERO_ORDER_OPERAND : operand
   }
 
   protected initialize(_options?: BTreeIndexOptions): void {}
@@ -101,29 +115,35 @@ export class BTreeIndex<
     normalizedValue: unknown,
     orderValue: unknown,
   ): void {
+    this.addToOrder(key, orderValue)
     const exact = this.valueMap.get(normalizedValue)
-    if (exact) {
-      exact.keys.add(key)
-      exact.ordered.keys.add(key)
+    if (exact) exact.keys.add(key)
+    else this.valueMap.set(normalizedValue, { keys: new Set([key]) })
+  }
+
+  private addToOrder(key: TKey, orderValue: unknown): void {
+    const operand = this.orderOperand(orderValue)
+    const cached = this.orderOperands.get(operand)
+    if (cached) {
+      cached.bucket.keys.add(key)
+      cached.bucket.values.set(key, orderValue)
+      cached.owners++
       return
     }
 
     let orderedBucket = this.orderedEntries.get(orderValue)
     if (orderedBucket) {
       orderedBucket.keys.add(key)
-      orderedBucket.exactValues.set(normalizedValue, orderValue)
+      orderedBucket.values.set(key, orderValue)
     } else {
       orderedBucket = {
         representative: orderValue,
-        exactValues: new Map([[normalizedValue, orderValue]]),
+        values: new Map([[key, orderValue]]),
         keys: new Set([key]),
       }
       this.orderedEntries.set(orderValue, orderedBucket)
     }
-    this.valueMap.set(normalizedValue, {
-      keys: new Set([key]),
-      ordered: orderedBucket,
-    })
+    this.orderOperands.set(operand, { bucket: orderedBucket, owners: 1 })
   }
 
   /**
@@ -141,23 +161,38 @@ export class BTreeIndex<
     // Normalize the value for Map key usage
     const normalizedValue = normalizeForBTree(indexedValue)
 
-    this.removeFromBucket(key, normalizedValue)
+    this.removeFromBucket(
+      key,
+      normalizedValue,
+      this.orderValue(indexedValue, normalizedValue),
+    )
     this.removeRangeValue(indexedValue)
 
     this.indexedKeys.delete(key)
   }
 
-  private removeFromBucket(key: TKey, normalizedValue: unknown): void {
+  private removeFromBucket(
+    key: TKey,
+    normalizedValue: unknown,
+    orderValue: unknown,
+  ): void {
     const exact = this.valueMap.get(normalizedValue)
     if (!exact?.keys.has(key)) return
-    const orderedBucket = exact.ordered
-    const removedExactValue = exact.keys.size === 1
+    this.removeFromOrder(key, orderValue)
+    exact.keys.delete(key)
+    if (exact.keys.size === 0) this.valueMap.delete(normalizedValue)
+  }
+
+  private removeFromOrder(key: TKey, orderValue: unknown): void {
+    const operand = this.orderOperand(orderValue)
+    const cached = this.orderOperands.get(operand)
+    const orderedBucket = cached?.bucket ?? this.orderedEntries.get(orderValue)
+    if (!orderedBucket?.keys.has(key)) return
     const replacesRepresentative =
-      removedExactValue &&
       orderedBucket.keys.size > 1 &&
       areSameValueZeroEqual(
         orderedBucket.representative,
-        orderedBucket.exactValues.get(normalizedValue),
+        orderedBucket.values.get(key),
       )
 
     // Tree writes compare first, so a comparator failure throws before the
@@ -165,18 +200,17 @@ export class BTreeIndex<
     if (orderedBucket.keys.size === 1) {
       this.orderedEntries.delete(orderedBucket.representative)
     } else if (replacesRepresentative) {
-      const representative = [...orderedBucket.exactValues].find(
-        ([value]) => !areSameValueZeroEqual(value, normalizedValue),
-      )?.[1]
-      this.orderedEntries.set(representative, orderedBucket)
+      const values = orderedBucket.values.entries()
+      const first = values.next().value!
+      const representative =
+        first[0] === key ? values.next().value![1] : first[1]
+      if (!areSameValueZeroEqual(representative, orderedBucket.representative))
+        this.orderedEntries.set(representative, orderedBucket)
       orderedBucket.representative = representative
     }
-    exact.keys.delete(key)
     orderedBucket.keys.delete(key)
-    if (removedExactValue) {
-      this.valueMap.delete(normalizedValue)
-      orderedBucket.exactValues.delete(normalizedValue)
-    }
+    orderedBucket.values.delete(key)
+    if (cached && --cached.owners === 0) this.orderOperands.delete(operand)
   }
 
   /**
@@ -196,18 +230,24 @@ export class BTreeIndex<
 
     const oldValue = normalizeForBTree(oldIndexedValue)
     const newValue = normalizeForBTree(newIndexedValue)
+    const oldOrder = this.orderValue(oldIndexedValue, oldValue)
+    const newOrder = this.orderValue(newIndexedValue, newValue)
     if (
       areSameValueZeroEqual(oldValue, newValue) &&
       this.valueMap.get(newValue)?.keys.has(key)
     ) {
+      if (!areSameValueZeroEqual(oldOrder, newOrder)) {
+        this.removeFromOrder(key, oldOrder)
+        this.addToOrder(key, newOrder)
+      }
       this.removeRangeValue(oldIndexedValue)
       this.addRangeValue(newIndexedValue)
       return
     }
 
-    this.removeFromBucket(key, oldValue)
+    this.removeFromBucket(key, oldValue, oldOrder)
     this.removeRangeValue(oldIndexedValue)
-    this.addToBucket(key, newValue, this.orderValue(newIndexedValue, newValue))
+    this.addToBucket(key, newValue, newOrder)
     this.addRangeValue(newIndexedValue)
     this.indexedKeys.add(key)
   }
@@ -229,6 +269,7 @@ export class BTreeIndex<
   clear(): void {
     this.orderedEntries.clear()
     this.valueMap.clear()
+    this.orderOperands.clear()
     this.indexedKeys.clear()
     this.clearRangeValues()
   }

@@ -356,7 +356,10 @@ function getOrderedKeys<T extends object, TKey extends string | number>(
       // Find the index
       const index = findIndexForField(collection, fieldPath, compareOpts)
 
-      if (index && index.supports(`gt`)) {
+      // A user-supplied index comparator is not described by compareOptions.
+      // Exact equality lookup may still use that index, but its ordered walk
+      // cannot stand in for the requested order.
+      if (index && index.supports(`gt`) && index.supportsRangeOptimization) {
         // Use index optimization
         const filterFn = (key: TKey): boolean => {
           const value = collection.get(key)

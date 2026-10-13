@@ -59,6 +59,14 @@ function from the value's prototype on each call. The repaired direct and
 evaluator suite passed 248 tests with no type errors. The exact committed-head
 verdict follows after commit.
 
+The later equality review exposed a separate order defect: a genuine
+ZonedDateTime with an own `Symbol.toStringTag` shadow was treated as an
+ordinary object. A direct witness failed at the equal-instant
+`ascComparator` return on the unrepaired code. The shared branded dispatch
+now reads the Temporal prototype and checks native slots; direct
+`ascComparator` and `compareValues` preserve the supplied instant order.
+The index-order owner has a corresponding value-cursor witness.
+
 ## Oracle guide audit
 
 | Requirement | Evidence and limit |

@@ -7,6 +7,7 @@ import { createLiveQueryCollection } from '../src/query/live-query-collection'
 import {
   areValuesEqual,
   ascComparator,
+  compareValues,
   defaultComparator,
   descComparator,
   isUnorderable,
@@ -1365,7 +1366,9 @@ describe(`areValuesEqual property-based tests`, () => {
  * Legal inputs are ISO PlainDates from years 2000..2030 with days 1..28 and
  * ZonedDateTimes within two seconds of a fixed instant in four offset zones.
  * Equal-value branches construct separate objects, and the zoned branch forces
- * different zones at the same instant. The production paths are the exported
+ * different zones at the same instant. A fixed genuine ZonedDateTime also
+ * shadows its own display tag; the supplied instant still determines order.
+ * The production paths are the exported
  * `ascComparator` under the default options and `compareValues` in hostile
  * dispatch histories. Each return is the observation checkpoint;
  * this lane makes no indexed or public-query claim. Comparator
@@ -1587,6 +1590,20 @@ describe(`Temporal default-order refinement`, () => {
       return Number(leftEpoch / 1_000_000n - rightEpoch / 1_000_000n)
     }
     expect(() => assertZonedDateTimeOrder(sample, truncated)).toThrow()
+  })
+
+  it(`keeps a genuine ZonedDateTime's instant order when its own tag is shadowed`, () => {
+    const utc = zonedValue(0, `+00:00`)
+    const peer = zonedValue(0, `+05:30`)
+    const later = zonedValue(1, `+05:30`)
+    Object.defineProperty(utc, Symbol.toStringTag, { value: `ordinary` })
+
+    // The supplied offsets, not the instance's display property, define the
+    // model positions. The direct comparator and helper are separate paths.
+    expect(ascComparator(utc, peer, DEFAULT_COMPARE_OPTIONS)).toBe(0)
+    expect(ascComparator(peer, utc, DEFAULT_COMPARE_OPTIONS)).toBe(0)
+    expect(compareValues(utc, peer)).toBe(0)
+    expect(sign(ascComparator(utc, later, DEFAULT_COMPARE_OPTIONS))).toBe(-1)
   })
 
   it(`keeps a PlainDate constructor override from poisoning later comparisons`, async () => {
