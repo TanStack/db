@@ -1,4 +1,4 @@
-import { isTemporal } from '../utils'
+import { isTemporal, nativeTypedArrayLength } from '../utils'
 import { getRuntimeReferenceIdentity } from '../query/runtime-reference-identity'
 import { codedMessage, devBuild } from '../error-message'
 import type { CompareOptions } from '../query/builder/types'
@@ -135,6 +135,21 @@ export const ascComparator = (a: any, b: any, opts: CompareOptions): number => {
     return compareBrandedTemporalValues(a, b, aTemporal, bTemporal)
   }
 
+  // Native byte views use their unsigned contents for default order. This
+  // agrees with their content-based equality and gives fresh equal views the
+  // same position; source keys break ties between rows.
+  const aIsBytes = isUint8Array(a)
+  const bIsBytes = isUint8Array(b)
+  if (aIsBytes && bIsBytes) {
+    const aLength = nativeTypedArrayLength(a)
+    const bLength = nativeTypedArrayLength(b)
+    for (let index = 0; index < Math.min(aLength, bLength); index++) {
+      const difference = a[index]! - b[index]!
+      if (difference !== 0) return difference
+    }
+    return aLength - bLength
+  }
+
   // Symbols have identity but no built-in order: relational comparison throws.
   // A stable runtime ID gives tree indexes a total order while preserving
   // equality only for the same symbol.
@@ -164,14 +179,18 @@ export const ascComparator = (a: any, b: any, opts: CompareOptions): number => {
           ? 1
           : aTemporal
             ? 2
-            : 3
+            : aIsBytes
+              ? 3
+              : 4
       const bKind = Array.isArray(b)
         ? 0
         : bDateTime !== undefined
           ? 1
           : bTemporal
             ? 2
-            : 3
+            : bIsBytes
+              ? 3
+              : 4
       if (aKind !== bKind) return aKind - bKind
       const aId = getObjectId(a)
       const bId = getObjectId(b)
@@ -249,15 +268,6 @@ const typedArrayTag = Object.getOwnPropertyDescriptor(
   Object.getPrototypeOf(Uint8Array.prototype),
   Symbol.toStringTag,
 )!.get!
-const typedArrayByteLength = Object.getOwnPropertyDescriptor(
-  Object.getPrototypeOf(Uint8Array.prototype),
-  `byteLength`,
-)!.get!
-
-function nativeByteLength(value: Uint8Array): number {
-  return Reflect.apply(typedArrayByteLength, value, []) as number
-}
-
 /** Recognize native Uint8Array values, including Buffers and foreign realms. */
 export function isUint8Array(value: unknown): value is Uint8Array {
   return (
@@ -268,8 +278,8 @@ export function isUint8Array(value: unknown): value is Uint8Array {
 
 /** Compare two Uint8Arrays for content equality. */
 function areUint8ArraysEqual(a: Uint8Array, b: Uint8Array): boolean {
-  const length = nativeByteLength(a)
-  if (length !== nativeByteLength(b)) {
+  const length = nativeTypedArrayLength(a)
+  if (length !== nativeTypedArrayLength(b)) {
     return false
   }
   for (let i = 0; i < length; i++) {
@@ -306,7 +316,7 @@ function canonicalTemporalZone(zoneId: string): string {
 
 function normalizeBinary(value: Uint8Array): string {
   let bytes = ``
-  const length = nativeByteLength(value)
+  const length = nativeTypedArrayLength(value)
   for (let index = 0; index < length; index++) {
     bytes += String.fromCharCode(value[index]!)
   }
@@ -508,11 +518,6 @@ export function indexCustomComparatorValue(value: unknown): unknown {
   return temporal
     ? normalizedKey(`temporal`, `${temporal.kind}:${temporal.text}`)
     : value
-}
-
-/** Recover the exact lookup key from a stored ordered value. */
-export function indexExactKey(value: any): any {
-  return normalizeValue(value)
 }
 
 /**

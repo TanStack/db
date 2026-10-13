@@ -1,3 +1,5 @@
+import { Buffer } from 'node:buffer'
+import { runInNewContext } from 'node:vm'
 import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { BasicIndex } from '../src/indexes/basic-index.js'
@@ -6,6 +8,7 @@ import { ReverseIndex } from '../src/indexes/reverse-index.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
 import { DEFAULT_COMPARE_OPTIONS } from '../src/utils.js'
 import { withOracleCleanup } from './utils.js'
+import type { SyncConfig } from '../src/types.js'
 
 /**
  * An ordered Collection snapshot may use an index only when the index executes
@@ -33,10 +36,19 @@ import { withOracleCleanup } from './utils.js'
  * checks initial and cursor snapshots of an equal-rank group. Raw escaped
  * strings must reach custom-collation callbacks without their exact-key
  * encoding; direct range and cursor operations use those same positions.
- * A mixed string, number, and byte fixture checks that opaque byte order
- * still matches the public scan while byte content retains exact equality.
- * They do not claim mutation histories, provider ordering, arbitrary binary
- * values, or live-query publication.
+ * This PR's proposed default native-byte order is unsigned lexicographic by
+ * content, with shorter prefixes first and source keys ascending at equal
+ * content. A mixed string, number, and byte fixture checks that order beside
+ * content-based exact equality.
+ * Bounded source histories replace one byte view with a fresh equal-content
+ * view, or another row's existing view, then delete and reinsert its key.
+ * They compare indexed and unindexed order with a reference based on source
+ * facts; exact membership comes only from byte content. Equal-content
+ * replacement keeps ordinary public order and publishes no source change.
+ * The maintainer's custom-comparator decision also requires each current row
+ * to follow the callback when equal-content views have distinct callback ranks.
+ * They do not claim arbitrary mutation histories, provider ordering, arbitrary
+ * binary values, or live-query publication.
  */
 type Row = { id: string; rank: number }
 
@@ -155,6 +167,27 @@ const indexTypes = [
   [`BasicIndex`, BasicIndex],
   [`BTreeIndex`, BTreeIndex],
 ] as const
+
+// For genuine native byte views in this bounded domain, the first differing
+// unsigned byte determines order; an exhausted prefix comes first. This model
+// reads the supplied bytes and never calls the production comparator or index.
+function compareByteContent(left: Uint8Array, right: Uint8Array): number {
+  const leftBytes = Array.from(Uint8Array.prototype.values.call(left))
+  const rightBytes = Array.from(Uint8Array.prototype.values.call(right))
+  for (
+    let index = 0;
+    index < Math.min(leftBytes.length, rightBytes.length);
+    index++
+  ) {
+    const difference = leftBytes[index]! - rightBytes[index]!
+    if (difference !== 0) return difference
+  }
+  return leftBytes.length - rightBytes.length
+}
+
+function compareStringKeys(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0
+}
 
 describe.each(indexTypes)(
   `%s custom comparator order selection`,
@@ -1017,7 +1050,166 @@ describe.each(indexTypes)(`%s public key ties`, (name, IndexType) => {
     expect(index.equalityLookup(literal)).toEqual(new Set([`literal`]))
   })
 
-  it(`keeps raw byte order distinct from content-based equality`, async () => {
+  it.each([
+    {
+      caseId: `equal-content-key-tie`,
+      makeRows: () => {
+        const z = new Uint8Array([1])
+        const a = new Uint8Array([1])
+        return [
+          { id: `a`, value: a },
+          { id: `z`, value: z },
+        ]
+      },
+      expected: [`a`, `z`],
+    },
+    {
+      caseId: `first-differing-byte`,
+      makeRows: () => {
+        const high = new Uint8Array([2, 0])
+        const low = new Uint8Array([1, 255])
+        return [
+          { id: `high`, value: high },
+          { id: `low`, value: low },
+        ]
+      },
+      expected: [`low`, `high`],
+    },
+    {
+      caseId: `unsigned-127-128-boundary`,
+      makeRows: () => {
+        const low = Uint8Array.of(127)
+        const high = Uint8Array.of(128)
+        return [
+          { id: `low`, value: low },
+          { id: `high`, value: high },
+        ]
+      },
+      expected: [`low`, `high`],
+    },
+    {
+      caseId: `foreign-native-byte-view`,
+      makeRows: () => {
+        const low = runInNewContext(`new Uint8Array([1])`) as Uint8Array
+        const high = Uint8Array.of(2)
+        return [
+          { id: `foreign-low`, value: low },
+          { id: `local-high`, value: high },
+        ]
+      },
+      expected: [`foreign-low`, `local-high`],
+    },
+    {
+      caseId: `own-length-shadow`,
+      makeRows: () => {
+        const low = Uint8Array.of(1)
+        const high = Object.defineProperty(Uint8Array.of(2), `length`, {
+          value: 0,
+        })
+        return [
+          { id: `low`, value: low },
+          { id: `high`, value: high },
+        ]
+      },
+      expected: [`low`, `high`],
+    },
+    {
+      caseId: `shorter-prefix`,
+      makeRows: () => {
+        const long = new Uint8Array([1, 0])
+        const short = new Uint8Array([1])
+        return [
+          { id: `long`, value: long },
+          { id: `short`, value: short },
+        ]
+      },
+      expected: [`short`, `long`],
+    },
+    {
+      caseId: `buffer-and-uint8array`,
+      makeRows: () => {
+        const buffer = Buffer.from([1])
+        const view = new Uint8Array([1])
+        return [
+          { id: `a-view`, value: view },
+          { id: `z-buffer`, value: buffer },
+        ]
+      },
+      expected: [`a-view`, `z-buffer`],
+    },
+  ])(`orders native bytes by content / $caseId`, async (example) => {
+    type ByteRow = { id: string; value: Uint8Array }
+    const source: ReadonlyArray<ByteRow> = example.makeRows()
+    // The independent model sorts supplied unsigned content and uses the
+    // source key only for content-equal values. The fixtures include orders
+    // that disagree with reference identity, signed bytes, and host collation.
+    const model = [...source]
+      .sort(
+        (left, right) =>
+          compareByteContent(left.value, right.value) ||
+          compareStringKeys(left.id, right.id),
+      )
+      .map(({ id }) => id)
+    expect(model).toEqual(example.expected)
+    let cleanup: (() => unknown) | undefined
+    await withOracleCleanup(async () => {
+      const collection = createCollection<ByteRow, string>({
+        id: `byte-content-${name}-${example.caseId}`,
+        getKey: ({ id }) => id,
+        autoIndex: `off`,
+        startSync: true,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            for (const row of source) write({ type: `insert`, value: row })
+            commit()
+            markReady()
+          },
+        },
+      })
+      cleanup = () => collection.cleanup()
+      await collection.stateWhenReady()
+      const orderBy = [
+        {
+          expression: new PropRef([`value`]),
+          compareOptions: DEFAULT_COMPARE_OPTIONS,
+        },
+      ]
+      const read = (optimizedOnly?: boolean) =>
+        collection
+          .currentStateAsChanges({ orderBy, optimizedOnly })
+          ?.map(({ key }) => key)
+
+      // Read before index installation, then force the installed index path.
+      // Exact arrays preserve both order and multiplicity at readiness.
+      expect.soft(read(), `unindexed ${example.caseId}`).toEqual(model)
+      const index = collection.createIndex((row) => row.value, {
+        indexType: IndexType,
+      })
+      const take = vi.spyOn(index, `takeFromStart`)
+      expect.soft(read(true), `indexed ${example.caseId}`).toEqual(model)
+      expect(take).toHaveBeenCalled()
+      expect.soft(index.takeFromStart(source.length)).toEqual(model)
+      expect(index.keyCount).toBe(source.length)
+      for (const row of source) {
+        expect(
+          index.equalityLookup(
+            Uint8Array.from(Uint8Array.prototype.values.call(row.value)),
+          ),
+        ).toEqual(
+          new Set(
+            source
+              .filter(
+                (other) => compareByteContent(other.value, row.value) === 0,
+              )
+              .map(({ id }) => id),
+          ),
+        )
+      }
+    }, [() => cleanup?.()])
+  })
+
+  it(`keeps mixed-value byte order and content equality aligned`, async () => {
     type MixedRow = { id: string; value: string | number | Uint8Array }
     const firstByte = new Uint8Array([1])
     const secondByte = new Uint8Array([1])
@@ -1056,13 +1248,11 @@ describe.each(indexTypes)(`%s public key ties`, (name, IndexType) => {
           .currentStateAsChanges({ orderBy, optimizedOnly })
           ?.map(({ key }) => key)
 
-      // Public scan order is the independent receiving path for opaque byte
-      // references. The value-kind law puts string and number before bytes;
-      // the scan also records the runtime order of these two distinct views.
+      // The value-kind law puts string and number before native bytes. The
+      // two byte views have equal content, so public source keys break their
+      // tie even though source admission put z-byte first.
       const scanned = read()
-      expect(scanned?.slice(0, 2)).toEqual([`s`, `n`])
-      expect(scanned?.slice(2)).toEqual([`z-byte`, `a-byte`])
-      expect(new Set(scanned)).toEqual(new Set([`s`, `n`, `z-byte`, `a-byte`]))
+      expect(scanned).toEqual([`s`, `n`, `a-byte`, `z-byte`])
       const index = collection.createIndex((row) => row.value, {
         indexType: IndexType,
       })
@@ -1075,6 +1265,309 @@ describe.each(indexTypes)(`%s public key ties`, (name, IndexType) => {
       expect(index.equalityLookup(`\u0000tanstack-db:binary:\u0001`)).toEqual(
         new Set(),
       )
+    }, [() => cleanup?.()])
+  })
+
+  it(`keeps a content-equal replacement in key order without a source event`, async () => {
+    type ByteRow = { id: string; value: Uint8Array }
+    type Sync = Parameters<SyncConfig<ByteRow, string>[`sync`]>[0]
+    const firstKey = `A`
+    const peerKey = `a`
+    const first = new Uint8Array([1])
+    const peer = new Uint8Array([1])
+    const replacement = new Uint8Array([1])
+    const source = new Map<string, Uint8Array>([
+      [peerKey, peer],
+      [firstKey, first],
+    ])
+    let sync!: Sync
+    let cleanup: (() => unknown) | undefined
+    let unsubscribe: (() => unknown) | undefined
+    await withOracleCleanup(async () => {
+      const collection = createCollection<ByteRow, string>({
+        id: `byte-replacement-order-${name}`,
+        getKey: ({ id }) => id,
+        autoIndex: `off`,
+        startSync: true,
+        sync: {
+          sync: (actions) => {
+            sync = actions
+            actions.begin()
+            for (const [id, value] of source)
+              actions.write({ type: `insert`, value: { id, value } })
+            actions.commit()
+            actions.markReady()
+          },
+        },
+      })
+      cleanup = () => collection.cleanup()
+      await collection.stateWhenReady()
+      const orderBy = [
+        {
+          expression: new PropRef([`value`]),
+          compareOptions: DEFAULT_COMPARE_OPTIONS,
+        },
+      ]
+      const read = (optimizedOnly?: boolean) =>
+        collection
+          .currentStateAsChanges({ orderBy, optimizedOnly })
+          ?.map(({ key }) => key)
+
+      // The plain source Map is the model. Every live value has byte content
+      // [1], so the public order is the source-key tie regardless of which
+      // native view supplies that content. The change-event equality law
+      // suppresses a source event for the equal-content replacement.
+      const model = () =>
+        [...source]
+          .sort(
+            ([leftKey, leftValue], [rightKey, rightValue]) =>
+              compareByteContent(leftValue, rightValue) ||
+              compareStringKeys(leftKey, rightKey),
+          )
+          .map(([key]) => key)
+      expect(model()).toEqual([firstKey, peerKey])
+      expect.soft(read()).toEqual(model())
+      const index = collection.createIndex((row) => row.value, {
+        indexType: IndexType,
+      })
+      const take = vi.spyOn(index, `takeFromStart`)
+      expect.soft(read(true)).toEqual(model())
+      expect(take).toHaveBeenCalled()
+      expect.soft(index.takeFromStart(2)).toEqual(model())
+      expect(index.keyCount).toBe(source.size)
+      expect(index.equalityLookup(new Uint8Array([1]))).toEqual(
+        new Set(source.keys()),
+      )
+      const events: Array<{ type: string; key: string }> = []
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          events.push(...changes.map(({ type, key }) => ({ type, key })))
+        },
+        { includeInitialState: false },
+      )
+      unsubscribe = () => subscription.unsubscribe()
+      expect(events).toEqual([])
+
+      // Commit changes the retained source instance while preserving its
+      // content. The indexed read and scan must both retain source-key order;
+      // neither a duplicate key nor a value event is allowed at this cut.
+      sync.begin()
+      sync.write({
+        type: `update`,
+        value: { id: firstKey, value: replacement },
+      })
+      source.set(firstKey, replacement)
+      await sync.commit()
+      expect(collection.state.get(firstKey)?.value).toBe(replacement)
+      expect(events).toEqual([])
+      const indexed = read(true)
+      const direct = index.takeFromStart(2)
+      expect(index.keyCount).toBe(source.size)
+      expect(index.equalityLookup(new Uint8Array([1]))).toEqual(
+        new Set(source.keys()),
+      )
+      expect(collection.removeIndex(index)).toBe(true)
+      const scanned = read()
+      expect.soft(scanned).toEqual(model())
+      expect.soft(indexed).toEqual(model())
+      expect.soft(direct).toEqual(model())
+    }, [() => unsubscribe?.(), () => cleanup?.()])
+  })
+
+  it(`conserves keys when a byte view adopts a peer value and is reinserted`, async () => {
+    type ByteRow = { id: string; value: Uint8Array }
+    type Sync = Parameters<SyncConfig<ByteRow, string>[`sync`]>[0]
+    const source = new Map<string, Uint8Array>([
+      [`0`, new Uint8Array([1])],
+      [`1`, new Uint8Array([1])],
+      [`2`, new Uint8Array([2])],
+      [`3`, Buffer.from([1])],
+    ])
+    let sync!: Sync
+    let cleanup: (() => unknown) | undefined
+    await withOracleCleanup(async () => {
+      const collection = createCollection<ByteRow, string>({
+        id: `byte-reinsertion-order-${name}`,
+        getKey: ({ id }) => id,
+        autoIndex: `off`,
+        startSync: true,
+        sync: {
+          sync: (actions) => {
+            sync = actions
+            actions.begin()
+            for (const [id, value] of source)
+              actions.write({ type: `insert`, value: { id, value } })
+            actions.commit()
+            actions.markReady()
+          },
+        },
+      })
+      cleanup = () => collection.cleanup()
+      await collection.stateWhenReady()
+      const orderBy = [
+        {
+          expression: new PropRef([`value`]),
+          compareOptions: DEFAULT_COMPARE_OPTIONS,
+        },
+      ]
+      const read = (optimizedOnly?: boolean) =>
+        collection
+          .currentStateAsChanges({ orderBy, optimizedOnly })
+          ?.map(({ key }) => key)
+
+      // A plain Map models source row ownership. Unsigned content puts every
+      // [1] view before [2], regardless of its native class or identity;
+      // source keys break the [1] tie. Adopting the peer value, deleting, and
+      // reinserting key 0 change only current membership. This reference never
+      // reads an index bucket or the production comparator.
+      const expectedOrder = () =>
+        [...source]
+          .sort(
+            ([leftKey, leftValue], [rightKey, rightValue]) =>
+              compareByteContent(leftValue, rightValue) ||
+              compareStringKeys(leftKey, rightKey),
+          )
+          .map(([key]) => key)
+      expect(expectedOrder()).toEqual([`0`, `1`, `3`, `2`])
+      expect.soft(read(), `initial unindexed order`).toEqual(expectedOrder())
+      const expectedExact = (byte: number) =>
+        new Set(
+          [...source]
+            .filter(([, value]) => value.length === 1 && value[0] === byte)
+            .map(([key]) => key),
+        )
+      const index = collection.createIndex((row) => row.value, {
+        indexType: IndexType,
+      })
+      const check = (phase: string) => {
+        const expected = expectedOrder()
+        expect
+          .soft(read(true), `${phase} public indexed order`)
+          .toEqual(expected)
+        expect
+          .soft(
+            index.takeFromStart(source.size + 1),
+            `${phase} direct index order`,
+          )
+          .toEqual(expected)
+        expect(index.keyCount, `${phase} key count`).toBe(source.size)
+        expect(index.equalityLookup(new Uint8Array([1]))).toEqual(
+          expectedExact(1),
+        )
+        expect(index.equalityLookup(new Uint8Array([2]))).toEqual(
+          expectedExact(2),
+        )
+      }
+
+      check(`initial`)
+      const peerValue = source.get(`1`)!
+      sync.begin()
+      sync.write({ type: `update`, value: { id: `0`, value: peerValue } })
+      source.set(`0`, peerValue)
+      await sync.commit()
+      expect(collection.state.get(`0`)?.value).toBe(peerValue)
+      check(`after update`)
+
+      sync.begin()
+      sync.write({ type: `delete`, key: `0` })
+      source.delete(`0`)
+      await sync.commit()
+      expect(collection.state.has(`0`)).toBe(false)
+      check(`after delete`)
+
+      sync.begin()
+      sync.write({ type: `insert`, value: { id: `0`, value: peerValue } })
+      source.set(`0`, peerValue)
+      await sync.commit()
+      expect(collection.state.get(`0`)?.value).toBe(peerValue)
+      check(`after reinsert`)
+
+      // Removing the index makes the same public ordered read use its scan.
+      // Its final keys are an independent receiving control for the history.
+      expect(collection.removeIndex(index)).toBe(true)
+      expect(read()).toEqual(expectedOrder())
+    }, [() => cleanup?.()])
+  })
+
+  it(`orders current byte views by a custom callback after equal-content replacement`, async () => {
+    type ByteRow = { id: string; value: Uint8Array }
+    type Sync = Parameters<SyncConfig<ByteRow, string>[`sync`]>[0]
+    const first = new Uint8Array([1])
+    const peer = new Uint8Array([1])
+    const replacement = new Uint8Array([1])
+    const callbackRanks = new WeakMap<object, number>([
+      [first, 1],
+      [peer, 2],
+      [replacement, 3],
+    ])
+    const source = new Map<string, { value: Uint8Array; rank: number }>([
+      [`first`, { value: first, rank: 1 }],
+      [`peer`, { value: peer, rank: 2 }],
+    ])
+    let sync!: Sync
+    let cleanup: (() => unknown) | undefined
+    await withOracleCleanup(async () => {
+      const collection = createCollection<ByteRow, string>({
+        id: `custom-byte-replacement-${name}`,
+        getKey: ({ id }) => id,
+        autoIndex: `off`,
+        startSync: true,
+        sync: {
+          sync: (actions) => {
+            sync = actions
+            actions.begin()
+            for (const [id, { value }] of source)
+              actions.write({ type: `insert`, value: { id, value } })
+            actions.commit()
+            actions.markReady()
+          },
+        },
+      })
+      cleanup = () => collection.cleanup()
+      await collection.stateWhenReady()
+      const index = collection.createIndex((row) => row.value, {
+        indexType: IndexType,
+        options: {
+          compareFn: (left: Uint8Array, right: Uint8Array) =>
+            callbackRanks.get(left)! - callbackRanks.get(right)!,
+        },
+      })
+
+      // Source facts carry numeric ranks independently of index storage.
+      // The callback receives the raw view for each current row; exact lookup
+      // instead groups these three one-byte views by content. A same-content
+      // update changes the first row's callback rank from 1 to 3.
+      const ordered = () =>
+        [...source]
+          .sort(([, left], [, right]) => left.rank - right.rank)
+          .map(([id]) => id)
+      const atOrAbovePeer = () =>
+        new Set(
+          [...source].filter(([, { rank }]) => rank >= 2).map(([id]) => id),
+        )
+      const afterPeer = () => ordered().filter((id) => source.get(id)!.rank > 2)
+      const exact = () =>
+        new Set(
+          [...source]
+            .filter(([, { value }]) => value.length === 1 && value[0] === 1)
+            .map(([id]) => id),
+        )
+
+      expect(index.takeFromStart(2)).toEqual(ordered())
+      expect(index.rangeQuery({ from: peer })).toEqual(atOrAbovePeer())
+      expect(index.take(2, peer)).toEqual(afterPeer())
+      expect(index.equalityLookup(new Uint8Array([1]))).toEqual(exact())
+
+      sync.begin()
+      sync.write({ type: `update`, value: { id: `first`, value: replacement } })
+      source.set(`first`, { value: replacement, rank: 3 })
+      await sync.commit()
+      expect(collection.state.get(`first`)?.value).toBe(replacement)
+      expect(index.keyCount).toBe(source.size)
+      expect(index.equalityLookup(new Uint8Array([1]))).toEqual(exact())
+      expect.soft(index.takeFromStart(2)).toEqual(ordered())
+      expect.soft(index.rangeQuery({ from: peer })).toEqual(atOrAbovePeer())
+      expect.soft(index.take(2, peer)).toEqual(afterPeer())
     }, [() => cleanup?.()])
   })
 })

@@ -15,6 +15,9 @@ import { deepEquals, equalPersistedSnapshotValues } from '../src/utils'
  * pairs remain unequal, even when a primitive displays or encodes a Date or
  * RegExp value. Separate bounded graph laws construct corresponding rings
  * and acyclic copies without reusing the production walk.
+ * A native typed-array length shadow cannot change how many intrinsic
+ * elements participate in change-event equality. A supplied changed byte
+ * must remain unequal even when both views report an own `length` of zero.
  *
  * Arbitrary different cycle topologies are outside this model. Naming that
  * exclusion matters: more random examples cannot establish semantics the
@@ -1128,6 +1131,26 @@ describe(`deepEquals property-based tests`, () => {
           Int8Array.from([...bytes.slice(1), 128]),
           false,
         )
+      },
+    )
+
+    utilsProperty([fc.uint8Array({ minLength: 1, maxLength: 20 }), fc.nat(20)])(
+      `native bytes ignore own length shadows`,
+      (bytes, indexHint) => {
+        const changedIndex = indexHint % bytes.length
+        const changed = Uint8Array.from(bytes)
+        changed[changedIndex] = (changed[changedIndex]! + 1) % 256
+        const shadow = (view: Uint8Array) =>
+          Object.defineProperty(view, `length`, { value: 0 })
+        const original = shadow(Uint8Array.from(bytes))
+        const copy = shadow(Uint8Array.from(bytes))
+        const different = shadow(changed)
+
+        // The supplied byte sequence, rather than either public `length`,
+        // determines both expected outcomes at the direct equality return.
+        expectEqualityPair(original, copy, true)
+        expectEqualityPair(original, different, false)
+        expectEqualityPair({ value: original }, { value: different }, false)
       },
     )
 

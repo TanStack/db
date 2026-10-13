@@ -1184,6 +1184,7 @@ export class CollectionStateManager<
       }
 
       const events: Array<ChangeMessage<TOutput, TKey>> = []
+      const indexOnlyChanges: Array<ChangeMessage<TOutput, TKey>> = []
       let reappliedKeys: ReadonlySet<TKey> | undefined
       if (hasTruncateSync) {
         // All queued transactions publish as one batch. Its clear prefix must
@@ -1403,6 +1404,18 @@ export class CollectionStateManager<
             value: newVisibleValue,
             previousValue: withPreviousVirtualProps(previousVisibleValue),
           })
+        } else if (
+          previousVisibleValue !== newVisibleValue &&
+          this.indexes.indexes.size > 0
+        ) {
+          // Change-event equality can group rows whose raw index order differs.
+          // Refresh their index positions without publishing a value change.
+          indexOnlyChanges.push({
+            type: `update`,
+            key,
+            value: newVisibleValue,
+            previousValue: withPreviousVirtualProps(previousVisibleValue),
+          })
         }
       }
 
@@ -1410,8 +1423,8 @@ export class CollectionStateManager<
       this.size = this.calculateSize()
 
       // Update indexes for all events before emitting
-      if (events.length > 0) {
-        this.indexes.updateIndexes(events)
+      if (events.length > 0 || indexOnlyChanges.length > 0) {
+        this.indexes.updateIndexes([...events, ...indexOnlyChanges])
       }
 
       // End batching and emit all events (combines any batched events with sync events)

@@ -10,7 +10,7 @@ import {
 import { localOnlyCollectionOptions } from '../src/local-only'
 import { PropRef } from '../src/query/ir'
 import { oraclePropertyOptions, oracleRuns } from './oracle-config'
-import { captureCreatedTransactions } from './utils'
+import { captureCreatedTransactions, withOracleCleanup } from './utils'
 import type { LocalOnlyCollectionUtils } from '../src/local-only'
 import type { Collection } from '../src/index'
 import type { BaseIndex } from '../src/indexes/base-index'
@@ -872,5 +872,104 @@ describe(`change-event history oracle`, () => {
   )(
     `keeps change messages and public rows aligned with a random or replayed seed`,
     verifyGeneratedHistory,
+  )
+})
+
+describe(`native-byte change publication`, () => {
+  /**
+   * A sync replacement with different intrinsic bytes changes the visible
+   * row, so one update must reach a subscriber after commit. An own `length`
+   * shadow is display state, not a way to erase the byte difference. The
+   * source's one-key before/after sequence supplies the expected payload;
+   * exact index lookup is a separate receiving path. An equal-byte copy then
+   * remains silent. This bounded history does not claim optimistic writes or
+   * other typed-array classes.
+   */
+  it.each([
+    [`BasicIndex`, BasicIndex],
+    [`BTreeIndex`, BTreeIndex],
+  ] as const)(
+    `publishes changed intrinsic bytes with %s`,
+    async (name, IndexType) => {
+      type ByteRow = { id: string; value: Uint8Array }
+      type ByteSync = Parameters<SyncConfig<ByteRow, string>[`sync`]>[0]
+      const shadow = (value: number) =>
+        Object.defineProperty(Uint8Array.of(value), `length`, { value: 0 })
+      const bytes = (view: Uint8Array) =>
+        Array.from(Uint8Array.prototype.values.call(view))
+      const before = shadow(1)
+      const after = shadow(2)
+      const equalCopy = shadow(2)
+      let sync!: ByteSync
+      let unsubscribe: (() => unknown) | undefined
+      let cleanup: (() => unknown) | undefined
+
+      await withOracleCleanup(async () => {
+        const collection = createCollection<ByteRow, string>({
+          id: `native-byte-publication-${name}`,
+          getKey: ({ id }) => id,
+          autoIndex: `off`,
+          startSync: true,
+          sync: {
+            sync: (actions) => {
+              sync = actions
+              actions.begin()
+              actions.write({
+                type: `insert`,
+                value: { id: `a`, value: before },
+              })
+              actions.commit()
+              actions.markReady()
+            },
+          },
+        })
+        cleanup = () => collection.cleanup()
+        await collection.stateWhenReady()
+        const index = collection.createIndex((row) => row.value, {
+          indexType: IndexType,
+        })
+        const messages: Array<{
+          type: string
+          key: string
+          previous: Array<number> | undefined
+          value: Array<number>
+        }> = []
+        const subscription = collection.subscribeChanges(
+          (changes) => {
+            for (const change of changes) {
+              messages.push({
+                type: change.type,
+                key: change.key,
+                previous:
+                  change.type === `update`
+                    ? bytes(change.previousValue!.value)
+                    : undefined,
+                value: bytes(change.value.value),
+              })
+            }
+          },
+          { includeInitialState: false },
+        )
+        unsubscribe = () => subscription.unsubscribe()
+        expect(messages).toEqual([])
+
+        sync.begin()
+        sync.write({ type: `update`, value: { id: `a`, value: after } })
+        await sync.commit()
+        expect(bytes(collection.get(`a`)!.value)).toEqual([2])
+        expect(index.equalityLookup(Uint8Array.of(1))).toEqual(new Set())
+        expect(index.equalityLookup(Uint8Array.of(2))).toEqual(new Set([`a`]))
+        expect(messages).toEqual([
+          { type: `update`, key: `a`, previous: [1], value: [2] },
+        ])
+
+        sync.begin()
+        sync.write({ type: `update`, value: { id: `a`, value: equalCopy } })
+        await sync.commit()
+        expect(bytes(collection.get(`a`)!.value)).toEqual([2])
+        expect(index.equalityLookup(Uint8Array.of(2))).toEqual(new Set([`a`]))
+        expect(messages).toHaveLength(1)
+      }, [() => unsubscribe?.(), () => cleanup?.()])
+    },
   )
 })

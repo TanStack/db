@@ -9,6 +9,16 @@ interface TypedArray {
   [index: number]: number
 }
 
+const typedArrayLength = Object.getOwnPropertyDescriptor(
+  Object.getPrototypeOf(Uint8Array.prototype),
+  `length`,
+)!.get!
+
+/** Read the native element count even when a view shadows its length property. */
+export function nativeTypedArrayLength(value: ArrayBufferView): number {
+  return Reflect.apply(typedArrayLength, value, []) as number
+}
+
 /**
  * Deep equality function that compares two values recursively
  * Handles primitives, objects, arrays, Date, RegExp, Map, Set, TypedArrays, and Temporal objects
@@ -229,15 +239,17 @@ export function deepEqualsInternal(
   ) {
     const typedA = a as unknown as TypedArray
     const typedB = b as unknown as TypedArray
+    const lengthA = nativeTypedArrayLength(a)
+    const lengthB = nativeTypedArrayLength(b)
     // Elements compare like numbers: -0 equals 0, NaN equals NaN. Only a
     // draft treats a change of typed-array class as a change.
     if (
       (draft && Object.getPrototypeOf(a) !== Object.getPrototypeOf(b)) ||
-      typedA.length !== typedB.length
+      lengthA !== lengthB
     )
       return false
 
-    for (let i = 0; i < typedA.length; i++) {
+    for (let i = 0; i < lengthA; i++) {
       const x = typedA[i]!
       const y = typedB[i]!
       if (x !== y && !(x !== x && y !== y)) return false

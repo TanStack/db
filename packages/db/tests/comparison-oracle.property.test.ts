@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer'
 import { runInNewContext } from 'node:vm'
 import { describe, expect, it, vi } from 'vitest'
 import { fc, test as fcTest } from '@fast-check/vitest'
@@ -59,6 +60,14 @@ import type { CompareOptions } from '../src/query/builder/types'
  * equality and key histories cover lengths 1..200. Fixed changes at byte 64
  * of a 129-byte view and the last byte of a 200-byte view pin positions that
  * a short generated campaign need not sample.
+ *
+ * The proposed native-byte ORDER BY law compares genuine Uint8Arrays and
+ * Buffers by unsigned byte content, with a shorter equal prefix first. Equal
+ * contents compare at one position. Genuine foreign-realm views and own
+ * length shadows retain their native bytes. The mixed-object witness checks
+ * total-order transitivity without choosing which kind comes first. This
+ * bounded direct-return witness does not claim relational WHERE comparison,
+ * other typed-array classes, arbitrary object order, or mutation.
  */
 
 const defaultOpts: CompareOptions = {
@@ -1965,6 +1974,110 @@ describe(`native binary key content`, () => {
       )
     },
   )
+})
+
+describe(`native byte content order`, () => {
+  // The independent rule reads only the supplied unsigned elements. It does
+  // not use the production object-identity allocator, comparator, or exact-key
+  // normalization. Each fresh pair exercises immediate comparator returns.
+  const model = (left: Uint8Array, right: Uint8Array): number => {
+    // Native iteration reads the byte slots even when an own `length`
+    // property shadows the public getter.
+    const leftBytes = Array.from(Uint8Array.prototype.values.call(left))
+    const rightBytes = Array.from(Uint8Array.prototype.values.call(right))
+    for (
+      let index = 0;
+      index < Math.min(leftBytes.length, rightBytes.length);
+      index++
+    ) {
+      const difference = leftBytes[index]! - rightBytes[index]!
+      if (difference !== 0) return difference
+    }
+    return leftBytes.length - rightBytes.length
+  }
+
+  it.each([
+    {
+      caseId: `equal-content distinct views`,
+      makePair: () => [Uint8Array.of(1), Uint8Array.of(1)] as const,
+      expectedSign: 0,
+    },
+    {
+      caseId: `first differing unsigned byte`,
+      makePair: () => [Uint8Array.of(1, 255), Uint8Array.of(2, 0)] as const,
+      expectedSign: -1,
+    },
+    {
+      caseId: `unsigned 127/128 boundary`,
+      makePair: () => [Uint8Array.of(127), Uint8Array.of(128)] as const,
+      expectedSign: -1,
+    },
+    {
+      caseId: `foreign native byte view`,
+      makePair: () =>
+        [
+          runInNewContext(`new Uint8Array([1])`) as Uint8Array,
+          Uint8Array.of(2),
+        ] as const,
+      expectedSign: -1,
+    },
+    {
+      caseId: `own length shadow`,
+      makePair: () =>
+        [
+          Uint8Array.of(1),
+          Object.defineProperty(Uint8Array.of(2), `length`, { value: 0 }),
+        ] as const,
+      expectedSign: -1,
+    },
+    {
+      caseId: `shorter equal prefix`,
+      makePair: () => [Uint8Array.of(1), Uint8Array.of(1, 0)] as const,
+      expectedSign: -1,
+    },
+    {
+      caseId: `Buffer and Uint8Array with equal content`,
+      makePair: () => [Uint8Array.of(1), Buffer.from([1])] as const,
+      expectedSign: 0,
+    },
+    {
+      caseId: `Buffer and Uint8Array with differing content`,
+      makePair: () => [Uint8Array.of(1), Buffer.from([2])] as const,
+      expectedSign: -1,
+    },
+  ])(`compares $caseId`, ({ makePair, expectedSign }) => {
+    const [lessOrEqual, greaterOrEqual] = makePair()
+    expect(sign(model(lessOrEqual, greaterOrEqual))).toBe(expectedSign)
+    const reverseSign = expectedSign === 0 ? 0 : -expectedSign
+
+    // Call the reverse direction first. An identity-order implementation
+    // assigns its first runtime ID to the greater operand here; content order
+    // must still return the opposite sign. Both directions and descending
+    // have the same immediate checkpoint.
+    expect
+      .soft(sign(ascComparator(greaterOrEqual, lessOrEqual, defaultOpts)))
+      .toBe(reverseSign)
+    expect
+      .soft(sign(ascComparator(lessOrEqual, greaterOrEqual, defaultOpts)))
+      .toBe(expectedSign)
+    expect
+      .soft(sign(descComparator(lessOrEqual, greaterOrEqual, defaultOpts)))
+      .toBe(reverseSign)
+  })
+
+  it(`keeps byte content order transitive through ordinary objects`, () => {
+    const high = Uint8Array.of(2)
+    const ordinary = {}
+    const low = Uint8Array.of(1)
+    // These two mixed comparisons assign identity IDs in an implementation
+    // that wrongly groups bytes with ordinary objects. The content edge then
+    // closes a strict cycle: high < ordinary < low < high.
+    const highToOrdinary = ascComparator(high, ordinary, defaultOpts)
+    const ordinaryToLow = ascComparator(ordinary, low, defaultOpts)
+    const highToLow = ascComparator(high, low, defaultOpts)
+    expect(highToLow).toBeGreaterThan(0)
+    assertTransitive(highToOrdinary, ordinaryToLow, highToLow)
+  })
 })
 
 if (requestedProperty !== undefined) {

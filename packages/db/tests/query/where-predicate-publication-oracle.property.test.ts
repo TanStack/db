@@ -77,7 +77,7 @@
  * including the zero timestamp class.
  *
  * Captured-list law: a caller-owned array passed to `inArray` remains live
- * input. Editing that array alone need not publish. At the next delivered
+ * input. Editing that array alone does not publish. At the next delivered
  * source event, the entire retained result, including untouched rows, uses
  * its current members. The fixed model starts with authored source rows and
  * filters them against the list at that checkpoint; it does not reuse the

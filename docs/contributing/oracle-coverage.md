@@ -479,6 +479,18 @@ in each direction and distinct `normalizeValue` keys. The generated
 changed-byte grammar spans lengths 1–200, but its fixed 100-run campaign did
 not reach those long positions; the fixed witnesses reject a first-64-byte
 comparator.
+The proposed default native-byte order is unsigned lexicographic content,
+with shorter prefixes first and equal contents at one comparator position.
+Direct signs cover fresh equal views, the 127/128 boundary, prefixes,
+Buffer/Uint8Array pairs, a foreign native view, and an own `length` shadow.
+A byte/object/byte triple checks transitivity without prescribing which kind
+comes first. These are immediate comparator observations, not relational
+`WHERE` comparisons or live-query publication. The deep-equality owner also
+checks that an own `length` shadow cannot hide a changed intrinsic byte in
+direct equality, including a nested row field, over fixed and random 1–20
+byte inputs. Other typed-array class transitions remain under its existing
+class-agnostic equality law; whether such transitions must publish a source
+change needs a separate contract witness.
 Exact `normalizeValue` results are direct utility observations. Indexed
 order, public Date range predicates, cursor continuation, proxies, deeper
 subclass chains, replaced Date prototypes or `getTime` methods, and other
@@ -622,11 +634,20 @@ comparator-equal group. Escaped strings reach direct custom callbacks and
 Collection custom collation as raw values across ordered snapshots, direct
 range/take operations, and one subscription cursor; normalized exact lookup
 still distinguishes their string keys. A mixed string/number/two-byte-view
-snapshot preserves public scan order after indexing while equal byte content
-shares one exact lookup key. An escaped literal remains distinct from the
-BTree undefined traversal marker. Mutation histories, arbitrary callbacks,
-provider ordering, other binary values, and full live-query publication remain
-outside this owner. The separate
+snapshot and bounded native-byte fixtures compare unsigned content order and
+source-key ties with the unindexed scan and both index types. They include the
+127/128 boundary, prefixes, Buffer, a foreign view, and an own `length`
+shadow; exact lookup still groups equal byte content. An escaped literal
+remains distinct from the BTree undefined traversal marker. One source
+history silently replaces an equal-content byte view and checks scan/index
+order and key count. Another adopts a peer view, deletes, and reinserts its
+key, checking ordered arrays and exact sets after every commit. A custom
+callback history moves an equal-content view to a different callback rank and
+checks direct take, range, and cursor positions. The working-tree version of
+these histories rejected stale index positions and duplicate keys on
+`d93ae1dd6`. Arbitrary callbacks and mutation histories, provider ordering,
+other binary values, and full live-query publication remain outside this
+owner. The separate
 [custom-index window selection oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/custom-index-window-selection-oracle.test.ts)
 checks the live-query compiler's receiving path. A controlled on-demand source
 starts with ranks 20 and 40 cached, then serves exact ordered requests from
@@ -1453,6 +1474,14 @@ new returned-mutation check. The direct index refinement owner does not prove
 this Collection mutation path. Callback-time index agreement,
 the reported insert-seeded string-key setup, adapter cancellation, and
 non-local-only persistence remain outside this lane.
+Its native-byte sync witness adds a one-key `[1]` to `[2]` replacement in which
+both genuine views shadow own `length` as zero. After commit, one update with
+the previous and current intrinsic bytes must reach the subscriber while
+public state and BasicIndex or BTreeIndex exact lookup agree with `[2]`. A
+fresh equal-content view then remains silent. The pre-fix implementation
+updated state and indexes but emitted no message for the changed bytes. This
+bounded sync cut does not cover optimistic draft admission, other typed-array
+classes, or live-query notification.
 The [issue #1912 review record](oracle-reviews/issue-1912-eager-index-history.md)
 records the grammar controls, exact reviewed commit, and ORC audit.
 

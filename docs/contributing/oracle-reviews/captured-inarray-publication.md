@@ -217,3 +217,20 @@ also passed for repeated list edits, combined stages, an unmatched LEFT JOIN,
 and a UNION refreshed by another source. Those probes were removed and do
 not extend the committed owner's claim. Broader callback coherence and real
 provider behavior remain open for that owner.
+
+## Exact-commit microtask review of `d93ae1dd6`
+
+A fresh read-only reviewer found no behavior defect in the retained direct
+WHERE history. The selected test passed with no type errors. The independent
+source-row model predicts the current whole key set. The direct receiver checks
+old keys and zero callbacks through one microtask after each list edit. After
+the next source transaction, it checks one complete callback batch and reads
+the current whole result during that callback. The compiler schedules list
+refreshes from source input events; the reviewer found no list-only scheduling
+path. The review found one contract-wording gap: the oracle said a list edit
+"need not publish," while the architecture says it does not publish. The
+follow-up changes that prose to the accepted law. The existing split-batch
+control calibrates event coherence, but no separate delayed-schedule mutant
+calibrates the new microtask checkpoint. Nested microtasks, timers, arbitrary
+list/event histories, and real providers remain outside this witness. It does
+not retire an additional legacy test block.

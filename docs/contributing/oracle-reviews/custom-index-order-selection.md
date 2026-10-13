@@ -289,6 +289,95 @@ mixtures, source mutations, remote provider order, or all live-query
 publication schedules. A fresh hostile review of the next committed code
 remains necessary.
 
+## Exact-commit hostile finding at `d93ae1dd6`
+
+Two independent read-only reviewers found a legal source-update history that
+the ready-state byte witness missed. The public comparator orders distinct
+native byte views by runtime reference ID, while change-event equality groups
+views with equal contents. Replacing one row's byte view with a fresh
+equal-content view therefore changed the public scan order but published no
+update to its index. Both built-in index types kept the old order. A later
+delete could remove the exact equality owner while leaving its old ordered
+entry; reinsertion then produced a duplicate public key. The two-row
+replacement and a four-row update/delete/reinsert history failed at exact
+public indexed arrays and direct index traversals. The latter retained a
+deleted key even while `keyCount` and exact lookup appeared correct.
+
+A third test-owned callback ranks three equal-content views at distinct
+positions. After Collection replaces a row with another view, the direct
+custom index must use the new callback position while exact lookup retains
+content equality. This witness failed for BasicIndex and BTreeIndex at take,
+range, and cursor comparisons. Direct index update histories had passed
+because their callers supplied both raw values; Collection suppressed the
+structurally equal source update before it reached the index. The repair must
+refresh indexed raw positions from the visible before/after rows even when
+change-event equality suppresses an ordinary change message.
+
+These witnesses establish indexed-versus-scan parity under the current default
+comparator. They do not, by themselves, make runtime-reference ordering of
+native bytes the permanent product contract. The default-byte order and its
+live-query publication consequence need an explicit contract choice before
+claiming this bug class closed.
+
+## Proposed native-byte order and hostile review
+
+This PR proposes unsigned lexicographic content order for genuine native
+Uint8Arrays and Buffers in default ordered reads. The old comparator put fresh
+equal-content views at distinct runtime-reference positions: replacing one
+could move the public scan without a source event or index refresh. The
+proposed comparator puts equal contents at one position and uses the public
+source key to break row ties, so an equal-content replacement preserves the
+ordinary ordered result and remains silent. A changed first byte orders by
+unsigned value; a shorter equal prefix comes first. Relational `WHERE`
+comparison remains a separate contract and was not changed to follow this
+order. A user custom index comparator still reads each current raw view, so
+Collection must refresh its index even when ordinary change-event equality
+suppresses a source message. These rival predictions distinguish the design
+choice from the original production behavior.
+
+The first content-order tests failed on `d93ae1dd6` at direct comparator,
+unindexed scan, and indexed snapshot checkpoints: 11 tests failed and four
+passed in the selected run after separating the `WHERE` assertion. With the
+new default comparator and silent index refresh, the comparison and custom
+index owners passed 162 tests. A fresh read-only hostile reviewer then found
+that the proposed unsigned law could pass with signed-byte ordering; the
+revised pair crosses 127/128. It also found missing cross-realm and mixed
+ordinary-object distinctions. The revised direct owner uses a foreign native
+view, an own `length` shadow, and a byte/object/byte transitivity triple. The
+public fixture adds the 127/128, foreign-view, and length-shadow cases for
+both index types. These owners now pass 172 tests. The mixed-kind check
+protects total order without fixing whether byte values precede ordinary
+objects. Full live-query `ORDER BY` materialization and publication after byte
+updates remain outside these ready-snapshot checks.
+
+A second fresh hostile reviewer found two reference-model errors. Byte ties
+used host locale collation rather than the public source key's code-unit order;
+the equal-content replacement now uses `A` and `a` so that error would fail.
+The byte model also called an instance's overrideable `.values()` method; it
+now invokes the native typed-array iterator on each view. It confirmed the
+index refresh reaches both built-in index types after a sync replacement and
+found no further mismatch within those bounded histories. It did not find an
+optimistic same-content replacement reaching Collection state: draft tracking
+discards that assignment before index maintenance. Arbitrary optimistic
+histories remain unclaimed.
+
+The same review found a separate public publication defect. A native `[1]`
+view and a native `[2]` view that each shadow own `length` as zero were treated
+as equal by `deepEquals`, although Collection state and exact index lookup
+changed. Both index types emitted no source update; an unshadowed control did.
+The direct deep-equality property and Collection change-event witness were RED
+on the uncorrected implementation: two generated equality lanes and both
+index-type publication cases failed at their intended comparisons. Reading
+the native typed-array element count repaired this boundary; the four focused
+owners then passed 693 tests with no type errors. A class transition between
+Uint8Array and Uint16Array with equal elements presents a neighboring
+deep-equality/query-equality tension. Existing general equality deliberately
+ignores typed-array class, so that contract needs separate review before
+changing publication for that transition.
+
+These review results are for the working tree. Exact-commit hostile review and
+the final full-suite run remain pending.
+
 ## Exact-commit window review of `5c97f18dc`
 
 A separate fresh reviewer found no blocker in the finite provider order-hint
