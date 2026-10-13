@@ -5322,8 +5322,20 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
         const streamOptions = vi.mocked(ShapeStream).mock.calls.at(-1)?.[0] as
           { onError?: (error: unknown) => unknown } | undefined
         expect(streamOptions?.onError).toBeTypeOf(`function`)
+        let firstOutcome = `pending`
+        const firstSettled = first.then(
+          () => {
+            firstOutcome = `fulfilled`
+          },
+          () => {
+            firstOutcome = `rejected`
+          },
+        )
         streamOptions!.onError!(error)
-        await expect(first).rejects.toBe(error)
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        // A retry that succeeds is a success: the pre-error demand waits for
+        // the retried snapshot instead of failing.
+        expect(firstOutcome).toBe(`pending`)
 
         subscriber([change(`insert`, 1, `recovered`), upToDate])
         await collection.stateWhenReady()
@@ -5343,6 +5355,8 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
         }
         await atCheckpoint(second, `retried full recovery demand`)
         expect(outcome).toBe(`fulfilled`)
+        await atCheckpoint(firstSettled, `pre-error full recovery demand`)
+        expect(firstOutcome).toBe(`fulfilled`)
         expect(collection.get(1)).toMatchObject({
           id: 1,
           name: `recovered`,
@@ -5352,11 +5366,11 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     },
   )
 
-  // The user may decide to retry asynchronously. The failed acquisition owes
-  // the original error, but a new acquisition during that decision cannot
-  // inherit it: a retry is still a legal continuation of this source run.
-  // This controlled callback holds the decision, observes both settlements,
-  // and then supplies an applied replacement through the real Collection.
+  // The user may decide to retry asynchronously. Until that decision, no
+  // acquisition fails: a retry is a legal continuation of this source run,
+  // and a retry that succeeds is a success. This controlled callback holds the
+  // decision, observes both settlements, and then supplies an applied
+  // replacement through the real Collection. A give-up fails both.
   it(`keeps a new full recovery demand pending during an async retry decision`, async () => {
     const retryDecision = createDeferred<Record<string, never> | undefined>()
     const metadata = createMetadata(
@@ -5376,8 +5390,16 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
       )
       const streamOptions = vi.mocked(ShapeStream).mock.calls.at(-1)?.[0] as
         { onError?: (error: unknown) => unknown } | undefined
+      let firstOutcome: `pending` | `fulfilled` | `rejected` = `pending`
+      const firstSettled = first.then(
+        () => {
+          firstOutcome = `fulfilled`
+        },
+        () => {
+          firstOutcome = `rejected`
+        },
+      )
       const decision = Promise.resolve(streamOptions!.onError!(error))
-      await expect(first).rejects.toBe(error)
 
       let secondOutcome: `pending` | `fulfilled` | `rejected` = `pending`
       const second = Promise.resolve(
@@ -5391,17 +5413,54 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
         },
       )
       await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect(firstOutcome).toBe(`pending`)
       expect(secondOutcome).toBe(`pending`)
+      expect(trace.collection.status).toBe(`loading`)
       retryDecision.resolve({})
       await decision
       trace.subscriber([change(`insert`, 1, `recovered`), upToDate])
       await atCheckpoint(second, `async retry replacement`)
+      await atCheckpoint(firstSettled, `async retry pre-error demand`)
+      expect(firstOutcome).toBe(`fulfilled`)
       expect(secondOutcome).toBe(`fulfilled`)
       expect(trace.collection.get(1)?.name).toBe(`recovered`)
     }, [
       () => retryDecision.resolve(undefined),
       () => trace.collection.cleanup(),
     ])
+  })
+
+  it(`fails every waiting full recovery demand when an async retry decision gives up`, async () => {
+    const retryDecision = createDeferred<Record<string, never> | undefined>()
+    const metadata = createMetadata(
+      new Map([[`electric:resume`, { kind: `reset`, updatedAt: 1 }]]),
+    )
+    const trace = createOracleCollection(
+      `full-recovery-async-give-up`,
+      `on-demand`,
+      metadata.api,
+      { onError: () => retryDecision.promise },
+    )
+    const error = new Error(`permanent provider error`)
+
+    await withElectricCleanup(async () => {
+      const first = Promise.resolve(
+        trace.collection._sync.loadSubset({ limit: 1 }),
+      )
+      void first.catch(() => undefined)
+      const streamOptions = vi.mocked(ShapeStream).mock.calls.at(-1)?.[0] as
+        { onError?: (error: unknown) => unknown } | undefined
+      const decision = Promise.resolve(streamOptions!.onError!(error))
+      const second = Promise.resolve(
+        trace.collection._sync.loadSubset({ limit: 2 }),
+      )
+      void second.catch(() => undefined)
+      retryDecision.resolve(undefined)
+      await decision
+      await expect(first).rejects.toBe(error)
+      await expect(second).rejects.toBe(error)
+      expect(trace.collection.status).toBe(`error`)
+    }, [() => trace.collection.cleanup()])
   })
 
   /**

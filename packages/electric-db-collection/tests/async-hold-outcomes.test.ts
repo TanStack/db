@@ -57,7 +57,10 @@ beforeEach(() => {
 const alice: User = { id: 1, name: `Alice` }
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
 
-function createProgressive(id: string, onError?: () => Record<string, never>) {
+function createProgressive(
+  id: string,
+  onError?: () => Record<string, never> | undefined,
+) {
   return createCollection({
     ...electricCollectionOptions({
       id,
@@ -166,12 +169,13 @@ describe(`progressive load waiting on the established snapshot`, () => {
     expect(load.state).toBe(`fulfilled`)
   })
 
-  it.each([`without onError`, `with an onError retry`] as const)(
+  // A stream error fails the wait only when no retry follows.
+  it.each([`without onError`, `when onError gives up`] as const)(
     `rejects the wait on a stream error %s`,
     async (handling) => {
       const collection = createProgressive(
         `hold-stream-error-${handling}`,
-        handling === `with an onError retry` ? () => ({}) : undefined,
+        handling === `when onError gives up` ? () => undefined : undefined,
       )
       const consoleError = vi
         .spyOn(console, `error`)
@@ -186,8 +190,29 @@ describe(`progressive load waiting on the established snapshot`, () => {
       await flush()
       expect(load.state).toBe(`rejected`)
       expect(load.error).toBe(error)
+      expect(collection.status).toBe(`error`)
       consoleError.mockRestore()
       await collection.cleanup()
     },
   )
+
+  // A retry that succeeds is a success: the wait settles on the snapshot the
+  // retried stream establishes, and the initial sync never fails.
+  it(`settles the wait on the retried snapshot after an onError retry`, async () => {
+    const collection = createProgressive(`hold-stream-error-retry`, () => ({}))
+    mustRefetch()
+    const load = observe(collection._sync.loadSubset({ limit: 1 }))
+    await flush()
+
+    await streamOnError()(new Error(`stream failed`))
+    await flush()
+    expect(load.state).toBe(`pending`)
+    expect(collection.status).toBe(`loading`)
+
+    fullSync([alice])
+    await flush()
+    expect(load.state).toBe(`fulfilled`)
+    expect(collection.get(1)?.name).toBe(`Alice`)
+    await collection.cleanup()
+  })
 })

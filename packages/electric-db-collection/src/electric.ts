@@ -1961,42 +1961,31 @@ function createElectricSync<T extends Row<unknown>>(
       signal: abortController.signal,
       onError: async (errorParams) => {
         if (!isActiveLifecycle() || abortController.signal.aborted) return
-        rejectFullSnapshot(errorParams)
         streamErrorVersion++
         // Note that Electric sends a 409 error on a `must-refetch` message, but the
         // ShapeStream handled this and it will not reach this handler, therefor
         // this handler will not run for a `must-refetch`.
-        const initialSyncFailed = collection.status === `loading`
-        if (initialSyncFailed) {
-          markError(errorParams)
+        // A stream error fails waiting loads and the initial sync only when no
+        // retry follows. A retry that succeeds is a success: waiting loads
+        // settle on the snapshot it establishes.
+        const fail = (error: unknown) => {
+          rejectFullSnapshot(error)
+          if (collection.status === `loading`) markError(errorParams)
         }
 
         if (shapeOptions.onError) {
-          // A progressive stream follows the same snapshot outside its
-          // buffered sync, so a retry must renew it as well.
-          const mayRetryFullSnapshot =
-            tracksFullSnapshot &&
-            !hasReceivedUpToDate &&
-            isActiveLifecycle() &&
-            !abortController.signal.aborted
-          if (mayRetryFullSnapshot) {
-            // Retire old acquisitions but admit new ones while the user's
-            // asynchronous retry decision is pending.
-            resetFullSnapshot()
-          }
-          const rejectPendingRetry = rejectFullSnapshot
           let retry: Awaited<ReturnType<typeof shapeOptions.onError>>
           try {
             retry = await shapeOptions.onError(errorParams)
           } catch (error) {
-            if (mayRetryFullSnapshot) rejectPendingRetry(error)
+            fail(error)
             throw error
           }
-          if (mayRetryFullSnapshot && (!retry || typeof retry !== `object`)) {
-            rejectPendingRetry(errorParams)
-          }
+          if (!retry || typeof retry !== `object`) fail(errorParams)
           return retry
         } else {
+          const initialSyncFailed = collection.status === `loading`
+          fail(errorParams)
           console.error(
             `An error occurred while syncing collection: ${collection.id}, \n` +
               (initialSyncFailed

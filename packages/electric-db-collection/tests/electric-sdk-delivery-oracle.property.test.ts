@@ -1243,9 +1243,10 @@ fixedCase(
 
 /**
  * The controlled provider exhausts SDK backoff with one 503, then the user's
- * onError retry continues the same ShapeStream. The independent demand model
- * rejects the pre-error attempt and keeps a new demand pending while the retry
- * transport is open, then accepts it after the complete snapshot applies.
+ * onError retry continues the same ShapeStream. A retry that succeeds is a
+ * success, so the independent demand model keeps both the pre-error demand
+ * and a new one pending while the retry transport is open, then accepts both
+ * after the complete snapshot applies.
  * This receives the adapter law through the actual
  * installed SDK, including its retry decision and HTTP delivery boundary.
  * Live service timing and nonretryable SDK errors remain outside this case.
@@ -1287,19 +1288,29 @@ fixedCase(
     })
 
     await withElectricCleanup(async () => {
-      const first = Promise.resolve(collection._sync.loadSubset({ limit: 1 }))
-      void first.catch(() => undefined)
+      let firstOutcome = `pending`
+      const first = Promise.resolve(
+        collection._sync.loadSubset({ limit: 1 }),
+      ).then(
+        () => {
+          firstOutcome = `fulfilled`
+        },
+        () => {
+          firstOutcome = `rejected`
+        },
+      )
       const initial = await atCheckpoint(http.take(), `full retry initial HTTP`)
       expect(initial.url.searchParams.get(`log`)).toBe(`full`)
       initial.respond(new Response(`transient`, { status: 503 }))
       await vi.waitFor(() => expect(errors).toBe(1))
-      await expect(first).rejects.toThrow(/503/)
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect(firstOutcome).toBe(`pending`)
 
       const retry = await atCheckpoint(http.take(), `full retry HTTP`)
       expect(retry.url.searchParams.get(`log`)).toBe(`full`)
       // The provider has accepted a retry transport but has not supplied a
-      // replacement source snapshot. A new demand must wait for that evidence;
-      // it cannot inherit the prior attempt's 503 rejection.
+      // replacement source snapshot. Every demand waits for that evidence;
+      // neither inherits the 503 that the retry answered.
       let duringRetryOutcome = `pending`
       const duringRetry = Promise.resolve(
         collection._sync.loadSubset({ limit: 3 }),
@@ -1328,6 +1339,8 @@ fixedCase(
       )
       await vi.waitFor(() => expect(collection.status).toBe(`ready`))
       await atCheckpoint(duringRetry, `retry-interval full demand`)
+      await atCheckpoint(first, `pre-error full demand`)
+      expect(firstOutcome).toBe(`fulfilled`)
       expect(duringRetryOutcome).toBe(`fulfilled`)
       await atCheckpoint(
         Promise.resolve(collection._sync.loadSubset({ limit: 2 })),
