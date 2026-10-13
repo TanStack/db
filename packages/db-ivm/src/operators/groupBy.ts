@@ -12,24 +12,13 @@ type BasicAggregateFunction<T, R, V = unknown> = {
   postMap?: (result: V) => R
 }
 
-type PipedAggregateFunction<T, R> = {
-  pipe: (stream: IStreamBuilder<T>) => IStreamBuilder<KeyValue<string, R>>
-}
-
-type AggregateFunction<T, R, V = unknown> =
-  BasicAggregateFunction<T, R, V> | PipedAggregateFunction<T, R>
+type AggregateFunction<T, R, V = unknown> = BasicAggregateFunction<T, R, V>
 
 type ExtractAggregateReturnType<T, A> =
   A extends AggregateFunction<T, infer R, any> ? R : never
 
 type AggregatesReturnType<T, A> = {
   [K in keyof A]: ExtractAggregateReturnType<T, A[K]>
-}
-
-function isPipedAggregateFunction<T, R>(
-  aggregate: AggregateFunction<T, R>,
-): aggregate is PipedAggregateFunction<T, R> {
-  return `pipe` in aggregate
 }
 
 /**
@@ -44,19 +33,10 @@ export function groupBy<
 >(keyExtractor: (data: T) => K, aggregates: A = {} as A) {
   type ResultType = K & AggregatesReturnType<T, A>
 
-  const basicAggregates = Object.fromEntries(
-    Object.entries(aggregates).filter(
-      ([_, aggregate]) => !isPipedAggregateFunction(aggregate),
-    ),
-  ) as Record<string, BasicAggregateFunction<T, any, any>>
-
-  // @ts-expect-error - TODO: we don't use this yet, but we will
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const pipedAggregates = Object.fromEntries(
-    Object.entries(aggregates).filter(([_, aggregate]) =>
-      isPipedAggregateFunction(aggregate),
-    ),
-  ) as Record<string, PipedAggregateFunction<T, any>>
+  const basicAggregates = aggregates as Record<
+    string,
+    BasicAggregateFunction<T, any, any>
+  >
 
   return (
     stream: IStreamBuilder<T>,

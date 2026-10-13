@@ -4,18 +4,13 @@ import { describe, expect, it } from 'vitest'
 import {
   consolidate,
   filter,
-  fullJoin,
   groupBy,
   groupByOperators,
   groupedOrderByWithFractionalIndex,
-  innerJoin,
-  leftJoin,
+  join,
   map,
-  negate,
-  orderBy,
+  orderByWithFractionalIndex,
   reduce,
-  rightJoin,
-  topK,
 } from '../src/operators/index.js'
 import {
   assertBinaryIncrementalization,
@@ -26,6 +21,24 @@ import {
   weightedTransitions,
 } from './incrementalization-law-oracle.js'
 import type { Weighted } from './incrementalization-law-oracle.js'
+import type { IStreamBuilder, KeyValue, PipedOperator } from '../src/types.js'
+
+// An inner join matches only present rows, so neither side of its output is
+// null.
+function innerJoined<K, V1, V2>(
+  right: IStreamBuilder<KeyValue<K, V2>>,
+): PipedOperator<KeyValue<K, V1>, KeyValue<K, [V1, V2]>> {
+  return join(right, `inner`) as unknown as PipedOperator<
+    KeyValue<K, V1>,
+    KeyValue<K, [V1, V2]>
+  >
+}
+
+// The window operators annotate each row with a fractional index. These laws
+// compare rows only, so the index is dropped from the output.
+function withoutIndex<K, V>() {
+  return map(([key, [value]]: [K, [V, string]]) => [key, value] as [K, V])
+}
 
 /**
  * # Does incremental execution equal full recomputation?
@@ -387,21 +400,6 @@ function groupedTextExtrema(
   })
 }
 
-function topTwo(input: Weighted<Keyed>): Weighted<Keyed> {
-  const groups = new Map<number, Array<[number, number]>>()
-  for (const [[key, value], weight] of keyedIdentity(input)) {
-    const values = groups.get(key) ?? []
-    values.push([value, weight])
-    groups.set(key, values)
-  }
-  return [...groups].flatMap(([key, values]) =>
-    values
-      .sort(([left], [right]) => left - right)
-      .slice(0, 2)
-      .map(([value, weight]) => [[key, value] as Keyed, weight] as const),
-  )
-}
-
 const orderedWorld = fc
   .uniqueArray(
     fc.tuple(fc.integer({ min: 0, max: 7 }), fc.integer({ min: -20, max: 20 })),
@@ -436,7 +434,7 @@ function firstTwoPerParity(input: Weighted<Keyed>): Weighted<Keyed> {
 
 describe(`DBSP incrementalization laws`, () => {
   it.each(generatedCampaigns)(
-    `checks consolidate, reduce, and grouped top-K against full recomputation ($name campaign)`,
+    `checks consolidate and reduce against full recomputation ($name campaign)`,
     async (campaign) => {
       await fc.assert(
         fc.asyncProperty(
@@ -534,16 +532,6 @@ describe(`DBSP incrementalization laws`, () => {
                 ),
               evaluate: groupedTextExtrema,
             })
-            assertUnaryIncrementalization({
-              name: `top-K`,
-              initial: worlds[0]!,
-              batches,
-              inputPolicy: keyedPolicy,
-              outputPolicy: keyedPolicy,
-              build: (input) =>
-                input.pipe(topK((left, right) => left - right, { limit: 2 })),
-              evaluate: topTwo,
-            })
           },
         ),
         campaignParameters(campaign),
@@ -585,7 +573,7 @@ describe(`DBSP incrementalization laws`, () => {
               leftPolicy: keyedPolicy,
               rightPolicy: keyedPolicy,
               outputPolicy: joinPolicy,
-              build: (left, right) => left.pipe(innerJoin(right)),
+              build: (left, right) => left.pipe(innerJoined(right)),
               evaluate: joined,
             })
             assertBinaryIncrementalization({
@@ -596,7 +584,7 @@ describe(`DBSP incrementalization laws`, () => {
               leftPolicy: keyedPolicy,
               rightPolicy: keyedPolicy,
               outputPolicy: outerJoinPolicy,
-              build: (left, right) => left.pipe(fullJoin(right)),
+              build: (left, right) => left.pipe(join(right, `full`)),
               evaluate: fullJoined,
             })
             assertBinaryIncrementalization({
@@ -607,7 +595,7 @@ describe(`DBSP incrementalization laws`, () => {
               leftPolicy: keyedPolicy,
               rightPolicy: keyedPolicy,
               outputPolicy: outerJoinPolicy,
-              build: (left, right) => left.pipe(leftJoin(right)),
+              build: (left, right) => left.pipe(join(right, `left`)),
               evaluate: leftJoined,
             })
             assertBinaryIncrementalization({
@@ -618,7 +606,7 @@ describe(`DBSP incrementalization laws`, () => {
               leftPolicy: keyedPolicy,
               rightPolicy: keyedPolicy,
               outputPolicy: outerJoinPolicy,
-              build: (left, right) => left.pipe(rightJoin(right)),
+              build: (left, right) => left.pipe(join(right, `right`)),
               evaluate: rightJoined,
             })
             assertBinaryIncrementalization({
@@ -631,7 +619,7 @@ describe(`DBSP incrementalization laws`, () => {
               outputPolicy: keyedPolicy,
               build: (left, right) =>
                 left.pipe(
-                  innerJoin(right),
+                  innerJoined(right),
                   map(([key, [leftValue, rightValue]]) => [
                     key,
                     leftValue * rightValue,
@@ -674,7 +662,10 @@ describe(`DBSP incrementalization laws`, () => {
               outputPolicy: keyedPolicy,
               splitDomain: uniqueRowSplitDomain,
               build: (input) =>
-                input.pipe(orderBy((rank) => rank, { limit: 3 })),
+                input.pipe(
+                  orderByWithFractionalIndex((rank) => rank, { limit: 3 }),
+                  withoutIndex(),
+                ),
               evaluate: firstThree,
             })
             assertUnaryIncrementalization({
@@ -743,7 +734,7 @@ describe(`DBSP incrementalization laws`, () => {
       leftPolicy: keyedPolicy,
       rightPolicy: keyedPolicy,
       outputPolicy: outerJoinPolicy,
-      build: (left, right) => left.pipe(fullJoin(right)),
+      build: (left, right) => left.pipe(join(right, `full`)),
       evaluate: fullJoined,
     })
     expect(binaryReach).toEqual({
@@ -840,7 +831,11 @@ describe(`DBSP incrementalization laws`, () => {
       inputPolicy: keyedPolicy,
       outputPolicy: keyedPolicy,
       splitDomain: uniqueRowSplitDomain,
-      build: (input) => input.pipe(orderBy((rank) => rank, { limit: 0 })),
+      build: (input) =>
+        input.pipe(
+          orderByWithFractionalIndex((rank) => rank, { limit: 0 }),
+          withoutIndex(),
+        ),
       evaluate: () => [],
     })
 
@@ -855,31 +850,12 @@ describe(`DBSP incrementalization laws`, () => {
       inputPolicy: keyedPolicy,
       outputPolicy: keyedPolicy,
       splitDomain: uniqueRowSplitDomain,
-      build: (input) => input.pipe(orderBy((rank) => rank, { limit: 1 })),
-      evaluate: (input) => firstThree(input).slice(0, 1),
-    })
-
-    // At two same-key values, limit 2 retains both. The third value crosses
-    // the boundary; a wrong limit of 3 would leak it at checkpoint 1. Removing
-    // the first value then requires the third to enter the retained relation.
-    const topKBoundary = assertUnaryIncrementalization({
-      name: `top-K boundary and promotion`,
-      initial: [
-        [[0, 1], 1],
-        [[0, 2], 1],
-      ],
-      batches: [[[[0, 3], 1]], [[[0, 1], -1]]],
-      inputPolicy: keyedPolicy,
-      outputPolicy: keyedPolicy,
       build: (input) =>
-        input.pipe(topK((left, right) => left - right, { limit: 2 })),
-      evaluate: topTwo,
-    })
-    expect(topKBoundary).toEqual({
-      atomicCheckpoints: 3,
-      atomicDeliveries: 3,
-      splitCheckpoints: 3,
-      splitDeliveries: 4,
+        input.pipe(
+          orderByWithFractionalIndex((rank) => rank, { limit: 1 }),
+          withoutIndex(),
+        ),
+      evaluate: (input) => firstThree(input).slice(0, 1),
     })
   })
 
@@ -932,7 +908,13 @@ describe(`DBSP incrementalization laws`, () => {
         batches: [],
         inputPolicy: keyedPolicy,
         outputPolicy: keyedPolicy,
-        build: (input) => input.pipe(negate()),
+        // A reduce that negates every multiplicity flips the sign of each row.
+        build: (input) =>
+          input.pipe(
+            reduce((values) =>
+              values.map(([value, weight]) => [value, -weight] as const),
+            ),
+          ),
         evaluate: keyedIdentity,
       }),
     ).toThrow(/output delta diverged/)
@@ -962,30 +944,15 @@ describe(`DBSP incrementalization laws`, () => {
         outputPolicy: keyedPolicy,
         build: (input) =>
           input.pipe(
-            orderBy((rank) => rank, {
+            orderByWithFractionalIndex((rank) => rank, {
               comparator: (left, right) => right - left,
               limit: 3,
             }),
+            withoutIndex(),
           ),
         evaluate: firstThree,
       }),
     ).toThrow(/output delta diverged/)
-    expect(() =>
-      assertUnaryIncrementalization({
-        name: `wrong top-K limit fault`,
-        initial: [
-          [[0, 1], 1],
-          [[0, 2], 1],
-          [[0, 3], 1],
-        ],
-        batches: [],
-        inputPolicy: keyedPolicy,
-        outputPolicy: keyedPolicy,
-        build: (input) =>
-          input.pipe(topK((left, right) => left - right, { limit: 3 })),
-        evaluate: topTwo,
-      }),
-    ).toThrow(/output delta diverged at checkpoint 0/)
 
     const truthinessMinimum = {
       preMap: ([, value]: Keyed): number | undefined => value,

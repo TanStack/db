@@ -1,25 +1,18 @@
-import { beforeAll, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import fc from 'fast-check'
 import { D2 } from '../../src/d2.js'
 import { MultiSet } from '../../src/multiset.js'
 import { output } from '../../src/operators/index.js'
 import { topKWithFractionalIndex } from '../../src/operators/topKWithFractionalIndex.js'
 import { groupedTopKWithFractionalIndex } from '../../src/operators/groupedTopKWithFractionalIndex.js'
-import {
-  loadBTree,
-  topKWithFractionalIndexBTree,
-} from '../../src/operators/topKWithFractionalIndexBTree.js'
-import { topK, topKWithIndex } from '../../src/operators/topK.js'
 import { TopKRelation } from './topk-relation-oracle.js'
 
 /**
  * A top-K window selects support from a signed, typed-key relation.
  *
  * The top-K operator APIs and existing window tests establish selection of
- * present relation rows in key order within an offset/limit window. Ordinary
- * top-K retains a selected row's input
- * multiplicity; fractional-index top-K emits one indexed row for positive
- * support. The model below integrates signed input weights by typed key and
+ * present relation rows in key order within an offset/limit window.
+ * Fractional-index top-K emits one indexed row for positive support. The model below integrates signed input weights by typed key and
  * selects from a fixed, independently ordered key domain. `TopKRelation` only
  * checks accumulated signed fractional-index output; its companion tests
  * calibrate that checker without exercising production.
@@ -27,7 +20,7 @@ import { TopKRelation } from './topk-relation-oracle.js'
  * The grammar covers five finite scalar keys, one fixed payload per key,
  * support 0..3, and offset/limit 0..6. Every input turn and supported window
  * move has a graph-run checkpoint for output rows and reported window size.
- * BTree has a fixed 0..3 window because it does not support moves. The pinned
+ * The pinned
  * 0/1/2 support crossing and boundary history distinguish presence from raw
  * multiplicity and inclusive from displaced window cuts. Row replacements,
  * multiple groups, negative net support, and downstream lazy acquisition are
@@ -98,47 +91,10 @@ const grouped: typeof topKWithFractionalIndex = (compare, options) =>
     groupKeyFn: () => `one`,
   })
 
-beforeAll(loadBTree)
-
-it.each([false, true])(
-  `preserves selected multiplicity in ordinary top-K (indexed %s)`,
-  (indexed) => {
-    const graph = new D2()
-    const input = graph.newInput<[null, Row]>()
-    const observed = new Map<string, number>()
-    const capture = (message: MultiSet<unknown>) => {
-      for (const [value, weight] of message.getInner()) {
-        const identity = JSON.stringify(value)
-        const count = (observed.get(identity) ?? 0) + weight
-        if (count === 0) observed.delete(identity)
-        else observed.set(identity, count)
-      }
-    }
-    const comparator = (a: Row, b: Row) => a.id - b.id
-    if (indexed)
-      input.pipe(topKWithIndex(comparator, { limit: 1 }), output(capture))
-    else input.pipe(topK(comparator, { limit: 1 }), output(capture))
-    graph.finalize()
-    const row = { id: 1, value: `a` }
-    let prior = 0
-    for (const count of [1, 2, 1, 0, 2, 1, 0]) {
-      input.sendData(new MultiSet([[[null, row], count - prior]]))
-      prior = count
-      graph.run()
-      expect([...observed]).toEqual(
-        count === 0
-          ? []
-          : [[JSON.stringify([null, indexed ? [row, 0] : row]), count]],
-      )
-    }
-  },
-)
-
 describe.each([
-  { name: `array`, operator: topKWithFractionalIndex, movable: true },
-  { name: `grouped`, operator: grouped, movable: true },
-  { name: `BTree`, operator: topKWithFractionalIndexBTree, movable: false },
-])(`Signed support and window oracle: $name`, ({ operator, movable }) => {
+  { name: `array`, operator: topKWithFractionalIndex },
+  { name: `grouped`, operator: grouped },
+])(`Signed support and window oracle: $name`, ({ operator }) => {
   it.each(campaigns)(
     `matches counted typed keys at every cut ($name campaign)`,
     ({ seed, path }) => {
@@ -188,7 +144,7 @@ describe.each([
             )
             graph.finalize()
             expect(size).toBeTypeOf(`function`)
-            if (movable) expect(move).toBeTypeOf(`function`)
+            expect(move).toBeTypeOf(`function`)
             const check = (
               checkpoint: `input` | `move`,
               step: number,
@@ -251,12 +207,10 @@ describe.each([
               input.sendData(new MultiSet([[[key, rowFor(key)], weight]]))
               graph.run()
               if (!check(`input`, index)) return
-              if (movable) {
-                window = { offset: action.offset, limit: action.limit }
-                move(window)
-                graph.run()
-                if (!check(`move`, index)) return
-              }
+              window = { offset: action.offset, limit: action.limit }
+              move(window)
+              graph.run()
+              if (!check(`move`, index)) return
             }
           },
         ),
