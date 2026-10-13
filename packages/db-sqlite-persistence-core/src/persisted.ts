@@ -1929,11 +1929,19 @@ class PersistedCollectionRuntime<
   // must await every commit receipt that establishes its result, so the
   // leader broadcasts those commits before it replies on the same channel.
   // They are already queued on the apply mutex; settle after they show here.
-  private async applyLeaderCommitsBeforeReply(): Promise<void> {
-    await this.applyMutex.run(() => this.flushQueuedTxCommittedUnsafe())
-    // A broadcast that failed to apply made the runtime terminal; its rows
-    // are not visible, so the load must not settle successfully.
-    this.throwIfTerminal()
+  private async applyLeaderCommitsBeforeReply(
+    options: LoadSubsetOptions,
+  ): Promise<void> {
+    try {
+      await this.applyMutex.run(() => this.flushQueuedTxCommittedUnsafe())
+      // A broadcast that failed to apply made the runtime terminal; its rows
+      // are not visible, so the load must not settle successfully.
+      this.throwIfTerminal()
+    } catch (error) {
+      // A load that fails releases the acquisition the owner granted it.
+      this.unloadSubset(options)
+      throw error
+    }
   }
 
   private clearSyncControls(): void {
@@ -2761,7 +2769,7 @@ class PersistedCollectionRuntime<
               this.storageCollectionId,
               rotatedOptions,
             ))
-          await this.applyLeaderCommitsBeforeReply()
+          await this.applyLeaderCommitsBeforeReply(options)
         }
         return
       }
@@ -2815,7 +2823,7 @@ class PersistedCollectionRuntime<
         this.queueRemoteSubsetEnsure(options)
         throw error
       }
-      await this.applyLeaderCommitsBeforeReply()
+      await this.applyLeaderCommitsBeforeReply(options)
       return
     }
 

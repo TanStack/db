@@ -25984,7 +25984,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
    * the apply is held and after it settles: whether the consumer settled, its
    * outcome, the demanded rows it sees when it settles (the query's
    * first-ready rows, or the source's rows at load settlement), and the
-   * query's and source's status. The coordinator
+   * query's and source's status. A load that rejects owes the release of the
+   * remote acquisition the owner granted it (LoadSubsetFn), so for the load
+   * consumer the model also counts the follower's release requests for the
+   * current cache generation when it settles. The coordinator
    * is a controlled double of an elected owner that broadcasts before it
    * replies, as the built-in coordinator does; the two-tab OPFS suite is the
    * receiving witness for the browser transport.
@@ -26010,8 +26013,18 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
             ? { outcome: `fulfilled`, rows: [`remote`], status: `ready` }
             : { outcome: `rejected`, rows: undefined, status: `error` }
           : applied
-            ? { outcome: `fulfilled`, rows: [`remote`], status: undefined }
-            : { outcome: `rejected`, rows: undefined, status: `error` },
+            ? {
+                outcome: `fulfilled`,
+                rows: [`remote`],
+                status: undefined,
+                releases: 0,
+              }
+            : {
+                outcome: `rejected`,
+                rows: undefined,
+                status: `error`,
+                releases: 1,
+              },
     }
   }
 
@@ -26073,6 +26086,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     } as PersistenceAdapter
     let subscriber: ((message: ProtocolEnvelope<unknown>) => void) | undefined
     let ensures = 0
+    let releases = 0
     const coordinator: PersistedCollectionCoordinator = {
       getNodeId: () => `follower`,
       getLeaderId: () => `owner`,
@@ -26112,7 +26126,11 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           payload,
         })
       },
-      requestReleaseRemoteSubset: async () => {},
+      // Rotation legitimately releases the previous generation's
+      // acquisition, so only the current generation's releases count.
+      requestReleaseRemoteSubset: async (collectionId) => {
+        if (!rotated || collectionId === storageId) releases++
+      },
       registerRemoteSubsetOwner: () => () => {},
       requestApplyCommittedTx: (_collectionId, tx) =>
         Promise.resolve({
@@ -26157,6 +26175,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       otherHydrationStarted: otherHydrationStarted.promise,
       releaseApply: () => applyRead.resolve(),
       releaseOtherHydration: () => otherHydration.resolve(),
+      releases: () => releases,
     }
   }
 
@@ -26240,9 +26259,13 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       await within(settled)
       await new Promise((resolve) => setTimeout(resolve, 0))
       // Checkpoint: the apply settled.
+      const releasesAtSettle = tab.releases()
       expect({
         outcome: seen.outcome,
         rows: seen.rows,
+        ...(`releases` in expected.settled
+          ? { releases: releasesAtSettle }
+          : {}),
         status:
           expected.settled.status === undefined
             ? undefined
@@ -26257,6 +26280,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       }).toEqual({
         outcome: expected.settled.outcome,
         rows: expected.settled.rows,
+        ...(`releases` in expected.settled
+          ? { releases: expected.settled.releases }
+          : {}),
         status:
           expected.settled.status === `error` &&
           history.consumer === `live-query`
