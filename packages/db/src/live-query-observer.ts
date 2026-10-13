@@ -760,13 +760,20 @@ class LiveQueryObserverImpl<
     // any status change publishes a synthetic notify so consumers re-read the
     // snapshot. Unlike onFirstReady, `on` returns a real unsubscribe, so a
     // detached attachment leaves nothing behind.
-    const statusUnsub = collection.on(`status:change`, ({ status }) =>
-      notify(undefined, status),
-    )
     // A health change below the query changes its error tree, not its rows.
-    const healthUnsub = collection.on(`health:change`, () =>
-      notify(undefined, collection.status),
-    )
+    // Each status change is followed by a health change; tree identity
+    // tells whether the health change has anything left to publish.
+    const errorsOf = () => (collection as { errors?: ErrorTreeNode }).errors
+    let publishedErrors = errorsOf()
+    const statusUnsub = collection.on(`status:change`, ({ status }) => {
+      publishedErrors = errorsOf()
+      notify(undefined, status)
+    })
+    const healthUnsub = collection.on(`health:change`, () => {
+      if (errorsOf() === publishedErrors) return
+      publishedErrors = errorsOf()
+      notify(undefined, collection.status)
+    })
     const subscribeLayoutChanges = (
       collection as Collection<T, TKey, any> & {
         _subscribeLayoutChanges?: (listener: () => void) => () => void

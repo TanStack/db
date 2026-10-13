@@ -61,6 +61,9 @@ export class CollectionLifecycleManager<
   // live query's request failures are separate, so settling a request cannot
   // clear a source problem.
   private sourceProblem: CollectionErrorInfo | null = null
+  // Error tree detail for the initial gate error, kept so readers see the
+  // same object until the attempt ends.
+  private initialProblem: CollectionErrorInfo | null = null
   private requestProblem: CollectionErrorInfo | null = null
   private cleanupConfig: () => void
   private statusRevision = 0
@@ -151,11 +154,11 @@ export class CollectionLifecycleManager<
     beforeEmit?.()
 
     // Emit event
-    this.events.emitStatusChange(
-      newStatus,
-      previousStatus,
-      () => this.statusRevision === revision,
-    )
+    const isCurrent = () => this.statusRevision === revision
+    this.events.emitStatusChange(newStatus, previousStatus, isCurrent)
+    // The status is part of the error tree. status:change fires first, and
+    // the tree is already current when either event fires.
+    if (isCurrent()) this.events.emitHealthChange()
   }
 
   /**
@@ -272,8 +275,11 @@ export class CollectionLifecycleManager<
    * unpublished rows stops being usable.
    */
   public crash(error?: unknown): void {
+    // The first error is final for the attempt.
+    if (this.status === `error`) return
     this.validateStatusTransition(this.status, `error`)
     this.syncError = error
+    this.initialProblem = describeProblem(error, `initial`, true)
     this.setStatus(`error`)
   }
 
@@ -284,9 +290,7 @@ export class CollectionLifecycleManager<
 
   /** The cause of the initial gate error, as error tree detail. */
   public get gateProblem(): CollectionErrorInfo | null {
-    return this.status === `error`
-      ? describeProblem(this.syncError, `initial`, true)
-      : null
+    return this.status === `error` ? this.initialProblem : null
   }
 
   /** A source's report after its first ready. Status and rows do not change. */
@@ -570,6 +574,7 @@ export class CollectionLifecycleManager<
     // Health belongs to the discarded attempt.
     this.sourceProblem = null
     this.requestProblem = null
+    this.initialProblem = null
     // Cleanup is not readiness. Sync cleanup rejects pending preload callers;
     // first-ready listeners belong to the discarded run.
     this.onFirstReadyCallbacks = []

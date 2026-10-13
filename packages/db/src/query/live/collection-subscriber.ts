@@ -75,6 +75,11 @@ export class CollectionSubscriber<
     // live query collection, avoiding the multi-hop deferred promise chain that
     // can break under microtask timing (e.g., queueMicrotask in TanStack Query).
     const trackLoadResult = (result: LoadSubsetRequestResult) => {
+      // A later successful load clears this source's request error.
+      void Promise.resolve(result).then(
+        () => this.collectionConfigBuilder.settleRootLoad(this.sourceId),
+        () => {},
+      )
       if (result instanceof Promise) {
         // Defer the tracked rejection by one microtask so the subscription's
         // error event can put an initial live query in error before loading
@@ -106,7 +111,7 @@ export class CollectionSubscriber<
       }
     }
     const onLoadSubsetError = (event: SubscriptionLoadSubsetErrorEvent) => {
-      this.collectionConfigBuilder.recordSubsetError(
+      const error = this.collectionConfigBuilder.recordSubsetError(
         event.error,
         // Lazy demand owns its fatal-error path. For eager sources, one
         // successful page does not finish initial ordered refinement.
@@ -114,6 +119,9 @@ export class CollectionSubscriber<
           this.collectionConfigBuilder.liveQueryCollection?.status ===
             `loading`,
       )
+      if (!this.collectionConfigBuilder.isLazySource(this.sourceId)) {
+        this.collectionConfigBuilder.failRootLoad(this.sourceId, error)
+      }
     }
 
     // Create subscription with onStatusChange - listener is registered before any async work

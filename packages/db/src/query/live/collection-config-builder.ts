@@ -13,6 +13,7 @@ import { runAllCallbacks } from '../../utils/callbacks.js'
 import { normalizeError } from '../../utils/error.js'
 import { createSourceRecord } from '../../utils/source-record.js'
 import { codedMessage, devBuild } from '../../error-message.js'
+import { collectSourceRefs } from '../ir.js'
 import { CollectionSubscriber } from './collection-subscriber.js'
 import { getCollectionBuilder } from './collection-registry.js'
 import { LIVE_QUERY_INTERNAL } from './internal.js'
@@ -116,7 +117,7 @@ export class CollectionConfigBuilder<
   private isInErrorState = false
   private fatalQueryError = false
   // Lazy demand that failed after the first ready, as request errors.
-  private readonly failedDemands = new Set<string>()
+  private readonly failedRequests = new Set<string>()
   private lastSubsetError: unknown | undefined
 
   // Reference to the live query collection for error state transitions
@@ -153,6 +154,8 @@ export class CollectionConfigBuilder<
     Map<string, BasicExpression<boolean>> | undefined
   private bucketFacadesCache:
     ReturnType<typeof materializeCompilation>[`facades`] | undefined
+  private bucketFacades: BucketFacadeAdapter | undefined
+  private readonly includeSourceIds = new Set<string>()
 
   // Map of opaque source ID to subscription
   readonly subscriptions = createSourceRecord<CollectionSubscription>()
@@ -197,6 +200,7 @@ export class CollectionConfigBuilder<
     this.settledWindow = this.initialWindow
     this.collections = extractCollectionsFromQuery(this.query)
     this.collectionSources = extractCollectionSources(this.query)
+    collectSourceRefs(this.query, this.includeSourceIds)
 
     // Create compare function for ordering if the query has orderBy
     if (this.query.orderBy && this.query.orderBy.length > 0) {
@@ -427,17 +431,27 @@ export class CollectionConfigBuilder<
 
   /** The source aliases of this query, in query order, for its error tree. */
   errorTreeSources(): ReadonlyArray<ErrorTreeSource> {
-    return this.collectionSources.map(({ alias, collection }) => ({
-      alias,
-      collection,
-    }))
+    return this.collectionSources.map(({ sourceId, alias, collection }) => {
+      if (!this.includeSourceIds.has(sourceId)) return { alias, collection }
+      const instanced = this.bucketFacadesCache?.some((compilation) =>
+        compilation.aliases.includes(alias),
+      )
+      return {
+        alias,
+        collection,
+        kind: `include` as const,
+        ...(instanced
+          ? { instances: () => this.bucketFacades?.instancesFor(alias) ?? [] }
+          : {}),
+      }
+    })
   }
 
   settleDemand(planId: string, generation: number): void {
     const demand = this.activeDemands.get(planId)
     if (!demand || demand.generation !== generation || demand.settled) return
     demand.settled = true
-    this.clearFailedDemand(planId)
+    this.clearFailedRequest(planId)
     try {
       this.maybeRunGraphFn?.()
       demand.participant?.resolve()
@@ -461,14 +475,7 @@ export class CollectionConfigBuilder<
     if (!demand || demand.generation !== generation) return
     const normalized = this.recordSubsetError(error)
     demand.participant?.reject(normalized)
-    // After the first ready, a failed load is a request error on this query's
-    // node. It clears when the demand settles later or is released.
-    const lifecycle = this.liveQueryCollection?._lifecycle
-    if (lifecycle?.status === `ready`) {
-      this.failedDemands.add(planId)
-      lifecycle.reportRequestError(normalized)
-      return
-    }
+    if (this.reportFailedRequest(planId, normalized)) return
     this.transitionToError(
       devBuild() && process.env.NODE_ENV !== `production`
         ? `Subset demand '${planId}' failed: ${normalized.message}`
@@ -567,13 +574,33 @@ export class CollectionConfigBuilder<
   retireDemand(planId: string): void {
     const demand = this.activeDemands.get(planId)
     this.activeDemands.delete(planId)
-    this.clearFailedDemand(planId)
+    this.clearFailedRequest(planId)
     demand?.participant?.resolve()
   }
 
-  private clearFailedDemand(planId: string): void {
-    if (!this.failedDemands.delete(planId)) return
-    if (this.failedDemands.size === 0)
+  /** A root load of an eager source failed. */
+  failRootLoad(sourceId: string, error: Error): void {
+    this.reportFailedRequest(`root:${sourceId}`, error)
+  }
+
+  /** A later root load of the source succeeded. */
+  settleRootLoad(sourceId: string): void {
+    this.clearFailedRequest(`root:${sourceId}`)
+  }
+
+  // After the first ready, a failed load is a request error on this query's
+  // node. It clears when every failed request settles later or is released.
+  private reportFailedRequest(key: string, error: Error): boolean {
+    const lifecycle = this.liveQueryCollection?._lifecycle
+    if (lifecycle?.status !== `ready`) return false
+    this.failedRequests.add(key)
+    lifecycle.reportRequestError(error)
+    return true
+  }
+
+  private clearFailedRequest(key: string): void {
+    if (!this.failedRequests.delete(key)) return
+    if (this.failedRequests.size === 0)
       this.liveQueryCollection?._lifecycle.clearRequestError()
   }
 
@@ -752,7 +779,7 @@ export class CollectionConfigBuilder<
     // Reset error state from any previous sync run so a restarted sync can become ready again.
     this.isInErrorState = false
     this.fatalQueryError = false
-    this.failedDemands.clear()
+    this.failedRequests.clear()
     this.lastSubsetError = undefined
     // Store config and syncState as instance properties for the duration of this sync run
     this.currentSyncConfig = config
@@ -835,7 +862,7 @@ export class CollectionConfigBuilder<
     this.settledWindow = this.initialWindow
     this.isInErrorState = false
     this.fatalQueryError = false
-    this.failedDemands.clear()
+    this.failedRequests.clear()
 
     // Reset caches so a fresh graph/pipeline is compiled on next start
     // This avoids reusing a finalized D2 graph across GC restarts
@@ -954,6 +981,7 @@ export class CollectionConfigBuilder<
           syncState.messagesCount += count
         })
       : undefined
+    this.bucketFacades = bucketFacades
     if (bucketFacades) {
       syncState.unsubscribeCallbacks.add(() => bucketFacades.cleanup())
     }
@@ -1135,9 +1163,6 @@ export class CollectionConfigBuilder<
   ) {
     const { status } = event
 
-    // Every source status appears in this query's error tree.
-    this.emitErrorTreeChange()
-
     // A source's initial error is final for its attempt. Before this query's
     // first ready it is this query's gate error, for every shape. After it,
     // the source node shows the error and this query keeps its rows.
@@ -1239,11 +1264,6 @@ export class CollectionConfigBuilder<
     this.liveQueryCollection?._lifecycle.crash(error ?? new Error(message))
   }
 
-  /** The error tree changed below this query; dependents read it again. */
-  private emitErrorTreeChange(): void {
-    this.liveQueryCollection?._emitHealthChange()
-  }
-
   private allRequiredSourcesReady() {
     return this.collectionSources.every(({ collection }) =>
       sourcePermitsInitialReadiness(collection),
@@ -1291,7 +1311,9 @@ export class CollectionConfigBuilder<
       })
       // Relay health changes so this query's error tree stays current.
       syncState.unsubscribeCallbacks.add(
-        collection.on(`health:change`, () => this.emitErrorTreeChange()),
+        collection.on(`health:change`, () =>
+          this.liveQueryCollection?._emitHealthChange(),
+        ),
       )
       let cleanupStartError: Error | undefined
       const cleanupStartUnsubscribe = collection._onCleanupStart(() => {

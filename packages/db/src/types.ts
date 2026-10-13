@@ -788,7 +788,8 @@ export interface ErrorTreeNode {
   /** The query alias, or `root` for the Collection the tree was read from. */
   readonly alias: string
   readonly collectionId: string
-  readonly kind: `source` | `live-query`
+  /** `include` is an include's source; its rows feed per-row child Collections. */
+  readonly kind: `source` | `live-query` | `include`
   /** The node's initial-load gate. */
   readonly status: CollectionStatus
   /** This node has a problem now: a gate error, a health error, or a request error. */
@@ -796,6 +797,8 @@ export interface ErrorTreeNode {
   /** This node or any node below it has a problem. */
   readonly hasErrors: boolean
   readonly error: CollectionErrorInfo | null
+  /** For an include node: its per-row child Collections, and how many have a problem. */
+  readonly instances?: { readonly total: number; readonly inError: number }
   readonly sources: ReadonlyArray<ErrorTreeNode>
 }
 

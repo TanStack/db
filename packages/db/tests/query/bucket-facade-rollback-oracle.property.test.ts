@@ -408,6 +408,7 @@ class Driver {
       [
         {
           edgeId: `children`,
+          aliases: [],
           rows: this.rows,
           activeBuckets: this.activity,
           hasOrderBy: true,
@@ -1427,12 +1428,14 @@ describe(`bucket facade rollback`, () => {
       [
         {
           edgeId: `children`,
+          aliases: [],
           rows: childRows,
           activeBuckets: childActive,
           hasOrderBy: false,
         },
         {
           edgeId: `parents`,
+          aliases: [],
           rows: parentRows,
           activeBuckets: parentActive,
           hasOrderBy: false,

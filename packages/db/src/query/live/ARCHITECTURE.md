@@ -1333,12 +1333,14 @@ Every consumer of initial readiness uses the same rule:
 `sourcePermitsInitialReadiness()` in `utils.ts` holds it. Framework adapters
 derive `isReady` and Suspense release from live-query readiness, so they
 release together. A read that waits for readiness, such as `queryOnce`,
-resolves at the same point. An Effect with `skipInitial` ends its initial
-suppression there too. Its initial subset loads and lazy demand hold
-suppression until they settle. An obsolete or aborted initial load releases its
-hold, and a truncate replacement takes the hold over. Neither can keep
-suppression open or close it for good. A real load failure disposes the
-Effect.
+resolves at the same point. Every Effect passes its gate there too, with or
+without `skipInitial`: its initial subset loads and lazy demand hold the gate
+until they settle. `skipInitial` only decides whether the initial rows are
+delivered, so with it the gate also ends initial suppression. An obsolete or
+aborted initial load releases its hold, and a truncate replacement takes the
+hold over. Neither can keep the gate open or close it for good. A real load
+failure before the gate disposes the Effect; after the gate, a source problem
+is health, delivered through `onHealthChange`.
 
 Two limits remain. Before an on-demand source completes a full sync, a ready
 query can hold rows that the source does not yet update. The source contract,
@@ -1574,14 +1576,26 @@ create recursive Collection machinery.
     source that fails fails the query's attempt, for every shape. After its
     first ready, a source's later problem is health metadata: the query keeps
     its status and rows, and its error tree reports the problem. A lazy load
-    that fails after the first ready is a request error on the query's node,
-    cleared when that demand settles or is released. Query failures and
-    contract violations, such as a graph failure or a source cleaned up under
-    the query, still end the query.
+    or a root source's load that fails after the first ready is a request
+    error on the query's node. A lazy demand's error clears when that demand
+    settles or is released; a root source's error clears when a later load of
+    that source settles. Query failures and contract violations, such as a
+    graph failure or a source cleaned up under the query, still end the
+    query. So does an IndexedDB connection closure: it ends read and
+    admission authority, which no health report can restore. An Effect has
+    the same two axes, with its gate at its settled initial loads.
 17. **Error tree:** a live query's `errors` has one node for itself and one per
-    source alias in query order, recursing through nested live queries. The
-    shape is fixed by the query. Each node mirrors its Collection when read,
-    and the query emits `health:change` whenever a node below it changes.
+    source alias in query order, recursing through nested live queries. An
+    include's source has `kind: 'include'`; when the include materializes a
+    child Collection per parent row, its node rolls those up as
+    `instances: { total, inError }`. A pooled live query's tree is the tree a
+    live-query Collection over its source would have, so it also reaches
+    deeper levels. The shape is fixed by the query. Each node mirrors its
+    Collection when read, and the query emits `health:change` whenever a node
+    below it changes. When a Collection's status changes, its `status:change`
+    fires first and its `health:change` follows at once; the tree is current
+    when either fires. A node keeps its object identity until something in its
+    subtree changes, and a change replaces only the nodes on its path.
 
 ## Glossary
 

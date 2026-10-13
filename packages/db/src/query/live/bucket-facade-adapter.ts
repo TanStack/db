@@ -218,6 +218,16 @@ export class BucketFacadeAdapter {
     return this.resolveValue(value) as T
   }
 
+  /** The live per-row Collections of the includes that read this alias. */
+  instancesFor(alias: string): Array<Collection<any, any, any>> {
+    return this.compilations
+      .filter((compilation) => compilation.aliases.includes(alias))
+      .flatMap((compilation) => [
+        ...(this.entries.get(compilation.edgeId)?.values() ?? []),
+      ])
+      .map((entry) => entry.collection)
+  }
+
   cleanup(): void {
     this.cleanedUp = true
     for (const byBucket of this.entries.values()) {
