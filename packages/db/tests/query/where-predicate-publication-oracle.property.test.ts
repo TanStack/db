@@ -86,8 +86,11 @@
  * filtered QueryRef, and correlated include witnesses compare public results
  * with that model. On-demand ordered, joined, and include receivers check that
  * the first acquisition is unfiltered when the captured list is mutable.
- * The retained direct query also checks exact insert/delete
- * events and no duplicate event when the list did not change. Separate fixed
+ * The retained direct query also checks that a list edit alone preserves the
+ * old public snapshot and sends no callback. At the next source transaction,
+ * one subscriber callback contains the complete insert/delete batch and reads
+ * the new whole result. It checks no duplicate event when the list did not
+ * change. Separate fixed
  * Date and byte-item cases change contents inside the captured list, then
  * check the next source event. An ordered limit witness deletes a source row
  * outside the old loaded prefix after a list edit; it requires the newly
@@ -1430,18 +1433,28 @@ describe(`WHERE predicate publication oracle`, () => {
       const live = createLiveQueryCollection((q) =>
         q.from({ row: source }).where(({ row }) => inArray(row.v, members)),
       )
-      const events: Array<{ type: string; key: string }> = []
+      // Retain callback boundaries and read the Collection while each callback
+      // runs. Flattening changes would accept two partial publications with the
+      // right eventual keys, even though one source transaction owes one
+      // coherent public result.
+      const batches: Array<{
+        changes: Array<{ type: string; key: string }>
+        visibleKeys: Array<string>
+      }> = []
       let unsubscribe: (() => void) | undefined
       await withOracleCleanup(async () => {
         await live.preload()
         const subscription = live.subscribeChanges(
           (changes) => {
-            events.push(
-              ...changes.map((change) => ({
-                type: change.type,
-                key: String(change.key),
-              })),
-            )
+            batches.push({
+              changes: changes
+                .map((change) => ({
+                  type: change.type,
+                  key: String(change.key),
+                }))
+                .sort((left, right) => left.key.localeCompare(right.key)),
+              visibleKeys: [...live.keys()].map(String).sort(),
+            })
           },
           { includeInitialState: false },
         )
@@ -1453,8 +1466,13 @@ describe(`WHERE predicate publication oracle`, () => {
             .sort()
         const check = () => expect([...live.keys()].sort()).toEqual(expected())
         check()
+        expect(batches).toEqual([])
 
         members[0] = 2
+        // A list edit is only an input change. The previous public snapshot
+        // remains in place until a source event clocks the retained query.
+        expect([...live.keys()].sort()).toEqual([`one`])
+        expect(batches).toEqual([])
         source.utils.begin()
         source.utils.write({
           type: `update`,
@@ -1462,15 +1480,20 @@ describe(`WHERE predicate publication oracle`, () => {
         })
         source.utils.commit()
         check()
-        expect(
-          events.sort((left, right) => left.key.localeCompare(right.key)),
-        ).toEqual([
-          { type: `delete`, key: `one` },
-          { type: `insert`, key: `two` },
+        expect(batches).toEqual([
+          {
+            changes: [
+              { type: `delete`, key: `one` },
+              { type: `insert`, key: `two` },
+            ],
+            visibleKeys: [`two`],
+          },
         ])
-        events.length = 0
+        batches.length = 0
 
         members.push(1)
+        expect([...live.keys()].sort()).toEqual([`two`])
+        expect(batches).toEqual([])
         source.utils.begin()
         source.utils.write({
           type: `update`,
@@ -1478,8 +1501,13 @@ describe(`WHERE predicate publication oracle`, () => {
         })
         source.utils.commit()
         check()
-        expect(events).toEqual([{ type: `insert`, key: `one` }])
-        events.length = 0
+        expect(batches).toEqual([
+          {
+            changes: [{ type: `insert`, key: `one` }],
+            visibleKeys: [`one`, `two`],
+          },
+        ])
+        batches.length = 0
 
         // A source update with no further list edit cannot republish the
         // unchanged result merely because the reduction revisits every row.
@@ -1490,7 +1518,7 @@ describe(`WHERE predicate publication oracle`, () => {
         })
         source.utils.commit()
         check()
-        expect(events).toEqual([])
+        expect(batches).toEqual([])
 
         source.utils.begin()
         source.utils.write({ type: `delete`, key: `two` })
@@ -1500,7 +1528,12 @@ describe(`WHERE predicate publication oracle`, () => {
           1,
         )
         check()
-        expect(events).toEqual([{ type: `delete`, key: `two` }])
+        expect(batches).toEqual([
+          {
+            changes: [{ type: `delete`, key: `two` }],
+            visibleKeys: [`one`],
+          },
+        ])
       }, [() => unsubscribe?.(), () => live.cleanup(), () => source.cleanup()])
     })
 

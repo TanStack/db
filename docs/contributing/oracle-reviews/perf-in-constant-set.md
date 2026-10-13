@@ -134,3 +134,17 @@ Date to equal its own timestamp through compiled `eq`, constant-list `in`, and
 row-supplied `in`. The focused `in` owner passed after this addition. This
 checks the compiled equality return for two VM contexts; browser iframe
 behavior and a fresh exact-commit hostile review of the follow-up remain open.
+
+## Own-method membership gap at `d917ba4c9`
+
+The compiled `in` evaluator and its reference both called the caller array's
+overridable `some` method. A compiled `[1]` with an own `some` returning false
+rejected present member `1`; after the list changed to `[2]`, an own `some`
+returning true accepted absent member `1`. Constant and row-supplied lists
+were both false green. The reference now walks present integer indices through
+the length captured at evaluation, independently of the array's methods.
+Production calls the native Array `some` with the current list as receiver.
+Both false rejection and false acceptance failed at the compiled return before
+the repair; the sparse-hole and nullish controls pass afterward. The focused
+`in` owner passed 44 tests. This proves the named array-method boundary at
+evaluation, not every possible proxy or mutation during one evaluation.

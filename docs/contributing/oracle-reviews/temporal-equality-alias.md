@@ -317,3 +317,18 @@ reference-identity controls. The revised owner passes 28 tests. This adds
 one recognized wrong-kind tag to the fixed polyfill grammar; arbitrary
 prototype impersonation and mixed implementations remain open. Fresh hostile
 review of the next committed head is pending.
+
+## Duration field sensitivity after `d917ba4c9`
+
+Read-only review found that the alias and compiled `in` owners claimed all
+ten intrinsic Duration fields while their fixtures did not vary `years`,
+`months`, `weeks`, `days`, or `nanoseconds`. Five new variants each change one
+of those fields from an equal baseline. The compiled owner checks `eq` and
+both `in` forms in both operand directions; its omit-one-field mutant fails at
+the membership comparison for every omitted field. The alias owner checks
+the same independent equality classes in an unindexed public scan and exact
+BasicIndex/BTreeIndex lookups. Those indexes use an explicit total comparator:
+default ordering of calendar-unit Durations requires `relativeTo`, so this
+evidence does not claim their default ordered-index behavior. The focused
+compiled and alias owners passed 75 tests. A fresh committed-head hostile
+review remains pending.

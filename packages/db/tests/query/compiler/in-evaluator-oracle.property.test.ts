@@ -12,9 +12,9 @@ import { oraclePropertyOptions, oracleRuns } from '../../oracle-config.js'
  * Transfer law: The public `inArray` API describes array membership. A
  * compiled expression holding a caller-owned array reads that array's current
  * members whenever it evaluates, even if the array or one of its items has
- * changed since compilation. The
- * current evaluator returns UNKNOWN (`null`) for a null or undefined value
- * and FALSE for a list that is not an array.
+ * changed since compilation. An own `some` method is not a list member and
+ * cannot decide membership. The current evaluator returns UNKNOWN (`null`)
+ * for a null or undefined value and FALSE for a list that is not an array.
  * Otherwise the result is TRUE when some list item equals the value under the
  * evaluator's equality, and FALSE when none does. A null or undefined item
  * never equals a value under that membership interpretation. The public
@@ -38,9 +38,10 @@ import { oraclePropertyOptions, oracleRuns } from '../../oracle-config.js'
  * - Every other pair compares with `===`, so `-0` equals `0`, `1n` does not
  *   equal `1`, and objects compare by reference.
  *
- * Model: `referenceIn` walks the list and applies `referenceEqual`, which
- * restates the rules above. It imports no production comparison or
- * normalization helper.
+ * Model: `referenceIn` walks present indices through the length captured at
+ * the start of evaluation and applies `referenceEqual`, which restates the
+ * rules above. It does not call the array's overridable methods and imports
+ * no production comparison or normalization helper.
  *
  * Domain: values and items come from a pool that contains the boundaries
  * of each rule: equal and unequal strings, a string that begins with the
@@ -60,6 +61,7 @@ import { oraclePropertyOptions, oracleRuns } from '../../oracle-config.js'
  * items and may repeat. The list is a constant `Value`, the shape that join
  * demand builds, or a row field. Fixed histories also compile a caller-owned
  * list, then replace a slot or mutate a Date or byte item before reevaluating.
+ * A fixed history also compiles, shadows `some`, and edits a list slot.
  *
  * Production driver: compile `in` with the public IR and evaluate it for
  * each row, as a WHERE clause does.
@@ -437,10 +439,14 @@ function referenceEqual(left: unknown, right: unknown): boolean {
 function referenceIn(value: unknown, list: unknown): boolean | null {
   if (value === null || value === undefined) return null
   if (!Array.isArray(list)) return false
-  return list.some(
-    (item) =>
-      item !== null && item !== undefined && referenceEqual(item, value),
-  )
+  const length = list.length
+  for (let index = 0; index < length; index++) {
+    if (!(index in list)) continue
+    const item = list[index]
+    if (item !== null && item !== undefined && referenceEqual(item, value))
+      return true
+  }
+  return false
 }
 
 type InCase = { value: unknown; list: unknown; listFromRow: boolean }
@@ -599,6 +605,56 @@ describe(`in evaluator`, () => {
     checkCurrent(3)
     list.splice(0, 1)
     checkCurrent(2)
+  })
+
+  it.each([
+    { listFromRow: false, source: `constant` },
+    { listFromRow: true, source: `row-supplied` },
+  ])(
+    `ignores an own some method after compiling a $source list and editing its member`,
+    ({ listFromRow }) => {
+      const list: Array<unknown> = [1]
+      const listExpression = listFromRow
+        ? new PropRef([`row`, `list`])
+        : new Value(list)
+      const evaluate = compileExpression(
+        new Func(`in`, [new PropRef([`row`, `value`]), listExpression]),
+      )
+      const checkCurrent = (value: unknown) =>
+        expect
+          .soft(evaluate({ row: { value, list } }))
+          .toBe(referenceIn(value, list))
+
+      // A hostile own method can lie, but indexed members remain the input.
+      checkCurrent(1)
+      Object.defineProperty(list, `some`, {
+        configurable: true,
+        value: () => false,
+      })
+      checkCurrent(1)
+      list[0] = 2
+      Object.defineProperty(list, `some`, {
+        configurable: true,
+        value: () => true,
+      })
+      checkCurrent(1)
+      checkCurrent(2)
+      checkCurrent(null)
+    },
+  )
+
+  it(`skips sparse holes and nullish items while retaining present members`, () => {
+    const list = Array<unknown>(4)
+    list[1] = null
+    list[2] = undefined
+    list[3] = 2
+    expect(0 in list).toBe(false)
+    const evaluate = compileExpression(
+      new Func(`in`, [new PropRef([`row`, `value`]), new Value(list)]),
+    )
+    for (const value of [1, 2, null, undefined]) {
+      expect(evaluate({ row: { value } })).toBe(referenceIn(value, list))
+    }
   })
 
   it(`reads a Date item's current timestamp after compilation`, () => {
@@ -935,6 +991,55 @@ describe(`in evaluator`, () => {
       millionMicrosecondDuration,
       false,
     )
+  })
+
+  it(`reads years, months, weeks, days, and nanoseconds in Duration equality`, () => {
+    const variedFields = [
+      `years`,
+      `months`,
+      `weeks`,
+      `days`,
+      `nanoseconds`,
+    ] as const
+    const fields = {
+      years: 1,
+      months: 1,
+      weeks: 1,
+      days: 1,
+      nanoseconds: 1,
+    }
+    const baseline = Temporal.Duration.from(fields)
+    const equalCopy = Temporal.Duration.from(fields)
+    checkEqualityPaths(baseline, equalCopy, true)
+
+    // Every variant differs in one intrinsic field. A comparator that drops
+    // that field predicts a false match, which the referenceIn check rejects.
+    for (const omitted of variedFields) {
+      const variant = Temporal.Duration.from({ ...fields, [omitted]: 2 })
+      const equalWithoutField = (
+        left: Temporal.Duration,
+        right: Temporal.Duration,
+      ) =>
+        durationFields.every(
+          (field, index) =>
+            field === omitted ||
+            Reflect.apply(durationGetters[index]!, left, []) ===
+              Reflect.apply(durationGetters[index]!, right, []),
+        )
+      expect(equalWithoutField(baseline, variant)).toBe(true)
+      const wrong: Evaluate = ({ value, list }) =>
+        Array.isArray(list) &&
+        value instanceof Temporal.Duration &&
+        list.some(
+          (candidate) =>
+            candidate instanceof Temporal.Duration &&
+            equalWithoutField(value, candidate),
+        )
+      expect(() =>
+        check(wrong, { value: variant, list: [baseline], listFromRow: false }),
+      ).toThrow(/in mismatch/)
+      checkEqualityPaths(baseline, variant, false)
+    }
   })
 
   it(`rejects display-string equality for equivalent zone aliases`, () => {

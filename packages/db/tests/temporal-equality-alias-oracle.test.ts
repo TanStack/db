@@ -35,7 +35,9 @@ import { withOracleCleanup } from './utils.js'
  * this file checks its public Collection equality through an unindexed scan.
  * Indexed PlainMonthDay equality remains open. YearMonth and Duration store
  * several classes with identical default display and check indexed add,
- * build, removal, re-add, and public reads.
+ * build, removal, re-add, and public reads. Duration also varies years,
+ * months, weeks, days, and nanoseconds one field at a time; a key that omits
+ * any one of those fields would merge its distinct fixture classes.
  * This oracle does not claim all IANA aliases, subclasses with replaced
  * Temporal methods, arbitrary spoofed prototypes,
  * mixed Temporal implementations, joins, live-query publication, or provider
@@ -301,6 +303,79 @@ function intrinsicFixture(kind: IntrinsicKind): IntrinsicFixture {
       expect(seconds.seconds).toBe(1)
       expect(milliseconds.milliseconds).toBe(1000)
       expect(microseconds.microseconds).toBe(1_000_000)
+    },
+  }
+}
+
+function variedDurationFixture(): IntrinsicFixture {
+  const fields = {
+    years: 1,
+    months: 1,
+    weeks: 1,
+    days: 1,
+    nanoseconds: 1,
+  }
+  const baseline = Temporal.Duration.from(fields)
+  const variedFields = [
+    `years`,
+    `months`,
+    `weeks`,
+    `days`,
+    `nanoseconds`,
+  ] as const
+  const variants = variedFields.map((field) => ({
+    field,
+    when: Temporal.Duration.from({ ...fields, [field]: 2 }),
+  }))
+  const allFields = [
+    `years`,
+    `months`,
+    `weeks`,
+    `days`,
+    `hours`,
+    `minutes`,
+    `seconds`,
+    `milliseconds`,
+    `microseconds`,
+    `nanoseconds`,
+  ] as const
+  const getters = allFields.map(
+    (field) =>
+      Object.getOwnPropertyDescriptor(Temporal.Duration.prototype, field)!.get!,
+  )
+  return {
+    rows: [
+      { id: `mixed`, when: baseline, identity: `mixed` },
+      {
+        id: `mixed-copy`,
+        when: Temporal.Duration.from(fields),
+        identity: `mixed`,
+      },
+      ...variants.map(({ field, when }) => ({
+        id: `mixed-${field}`,
+        when,
+        identity: `mixed-${field}`,
+      })),
+    ],
+    probes: [
+      { when: Temporal.Duration.from(fields), identity: `mixed` },
+      ...variants.map(({ field }) => ({
+        when: Temporal.Duration.from({ ...fields, [field]: 2 }),
+        identity: `mixed-${field}`,
+      })),
+    ],
+    checkNativeRelation: () => {
+      // Each class differs from mixed in exactly one intrinsic field. Dropping
+      // that field from an exact key would merge the two classes.
+      for (const { field, when } of variants) {
+        expect(
+          allFields.filter(
+            (_, index) =>
+              Reflect.apply(getters[index]!, baseline, []) !==
+              Reflect.apply(getters[index]!, when, []),
+          ),
+        ).toEqual([field])
+      }
     },
   }
 }
@@ -596,6 +671,71 @@ it(`keeps PlainMonthDay reference years distinct in an unindexed public equality
     }
   }, [() => collection.cleanup()])
 })
+
+it(`keeps five additional Duration fields distinct in an unindexed public equality scan`, async () => {
+  const fixture = variedDurationFixture()
+  fixture.checkNativeRelation()
+  const collection = createCollection<IntrinsicRow, string>({
+    id: `temporal-duration-varied-unindexed-equality`,
+    getKey: (row) => row.id,
+    autoIndex: `off`,
+    startSync: true,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        begin()
+        for (const row of fixture.rows) write({ type: `insert`, value: row })
+        commit()
+        markReady()
+      },
+    },
+  })
+
+  // The scan reads exact classes without asking Temporal to order calendar
+  // units, which would require relativeTo.
+  await withOracleCleanup(async () => {
+    await collection.stateWhenReady()
+    expect(collection.indexes.size).toBe(0)
+    for (const probe of fixture.probes) {
+      const predicate = new Func(`eq`, [
+        new PropRef([`when`]),
+        new Value(probe.when),
+      ])
+      const keys = new Set(
+        collection
+          .currentStateAsChanges({ where: predicate, optimizedOnly: false })
+          ?.map(({ value }) => value.id),
+      )
+      expect(keys).toEqual(intrinsicExpectedKeys(fixture.rows, probe.identity))
+    }
+  }, [() => collection.cleanup()])
+})
+
+it.each(indexTypes)(
+  `%s keeps five additional Duration fields in exact index equality`,
+  (_name, IndexType) => {
+    const fixture = variedDurationFixture()
+    fixture.checkNativeRelation()
+    // A lexical display comparator supplies only the index's required total
+    // order. The independently assigned classes judge exact equality.
+    const compareText = (left: unknown, right: unknown) => {
+      const a = String(left)
+      const b = String(right)
+      return a < b ? -1 : a > b ? 1 : 0
+    }
+    const index = new IndexType(1, new PropRef([`when`]), undefined, {
+      compareFn: compareText,
+    })
+    index.build(
+      fixture.rows.map((row): [string, IntrinsicRow] => [row.id, row]),
+    )
+    for (const probe of fixture.probes) {
+      const expected = intrinsicExpectedKeys(fixture.rows, probe.identity)
+      expect(index.equalityLookup(probe.when)).toEqual(expected)
+      expect(index.lookup(`eq`, probe.when)).toEqual(expected)
+      expect(index.inArrayLookup([probe.when])).toEqual(expected)
+    }
+  },
+)
 
 describe.each(indexTypes)(
   `%s Temporal intrinsic field equality`,

@@ -196,3 +196,52 @@ bound slightly does not necessarily change it, so the coverage map now says
 "omitting" rather than "misplacing." This is a documentation correction,
 not a new production bug or an added witness. Final review of the next
 committed head remains pending.
+
+## Finite provider order handoff
+
+Review of `d917ba4c9` found that the window oracle's controlled provider read
+its source rows from the rank-sorted expected result. Removing `orderBy` from
+every request therefore left all eight cases green: the fixture still served
+the right prefix without an ordering hint. The source facts now have physical
+rank order 30, 10, 40, 20. The independent public model still sorts by numeric
+rank. The adapter sorts its filtered source rows only when the request carries
+`orderBy`, and it checks that every finite request asks for one ascending
+`rank` term. This keeps provider work at the request boundary; the public
+preload and moved-window comparisons keep their original law.
+
+All eight fixed cases passed after this oracle repair. A temporary test-only
+mutant stripped `orderBy` as the adapter received it. All eight cases failed
+at the finite-request assertion. With that assertion temporarily disabled,
+the BasicIndex/custom-first case reached the initial public snapshot and
+failed with `[2]` instead of `[1]`. Both mutations were removed. These are
+assertion failures at the intended request and public checkpoints, not
+setup failures. The controlled provider still does not establish how a remote
+provider interprets an ordered request.
+
+## Public comparator ties at `d917ba4c9`
+
+The public `currentStateAsChanges` path returned `[b]` for descending
+`orderBy rank, limit: 1` over tied source keys, while an unindexed scan
+returned `[a]`. BasicIndex and BTreeIndex both exposed the
+failure through their reverse views. The low-level reverse index may reverse
+tie order; the public Collection rule from changelog #958 requires source keys
+ascending within comparator-equal positions. New numeric, mixed-key,
+custom-collation, and nullish fixtures compare independently sorted source
+facts with unindexed and optimized indexed snapshots. Finite prefixes cut
+through tied groups, and index-take spies establish the optimized path.
+
+The same defect reached direct on-demand `requestLimitedSnapshot`: a source
+with rank-1 keys `c`, `b`, `a` published `[c]` for a descending limit-one
+request. That was a separate RED public receiving witness. A neighboring
+history first publishes a unique rank-2 row, then continues at a cursor into
+the rank-1 tie. A custom string-length comparator checks that a cursor at
+`xx` still includes the unsent `yy` peer in the same comparator position.
+The repair shares indexed prefix selection across ready snapshots and direct
+subscriptions, completes only a finite prefix's boundary group, and sorts
+source keys within each comparator group. It does not change the low-level
+ReverseIndex contract. The repaired focused ordering, lifecycle, pagination,
+and work suites passed 748 tests, plus TypeScript, lint, formatting, and diff
+checks. The evidence covers these two public snapshot paths and fixed
+histories; provider ordering, source mutations, and full live-query
+publication require separate receiving witnesses. Fresh hostile review of
+the committed repair remains pending.

@@ -56,8 +56,9 @@ import type { CompareOptions } from '../src/query/builder/types'
  * universal performance bound. Own `length` and `byteLength` properties do
  * not change native byte content. The 32-character margin is the existing
  * constant-overhead budget for the sampled 0..200-byte keys. Changed-byte
- * equality and key histories cover lengths 1..200; a 129-byte interior change
- * pins the first length beyond the 128-byte boundary.
+ * equality and key histories cover lengths 1..200. Fixed changes at byte 64
+ * of a 129-byte view and the last byte of a 200-byte view pin positions that
+ * a short generated campaign need not sample.
  */
 
 const defaultOpts: CompareOptions = {
@@ -1918,26 +1919,38 @@ describe(`native binary key content`, () => {
     expect(normalizeValue(left)).not.toBe(normalizeValue(right))
   })
 
-  it(`distinguishes byte 64 in a 129-byte key`, () => {
-    const bytes = Uint8Array.from({ length: 129 }, (_, index) => index)
-    const changed = new Uint8Array(bytes)
-    changed[64] = (changed[64]! + 1) % 256
-    const sample = { bytes, changed, index: 64 }
+  it(`distinguishes interior and last bytes of long native views`, () => {
+    // The supplied byte at each named position changes while length and all
+    // other bytes stay equal. At each function return, equality must reject
+    // the pair in both directions and normalization must produce distinct keys.
+    for (const { length, index } of [
+      { length: 129, index: 64 },
+      { length: 200, index: 199 },
+    ]) {
+      const bytes = Uint8Array.from({ length }, (_, byteIndex) => byteIndex)
+      const changed = new Uint8Array(bytes)
+      changed[index] = (changed[index]! + 1) % 256
+      const sample = { bytes, changed, index }
 
-    // A key that reads only its first 64 bytes accepts this legal change.
-    // The normalizer must preserve it at the direct-return checkpoint.
-    expect(() =>
-      assertChangedBytes(
-        sample,
-        (left, right) =>
-          left.length === right.length &&
-          left.subarray(0, 64).every((byte, index) => byte === right[index]),
-      ),
-    ).toThrow(`changed byte must be unequal`)
-    assertChangedBytes(
-      sample,
-      (left, right) => normalizeValue(left) === normalizeValue(right),
-    )
+      // A plausible first-64-byte comparator passes every short pair but
+      // fails the same changed-byte checker used by the generated equality
+      // property. This fault injection reaches the intended return check.
+      expect(() =>
+        assertChangedBytes(
+          sample,
+          (left, right) =>
+            left.length === right.length &&
+            left
+              .subarray(0, 64)
+              .every((byte, byteIndex) => byte === right[byteIndex]),
+        ),
+      ).toThrow(`changed byte must be unequal`)
+
+      expect(areValuesEqual(bytes, new Uint8Array(bytes))).toBe(true)
+      expect(areValuesEqual(bytes, changed)).toBe(false)
+      expect(areValuesEqual(changed, bytes)).toBe(false)
+      expect(normalizeValue(bytes)).not.toBe(normalizeValue(changed))
+    }
   })
 
   comparisonProperty([arbitraryChangedBytes])(

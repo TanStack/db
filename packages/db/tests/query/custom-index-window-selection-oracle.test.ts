@@ -16,8 +16,9 @@ import type { LoadSubsetOptions } from '../../src/types.js'
  *
  * The bounded history caches ranks 20 and 40, installs indexes in one of four
  * legal layouts, preloads a one-row window, then moves to offset one with two
- * rows. A controlled provider fulfills each exact request from four immutable
- * source rows; it never rewrites cached rows. A plain numeric sort and slice
+ * rows. A controlled provider holds four immutable source rows in physical
+ * order that differs from rank order. It sorts only when the request carries
+ * `orderBy`, and it never rewrites cached rows. A plain numeric sort and slice
  * predicts both public checkpoints independently of index selection. Public
  * snapshots and publication batches are compared after preload and after the
  * window promise settles. This checks BasicIndex and BTreeIndex; it does not
@@ -29,11 +30,12 @@ type Layout =
   `custom-first` | `ordinary-first` | `no-index` | `eager-custom-only`
 
 const rows: ReadonlyArray<Row> = [
-  { id: 1, rank: 10 },
-  { id: 2, rank: 20 },
   { id: 3, rank: 30 },
+  { id: 1, rank: 10 },
   { id: 4, rank: 40 },
+  { id: 2, rank: 20 },
 ]
+// The public order follows the query's rank expression, not source storage.
 const expected = [...rows].sort((a, b) => a.rank - b.rank || a.id - b.id)
 const expectedWindow = (offset: number, limit: number) =>
   expected.slice(offset, offset + limit).map(({ id }) => id)
@@ -41,7 +43,12 @@ const expectedWindow = (offset: number, limit: number) =>
 // This adapter models only the request grammar exercised here: a whole-source
 // request, a finite prefix, or a cursor's current tie plus following rows.
 // Its answers come from source facts and the request predicate, never indexes.
+// Finite ordered acquisition needs a rank hint: without it, a provider slices
+// physical order and cannot establish the requested prefix.
 function requestedRows(options: LoadSubsetOptions): Array<Row> {
+  if (options.limit !== undefined) {
+    expect(options.orderBy).toBeDefined()
+  }
   if (options.orderBy) {
     expect(options.orderBy).toHaveLength(1)
     expect(options.orderBy[0]!.expression).toMatchObject({
@@ -51,21 +58,24 @@ function requestedRows(options: LoadSubsetOptions): Array<Row> {
     expect(options.orderBy[0]!.compareOptions.direction).toBe(`asc`)
   }
   const matching = options.where
-    ? expected.filter(
+    ? rows.filter(
         (row) => evaluateReferenceExpression(options.where!, row) === true,
       )
-    : expected
+    : rows
+  const providerRows = options.orderBy
+    ? [...matching].sort((a, b) => a.rank - b.rank || a.id - b.id)
+    : matching
   if (!options.cursor) {
     const start = options.offset ?? 0
-    return matching.slice(
+    return providerRows.slice(
       start,
       options.limit === undefined ? undefined : start + options.limit,
     )
   }
-  const current = matching.filter((row) =>
+  const current = providerRows.filter((row) =>
     Boolean(evaluateReferenceExpression(options.cursor!.whereCurrent, row)),
   )
-  const following = matching
+  const following = providerRows
     .filter((row) =>
       Boolean(evaluateReferenceExpression(options.cursor!.whereFrom, row)),
     )
@@ -152,6 +162,7 @@ async function observeWindowMove(
     cleanupLive = () => live.cleanup()
     await live.preload()
     const initial = Array.from(live.values(), ({ id }) => id)
+    expect(initial).toEqual(expectedWindow(0, 1))
     const subscription = live.subscribeChanges(() => {
       publications.push(Array.from(live.values(), ({ id }) => id))
     })
@@ -164,7 +175,6 @@ async function observeWindowMove(
     // its write stream does not. This reaches the cached-row merge path.
     expect(replies.some((reply) => reply.join(`,`) === `1,2,3`)).toBe(true)
     expect(writes).toEqual([1, 3])
-    expect(initial).toEqual(expectedWindow(0, 1))
     expect(moved).toEqual(expectedWindow(1, 2))
     expect(publications).toEqual([expectedWindow(1, 2)])
     if (layout === `eager-custom-only`) {

@@ -111,10 +111,23 @@ Review of committed head `d974d4a4f` found that the changed-byte generator
 reached only lengths 1–50 while the owner's bounded key-size claim reached
 200. The follow-up expands independently supplied changed-byte pairs to
 lengths 1–200 for both direct `areValuesEqual` and `normalizeValue` checks.
-A fixed 129-byte pair differs only at byte 64. A first-64-byte comparison
-fault fails the equality check at the intended direct return; the real
-normalizer returns distinct keys. The focused comparison owner passed 117
-tests, and explicit test TypeScript, ESLint, and Prettier checks passed. This
-is bounded sensitivity evidence, not a claim that every byte sequence or
-all binary consumers were exercised. Final exact-commit hostile review of
-the follow-up is pending.
+A fixed 129-byte pair differs only at byte 64. The former fixed assertion
+checked `normalizeValue` through `assertChangedBytes`, but did not call
+production `areValuesEqual`; the 100-run generated campaign declared lengths
+through 200 without guaranteeing a long changed-byte sample. Replaying that
+fixed-seed generator and budget reached at most length 12 and changed index
+10; an executed first-64-byte comparator fault survived the generated lane.
+Exact-head hostile review of `d917ba4c9` found this direct-equality gap.
+
+The next fixed witness supplies a 129-byte pair changed at interior byte 64
+and a 200-byte pair changed at its last byte, 199. For each pair, it calls
+production `areValuesEqual` in both directions at the direct-return
+checkpoint, checks an unchanged copy, and compares the normalized keys. An
+executed first-64-byte comparator fault fails the same changed-byte checker
+used by the generated equality property for both pairs. The generated grammar
+still spans lengths 1–200; these pins guarantee upper-position reach within
+the normal 100-run budget. This is bounded sensitivity evidence, not a claim
+that every byte sequence or all binary consumers were exercised. The focused
+comparison owner passed 117 tests with no Vitest type errors; explicit test
+TypeScript, ESLint, Prettier, and whitespace checks passed. Final exact-commit
+hostile review of this repair is pending.

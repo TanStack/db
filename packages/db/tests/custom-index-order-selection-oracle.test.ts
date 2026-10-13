@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { BasicIndex } from '../src/indexes/basic-index.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
+import { ReverseIndex } from '../src/indexes/reverse-index.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
 import { DEFAULT_COMPARE_OPTIONS } from '../src/utils.js'
 import { withOracleCleanup } from './utils.js'
@@ -25,8 +26,12 @@ import { withOracleCleanup } from './utils.js'
  * limit one. A neighboring mixed Date/number snapshot compares public scan
  * order before index creation with optimized order afterward. It promises
  * index installation preserves that order, without prescribing a general
- * cross-family order. These checks do not claim arbitrary custom comparator
- * laws, mutation histories, provider ordering, or live-query publication.
+ * cross-family order. Changelog #958 and the temporal index order oracle
+ * establish key-ascending ties in public ordered snapshots. The witnesses
+ * below add equal numeric and custom-collation values, nullish values, finite
+ * windows, and unbounded reads. A direct on-demand ordered subscription
+ * checks initial and cursor snapshots of an equal-rank group. They do not
+ * claim mutation histories, provider ordering, or live-query publication.
  */
 type Row = { id: string; rank: number }
 
@@ -486,6 +491,320 @@ describe.each(indexTypes)(`%s public mixed-value order`, (name, IndexType) => {
       take.mockClear()
       expect(keys(1, true)).toEqual(scannedFirst)
       expect(take).toHaveBeenCalled()
+    }, [() => cleanup?.()])
+  })
+})
+
+describe.each(indexTypes)(`%s public key ties`, (name, IndexType) => {
+  it(`publishes key-first ties through limited ordered subscriptions`, async () => {
+    // A direct ordered subscription is a second public receiving path. The
+    // first history begins inside a tie; the second first emits a unique rank
+    // and then continues into a tied rank. The provider accepts each request
+    // immediately, so callbacks are observed after each local snapshot.
+    const observe = async (
+      suffix: string,
+      source: ReadonlyArray<Row>,
+      requests: ReadonlyArray<{ minValues?: Array<number> }>,
+    ) => {
+      const batches: Array<Array<string>> = []
+      const collection = createCollection<Row, string>({
+        id: `subscription-public-ties-${name}-${suffix}`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        startSync: true,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            for (const row of source) write({ type: `insert`, value: row })
+            commit()
+            markReady()
+            return { loadSubset: () => true }
+          },
+        },
+      })
+      await withOracleCleanup(async () => {
+        await collection.stateWhenReady()
+        const index = collection.createIndex((row) => row.rank, {
+          indexType: IndexType,
+        })
+        const subscription = collection.subscribeChanges(
+          (changes) => {
+            if (changes.length) batches.push(changes.map(({ key }) => key))
+          },
+          { includeInitialState: false },
+        )
+        try {
+          subscription.setOrderByIndex(new ReverseIndex(index, true))
+          for (const request of requests) {
+            subscription.requestLimitedSnapshot({
+              orderBy: descendingFirst.orderBy,
+              limit: 1,
+              ...request,
+            })
+          }
+        } finally {
+          subscription.unsubscribe()
+        }
+      }, [() => collection.cleanup()])
+      return batches
+    }
+
+    // Numeric rank descending, then source key ascending, predicts `a` in
+    // the initial tie. The unique rank-2 row is an adjacent non-tie control;
+    // a cursor at rank 2 then reaches the complete rank-1 tie group.
+    expect(
+      await observe(
+        `initial`,
+        [
+          { id: `c`, rank: 1 },
+          { id: `b`, rank: 1 },
+          { id: `a`, rank: 1 },
+        ],
+        [{}],
+      ),
+    ).toEqual([[`a`]])
+    expect(
+      await observe(
+        `cursor`,
+        [
+          { id: `z`, rank: 2 },
+          { id: `c`, rank: 1 },
+          { id: `b`, rank: 1 },
+          { id: `a`, rank: 1 },
+        ],
+        [{}, { minValues: [2] }],
+      ),
+    ).toEqual([[`z`], [`a`]])
+  })
+  it(`uses ascending keys within numeric ties in both order directions`, async () => {
+    type TiedRow = { id: string | number; rank: number }
+    const source: ReadonlyArray<TiedRow> = [
+      { id: 2, rank: 1 },
+      { id: 1, rank: 1 },
+      { id: `c`, rank: 1 },
+      { id: `b`, rank: 1 },
+      { id: `a`, rank: 1 },
+      { id: `z`, rank: 0 },
+      { id: `y`, rank: 0 },
+    ]
+    let cleanup: (() => unknown) | undefined
+    await withOracleCleanup(async () => {
+      const collection = createCollection<TiedRow, string | number>({
+        id: `numeric-public-ties-${name}`,
+        getKey: ({ id }) => id,
+        autoIndex: `off`,
+        startSync: true,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            for (const row of source) write({ type: `insert`, value: row })
+            commit()
+            markReady()
+          },
+        },
+      })
+      cleanup = () => collection.cleanup()
+      await collection.stateWhenReady()
+
+      // The independent reference sorts source facts by numeric rank, then
+      // by source key: strings before numbers, each in ascending order.
+      // Reverse admission distinguishes that law from a stable scan. A
+      // descending window cuts through the rank-1 group and the string-to-
+      // number boundary within it.
+      const keyOrder = (left: string | number, right: string | number) =>
+        typeof left !== typeof right
+          ? typeof left === `string`
+            ? -1
+            : 1
+          : left < right
+            ? -1
+            : left > right
+              ? 1
+              : 0
+      const expected = (direction: `asc` | `desc`, limit?: number) =>
+        [...source]
+          .sort(
+            (left, right) =>
+              (direction === `asc`
+                ? left.rank - right.rank
+                : right.rank - left.rank) || keyOrder(left.id, right.id),
+          )
+          .slice(0, limit)
+          .map(({ id }) => id)
+      const read = (
+        direction: `asc` | `desc`,
+        limit?: number,
+        optimizedOnly?: boolean,
+      ) =>
+        collection
+          .currentStateAsChanges({
+            orderBy: [
+              {
+                expression: new PropRef([`rank`]),
+                compareOptions: { ...DEFAULT_COMPARE_OPTIONS, direction },
+              },
+            ],
+            limit,
+            optimizedOnly,
+          })
+          ?.map(({ key }) => key)
+      const cases = [
+        { direction: `asc`, limit: 1 },
+        { direction: `asc`, limit: 3 },
+        { direction: `desc`, limit: 1 },
+        { direction: `desc`, limit: 2 },
+        { direction: `desc`, limit: 4 },
+        { direction: `desc`, limit: undefined },
+      ] as const
+
+      // Before index creation, the public scan is one receiving formulation.
+      for (const { direction, limit } of cases) {
+        expect(read(direction, limit)).toEqual(expected(direction, limit))
+      }
+      const index = collection.createIndex((row) => row.rank, {
+        indexType: IndexType,
+      })
+      const take = vi.spyOn(index, `takeFromStart`)
+      const reverseTake = vi.spyOn(index, `takeReversedFromEnd`)
+      // optimizedOnly forbids scan fallback. The take spies show that the
+      // index path supplies the same public observation after readiness.
+      for (const { direction, limit } of cases) {
+        expect(read(direction, limit, true)).toEqual(expected(direction, limit))
+      }
+      expect(take).toHaveBeenCalled()
+      expect(reverseTake).toHaveBeenCalled()
+    }, [() => cleanup?.()])
+  })
+
+  it(`uses source keys within custom-collation and nullish ties`, async () => {
+    type LabelRow = { id: string; label: string | null | undefined }
+    const source: ReadonlyArray<LabelRow> = [
+      { id: `b`, label: `yy` },
+      { id: `a`, label: `xx` },
+      { id: `n`, label: null },
+      { id: `m`, label: undefined },
+      { id: `c`, label: `z` },
+    ]
+    const compare = (left: string, right: string) => left.length - right.length
+    let cleanup: (() => unknown) | undefined
+    await withOracleCleanup(async () => {
+      const collection = createCollection<LabelRow, string>({
+        id: `custom-public-ties-${name}`,
+        getKey: ({ id }) => id,
+        autoIndex: `off`,
+        defaultStringCollation: { stringSort: `custom`, compare },
+        startSync: true,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            for (const row of source) write({ type: `insert`, value: row })
+            commit()
+            markReady()
+          },
+        },
+      })
+      cleanup = () => collection.cleanup()
+      await collection.stateWhenReady()
+
+      // Null and undefined share one position. The callback compares only
+      // non-null strings by length. The independent reference applies the
+      // public key rule to both comparator-equal groups.
+      const expected = (direction: `asc` | `desc`, limit?: number) =>
+        [...source]
+          .sort((left, right) => {
+            const order =
+              left.label == null
+                ? right.label == null
+                  ? 0
+                  : -1
+                : right.label == null
+                  ? 1
+                  : direction === `asc`
+                    ? left.label.length - right.label.length
+                    : right.label.length - left.label.length
+            return (
+              order || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0)
+            )
+          })
+          .slice(0, limit)
+          .map(({ id }) => id)
+      const read = (
+        direction: `asc` | `desc`,
+        limit?: number,
+        optimizedOnly?: boolean,
+      ) =>
+        collection
+          .currentStateAsChanges({
+            orderBy: [
+              {
+                expression: new PropRef([`label`]),
+                compareOptions: { direction, nulls: `first` },
+              },
+            ],
+            limit,
+            optimizedOnly,
+          })
+          ?.map(({ key }) => key)
+      const cases = [
+        { direction: `asc`, limit: 1 },
+        { direction: `asc`, limit: 4 },
+        { direction: `desc`, limit: 3 },
+        { direction: `desc`, limit: undefined },
+      ] as const
+
+      for (const { direction, limit } of cases) {
+        expect(read(direction, limit)).toEqual(expected(direction, limit))
+      }
+      const index = collection.createIndex((row) => row.label, {
+        indexType: IndexType,
+        options: {
+          compareOptions: {
+            direction: `asc`,
+            nulls: `first`,
+            stringSort: `custom`,
+            compare,
+          },
+        },
+      })
+      const take = vi.spyOn(index, `takeFromStart`)
+      const reverseTake = vi.spyOn(index, `takeReversedFromEnd`)
+      for (const { direction, limit } of cases) {
+        expect(read(direction, limit, true)).toEqual(expected(direction, limit))
+      }
+      expect(take).toHaveBeenCalled()
+      expect(reverseTake).toHaveBeenCalled()
+
+      // A cursor at `xx` names the callback's length-two position. Its
+      // comparator-equal `yy` peer remains eligible even though exact string
+      // equality would find only the already-sent `xx` row.
+      const batches: Array<Array<string>> = []
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          if (changes.length) batches.push(changes.map(({ key }) => key))
+        },
+        { includeInitialState: false },
+      )
+      try {
+        subscription.setOrderByIndex(new ReverseIndex(index, true))
+        const orderBy = [
+          {
+            expression: new PropRef([`label`]),
+            compareOptions: {
+              direction: `desc` as const,
+              nulls: `first` as const,
+            },
+          },
+        ]
+        subscription.requestLimitedSnapshot({ orderBy, limit: 3 })
+        subscription.requestLimitedSnapshot({
+          orderBy,
+          limit: 1,
+          minValues: [`xx`],
+        })
+        expect(batches).toEqual([[`m`, `n`, `a`], [`b`]])
+      } finally {
+        subscription.unsubscribe()
+      }
     }, [() => cleanup?.()])
   })
 })

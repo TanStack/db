@@ -90,3 +90,54 @@ snapshots still compare against the same frozen model. The focused owner
 passes 18 tests after the change. This is a fixed in-memory matrix, not
 evidence for later publication, other realms, arbitrary coercion, or provider
 cursors. The new witnesses await hostile review at a committed head.
+
+## Read-only review of `d917ba4c9`
+
+The exact-head hostile review found an enforcement gap in the fixed Date-range
+matrix. Its only source row at the bound's intrinsic timestamp was a plain
+`Date`. A wrong comparator that sent a native subclass tied with the bound to
+the strict side of a range could pass every subclass assertion: the local and
+foreign subclass rows were previously below or above the bound. This was an
+oracle-history gap, not a demonstrated production defect. The repair belongs
+in the source-row grammar and exact-key comparison; changing the accepted
+timestamp law or production comparator was not justified by this finding.
+
+The working-tree owner now admits a local and a foreign native Date subclass
+at the bound's exact millisecond timestamp. Their `valueOf` overrides report
+`-100` and `100`, respectively, while the bound's native timestamp is `1`.
+The model freezes all source timestamps through `Date.prototype.getTime`
+before Collection admission. Thus `gt` and `lt` exclude all three tied rows,
+while `gte` and `lte` include all three, including the plain-Date control.
+The same exact expected key sets judge the unindexed scan, ordinary indexed
+snapshot, and `optimizedOnly` indexed snapshot for BasicIndex and BTreeIndex;
+the lookup spy confirms both indexed paths. A wrong-result control removes
+`foreign-equal` from a real inclusive scan result and reaches the same
+exact-key `toEqual` comparison, which rejects it as an assertion failure.
+The focused Vitest run passed 18 tests with no type errors. These results are
+working-tree evidence after the `d917ba4c9` review, not a fresh committed-head
+hostile review.
+
+### Oracle-guide applicability for this repair
+
+| Requirement | Outcome at this working tree |
+| --- | --- |
+| ORC-001 | The live-query guide's comparison semantics promise native Date timestamp ordering, including foreign Dates; the owner limits its claim to fixed ready-Collection snapshots and the named Date domain. |
+| ORC-002 | Expected keys come from native `getTime` numbers frozen before Collection admission and simple numeric relations; no production comparator or index classifier computes the reference. |
+| ORC-003 | Opening prose states the law and limits. Adjacent comments identify the model, finite row and predicate grammar, Collection driver, public key observation, and scan/index checkpoints. |
+| ORC-004 | Not triggered: this is a fixed bounded matrix, not a generated-history property. |
+| ORC-005 | Public `currentStateAsChanges` keys are compared exactly before indexing and after BasicIndex or BTreeIndex installation; `optimizedOnly` and lookup spies witness the indexed path. |
+| ORC-006 | Removing `foreign-equal` from a real `gte` scan result fails the exact-key assertion at its intended checkpoint. The control is an assertion failure, not a setup or runtime failure. |
+| ORC-007 | Not triggered: the fixed matrix makes no important generated-property claim. |
+| ORC-008 | Not triggered: the reference recomputes from frozen rows and introduces no stateful transition model. |
+| ORC-009 | The reference maps plain, local-subclass, and foreign-subclass Date values to one intrinsic millisecond timestamp domain. The Collection retains the source values; the model intentionally does not represent their overridden coercion methods as ordering state. |
+| ORC-010 | The owner's cleanup wrapper preserves a primary comparison failure as the `AggregateError` cause if release also fails; its separate cleanup witness checks both errors and release order. |
+| ORC-011 | Not triggered by this review: the named fault was a missing tied-subclass history, not a plausible semantic error shared by production and the native-timestamp reference for which a second formulation was identified. |
+| ORC-012 | This table records the other applicable requirements and explains non-applicable triggers. It does not substitute for a new exact-head hostile review. |
+| ORC-013 | `local-equal` and `foreign-equal` reach the boundary premise. Inclusive and exclusive relations on both sides distinguish correct timestamp ties from a wrong strict-side rule; the wrong-result control rejects an omitted tie. |
+| ORC-014 | Not triggered: the claim is limited to the controlled ready in-memory Collection and makes no real-provider or host handoff claim. |
+
+The bounded claim remains: a ready in-memory Collection, fixed rows, these
+four range operators and operand arrangements, two index types, and public
+snapshot keys. Later publication, generated subclass histories, invalid Dates,
+arbitrary coercion methods, provider cursors, and other hosts still need their
+own witnesses before broader closure.

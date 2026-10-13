@@ -28,13 +28,15 @@
  * A further valid-Date history overrides `valueOf` in local and foreign
  * subclasses while retaining native `getTime`. An ordinary Date bound and a
  * subclass bound each reach all four effective relations; the subclass bound
- * occupies both operand positions. The intrinsic-timestamp model compares
- * public scan and indexed snapshots, and both index types must remain eligible
- * for optimized-only reads. The reference captures each source timestamp
- * before the rows enter the Collection, so later source-Date changes cannot
- * change the expected answer. Date/number scan comparisons in both operand
- * orders use the same model; mixed-domain range indexes make no eligibility
- * claim here.
+ * occupies both operand positions. Plain, local-subclass, and foreign-subclass
+ * rows share the bound's exact timestamp, so inclusive and exclusive ranges
+ * must respectively keep or exclude every tied key. The intrinsic-timestamp
+ * model compares public scan and indexed snapshots, and both index types must
+ * remain eligible for optimized-only reads. The reference captures each source
+ * timestamp before the rows enter the Collection, so later source-Date changes
+ * cannot change the expected answer. Date/number scan comparisons in both
+ * operand orders use the same model; mixed-domain range indexes make no
+ * eligibility claim here.
  *
  * Production driver: `currentStateAsChanges`, Collection subscriptions, and
  * live-query Collections run the real predicates and callback compilers.
@@ -374,11 +376,18 @@ it.each([
       const earlierForeign = runInNewContext(
         `new (class extends Date { valueOf() { return 100 } })(0)`,
       ) as Date
+      const equalForeign = runInNewContext(
+        `new (class extends Date { valueOf() { return 100 } })(1)`,
+      ) as Date
+      const equalLocal = new LaterDate(1)
+      const localLater = new LaterDate(2)
       const dateRows = [
         { id: `plain-before`, v: new Date(-1) },
         { id: `foreign-earlier`, v: earlierForeign },
         { id: `equal`, v: new Date(1) },
-        { id: `local-later`, v: new LaterDate(2) },
+        { id: `local-equal`, v: equalLocal },
+        { id: `foreign-equal`, v: equalForeign },
+        { id: `local-later`, v: localLater },
         { id: `plain-after`, v: new Date(3) },
       ]
       const bound = new Date(1)
@@ -491,10 +500,12 @@ it.each([
       await collection.stateWhenReady()
 
       // The model captured native timestamps, which ignore subclass valueOf.
-      // The two overrides deliberately reverse their apparent native-operator
-      // positions, while ordinary Dates control both sides and equality.
+      // The overrides deliberately move their native-operator positions,
+      // including at the exact bound, while ordinary Dates control both sides.
       expect(Number(earlierForeign)).toBe(100)
-      expect(Number(dateRows[3]!.v)).toBe(-100)
+      expect(Number(equalForeign)).toBe(100)
+      expect(Number(equalLocal)).toBe(-100)
+      expect(Number(localLater)).toBe(-100)
       expect(Number(subclassBound)).toBe(-100)
       const expectedDateKeys = (accepts: (time: number) => boolean) =>
         referenceRows
@@ -509,6 +520,13 @@ it.each([
           .currentStateAsChanges({ where, optimizedOnly })
           ?.map((change) => String(change.key))
           .sort()
+      expect(
+        referenceRows
+          .filter(({ time }) => time === boundTime)
+          .map(({ id }) => id)
+          .sort(),
+        `plain and native subclass rows at the range bound`,
+      ).toEqual([`equal`, `foreign-equal`, `local-equal`])
 
       // A ready Collection's public snapshots are the comparison cuts. Scan
       // first, then install one index and require both the ordinary and
@@ -522,6 +540,17 @@ it.each([
           `unindexed optimized-only ${predicate.name}`,
         ).toBeUndefined()
       }
+      // Calibrate the exact-key refinement check with a plausible wrong
+      // result: dropping one tied subclass from an inclusive public scan.
+      const inclusive = predicates[1]!
+      const fullScan = snapshotKeys(inclusive.where)!
+      expect(fullScan).toContain(`foreign-equal`)
+      expect(() =>
+        expect(
+          fullScan.filter((key) => key !== `foreign-equal`),
+          `wrong-result control: omitted foreign Date tie`,
+        ).toEqual(expectedDateKeys(inclusive.accepts)),
+      ).toThrow()
       // Equality already normalizes native Dates to numbers. Relational scan
       // results must use the same timestamp when either operand is a number.
       for (const predicate of mixedPredicates) {
@@ -554,8 +583,8 @@ it.each([
       // timestamps before production received the source rows.
       const greaterKeys = expectedDateKeys((time) => time > boundTime)
       expect(greaterKeys).toContain(`local-later`)
-      dateRows[3]!.v.setTime(-2)
-      expect(nativeGetTime.call(dateRows[3]!.v)).toBe(-2)
+      localLater.setTime(-2)
+      expect(nativeGetTime.call(localLater)).toBe(-2)
       expect(expectedDateKeys((time) => time > boundTime)).toEqual(greaterKeys)
     })
   },

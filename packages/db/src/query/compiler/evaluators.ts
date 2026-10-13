@@ -509,7 +509,7 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
         if (!Array.isArray(array)) {
           return false
         }
-        return array.some((item) =>
+        return Array.prototype.some.call(array, (item: unknown) =>
           valuesEqual(normalizeEqualityOperand(item), value),
         )
       }
