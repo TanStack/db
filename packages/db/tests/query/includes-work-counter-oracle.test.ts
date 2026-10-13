@@ -593,3 +593,279 @@ describe(`includes deterministic work-counter oracle`, () => {
     )
   }
 })
+
+/**
+ * # Does a parent window bound include work?
+ *
+ * An ordered, limited parent query shows only the rows in its window. Law 12
+ * of the live-query architecture (Work) says irrelevant rows must not
+ * activate unrelated routes. A parent row that `limit` or `offset` drops is
+ * irrelevant to the result, so its include must not load child rows. The
+ * same holds with `distinct`, which reads every parent row before the window.
+ *
+ * The model is relational: sort the parents by rank, take the window, and
+ * attach each shown parent's children. The query must show exactly those
+ * rows after preload and after every step.
+ *
+ * Work is counted as child rows the child Collection delivers to the query.
+ * After preload, that count is at most the children of the shown parents plus
+ * one parent's children as refill headroom. A step may deliver at most the
+ * children of the parents shown before or after it, one changed child, and
+ * the same headroom. A query that loads children for every parent before the
+ * window delivers the children of `offset + limit` parents, or of every
+ * parent with `distinct`, and fails.
+ *
+ * Histories insert and delete parents, change a parent's rank, insert and
+ * delete children, and move the window with `setWindow`. Ranks are unique, so
+ * the window order is total. Indexes exist before the live query starts.
+ */
+type WindowParent = { id: string; rank: number }
+type WindowChild = { id: string; parentId: string }
+
+type WindowCommand =
+  | { type: `insert-parent` }
+  | { type: `delete-parent`; pick: number }
+  | { type: `rank`; pick: number; up: boolean }
+  | { type: `insert-child`; pick: number }
+  | { type: `delete-child`; pick: number }
+  | { type: `move`; offset: number; limit: number }
+
+type WindowCase = {
+  parents: number
+  childrenPerParent: number
+  direction: `asc` | `desc`
+  distinct: boolean
+  offset: number
+  limit: number
+  history: Array<WindowCommand>
+}
+
+const windowCommand: fc.Arbitrary<WindowCommand> = fc.oneof(
+  fc.constant({ type: `insert-parent` as const }),
+  fc.record({ type: fc.constant(`delete-parent` as const), pick: fc.nat() }),
+  fc.record({
+    type: fc.constant(`rank` as const),
+    pick: fc.nat(),
+    up: fc.boolean(),
+  }),
+  fc.record({ type: fc.constant(`insert-child` as const), pick: fc.nat() }),
+  fc.record({ type: fc.constant(`delete-child` as const), pick: fc.nat() }),
+  fc.record({
+    type: fc.constant(`move` as const),
+    offset: fc.integer({ min: 0, max: 30 }),
+    limit: fc.integer({ min: 1, max: 4 }),
+  }),
+)
+
+const windowCase: fc.Arbitrary<WindowCase> = fc.record({
+  parents: fc.integer({ min: 10, max: 60 }),
+  childrenPerParent: fc.integer({ min: 1, max: 3 }),
+  direction: fc.constantFrom(`asc` as const, `desc` as const),
+  distinct: fc.boolean(),
+  offset: fc.integer({ min: 0, max: 30 }),
+  limit: fc.integer({ min: 1, max: 4 }),
+  history: fc.array(windowCommand, { maxLength: 8 }),
+})
+
+type WindowRow = { id: string; children: Array<string> }
+
+/** The model's window: shown parents in order, each with its child ids. */
+function modelWindowRows(
+  parents: ReadonlyMap<string, WindowParent>,
+  children: ReadonlyMap<string, WindowChild>,
+  {
+    direction,
+    offset,
+    limit,
+  }: Pick<WindowCase, 'direction'> & {
+    offset: number
+    limit: number
+  },
+): Array<WindowRow> {
+  const sign = direction === `asc` ? 1 : -1
+  return [...parents.values()]
+    .sort((left, right) => sign * (left.rank - right.rank))
+    .slice(offset, offset + limit)
+    .map((parent) => ({
+      id: parent.id,
+      children: [...children.values()]
+        .filter((child) => child.parentId === parent.id)
+        .map((child) => child.id)
+        .sort(),
+    }))
+}
+
+async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
+  const parents = new Map<string, WindowParent>()
+  const children = new Map<string, WindowChild>()
+  let nextRank = 0
+  let nextChild = 0
+  for (let index = 0; index < testCase.parents; index++) {
+    const parent = { id: `parent-${index}`, rank: (nextRank += 2) }
+    parents.set(parent.id, parent)
+    for (let child = 0; child < testCase.childrenPerParent; child++) {
+      const row = { id: `child-${nextChild++}`, parentId: parent.id }
+      children.set(row.id, row)
+    }
+  }
+  const parentSource = createSourceCollection(`window-parents`, [
+    ...parents.values(),
+  ])
+  const childSource = createSourceCollection(`window-children`, [
+    ...children.values(),
+  ])
+  let cleanupLive: (() => Promise<void>) | undefined
+  let primary: { error: unknown } | undefined
+  try {
+    await Promise.all([parentSource.preload(), childSource.preload()])
+    parentSource.createIndex((row) => row.rank, { indexType: BTreeIndex })
+    childSource.createIndex((row) => row.parentId, { indexType: BTreeIndex })
+    const childWork = countSourceWork(childSource)
+
+    const live = createLiveQueryCollection((q) => {
+      const page = q
+        .from({ parent: parentSource })
+        .orderBy(({ parent }) => parent.rank, testCase.direction)
+        .offset(testCase.offset)
+        .limit(testCase.limit)
+        .select(({ parent }) => ({
+          id: parent.id,
+          rank: parent.rank,
+          children: materialize(
+            q
+              .from({ child: childSource })
+              .where(({ child }) => eq(child.parentId, parent.id))
+              .select(({ child }) => ({ id: child.id })),
+          ),
+        }))
+      return testCase.distinct ? page.distinct() : page
+    })
+    cleanupLive = () => live.cleanup()
+
+    let shown = { offset: testCase.offset, limit: testCase.limit }
+    const shownRows = (): Array<WindowRow> =>
+      (
+        live.toArray as unknown as Array<{
+          id: string
+          children: Array<{ id: string }>
+        }>
+      ).map((row) => ({
+        id: row.id,
+        children: row.children.map((child) => child.id).sort(),
+      }))
+    const childCount = (parentId: string) =>
+      [...children.values()].filter((child) => child.parentId === parentId)
+        .length
+    const headroom = () => Math.max(0, ...[...parents.keys()].map(childCount))
+    const expectWindow = (label: string) => {
+      const expected = modelWindowRows(parents, children, {
+        direction: testCase.direction,
+        ...shown,
+      })
+      expect(shownRows(), label).toEqual(expected)
+      return expected
+    }
+
+    await live.preload()
+    let before = expectWindow(`rows after preload`)
+    expect(
+      childWork().delivered,
+      `child rows delivered by preload`,
+    ).toBeLessThanOrEqual(
+      before.reduce((sum, row) => sum + childCount(row.id), 0) + headroom(),
+    )
+
+    const sorted = () =>
+      [...parents.values()].sort((left, right) => left.rank - right.rank)
+    for (const [step, command] of testCase.history.entries()) {
+      const deliveredBefore = childWork().delivered
+      const ids = [...parents.keys()]
+      const childIds = [...children.keys()]
+      if (command.type === `insert-parent`) {
+        const parent = { id: `parent-new-${step}`, rank: (nextRank += 2) - 1 }
+        parents.set(parent.id, parent)
+        await parentSource.insert(parent).isPersisted.promise
+      } else if (command.type === `delete-parent`) {
+        if (ids.length === 0) continue
+        const id = ids[command.pick % ids.length]!
+        parents.delete(id)
+        await parentSource.delete(id).isPersisted.promise
+      } else if (command.type === `rank`) {
+        if (ids.length === 0) continue
+        const id = ids[command.pick % ids.length]!
+        // Move the parent past every other rank, so it crosses the window.
+        const ranks = sorted().map((parent) => parent.rank)
+        const rank = command.up ? ranks.at(-1)! + 1 : ranks[0]! - 1
+        nextRank = Math.max(nextRank, rank + 1)
+        parents.set(id, { id, rank })
+        await parentSource.update(id, (draft) => {
+          draft.rank = rank
+        }).isPersisted.promise
+      } else if (command.type === `insert-child`) {
+        if (ids.length === 0) continue
+        const row = {
+          id: `child-${nextChild++}`,
+          parentId: ids[command.pick % ids.length]!,
+        }
+        children.set(row.id, row)
+        await childSource.insert(row).isPersisted.promise
+      } else if (command.type === `delete-child`) {
+        if (childIds.length === 0) continue
+        const id = childIds[command.pick % childIds.length]!
+        children.delete(id)
+        await childSource.delete(id).isPersisted.promise
+      } else {
+        shown = { offset: command.offset, limit: command.limit }
+        const settled = live.utils.setWindow(shown)
+        if (settled !== true) await settled
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      const after = expectWindow(`rows after step ${step}`)
+      const touched = new Set([...before, ...after].map((row) => row.id))
+      expect(
+        childWork().delivered - deliveredBefore,
+        `child rows delivered by step ${step}`,
+      ).toBeLessThanOrEqual(
+        [...touched].reduce((sum, id) => sum + childCount(id), 0) +
+          1 +
+          headroom(),
+      )
+      before = after
+    }
+  } catch (error) {
+    primary = { error }
+    throw error
+  } finally {
+    await runCleanups(
+      [
+        async () => cleanupLive?.(),
+        async () => parentSource.cleanup(),
+        async () => childSource.cleanup(),
+      ],
+      primary,
+    )
+  }
+}
+
+describe(`includes work under an ordered parent window`, () => {
+  it.each([false, true])(
+    `loads children only for a late page's parents (distinct=%s)`,
+    (distinct) =>
+      checkWindowedIncludeWork({
+        parents: 60,
+        childrenPerParent: 3,
+        direction: `desc`,
+        distinct,
+        offset: 30,
+        limit: 2,
+        history: [{ type: `move`, offset: 10, limit: 3 }],
+      }),
+  )
+
+  for (const campaign of campaigns(2137, `includes-work.ordered-window`)) {
+    fcTest.prop([windowCase], campaign.options)(
+      `a parent window bounds child loading (${campaign.name})`,
+      checkWindowedIncludeWork,
+    )
+  }
+})
