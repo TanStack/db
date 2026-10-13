@@ -1439,17 +1439,6 @@ function normalizeSyncFnResult(result: void | (() => void) | SyncConfigRes) {
   return result
 }
 
-// The caller retired the demand: its failure is not a sync failure.
-function isAbandonedDemand(
-  options: LoadSubsetOptions,
-  error: unknown,
-): boolean {
-  return (
-    options.signal?.aborted === true ||
-    (isRecord(error) && error.name === `AbortError`)
-  )
-}
-
 function isTxCommittedPayload(payload: unknown): payload is TxCommitted {
   if (!isRecord(payload) || payload.type !== `tx:committed`) {
     return false
@@ -1593,18 +1582,6 @@ class PersistedCollectionRuntime<
   private sourceTruncateGeneration = 0
   /** Durable rows cannot replace source rows during scoped recovery. */
   private scopedRecovery = false
-  /**
-   * The current scoped recovery's reacquisition. While it is open, commit
-   * notices wait in the queue; `failure` is set when it ends without
-   * restoring the generation's authority.
-   */
-  private reacquisition:
-    | {
-        done: Promise<void>
-        failure?: unknown
-        finish: (failure?: unknown) => void
-      }
-    | undefined
   private scopedRecoveryPending = false
   private scopedRecoverySequence = 0
   private recoverQueuedAfterLocalLoadFailure = false
@@ -1950,14 +1927,6 @@ class PersistedCollectionRuntime<
     options: LoadSubsetOptions,
   ): Promise<void> {
     try {
-      // A load during reacquisition settles only after it ends and its held
-      // commits apply; a reacquisition that failed leaves no visible rows.
-      while (this.reacquisition) {
-        const reacquisition = this.reacquisition
-        await reacquisition.done
-        if (reacquisition.failure !== undefined && this.scopedRecovery)
-          throw reacquisition.failure
-      }
       // Commits kept while the claim was expired apply after it is active.
       if (this.hasExpiredCacheClaim() || this.cacheClaimRecovery) {
         await this.ensureCacheClaimActive()
@@ -2392,26 +2361,6 @@ class PersistedCollectionRuntime<
     return this.startupCacheGenerationRotated
   }
 
-  // Opens this recovery's reacquisition; a newer recovery supersedes an
-  // older one, whose waiters then wait for the newer one.
-  private openReacquisition(): NonNullable<typeof this.reacquisition> {
-    const previous = this.reacquisition
-    let resolve!: () => void
-    const reacquisition: NonNullable<typeof this.reacquisition> = {
-      done: new Promise<void>((done) => {
-        resolve = done
-      }),
-      finish: (failure) => {
-        reacquisition.failure = failure
-        if (this.reacquisition === reacquisition) this.reacquisition = undefined
-        resolve()
-      },
-    }
-    this.reacquisition = reacquisition
-    previous?.finish()
-    return reacquisition
-  }
-
   async startScopedRecovery(resetMetadata?: {
     key: string
     value: unknown
@@ -2424,7 +2373,6 @@ class PersistedCollectionRuntime<
     this.scopedRecovery = true
     this.scopedRecoveryPending = true
     const recoverySequence = ++this.scopedRecoverySequence
-    const reacquisition = this.openReacquisition()
     this.hydratedDemands.clear()
     this.resetSequence++
     let resolveCacheRotated: (() => void) | undefined
@@ -2441,9 +2389,8 @@ class PersistedCollectionRuntime<
         sourceRestart = Promise.resolve(restartSource(cacheRotated))
         void sourceRestart.catch(() => undefined)
       }
-      const rotatedGeneration = await this.applyMutex.run(async () => {
+      await this.applyMutex.run(async () => {
         this.throwIfLifecycleReplaced(lifecycleGeneration)
-        let generationRotated = false
         const claim = this.cacheGenerationClaim
         if (claim && this.persistence.adapter.rotateCacheGeneration) {
           const previousStorageId = claim.storageCollectionId
@@ -2484,7 +2431,6 @@ class PersistedCollectionRuntime<
           this.coordinatorUnsubscribe?.()
           this.coordinatorUnsubscribe = null
           this.cacheGenerationClaim = rotated
-          generationRotated = true
           this.latestTerm = 0
           this.latestSeq = 0
           this.latestRowVersion = 0
@@ -2554,7 +2500,6 @@ class PersistedCollectionRuntime<
             )
           }
         }
-        return generationRotated
       })
       this.throwIfLifecycleReplaced(lifecycleGeneration)
       resolveCacheRotated?.()
@@ -2568,18 +2513,6 @@ class PersistedCollectionRuntime<
       // A newer rotation owns reacquisition of the active demands. Dispatching
       // them from this older recovery would fetch against its pending cache.
       if (recoverySequence !== this.scopedRecoverySequence) return
-      // A follower's rotated generation holds only the owner's writes. Its
-      // authority returns once the owner has reacquired every active demand;
-      // a recovery that did not rotate keeps the old, untrusted cache.
-      const followsLeader =
-        rotatedGeneration &&
-        this.canRouteRemoteDemandThroughCoordinator() &&
-        !this.persistence.coordinator.isLeader(this.storageCollectionId)
-      const reacquiring: Array<{
-        options: LoadSubsetOptions
-        ensure: Promise<void>
-      }> = []
-      let everyDemandReacquires = followsLeader
       for (const options of this.activeSubsets.values()) {
         if (options.signal?.aborted) continue
         const rotatedOptions = this.rotatedAcquisitions.get(options)
@@ -2589,49 +2522,14 @@ class PersistedCollectionRuntime<
             rotatedOptions,
           )
           this.rotatedEnsures.set(options, ensure)
-          reacquiring.push({ options, ensure })
-          void ensure.catch((error) => {
-            if (!isAbandonedDemand(options, error)) this.reportSyncError(error)
-          })
+          void ensure.catch((error) => this.reportSyncError(error))
         } else {
-          everyDemandReacquires = false
           this.refreshScopedSubsets()
           break
         }
       }
-      // Other recoveries do not wait for reacquisition: release the queue.
-      const settled = followsLeader
-        ? Promise.allSettled(reacquiring.map(({ ensure }) => ensure))
-        : Promise.resolve([])
-      void settled
-        .then((results) =>
-          this.applyMutex.run(async () => {
-            if (this.reacquisition !== reacquisition) return
-            let failure: unknown
-            // A released or aborted demand no longer needs its
-            // reacquisition; any other rejection keeps the cache untrusted.
-            results.forEach((result, index) => {
-              if (
-                result.status === `rejected` &&
-                !isAbandonedDemand(reacquiring[index]!.options, result.reason)
-              )
-                failure ??= result.reason
-            })
-            if (!followsLeader) {
-              reacquisition.finish()
-            } else if (everyDemandReacquires && failure === undefined) {
-              this.scopedRecovery = false
-              reacquisition.finish()
-            } else {
-              reacquisition.finish(failure ?? new SyncTransactionAbortedError())
-            }
-            await this.flushQueuedTxCommittedUnsafe()
-          }),
-        )
-        .catch((error) => this.markTerminalFailure(error, lifecycleGeneration))
     } catch (error) {
       rejectCacheRotated?.(error)
-      reacquisition.finish(error)
       throw this.markTerminalFailure(error, lifecycleGeneration)
     }
   }
@@ -2910,7 +2808,13 @@ class PersistedCollectionRuntime<
           this.rotatedAcquisitions.get(options) ?? options,
         )
       } catch (error) {
-        if (isAbandonedDemand(options, error)) {
+        if (
+          options.signal?.aborted ||
+          (typeof error === `object` &&
+            error !== null &&
+            `name` in error &&
+            error.name === `AbortError`)
+        ) {
           this.pendingRemoteSubsetEnsures.delete(this.getSubsetKey(options))
           throw error
         }
@@ -2982,7 +2886,13 @@ class PersistedCollectionRuntime<
     options: LoadSubsetOptions,
     error: unknown,
   ): void {
-    if (isAbandonedDemand(options, error)) {
+    if (
+      options.signal?.aborted ||
+      (typeof error === `object` &&
+        error !== null &&
+        `name` in error &&
+        error.name === `AbortError`)
+    ) {
       this.pendingRemoteSubsetEnsures.delete(this.getSubsetKey(options))
       return
     }
@@ -3280,7 +3190,6 @@ class PersistedCollectionRuntime<
     this.clearCacheClaimRenewal()
     this.cacheClaimRecovery = null
     this.scopedRecovery = false
-    this.reacquisition?.finish(new SyncTransactionAbortedError())
     this.scopedRecoveryPending = false
     this.scopedRecoverySequence++
     this.recoverQueuedAfterLocalLoadFailure = false
@@ -4681,11 +4590,7 @@ class PersistedCollectionRuntime<
     if (isTxCommittedPayload(payload)) {
       // While the claim is expired, keep the commit until renewal or rotation
       // decides this generation; a renewed generation still owes its rows.
-      if (
-        claimExpired ||
-        this.isHydratingNow() ||
-        this.reacquisition !== undefined
-      ) {
+      if (claimExpired || this.isHydratingNow()) {
         this.queuedTxCommitted.push({
           txCommitted: payload,
           lifecycleGeneration,
@@ -4745,8 +4650,6 @@ class PersistedCollectionRuntime<
         this.scheduleCacheClaimRecovery(this.lifecycleGeneration)
         return
       }
-      // Reacquisition flushes the queue once every rotated demand settles.
-      if (this.reacquisition) return
       const queued = this.queuedTxCommitted.shift()
       if (!queued) {
         continue

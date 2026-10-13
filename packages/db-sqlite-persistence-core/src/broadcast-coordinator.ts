@@ -411,11 +411,6 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     this.channel.postMessage(message)
   }
 
-  private getLeaderId(collectionId: string): string | null {
-    const state = this.collections.get(collectionId)
-    return state?.isLeader ? this.nodeId : (state?.leaderId ?? null)
-  }
-
   isLeader(collectionId: string): boolean {
     return this.collections.get(collectionId)?.isLeader ?? false
   }
@@ -661,7 +656,10 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       }
     } finally {
       if (acquisition.inFlight === work) acquisition.inFlight = null
-      const currentLeaderId = this.getLeaderId(acquisition.collectionId)
+      const current = this.collections.get(acquisition.collectionId)
+      const currentLeaderId = current?.isLeader
+        ? this.nodeId
+        : (current?.leaderId ?? null)
       const key = remoteSubsetAcquisitionKey(
         acquisition.collectionId,
         acquisition.acquisitionId,
@@ -1249,7 +1247,8 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     collectionId: string,
   ): Promise<void> {
     if (this.isDisposed()) return
-    const leaderId = this.getLeaderId(collectionId)
+    const state = this.collections.get(collectionId)
+    const leaderId = state?.isLeader ? this.nodeId : state?.leaderId
     if (!leaderId) return
 
     const replays: Array<Promise<void>> = []
@@ -1454,7 +1453,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
   } {
     const state = this.collections.get(collectionId)
     return {
-      leaderId: this.getLeaderId(collectionId),
+      leaderId: state?.isLeader ? this.nodeId : (state?.leaderId ?? null),
       term: state?.latestTerm ?? null,
     }
   }
