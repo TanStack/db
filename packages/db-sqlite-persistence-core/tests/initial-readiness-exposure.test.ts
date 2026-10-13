@@ -181,9 +181,19 @@ type ReadScript = (read: number) => { hold?: Promise<void>; fail?: Error }
 function followerTab(
   script: ReadScript = () => ({}),
   beforeLeaderCommit: () => Promise<void> = () => Promise.resolve(),
+  rotateAfterFirstRead = false,
 ) {
   const durable: Array<Row> = []
   let reads = 0
+  // A managed cache claim that is lost right after the first read, so that
+  // read is discarded and the demand reacquires under a rotated generation.
+  let storageId = `follower-cache-1`
+  let loseClaim = false
+  const claim = () => ({
+    storageCollectionId: storageId,
+    claimId: `follower-claim`,
+    expiresAtMs: Date.now() + 10_000,
+  })
   const adapter: PersistenceAdapter = {
     loadSubset: async () => {
       const read = ++reads
@@ -191,8 +201,22 @@ function followerTab(
       const { hold, fail } = script(read)
       await hold
       if (fail) throw fail
+      if (rotateAfterFirstRead && read === 1) loseClaim = true
       return snapshot.map((value) => ({ key: value.id, value }))
     },
+    ...(rotateAfterFirstRead
+      ? {
+          claimCacheGeneration: async () => claim(),
+          renewCacheGenerationClaim: async () =>
+            loseClaim ? undefined : Date.now() + 10_000,
+          rotateCacheGeneration: async () => {
+            loseClaim = false
+            storageId = `follower-cache-2`
+            return claim()
+          },
+          releaseCacheGenerationClaim: async () => {},
+        }
+      : {}),
     loadResumeSnapshot: () =>
       Promise.resolve({
         rows: [],
@@ -277,7 +301,10 @@ function followerTab(
       persistence: { adapter, coordinator },
       syncMode: `on-demand`,
       sync: {
-        sync: () => ({ loadSubset: () => Promise.resolve() }),
+        sync: () => ({
+          loadSubset: () => Promise.resolve(),
+          restartAfterScopedRecovery: () => {},
+        }),
       },
     }),
   )
@@ -365,6 +392,27 @@ describe(`a persisted follower tab's load settles with the leader's rows`, () =>
 
     expect(seen.rows).toEqual([`remote`])
   })
+
+  // Open, and the same on main: after the claim rotates, the reacquired
+  // demand has not hydrated in the new generation, so the leader's broadcast
+  // invalidates nothing and its row never becomes visible here. This pins the
+  // gap; it also means the rotated route's wait has no distinguishing witness.
+  it.fails(
+    `settles a demand reacquired under a rotated cache with the leader's rows`,
+    async () => {
+      // The claim is lost right after read 1, so that read is discarded and
+      // the demand reacquires under the rotated generation through the leader.
+      const tab = followerTab(undefined, undefined, true)
+      let visibleAtSettlement: boolean | undefined
+      await Promise.resolve(tab.source._sync.loadSubset({ limit: 10 })).then(
+        () => {
+          visibleAtSettlement = tab.source.has(`remote`)
+        },
+      )
+
+      expect(visibleAtSettlement).toBe(true)
+    },
+  )
 
   it(`rejects when the leader's broadcast fails to apply`, async () => {
     quietErrors()
