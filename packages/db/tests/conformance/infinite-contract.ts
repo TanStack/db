@@ -110,6 +110,18 @@ export interface InfiniteQueryDriver {
     collection: Collection<T, string | number, any>
     calls: Array<{ limit?: number }>
   }
+  /**
+   * An on-demand source whose Collection stays `loading` until `markReady`.
+   * Each request writes its rows at once and stays pending until `settle`.
+   */
+  makeLaggingOnDemandSource: <T extends { id: string; rank: number }>(
+    data: ReadonlyArray<T>,
+  ) => {
+    collection: Collection<T, string | number, any>
+    pending: () => number
+    settle: () => void
+    markReady: () => void
+  }
   makePrecreated: (build: QueryBuild) => {
     collection: Collection<any, any, any>
   }

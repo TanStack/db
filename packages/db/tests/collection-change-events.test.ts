@@ -70,7 +70,7 @@ describe(`currentStateAsChanges`, () => {
     })
 
     // Insert users via sync
-    mockSync.mockImplementation(({ begin, write, commit }) => {
+    mockSync.mockImplementation(({ begin, write, commit, markReady }) => {
       begin()
       users.forEach((user) => {
         write({
@@ -79,6 +79,7 @@ describe(`currentStateAsChanges`, () => {
         })
       })
       commit()
+      markReady()
     })
 
     collection.startSyncImmediate()

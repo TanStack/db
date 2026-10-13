@@ -244,6 +244,13 @@ const reactInfiniteDriver: InfiniteQueryDriver = {
   makeSource,
   makeOnDemandSource: (data, delay) =>
     makeInfiniteOnDemandSource({ createCollection, BTreeIndex }, data, delay),
+  makeLaggingOnDemandSource: (data) =>
+    makeInfiniteOnDemandSource(
+      { createCollection, BTreeIndex },
+      data,
+      undefined,
+      `lagging`,
+    ),
   makePrecreated,
   makeWindowController: createLiveQueryWindowController,
   mount,

@@ -37,6 +37,7 @@ import {
 } from '../../db/tests/utils'
 import { injectLiveQuery } from '../src/index'
 import { runSuite } from '../../db/tests/conformance/suite'
+import { makeLaggingSource } from '../../db/tests/conformance/lagging-source'
 import { expectResultSurface } from '../../db/tests/conformance/result-laws'
 import { withScopeSetup } from '../../db/tests/conformance/scope-setup'
 import type {
@@ -227,6 +228,11 @@ const angularDriver: LiveQueryDriver = {
   ops: { eq, gt, count, sum, coalesce, createOptimisticAction },
   makeSource,
   makeDeferredSource,
+  makeLaggingSource: <T extends { id: string }>() =>
+    makeLaggingSource<T>(
+      createCollection,
+      `conformance-angular-lagging-${sourceSeq++}`,
+    ),
   makePrecreated,
   makeErrorSource,
   mount,

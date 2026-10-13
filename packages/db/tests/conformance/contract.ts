@@ -59,6 +59,26 @@ export interface DeferredSourceHandle<
 }
 
 /**
+ * An on-demand source whose Collection readiness lags behind its settled
+ * subset demand, as a progressive Electric collection does during its full
+ * sync. `syncMode` is `on-demand`. Rows written with `emit` are visible at once,
+ * but each `loadSubset` request stays pending until `settle`. The Collection
+ * stays `loading` until `markReady`.
+ *
+ * The readiness law (ARCHITECTURE.md law 10) makes the settled request, not
+ * the source's `markReady`, the evidence that a query over this source is
+ * initially ready. A binding that waits for `markReady` fails at `settle`.
+ */
+export interface LaggingSourceHandle<
+  T extends { id: string } = Row,
+> extends DeferredSourceHandle<T> {
+  /** Whether a subset request is pending. */
+  loadStarted: () => boolean
+  /** Settle every pending subset request. */
+  settle: () => void
+}
+
+/**
  * The subset of `@tanstack/db` query operators scenarios need, supplied by the
  * driver from the adapter's realm. Grows as engine scenarios are ported.
  */
@@ -144,6 +164,8 @@ export interface LiveQueryDriver {
   ) => SourceHandle<T>
   /** Create a source that starts `loading` and readies on demand (keyed by `id`). */
   makeDeferredSource: <T extends { id: string }>() => DeferredSourceHandle<T>
+  /** Create an on-demand source that lags behind its settled subset (keyed by `id`). */
+  makeLaggingSource: <T extends { id: string }>() => LaggingSourceHandle<T>
   /**
    * Create a pre-built live-query collection to pass straight to the hook.
    * `startSync: false` yields a not-yet-syncing collection (isReady false).

@@ -25,6 +25,7 @@ import {
   extractCollectionFromSource,
   extractCollectionSources,
   extractCollectionsFromQuery,
+  sourcePermitsInitialReadiness,
 } from './utils.js'
 import type { LiveQueryInternalUtils } from './internal.js'
 import type { WindowOptions } from '../compiler/index.js'
@@ -1213,13 +1214,8 @@ export class CollectionConfigBuilder<
   }
 
   private allRequiredSourcesReady() {
-    return this.collectionSources.every(
-      (source) =>
-        // Only on-demand sources settle through route demand. Eager
-        // loadSubset calls return immediately, so they must reach ready.
-        (this.lazySources.has(source.sourceId) &&
-          source.collection.config.syncMode === `on-demand`) ||
-        source.collection.isReady(),
+    return this.collectionSources.every(({ collection }) =>
+      sourcePermitsInitialReadiness(collection),
     )
   }
 

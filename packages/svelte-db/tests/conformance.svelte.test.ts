@@ -26,6 +26,7 @@ import {
 } from '../../db/tests/utils'
 import { useLiveQuery } from '../src/useLiveQuery.svelte.js'
 import { runSuite } from '../../db/tests/conformance/suite'
+import { makeLaggingSource } from '../../db/tests/conformance/lagging-source'
 import { expectResultSurface } from '../../db/tests/conformance/result-laws'
 import type {
   ConformanceResult,
@@ -214,6 +215,11 @@ const svelteDriver: LiveQueryDriver = {
   ops: { eq, gt, count, sum, coalesce, createOptimisticAction },
   makeSource,
   makeDeferredSource,
+  makeLaggingSource: <T extends { id: string }>() =>
+    makeLaggingSource<T>(
+      createCollection,
+      `conformance-svelte-lagging-${sourceSeq++}`,
+    ),
   makePrecreated,
   makeErrorSource,
   mount,

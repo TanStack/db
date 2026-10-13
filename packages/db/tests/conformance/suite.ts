@@ -23,7 +23,7 @@
  * Coverage: query/where/select, live insert/update/delete, orderBy, join,
  * groupBy/aggregate, nested aggregates, `.includes` subqueries, findOne
  * cardinality, disabled + transitions, deferred readiness / eager / ready-with-
- * no-data, param recompilation, optimistic mutation, pre-created & config-object
+ * no-data, initial readiness over a lagging on-demand source, param recompilation, optimistic mutation, pre-created & config-object
  * inputs, error status, and order-only moves.
  */
 import { describe, expect, it } from 'vitest'
@@ -83,6 +83,8 @@ export function runSuite(rawDriver: LiveQueryDriver) {
     makeSource: (data) => sources!.track(rawDriver.makeSource(data)),
     makeDeferredSource: <T extends { id: string }>() =>
       sources!.track(rawDriver.makeDeferredSource<T>()),
+    makeLaggingSource: <T extends { id: string }>() =>
+      sources!.track(rawDriver.makeLaggingSource<T>()),
     makePrecreated: (build, options) =>
       sources!.track(rawDriver.makePrecreated(build, options)),
     makeErrorSource: () => sources!.track(rawDriver.makeErrorSource()),
@@ -737,6 +739,83 @@ export function runSuite(rawDriver: LiveQueryDriver) {
       },
     )
 
+    // ---- Tier 2: initial readiness over a lagging on-demand source -------
+    //
+    // Law (ARCHITECTURE.md law 10): a query is initially ready when every
+    // request it made to an on-demand source has settled. That source's own
+    // Collection readiness does not gate it. The checkpoint after `settle`,
+    // while the source is still `loading`, separates this law from the rule
+    // that waits for every source to be ready. Once ready, the query stays
+    // ready, and later source changes still reach it.
+
+    scenario(
+      `lagging-source-ready-at-settle`,
+      `an on-demand query is ready when its subset settles, before the source is ready`,
+      async () => {
+        const source = driver.makeLaggingSource<Row>()
+        const h = driver.mount((q) =>
+          q
+            .from({ items: source.collection })
+            .where(({ items }: any) => ops.eq(items.id, `1`))
+            .select(({ items }: any) => ({ id: items.id, name: items.name })),
+        )
+        await h.flush()
+        expect(source.loadStarted()).toBe(true)
+
+        // Delivered rows are visible, but an unsettled request is not evidence.
+        source.emit([SEED[0]!])
+        await h.flush()
+        expect(h.current().isReady).toBe(false)
+
+        source.settle()
+        await h.flush()
+        expect(source.collection.status).toBe(`loading`)
+        expect(h.current().isReady).toBe(true)
+        expect(h.current().status).toBe(`ready`)
+        expectUnorderedRows(h.current().data, [{ id: `1`, name: `John Doe` }])
+
+        source.markReady()
+        source.update({ ...SEED[0]!, name: `Johnny Doe` })
+        await h.flush()
+        expect(h.current().isReady).toBe(true)
+        expectUnorderedRows(h.current().data, [{ id: `1`, name: `Johnny Doe` }])
+        h.unmount()
+      },
+    )
+
+    scenario(
+      `lagging-source-findone-ready-at-settle`,
+      `a findOne query over an on-demand source is ready when its subset settles`,
+      async () => {
+        const source = driver.makeLaggingSource<Row>()
+        const h = driver.mount((q) =>
+          q
+            .from({ items: source.collection })
+            .where(({ items }: any) => ops.eq(items.id, `1`))
+            .findOne(),
+        )
+        await h.flush()
+        expect(source.loadStarted()).toBe(true)
+
+        source.emit([SEED[0]!])
+        await h.flush()
+        expect(h.current().isReady).toBe(false)
+
+        source.settle()
+        await h.flush()
+        expect(source.collection.status).toBe(`loading`)
+        expect(h.current().isReady).toBe(true)
+        expect(h.current().data).toMatchObject({ id: `1`, name: `John Doe` })
+
+        source.markReady()
+        source.update({ ...SEED[0]!, name: `Johnny Doe` })
+        await h.flush()
+        expect(h.current().isReady).toBe(true)
+        expect(h.current().data).toMatchObject({ id: `1`, name: `Johnny Doe` })
+        h.unmount()
+      },
+    )
+
     // ---- Tier 2: controllable input --------------------------------------
 
     scenario(
@@ -1019,7 +1098,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
     )
 
     it(`registers every distinct scenario without whole-test waivers`, () => {
-      expect(registry.size).toBe(30)
+      expect(registry.size).toBe(32)
     })
   })
 }
