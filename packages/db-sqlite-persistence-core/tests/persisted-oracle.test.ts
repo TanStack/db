@@ -26375,7 +26375,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   // A reset clears the owner's durable rows. Its rows return only when the
   // follower requests its demand again, so the model predicts one more
   // ensure, the owner's row visible again, and no further ensures: replacing
-  // rows in place must not drop the replay that a reset owes.
+  // rows in place must not drop the replay that a reset owes. Only a node
+  // that follows replaces rows in place. A node elected leader that still
+  // routes demand through the coordinator truncates and replays as the
+  // leader does; this follower-only cell does not exercise that path.
   it(`a follower requests its demand again after the owner resets, once`, async () => {
     const errors = vi.spyOn(console, `error`).mockImplementation(() => {})
     const warnings = vi.spyOn(console, `warn`).mockImplementation(() => {})
@@ -26433,16 +26436,48 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
    * generation, and the source reports the failure as soon as that
    * reacquisition settles.
    *
+   * A demand that the caller releases or aborts while it reacquires no longer
+   * needs the new generation's rows: its aborted ensure is neither a failure
+   * nor a reported error, and the other demands decide the outcome. Releasing
+   * it twice changes nothing. A load that fails on its own still counts as a
+   * failure even though the failed load gives up its demand.
+   *
+   * A new demand loaded while the reacquisitions are in flight settles only
+   * once they all have: with the rows of the new generation if recovery
+   * ended, or rejected if it did not. Its own ensure answering early does not
+   * make its held rows visible.
+   *
+   * Only a recovery that rotated can end this way. A recovery that keeps the
+   * old generation, or one in which this node is the leader, leaves scoped
+   * recovery in place, and a newer rotation supersedes an older one's
+   * reacquisition.
+   *
+   * Limits. A failed reacquisition is not retried; the follower stays in
+   * scoped recovery until a later recovery rotates again.
+   *
    * The grammar crosses the order in which two demands' reacquisitions
    * settle, whether the owner updates demand a's row (version 3) between
-   * the first and last settlement, and which reacquisitions fail. The driver
-   * observes both demands' rows and the source status after every
-   * settlement, plus the ensure count, which a refetch loop would exceed.
+   * the first and last settlement, which reacquisitions fail or are released,
+   * and whether a new demand loads during reacquisition. Separate cells start
+   * rotation from two reads that find the claim lost, supersede reacquisition
+   * by a rotation as leader, and recover without rotating. The driver
+   * observes the rows, the new load's outcome, and the source status after
+   * every settlement, plus the ensure count, which a refetch loop would
+   * exceed.
    */
   type RotatedReacquisitionHistory = {
     order: [`a`, `b`] | [`b`, `a`]
     noticeBetween: boolean
-    fails: `none` | `a` | `b` | `both`
+    // Which reacquisitions fail. `released` means demand b is released
+    // while it reacquires, so its ensure aborts; that is not a failure.
+    fails: `none` | `a` | `b` | `both` | `released`
+    // A new demand, c, loads while the reacquisitions are in flight.
+    newDemand?: boolean
+    // While reacquisition is in flight, the node is elected leader and a
+    // second rotation supersedes the first; it then follows again, and a new
+    // demand c loads. With nothing reacquiring, the node stays in scoped
+    // recovery: held notices must still be handled, not queued forever.
+    supersededAsLeader?: boolean
     // How rotation starts: the source asks for scoped recovery after both
     // demands loaded, or both demands' first reads are in flight when the
     // cache claim is found lost.
@@ -26450,22 +26485,40 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   }
   type VersionedRow = { id: string; group: string; v: number }
   type ReacquisitionObservation = {
-    rows: Record<`a` | `b`, number | undefined>
+    rows: Record<`a` | `b` | `c`, number | undefined>
+    // The new demand's load, when the history has one.
+    newLoad?: `pending` | `fulfilled` | `rejected`
     status: `error` | `healthy`
   }
   const expectedReacquisition = (
     history: RotatedReacquisitionHistory,
     settled: number,
   ): ReacquisitionObservation => {
-    const ended = settled === 2 && history.fails === `none`
+    const fails = (group: `a` | `b`) =>
+      history.fails === group || history.fails === `both`
+    const allSettled = settled === 2
+    const ended = allSettled && !fails(`a`) && !fails(`b`)
     // A failed reacquisition is reported when it settles.
-    const failed = history.order
-      .slice(0, settled)
-      .some((group) => history.fails === group || history.fails === `both`)
+    const failed = history.order.slice(0, settled).some(fails)
     return {
       rows: ended
-        ? { a: history.noticeBetween ? 3 : 2, b: 2 }
-        : { a: undefined, b: undefined },
+        ? {
+            a: history.noticeBetween ? 3 : 2,
+            // A released demand's held notice still applies once recovery
+            // ends; the new generation's rows are trusted then.
+            b: 2,
+            c: history.newDemand ? 2 : undefined,
+          }
+        : { a: undefined, b: undefined, c: undefined },
+      ...(history.newDemand
+        ? {
+            newLoad: !allSettled
+              ? (`pending` as const)
+              : ended
+                ? (`fulfilled` as const)
+                : (`rejected` as const),
+          }
+        : {}),
       status: failed ? `error` : `healthy`,
     }
   }
@@ -26512,10 +26565,11 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
     const replies = new Map<string, Reply>()
     let ensures = 0
+    let cEnsures = 0
     const groupOf = (options: LoadSubsetOptions) => {
       const where = options.where as IR.Func | undefined
       const value = where?.args[1] as IR.Value | undefined
-      return value?.value as `a` | `b` | undefined
+      return value?.value as `a` | `b` | `c` | undefined
     }
     const duringReads = history.trigger === `claim-lost-during-reads`
     const firstReads = createDeferred()
@@ -26563,6 +26617,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       applyCommittedTx: async () => {},
       ensureIndex: async () => {},
     } as unknown as PersistenceAdapter
+    let leader = false
     const coordinator = {
       getNodeId: () => `follower`,
       subscribe: (
@@ -26575,7 +26630,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         }
       },
       publish: () => {},
-      isLeader: () => false,
+      isLeader: () => leader,
       ensureLeadership: async () => {},
       requestEnsurePersistedIndex: async () => {},
       // The owner commits the demand's row into the requesting generation
@@ -26592,8 +26647,13 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           ownerCommits(oldStorageId, { id: `${group}-row`, group, v: 1 })
           return Promise.resolve()
         }
-        if (replies.has(group)) return Promise.resolve()
+        if (group === `c`) cEnsures++
+        if (replies.has(group) || (group === `c` && cEnsures > 1))
+          return Promise.resolve()
         ownerCommits(newStorageId, { id: `${group}-row`, group, v: 2 })
+        // The new demand's ensure answers at once; the follower must still
+        // hold its rows until reacquisition ends.
+        if (group === `c`) return Promise.resolve()
         return new Promise<void>((resolve, reject) => {
           replies.set(group, { resolve, reject })
         })
@@ -26645,21 +26705,29 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       }),
     )
     source.startSyncImmediate()
+    let newLoad: `pending` | `fulfilled` | `rejected` = `pending`
     const observe = (): ReacquisitionObservation => ({
-      rows: { a: source.get(`a-row`)?.v, b: source.get(`b-row`)?.v },
+      rows: {
+        a: source.get(`a-row`)?.v,
+        b: source.get(`b-row`)?.v,
+        c: source.get(`c-row`)?.v,
+      },
+      ...(history.newDemand ? { newLoad } : {}),
       status: source.status === `error` ? `error` : `healthy`,
     })
     const turn = () => new Promise((resolve) => setTimeout(resolve, 0))
     const settle = async () => {
       for (let i = 0; i < 8; i++) await turn()
     }
-    const load = (group: `a` | `b`) =>
-      source._sync.loadSubset({
-        where: new IR.Func(`eq`, [
-          new IR.PropRef([`group`]),
-          new IR.Value(group),
-        ]),
-      })
+    const demand = (group: `a` | `b` | `c`): LoadSubsetOptions => ({
+      where: new IR.Func(`eq`, [
+        new IR.PropRef([`group`]),
+        new IR.Value(group),
+      ]),
+    })
+    const demands = { a: demand(`a`), b: demand(`b`), c: demand(`c`) }
+    const load = (group: `a` | `b` | `c`) =>
+      source._sync.loadSubset(demands[group])
     try {
       if (duringReads) {
         // Both first reads are in flight when the claim is found lost.
@@ -26675,23 +26743,63 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       }
       await vi.waitFor(() => expect(replies.size).toBe(2), { timeout: 2_000 })
       await settle()
+      if (history.newDemand) {
+        void Promise.resolve(load(`c`)).then(
+          () => (newLoad = `fulfilled`),
+          () => (newLoad = `rejected`),
+        )
+      }
+      if (history.fails === `released`) {
+        // Releasing the same demand twice must be idempotent.
+        source._sync.unloadSubset(demands.b)
+        source._sync.unloadSubset(demands.b)
+      }
+      await settle()
       // Checkpoint: both reacquisitions are in flight.
       expect(observe()).toEqual(expectedReacquisition(history, 0))
+      if (history.supersededAsLeader) {
+        leader = true
+        await sourceParams!.metadata!.persistence!.startScopedRecovery!()
+        await settle()
+        leader = false
+        let outcome: `pending` | `fulfilled` | `rejected` = `pending`
+        void Promise.resolve(load(`c`)).then(
+          () => (outcome = `fulfilled`),
+          () => (outcome = `rejected`),
+        )
+        await settle()
+        // Checkpoint: the superseded reacquisition no longer holds notices.
+        // The node stays in scoped recovery with nothing reacquiring, so the
+        // owner's notice for c is handled by one refetch instead of waiting
+        // in the queue forever; the untrusted generation shows no row.
+        expect({ outcome, cEnsures, c: source.get(`c-row`)?.v }).toEqual({
+          outcome: `fulfilled`,
+          cEnsures: 2,
+          c: undefined,
+        })
+        for (const reply of replies.values()) reply.resolve()
+        return
+      }
       for (const [index, group] of history.order.entries()) {
         if (index === 1 && history.noticeBetween) {
           ownerCommits(newStorageId, { id: `a-row`, group: `a`, v: 3 })
           await settle()
         }
-        if (history.fails === group || history.fails === `both`)
+        if (history.fails === `released` && group === `b`) {
+          const aborted = new Error(`released`)
+          aborted.name = `AbortError`
+          replies.get(group)!.reject(aborted)
+        } else if (history.fails === group || history.fails === `both`)
           replies.get(group)!.reject(new Error(`reacquire ${group} failed`))
         else replies.get(group)!.resolve()
         await settle()
         // Checkpoint: after each settlement.
         expect(observe()).toEqual(expectedReacquisition(history, index + 1))
       }
-      // Two acquisitions and two reacquisitions, plus one refresh per held
-      // notice when recovery stays; a refetch loop exceeds the bound.
-      expect(ensures).toBeLessThanOrEqual(12)
+      // Two acquisitions and two reacquisitions, a new demand's ensure, plus
+      // one refresh per held notice when recovery stays; a refetch loop
+      // exceeds the bound.
+      expect(ensures).toBeLessThanOrEqual(16)
     } finally {
       await source.cleanup()
       errors.mockRestore()
@@ -26706,16 +26814,30 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     ] as const
   ).flatMap((order) =>
     [false, true].flatMap((noticeBetween) =>
-      ([`none`, `a`, `b`, `both`] as const).map((fails) => ({
-        order: [...order],
-        noticeBetween,
-        fails,
-      })),
+      ([`none`, `a`, `b`, `both`, `released`] as const).flatMap((fails) =>
+        [false, true].map((newDemand) => ({
+          order: [...order],
+          noticeBetween,
+          fails,
+          newDemand,
+        })),
+      ),
     ),
   )
   it.each(rotatedReacquisitionHistories)(
-    `ends a follower's scoped recovery only after every reacquisition succeeds: order $order, notice between $noticeBetween, fails $fails`,
+    `ends a follower's scoped recovery only after every reacquisition succeeds: order $order, notice between $noticeBetween, fails $fails, new demand $newDemand`,
     assertRotatedReacquisition,
+    10_000,
+  )
+  it(
+    `releases held notices when a second rotation supersedes reacquisition as leader`,
+    () =>
+      assertRotatedReacquisition({
+        order: [`a`, `b`],
+        noticeBetween: false,
+        fails: `none`,
+        supersededAsLeader: true,
+      }),
     10_000,
   )
   // Two hydrations that both find the claim lost queue work while the
@@ -26734,135 +26856,152 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     10_000,
   )
 
-  it(`an owner notice does not republish untrusted durable rows without rotation`, async () => {
-    const errors = vi.spyOn(console, `error`).mockImplementation(() => {})
-    const warnings = vi.spyOn(console, `warn`).mockImplementation(() => {})
-    const durable: Array<FollowerRow> = [{ id: `stale`, group: `a` }]
-    let subscriber: ((message: ProtocolEnvelope<unknown>) => void) | undefined
-    let seq = 0
-    const notice = (collectionId: string, value: FollowerRow) => {
-      seq++
-      if (!durable.some((row) => row.id === value.id)) durable.push(value)
-      const payload: TxCommitted = {
-        type: `tx:committed`,
-        term: 1,
-        seq,
-        txId: `owner-tx-${seq}`,
-        latestRowVersion: seq,
-        requiresFullReload: false,
-        changedRows: [{ key: value.id, value }],
-        deletedKeys: [],
-      }
-      subscriber?.({
-        v: 1,
-        dbName: `test-db`,
-        collectionId,
-        senderId: `owner`,
-        ts: Date.now(),
-        payload,
-      })
-    }
-    let ensures = 0
-    const adapter = {
-      loadSubset: async () =>
-        durable.map((value) => ({ key: value.id, value })),
-      loadResumeSnapshot: () =>
-        Promise.resolve({
-          rows: [],
-          keySet: { status: `consistent` },
-          collectionMetadata: [],
-          latestTerm: 0,
-          latestSeq: 0,
-          latestRowVersion: 0,
-          resetEpoch: 0,
-        }),
-      applyCommittedTx: async () => {},
-      ensureIndex: async () => {},
-    } as unknown as PersistenceAdapter
-    const coordinator = {
-      getNodeId: () => `follower`,
-      subscribe: (
-        _collectionId: string,
-        onMessage: (message: ProtocolEnvelope<unknown>) => void,
-      ) => {
-        subscriber = onMessage
-        return () => {
-          subscriber = undefined
-        }
-      },
-      publish: () => {},
-      isLeader: () => false,
-      ensureLeadership: async () => {},
-      requestEnsurePersistedIndex: async () => {},
-      requestEnsureRemoteSubset: async (collectionId: string) => {
-        if (++ensures === 1) notice(collectionId, { id: `remote`, group: `a` })
-      },
-      requestReleaseRemoteSubset: async () => {},
-      registerRemoteSubsetOwner: () => () => {},
-      requestApplyCommittedTx: (_collectionId: string, tx: TxCommitted) =>
-        Promise.resolve({
-          type: `rpc:applyCommittedTx:res`,
-          rpcId: tx.txId,
-          ok: true,
-          term: tx.term,
-          seq: tx.seq,
-          latestRowVersion: seq,
-        }),
-      pullSince: () =>
-        Promise.resolve({
-          type: `rpc:pullSince:res`,
-          rpcId: `unrotated-pull`,
-          ok: true,
-          latestTerm: 1,
-          latestSeq: seq,
+  // The same law holds when no demand is active as recovery starts: with
+  // nothing reacquired and no new generation, a later load must still not
+  // hydrate the untrusted rows.
+  it.each([`active demand`, `no active demand`] as const)(
+    `does not trust untrusted durable rows after a recovery without rotation: %s`,
+    async (activeAtRecovery) => {
+      const errors = vi.spyOn(console, `error`).mockImplementation(() => {})
+      const warnings = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const durable: Array<FollowerRow> = [{ id: `stale`, group: `a` }]
+      let subscriber: ((message: ProtocolEnvelope<unknown>) => void) | undefined
+      let seq = 0
+      const notice = (collectionId: string, value: FollowerRow) => {
+        seq++
+        if (!durable.some((row) => row.id === value.id)) durable.push(value)
+        const payload: TxCommitted = {
+          type: `tx:committed`,
+          term: 1,
+          seq,
+          txId: `owner-tx-${seq}`,
           latestRowVersion: seq,
           requiresFullReload: false,
-          changedKeys: [],
+          changedRows: [{ key: value.id, value }],
           deletedKeys: [],
-        }),
-    } as unknown as PersistedCollectionCoordinator
-    let sourceParams: SyncConfig<FollowerRow, string>[`sync`] extends (
-      params: infer P,
-    ) => unknown
-      ? P
-      : never
-    const source = createCollection(
-      persistedCollectionOptions<FollowerRow, string>({
-        id: `follower-unrotated-${Math.random().toString(36).slice(2)}`,
-        getKey: (row) => row.id,
-        persistence: { adapter, coordinator },
-        syncMode: `on-demand`,
-        sync: {
-          sync: (params) => {
-            sourceParams = params
-            return {
-              loadSubset: () => Promise.resolve(),
-              restartAfterScopedRecovery: () => {},
-            }
-          },
+        }
+        subscriber?.({
+          v: 1,
+          dbName: `test-db`,
+          collectionId,
+          senderId: `owner`,
+          ts: Date.now(),
+          payload,
+        })
+      }
+      let ensures = 0
+      const adapter = {
+        loadSubset: async () =>
+          durable.map((value) => ({ key: value.id, value })),
+        loadResumeSnapshot: () =>
+          Promise.resolve({
+            rows: [],
+            keySet: { status: `consistent` },
+            collectionMetadata: [],
+            latestTerm: 0,
+            latestSeq: 0,
+            latestRowVersion: 0,
+            resetEpoch: 0,
+          }),
+        applyCommittedTx: async () => {},
+        ensureIndex: async () => {},
+      } as unknown as PersistenceAdapter
+      const coordinator = {
+        getNodeId: () => `follower`,
+        subscribe: (
+          _collectionId: string,
+          onMessage: (message: ProtocolEnvelope<unknown>) => void,
+        ) => {
+          subscriber = onMessage
+          return () => {
+            subscriber = undefined
+          }
         },
-      }),
-    )
-    source.startSyncImmediate()
-    const query = createLiveQueryCollection((q) =>
-      q.from({ row: source }).where(({ row }) => eq(row.group, `a`)),
-    )
-    try {
-      await query.preload()
-      expect(Array.from(source.keys()).sort()).toEqual([`remote`, `stale`])
+        publish: () => {},
+        isLeader: () => false,
+        ensureLeadership: async () => {},
+        requestEnsurePersistedIndex: async () => {},
+        requestEnsureRemoteSubset: async (collectionId: string) => {
+          if (++ensures === 1)
+            notice(collectionId, { id: `remote`, group: `a` })
+        },
+        requestReleaseRemoteSubset: async () => {},
+        registerRemoteSubsetOwner: () => () => {},
+        requestApplyCommittedTx: (_collectionId: string, tx: TxCommitted) =>
+          Promise.resolve({
+            type: `rpc:applyCommittedTx:res`,
+            rpcId: tx.txId,
+            ok: true,
+            term: tx.term,
+            seq: tx.seq,
+            latestRowVersion: seq,
+          }),
+        pullSince: () =>
+          Promise.resolve({
+            type: `rpc:pullSince:res`,
+            rpcId: `unrotated-pull`,
+            ok: true,
+            latestTerm: 1,
+            latestSeq: seq,
+            latestRowVersion: seq,
+            requiresFullReload: false,
+            changedKeys: [],
+            deletedKeys: [],
+          }),
+      } as unknown as PersistedCollectionCoordinator
+      let sourceParams: SyncConfig<FollowerRow, string>[`sync`] extends (
+        params: infer P,
+      ) => unknown
+        ? P
+        : never
+      const source = createCollection(
+        persistedCollectionOptions<FollowerRow, string>({
+          id: `follower-unrotated-${Math.random().toString(36).slice(2)}`,
+          getKey: (row) => row.id,
+          persistence: { adapter, coordinator },
+          syncMode: `on-demand`,
+          sync: {
+            sync: (params) => {
+              sourceParams = params
+              return {
+                loadSubset: () => Promise.resolve(),
+                restartAfterScopedRecovery: () => {},
+              }
+            },
+          },
+        }),
+      )
+      source.startSyncImmediate()
+      const query = createLiveQueryCollection((q) =>
+        q.from({ row: source }).where(({ row }) => eq(row.group, `a`)),
+      )
+      try {
+        if (activeAtRecovery === `active demand`) {
+          await query.preload()
+          expect(Array.from(source.keys()).sort()).toEqual([`remote`, `stale`])
+        } else {
+          // Start the source without any demand.
+          void source.preload().catch(() => undefined)
+          await vi.waitFor(() => expect(sourceParams).toBeDefined())
+        }
 
-      // The source reports that the old durable rows are untrusted.
-      await sourceParams!.metadata!.persistence!.startScopedRecovery!()
-      notice(source.id, { id: `fresh`, group: `a` })
-      await new Promise((resolve) => setTimeout(resolve, 100))
-      expect(Array.from(source.keys())).not.toContain(`stale`)
-    } finally {
-      await query.cleanup()
-      await source.cleanup()
-      errors.mockRestore()
-      warnings.mockRestore()
-    }
-  })
+        // The source reports that the old durable rows are untrusted.
+        await sourceParams!.metadata!.persistence!.startScopedRecovery!()
+        await new Promise((resolve) => setTimeout(resolve, 50))
+        if (activeAtRecovery === `no active demand`) {
+          void query.preload().catch(() => undefined)
+        }
+        notice(source.id, { id: `fresh`, group: `a` })
+        await new Promise((resolve) => setTimeout(resolve, 100))
+        expect(Array.from(source.keys())).not.toContain(`stale`)
+      } finally {
+        await query.cleanup()
+        await source.cleanup()
+        errors.mockRestore()
+        warnings.mockRestore()
+      }
+    },
+  )
 
   const followerRemoteDemandHistory = fc.record({
     placement: fc.constantFrom<FollowerRemoteDemandHistory[`placement`]>(
