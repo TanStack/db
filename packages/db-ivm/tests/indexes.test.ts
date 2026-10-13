@@ -2,6 +2,19 @@ import { beforeEach, describe, expect, test } from 'vitest'
 import { Index } from '../src/indexes.js'
 
 describe(`Index`, () => {
+  test(`an index built without presence throws when presence is read`, () => {
+    const index = new Index<string, number>({ trackPresence: false })
+    index.addValue(`k`, [1, 1])
+    expect(index.get(`k`)).toEqual([[1, 1]])
+    expect(() => index.hasPresence(`k`)).toThrow(`does not track presence`)
+    expect(() => index.getConsolidatedMultiplicity(`k`)).toThrow(
+      `does not track presence`,
+    )
+    expect(() => [...index.getPresenceKeys()]).toThrow(
+      `does not track presence`,
+    )
+  })
+
   let index: Index<string, number>
   let createIndex: (name: string) => Index<string, number>
 
