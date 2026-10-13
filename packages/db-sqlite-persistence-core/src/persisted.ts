@@ -1918,8 +1918,11 @@ class PersistedCollectionRuntime<
   // An ensure reply settles a follower's load (law 7). The leader broadcasts
   // its commits before it replies on the same channel, so they are already
   // queued on the apply mutex. Settle only after they show here.
-  private applyLeaderCommitsBeforeReply(): Promise<void> {
-    return this.applyMutex.run(() => this.flushQueuedTxCommittedUnsafe())
+  private async applyLeaderCommitsBeforeReply(): Promise<void> {
+    await this.applyMutex.run(() => this.flushQueuedTxCommittedUnsafe())
+    // A broadcast that failed to apply made the runtime terminal; its rows
+    // are not visible, so the load must not settle successfully.
+    this.throwIfTerminal()
   }
 
   private clearSyncControls(): void {
@@ -4620,10 +4623,16 @@ class PersistedCollectionRuntime<
         continue
       }
       if (queued.storageCollectionId !== this.storageCollectionId) continue
-      await this.processCommittedTxUnsafe(
-        queued.txCommitted,
-        queued.lifecycleGeneration,
-      )
+      // A queued commit has left the queue, so a failure must be terminal,
+      // as it is for a commit applied when it arrives.
+      try {
+        await this.processCommittedTxUnsafe(
+          queued.txCommitted,
+          queued.lifecycleGeneration,
+        )
+      } catch (error) {
+        throw this.markTerminalFailure(error, queued.lifecycleGeneration)
+      }
     }
   }
 

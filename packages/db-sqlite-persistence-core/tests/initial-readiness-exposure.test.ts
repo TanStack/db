@@ -169,22 +169,29 @@ describe(`persisted on-demand initial readiness follows the composed load`, () =
  * answers the ensure request on the same channel. The follower applies that
  * broadcast asynchronously: it reads the durable rows under its apply mutex.
  * Law 7 therefore requires the follower's load to settle only after the
- * broadcasts that preceded the ensure reply have applied in this tab.
+ * broadcasts that preceded the ensure reply have applied in this tab, and to
+ * reject if applying them failed.
  *
- * The history holds the follower's durable read for the broadcast, so the
- * reply arrives while the leader's rows are committed but not yet visible.
+ * The scripted tab can hold or fail any durable read by its order. A read
+ * returns the durable rows as of its start, so a hydration read that began
+ * before the leader committed cannot supply the leader's row.
  */
-function followerTab() {
+type ReadScript = (read: number) => { hold?: Promise<void>; fail?: Error }
+
+function followerTab(
+  script: ReadScript = () => ({}),
+  beforeLeaderCommit: () => Promise<void> = () => Promise.resolve(),
+) {
   const durable: Array<Row> = []
-  let holdNextRead: Promise<void> | undefined
   let reads = 0
   const adapter: PersistenceAdapter = {
     loadSubset: async () => {
-      reads++
-      const hold = holdNextRead
-      holdNextRead = undefined
+      const read = ++reads
+      const snapshot = durable.slice()
+      const { hold, fail } = script(read)
       await hold
-      return durable.map((value) => ({ key: value.id, value }))
+      if (fail) throw fail
+      return snapshot.map((value) => ({ key: value.id, value }))
     },
     loadResumeSnapshot: () =>
       Promise.resolve({
@@ -199,8 +206,8 @@ function followerTab() {
     applyCommittedTx: async () => {},
     ensureIndex: async () => {},
   }
-  const broadcastRead = createDeferred<void>()
   let subscriber: ((message: ProtocolEnvelope<unknown>) => void) | undefined
+  let ensures = 0
   const coordinator: PersistedCollectionCoordinator = {
     getNodeId: () => `follower`,
     subscribe: (_collectionId, onMessage) => {
@@ -213,11 +220,13 @@ function followerTab() {
     isLeader: () => false,
     ensureLeadership: async () => {},
     requestEnsurePersistedIndex: async () => {},
-    // The leader commits the row, broadcasts it, then replies.
-    requestEnsureRemoteSubset: (collectionId) => {
+    // On the first ensure, the leader commits the row, broadcasts it, then
+    // replies. Later ensures find nothing new.
+    requestEnsureRemoteSubset: async (collectionId) => {
+      if (++ensures > 1) return
+      await beforeLeaderCommit()
       const value = { id: `remote`, group: `a` }
       durable.push(value)
-      holdNextRead = broadcastRead.promise
       const payload: TxCommitted = {
         type: `tx:committed`,
         term: 1,
@@ -236,7 +245,6 @@ function followerTab() {
         ts: Date.now(),
         payload,
       })
-      return Promise.resolve()
     },
     requestReleaseRemoteSubset: async () => {},
     registerRemoteSubsetOwner: () => () => {},
@@ -274,22 +282,137 @@ function followerTab() {
     }),
   )
   onTestFinished(() => source.cleanup())
-  return { source, broadcastRead, reads: () => reads }
+  source.startSyncImmediate()
+  return { source, reads: () => reads }
+}
+
+function groupB(source: Collection<Row, string, any>) {
+  const query = createLiveQueryCollection((q) =>
+    q.from({ row: source }).where(({ row }) => eq(row.group, `b`)),
+  )
+  onTestFinished(() => query.cleanup())
+  return query
+}
+
+// Records a promise's outcome so a test can assert it at a checkpoint.
+function outcome(promise: Promise<unknown>) {
+  const record: { state: `pending` | `fulfilled` | `rejected` } = {
+    state: `pending`,
+  }
+  void promise.then(
+    () => (record.state = `fulfilled`),
+    () => (record.state = `rejected`),
+  )
+  return record
+}
+
+const tick = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+function quietErrors() {
+  const error = vi.spyOn(console, `error`).mockImplementation(() => {})
+  const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
+  onTestFinished(() => {
+    error.mockRestore()
+    warn.mockRestore()
+  })
 }
 
 describe(`a persisted follower tab's load settles with the leader's rows`, () => {
   it(`is first ready only after the leader's broadcast applies here`, async () => {
-    const tab = followerTab()
+    const broadcastRead = createDeferred<void>()
+    // Read 1 hydrates the subset; read 2 applies the leader's broadcast.
+    const tab = followerTab((read) =>
+      read === 2 ? { hold: broadcastRead.promise } : {},
+    )
     const query = groupA(tab.source)
     const seen = rowsAtFirstReady(query)
     const preload = query.preload()
 
-    // The hydration read and the broadcast's durable read have both started.
     await vi.waitFor(() => expect(tab.reads()).toBe(2))
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    tab.broadcastRead.resolve()
+    await tick()
+    // The leader has replied, but its rows are not visible here yet.
+    expect(seen.rows).toBeUndefined()
+    expect(query.isReady()).toBe(false)
+    broadcastRead.resolve()
     await preload
 
     expect(seen.rows).toEqual([`remote`])
+  })
+
+  it(`is first ready with the leader's rows when their broadcast waits behind another subset's hydration`, async () => {
+    const otherHydration = createDeferred<void>()
+    const otherReadStarted = createDeferred<void>()
+    // Read 1 hydrates group a; read 2 hydrates group b and is held, so the
+    // leader's broadcast is queued; read 3 applies it.
+    const tab = followerTab(
+      (read) => {
+        if (read !== 2) return {}
+        otherReadStarted.resolve()
+        return { hold: otherHydration.promise }
+      },
+      () => otherReadStarted.promise,
+    )
+    const query = groupA(tab.source)
+    const seen = rowsAtFirstReady(query)
+    const preload = query.preload()
+    void groupB(tab.source).preload()
+
+    await otherReadStarted.promise
+    await tick()
+    expect(seen.rows).toBeUndefined()
+    otherHydration.resolve()
+    await preload
+
+    expect(seen.rows).toEqual([`remote`])
+  })
+
+  it(`rejects when the leader's broadcast fails to apply`, async () => {
+    quietErrors()
+    // Read 2 applies the leader's broadcast, and it fails.
+    const tab = followerTab((read) =>
+      read === 2 ? { fail: new Error(`durable read failed`) } : {},
+    )
+    const load = outcome(
+      Promise.resolve(tab.source._sync.loadSubset({ limit: 10 })),
+    )
+    await vi.waitFor(() => expect(tab.reads()).toBe(2))
+    await tick()
+    await tick()
+
+    expect(load.state).toBe(`rejected`)
+    expect(tab.source.has(`remote`)).toBe(false)
+  })
+
+  it(`rejects and fails the source when a queued broadcast fails to apply`, async () => {
+    quietErrors()
+    const otherHydration = createDeferred<void>()
+    const otherReadStarted = createDeferred<void>()
+    // Read 2 holds another subset's hydration, so the broadcast is queued;
+    // read 3 applies it, and it fails.
+    const tab = followerTab(
+      (read) => {
+        if (read === 2) {
+          otherReadStarted.resolve()
+          return { hold: otherHydration.promise }
+        }
+        return read === 3 ? { fail: new Error(`durable read failed`) } : {}
+      },
+      () => otherReadStarted.promise,
+    )
+    const load = outcome(
+      Promise.resolve(tab.source._sync.loadSubset({ limit: 10 })),
+    )
+    void Promise.resolve(
+      tab.source._sync.loadSubset({ limit: 20, offset: 1 }),
+    ).catch(() => {})
+    await otherReadStarted.promise
+    await tick()
+    otherHydration.resolve()
+    await vi.waitFor(() => expect(tab.reads()).toBe(3))
+    await tick()
+    await tick()
+
+    expect(load.state).toBe(`rejected`)
+    expect(tab.source.status).toBe(`error`)
   })
 })
