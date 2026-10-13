@@ -12,6 +12,9 @@ import {
   orderByWithFractionalIndex,
   reduce,
 } from '../src/operators/index.js'
+import { StreamBuilder } from '../src/d2.js'
+import { DifferenceStreamWriter, LinearUnaryOperator } from '../src/graph.js'
+import { MultiSet } from '../src/multiset.js'
 import {
   assertBinaryIncrementalization,
   assertUnaryIncrementalization,
@@ -38,6 +41,35 @@ function innerJoined<K, V1, V2>(
 // compare rows only, so the index is dropped from the output.
 function withoutIndex<K, V>() {
   return map(([key, [value]]: [K, [V, string]]) => [key, value] as [K, V])
+}
+
+// A fault for the promotion law: a window that forwards a removal but drops
+// the rows entering in the same message, as a top-K that forgets to promote
+// the next row would.
+class WithoutPromotionOperator<T> extends LinearUnaryOperator<T, T> {
+  inner(collection: MultiSet<T>): MultiSet<T> {
+    const changes = collection.getInner()
+    return changes.some(([, weight]) => weight < 0)
+      ? new MultiSet(changes.filter(([, weight]) => weight < 0))
+      : collection
+  }
+}
+
+function withoutPromotion<T>(): PipedOperator<T, T> {
+  return (stream: IStreamBuilder<T>): IStreamBuilder<T> => {
+    const output = new StreamBuilder<T>(
+      stream.graph,
+      new DifferenceStreamWriter<T>(),
+    )
+    stream.graph.addOperator(
+      new WithoutPromotionOperator<T>(
+        stream.graph.getNextOperatorId(),
+        stream.connectReader(),
+        output.writer,
+      ),
+    )
+    return output
+  }
 }
 
 /**
@@ -916,7 +948,7 @@ describe(`DBSP incrementalization laws`, () => {
     ).toThrow(/no unit ordering with legal split-delivery prefixes/)
   })
 
-  it(`rejects omitted, sign-flipped, wrong-member, wrong-window, wrong-limit, and truthiness-filtered output`, () => {
+  it(`rejects omitted, sign-flipped, wrong-member, wrong-window, wrong-limit, missing-promotion, and truthiness-filtered output`, () => {
     expect(() =>
       assertUnaryIncrementalization({
         name: `omitted output fault`,
@@ -1019,6 +1051,27 @@ describe(`DBSP incrementalization laws`, () => {
         evaluate: (input) => firstThree(input).slice(0, 2),
       }),
     ).toThrow(/output delta diverged at checkpoint 1/)
+    // A window that removes the first value without promoting the third
+    // agrees with the model until the removal.
+    expect(() =>
+      assertUnaryIncrementalization({
+        name: `missing promotion fault`,
+        initial: [
+          [[0, 1] as Keyed, 1],
+          [[1, 2] as Keyed, 1],
+        ],
+        batches: [[[[2, 3] as Keyed, 1]], [[[0, 1] as Keyed, -1]]],
+        inputPolicy: keyedPolicy,
+        outputPolicy: keyedPolicy,
+        build: (input) =>
+          input.pipe(
+            orderByWithFractionalIndex((rank) => rank, { limit: 2 }),
+            withoutPromotion(),
+            withoutIndex(),
+          ),
+        evaluate: (input) => firstThree(input).slice(0, 2),
+      }),
+    ).toThrow(/output delta diverged at checkpoint 2/)
 
     const truthinessMinimum = {
       preMap: ([, value]: Keyed): number | undefined => value,
