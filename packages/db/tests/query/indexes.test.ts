@@ -365,7 +365,7 @@ describe(`Query Index Optimization`, () => {
           getKey: (item) => item.id,
           startSync: true,
           sync: {
-            sync: ({ begin, write, commit }) => {
+            sync: ({ begin, write, commit, markReady }) => {
               begin()
               write({
                 type: `insert`,
@@ -378,6 +378,7 @@ describe(`Query Index Optimization`, () => {
                 },
               })
               commit()
+              markReady()
             },
           },
         })
@@ -455,7 +456,7 @@ describe(`Query Index Optimization`, () => {
         defaultIndexType: BTreeIndex,
         startSync: true,
         sync: {
-          sync: ({ begin, write, commit }) => {
+          sync: ({ begin, write, commit, markReady }) => {
             begin()
             write({
               type: `insert`,
@@ -478,6 +479,7 @@ describe(`Query Index Optimization`, () => {
               },
             })
             commit()
+            markReady()
           },
         },
       })
@@ -554,7 +556,7 @@ describe(`Query Index Optimization`, () => {
         autoIndex: `off`,
         startSync: true,
         sync: {
-          sync: ({ begin, write, commit }) => {
+          sync: ({ begin, write, commit, markReady }) => {
             begin()
             write({
               type: `insert`,
@@ -577,6 +579,7 @@ describe(`Query Index Optimization`, () => {
               },
             })
             commit()
+            markReady()
           },
         },
       })
@@ -661,7 +664,7 @@ describe(`Query Index Optimization`, () => {
         autoIndex: `off`,
         startSync: true,
         sync: {
-          sync: ({ begin, write, commit }) => {
+          sync: ({ begin, write, commit, markReady }) => {
             begin()
             write({
               type: `insert`,
@@ -684,6 +687,7 @@ describe(`Query Index Optimization`, () => {
               },
             })
             commit()
+            markReady()
           },
         },
       })
@@ -751,7 +755,7 @@ describe(`Query Index Optimization`, () => {
         defaultIndexType: BTreeIndex,
         startSync: true,
         sync: {
-          sync: ({ begin, write, commit }) => {
+          sync: ({ begin, write, commit, markReady }) => {
             begin()
             write({
               type: `insert`,
@@ -774,6 +778,7 @@ describe(`Query Index Optimization`, () => {
               },
             })
             commit()
+            markReady()
           },
         },
       })
@@ -874,7 +879,7 @@ describe(`Query Index Optimization`, () => {
         autoIndex: `off`,
         startSync: true,
         sync: {
-          sync: ({ begin, write, commit }) => {
+          sync: ({ begin, write, commit, markReady }) => {
             begin()
             write({
               type: `insert`,
@@ -897,6 +902,7 @@ describe(`Query Index Optimization`, () => {
               },
             })
             commit()
+            markReady()
           },
         },
       })
@@ -967,7 +973,7 @@ describe(`Query Index Optimization`, () => {
         autoIndex: `off`,
         startSync: true,
         sync: {
-          sync: ({ begin, write, commit }) => {
+          sync: ({ begin, write, commit, markReady }) => {
             begin()
             write({
               type: `insert`,
@@ -990,6 +996,7 @@ describe(`Query Index Optimization`, () => {
               },
             })
             commit()
+            markReady()
           },
         },
       })
@@ -1064,7 +1071,7 @@ describe(`Query Index Optimization`, () => {
         autoIndex: `off`,
         startSync: true,
         sync: {
-          sync: ({ begin, write, commit }) => {
+          sync: ({ begin, write, commit, markReady }) => {
             begin()
             write({
               type: `insert`,
@@ -1087,6 +1094,7 @@ describe(`Query Index Optimization`, () => {
               },
             })
             commit()
+            markReady()
           },
         },
       })

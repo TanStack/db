@@ -10,6 +10,11 @@ import type { BasicExpression } from '../../src/query/ir.js'
  * slicing the requested window. It records exact loadSubset calls for work and
  * deduplication laws. Unsupported expressions reject even on an empty source;
  * silently returning no rows would turn a weak fixture into a false oracle.
+ *
+ * With `readiness: 'lagging'`, the provider models a source whose Collection
+ * readiness lags behind its settled subsets, as a progressive Electric source
+ * does during its full sync. It does not call `markReady` at start. Each
+ * request writes its rows at once but stays pending until `settle`.
  */
 
 interface Runtime {
@@ -138,7 +143,12 @@ function copyRequest(options: LoadSubsetOptions): LoadSubsetOptions {
 
 export function makeInfiniteOnDemandSource<
   T extends { id: string; rank: number },
->(runtime: Runtime, data: ReadonlyArray<T>, asyncDelay?: number) {
+>(
+  runtime: Runtime,
+  data: ReadonlyArray<T>,
+  asyncDelay?: number,
+  readiness: `ready` | `lagging` = `ready`,
+) {
   const ranks = new Set<number>()
   const keys = new Set<string>()
   const backend = data.map((row) => {
@@ -168,6 +178,8 @@ export function makeInfiniteOnDemandSource<
     return { ...row }
   })
   const calls: Array<LoadSubsetOptions> = []
+  const heldLoads: Array<() => void> = []
+  let markSourceReady: (() => void) | undefined
   const collection = runtime.createCollection<T>({
     id: `infinite-conformance-on-demand-${sequence++}`,
     getKey: (row: T) => row.id,
@@ -177,7 +189,8 @@ export function makeInfiniteOnDemandSource<
     defaultIndexType: runtime.BTreeIndex,
     sync: {
       sync: ({ markReady, begin, write, commit }: any) => {
-        markReady()
+        markSourceReady = markReady
+        if (readiness === `ready`) markReady()
         return {
           loadSubset: (options: LoadSubsetOptions) => {
             const request = copyRequest(options)
@@ -210,6 +223,15 @@ export function makeInfiniteOnDemandSource<
                 write({ type: `insert`, value: { ...row } })
               return commit() ?? true
             }
+            if (readiness === `lagging`) {
+              const receipt: true | Promise<void> = load()
+              return new Promise<void>((resolve, reject) => {
+                heldLoads.push(() => {
+                  if (receipt === true) resolve()
+                  else void receipt.then(resolve, reject)
+                })
+              })
+            }
             if (asyncDelay === undefined) {
               return load()
             }
@@ -229,5 +251,13 @@ export function makeInfiniteOnDemandSource<
       },
     },
   })
-  return { collection, calls }
+  return {
+    collection,
+    calls,
+    /** Number of lagging requests still pending. */
+    pending: () => heldLoads.length,
+    /** Settle every pending lagging request. */
+    settle: () => heldLoads.splice(0).forEach((release) => release()),
+    markReady: () => markSourceReady!(),
+  }
 }
