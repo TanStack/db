@@ -37,13 +37,13 @@ supports only its legal histories, paths, and observations.
 
 ## Production-code weight
 
-Against the recorded `origin/main` baseline, the final source diff under
-`packages/db/src` adds 200 lines and removes 211, for **11 fewer production
+Against the recorded `origin/main` baseline, the source diff under
+`packages/db/src` adds 205 lines and removes 222, for **17 fewer production
 lines**. The built DB ESM entry bundled with esbuild (`bundle`, `minify`,
 `format: esm`, `platform: neutral`, `NODE_ENV=production`; DB IVM, pacer-lite,
 and standard-schema external) is 334,795 bytes / 100,227 gzip at baseline and
-335,886 bytes / 100,644 gzip for this change. That is **1,091 more minified
-bytes / 417 more gzip bytes**. The source-line budget is negative; the bundle
+335,754 bytes / 100,551 gzip for this change. That is **959 more minified
+bytes / 324 more gzip bytes**. The source-line budget is negative; the bundle
 budget is still positive. The remaining runtime addition is concentrated in
 distinct index-storage comparison and exact Temporal keys, which the bounded
 fixes above require. Do not treat source-line reduction as a bundle-size win.

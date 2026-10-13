@@ -118,10 +118,9 @@ export const descComparator = (
   b: unknown,
   opts: CompareOptions,
 ): number => {
-  return ascComparator(b, a, {
-    ...opts,
-    nulls: opts.nulls === `first` ? `last` : `first`,
-  })
+  return a == null || b == null
+    ? ascComparator(a, b, opts)
+    : ascComparator(b, a, opts)
 }
 
 export function makeComparator(

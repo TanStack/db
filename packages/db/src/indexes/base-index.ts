@@ -304,17 +304,12 @@ export abstract class BaseIndex<
       return false
     }
 
-    if (indexStringSort === `custom` && requestedStringSort === `custom`) {
+    if (indexCompareOptions.stringSort === `custom`)
       return (
-        indexCompareOptions.stringSort === `custom` &&
         compareOptions.stringSort === `custom` &&
         indexCompareOptions.compare === compareOptions.compare
       )
-    }
-
-    if (indexStringSort !== `locale` || requestedStringSort !== `locale`) {
-      return true
-    }
+    if (indexStringSort !== `locale`) return true
 
     const indexLocaleOptions = indexCompareOptions as LocaleCompareOptions
     const requestedLocaleOptions = compareOptions as LocaleCompareOptions
