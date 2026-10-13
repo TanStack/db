@@ -985,8 +985,8 @@ describe(`opaque DataView change publication`, () => {
    * distinct keyless DataViews remain distinct even when their bytes match.
    * One sync history crosses from a typed array to a foreign DataView, then
    * replaces that DataView with a fresh foreign one. The independent expected
-   * sequence is two updates. After each commit, public rows, exact index
-   * lookup, and each complete subscriber callback must agree on that step.
+   * sequence is two updates. At each subscriber callback, and again after
+   * commit, public rows and exact index lookup must agree on that step.
    */
   it.each([
     [`BasicIndex`, BasicIndex],
@@ -1042,8 +1042,20 @@ describe(`opaque DataView change publication`, () => {
             value: string | undefined
           }>
         > = []
+        const callbackSnapshots: Array<{
+          row: string | undefined
+          indexKeys: Array<string>
+        }> = []
         const subscription = collection.subscribeChanges(
           (changes) => {
+            // Publication must expose the new row and index before invoking
+            // the subscriber. Recording inside the callback distinguishes a
+            // torn publication that repairs its index only after notification.
+            const published = collection.get(`a`)?.value
+            callbackSnapshots.push({
+              row: labels.get(published),
+              indexKeys: published ? [...index.equalityLookup(published)] : [],
+            })
             batches.push(
               changes.map((change) => ({
                 type: change.type,
@@ -1070,6 +1082,7 @@ describe(`opaque DataView change publication`, () => {
         expect(batches).toEqual([
           [{ type: `update`, key: `a`, previous: `bytes`, value: `first` }],
         ])
+        expect(callbackSnapshots).toEqual([{ row: `first`, indexKeys: [`a`] }])
 
         sync.begin()
         sync.write({ type: `update`, value: { id: `a`, value: second } })
@@ -1080,6 +1093,10 @@ describe(`opaque DataView change publication`, () => {
         expect(batches).toEqual([
           [{ type: `update`, key: `a`, previous: `bytes`, value: `first` }],
           [{ type: `update`, key: `a`, previous: `first`, value: `second` }],
+        ])
+        expect(callbackSnapshots).toEqual([
+          { row: `first`, indexKeys: [`a`] },
+          { row: `second`, indexKeys: [`a`] },
         ])
       }, [() => unsubscribe?.(), () => cleanup?.()])
     },

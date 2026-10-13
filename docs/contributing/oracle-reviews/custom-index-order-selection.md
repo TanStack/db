@@ -428,5 +428,32 @@ that ordering.
 The index reviewer found no additional mismatch in bounded 250-action sweeps
 per built-in index for native-byte order, key conservation, and custom
 callback positions. These sweeps are diagnostic evidence, not a replacement
-for the committed oracle. A fresh review of the follow-up committed head is
-still required.
+for the committed oracle.
+
+## Exact-commit hostile review of `23a478e78`
+
+Two fresh read-only reviewers challenged the repaired byte and DataView
+oracles. Neither found a further production defect in the paths exercised.
+The byte reviewer showed that a comparator reading only the first two bytes
+passed the prior direct and ready-Collection owners. A third-byte fixture
+failed that mutant at the direct comparator, unindexed scan, and both built-in
+index paths; it passed unchanged production. The direct owner now generates a
+common prefix of 2–24 bytes before a differing byte, and the ready public
+owner includes a third-byte witness with source keys opposed to content order.
+The fixed and random direct runs vary the first-difference position; the
+public witness checks one later position.
+
+The DataView reviewer moved index maintenance after subscriber notification
+in an isolated copy. The prior two-step Collection oracle stayed green even
+though the callback could read a new public row with an old index. Recording
+the row and exact index lookup inside each callback failed that mutant and
+passed unchanged production for both index types. The existing after-commit
+checks remain. This strengthens the atomic-publication observation for one
+key and two sync commits; it does not establish every callback schedule.
+
+The byte reviewer confirmed that relational `WHERE` still uses JavaScript
+coercion for byte comparisons, while the proposed default ordered-read rule
+uses unsigned byte content. The planner declined byte range optimization in
+the reviewed public path, so indexed and unindexed results agreed there. The
+two comparison rules remain a product-design question beyond this PR's byte
+equality repair.

@@ -1084,6 +1084,14 @@ describe.each(indexTypes)(`%s public key ties`, (name, IndexType) => {
       expected: [`z`, `a`],
     },
     {
+      caseId: `third-differing-byte`,
+      makeRows: () => [
+        { id: `a`, value: Uint8Array.of(1, 1, 3) },
+        { id: `z`, value: Uint8Array.of(1, 1, 2) },
+      ],
+      expected: [`z`, `a`],
+    },
+    {
       caseId: `unsigned-127-128-boundary`,
       makeRows: () => {
         const low = Uint8Array.of(127)

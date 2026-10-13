@@ -2079,6 +2079,28 @@ describe(`native byte content order`, () => {
       .toBe(reverseSign)
   })
 
+  comparisonProperty([
+    fc.array(fc.integer({ min: 0, max: 255 }), {
+      minLength: 2,
+      maxLength: 24,
+    }),
+    fc.integer({ min: 0, max: 254 }),
+    fc.array(fc.integer({ min: 0, max: 255 }), { maxLength: 8 }),
+  ])(
+    `compares the first differing byte after a common prefix`,
+    (prefix, lowerByte, suffix) => {
+      // The prefix varies the first-difference position. A comparator that
+      // inspects only one or two leading bytes agrees on the pinned examples
+      // but disagrees with this independent content rule.
+      const lower = Uint8Array.from([...prefix, lowerByte, ...suffix])
+      const higher = Uint8Array.from([...prefix, lowerByte + 1, ...suffix])
+      expect(sign(model(lower, higher))).toBe(-1)
+      expect(sign(ascComparator(higher, lower, defaultOpts))).toBe(1)
+      expect(sign(ascComparator(lower, higher, defaultOpts))).toBe(-1)
+      expect(sign(descComparator(lower, higher, defaultOpts))).toBe(1)
+    },
+  )
+
   it(`keeps byte content order transitive through ordinary objects`, () => {
     const high = Uint8Array.of(2)
     const ordinary = {}

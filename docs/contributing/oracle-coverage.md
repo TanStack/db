@@ -487,6 +487,9 @@ pairs, a foreign native view, and own `length` and `byteLength` shadows. The
 later-byte case and its ready public scan/index counterpart reject a
 first-byte-only order
 mutant at their direct comparison and exact ordered-array checkpoints.
+Fixed and random direct samples vary a common prefix of 2–24 bytes before
+the first differing byte; a third-byte ready public case checks both index
+types and rejects a comparator that reads only the first two bytes.
 A byte/object/byte triple checks transitivity without prescribing which kind
 comes first. These are immediate comparator observations, not relational
 `WHERE` comparisons or live-query publication. The deep-equality owner also
@@ -501,7 +504,9 @@ tag, plus a mixed typed-array/DataView
 pair. The Collection change-event owner receives that boundary through a
 typed-array-to-foreign-DataView update and a same-realm foreign-DataView
 replacement. Both commits must settle with public state, BasicIndex or
-BTreeIndex exact lookup, and whole subscriber batches aligned. This rejects
+BTreeIndex exact lookup, and whole subscriber batches aligned. The callback
+also records the current public row and exact index keys, so a late index
+refresh fails at the publication cut. This rejects
 the getter failure that changed the row while leaving its index and subscriber
 behind. It does not assert content equality for DataViews.
 Exact `normalizeValue` results are direct utility observations. Indexed
