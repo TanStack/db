@@ -5195,7 +5195,7 @@ class PersistedCollectionRuntime<
         }
       } catch (error) {
         // Recovery may have started while the adapter read was awaited.
-         
+
         if (this.scopedRecovery) return
         // SQLite may reject its second read-admission check after a claim
         // expires. A read from that cache has no authority to fail the

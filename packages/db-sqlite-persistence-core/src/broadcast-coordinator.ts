@@ -661,10 +661,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       }
     } finally {
       if (acquisition.inFlight === work) acquisition.inFlight = null
-      const current = this.collections.get(acquisition.collectionId)
-      const currentLeaderId = current?.isLeader
-        ? this.nodeId
-        : (current?.leaderId ?? null)
+      const currentLeaderId = this.getLeaderId(acquisition.collectionId)
       const key = remoteSubsetAcquisitionKey(
         acquisition.collectionId,
         acquisition.acquisitionId,
@@ -1252,8 +1249,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     collectionId: string,
   ): Promise<void> {
     if (this.isDisposed()) return
-    const state = this.collections.get(collectionId)
-    const leaderId = state?.isLeader ? this.nodeId : state?.leaderId
+    const leaderId = this.getLeaderId(collectionId)
     if (!leaderId) return
 
     const replays: Array<Promise<void>> = []
@@ -1458,7 +1454,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
   } {
     const state = this.collections.get(collectionId)
     return {
-      leaderId: state?.isLeader ? this.nodeId : (state?.leaderId ?? null),
+      leaderId: this.getLeaderId(collectionId),
       term: state?.latestTerm ?? null,
     }
   }
