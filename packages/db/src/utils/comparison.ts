@@ -304,6 +304,16 @@ export function normalizeForBTree(value: any): any {
   return normalizeValue(value)
 }
 
+/** Keep Temporal's native order separate from its exact index lookup key. */
+export function indexOrderValue(value: any, exactKey: any): any {
+  return isTemporal(value) ? value : exactKey
+}
+
+/** Recover the exact lookup key from a stored ordered value. */
+export function indexExactKey(value: any): any {
+  return isTemporal(value) ? normalizeValue(value) : value
+}
+
 /**
  * Compare values using the equality semantics used by Map keys.
  */
@@ -322,23 +332,13 @@ export function denormalizeUndefined(value: any): any {
   return value
 }
 
-// Cached map from Symbol.toStringTag → static compare function (null = none defined).
-// Populated lazily on first encounter of each Temporal type so we never access
-// `.constructor` more than once per type, and dispatch is keyed on the already-
-// computed brand tag rather than on the constructor itself.
-const temporalCompareByTag = new Map<
-  string,
-  ((a: unknown, b: unknown) => number) | null
->()
-
 /**
  * Compare two Temporal values of the same type, returning -1, 0, or 1.
  *
- * Dispatch is keyed on `Symbol.toStringTag` (the brand already checked by
- * `isTemporal`) rather than `a.constructor`, making it robust across realms
- * and resistant to a shadowed `constructor` property. Types without a static
- * `.compare` (e.g. `PlainMonthDay`) throw rather than fall back to string
- * comparison, matching Temporal's design intent.
+ * The tag checks type agreement; the prototype supplies the static compare
+ * function. An instance's own `constructor` can be shadowed, and a claimed tag
+ * must not install a comparator that later genuine values use. Types without
+ * a static `.compare` (e.g. `PlainMonthDay`) throw instead of using text order.
  *
  * Callers must ensure both arguments are Temporal objects; mixed types throw.
  */
@@ -352,17 +352,11 @@ export function compareTemporalValues(a: unknown, b: unknown): number {
         : codedMessage(167, { aTag, bTag }),
     )
   }
-  let compare = temporalCompareByTag.get(aTag)
-  if (compare === undefined) {
-    const fn = (
-      (a as { constructor: unknown }).constructor as {
-        compare?: (x: unknown, y: unknown) => number
-      }
-    ).compare
-    compare = typeof fn === `function` ? fn : null
-    temporalCompareByTag.set(aTag, compare)
-  }
-  if (compare === null) {
+  const prototype = Object.getPrototypeOf(a) as {
+    constructor?: { compare?: (x: unknown, y: unknown) => number }
+  } | null
+  const compare = prototype?.constructor?.compare
+  if (typeof compare !== `function`) {
     throw new TypeError(
       devBuild() && process.env.NODE_ENV !== `production`
         ? `${aTag} has no defined ordering`

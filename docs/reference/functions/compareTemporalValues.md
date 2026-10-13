@@ -7,17 +7,18 @@ title: compareTemporalValues
 function compareTemporalValues(a, b): number;
 ```
 
-Defined in: [packages/db/src/utils/comparison.ts:313](https://github.com/TanStack/db/blob/main/packages/db/src/utils/comparison.ts#L313)
+Defined in: [packages/db/src/utils/comparison.ts:345](https://github.com/TanStack/db/blob/main/packages/db/src/utils/comparison.ts#L345)
 
 Compare two Temporal values of the same type, returning -1, 0, or 1.
 
-Dispatch is keyed on `Symbol.toStringTag` (the brand already checked by
-`isTemporal`) rather than `a.constructor`, making it robust across realms
-and resistant to a shadowed `constructor` property. Types without a static
-`.compare` (e.g. `PlainMonthDay`) throw rather than fall back to string
-comparison, matching Temporal's design intent.
+The tag checks type agreement. The first value's prototype supplies the static
+compare function, so an own `constructor` property cannot change dispatch or
+poison later comparisons. Types without a static `.compare` (e.g.
+`PlainMonthDay`) throw instead of using text order.
 
-Callers must ensure both arguments are Temporal objects; mixed types throw.
+Callers must ensure both arguments are ordinary Temporal objects from one
+compatible implementation. Mixed types throw. Replaced prototypes and custom
+subclass comparators are outside this contract.
 
 ## Parameters
 

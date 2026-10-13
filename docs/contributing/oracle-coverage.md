@@ -473,6 +473,18 @@ order, public Date range predicates, cursor continuation, proxies, subclasses,
 replaced Date prototypes or `getTime` methods, and other Date-consuming paths
 remain outside that witness.
 
+The comparison oracle also owns a bounded [Temporal order transfer](oracle-reviews/comparison-unit-retirement-round-6.md). Supplied ISO calendar fields and epoch-nanosecond offsets predict direct `ascComparator` signs and exact zeros for ordinary `PlainDate` and `ZonedDateTime` values from one polyfill copy. Fixed cases preserve the two retired unit blocks; generated cases vary calendar fields, offset zones, equal instants, and adjacent nanoseconds. Fresh-module histories reject a first-input constructor cache poisoned by a genuine instance or forged tag, including the direct `compareValues` path. This lane does not establish public query or index behavior. Custom Temporal subclasses, replaced instance prototypes, mixed native/polyfill implementations, other Temporal kinds, and public ordering/filter publication need separate witnesses.
+
+The [Temporal index order oracle](../../packages/db/tests/temporal-index-order-oracle.test.ts)
+and its [review record](oracle-reviews/temporal-index-order.md) own direct
+BasicIndex and BTreeIndex ordered takes after add/build and one mutation
+continuation, plus an optimized-only public Collection snapshot with an
+explicit index. Supplied epoch nanoseconds establish order without promising
+a key tie break for equal instants; distinct zones retain exact lookup
+identities. Custom comparators, mixed value domains, other Temporal kinds,
+public WHERE ranges, provider cursors, longer histories, and live-query
+publication require separate witnesses.
+
 The [WHERE predicate publication oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/where-predicate-publication-oracle.property.test.ts)
 also has a [cross-realm Date equality matrix](oracle-reviews/cross-realm-date-where-publication.md).
 For local and `node:vm` Dates with timestamps 1 and 2 or invalid timestamps,

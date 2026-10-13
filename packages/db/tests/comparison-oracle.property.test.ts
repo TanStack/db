@@ -1,6 +1,7 @@
 import { runInNewContext } from 'node:vm'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { fc, test as fcTest } from '@fast-check/vitest'
+import { Temporal } from 'temporal-polyfill'
 import { createCollection } from '../src/collection/index'
 import { createLiveQueryCollection } from '../src/query/live-query-collection'
 import {
@@ -1352,6 +1353,339 @@ describe(`areValuesEqual property-based tests`, () => {
       }
     },
   )
+})
+
+/**
+ * Temporal ordering uses the value's calendar position or instant, not its
+ * display text. The published #1519 contract gives PlainDate calendar order
+ * and ZonedDateTime instant order even when zones differ. These models use
+ * supplied ISO date fields and epoch-nanosecond offsets; neither asks the
+ * production comparator or Temporal's static compare for an expected sign.
+ *
+ * Legal inputs are ISO PlainDates from years 2000..2030 with days 1..28 and
+ * ZonedDateTimes within two seconds of a fixed instant in four offset zones.
+ * Equal-value branches construct separate objects, and the zoned branch forces
+ * different zones at the same instant. The production paths are the exported
+ * `ascComparator` under the default options and `compareValues` in hostile
+ * dispatch histories. Each return is the observation checkpoint;
+ * this lane makes no indexed or public-query claim. Comparator
+ * zero for same-instant ZonedDateTimes is distinct from `eq`/`in` identity:
+ * the zone remains part of identity under the #1519 contract.
+ */
+type IsoDateFields = { year: number; month: number; day: number }
+type PlainDateOrderInput = { left: IsoDateFields; right: IsoDateFields }
+
+function modelPlainDateSign(
+  left: IsoDateFields,
+  right: IsoDateFields,
+): -1 | 0 | 1 {
+  for (const field of [`year`, `month`, `day`] as const) {
+    if (left[field] < right[field]) return -1
+    if (left[field] > right[field]) return 1
+  }
+  return 0
+}
+
+function assertPlainDateOrder(input: PlainDateOrderInput): void {
+  const left = new Temporal.PlainDate(
+    input.left.year,
+    input.left.month,
+    input.left.day,
+  )
+  const right = new Temporal.PlainDate(
+    input.right.year,
+    input.right.month,
+    input.right.day,
+  )
+  const expected = modelPlainDateSign(input.left, input.right)
+  const actual = ascComparator(left, right, DEFAULT_COMPARE_OPTIONS)
+  const reverse = ascComparator(right, left, DEFAULT_COMPARE_OPTIONS)
+  expect(sign(actual)).toBe(expected)
+  expect(sign(reverse)).toBe(expected === 0 ? 0 : -expected)
+  if (expected === 0) {
+    // The old unit block asserted an exact zero for two distinct instances.
+    expect(left).not.toBe(right)
+    expect(actual).toBe(0)
+    expect(reverse).toBe(0)
+  }
+}
+
+const arbitraryIsoDateFields: fc.Arbitrary<IsoDateFields> = fc.record({
+  year: fc.integer({ min: 2000, max: 2030 }),
+  month: fc.integer({ min: 1, max: 12 }),
+  day: fc.integer({ min: 1, max: 28 }),
+})
+const arbitraryPlainDateOrderInput: fc.Arbitrary<PlainDateOrderInput> =
+  fc.oneof(
+    fc.record({
+      left: arbitraryIsoDateFields,
+      right: arbitraryIsoDateFields,
+    }),
+    arbitraryIsoDateFields.map((fields) => ({ left: fields, right: fields })),
+  )
+
+type OffsetZone = `+00:00` | `+05:30` | `-05:00` | `+14:00`
+type ZonedDateTimeOrderInput = {
+  leftNanoOffset: number
+  rightNanoOffset: number
+  leftZone: OffsetZone
+  rightZone: OffsetZone
+}
+
+// The base instant reconstructs the old 06:30 UTC / 12:00 +05:30 witness.
+// Offsets are safe integers, so their ordinary numeric order is the reference
+// for the generated epoch nanoseconds.
+const zonedBaseEpochNanoseconds =
+  BigInt(Date.UTC(2024, 0, 15, 6, 30)) * 1_000_000n
+
+function modelNanosecondSign(left: number, right: number): -1 | 0 | 1 {
+  return left < right ? -1 : left > right ? 1 : 0
+}
+
+function zonedValue(nanoOffset: number, zone: OffsetZone) {
+  return Temporal.Instant.fromEpochNanoseconds(
+    zonedBaseEpochNanoseconds + BigInt(nanoOffset),
+  ).toZonedDateTimeISO(zone)
+}
+
+function assertZonedDateTimeOrder(
+  input: ZonedDateTimeOrderInput,
+  compare: (left: unknown, right: unknown) => number = (left, right) =>
+    ascComparator(left, right, DEFAULT_COMPARE_OPTIONS),
+): void {
+  const left = zonedValue(input.leftNanoOffset, input.leftZone)
+  const right = zonedValue(input.rightNanoOffset, input.rightZone)
+  const expected = modelNanosecondSign(
+    input.leftNanoOffset,
+    input.rightNanoOffset,
+  )
+  const actual = compare(left, right)
+  const reverse = compare(right, left)
+  expect(sign(actual)).toBe(expected)
+  expect(sign(reverse)).toBe(expected === 0 ? 0 : -expected)
+  if (expected === 0) {
+    expect(actual).toBe(0)
+    expect(reverse).toBe(0)
+    if (input.leftZone !== input.rightZone) {
+      // A text-order mutant sees different strings for one model instant.
+      expect(left.toString()).not.toBe(right.toString())
+    }
+  }
+}
+
+const arbitraryNanoOffset = fc.integer({
+  min: -1_999_999_999,
+  max: 1_999_999_999,
+})
+const arbitraryOffsetZone: fc.Arbitrary<OffsetZone> = fc.constantFrom(
+  `+00:00`,
+  `+05:30`,
+  `-05:00`,
+  `+14:00`,
+)
+const arbitraryZonedDateTimeOrderInput: fc.Arbitrary<ZonedDateTimeOrderInput> =
+  fc.oneof(
+    fc.record({
+      leftNanoOffset: arbitraryNanoOffset,
+      rightNanoOffset: arbitraryNanoOffset,
+      leftZone: arbitraryOffsetZone,
+      rightZone: arbitraryOffsetZone,
+    }),
+    fc
+      .tuple(arbitraryNanoOffset, arbitraryOffsetZone, arbitraryOffsetZone)
+      .filter(([, leftZone, rightZone]) => leftZone !== rightZone)
+      .map(([nanoOffset, leftZone, rightZone]) => ({
+        leftNanoOffset: nanoOffset,
+        rightNanoOffset: nanoOffset,
+        leftZone,
+        rightZone,
+      })),
+    fc
+      .tuple(
+        arbitraryNanoOffset,
+        fc.boolean(),
+        arbitraryOffsetZone,
+        arbitraryOffsetZone,
+      )
+      .map(([nanoOffset, forward, leftZone, rightZone]) => ({
+        leftNanoOffset: nanoOffset,
+        rightNanoOffset: nanoOffset + (forward ? 1 : -1),
+        leftZone,
+        rightZone,
+      })),
+  )
+
+// Dispatch previously cached the first comparison function seen for a tag.
+// Reload before each hostile history so its first dispatch, rather than test
+// execution order, determines whether a bad function can poison later values.
+async function freshTemporalComparison() {
+  vi.resetModules()
+  return import('../src/utils/comparison')
+}
+
+describe(`Temporal default-order refinement`, () => {
+  it(`reconstructs the three PlainDate and one ZonedDateTime assertions`, () => {
+    const jan = { year: 2024, month: 1, day: 1 }
+    const june = { year: 2024, month: 6, day: 1 }
+    assertPlainDateOrder({
+      left: { year: 2023, month: 12, day: 28 },
+      right: jan,
+    })
+    assertPlainDateOrder({ left: jan, right: june })
+    assertPlainDateOrder({
+      left: jan,
+      right: { year: 2024, month: 1, day: 2 },
+    })
+    assertPlainDateOrder({ left: jan, right: jan })
+    assertZonedDateTimeOrder({
+      leftNanoOffset: 0,
+      rightNanoOffset: 0,
+      leftZone: `+00:00`,
+      rightZone: `+05:30`,
+    })
+    assertZonedDateTimeOrder({
+      leftNanoOffset: 0,
+      rightNanoOffset: 1,
+      leftZone: `+05:30`,
+      rightZone: `+00:00`,
+    })
+  })
+
+  comparisonProperty([arbitraryPlainDateOrderInput])(
+    `ISO PlainDate order refines supplied calendar fields`,
+    assertPlainDateOrder,
+  )
+
+  comparisonProperty([arbitraryZonedDateTimeOrderInput])(
+    `ZonedDateTime order refines supplied instants across offset zones`,
+    assertZonedDateTimeOrder,
+  )
+
+  it(`rejects text order for one instant shown in two zones`, () => {
+    const sample: ZonedDateTimeOrderInput = {
+      leftNanoOffset: 0,
+      rightNanoOffset: 0,
+      leftZone: `+00:00`,
+      rightZone: `+05:30`,
+    }
+    const lexical = (left: unknown, right: unknown) =>
+      String(left).localeCompare(String(right))
+    expect(() => assertZonedDateTimeOrder(sample, lexical)).toThrow()
+  })
+
+  it(`rejects millisecond truncation across adjacent instants`, () => {
+    const sample: ZonedDateTimeOrderInput = {
+      leftNanoOffset: 0,
+      rightNanoOffset: 1,
+      leftZone: `+05:30`,
+      rightZone: `+00:00`,
+    }
+    const truncated = (left: unknown, right: unknown) => {
+      const leftEpoch = (left as { epochNanoseconds: bigint }).epochNanoseconds
+      const rightEpoch = (right as { epochNanoseconds: bigint })
+        .epochNanoseconds
+      return Number(leftEpoch / 1_000_000n - rightEpoch / 1_000_000n)
+    }
+    expect(() => assertZonedDateTimeOrder(sample, truncated)).toThrow()
+  })
+
+  it(`keeps a PlainDate constructor override from poisoning later comparisons`, async () => {
+    const { ascComparator: isolatedComparator, compareValues: isolatedValues } =
+      await freshTemporalComparison()
+    // A genuine Temporal instance may have an own data property; its calendar
+    // value is unchanged by that property. It is the first dispatch here.
+    const shadowed = new Temporal.PlainDate(2024, 1, 1)
+    Object.defineProperty(shadowed, `constructor`, {
+      value: { compare: () => 0 },
+    })
+    const later = new Temporal.PlainDate(2024, 6, 1)
+    const ordinary = new Temporal.PlainDate(2024, 1, 1)
+    const expected = modelPlainDateSign(
+      { year: 2024, month: 1, day: 1 },
+      { year: 2024, month: 6, day: 1 },
+    )
+    const observed = [
+      isolatedComparator(shadowed, later, DEFAULT_COMPARE_OPTIONS),
+      isolatedComparator(ordinary, later, DEFAULT_COMPARE_OPTIONS),
+      isolatedValues(ordinary, later),
+    ]
+    expect(observed.map(sign)).toEqual([expected, expected, expected])
+  })
+
+  it(`keeps a right-hand constructor override from changing PlainDate order`, async () => {
+    const { ascComparator: isolatedComparator, compareValues: isolatedValues } =
+      await freshTemporalComparison()
+    const january = new Temporal.PlainDate(2024, 1, 1)
+    const shadowedJune = new Temporal.PlainDate(2024, 6, 1)
+    Object.defineProperty(shadowedJune, `constructor`, {
+      value: { compare: () => 0 },
+    })
+    const ordinaryJanuary = new Temporal.PlainDate(2024, 1, 1)
+    const ordinaryJune = new Temporal.PlainDate(2024, 6, 1)
+    const expected = modelPlainDateSign(
+      { year: 2024, month: 1, day: 1 },
+      { year: 2024, month: 6, day: 1 },
+    )
+    const observed = [
+      isolatedComparator(january, shadowedJune, DEFAULT_COMPARE_OPTIONS),
+      isolatedComparator(
+        ordinaryJanuary,
+        ordinaryJune,
+        DEFAULT_COMPARE_OPTIONS,
+      ),
+      isolatedValues(ordinaryJanuary, ordinaryJune),
+    ]
+    expect(observed.map(sign)).toEqual([expected, expected, expected])
+  })
+
+  it(`keeps a compareValues-first constructor override from poisoning later comparisons`, async () => {
+    const { ascComparator: isolatedComparator, compareValues: isolatedValues } =
+      await freshTemporalComparison()
+    const shadowedJanuary = new Temporal.PlainDate(2024, 1, 1)
+    Object.defineProperty(shadowedJanuary, `constructor`, {
+      value: { compare: () => 0 },
+    })
+    const june = new Temporal.PlainDate(2024, 6, 1)
+    const ordinaryJanuary = new Temporal.PlainDate(2024, 1, 1)
+    const expected = modelPlainDateSign(
+      { year: 2024, month: 1, day: 1 },
+      { year: 2024, month: 6, day: 1 },
+    )
+    const observed = [
+      isolatedValues(shadowedJanuary, june),
+      isolatedValues(ordinaryJanuary, june),
+      isolatedComparator(ordinaryJanuary, june, DEFAULT_COMPARE_OPTIONS),
+    ]
+    expect(observed.map(sign)).toEqual([expected, expected, expected])
+  })
+
+  it(`keeps a forged Temporal tag from poisoning genuine PlainDate order`, async () => {
+    // A claimed display tag may enter the dispatch path, but must not change
+    // the result of a later comparison between genuine Temporal values.
+    const { ascComparator: isolatedComparator, compareValues: isolatedValues } =
+      await freshTemporalComparison()
+    const forged = {
+      [Symbol.toStringTag]: `Temporal.PlainDate`,
+      constructor: { compare: () => 0 },
+    }
+    const june = new Temporal.PlainDate(2024, 6, 1)
+    try {
+      isolatedComparator(forged, june, DEFAULT_COMPARE_OPTIONS)
+    } catch {
+      // Rejecting the forged value is a valid outcome for this history.
+    }
+    const january = new Temporal.PlainDate(2024, 1, 1)
+    const expected = modelPlainDateSign(
+      { year: 2024, month: 1, day: 1 },
+      { year: 2024, month: 6, day: 1 },
+    )
+    expect(
+      [
+        isolatedComparator(january, june, DEFAULT_COMPARE_OPTIONS),
+        isolatedValues(january, june),
+      ].map(sign),
+    ).toEqual([expected, expected])
+  })
 })
 
 if (requestedProperty !== undefined) {
