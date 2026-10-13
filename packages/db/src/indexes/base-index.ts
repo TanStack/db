@@ -1,14 +1,7 @@
 import { compileSingleRowExpression } from '../query/compiler/evaluators.js'
 import { comparisonFunctions } from '../query/builder/functions.js'
 import { DEFAULT_COMPARE_OPTIONS, deepEquals } from '../utils.js'
-import {
-  dateTimestamp,
-  indexCustomComparatorValue,
-  indexOrderValue,
-  indexTemporalKind,
-  makeCheckedComparator,
-  makeIndexComparator,
-} from '../utils/comparison.js'
+import { makeCheckedComparator, makeComparator } from '../utils/comparison.js'
 import { codedMessage, codedWarning, devBuild } from '../error-message.js'
 import type { CompiledSingleRowExpression } from '../query/compiler/evaluators.js'
 import type { RangeQueryOptions } from './btree-index.js'
@@ -103,10 +96,8 @@ export interface IndexInterface<
    * Whether range lookups (gt/gte/lt/lte) on this index can be trusted to
    * return every matching key. Range traversal relies on the index ordering, so
    * it is unsafe when the index uses a custom comparator, whose order may not
-   * match the WHERE evaluator's relational operators. A custom comparator is
-   * also not represented by compareOptions, so an ordered Collection read must
-   * not select this index by compareOptions alone. Callers must fall back to a
-   * full scan when this is `false`.
+   * match the WHERE evaluator's relational operators. Callers must fall back to
+   * a full scan when this is `false`.
    */
   get supportsRangeOptimization(): boolean
 
@@ -156,15 +147,8 @@ export abstract class BaseIndex<
     this.expression = expression
     this.compareOptions = options?.compareOptions ?? DEFAULT_COMPARE_OPTIONS
     this.hasCustomComparator = options?.compareFn != null
-    const compareFn = options?.compareFn
     this.compareFn = makeCheckedComparator(
-      compareFn == null
-        ? makeIndexComparator(this.compareOptions)
-        : (a, b) =>
-            compareFn(
-              indexCustomComparatorValue(a),
-              indexCustomComparatorValue(b),
-            ),
+      options?.compareFn ?? makeComparator(this.compareOptions),
     )
     this.name = name
     this.initialize(options)
@@ -220,26 +204,7 @@ export abstract class BaseIndex<
   }
 
   get supportsRangeOptimization(): boolean {
-    if (this.hasCustomComparator) return false
-    // The default index can retain these genuine values for exact lookup,
-    // but its internal total order does not stand in for public `orderBy`.
-    let temporalKind: string | undefined
-    for (const domain of this.rangeValueDomains.keys()) {
-      if (!domain.startsWith(`Temporal.`)) continue
-      if (
-        domain === `Temporal.Duration` ||
-        domain === `Temporal.PlainMonthDay` ||
-        (temporalKind !== undefined && temporalKind !== domain)
-      )
-        return false
-      temporalKind = domain
-    }
-    return true
-  }
-
-  /** Ordering sees raw values; exact lookup keeps its normalized key. */
-  protected orderValue(value: unknown, exactKey: unknown): unknown {
-    return indexOrderValue(value, exactKey)
+    return !this.hasCustomComparator
   }
 
   protected addRangeValue(value: unknown): void {
@@ -355,8 +320,8 @@ export abstract class BaseIndex<
 
 function rangeValueDomain(value: unknown): string | undefined {
   if (value == null) return undefined
-  if (dateTimestamp(value) !== undefined) return `date`
-  return indexTemporalKind(value) ?? typeof value
+  if (value instanceof Date) return `date`
+  return typeof value
 }
 
 function isNativeRangeDomain(domain: string): boolean {

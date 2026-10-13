@@ -66,25 +66,21 @@ describe(`binary equality work`, () => {
   )
 
   it.each([`eq`, `in`])(
-    `compares distinct MiB values using %s without string encoding`,
+    `compares a MiB using %s without encoding strings`,
     (operator) => {
       const left = new Uint8Array(1024 * 1024).fill(65)
       const right = left.slice()
-      const list = [right]
       const evaluate = compileSingleRowExpression(
         new Func(operator, [
           new PropRef([`blob`]),
-          new Value(operator === `in` ? list : right),
+          new Value(operator === `in` ? [right] : right),
         ]),
       )
       const equal = measureEncoding(() => evaluate({ blob: left }))
       expect(equal).toEqual({ result: true, bytes: 0 })
-      const other = left.slice()
-      other[other.length - 1] = 66
-      if (operator === `in`) list[0] = other
-      const different = measureEncoding(() =>
-        evaluate({ blob: operator === `in` ? left : other }),
-      )
+      const changedRow = left.slice()
+      changedRow[changedRow.length - 1] = 66
+      const different = measureEncoding(() => evaluate({ blob: changedRow }))
       expect(different).toEqual({ result: false, bytes: 0 })
     },
   )

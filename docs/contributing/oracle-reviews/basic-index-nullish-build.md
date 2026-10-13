@@ -130,3 +130,14 @@ type errors. `git diff --exit-code --
 packages/db/tests/index-update-oracle.property.test.ts` confirmed that the
 oracle file again matched the reviewed commit. No calibration fault remains.
 The preceding ORC-007 and ORC-012 gaps are closed by this executed evidence.
+
+## Transfer-only narrowing
+
+The later production refactor groups each normalized build value during the
+existing entry pass. It removes the intermediate entries array and keeps the
+wrapper sort that fixes the nullish position. A fresh hostile recheck read
+the source Map model, original unit ledgers, and current build code. Its
+focused index, work, and Collection-index run passed 535 tests with no type
+errors. The recheck found no lost direct-index assertion after the grouping
+change. It did not rerun the original wrong-sort mutant or extend the law to
+raw duplicate source keys or custom callbacks within one normalized value.

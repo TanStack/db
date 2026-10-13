@@ -1,21 +1,15 @@
-import { runInNewContext } from 'node:vm'
 import { describe, expect, it } from 'vitest'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { Temporal } from 'temporal-polyfill'
-import { createCollection } from '../src/collection/index'
-import { createLiveQueryCollection } from '../src/query/live-query-collection'
 import {
   areValuesEqual,
   ascComparator,
-  compareValues,
   defaultComparator,
   descComparator,
-  isUnorderable,
   makeComparator,
   normalizeValue,
 } from '../src/utils/comparison'
 import { DEFAULT_COMPARE_OPTIONS } from '../src/utils'
-import { withOracleCleanup } from './utils'
 import type { CompareOptions } from '../src/query/builder/types'
 
 /**
@@ -25,9 +19,8 @@ import type { CompareOptions } from '../src/query/builder/types'
  * lexical/locale string modes are independent axes. In the bounded default
  * ascending domain below, NaN and invalid Dates share one non-finite order
  * position and follow finite values; null remains first. The published NaN
- * ordering change in `packages/db/CHANGELOG.md` (#1582) and the live-query
- * guide establish that law for Dates with native prototypes regardless of
- * their JavaScript realm in the currently broader Date-order lane.
+ * ordering change in `packages/db/CHANGELOG.md` (#1582) establishes that law
+ * for ordinary numbers and Dates in the transferred unit-test domain.
  *
  * Authority: `OrderByOptions` and `CompareOptions` in the query builder's
  * option types declare these modes. The index comparator contract accepts
@@ -38,12 +31,11 @@ import type { CompareOptions } from '../src/query/builder/types'
  * intentionally assigns those a creation-order ID. The non-finite model uses
  * input tags and finite epoch-day values, rather than the production
  * unorderable classifier. It covers number-only and Date-only sorts with
- * optional null. A separate realm-tagged Date model below checks native Date
- * timestamps and invalidity across realms, plus one public ordered scan.
- * Neither lane claims mixed-type order or every query/index path. Equality laws separately
- * cover the normalized value classes and changed-byte controls. Comparator
- * signs reject NaN and non-number results before reduction. Signed infinity
- * is a valid comparator result, including for custom string collation.
+ * optional null; it does not claim mixed-type order or query/index paths.
+ * Equality laws separately cover normalized value classes and changed-byte
+ * controls. Comparator signs reject NaN and non-number results before
+ * reduction. Signed infinity is a valid comparator result, including for
+ * custom string collation.
  *
  * Binary normalization has a narrower, established contract: equal byte
  * contents produce one Map key, different contents remain distinct, and a
@@ -52,10 +44,7 @@ import type { CompareOptions } from '../src/query/builder/types'
  * indexed-byte checks retain the regression contract introduced with #1797;
  * they constrain this internal utility, not a public serialized format or a
  * universal performance bound. The 32-character margin is the existing
- * constant-overhead budget for the sampled 0..200-byte keys. Changed-byte
- * equality and key histories cover lengths 1..200. Fixed changes at byte 64
- * of a 129-byte view and the last byte of a 200-byte view pin positions that
- * a short generated campaign need not sample.
+ * constant-overhead budget for the sampled 0..200-byte keys.
  */
 
 const defaultOpts: CompareOptions = {
@@ -222,9 +211,9 @@ function comparisonProperty<
 // locale/lexical, and custom-collation cases reconstruct those boundaries.
 // Array length 0/1 and binary length 0/1/128/129 are marginal cases. Plain
 // objects are outside this order model because their IDs depend on creation
-// order. Mixed-type order is outside this bounded grammar. A separate tagged
-// grammar below admits NaN and invalid Date inputs; an invalid comparator
-// result is rejected by the control below.
+// order. Mixed-type order is outside this bounded grammar. A tagged grammar
+// below admits NaN and invalid Date inputs; an invalid comparator result is
+// rejected by the control below.
 const arbitraryComparablePrimitive = fc.oneof(
   fc.string(),
   fc.integer(),
@@ -336,79 +325,6 @@ const arbitraryNonFiniteInput: fc.Arbitrary<NonFiniteInput> = fc.record({
   includeNull: fc.boolean(),
 })
 
-type RealmDateSample = {
-  leftTime: number | null
-  rightTime: number | null
-  leftForeign: boolean
-  rightForeign: boolean
-}
-
-function dateInRealm(time: number | null, foreign: boolean): Date {
-  const timestamp = time ?? Number.NaN
-  return foreign
-    ? (runInNewContext(`new Date(timestamp)`, { timestamp }) as Date)
-    : new Date(timestamp)
-}
-
-// `null` is a model-only invalid-Date tag; production receives a real Date
-// whose timestamp is NaN. Two valid tags compare by their supplied timestamp,
-// while an invalid tag follows every valid tag. The model never asks the
-// production Date detector, normalizer, or comparator for an expected sign.
-function modelDateSign(left: number | null, right: number | null): -1 | 0 | 1 {
-  if (left === null) return right === null ? 0 : 1
-  if (right === null) return -1
-  return left < right ? -1 : left > right ? 1 : 0
-}
-
-function assertRealmDateOrder(sample: RealmDateSample): void {
-  const left = dateInRealm(sample.leftTime, sample.leftForeign)
-  const right = dateInRealm(sample.rightTime, sample.rightForeign)
-  const expected = modelDateSign(sample.leftTime, sample.rightTime)
-  const reverseExpected = expected === 0 ? 0 : -expected
-  expect(isUnorderable(left)).toBe(sample.leftTime === null)
-  expect(isUnorderable(right)).toBe(sample.rightTime === null)
-  expect(sign(ascComparator(left, right, DEFAULT_COMPARE_OPTIONS))).toBe(
-    expected,
-  )
-  expect(sign(ascComparator(right, left, DEFAULT_COMPARE_OPTIONS))).toBe(
-    reverseExpected,
-  )
-  // Index equality keys use a Date's timestamp. This separate observation
-  // prevents a correct direct order from masking reference-key normalization.
-  expect(normalizeValue(left)).toBe(sample.leftTime ?? Number.NaN)
-  expect(normalizeValue(right)).toBe(sample.rightTime ?? Number.NaN)
-}
-
-// Legal pairs cross local and foreign native Dates, valid epoch milliseconds
-// in -1e12..1e12 and invalid Dates. The fixed witnesses below force the
-// foreign-valid and foreign-invalid paths; generated pairs add equal times,
-// both operand orders and both invalid values. Caller-modified built-ins,
-// proxies, and user-defined Date subclasses are outside this grammar.
-const arbitraryDateTime = fc.oneof(
-  fc.integer({ min: -1_000_000_000_000, max: 1_000_000_000_000 }),
-  fc.constant(null),
-)
-const arbitraryRealmDateSample: fc.Arbitrary<RealmDateSample> = fc.oneof(
-  fc.record({
-    leftTime: arbitraryDateTime,
-    rightTime: arbitraryDateTime,
-    leftForeign: fc.boolean(),
-    rightForeign: fc.boolean(),
-  }),
-  fc
-    .record({
-      time: arbitraryDateTime,
-      leftForeign: fc.boolean(),
-      rightForeign: fc.boolean(),
-    })
-    .map(({ time, leftForeign, rightForeign }) => ({
-      leftTime: time,
-      rightTime: time,
-      leftForeign,
-      rightForeign,
-    })),
-)
-
 const arbitraryComparableArray = fc.array(arbitraryComparablePrimitive, {
   maxLength: 5,
 })
@@ -477,13 +393,10 @@ const arbitrarySameTypeTriple = fc.oneof(
   ),
 )
 
-// A legal changed-byte input retains length and all but one indexed byte.
-// The 1..200 range spans both sides of the 128-byte key-size boundary; the
-// empty input has no byte to change and is checked by the size-margin witness.
 const arbitraryChangedBytes = fc
   .tuple(
-    fc.uint8Array({ minLength: 1, maxLength: 200 }),
-    fc.integer({ min: 0, max: 199 }),
+    fc.uint8Array({ minLength: 1, maxLength: 50 }),
+    fc.integer({ min: 0, max: 49 }),
     fc.integer({ min: 1, max: 255 }),
   )
   .map(([bytes, indexHint, delta]) => {
@@ -972,89 +885,6 @@ describe(`NaN and invalid Date default-order refinement`, () => {
   })
 })
 
-describe(`native Date order across JavaScript realms`, () => {
-  it(`treats numeric NaN and invalid Dates as one non-finite order position`, () => {
-    for (const foreign of [false, true]) {
-      const invalid = dateInRealm(null, foreign)
-      expect(ascComparator(Number.NaN, invalid, DEFAULT_COMPARE_OPTIONS)).toBe(
-        0,
-      )
-      expect(ascComparator(invalid, Number.NaN, DEFAULT_COMPARE_OPTIONS)).toBe(
-        0,
-      )
-    }
-  })
-
-  it(`orders foreign valid and invalid Dates by the promised timestamp law`, () => {
-    const jan1 = Date.UTC(2023, 0, 1)
-    const jan2 = Date.UTC(2023, 0, 2)
-    assertRealmDateOrder({
-      leftTime: jan2,
-      rightTime: jan1,
-      leftForeign: true,
-      rightForeign: false,
-    })
-    assertRealmDateOrder({
-      leftTime: null,
-      rightTime: jan1,
-      leftForeign: true,
-      rightForeign: false,
-    })
-    assertRealmDateOrder({
-      leftTime: jan1,
-      rightTime: jan1,
-      leftForeign: true,
-      rightForeign: false,
-    })
-    assertRealmDateOrder({
-      leftTime: jan1,
-      rightTime: null,
-      leftForeign: false,
-      rightForeign: true,
-    })
-  })
-
-  comparisonProperty([arbitraryRealmDateSample])(
-    `local and foreign Dates refine timestamp and invalidity order`,
-    (sample) => assertRealmDateOrder(sample),
-  )
-
-  it(`orders a foreign invalid Date after a valid Date in a public scan`, async () => {
-    for (const foreign of [false, true]) {
-      const invalid = dateInRealm(null, foreign)
-      const valid = new Date(Date.UTC(2023, 0, 1))
-      const source = createCollection({
-        id: `realm-date-order-${foreign}`,
-        getKey: (row: { id: number; when: Date }) => row.id,
-        autoIndex: `off`,
-        sync: {
-          sync: ({ begin, write, commit, markReady }) => {
-            begin()
-            write({ type: `insert`, value: { id: 1, when: invalid } })
-            write({ type: `insert`, value: { id: 2, when: valid } })
-            commit()
-            markReady()
-          },
-        },
-      })
-      const query = createLiveQueryCollection((q) =>
-        q
-          .from({ rows: source })
-          .orderBy(({ rows }) => rows.when, `asc`)
-          .select(({ rows }) => ({ id: rows.id, when: rows.when })),
-      )
-      // Preserve an ordered-row mismatch if either resource also fails to
-      // clean up, and attempt both cleanups in all cases.
-      await withOracleCleanup(async () => {
-        await query.preload()
-        // The local control proves that this public query actually orders
-        // rows; the foreign case must have the same promised result.
-        expect([...query.values()].map(({ id }) => id)).toEqual([2, 1])
-      }, [() => query.cleanup(), () => source.cleanup()])
-    }
-  })
-})
-
 describe(`descComparator property-based tests`, () => {
   comparisonProperty([arbitrarySameTypePair])(
     `descComparator reverses ascComparator ordering (same types)`,
@@ -1250,8 +1080,8 @@ describe(`areValuesEqual property-based tests`, () => {
 })
 
 /**
- * Temporal ordering uses the value's calendar position or instant, not its
- * display text. The published #1519 contract gives PlainDate calendar order
+ * Temporal ordering uses calendar position or instant. The published #1519
+ * contract gives PlainDate calendar order
  * and ZonedDateTime instant order even when zones differ. These models use
  * supplied ISO date fields and epoch-nanosecond offsets; neither asks the
  * production comparator or Temporal's static compare for an expected sign.
@@ -1259,14 +1089,9 @@ describe(`areValuesEqual property-based tests`, () => {
  * Legal inputs are ISO PlainDates from years 2000..2030 with days 1..28 and
  * ZonedDateTimes within two seconds of a fixed instant in four offset zones.
  * Equal-value branches construct separate objects, and the zoned branch forces
- * different zones at the same instant. A normal ZonedDateTime subclass
- * inherits its Temporal methods and retains the same instant order.
- * The production paths are the exported
- * `ascComparator` under the default options and `compareValues` in hostile
- * dispatch histories. Each return is the observation checkpoint;
- * this lane makes no indexed or public-query claim. Comparator
- * zero for same-instant ZonedDateTimes is distinct from `eq`/`in` identity:
- * the zone remains part of identity under the #1519 contract.
+ * different zones at the same instant. The production path is the exported
+ * `ascComparator` under default options; each return is the observation
+ * checkpoint. This lane makes no indexed or public-query claim.
  */
 type IsoDateFields = { year: number; month: number; day: number }
 type PlainDateOrderInput = { left: IsoDateFields; right: IsoDateFields }
@@ -1476,91 +1301,6 @@ describe(`Temporal default-order refinement`, () => {
     }
     expect(() => assertZonedDateTimeOrder(sample, truncated)).toThrow()
   })
-
-  it.each([
-    [
-      `ascComparator`,
-      (left: unknown, right: unknown) =>
-        ascComparator(left, right, DEFAULT_COMPARE_OPTIONS),
-    ],
-    [`compareValues`, compareValues],
-  ] as const)(
-    `keeps a ZonedDateTime subclass in instant order through %s`,
-    (_name, compare) => {
-      class SubclassZonedDateTime extends Temporal.ZonedDateTime {}
-      const subclass = new SubclassZonedDateTime(
-        zonedBaseEpochNanoseconds,
-        `+00:00`,
-      )
-      const peer = zonedValue(0, `+05:30`)
-      const later = zonedValue(1, `+00:00`)
-
-      // The model position comes from the supplied nanosecond offset.
-      expect(Temporal.ZonedDateTime.compare(subclass, peer)).toBe(0)
-      expect(Temporal.ZonedDateTime.compare(subclass, later)).toBe(-1)
-      expect(compare(subclass, peer)).toBe(0)
-      expect(compare(peer, subclass)).toBe(0)
-      expect(sign(compare(subclass, later))).toBe(-1)
-      expect(sign(compare(later, subclass))).toBe(1)
-    },
-  )
-})
-
-describe(`native binary key content`, () => {
-  it(`distinguishes a changed interior byte at the normalized-key return`, () => {
-    // Equal lengths and endpoints cannot conceal an interior byte change.
-    // Native byte content, not the production encoding, defines inequality.
-    const left = Uint8Array.of(1, 0, 2)
-    const right = Uint8Array.of(1, 9, 2)
-    expect(normalizeValue(left)).not.toBe(normalizeValue(right))
-  })
-
-  it(`distinguishes interior and last bytes of long native views`, () => {
-    // The supplied byte at each named position changes while length and all
-    // other bytes stay equal. At each function return, equality must reject
-    // the pair in both directions and normalization must produce distinct keys.
-    for (const { length, index } of [
-      { length: 129, index: 64 },
-      { length: 200, index: 199 },
-    ]) {
-      const bytes = Uint8Array.from({ length }, (_, byteIndex) => byteIndex)
-      const changed = new Uint8Array(bytes)
-      changed[index] = (changed[index]! + 1) % 256
-      const sample = { bytes, changed, index }
-
-      // A plausible first-64-byte comparator passes every short pair but
-      // fails the same changed-byte checker used by the generated equality
-      // property. This fault injection reaches the intended return check.
-      expect(() =>
-        assertChangedBytes(
-          sample,
-          (left, right) =>
-            left.length === right.length &&
-            left
-              .subarray(0, 64)
-              .every((byte, byteIndex) => byte === right[byteIndex]),
-        ),
-      ).toThrow(`changed byte must be unequal`)
-
-      expect(areValuesEqual(bytes, new Uint8Array(bytes))).toBe(true)
-      expect(areValuesEqual(bytes, changed)).toBe(false)
-      expect(areValuesEqual(changed, bytes)).toBe(false)
-      expect(normalizeValue(bytes)).not.toBe(normalizeValue(changed))
-    }
-  })
-
-  comparisonProperty([arbitraryChangedBytes])(
-    `a changed native byte changes the normalized key`,
-    (sample) => {
-      // Reuse the independently authored changed-byte history. This
-      // property has its own assertion site so a shrunk failure identifies
-      // key normalization rather than direct byte equality.
-      assertChangedBytes(
-        sample,
-        (left, right) => normalizeValue(left) === normalizeValue(right),
-      )
-    },
-  )
 })
 
 if (requestedProperty !== undefined) {

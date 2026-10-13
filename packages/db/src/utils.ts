@@ -9,34 +9,6 @@ interface TypedArray {
   [index: number]: number
 }
 
-// Duration equality retains the exact units, including subsecond units that
-// share a default display. Query normalization uses the same field order.
-export const durationFields = [
-  `years`,
-  `months`,
-  `weeks`,
-  `days`,
-  `hours`,
-  `minutes`,
-  `seconds`,
-  `milliseconds`,
-  `microseconds`,
-  `nanoseconds`,
-] as const
-
-// Ordinary native Dates compare by timestamp, including across realms.
-export function dateTimestamp(value: unknown): number | undefined {
-  if (value === null || typeof value !== `object`) return undefined
-  if (value instanceof Date) return value.getTime()
-  if (Object.prototype.toString.call(value) !== `[object Date]`)
-    return undefined
-  try {
-    return Date.prototype.getTime.call(value)
-  } catch {
-    return undefined
-  }
-}
-
 /**
  * Deep equality function that compares two values recursively
  * Handles primitives, objects, arrays, Date, RegExp, Map, Set, TypedArrays, and Temporal objects
@@ -111,11 +83,13 @@ export function deepEqualsInternal(
     return false
   }
 
-  const aDateTime = dateTimestamp(a)
-  const bDateTime = dateTimestamp(b)
-  if (aDateTime !== undefined || bDateTime !== undefined) {
-    return Object.is(aDateTime, bDateTime)
+  // Handle Date objects
+  if (a instanceof Date) {
+    if (!(b instanceof Date)) return false
+    return Object.is(a.getTime(), b.getTime())
   }
+  // Symmetric check: if b is Date but a is not, they're not equal
+  if (b instanceof Date) return false
 
   // Handle RegExp objects
   if (a instanceof RegExp) {
@@ -250,22 +224,20 @@ export function deepEqualsInternal(
   if (
     ArrayBuffer.isView(a) &&
     ArrayBuffer.isView(b) &&
-    Object.prototype.toString.call(a) !== `[object DataView]` &&
-    Object.prototype.toString.call(b) !== `[object DataView]`
+    !(a instanceof DataView) &&
+    !(b instanceof DataView)
   ) {
     const typedA = a as unknown as TypedArray
     const typedB = b as unknown as TypedArray
-    const lengthA = typedA.length
-    const lengthB = typedB.length
     // Elements compare like numbers: -0 equals 0, NaN equals NaN. Only a
     // draft treats a change of typed-array class as a change.
     if (
       (draft && Object.getPrototypeOf(a) !== Object.getPrototypeOf(b)) ||
-      lengthA !== lengthB
+      typedA.length !== typedB.length
     )
       return false
 
-    for (let i = 0; i < lengthA; i++) {
+    for (let i = 0; i < typedA.length; i++) {
       const x = typedA[i]!
       const y = typedB[i]!
       if (x !== y && !(x !== x && y !== y)) return false
@@ -276,7 +248,7 @@ export function deepEqualsInternal(
   // Symmetric check: if b is TypedArray but a is not, they're not equal
   if (
     ArrayBuffer.isView(b) &&
-    Object.prototype.toString.call(b) !== `[object DataView]` &&
+    !(b instanceof DataView) &&
     !ArrayBuffer.isView(a)
   ) {
     return false
@@ -291,15 +263,13 @@ export function deepEqualsInternal(
     // If they're different Temporal types, they're not equal
     if (aTag !== bTag) return false
 
-    if (aTag === `Temporal.Duration`) {
-      const left = a as typeof a &
-        Record<(typeof durationFields)[number], number>
-      const right = b as typeof b &
-        Record<(typeof durationFields)[number], number>
-      return durationFields.every((field) => left[field] === right[field])
+    // Use Temporal's built-in equals method if available
+    if (typeof a.equals === `function`) {
+      return a.equals(b)
     }
 
-    return a.equals!(b)
+    // Fallback to toString comparison for other types
+    return a.toString() === b.toString()
   }
   // Symmetric check: if b is Temporal but a is not, they're not equal
   if (isTemporal(b)) return false
@@ -397,7 +367,7 @@ export interface TemporalLike {
   equals?: (other: unknown) => boolean
 }
 
-/** Recognizes a supported Temporal tag; callers assume tagged values are valid. */
+/** Checks if the value is a Temporal object by checking for the Temporal brand */
 export function isTemporal(a: unknown): a is TemporalLike {
   if (a == null || typeof a !== `object`) return false
   const tag = (a as Record<symbol, unknown>)[Symbol.toStringTag]

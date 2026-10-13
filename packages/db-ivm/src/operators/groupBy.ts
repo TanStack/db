@@ -5,10 +5,6 @@ import { reduce } from './reduce.js'
 import type { IStreamBuilder, KeyValue } from '../types.js'
 
 type GroupKey = Record<string, unknown>
-type ProjectedGroupInput = KeyValue<
-  string,
-  [string | null, Record<string | symbol, unknown>]
->
 
 type BasicAggregateFunction<T, R, V = unknown> = {
   preMap: (data: T) => V
@@ -45,14 +41,7 @@ export function groupBy<
   T,
   K extends GroupKey,
   A extends Record<string, AggregateFunction<T, any, any>>,
->(
-  keyExtractor: (data: T) => K,
-  aggregates: A = {} as A,
-  mapInput?: (
-    stream: IStreamBuilder<T>,
-    project: (data: T) => ProjectedGroupInput,
-  ) => IStreamBuilder<ProjectedGroupInput>,
-) {
+>(keyExtractor: (data: T) => K, aggregates: A = {} as A) {
   type ResultType = K & AggregatesReturnType<T, A>
 
   const basicAggregates = Object.fromEntries(
@@ -82,33 +71,35 @@ export function groupBy<
     // values when every one of them has one. Within one group the reduce
     // index then merges equal contributions by that identity instead of
     // hashing them. A null identity falls back to the structural hash.
-    const project = (data: T): ProjectedGroupInput => {
-      const key = keyExtractor(data)
-      const keyString = serializeValue(key)
+    const withKeysAndValues = stream.pipe(
+      map((data) => {
+        const key = keyExtractor(data)
+        const keyString = serializeValue(key)
 
-      // Create values object with pre-aggregated values
-      const values: Record<string | symbol, unknown> = {}
+        // Create values object with pre-aggregated values
+        const values: Record<string | symbol, unknown> = {}
 
-      // Store the original key object. Contributions whose keys serialize
-      // alike but hash apart must not merge, so the key is part of the
-      // identity.
-      values[KEY_SENTINEL] = key
+        // Store the original key object. Contributions whose keys serialize
+        // alike but hash apart must not merge, so the key is part of the
+        // identity.
+        values[KEY_SENTINEL] = key
 
-      // Add pre-aggregated values
-      let identity: string | null = structuralIdentity(key) ?? null
-      for (const [name, aggregate] of aggregateEntries) {
-        const value = aggregate.preMap(data)
-        values[name] = value
-        if (identity === null) continue
-        const part = structuralIdentity(value)
-        identity = part === undefined ? null : `${identity}|${part}`
-      }
+        // Add pre-aggregated values
+        let identity: string | null = structuralIdentity(key) ?? null
+        for (const [name, aggregate] of aggregateEntries) {
+          const value = aggregate.preMap(data)
+          values[name] = value
+          if (identity === null) continue
+          const part = structuralIdentity(value)
+          identity = part === undefined ? null : `${identity}|${part}`
+        }
 
-      return [keyString, [identity, values]]
-    }
-    const withKeysAndValues = mapInput
-      ? mapInput(stream, project)
-      : stream.pipe(map(project))
+        return [keyString, [identity, values]] as KeyValue<
+          string,
+          [string | null, Record<string | symbol, unknown>]
+        >
+      }),
+    )
 
     // Then reduce to compute aggregates
     const reduced = withKeysAndValues.pipe(

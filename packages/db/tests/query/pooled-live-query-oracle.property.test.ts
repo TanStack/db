@@ -63,22 +63,17 @@
  *
  * Known omissions: on-demand and persisted sources, `DbClient` hydration,
  * Suspense, `select`, and every other clause keep the live-query Collection
- * and are outside this owner. A captured mutable `inArray` list in a residual
- * predicate also keeps the live-query Collection: a pooled group would not
- * notify the view about a source event in another group, although that event
- * must refresh the whole result using the list's current members.
+ * and are outside this owner.
  */
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createLiveQueryObserver } from '../../src/live-query-observer.js'
-import { resolveLiveQueryValue } from '../../src/live-query-options.js'
 import { Query } from '../../src/query/builder/index.js'
 import {
   and,
   createLiveQueryCollection,
   eq,
-  inArray,
   not,
 } from '../../src/query/index.js'
 import { createPooledLiveQuery } from '../../src/query/pooled-live-query.js'
@@ -902,54 +897,6 @@ async function runHistory(history: History): Promise<void> {
 
 describe(`pooled live query oracle`, () => {
   if (requestedReplayProperty === undefined) {
-    it(`routes a mutable residual inArray list to a live-query Collection`, async () => {
-      type PooledMembershipRow = {
-        id: string
-        g: string
-        v: number
-        revision: number
-      }
-      const source = createCollection(
-        mockSyncCollectionOptions<PooledMembershipRow>({
-          id: `pooled-mutable-in-${serial++}`,
-          getKey: (row) => row.id,
-          initialData: [
-            { id: `one`, g: `g`, v: 1, revision: 0 },
-            { id: `two`, g: `g`, v: 2, revision: 0 },
-            { id: `trigger`, g: `other`, v: 3, revision: 0 },
-          ],
-        }),
-      )
-      const members = [1]
-      const query = new Query()
-        .from({ r: source })
-        .where(({ r }) => and(eq(r.g, `g`), inArray(r.v, members)))
-      const resolved = resolveLiveQueryValue(query)!
-      const observer = createLiveQueryObserver(resolved, { mode: `wholesale` })
-      const stop = observer.subscribe(() => {})
-      await withOracleCleanup(async () => {
-        await resolved.preload()
-        const expected = () =>
-          [
-            { id: `one`, v: 1 },
-            { id: `two`, v: 2 },
-          ]
-            .filter((row) => members.includes(row.v))
-            .map((row) => row.id)
-        const check = () =>
-          expect([...observer.getSnapshot().state!.keys()]).toEqual(expected())
-        check()
-        members[0] = 2
-        source.utils.begin()
-        source.utils.write({
-          type: `update`,
-          value: { id: `trigger`, g: `other`, v: 3, revision: 1 },
-        })
-        source.utils.commit()
-        check()
-      }, [stop, () => resolved.cleanup(), () => source.cleanup()])
-    })
-
     // Generated fields are plain values; this pins a field whose getter
     // throws, which both paths treat as a row that does not match.
     it(`matches the live-query Collection when an eq path getter throws`, async () => {

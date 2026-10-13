@@ -598,14 +598,10 @@ export function withExpectedRejection<T>(
   }).finally(() => restoreListeners())
 }
 
-type IndexInternals<TKey> = { indexedKeys: Map<TKey, unknown> } & (
+type IndexInternals<TKey> = { indexedKeys: Set<TKey> } & (
+  | { sortedValues: Array<unknown>; valueMap: Map<unknown, Set<TKey>> }
   | {
-      sortedValues: Array<unknown>
-      valueMap: Map<unknown, Set<TKey>>
-      orderedBuckets: Array<Map<TKey, unknown>>
-    }
-  | {
-      valueMap: Map<unknown, Set<TKey>>
+      valueMap: Map<unknown, { keys: Set<TKey> }>
       orderedEntries: {
         size: number
         minKey: () => unknown
@@ -614,10 +610,7 @@ type IndexInternals<TKey> = { indexedKeys: Map<TKey, unknown> } & (
           low: unknown,
           high: unknown,
           includeHigh: boolean,
-          onFound: (
-            key: unknown,
-            bucket: { values: Map<TKey, unknown> },
-          ) => void,
+          onFound: (key: unknown, bucket: { keys: Set<TKey> }) => void,
         ) => void
       }
     }
@@ -635,7 +628,7 @@ function indexInternals<TKey>(index: object): [IndexInternals<TKey>, boolean] {
 
 /** Test inspection of an index's tracked keys. */
 export function indexedKeysSet<TKey>(index: object): Set<TKey> {
-  return new Set(indexInternals<TKey>(index)[0].indexedKeys.keys())
+  return indexInternals<TKey>(index)[0].indexedKeys
 }
 
 /** Test inspection of an index's value buckets keyed by indexed value. */
@@ -643,8 +636,8 @@ export function valueMapData<TKey>(index: object): Map<unknown, Set<TKey>> {
   const [internals] = indexInternals<TKey>(index)
   if (`sortedValues` in internals) return internals.valueMap
   const result = new Map<unknown, Set<TKey>>()
-  for (const [key, keys] of internals.valueMap) {
-    result.set(denormalizeUndefined(key), keys)
+  for (const [key, bucket] of internals.valueMap) {
+    result.set(denormalizeUndefined(key), bucket.keys)
   }
   return result
 }
@@ -656,18 +649,16 @@ export function orderedEntriesArray<TKey>(
   const [internals, reversed] = indexInternals<TKey>(index)
   let entries: Array<[unknown, Set<TKey>]>
   if (`sortedValues` in internals) {
-    if (internals.sortedValues.length !== internals.orderedBuckets.length)
-      throw new Error(`BasicIndex order buckets are misaligned`)
-    entries = internals.sortedValues.map((value, position) => [
+    entries = internals.sortedValues.map((value) => [
       value,
-      new Set(internals.orderedBuckets[position]!.keys()),
+      internals.valueMap.get(value) ?? new Set(),
     ])
   } else {
     const tree = internals.orderedEntries
     entries = []
     if (tree.size > 0) {
       tree.forRange(tree.minKey(), tree.maxKey(), true, (key, bucket) => {
-        entries.push([denormalizeUndefined(key), new Set(bucket.values.keys())])
+        entries.push([denormalizeUndefined(key), bucket.keys])
       })
     }
   }

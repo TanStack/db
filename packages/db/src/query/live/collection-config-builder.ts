@@ -149,7 +149,6 @@ export class CollectionConfigBuilder<
   private pipelineCache: ResultStream | undefined
   public sourceWhereClausesCache:
     Map<string, BasicExpression<boolean>> | undefined
-  public hasCapturedMutableList = false
   private bucketFacadesCache:
     ReturnType<typeof materializeCompilation>[`facades`] | undefined
 
@@ -818,7 +817,6 @@ export class CollectionConfigBuilder<
     this.inputsCache = undefined
     this.pipelineCache = undefined
     this.sourceWhereClausesCache = undefined
-    this.hasCapturedMutableList = false
     this.bucketFacadesCache = undefined
 
     // Reset lazy source alias state
@@ -877,7 +875,6 @@ export class CollectionConfigBuilder<
     )
     this.pipelineCache = materialized.pipeline
     this.sourceWhereClausesCache = compilation.sourceWhereClauses
-    this.hasCapturedMutableList = compilation.hasCapturedMutableList
     this.bucketFacadesCache = materialized.facades
 
     const missingSources = this.collectionSources

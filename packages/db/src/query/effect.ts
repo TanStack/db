@@ -419,7 +419,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   private graph: D2 | undefined
   private inputs: Record<string, RootStreamBuilder<unknown>> | undefined
   private sourceWhereClauses: Map<string, BasicExpression<boolean>> | undefined
-  private hasCapturedMutableList = false
 
   // Mutable objects passed to compileQuery by reference.
   // The join compiler captures these references and reads them later when
@@ -517,7 +516,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     )
 
     this.sourceWhereClauses = compilation.sourceWhereClauses
-    this.hasCapturedMutableList = compilation.hasCapturedMutableList
 
     // Attach the output operator that accumulates changes
     compilation.pipeline.pipe(
@@ -1083,7 +1081,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       this.query,
       alias,
       this.queryCompareOptions,
-      this.hasCapturedMutableList,
     )
 
     return {
@@ -1166,7 +1163,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     this.graph = undefined
     this.inputs = undefined
     this.sourceWhereClauses = undefined
-    this.hasCapturedMutableList = false
   }
 }
 

@@ -5,17 +5,8 @@ production change is `18ea072b5`. This record adds the audit only.
 
 ## Contract and evidence
 
-The original review called `inArray(value, list)` SQL `IN` under three-valued
-logic. That wording is superseded for null-containing lists by the
-[compiled `in` contract review](temporal-equality-alias.md#review-of-committed-head-5df06de2e)
-and its coverage-map entry. The current evaluator treats a non-null value
-against a null-only list as FALSE; SQL would yield UNKNOWN. This is an open
-product-law decision, not a claim that the current rule is SQL-equivalent.
-The normalization details below describe the reviewed `perf-in-set` head;
-the linked review records later Temporal equality changes.
-
-Under the reviewed evaluator rule, a null or undefined value is UNKNOWN
-(`null`). A list that is not an array is FALSE. The
+`inArray(value, list)` is SQL `IN` under three-valued logic. A null or
+undefined value is UNKNOWN (`null`). A list that is not an array is FALSE. The
 result is TRUE when some non-null list item equals the value under the
 evaluator's equality, and FALSE otherwise.
 
@@ -106,55 +97,3 @@ times with no source index:
 
 Median write times did not change beyond noise. Two of the three comparisons
 were 1.00× and 0.98×, and a same-code comparison was 0.96×.
-
-## Frozen-head reference-model correction
-
-The hostile review of `210651d207eefe9bbc025c780f6259e470225c9e`
-found a false-green risk in `referenceEqual`: realm-local `instanceof Date`
-could classify a native foreign Date as an ordinary reference even when the
-compiled evaluator correctly compared its timestamp. The working-tree model
-now reads a captured native `Date.prototype.getTime`, uses valid and invalid
-foreign Dates, and rejects a local object made with
-`Object.create(Date.prototype)`. Fixed witnesses check compiled `eq`, constant-list `in`, and
-row-supplied `in` in both operand directions. This was a reference-model gap,
-not an observed production defect. The focused receiving run passed 72 tests.
-
-The transport controls for equal native Uint8Arrays from different realms
-now expect `[true, true]` for the compiled equality paths; request-identity
-assertions remain in place. This corrects old test expectations rather than
-altering the native byte-content law. The open null-containing-list authority
-question recorded by the [Temporal alias review](temporal-equality-alias.md)
-is unchanged. The working-tree changes still need a fresh committed-head
-hostile review.
-
-The review of committed head `d974d4a4f` found that the positive foreign-Date
-controls came from one VM context, while a second context supplied only a
-different timestamp. The receiving oracle now requires that second context's
-Date to equal its own timestamp through compiled `eq`, constant-list `in`, and
-row-supplied `in`. The focused `in` owner passed after this addition. This
-checks the compiled equality return for two VM contexts; browser iframe
-behavior and a fresh exact-commit hostile review of the follow-up remain open.
-
-## Own-method membership gap at `d917ba4c9`
-
-The compiled `in` evaluator and its reference both called the caller array's
-overridable `some` method. A compiled `[1]` with an own `some` returning false
-rejected present member `1`; after the list changed to `[2]`, an own `some`
-returning true accepted absent member `1`. Constant and row-supplied lists
-were both false green. The reference now walks present integer indices through
-the length captured at evaluation, independently of the array's methods.
-Production calls the native Array `some` with the current list as receiver.
-Both false rejection and false acceptance failed at the compiled return before
-the repair; the sparse-hole and nullish controls pass afterward. The focused
-`in` owner passed 44 tests. This proves the named array-method boundary at
-evaluation, not every possible proxy or mutation during one evaluation.
-
-## Exact-commit review of `5c97f18dc`
-
-A fresh read-only reviewer found no blocker in the own-method repair. The
-model walks present indices independently of production's native `some`
-call. Fixed constant and row-supplied cases reject both lying-false and
-lying-true methods after a slot edit; sparse and nullish controls preserve the
-stated behavior. The compiled `in` and byte-work owners passed 120 tests with
-no type errors. Generated lists remain dense and static. Arbitrary getters,
-proxies, and mutation during one evaluation remain outside this verdict.

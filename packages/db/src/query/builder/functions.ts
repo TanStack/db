@@ -42,7 +42,7 @@ type ExpressionLike =
   | Date
   | null
   | undefined
-  | ReadonlyArray<unknown>
+  | Array<unknown>
 
 export type CaseWhenValue =
   | ExpressionLike

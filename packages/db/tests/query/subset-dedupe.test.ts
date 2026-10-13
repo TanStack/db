@@ -1,4 +1,3 @@
-import { runInNewContext } from 'node:vm'
 import { describe, expect, it, vi } from 'vitest'
 import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe'
 import { eq, gt } from '../../src/query/builder/functions'
@@ -382,42 +381,6 @@ describe(`DeduplicatedLoadSubset`, () => {
     expect(deduplicated.loadSubset(request(2025))).toBe(true)
     expect(loadSubset).toHaveBeenCalledTimes(2)
   })
-
-  describe.each([`Date`, `Uint8Array`] as const)(
-    `request transport preserves %s predicate matches`,
-    (type) => {
-      it.each([`local`, `foreign`] as const)(`in the %s realm`, (realm) => {
-        const local = type === `Date` ? new Date(2) : new Uint8Array([1, 2])
-        const foreign: unknown = runInNewContext(
-          type === `Date` ? `new Date(2)` : `new Uint8Array([1, 2])`,
-        )
-        expect(foreign).not.toBe(local)
-        if (type === `Uint8Array`) {
-          // A genuine foreign view has the same native bytes despite having
-          // a different reference and failing this realm's instanceof check.
-          expect(foreign instanceof Uint8Array).toBe(false)
-          expect(ArrayBuffer.isView(foreign)).toBe(true)
-          expect(Array.from(foreign as Uint8Array)).toEqual([1, 2])
-        }
-        const value = realm === `local` ? local : foreign
-        for (const where of [
-          eq(ref(`value`), val(value)),
-          new Func<boolean>(`in`, [ref(`value`), val([value])]),
-        ]) {
-          const options = { where }
-          const request = captureRequest(options)
-          expect(request).toBe(options)
-          expect(request.where).toBe(where)
-          const matches = compileSingleRowExpression(request.where!)
-          // Transport keeps the literal object; ordinary native value
-          // equality uses its time or bytes across JavaScript environments.
-          expect(
-            [foreign, local].map((item) => matches({ value: item })),
-          ).toEqual([true, true])
-        }
-      })
-    },
-  )
 
   it.each([`coalesce`, `caseWhen`] as const)(
     `preserves membership results through %s`,

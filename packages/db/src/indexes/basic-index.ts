@@ -55,13 +55,10 @@ export class BasicIndex<
 
   // Map for O(1) equality lookups: indexedValue -> Set of PKs
   private valueMap = new Map<any, Set<TKey>>()
-  // Equality and comparator positions are independent: a custom comparator
-  // may distinguish values that have one exact query-equality key.
+  // Sorted array of unique indexed values for range queries
   private sortedValues: Array<any> = []
-  // Each bucket stays at the same array position as its order representative.
-  private orderedBuckets: Array<Map<TKey, unknown>> = []
-  // Each indexed key retains the order value used for its current position.
-  private indexedKeys = new Map<TKey, unknown>()
+  // Set of all indexed PKs
+  private indexedKeys = new Set<TKey>()
 
   protected initialize(_options?: BasicIndexOptions): void {}
 
@@ -71,42 +68,28 @@ export class BasicIndex<
   add(key: TKey, item: any): void {
     const indexedValue = this.evaluateAddedValue(key, item)
     const normalizedValue = normalizeValue(indexedValue)
-    const orderValue = this.orderValue(indexedValue, normalizedValue)
 
-    this.addToBucket(key, normalizedValue, orderValue)
+    this.addToBucket(key, normalizedValue)
     this.addRangeValue(indexedValue)
 
-    this.indexedKeys.set(key, orderValue)
+    this.indexedKeys.add(key)
   }
 
-  private addToBucket(
-    key: TKey,
-    normalizedValue: unknown,
-    orderValue: unknown,
-  ): void {
-    this.addToOrder(key, orderValue)
-    const exactKeys = this.valueMap.get(normalizedValue)
-    if (exactKeys) exactKeys.add(key)
-    else this.valueMap.set(normalizedValue, new Set([key]))
-  }
-
-  private addToOrder(key: TKey, orderValue: unknown): void {
-    // Compare before changing either partition. One comparator position can
-    // contain several exact values, and one exact value can occupy several
-    // custom comparator positions.
-    const insertIdx = findInsertPositionInArray(
-      this.sortedValues,
-      orderValue,
-      this.compareFn,
-    )
-    if (
-      insertIdx < this.sortedValues.length &&
-      this.compareFn(this.sortedValues[insertIdx], orderValue) === 0
-    ) {
-      this.orderedBuckets[insertIdx]!.set(key, orderValue)
+  private addToBucket(key: TKey, normalizedValue: unknown): void {
+    const keySet = this.valueMap.get(normalizedValue)
+    if (keySet) {
+      // Value already exists, just add the key to the set
+      keySet.add(key)
     } else {
-      this.sortedValues.splice(insertIdx, 0, orderValue)
-      this.orderedBuckets.splice(insertIdx, 0, new Map([[key, orderValue]]))
+      // New value. Find its sorted position first: a comparator failure must
+      // throw before the index changes.
+      const insertIdx = findInsertPositionInArray(
+        this.sortedValues,
+        normalizedValue,
+        this.compareFn,
+      )
+      this.valueMap.set(normalizedValue, new Set([key]))
+      this.sortedValues.splice(insertIdx, 0, normalizedValue)
     }
   }
 
@@ -125,53 +108,43 @@ export class BasicIndex<
 
     const normalizedValue = normalizeValue(indexedValue)
 
-    this.removeFromBucket(key, normalizedValue, this.indexedKeys.get(key))
+    this.removeFromBucket(key, normalizedValue)
     this.removeRangeValue(indexedValue)
 
     this.indexedKeys.delete(key)
   }
 
-  private removeFromBucket(
-    key: TKey,
-    normalizedValue: unknown,
-    orderValue: unknown,
-  ): void {
-    const exactKeys = this.valueMap.get(normalizedValue)
-    if (!exactKeys?.has(key)) return
-    this.removeFromOrder(key, orderValue)
-    exactKeys.delete(key)
-    if (exactKeys.size === 0) this.valueMap.delete(normalizedValue)
-  }
-
-  private removeFromOrder(key: TKey, orderValue: unknown): void {
-    const index = findInsertPositionInArray(
-      this.sortedValues,
-      orderValue,
-      this.compareFn,
-    )
-    if (index >= this.sortedValues.length) return
-    const representative = this.sortedValues[index]
-    if (this.compareFn(representative, orderValue) !== 0) return
-    const members = this.orderedBuckets[index]!
-    if (!members.has(key)) return
-    if (members.size === 1) {
-      this.sortedValues.splice(index, 1)
-      this.orderedBuckets.splice(index, 1)
-      return
+  private removeFromBucket(key: TKey, normalizedValue: unknown): void {
+    const keySet = this.valueMap.get(normalizedValue)
+    if (keySet?.has(key)) {
+      // The last key for this value leaves the sorted array too. Locate it
+      // before any change, so a comparator failure leaves the index unchanged.
+      if (keySet.size === 1) {
+        let sortedIndex = findInsertPositionInArray(
+          this.sortedValues,
+          normalizedValue,
+          this.compareFn,
+        )
+        // Distinct equality keys may share one comparator position.
+        while (
+          sortedIndex < this.sortedValues.length &&
+          this.compareFn(this.sortedValues[sortedIndex], normalizedValue) === 0
+        ) {
+          if (
+            areSameValueZeroEqual(
+              this.sortedValues[sortedIndex],
+              normalizedValue,
+            )
+          ) {
+            this.sortedValues.splice(sortedIndex, 1)
+            break
+          }
+          sortedIndex++
+        }
+        this.valueMap.delete(normalizedValue)
+      }
+      keySet.delete(key)
     }
-    // Keep a live representative when its row leaves the comparator group.
-    if (areSameValueZeroEqual(members.get(key), representative)) {
-      const values = members.entries()
-      const first = values.next().value!
-      const successor = first[0] === key ? values.next().value![1] : first[1]
-      // A custom comparator may reject the promoted value against a neighbor.
-      // Check before changing either the sorted or exact partition.
-      if (index > 0) this.compareFn(this.sortedValues[index - 1], successor)
-      if (index + 1 < this.sortedValues.length)
-        this.compareFn(successor, this.sortedValues[index + 1])
-      this.sortedValues[index] = successor
-    }
-    members.delete(key)
   }
 
   /**
@@ -191,28 +164,21 @@ export class BasicIndex<
 
     const oldValue = normalizeValue(oldIndexedValue)
     const newValue = normalizeValue(newIndexedValue)
-    const oldOrder = this.indexedKeys.get(key)
-    const newOrder = this.orderValue(newIndexedValue, newValue)
     if (
       areSameValueZeroEqual(oldValue, newValue) &&
       this.valueMap.get(newValue)?.has(key) &&
       this.indexedKeys.has(key)
     ) {
-      if (!Object.is(oldOrder, newOrder)) {
-        this.removeFromOrder(key, oldOrder)
-        this.addToOrder(key, newOrder)
-      }
       this.removeRangeValue(oldIndexedValue)
       this.addRangeValue(newIndexedValue)
-      this.indexedKeys.set(key, newOrder)
       return
     }
 
-    this.removeFromBucket(key, oldValue, oldOrder)
+    this.removeFromBucket(key, oldValue)
     this.removeRangeValue(oldIndexedValue)
-    this.addToBucket(key, newValue, newOrder)
+    this.addToBucket(key, newValue)
     this.addRangeValue(newIndexedValue)
-    this.indexedKeys.set(key, newOrder)
+    this.indexedKeys.add(key)
   }
 
   /**
@@ -221,43 +187,21 @@ export class BasicIndex<
   build(entries: Iterable<[TKey, any]>): void {
     this.clear()
 
-    // Collect all entries first
-    const entriesArray: Array<{ key: TKey; value: any; orderValue: any }> = []
     for (const [key, item] of entries) {
       const indexedValue = this.evaluateAddedValue(key, item)
       const value = normalizeValue(indexedValue)
-      const orderValue = this.orderValue(indexedValue, value)
-      entriesArray.push({
-        key,
-        value,
-        orderValue,
-      })
+      const keys = this.valueMap.get(value)
+      if (keys) keys.add(key)
+      else this.valueMap.set(value, new Set([key]))
       this.addRangeValue(indexedValue)
-      this.indexedKeys.set(key, orderValue)
+      this.indexedKeys.add(key)
     }
 
-    // Native Array.sort moves raw undefined values last without comparing them.
-    // Wrap values so nulls-first comparison also runs during a full build.
-    const sortable = entriesArray.map((entry) => ({ entry }))
-    sortable.sort((left, right) =>
-      this.compareFn(left.entry.orderValue, right.entry.orderValue),
-    )
-    for (const { entry } of sortable) {
-      const exactKeys = this.valueMap.get(entry.value)
-      if (exactKeys) exactKeys.add(entry.key)
-      else this.valueMap.set(entry.value, new Set([entry.key]))
-
-      const representative = this.sortedValues.at(-1)
-      if (
-        this.sortedValues.length > 0 &&
-        this.compareFn(representative, entry.orderValue) === 0
-      ) {
-        this.orderedBuckets.at(-1)!.set(entry.key, entry.orderValue)
-      } else {
-        this.sortedValues.push(entry.orderValue)
-        this.orderedBuckets.push(new Map([[entry.key, entry.orderValue]]))
-      }
-    }
+    // Array.sort moves raw undefined values last without comparing them.
+    // Wrap values so nulls-first comparison runs during a full build.
+    const sortable = Array.from(this.valueMap.keys(), (value) => ({ value }))
+    sortable.sort((left, right) => this.compareFn(left.value, right.value))
+    this.sortedValues = sortable.map(({ value }) => value)
   }
 
   /**
@@ -266,7 +210,6 @@ export class BasicIndex<
   clear(): void {
     this.valueMap.clear()
     this.sortedValues = []
-    this.orderedBuckets = []
     this.indexedKeys.clear()
     this.clearRangeValues()
   }
@@ -334,8 +277,6 @@ export class BasicIndex<
 
     const normalizedFrom = normalizeValue(from)
     const normalizedTo = normalizeValue(to)
-    const orderFrom = this.orderValue(from, normalizedFrom)
-    const orderTo = this.orderValue(to, normalizedTo)
     const hasFrom = `from` in options
     const hasTo = `to` in options
 
@@ -344,7 +285,7 @@ export class BasicIndex<
     if (hasFrom) {
       startIdx = findInsertPositionInArray(
         this.sortedValues,
-        orderFrom,
+        normalizedFrom,
         this.compareFn,
       )
       // Comparator-equal values form one range boundary even when they are
@@ -352,7 +293,7 @@ export class BasicIndex<
       while (
         !fromInclusive &&
         startIdx < this.sortedValues.length &&
-        this.compareFn(this.sortedValues[startIdx], orderFrom) === 0
+        this.compareFn(this.sortedValues[startIdx], normalizedFrom) === 0
       ) {
         startIdx++
       }
@@ -363,14 +304,14 @@ export class BasicIndex<
     if (hasTo) {
       endIdx = findInsertPositionInArray(
         this.sortedValues,
-        orderTo,
+        normalizedTo,
         this.compareFn,
       )
       // Include the whole comparator group at an inclusive upper boundary.
       while (
         toInclusive &&
         endIdx < this.sortedValues.length &&
-        this.compareFn(this.sortedValues[endIdx], orderTo) === 0
+        this.compareFn(this.sortedValues[endIdx], normalizedTo) === 0
       ) {
         endIdx++
       }
@@ -378,8 +319,9 @@ export class BasicIndex<
 
     // Collect all keys in range
     for (let i = startIdx; i < endIdx; i++) {
-      for (const key of this.orderedBuckets[i]!.keys()) {
-        result.add(key)
+      const keys = this.valueMap.get(this.sortedValues[i])
+      if (keys) {
+        keys.forEach((key) => result.add(key))
       }
     }
 
@@ -391,16 +333,15 @@ export class BasicIndex<
    */
   take(n: number, from: any, filterFn?: (key: TKey) => boolean): Array<TKey> {
     const normalizedFrom = normalizeValue(from)
-    const orderFrom = this.orderValue(from, normalizedFrom)
     let startIdx = findInsertPositionInArray(
       this.sortedValues,
-      orderFrom,
+      normalizedFrom,
       this.compareFn,
     )
     // Skip past the 'from' value (exclusive)
     while (
       startIdx < this.sortedValues.length &&
-      this.compareFn(this.sortedValues[startIdx], orderFrom) <= 0
+      this.compareFn(this.sortedValues[startIdx], normalizedFrom) <= 0
     ) {
       startIdx++
     }
@@ -417,14 +358,16 @@ export class BasicIndex<
     filterFn?: (key: TKey) => boolean,
   ): Array<TKey> {
     const normalizedFrom = normalizeValue(from)
-    const orderFrom = this.orderValue(from, normalizedFrom)
     let startIdx =
-      findInsertPositionInArray(this.sortedValues, orderFrom, this.compareFn) -
-      1
+      findInsertPositionInArray(
+        this.sortedValues,
+        normalizedFrom,
+        this.compareFn,
+      ) - 1
     // Skip past the 'from' value (exclusive)
     while (
       startIdx >= 0 &&
-      this.compareFn(this.sortedValues[startIdx], orderFrom) >= 0
+      this.compareFn(this.sortedValues[startIdx], normalizedFrom) >= 0
     ) {
       startIdx--
     }
@@ -465,7 +408,7 @@ export class BasicIndex<
       const groupValue = this.sortedValues[index]
       const groupKeys: Array<TKey> = []
       do {
-        for (const key of this.orderedBuckets[index]!.keys()) {
+        for (const key of this.valueMap.get(this.sortedValues[index]) ?? []) {
           groupKeys.push(key)
         }
         index += step

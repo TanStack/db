@@ -271,7 +271,6 @@ export class CollectionSubscriber<
       this.collectionConfigBuilder.query,
       this.alias,
       this.collectionConfigBuilder.queryCompareOptions,
-      this.collectionConfigBuilder.hasCapturedMutableList,
     )
 
     // Track loading via the loadSubset promise directly.

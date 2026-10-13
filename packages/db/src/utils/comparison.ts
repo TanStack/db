@@ -1,9 +1,7 @@
-import { dateTimestamp, durationFields, isTemporal } from '../utils'
+import { isTemporal } from '../utils'
 import { getRuntimeReferenceIdentity } from '../query/runtime-reference-identity'
 import { codedMessage, devBuild } from '../error-message'
 import type { CompareOptions } from '../query/builder/types'
-
-export { dateTimestamp } from '../utils'
 
 // WeakMap to store stable IDs for objects
 const objectIds = new WeakMap<object, number>()
@@ -13,19 +11,11 @@ let nextObjectId = 1
  * Get or create a stable ID for an object
  */
 function getObjectId(obj: object): number {
-  if (objectIds.has(obj)) {
-    return objectIds.get(obj)!
-  }
+  const existing = objectIds.get(obj)
+  if (existing !== undefined) return existing
   const id = nextObjectId++
   objectIds.set(obj, id)
   return id
-}
-
-function hasUnorderableValue(
-  value: unknown,
-  timestamp: number | undefined,
-): boolean {
-  return Number.isNaN(value) || Number.isNaN(timestamp)
 }
 
 /**
@@ -36,8 +26,11 @@ function hasUnorderableValue(
  * evaluator treat them explicitly instead of letting `NaN` compare unequal to
  * everything (which has no consistent order and cannot be indexed or sorted).
  */
-export function isUnorderable(value: unknown): boolean {
-  return hasUnorderableValue(value, dateTimestamp(value))
+export function isUnorderable(value: any): boolean {
+  return (
+    (typeof value === `number` && Number.isNaN(value)) ||
+    (value instanceof Date && Number.isNaN(value.getTime()))
+  )
 }
 
 /**
@@ -57,10 +50,8 @@ export const ascComparator = (a: any, b: any, opts: CompareOptions): number => {
   // all equal and sort greater than every other non-null value. This keeps the
   // order total (NaN would otherwise compare equal to everything), so such
   // values can be sorted and stored in tree-based indexes.
-  const aDateTime = dateTimestamp(a)
-  const bDateTime = dateTimestamp(b)
-  const aUnordered = hasUnorderableValue(a, aDateTime)
-  const bUnordered = hasUnorderableValue(b, bDateTime)
+  const aUnordered = isUnorderable(a)
+  const bUnordered = isUnorderable(b)
   if (aUnordered && bUnordered) return 0
   if (aUnordered) return 1
   if (bUnordered) return -1
@@ -76,12 +67,6 @@ export const ascComparator = (a: any, b: any, opts: CompareOptions): number => {
     // For lexical sort we rely on direct comparison for primitive values
   }
 
-  // Keep the string collation class separate from other value types. Native
-  // relational comparison ties every nonnumeric string with every number,
-  // although those same strings have a distinct order among themselves.
-  if (typeof a === `string` && typeof b !== `string`) return -1
-  if (typeof b === `string` && typeof a !== `string`) return 1
-
   // if a and b are both arrays, compare them element by element
   if (Array.isArray(a) && Array.isArray(b)) {
     for (let i = 0; i < Math.min(a.length, b.length); i++) {
@@ -95,14 +80,12 @@ export const ascComparator = (a: any, b: any, opts: CompareOptions): number => {
   }
 
   // If both are dates, compare them
-  if (aDateTime !== undefined && bDateTime !== undefined) {
-    return aDateTime - bDateTime
+  if (a instanceof Date && b instanceof Date) {
+    return a.getTime() - b.getTime()
   }
 
   // If both are Temporal objects, use compareTemporalValues for correct semantic ordering
-  const aTemporal = isTemporal(a)
-  const bTemporal = isTemporal(b)
-  if (aTemporal && bTemporal) {
+  if (isTemporal(a) && isTemporal(b)) {
     return compareTemporalValues(a, b)
   }
 
@@ -118,32 +101,13 @@ export const ascComparator = (a: any, b: any, opts: CompareOptions): number => {
   if (aIsSymbol) return 1
   if (bIsSymbol) return -1
 
-  // Function values are references too; coercing them against numbers can
-  // create the same non-transitive ties as unlike ordered object kinds.
-  const aIsObject = typeof a === `object` || typeof a === `function`
-  const bIsObject = typeof b === `object` || typeof b === `function`
+  // If at least one of the values is an object, use stable IDs for comparison
+  const aIsObject = typeof a === `object`
+  const bIsObject = typeof b === `object`
 
   if (aIsObject || bIsObject) {
-    // Compare unlike ordered kinds before assigning stable IDs to ordinary objects.
+    // If both are objects, compare their stable IDs
     if (aIsObject && bIsObject) {
-      // Array, Date, and Temporal comparisons order values within their own
-      // kinds above. Keep those kinds apart from ordinary objects: mixing a
-      // calendar comparison with runtime object IDs creates order cycles.
-      const aKind = Array.isArray(a)
-        ? 0
-        : aDateTime !== undefined
-          ? 1
-          : aTemporal
-            ? 2
-            : 3
-      const bKind = Array.isArray(b)
-        ? 0
-        : bDateTime !== undefined
-          ? 1
-          : bTemporal
-            ? 2
-            : 3
-      if (aKind !== bKind) return aKind - bKind
       const aId = getObjectId(a)
       const bId = getObjectId(b)
       return aId - bId
@@ -188,45 +152,6 @@ export function makeComparator(
 }
 
 /**
- * Index storage needs a total order even for Temporal values that have no
- * public `orderBy` relation. Keep kinds in separate groups, and consistently
- * order every Duration and PlainMonthDay by its exact equality key. Public
- * comparisons still use `makeComparator` and retain their strict semantics.
- */
-export function makeIndexComparator(
-  opts: CompareOptions,
-): (a: any, b: any) => number {
-  const compare = makeComparator(opts)
-  return (a, b) => {
-    const aTemporal = isTemporal(a)
-    const bTemporal = isTemporal(b)
-    if (!aTemporal || !bTemporal) return compare(a, b)
-
-    const aKind = a[Symbol.toStringTag]
-    const bKind = b[Symbol.toStringTag]
-    let order: number
-    if (aKind !== bKind) {
-      order = aKind < bKind ? -1 : 1
-    } else if (
-      aKind === `Temporal.Duration` ||
-      aKind === `Temporal.PlainMonthDay`
-    ) {
-      const aKey = normalizeValue(a) as string
-      const bKey = normalizeValue(b) as string
-      order = aKey < bKey ? -1 : aKey > bKey ? 1 : 0
-    } else {
-      return compare(a, b)
-    }
-    return opts.direction === `desc` ? -order : order
-  }
-}
-
-/** Identify a supported Temporal tag for index ordering. */
-export function indexTemporalKind(value: unknown): string | undefined {
-  return isTemporal(value) ? value[Symbol.toStringTag] : undefined
-}
-
-/**
  * Wraps a user comparator so an index crashes on a result that cannot order
  * its storage, instead of silently misplacing rows.
  */
@@ -252,21 +177,20 @@ export const defaultComparator = makeComparator({
   stringSort: `locale`,
 })
 
-/** Recognize ordinary Uint8Array values, including Buffers and foreign realms. */
+/** Include host Buffers when the current realm has a different Uint8Array. */
 export function isUint8Array(value: unknown): value is Uint8Array {
   return (
-    ArrayBuffer.isView(value) &&
-    Object.prototype.toString.call(value) === `[object Uint8Array]`
+    value instanceof Uint8Array ||
+    (typeof Buffer !== `undefined` && value instanceof Buffer)
   )
 }
 
 /** Compare two Uint8Arrays for content equality. */
 function areUint8ArraysEqual(a: Uint8Array, b: Uint8Array): boolean {
-  const length = a.length
-  if (length !== b.length) {
+  if (a.byteLength !== b.byteLength) {
     return false
   }
-  for (let i = 0; i < length; i++) {
+  for (let i = 0; i < a.byteLength; i++) {
     if (a[i] !== b[i]) {
       return false
     }
@@ -280,28 +204,10 @@ function normalizedKey(kind: string, value: string): string {
   return `${NORMALIZED_KEY_PREFIX}${kind}:${value}`
 }
 
-const canonicalTemporalZones = new Map<string, string>()
-
-function canonicalTemporalZone(zoneId: string): string {
-  const cached = canonicalTemporalZones.get(zoneId)
-  if (cached !== undefined) return cached
-
-  let canonical = zoneId
-  try {
-    canonical = new Intl.DateTimeFormat(`en-US`, {
-      timeZone: zoneId,
-    }).resolvedOptions().timeZone
-  } catch {
-    // Keep valid Temporal zones that this host's Intl does not recognize.
-  }
-  canonicalTemporalZones.set(zoneId, canonical)
-  return canonical
-}
-
 function normalizeBinary(value: Uint8Array): string {
   let bytes = ``
-  for (const byte of value) {
-    bytes += String.fromCharCode(byte)
+  for (let index = 0; index < value.byteLength; index++) {
+    bytes += String.fromCharCode(value[index]!)
   }
   return normalizedKey(`binary`, bytes)
 }
@@ -311,7 +217,7 @@ function normalizeBinary(value: Uint8Array): string {
  * This allows distinguishing between "start from beginning" (undefined parameter)
  * and "start from the key undefined" (actual undefined value in the tree).
  */
-export const UNDEFINED_SENTINEL = Symbol(`undefined index value`)
+export const UNDEFINED_SENTINEL = normalizedKey(`undefined`, ``)
 
 /**
  * Normalize a value for comparison and Map key usage
@@ -332,49 +238,15 @@ export function normalizeValue(value: any): any {
     return value
   }
 
-  const timestamp = dateTimestamp(value)
-  if (timestamp !== undefined) return timestamp
+  if (value instanceof Date) {
+    return value.getTime()
+  }
 
   if (isTemporal(value)) {
-    const kind = value[Symbol.toStringTag]
-    if (kind === `Temporal.ZonedDateTime`) {
-      const zoned = value as typeof value & {
-        epochNanoseconds: bigint
-        timeZoneId: string
-        calendarId: string
-      }
-      // Equality retains the instant, calendar, and canonical zone. A fixed
-      // +00:00 zone stays distinct from named UTC, while UTC aliases merge.
-      return normalizedKey(
-        `temporal`,
-        JSON.stringify([
-          kind,
-          String(zoned.epochNanoseconds),
-          canonicalTemporalZone(zoned.timeZoneId),
-          zoned.calendarId,
-        ]),
-      )
-    }
-    if (
-      kind === `Temporal.PlainMonthDay` ||
-      kind === `Temporal.PlainYearMonth`
-    ) {
-      // Default display omits the reference ISO year/day that native equals()
-      // compares. The calendar-inclusive display preserves those fields.
-      const fullText = (
-        value.toString as (options: { calendarName: `always` }) => string
-      )({ calendarName: `always` })
-      return normalizedKey(`temporal`, `${kind}:${fullText}`)
-    }
-    if (kind === `Temporal.Duration`) {
-      // Duration's default display balances subsecond units. Equality under
-      // the #1519 contract instead preserves all ten fields.
-      const duration = value as typeof value &
-        Record<(typeof durationFields)[number], number>
-      const fields = durationFields.map((field) => duration[field])
-      return normalizedKey(`temporal`, JSON.stringify([kind, ...fields]))
-    }
-    return normalizedKey(`temporal`, `${kind}:${value.toString()}`)
+    return normalizedKey(
+      `temporal`,
+      `${value[Symbol.toStringTag]}:${value.toString()}`,
+    )
   }
 
   // Normalize Uint8Arrays/Buffers to a string representation for Map key usage
@@ -397,21 +269,6 @@ export function normalizeForBTree(value: any): any {
     return UNDEFINED_SENTINEL
   }
   return normalizeValue(value)
-}
-
-/** Order raw values while keeping BTree's undefined position distinct from its traversal marker. */
-export function indexOrderValue(value: any, exactKey: any): any {
-  return value === undefined ? exactKey : value
-}
-
-/** Supply custom comparators the Temporal display key used before raw ordering. */
-export function indexCustomComparatorValue(value: unknown): unknown {
-  return isTemporal(value)
-    ? normalizedKey(
-        `temporal`,
-        `${value[Symbol.toStringTag]}:${value.toString()}`,
-      )
-    : value
 }
 
 /**
@@ -468,9 +325,8 @@ export function compareTemporalValues(a: unknown, b: unknown): number {
  *
  * Temporal types intentionally throw from `valueOf` to prevent silent
  * miscomparison via the native relational operators — delegate to
- * `compareTemporalValues` for them. Ordinary native Dates compare by their
- * timestamps, including against numbers and across realms. Other values
- * retain the native relational comparison.
+ * `compareTemporalValues` for them. For everything else (numbers, strings,
+ * Dates via `valueOf`, etc.) the native operators do the right thing.
  *
  * Callers must handle null/undefined themselves — this helper assumes both
  * arguments are non-null.
@@ -479,13 +335,7 @@ export function compareValues(a: unknown, b: unknown): number {
   if (isTemporal(a) && isTemporal(b)) {
     return compareTemporalValues(a, b)
   }
-  const comparableA = dateTimestamp(a) ?? a
-  const comparableB = dateTimestamp(b) ?? b
-  return (comparableA as any) < (comparableB as any)
-    ? -1
-    : (comparableA as any) > (comparableB as any)
-      ? 1
-      : 0
+  return (a as any) < (b as any) ? -1 : (a as any) > (b as any) ? 1 : 0
 }
 
 /**

@@ -14,13 +14,11 @@ import { ensureIndexForField } from '../../indexes/auto-index.js'
 import { findIndexForField } from '../../utils/index-optimization.js'
 import { devBuild } from '../../error-message.js'
 import { compileExpression } from './evaluators.js'
-import { refreshMap } from './mutable-list-refresh.js'
 import { getSourceAliasesFromExpression } from './expressions.js'
 import { replaceAggregatesByRefs } from './group-by.js'
 import type { CompareOptions } from '../builder/types.js'
 import type { WindowOptions } from './types.js'
 import type { CompiledSingleRowExpression } from './evaluators.js'
-import type { MutableListRevision } from './mutable-list-refresh.js'
 import type { OrderBy, OrderByClause, QueryIR, Select } from '../ir.js'
 import type {
   CollectionLike,
@@ -67,8 +65,6 @@ export type OrderByOptimizationInfo = {
   joinedFilterSourceId?: string
 }
 
-const CAPTURED_ORDER_VALUE = Symbol(`captured_order_value`)
-
 /**
  * Processes the ORDER BY clause
  * Works with the new structure that has both namespaced row data and $selected
@@ -85,8 +81,6 @@ export function processOrderBy(
   limit?: number,
   offset?: number,
   groupKeyFn?: (key: unknown, value: unknown) => unknown,
-  requiresFullSourceForMutableList = false,
-  mutableRevision?: MutableListRevision,
 ): IStreamBuilder<KeyValue<unknown, [NamespacedRow, string]>> {
   // Pre-compile all order by expressions
   const compiledOrderBy = orderByClause.map((clause) => {
@@ -125,21 +119,6 @@ export function processOrderBy(
     // Default case - no ordering
     return null
   }
-  // topK must retract the old sort key before a changed list supplies the
-  // new one. Retain the evaluated key beside each candidate, not in topK's
-  // callback over a raw row that can see only current list members.
-  if (mutableRevision) {
-    pipeline = refreshMap(pipeline, mutableRevision, ([key, row]) => [
-      key,
-      { ...row, [CAPTURED_ORDER_VALUE]: valueExtractor(row) },
-    ]) as NamespacedAndKeyedStream
-  }
-  const readOrderValue = mutableRevision
-    ? (row: NamespacedRow) =>
-        (row as NamespacedRow & { [CAPTURED_ORDER_VALUE]: unknown })[
-          CAPTURED_ORDER_VALUE
-        ]
-    : valueExtractor
 
   // Create a multi-property comparator that respects the order and direction of each property
   const compare = (a: unknown, b: unknown) => {
@@ -175,9 +154,7 @@ export function processOrderBy(
   // When there's a limit, create orderByOptimizationInfo for top-K source
   // loading. Unbounded queries use subscription hints instead. A plan whose
   // local semantics cannot be established from a provider prefix records
-  // requiresFullSource and issues one full-source acquisition. A mutable
-  // captured list needs that acquisition without a source WHERE filter so
-  // later changes to previously unseen rows can trigger membership refresh.
+  // requiresFullSource and issues one filtered full-source acquisition.
   // We try to use an index on the FIRST orderBy column for lazy loading,
   // even for multi-column orderBy (using wider bounds on first column).
   // Skip this optimization when using grouped ordering (includes with limit),
@@ -212,16 +189,19 @@ export function processOrderBy(
       const compareOpts = buildCompareOptions(firstClause, collection)
 
       if (fieldName) {
-        // The index derives this term's comparator from compareOptions.
-        // Supplying a compareFn would mark it as a custom comparator whose
-        // order cannot be used for ordinary ordered traversal.
+        // Use a single-column comparator for the index, not the
+        // multi-column `compare` function. The multi-column comparator
+        // expects array values [col1, col2, ...] but the index stores
+        // individual field values. Passing `compare` here causes the
+        // BTree to treat all single values as equal (since number[0]
+        // === undefined for both sides of the comparison).
+        const firstColumnCompareFn = makeComparator(compareOpts)
         ensureIndexForField(
           fieldName,
           followRefResult.path,
           followRefCollection,
           compareOpts,
-          undefined,
-          true,
+          firstColumnCompareFn,
         )
       }
 
@@ -229,7 +209,6 @@ export function processOrderBy(
         followRefCollection,
         followRefResult.path,
         compareOpts,
-        true,
       )
 
       // Only use the index if it supports range queries
@@ -307,9 +286,6 @@ export function processOrderBy(
         sourceHoldsAllRows:
           followRefResult.collection.config.syncMode !== `on-demand`,
         requiresFullSource:
-          // An unseen source delete must still trigger a captured mutable
-          // membership list, so a finite prefix cannot own this subscription.
-          requiresFullSourceForMutableList ||
           sourceOrderBy.some(
             ({ compareOptions }) => compareOptions.stringSort === `custom`,
           ) ||
@@ -366,7 +342,7 @@ export function processOrderBy(
   // otherwise use the standard global ordering operator.
   if (groupKeyFn) {
     return pipeline.pipe(
-      groupedOrderByWithFractionalIndex(readOrderValue, {
+      groupedOrderByWithFractionalIndex(valueExtractor, {
         limit,
         offset,
         comparator: compare,
@@ -391,7 +367,7 @@ export function processOrderBy(
 
   // Use fractional indexing and return the tuple [value, index]
   return pipeline.pipe(
-    orderByWithFractionalIndex(readOrderValue, {
+    orderByWithFractionalIndex(valueExtractor, {
       limit,
       offset,
       comparator: compare,

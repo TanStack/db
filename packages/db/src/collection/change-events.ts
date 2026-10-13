@@ -1,4 +1,3 @@
-import { compareKeys } from '@tanstack/db-ivm'
 import {
   compileSingleRowExpression,
   toBooleanPredicate,
@@ -17,7 +16,6 @@ import {
 import { makeComparator } from '../utils/comparison.js'
 import { buildCompareOptions } from '../query/compiler/order-by'
 import { codedMessage, codedWarning, devBuild } from '../error-message.js'
-import type { IndexReader } from '../indexes/base-index.js'
 import type {
   ChangeMessage,
   CollectionLike,
@@ -25,7 +23,7 @@ import type {
   SubscribeChangesOptions,
 } from '../types'
 import type { CollectionImpl } from './index.js'
-import type { BasicExpression, OrderBy, OrderByClause } from '../query/ir.js'
+import type { BasicExpression, OrderBy } from '../query/ir.js'
 import type { WithVirtualProps } from '../virtual-props.js'
 
 /**
@@ -353,17 +351,12 @@ function getOrderedKeys<T extends object, TKey extends string | number>(
         fieldPath,
         collection as CollectionImpl<T, TKey>,
         compareOpts,
-        undefined,
-        true,
       )
 
       // Find the index
-      const index = findIndexForField(collection, fieldPath, compareOpts, true)
+      const index = findIndexForField(collection, fieldPath, compareOpts)
 
-      // A user-supplied index comparator is not described by compareOptions.
-      // Exact equality lookup may still use that index, but its ordered walk
-      // cannot stand in for the requested order.
-      if (index && index.supports(`gt`) && index.supportsRangeOptimization) {
+      if (index && index.supports(`gt`)) {
         // Use index optimization
         const filterFn = (key: TKey): boolean => {
           const value = collection.get(key)
@@ -373,7 +366,10 @@ function getOrderedKeys<T extends object, TKey extends string | number>(
           return whereFilter?.(value) ?? true
         }
 
-        return takeOrderedIndexKeys(collection, index, clause, limit, filterFn)
+        // Take the keys that match the filter and limit
+        // if no limit is provided `index.keyCount` is used,
+        // i.e. we will take all keys that match the filter
+        return index.takeFromStart(limit ?? index.keyCount, filterFn)
       }
     }
   }
@@ -396,13 +392,18 @@ function getOrderedKeys<T extends object, TKey extends string | number>(
   }))
   const compare = (a: { key: TKey; value: T }, b: { key: TKey; value: T }) => {
     for (const clause of clauses) {
+      // Extract values for comparison
       const aValue = extractValueFromItem(a.value, clause.expression)
       const bValue = extractValueFromItem(b.value, clause.expression)
+
       const result = clause.compare(aValue, bValue)
-      if (result !== 0) return result
+      if (result !== 0) {
+        return result
+      }
     }
-    return compareKeys(a.key, b.key)
+    return 0
   }
+
   allItems.sort(compare)
   const sortedKeys = allItems.map((item) => item.key)
 
@@ -413,61 +414,6 @@ function getOrderedKeys<T extends object, TKey extends string | number>(
 
   // if no limit is provided, we will return all keys
   return sortedKeys
-}
-
-/**
- * Takes an indexed ordered prefix, completing its comparator-equal boundary.
- * Public snapshots keep source keys ascending within ties even when a reversed
- * index walks them backward. A finite read asks for an indexed prefix and
- * completes its boundary group; it does not bound work inside the index.
- * An unbounded read asks for all indexed keys. `from` marks an exclusive
- * comparator position, including an explicit nullish value.
- */
-export function takeOrderedIndexKeys<
-  T extends object,
-  TKey extends string | number,
->(
-  collection: CollectionLike<T, TKey>,
-  index: IndexReader<TKey>,
-  clause: OrderByClause,
-  limit: number | undefined,
-  filterFn: (key: TKey) => boolean,
-  from?: { value: unknown },
-): Array<TKey> {
-  if (limit !== undefined && limit <= 0) return []
-  const count = limit ?? index.keyCount
-  const taken = from
-    ? index.take(count, from.value, filterFn)
-    : index.takeFromStart(count, filterFn)
-  if (taken.length === 0) return taken
-
-  const valueFor = (key: TKey) =>
-    extractValueFromItem(collection.get(key)!, clause.expression)
-  let keys = taken
-  if (limit !== undefined && taken.length === limit) {
-    const boundaryValue = valueFor(taken[taken.length - 1]!)
-    const boundaryKeys = [
-      ...index.rangeQuery({ from: boundaryValue, to: boundaryValue }),
-    ].filter(filterFn)
-    keys = [...new Set([...taken, ...boundaryKeys])]
-  }
-
-  // The index already orders distinct comparator positions. Sort only the
-  // source keys inside each equal position, including a completed boundary.
-  const values = keys.map(valueFor)
-  const compare = makeComparator(buildCompareOptions(clause, collection))
-  const ordered: Array<TKey> = []
-  for (let start = 0; start < keys.length;) {
-    let end = start + 1
-    while (end < keys.length && compare(values[start], values[end]) === 0) {
-      end++
-    }
-    for (const key of keys.slice(start, end).sort(compareKeys)) {
-      ordered.push(key)
-    }
-    start = end
-  }
-  return limit === undefined ? ordered : ordered.slice(0, limit)
 }
 
 /**

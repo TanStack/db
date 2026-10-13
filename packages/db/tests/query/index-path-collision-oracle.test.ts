@@ -18,14 +18,6 @@
  * argument order, bound inclusivity, reversed operands, and bound field.
  * A selected-field ordering reads both paths through the public `$selected`
  * callback proxy.
- * A separate range history stores ordinary native Dates from this and another
- * JavaScript realm. Supplied timestamps predict inclusive and exclusive range
- * keys before and after installing either index type. Local and foreign Dates
- * at the exact bound distinguish a missing equality tie; a foreign Date after
- * the bound distinguishes a scan or index that loses that row. The bound also
- * comes from both realms, so index eligibility cannot recognize only local
- * bounds. The timestamp model does not read production comparison or index
- * classification.
  *
  * Production driver: `currentStateAsChanges`, Collection subscriptions, and
  * live-query Collections run the real predicates and callback compilers.
@@ -42,23 +34,11 @@
  * Known omissions: This bounded owner does not claim arbitrary path segments,
  * nullish values, custom collation, or incremental publication histories.
  * Lazy demand target deduplication has a separate compiler-boundary witness.
- * The Date range history covers ordinary native Dates only. Modified Date
- * objects, subclasses, borrowed prototypes, invalid Dates, and publication
- * after later writes are outside its claimed domain.
  */
-import { runInNewContext } from 'node:vm'
 import { expect, it, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
-import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
-import {
-  add,
-  and,
-  gt,
-  gte,
-  lt,
-  lte,
-} from '../../src/query/builder/functions.js'
+import { add, and, gt, lt, lte } from '../../src/query/builder/functions.js'
 import { PropRef } from '../../src/query/ir.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
 import { mockSyncCollectionOptions } from '../utils.js'
@@ -179,125 +159,6 @@ it.each(cases)(
       const lookup = vi.spyOn(index, `lookup`)
       expect(queryKeys(), `indexed result`).toEqual(expected)
       expect(lookup, `indexed path reached`).toHaveBeenCalled()
-    })
-  },
-)
-
-it.each([
-  { name: `BasicIndex`, indexType: BasicIndex },
-  { name: `BTreeIndex`, indexType: BTreeIndex },
-])(
-  `keeps ordinary foreign Dates in indexed timestamp ranges: $name`,
-  async ({ name, indexType }) => {
-    await checkWithCleanup(async (register) => {
-      // Supplied times, rather than production values, define the reference.
-      // Both realms have a Date at the exact lower bound.
-      const inputs = [
-        { id: `local-before`, time: 0, foreign: false },
-        { id: `local-equal`, time: 1, foreign: false },
-        { id: `foreign-equal`, time: 1, foreign: true },
-        { id: `foreign-after`, time: 2, foreign: true },
-      ] as const
-      const dateRows = inputs.map(({ id, time, foreign }) => ({
-        id,
-        v: foreign
-          ? (runInNewContext(`new Date(time)`, { time }) as Date)
-          : new Date(time),
-      }))
-      expect(dateRows[2]!.v instanceof Date).toBe(false)
-      expect(Date.prototype.getTime.call(dateRows[2]!.v)).toBe(1)
-      const bound = new Date(1)
-      const foreignBound = runInNewContext(`new Date(1)`) as Date
-      expect(foreignBound instanceof Date).toBe(false)
-      const field = new PropRef([`v`])
-      const rangeCases = [
-        {
-          name: `exclusive`,
-          where: gt(field, bound),
-          accepts: (time: number) => time > 1,
-        },
-        {
-          name: `inclusive`,
-          where: gte(field, bound),
-          accepts: (time: number) => time >= 1,
-        },
-        {
-          name: `foreign exclusive bound`,
-          where: gt(field, foreignBound),
-          accepts: (time: number) => time > 1,
-        },
-        {
-          name: `foreign inclusive bound`,
-          where: gte(field, foreignBound),
-          accepts: (time: number) => time >= 1,
-        },
-      ]
-      const matchingKeys = (accepts: (time: number) => boolean) =>
-        inputs
-          .filter(({ time }) => accepts(time))
-          .map(({ id }) => id)
-          .sort()
-      expect(matchingKeys(rangeCases[0]!.accepts)).toEqual([`foreign-after`])
-      expect(matchingKeys(rangeCases[1]!.accepts)).toEqual([
-        `foreign-after`,
-        `foreign-equal`,
-        `local-equal`,
-      ])
-
-      const collection = createCollection(
-        mockSyncCollectionOptions({
-          id: `index-foreign-date-${name}`,
-          getKey: (row: (typeof dateRows)[number]) => row.id,
-          initialData: dateRows,
-          autoIndex: `off`,
-        }),
-      )
-      register(() => collection.cleanup())
-      await collection.stateWhenReady()
-      const snapshotKeys = (
-        where: BasicExpression<boolean>,
-        optimizedOnly = false,
-      ) =>
-        collection
-          .currentStateAsChanges({ where, optimizedOnly })
-          ?.map((change) => String(change.key))
-          .sort()
-
-      // Exact public keys at the ready Collection checkpoint expose missing
-      // foreign rows and missing ties, before and after index installation.
-      for (const range of rangeCases) {
-        expect(snapshotKeys(range.where), `scan ${range.name}`).toEqual(
-          matchingKeys(range.accepts),
-        )
-        expect(snapshotKeys(range.where, true)).toBeUndefined()
-      }
-      const inclusive = rangeCases[1]!
-      const fullScan = snapshotKeys(inclusive.where)!
-      expect(() =>
-        expect(fullScan.filter((key) => key !== `foreign-equal`)).toEqual(
-          matchingKeys(inclusive.accepts),
-        ),
-      ).toThrow()
-
-      const index = collection.createIndex((row) => row.v, { indexType })
-      const lookup = vi.spyOn(index, `lookup`)
-      for (const range of rangeCases) {
-        const expected = matchingKeys(range.accepts)
-        expect(snapshotKeys(range.where), `indexed ${range.name}`).toEqual(
-          expected,
-        )
-        expect(lookup, `indexed ${range.name} reached`).toHaveBeenCalled()
-        lookup.mockClear()
-        expect(
-          snapshotKeys(range.where, true),
-          `optimized-only ${range.name}`,
-        ).toEqual(expected)
-        expect(
-          lookup,
-          `optimized-only ${range.name} reached`,
-        ).toHaveBeenCalled()
-        lookup.mockClear()
-      }
     })
   },
 )

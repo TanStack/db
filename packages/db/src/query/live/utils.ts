@@ -198,16 +198,13 @@ export function reconcileChangesForD2<
  * Returns normalised orderBy and effective limit suitable for passing to
  * `subscribeChanges`, or `undefined` values when the query's orderBy cannot
  * be scoped to the given alias (e.g. cross-collection refs or aggregates), or
- * when its resolved string collation is a local custom comparator. A captured
- * mutable list requires the full source without ordering hints.
+ * when its resolved string collation is a local custom comparator.
  */
 export function computeSubscriptionOrderByHints(
   query: { orderBy?: OrderBy; limit?: number; offset?: number },
   alias: string,
   queryCompareOptions: StringCollationConfig,
-  hasCapturedMutableList: boolean,
 ): { orderBy: OrderBy | undefined; limit: number | undefined } {
-  if (hasCapturedMutableList) return { orderBy: undefined, limit: undefined }
   const { orderBy, limit, offset } = query
   const effectiveLimit =
     limit !== undefined && offset !== undefined ? limit + offset : limit

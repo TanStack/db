@@ -18,7 +18,7 @@
 import { DEFAULT_COMPARE_OPTIONS } from '../utils.js'
 import { ReverseIndex } from '../indexes/reverse-index.js'
 import { hasVirtualPropPath } from '../virtual-props.js'
-import { dateTimestamp, makeComparator } from './comparison.js'
+import { makeComparator } from './comparison.js'
 import type { CompareOptions } from '../query/builder/types.js'
 import type { IndexOperation, IndexReader } from '../indexes/base-index.js'
 import type { BasicExpression } from '../query/ir.js'
@@ -40,15 +40,12 @@ export interface OptimizationResult<TKey> {
 }
 
 /**
- * Finds an index that matches a field path. Exact predicates can use a custom
- * comparator's equality buckets; ordered traversal needs an index whose order
- * is represented by its comparison options.
+ * Finds an index that matches a given field path
  */
 export function findIndexForField<TKey extends string | number>(
   collection: CollectionLike<any, TKey>,
   fieldPath: Array<string>,
   compareOptions?: CompareOptions,
-  requireOrderedTraversal = false,
 ): IndexReader<TKey> | undefined {
   if (hasVirtualPropPath(fieldPath)) {
     return undefined
@@ -61,8 +58,7 @@ export function findIndexForField<TKey extends string | number>(
   for (const index of collection.indexes.values()) {
     if (
       index.matchesField(fieldPath) &&
-      index.matchesCompareOptions(compareOpts) &&
-      (!requireOrderedTraversal || index.supportsRangeOptimization)
+      index.matchesCompareOptions(compareOpts)
     ) {
       if (!index.matchesDirection(compareOpts.direction)) {
         // Reversing the index also reverses where it keeps nulls, so the
@@ -173,7 +169,7 @@ function isRangeOrderingDivergent(
       if (value === null) return false
       // Dates order consistently with the evaluator: valid Dates by time, and
       // invalid Dates as the greatest value under PostgreSQL float semantics.
-      return dateTimestamp(value) === undefined
+      return !(value instanceof Date)
     }
     default:
       return false
@@ -367,7 +363,7 @@ function optimizeCompoundRangeQuery<
   for (const [fieldKey, operations] of fieldOperations) {
     if (operations.length >= 2) {
       const fieldPath = JSON.parse(fieldKey) as Array<string>
-      const index = findIndexForField(collection, fieldPath, undefined, true)
+      const index = findIndexForField(collection, fieldPath)
 
       // Only collapse this field into a range query when every bound's domain
       // orders the same way the index does and the index supports trustworthy
@@ -530,12 +526,7 @@ function optimizeSimpleComparison<
 
   if (fieldArg && valueArg) {
     const fieldPath = (fieldArg as any).path
-    const index = findIndexForField(
-      collection,
-      fieldPath,
-      undefined,
-      operation !== `eq`,
-    )
+    const index = findIndexForField(collection, fieldPath)
 
     if (index) {
       const queryValue = (valueArg as any).value
@@ -611,12 +602,7 @@ function canOptimizeSimpleComparison<
   }
 
   if (fieldPath) {
-    const index = findIndexForField(
-      collection,
-      fieldPath,
-      undefined,
-      expression.name !== `eq`,
-    )
+    const index = findIndexForField(collection, fieldPath)
     return index !== undefined
   }
 

@@ -63,7 +63,6 @@ import { normalizeValue } from '../../utils/comparison.js'
 import { codedMessage, devBuild } from '../../error-message.js'
 import {
   compileExpression,
-  hasMutableInList,
   isCaseWhenConditionTrue,
   toBooleanPredicate,
 } from './evaluators.js'
@@ -71,7 +70,6 @@ import { processJoins, registerLazyDemandPlan } from './joins.js'
 import { containsAggregate, processGroupBy } from './group-by.js'
 import { getLazyLoadTargets } from './lazy-targets.js'
 import { processOrderBy } from './order-by.js'
-import { refreshMap } from './mutable-list-refresh.js'
 import { crossJoinParentRoutes } from './parent-routes.js'
 import { queriesMatchForCaching } from './query-equivalence.js'
 import {
@@ -90,7 +88,6 @@ import { processSelect } from './select.js'
 import type { ValueIdentity } from '../equality-value-identity.js'
 import type { CollectionSubscription } from '../../collection/subscription.js'
 import type { OrderByOptimizationInfo } from './order-by.js'
-import type { MutableListRevision } from './mutable-list-refresh.js'
 import type {
   Aggregate,
   BasicExpression,
@@ -341,9 +338,6 @@ export interface CompilationResult {
   /** Map of opaque source IDs to their WHERE clauses for index optimization */
   sourceWhereClauses: Map<string, BasicExpression<boolean>>
 
-  /** Captured membership requires unfiltered source rows without order hints. */
-  hasCapturedMutableList: boolean
-
   /**
    * Maps FROM and JOIN source aliases to collection IDs within this compiled
    * query. Includes keep their own alias maps in their child results.
@@ -373,121 +367,9 @@ export interface CompilationResult {
 }
 
 const valueIdentitiesByCache = new WeakMap<QueryCache, ValueIdentity>()
-const mutableListRevisions = new WeakMap<QueryCache, MutableListRevision>()
 
 function getCompilationValueIdentity(cache: QueryCache): ValueIdentity {
   return getOrCreate(valueIdentitiesByCache, cache, createValueIdentity)
-}
-
-function collectMutableSelectLists(
-  value: unknown,
-  lists: Set<ReadonlyArray<unknown>>,
-  includeSubqueries = true,
-): void {
-  if (value instanceof ConditionalSelect) {
-    for (const branch of value.branches) {
-      hasMutableInList(branch.condition, lists)
-      collectMutableSelectLists(branch.value, lists, includeSubqueries)
-    }
-    collectMutableSelectLists(value.defaultValue, lists, includeSubqueries)
-  } else if (value instanceof IncludesSubquery) {
-    if (!includeSubqueries) return
-    for (const where of value.parentFilters ?? []) {
-      hasMutableInList(getWhereExpression(where), lists)
-    }
-    collectMutableQueryLists(value.query, lists)
-  } else if (isBasicOrAggregateExpression(value)) {
-    if (value.type === `agg`) {
-      for (const arg of value.args) hasMutableInList(arg, lists)
-    } else {
-      hasMutableInList(value, lists)
-    }
-  } else if (value && typeof value === `object`) {
-    for (const child of Object.values(value)) {
-      collectMutableSelectLists(child, lists, includeSubqueries)
-    }
-  }
-}
-
-function selectHasMutableAggregateInput(value: unknown): boolean {
-  if (value instanceof ConditionalSelect) {
-    return (
-      value.branches.some(
-        (branch) =>
-          selectHasMutableAggregateInput(branch.condition) ||
-          selectHasMutableAggregateInput(branch.value),
-      ) || selectHasMutableAggregateInput(value.defaultValue)
-    )
-  }
-  if (value instanceof IncludesSubquery) return false
-  if (isBasicOrAggregateExpression(value)) {
-    if (value.type !== `agg` && value.type !== `func`) return false
-    return (
-      (value.type === `agg` &&
-        value.args.some((arg) => hasMutableInList(arg))) ||
-      value.args.some(selectHasMutableAggregateInput)
-    )
-  }
-  return (
-    value !== null &&
-    typeof value === `object` &&
-    Object.values(value).some(selectHasMutableAggregateInput)
-  )
-}
-
-function collectMutableQueryLists(
-  query: QueryIR,
-  lists: Set<ReadonlyArray<unknown>>,
-): void {
-  for (const where of query.where ?? []) {
-    hasMutableInList(getWhereExpression(where), lists)
-  }
-  for (const join of query.join ?? []) {
-    hasMutableInList(join.on, lists)
-    if (join.from.type === `queryRef`) {
-      collectMutableQueryLists(join.from.query, lists)
-    }
-  }
-  for (const expression of query.groupBy ?? []) {
-    hasMutableInList(expression, lists)
-  }
-  for (const having of query.having ?? []) {
-    hasMutableInList(getHavingExpression(having), lists)
-  }
-  for (const { expression } of query.orderBy ?? []) {
-    hasMutableInList(expression, lists)
-  }
-  if (query.select) collectMutableSelectLists(query.select, lists)
-  if (query.from.type === `unionAll`) {
-    for (const branch of query.from.queries) {
-      collectMutableQueryLists(branch, lists)
-    }
-  }
-  for (const source of getFromSources(query.from)) {
-    if (source.type === `queryRef`) {
-      collectMutableQueryLists(source.query, lists)
-    }
-  }
-}
-
-function selectHasMutableInList(select: QueryIR[`select`]): boolean {
-  const lists = new Set<ReadonlyArray<unknown>>()
-  collectMutableSelectLists(select, lists, false)
-  return lists.size > 0
-}
-
-function snapshotList(list: ReadonlyArray<unknown>): Array<unknown> {
-  return Array.from(list)
-}
-
-function sameListSnapshot(
-  left: ReturnType<typeof snapshotList>,
-  right: ReturnType<typeof snapshotList>,
-): boolean {
-  return (
-    left.length === right.length &&
-    left.every((value, index) => Object.is(value, right[index]))
-  )
 }
 
 /**
@@ -519,45 +401,6 @@ type CompileQueryArgs = [
 ]
 
 export function compileQuery(...args: CompileQueryArgs): CompilationResult {
-  // A mutable-list plan cannot reuse a subquery compiled earlier with source
-  // pushdown. Give this graph its own cache and share it only recursively.
-  const mutableLists = new Set<ReadonlyArray<unknown>>()
-  collectMutableQueryLists(args[0], mutableLists)
-  const dynamic = mutableLists.size > 0
-  const cache = dynamic ? new WeakMap() : (args[8] ?? new WeakMap())
-  args[8] = cache
-  if (dynamic) {
-    const lists = [...mutableLists]
-    let snapshots = lists.map(snapshotList)
-    let revision = 0
-    // Raw source events clock every expression stage, including events that
-    // a join, filter, or nested QueryRef suppresses before that stage.
-    const inputs = [...new Set(Object.values(args[1]))]
-    let pulses = inputs[0]!.pipe(map(() => [0, 0] as [number, number]))
-    for (const input of inputs.slice(1)) {
-      pulses = pulses.pipe(
-        concatOperator(input.pipe(map(() => [0, 0] as [number, number]))),
-      )
-    }
-    mutableListRevisions.set(
-      cache,
-      pulses.pipe(
-        reduce(() => {
-          const next = lists.map(snapshotList)
-          if (
-            next.some(
-              (snapshot, index) =>
-                !sameListSnapshot(snapshot, snapshots[index]!),
-            )
-          ) {
-            revision++
-          }
-          snapshots = next
-          return [[revision, 1]]
-        }),
-      ),
-    )
-  }
   return compileQueryInternal(args, false)
 }
 
@@ -592,23 +435,9 @@ function compileQueryInternal(
   if (!scopeValidated) validateQueryStructure(rawQuery)
   const rawSources = collectCollectionSources(rawQuery)
 
-  // A captured mutable membership list can change between source events.
-  // A mutable membership list needs the complete pre-WHERE relation. On-demand
-  // sources acquire unfiltered rows rather than only the current list's subset.
-  const refreshMutableWhere =
-    rawQuery.where?.some((where) =>
-      hasMutableInList(getWhereExpression(where)),
-    ) ?? false
-  const mutableRevision = mutableListRevisions.get(cache)
-
   // Optimize the query before compilation
   const { optimizedQuery, sourceWhereClauses: aliasWhereClauses } =
-    mutableListRevisions.has(cache)
-      ? {
-          optimizedQuery: rawQuery,
-          sourceWhereClauses: new Map<string, BasicExpression<boolean>>(),
-        }
-      : optimizeQuery(rawQuery)
+    optimizeQuery(rawQuery)
   const sourceWhereClauses = keyWhereClausesBySource(
     rawQuery,
     aliasWhereClauses,
@@ -783,8 +612,6 @@ function compileQueryInternal(
       joinsParentDirectly,
       valueIdentity,
       parentKeyStream,
-      mutableListRevisions.has(cache),
-      mutableRevision,
     )
   }
 
@@ -812,26 +639,15 @@ function compileQueryInternal(
 
   // Process the WHERE clause if it exists
   if (query.where && query.where.length > 0) {
-    if (refreshMutableWhere && mutableRevision) {
-      const predicates = query.where.map((where) =>
-        compileExpression(getWhereExpression(where)),
+    // Apply each WHERE condition as a filter (they are ANDed together)
+    for (const where of query.where) {
+      const whereExpression = getWhereExpression(where)
+      const compiledWhere = compileExpression(whereExpression)
+      pipeline = pipeline.pipe(
+        filter(([_key, namespacedRow]) => {
+          return toBooleanPredicate(compiledWhere(namespacedRow))
+        }),
       )
-      pipeline = refreshMap(pipeline, mutableRevision, (pair) =>
-        predicates.every((predicate) => toBooleanPredicate(predicate(pair[1])))
-          ? pair
-          : undefined,
-      ) as NamespacedAndKeyedStream
-    } else {
-      // Apply each WHERE condition as a filter (they are ANDed together).
-      for (const where of query.where) {
-        const whereExpression = getWhereExpression(where)
-        const compiledWhere = compileExpression(whereExpression)
-        pipeline = pipeline.pipe(
-          filter(([_key, namespacedRow]) => {
-            return toBooleanPredicate(compiledWhere(namespacedRow))
-          }),
-        )
-      }
     }
   }
 
@@ -1010,9 +826,7 @@ function compileQueryInternal(
         aliasRemapping,
       )
 
-      // Every child source event can refresh a mutable membership list, even
-      // when the child does not match the current parent route.
-      if (!mutableListRevisions.has(cache) && lazyTargets.length > 0) {
+      if (lazyTargets.length > 0) {
         // 1. Mark child source as lazy so CollectionSubscriber skips initial full load
         for (const target of lazyTargets) {
           lazySources.add(target.sourceId)
@@ -1191,7 +1005,6 @@ function compileQueryInternal(
       valueIdentity,
       collectionId: mainCollectionId,
       sourceWhereClauses,
-      hasCapturedMutableList: mutableListRevisions.has(cache),
       aliasToCollectionId,
       aliasRemapping,
     })
@@ -1244,12 +1057,7 @@ function compileQueryInternal(
     // An aggregate query computes its select values from each group, so it
     // does not project rows first.
     if (!selectHasAggregates && !(query.groupBy && query.groupBy.length > 0))
-      pipeline = processSelect(
-        pipeline,
-        query.select,
-        allInputs,
-        selectHasMutableInList(query.select) ? mutableRevision : undefined,
-      )
+      pipeline = processSelect(pipeline, query.select, allInputs)
   } else {
     // If no SELECT clause, create $selected with the main table data
     pipeline = pipeline.pipe(
@@ -1318,9 +1126,6 @@ function compileQueryInternal(
       mainCollectionId,
       groupByMainSource,
       sourceCarriesInternalRouteState || includesRoutingFns.length > 0,
-      mutableRevision,
-      query.select ? selectHasMutableInList(query.select) : false,
-      query.select ? selectHasMutableAggregateInput(query.select) : false,
     )
   } else if (selectHasAggregates) {
     // SELECT contains aggregates but no GROUP BY: implicit single-group aggregation
@@ -1335,9 +1140,6 @@ function compileQueryInternal(
       mainCollectionId,
       groupByMainSource,
       sourceCarriesInternalRouteState || includesRoutingFns.length > 0,
-      mutableRevision,
-      query.select ? selectHasMutableInList(query.select) : false,
-      query.select ? selectHasMutableAggregateInput(query.select) : false,
     )
   }
 
@@ -1470,10 +1272,6 @@ function compileQueryInternal(
       resultLimit,
       query.offset,
       includesGroupKeyFn,
-      mutableListRevisions.has(cache),
-      query.orderBy?.some(({ expression }) => hasMutableInList(expression))
-        ? mutableRevision
-        : undefined,
     ).pipe(
       map(([key, [row, orderByIndex]]) => finalizeRow(key, row, orderByIndex)),
     ) as ResultStream
@@ -1489,7 +1287,6 @@ function compileQueryInternal(
     pipeline: resultPipeline,
     valueIdentity,
     sourceWhereClauses,
-    hasCapturedMutableList: mutableListRevisions.has(cache),
     aliasToCollectionId,
     aliasRemapping,
     includes: includesResults.length > 0 ? includesResults : undefined,

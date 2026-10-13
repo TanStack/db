@@ -1129,11 +1129,7 @@ export class CollectionStateManager<
       // Application is now the point of no return. Event listeners run before
       // the receipts resolve, so a signal aborted from one of those listeners
       // must not cancel writes that are already becoming visible.
-      // A layout-only update can change the comparator's fractional index
-      // before these writes run. Rebuild after the batch rather than searching
-      // the old order with a comparator that already sees new positions.
       const deferOrder =
-        layoutChanged ||
         committedSyncedTransactions.reduce(
           (count, transaction) => count + transaction.operations.length,
           0,
@@ -1184,7 +1180,6 @@ export class CollectionStateManager<
       }
 
       const events: Array<ChangeMessage<TOutput, TKey>> = []
-      const indexOnlyChanges: Array<ChangeMessage<TOutput, TKey>> = []
       let reappliedKeys: ReadonlySet<TKey> | undefined
       if (hasTruncateSync) {
         // All queued transactions publish as one batch. Its clear prefix must
@@ -1404,18 +1399,6 @@ export class CollectionStateManager<
             value: newVisibleValue,
             previousValue: withPreviousVirtualProps(previousVisibleValue),
           })
-        } else if (
-          previousVisibleValue !== newVisibleValue &&
-          this.indexes.indexes.size > 0
-        ) {
-          // Change-event equality can group rows whose raw index order differs.
-          // Refresh their index positions without publishing a value change.
-          indexOnlyChanges.push({
-            type: `update`,
-            key,
-            value: newVisibleValue,
-            previousValue: withPreviousVirtualProps(previousVisibleValue),
-          })
         }
       }
 
@@ -1423,8 +1406,8 @@ export class CollectionStateManager<
       this.size = this.calculateSize()
 
       // Update indexes for all events before emitting
-      if (events.length > 0 || indexOnlyChanges.length > 0) {
-        this.indexes.updateIndexes([...events, ...indexOnlyChanges])
+      if (events.length > 0) {
+        this.indexes.updateIndexes(events)
       }
 
       // End batching and emit all events (combines any batched events with sync events)

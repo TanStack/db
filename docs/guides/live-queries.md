@@ -778,7 +778,6 @@ For a complete reference of all available functions, see the [Expression Functio
 Comparisons follow SQL/PostgreSQL conventions rather than raw JavaScript:
 
 - **`null` / `undefined` use three-valued logic.** Any comparison involving `null` or `undefined` evaluates to `UNKNOWN`, so the row is not matched. For example `eq(user.score, null)` matches nothing — use a dedicated null check (e.g. `isUndefined`) to match missing values.
-- **Ordinary native `Date` values compare by timestamp.** Dates with the same millisecond timestamp match equality and occupy the same order position, including Dates created in another JavaScript environment.
 - **`NaN` follows PostgreSQL float semantics.** `NaN` is treated as equal to itself and greater than every other (non-null) value. So `eq(row.value, NaN)` matches `NaN` rows, `gt(row.value, x)` includes `NaN`, and ordering by such a field places `NaN` last. (Invalid `Date` values, whose timestamp is `NaN`, behave the same way.) This differs from JavaScript, where `NaN === NaN` is `false`, and matches how PostgreSQL orders and indexes floating-point values.
 
 ## Select
@@ -2646,17 +2645,6 @@ Check if a value is in an array:
 inArray(user.id, [1, 2, 3])
 inArray(user.role, ['admin', 'moderator'])
 ```
-
-If a query captures a caller-owned array, it reads that array's current
-members when the next source change is processed. That source change updates
-the whole existing query result, including rows that did not change. This
-applies when `inArray` filters rows, computes selected values, forms a join or
-group, supplies an aggregate even inside another selected expression, filters
-with `having`, or determines order. The
-resulting values and order are published together. Editing the array alone
-does not publish a new result. Current members means entries added, removed,
-or replaced; changing an existing Date or byte-array item in place is outside
-this guarantee.
 
 #### `like(value, pattern)`, `ilike(value, pattern)`
 String pattern matching:

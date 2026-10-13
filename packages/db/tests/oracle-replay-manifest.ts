@@ -35,11 +35,6 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
     `reference-model nullish-membership exact-identity custom-comparator`,
   ],
   [
-    `db/tests/query/compiler/in-evaluator-oracle.property.test.ts`,
-    `evaluators`,
-    `in`,
-  ],
-  [
     `db/tests/cursor-oracle.property.test.ts`,
     `cursor`,
     `scalar-continuation exact-width exact-local-order partial-width partial-local-order repeat-construction`,
@@ -286,8 +281,6 @@ const indexReplayTestNames = new Map([
 ])
 
 function directReplayTestName(property: string): string | undefined {
-  if (property === `evaluators.in`)
-    return `agrees with the reference over a random or replayed campaign`
   if (property === `cold-join.compound`)
     return `recomputes generated compound histories, seed=undefined`
   if (property === `oracle-replay.calibration`)

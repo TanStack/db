@@ -3141,21 +3141,18 @@ describe(`QueryCollection`, () => {
             syncMode: `on-demand`,
           }),
         )
-        // These are fixed provider demands; mutable lists acquire the full source.
-        const firstIds = Object.freeze([`1`, `2`])
-        const secondIds = Object.freeze([`2`, `3`])
         const firstLiveQuery = createLiveQueryCollection({
           query: (q) =>
             q
               .from({ item: collection })
-              .where(({ item }) => inArray(item.id, firstIds))
+              .where(({ item }) => inArray(item.id, [`1`, `2`]))
               .select(({ item }) => ({ id: item.id, name: item.name })),
         })
         const secondLiveQuery = createLiveQueryCollection({
           query: (q) =>
             q
               .from({ item: collection })
-              .where(({ item }) => inArray(item.id, secondIds))
+              .where(({ item }) => inArray(item.id, [`2`, `3`]))
               .select(({ item }) => ({ id: item.id, name: item.name })),
         })
 
@@ -7168,20 +7165,17 @@ describe(`QueryCollection`, () => {
           syncMode: `on-demand`,
         })
         const collection = createCollection(options)
-        // Separate fixed demands make shared row ownership observable.
-        const firstIds = Object.freeze([`1`, `2`])
-        const secondIds = Object.freeze([`2`, `3`])
         const firstSubset = createLiveQueryCollection({
           query: (q) =>
             q
               .from({ item: collection })
-              .where(({ item }) => inArray(item.id, firstIds)),
+              .where(({ item }) => inArray(item.id, [`1`, `2`])),
         })
         const secondSubset = createLiveQueryCollection({
           query: (q) =>
             q
               .from({ item: collection })
-              .where(({ item }) => inArray(item.id, secondIds)),
+              .where(({ item }) => inArray(item.id, [`2`, `3`])),
         })
 
         await firstSubset.preload()
@@ -11208,12 +11202,6 @@ describe(`QueryCollection`, () => {
         }),
       )
 
-      // These fixed lists retain distinct subset demands while writes are held.
-      const taskIds = Object.freeze([10])
-      const allResources = Object.freeze([1, 2, 3, 4])
-      const postInsertResources = Object.freeze([1, 2, 4])
-      const firstTwoResources = Object.freeze([1, 2])
-
       // Complete server population is deliberately returned for every demand:
       // this fixture tests cache writeback/ownership, not backend filtering.
       const world = new Map<number, Assignment>([
@@ -11258,7 +11246,7 @@ describe(`QueryCollection`, () => {
         query: (q) =>
           q
             .from({ assignment: collection })
-            .where(({ assignment }) => inArray(assignment.task_id, taskIds)),
+            .where(({ assignment }) => inArray(assignment.task_id, [10])),
       })
       cleanups.push(() => taskQuery.cleanup())
       try {
@@ -11283,7 +11271,7 @@ describe(`QueryCollection`, () => {
             q
               .from({ assignment: collection })
               .where(({ assignment }) =>
-                inArray(assignment.resource_id, allResources),
+                inArray(assignment.resource_id, [1, 2, 3, 4]),
               ),
         })
         cleanups.push(() => workloadQuery.cleanup())
@@ -11347,7 +11335,7 @@ describe(`QueryCollection`, () => {
             q
               .from({ assignment: collection })
               .where(({ assignment }) =>
-                inArray(assignment.resource_id, postInsertResources),
+                inArray(assignment.resource_id, [1, 2, 4]),
               ),
         })
         const firstLoad = startHeldWorkloadLoad()
@@ -11388,7 +11376,7 @@ describe(`QueryCollection`, () => {
             q
               .from({ assignment: collection })
               .where(({ assignment }) =>
-                inArray(assignment.resource_id, firstTwoResources),
+                inArray(assignment.resource_id, [1, 2]),
               ),
         })
         const deleteLoad = startHeldWorkloadLoad()
@@ -11412,7 +11400,7 @@ describe(`QueryCollection`, () => {
             q
               .from({ assignment: collection })
               .where(({ assignment }) =>
-                inArray(assignment.resource_id, allResources),
+                inArray(assignment.resource_id, [1, 2, 3, 4]),
               ),
         })
         await workloadQuery.preload()
@@ -11443,7 +11431,7 @@ describe(`QueryCollection`, () => {
             q
               .from({ assignment: collection })
               .where(({ assignment }) =>
-                inArray(assignment.resource_id, postInsertResources),
+                inArray(assignment.resource_id, [1, 2, 4]),
               ),
         })
         const secondLoad = startHeldWorkloadLoad()

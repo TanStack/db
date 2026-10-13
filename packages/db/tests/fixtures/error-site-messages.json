@@ -923,10 +923,5 @@
     "file": "local-storage.ts",
     "template": "LocalStorage sync belongs to its options Collection.",
     "literals": ["LocalStorage sync belongs to its options Collection."]
-  },
-  "243": {
-    "file": "query/compiler/mutable-list-refresh.ts",
-    "template": "An inner mutable-list revision lost its candidate",
-    "literals": ["An inner mutable-list revision lost its candidate"]
   }
 }

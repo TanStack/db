@@ -1,7 +1,6 @@
-import { compareKeys } from '@tanstack/db-ivm'
 import { ensureIndexForExpression } from '../indexes/auto-index.js'
-import { and } from '../query/builder/functions.js'
-import { PropRef, getPropRefPropertyPath } from '../query/ir.js'
+import { and, eq } from '../query/builder/functions.js'
+import { PropRef, Value, getPropRefPropertyPath } from '../query/ir.js'
 import { EventEmitter } from '../event-emitter.js'
 import { compileExpression } from '../query/compiler/evaluators.js'
 import { buildCursor, buildCursorCurrent } from '../utils/cursor.js'
@@ -14,7 +13,6 @@ import { codedMessage, devBuild } from '../error-message.js'
 import {
   createFilterFunctionFromExpression,
   createFilteredCallback,
-  takeOrderedIndexKeys,
 } from './change-events.js'
 import type { BasicExpression, OrderBy } from '../query/ir.js'
 import type { IndexReader } from '../indexes/base-index.js'
@@ -1506,36 +1504,34 @@ export class CollectionSubscription
     //      so we load all rows equal to minValue first, to be sure we don't skip any duplicate values
     let keys: Array<string | number> = []
     if (hasMinValue) {
-      // A cursor names a comparator position, which can contain several
-      // unequal values (or both null and undefined). Keep that whole group
-      // before walking later positions, with public keys ascending.
-      keys = [
-        ...index.rangeQuery({
-          from: minValueForIndex,
-          to: minValueForIndex,
-        }),
-      ]
-        .filter(filterFn)
-        .sort(compareKeys)
-      keys.push(
-        ...takeOrderedIndexKeys(
-          this.collection,
-          index,
-          orderBy[0]!,
+      // First, get all items with the same FIRST COLUMN value as minValue
+      // This provides wide bounds for the local index
+      const { expression } = orderBy[0]!
+      const allRowsWithMinValue = this.collection.currentStateAsChanges({
+        where: eq(expression, new Value(minValueForIndex)),
+      })
+
+      if (allRowsWithMinValue) {
+        const keysWithMinValue = allRowsWithMinValue
+          .map((change) => change.key)
+          .filter(filterFn)
+
+        // Add items with the minValue first
+        keys.push(...keysWithMinValue)
+
+        // Then get items greater than minValue
+        const keysGreaterThanMin = index.take(
           limit - keys.length,
+          minValueForIndex!,
           filterFn,
-          { value: minValueForIndex },
-        ),
-      )
+        )
+        keys.push(...keysGreaterThanMin)
+      } else {
+        keys = index.take(limit, minValueForIndex!, filterFn)
+      }
     } else {
       // No min value provided, start from the beginning
-      keys = takeOrderedIndexKeys(
-        this.collection,
-        index,
-        orderBy[0]!,
-        limit,
-        filterFn,
-      )
+      keys = index.takeFromStart(limit, filterFn)
     }
 
     const valuesNeeded = () => Math.max(limit - changes.length, 0)
@@ -1564,14 +1560,7 @@ export class CollectionSubscription
         biggestObservedValue = valueExtractor ? valueExtractor(value) : value
       }
 
-      keys = takeOrderedIndexKeys(
-        this.collection,
-        index,
-        orderBy[0]!,
-        valuesNeeded(),
-        filterFn,
-        { value: biggestObservedValue },
-      )
+      keys = index.take(valuesNeeded(), biggestObservedValue!, filterFn)
     }
 
     // Reserve rows before publication. A direct truncate replay keeps them in

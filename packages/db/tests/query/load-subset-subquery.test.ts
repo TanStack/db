@@ -117,10 +117,8 @@ const forwardingCases: ReadonlyArray<ForwardingCase> = [
   },
   {
     name: `IN`,
-    // An immutable list can be forwarded once. A mutable captured list needs
-    // the full source so later edits can refresh existing query rows.
-    build: (order) => inArray(order.id, Object.freeze([1, 2, 3])),
-    expected: inArray(new PropRef([`id`]), Object.freeze([1, 2, 3])),
+    build: (order) => inArray(order.id, [1, 2, 3]),
+    expected: inArray(new PropRef([`id`]), [1, 2, 3]),
   },
   {
     name: `NOT`,
