@@ -4394,11 +4394,19 @@ describe(`ordered source work oracle`, () => {
  * The sync path also runs against an on-demand source. Its provider serves
  * each request from the rows: filtered with the reference evaluator, sorted
  * by the requested order, with the offset only when there is no cursor, up
- * to the limit. It returns the commit's applied receipt, and forwards live
- * changes only for rows it sent or rows that match a subset it served. On
- * that path the rows law holds after each step, the work law bounds the rows
- * the provider serves, and a step that made a provider request only needs
- * its last publication to show the final window (#2131).
+ * to the limit. It returns the commit's applied receipt and keeps its own
+ * ledger of sent rows. A forwarding provider sends live changes only for
+ * rows it sent or rows that match a subset it served; the rows law holds
+ * after each step, and the work law bounds the rows it serves. A refetching
+ * provider, like query-db-collection, sends nothing until a `refetch` step.
+ * A refetch keeps every served ordered range whole, as the LoadSubset
+ * contract requires: it sends every row from the start of the order through
+ * the last order value a limited page returned, so a row that moves between
+ * two pages still arrives, and rows in no range leave. Until then the Collection may lag the
+ * rows, so the rows law applies only once no change is pending, and every
+ * refetching history ends with a refetch. On either provider a step may
+ * publish one intermediate window per provider request it made, and only
+ * its last publication must show the final window (#2131).
  * Joined filters can match a row through several markers, by `dup`, so a
  * LEFT-joined filter and a full join keep one result row per matched
  * (row, marker) pair, and an anti-join keeps a row once.
@@ -4416,12 +4424,22 @@ type EagerCommand =
   // the row more than once.
   | { type: `dup`; id: number }
   | { type: `delete-visible` }
+  // A refetching provider re-runs every request it served and sends the
+  // results; any other path skips it.
+  | { type: `refetch` }
 
 type EagerCase = {
   // How rows reach the source: sync writes to an eager source, local-only
   // direct writes, or an on-demand source whose provider serves each
   // request from the rows and installs only what it returns.
   path: `sync` | `local-only` | `on-demand`
+  // How an on-demand provider delivers later changes. `forward` sends each
+  // change to a row it sent, or to a row that matches a subset it served.
+  // `refetch` sends nothing until a refetch, which keeps every served
+  // ordered range whole: rows that now sort inside one arrive then, and rows
+  // in no range leave (query-db-collection, without its page gaps). Omitted
+  // means `forward`.
+  provider?: `forward` | `refetch`
   // Where eligibility is decided: a predicate on the ordered source itself,
   // a JavaScript function filter, or a filter on a LEFT-joined marker, where
   // a marker admits its row (`joined`) or excludes it (`anti-joined`). The
@@ -4509,6 +4527,7 @@ function eagerHistory(
       }),
       // Deletes the first visible row, so a repair runs on most histories.
       fc.constant({ type: `delete-visible` as const }),
+      fc.constant({ type: `refetch` as const }),
     ),
     { minLength: 1, maxLength: 12 },
   )
@@ -4520,6 +4539,7 @@ const eagerCase: fc.Arbitrary<EagerCase> = fc.record({
     `local-only` as const,
     `on-demand` as const,
   ),
+  provider: fc.constantFrom(`forward` as const, `refetch` as const),
   filter: fc.constantFrom(
     `source` as const,
     `function` as const,
@@ -4580,6 +4600,7 @@ const eagerJoinedHistory: fc.Arbitrary<Array<EagerCommand>> = fc.array(
       id: fc.integer({ min: 0, max: 19 }),
     }),
     fc.constant({ type: `delete-visible` as const }),
+    fc.constant({ type: `refetch` as const }),
   ),
   { minLength: 1, maxLength: 8 },
 )
@@ -4817,34 +4838,129 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
             },
           },
         })
-  // The on-demand provider: rows matching the request's predicate and
-  // cursor, in the model's order, after the offset when there is no cursor,
-  // up to the limit. It sends each returned row it has not sent yet, and
-  // keeps its own ledger of sent rows, so its behavior never depends on the
-  // Collection under test. It evaluates predicates with the reference
-  // evaluator, not production's.
+  // The on-demand provider: a page is the rows matching the request's
+  // predicate and cursor, in the model's order, after the offset when there
+  // is no cursor, up to the limit. It sends each page row it has not sent, or
+  // whose value changed since it sent it, and keeps its own ledger of sent
+  // values, so its behavior never depends on the Collection under test. It
+  // evaluates predicates with the reference evaluator, not production's.
+  const refetching =
+    testCase.path === `on-demand` && testCase.provider === `refetch`
   let providerRequests = 0
-  const sent = new Set<number>()
+  const sent = new Map<number, Row>()
   // Rows the provider returns, the on-demand transfer the work law bounds.
   let served = 0
-  // Predicates of the subsets the provider has served; `undefined` is a
-  // request without one, which covers every row.
-  const servedWheres: Array<LoadSubsetOptions[`where`]> = []
+  // The requests the provider has served. A request without a predicate
+  // covers every row.
+  const servedRequests: Array<LoadSubsetOptions> = []
+  // A refetching provider has skipped a change since its last refetch, so
+  // the Collection may lag the rows and the window laws wait for a refetch.
+  let stale = false
+  // Read through a call: the provider's callbacks assign `stale`, which the
+  // step loop's control flow cannot see.
+  const lagging = () => stale
   const matches = (expression: unknown, row: Row) =>
     evaluateReferenceExpression(
       expression as Parameters<typeof evaluateReferenceExpression>[0],
       row,
     ) === true
   const matchesServedSubset = (row: Row) =>
-    servedWheres.some((where) => where === undefined || matches(where, row))
+    servedRequests.some(
+      ({ where }) => where === undefined || matches(where, row),
+    )
+  const sameRow = (left: Row | undefined, right: Row) =>
+    left !== undefined &&
+    Object.is(left.rank, right.rank) &&
+    left.eligible === right.eligible &&
+    left.label === right.label &&
+    left.link === right.link
+  // One commit that sends the changed rows and removes the given sent rows.
+  // A load settles only after its writes apply, so this returns the commit's
+  // applied receipt, which is a promise while the transaction is queued.
+  function send(
+    page: Array<Row>,
+    removed: Array<number> = [],
+  ): true | Promise<void> {
+    const changed = page.filter((row) => !sameRow(sent.get(row.id), row))
+    if (changed.length === 0 && removed.length === 0) return true
+    syncControls!.begin()
+    for (const row of changed) {
+      syncControls!.write({
+        type: sent.has(row.id) ? `update` : `insert`,
+        value: { ...row },
+      })
+      sent.set(row.id, { ...row })
+    }
+    for (const rowId of removed) {
+      syncControls!.write({ type: `delete`, value: sent.get(rowId)! })
+      sent.delete(rowId)
+    }
+    const applied = syncControls!.commit()
+    return applied === true ? true : applied.then(() => undefined)
+  }
+  // The last row of each full, limited, ordered page: where its served range
+  // ends. A page shorter than its limit reached the end of the order.
+  const rangeEnds = new Map<LoadSubsetOptions, Row>()
   function servePage(options: LoadSubsetOptions): true | Promise<void> {
+    providerRequests++
+    servedRequests.push(options)
+    const page = pageFor(options)
+    if (
+      options.orderBy &&
+      options.limit !== undefined &&
+      page.length === options.limit &&
+      page.length > 0
+    ) {
+      rangeEnds.set(options, { ...page.at(-1)! })
+    }
+    served += page.length
+    return send(page)
+  }
+  // A refetch keeps every served ordered range whole, as the LoadSubset
+  // contract requires: it sends every row that now sorts from the start of
+  // the order through the last order value a limited page returned, so a
+  // row that moves between two pages still arrives. A request without a
+  // limit or an order re-runs as it is. Rows in no range leave, as a
+  // query-db-collection refetch removes rows no query holds. (query-db
+  // re-runs each page alone today, which leaves such gaps.)
+  const coverage = (options: LoadSubsetOptions): Array<Row> => {
+    const end = rangeEnds.get(options)
+    if (end === undefined) return pageFor(options)
+    const { direction, nulls } = options.orderBy![0]!.compareOptions
+    // A sentinel at the end value sorts after every row tied with it.
+    const sentinel = { ...end, id: Number.MAX_SAFE_INTEGER, eligible: true }
+    const ordered = eagerOrder(
+      new Map(
+        [...rows.values(), sentinel]
+          .filter((row) => !options.where || matches(options.where, row))
+          .map((row) => [row.id, { ...row, eligible: true }]),
+      ),
+      { ...testCase, direction, nulls },
+    )
+    return ordered
+      .slice(
+        0,
+        ordered.findIndex((row) => row.id === sentinel.id),
+      )
+      .map((row) => rows.get(row.id)!)
+  }
+  async function refetch(): Promise<void> {
+    const current = new Map(
+      servedRequests.flatMap(coverage).map((row) => [row.id, row]),
+    )
+    const applied = send(
+      [...current.values()],
+      [...sent.keys()].filter((rowId) => !current.has(rowId)),
+    )
+    if (applied !== true) await applied
+    stale = false
+  }
+  function pageFor(options: LoadSubsetOptions): Array<Row> {
     let page = [...rows.values()].filter(
       (row) =>
         (!options.where || matches(options.where, row)) &&
         (!options.cursor || matches(options.cursor.whereFrom, row)),
     )
-    providerRequests++
-    servedWheres.push(options.where)
     if (options.orderBy) {
       // Serve the order the request names, not the query's: a loader that
       // asks for the wrong direction or null placement gets the wrong rows.
@@ -4860,23 +4976,17 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       if (!options.cursor) page = page.slice(options.offset ?? 0)
       if (options.limit !== undefined) page = page.slice(0, options.limit)
     }
-    served += page.length
-    const fresh = page.filter((row) => !sent.has(row.id))
-    if (fresh.length === 0) return true
-    syncControls!.begin()
-    for (const row of fresh) {
-      sent.add(row.id)
-      syncControls!.write({ type: `insert`, value: { ...row } })
-    }
-    // A load settles only after its writes apply, so it returns the commit's
-    // applied receipt, which is a promise while the transaction is queued.
-    const applied = syncControls!.commit()
-    return applied === true ? true : applied.then(() => undefined)
+    return page
   }
-  // A live source write. An on-demand provider forwards changes for rows it
+  // A live source write. A forwarding provider sends changes for rows it
   // has sent, and for rows that now match a subset it has served (inserted);
-  // it writes nothing for any other row.
+  // it writes nothing for any other row. A refetching provider writes
+  // nothing until its next refetch.
   const sourceWrite = (type: `insert` | `update` | `delete`, value: Row) => {
+    if (refetching) {
+      stale = true
+      return
+    }
     const installed = sent.has(value.id)
     if (
       testCase.path === `on-demand` &&
@@ -4886,7 +4996,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       return
     }
     if (type === `delete`) sent.delete(value.id)
-    else sent.add(value.id)
+    else sent.set(value.id, { ...value })
     syncControls!.begin()
     syncControls!.write({
       type:
@@ -5179,7 +5289,13 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
         `rows delivered by the initial load`,
       ).toBeLessThanOrEqual(initialBound)
     }
-    for (const [step, generated] of testCase.history.entries()) {
+    // A refetching provider ends with a refetch, so the last step shows
+    // the rows.
+    const history: Array<EagerCommand> = refetching
+      ? [...testCase.history, { type: `refetch` }]
+      : testCase.history
+    for (const [step, generated] of history.entries()) {
+      if (generated.type === `refetch` && !refetching) continue
       // Resolve a visible-row delete against the model's current window.
       const visibleId = eagerWindow(rows, testCase)[0]
       if (generated.type === `delete-visible` && visibleId === undefined) {
@@ -5189,7 +5305,8 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
         generated.type === `delete-visible`
           ? { type: `delete`, id: visibleId! }
           : generated
-      const before = rows.get(command.id)
+      const before =
+        command.type === `refetch` ? undefined : rows.get(command.id)
       const boundaryBefore = boundaryRanks(rows, testCase)
       const sizeBefore = rows.size
       read = 0
@@ -5200,7 +5317,9 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       commits = 1
       const requestsBefore = providerRequests
       const visibleBefore = JSON.stringify(visibleIds())
-      if (command.type === `delete`) {
+      if (command.type === `refetch`) {
+        await refetch()
+      } else if (command.type === `delete`) {
         if (!before) continue
         rows.delete(command.id)
         if (testCase.path !== `local-only`) {
@@ -5267,13 +5386,18 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
         await setMarker(command.id, next.eligible)
       }
       await flushPromises()
-      expectEagerWindow(
-        visibleIds(),
-        modelRows(),
-        testCase,
-        `rows after step ${step}`,
-      )
-      if (effect) {
+      // While a refetching provider lags the rows, the Collection holds an
+      // older state the model does not track, so only the publication count
+      // laws apply until the next refetch.
+      if (!lagging()) {
+        expectEagerWindow(
+          visibleIds(),
+          modelRows(),
+          testCase,
+          `rows after step ${step}`,
+        )
+      }
+      if (effect && !lagging()) {
         expectEagerWindow(
           effectIds(),
           modelRows(),
@@ -5286,23 +5410,26 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       // shows it. A step that changes the visible rows (their keys or order)
       // publishes at least once; the subscriber holds every visible key, so
       // no change is filtered away. An on-demand repair or refill can publish
-      // one intermediate window first (#2131), so a step that made a provider
-      // request allows one more publication and only its last must show the
-      // final window.
+      // an intermediate window after each provider round trip (#2131), so a
+      // step allows one more publication per provider request it made, and
+      // only its last must show the final window.
       if (JSON.stringify(visibleIds()) !== visibleBefore) {
         expect(
           published.length,
           `publications by step ${step}`,
         ).toBeGreaterThan(0)
       }
-      const onDemand = providerRequests > requestsBefore
+      const requests = providerRequests - requestsBefore
+      const onDemand = requests > 0
       expect(
         published.length,
         `publications by step ${step}`,
-      ).toBeLessThanOrEqual(onDemand ? commits + 1 : commits)
-      for (const window of commits === 1 && !onDemand
-        ? published
-        : published.slice(-1)) {
+      ).toBeLessThanOrEqual(commits + requests)
+      for (const window of lagging()
+        ? []
+        : commits === 1 && !onDemand
+          ? published
+          : published.slice(-1)) {
         expectEagerWindow(
           window,
           modelRows(),
@@ -5321,10 +5448,11 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       // A NaN or null boundary cannot be expressed as a cursor
       // (canExpressCursorOrder), so the loader takes the documented
       // full-source fallback; only the rows and scan laws apply then.
-      const bound = workBound([
-        ...boundaryBefore,
-        ...boundaryRanks(rows, testCase),
-      ])
+      // A refetching provider's loads follow the Collection's older state,
+      // so the work law applies only to a forwarding provider.
+      const bound = refetching
+        ? undefined
+        : workBound([...boundaryBefore, ...boundaryRanks(rows, testCase)])
       if (bound !== undefined && testCase.path === `on-demand`) {
         expect(served, `rows served by step ${step}`).toBeLessThanOrEqual(bound)
       } else if (bound !== undefined) {
@@ -5415,6 +5543,69 @@ describe(`eager indexed ordered windows`, () => {
       })
     },
   )
+
+  it(`refills a joined window over several pages after a refetch empties it`, async () => {
+    // Every row the window held changes while the refetching provider lags.
+    // The final refetch empties the window, and the loader refills it one
+    // page at a time, publishing [], then one row, then the final two (#2131).
+    await checkEagerWindow({
+      path: `on-demand`,
+      provider: `refetch`,
+      filter: `joined`,
+      via: `link`,
+      indexed: true,
+      direction: `asc`,
+      nulls: `first`,
+      terms: 1,
+      limit: 2,
+      offset: 1,
+      initial: [
+        { id: 0, rank: 1, eligible: true },
+        { id: 1, rank: 2, eligible: true },
+        { id: 2, rank: 0, eligible: true },
+        { id: 3, rank: 3, eligible: true },
+      ],
+      history: [
+        { type: `upsert`, id: 10, rank: 0, eligible: true },
+        { type: `flip`, id: 1 },
+        { type: `flip`, id: 3 },
+        { type: `delete`, id: 0 },
+        { type: `flip`, id: 2 },
+      ],
+    })
+  })
+
+  it(`shows a row that moved between two served pages after a refetch`, async () => {
+    // The loader pages the top two rows, then one more after a cursor. Rows
+    // 10 and 11 arrive while the provider lags; the refetched first page now
+    // ends at row 11, so row 10 sorts between the pages. A provider that
+    // keeps served ranges whole sends it; one that re-runs each page alone
+    // (query-db-collection today) never does, and the window shows [4, 1].
+    await checkEagerWindow({
+      path: `on-demand`,
+      provider: `refetch`,
+      filter: `joined`,
+      via: `marker`,
+      indexed: true,
+      direction: `desc`,
+      nulls: `first`,
+      terms: 1,
+      limit: 2,
+      offset: 0,
+      initial: [
+        { id: 0, rank: Number.NaN, eligible: true },
+        { id: 1, rank: 0, eligible: true },
+        { id: 2, rank: 4, eligible: true },
+        { id: 3, rank: 1, eligible: true },
+      ],
+      history: [
+        { type: `upsert`, id: 10, rank: 5, eligible: true },
+        { type: `flip`, id: 0 },
+        { type: `upsert`, id: 11, rank: 6, eligible: false },
+        { type: `refetch` },
+      ],
+    })
+  })
 
   it(`publishes a full-join window that only loses a row`, async () => {
     // The delete leaves fewer result rows than the offset, so the window
@@ -5642,7 +5833,7 @@ describe(`eager indexed ordered windows`, () => {
         mixedNullGroup++
       }
     }
-    // At one times the run count: 16 and 2 of 40 cases.
+    // At one times the run count: 23 and 4 of 40 cases.
     expect(rootless).toBeGreaterThanOrEqual(10)
     expect(mixedNullGroup).toBeGreaterThanOrEqual(1)
   })
