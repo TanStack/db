@@ -4819,36 +4819,31 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
         })
   // The on-demand provider: rows matching the request's predicate and
   // cursor, in the model's order, after the offset when there is no cursor,
-  // up to the limit. It
-  // installs each returned row that the source does not hold yet. It
-  // evaluates predicates with the reference evaluator, not production's.
-  const providerRequests: Array<{ unbounded: boolean }> = []
+  // up to the limit. It sends each returned row it has not sent yet, and
+  // keeps its own ledger of sent rows, so its behavior never depends on the
+  // Collection under test. It evaluates predicates with the reference
+  // evaluator, not production's.
+  let providerRequests = 0
+  const sent = new Set<number>()
   // Rows the provider returns, the on-demand transfer the work law bounds.
   let served = 0
   // Predicates of the subsets the provider has served; `undefined` is a
   // request without one, which covers every row.
   const servedWheres: Array<LoadSubsetOptions[`where`]> = []
+  const matches = (expression: unknown, row: Row) =>
+    evaluateReferenceExpression(
+      expression as Parameters<typeof evaluateReferenceExpression>[0],
+      row,
+    ) === true
   const matchesServedSubset = (row: Row) =>
-    servedWheres.some(
-      (where) =>
-        where === undefined ||
-        evaluateReferenceExpression(
-          where as Parameters<typeof evaluateReferenceExpression>[0],
-          row,
-        ) === true,
-    )
+    servedWheres.some((where) => where === undefined || matches(where, row))
   function servePage(options: LoadSubsetOptions): true | Promise<void> {
-    const matches = (expression: unknown, row: Row) =>
-      evaluateReferenceExpression(
-        expression as Parameters<typeof evaluateReferenceExpression>[0],
-        row,
-      ) === true
     let page = [...rows.values()].filter(
       (row) =>
         (!options.where || matches(options.where, row)) &&
         (!options.cursor || matches(options.cursor.whereFrom, row)),
     )
-    providerRequests.push({ unbounded: options.limit === undefined })
+    providerRequests++
     servedWheres.push(options.where)
     if (options.orderBy) {
       // Serve the order the request names, not the query's: a loader that
@@ -4858,17 +4853,19 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
         new Map(page.map((row) => [row.id, { ...row, eligible: true }])),
         { ...testCase, direction, nulls },
       ).map((row) => row.id)
-      page = order.map((rowId) => page.find((row) => row.id === rowId)!)
+      const pageRows = new Map(page.map((row) => [row.id, row]))
+      page = order.map((rowId) => pageRows.get(rowId)!)
       // `offset` is the alternative to `cursor` (LoadSubsetOptions), so a
       // provider applies it only to a request without a cursor.
       if (!options.cursor) page = page.slice(options.offset ?? 0)
       if (options.limit !== undefined) page = page.slice(0, options.limit)
     }
     served += page.length
-    const fresh = page.filter((row) => !source.has(row.id))
+    const fresh = page.filter((row) => !sent.has(row.id))
     if (fresh.length === 0) return true
     syncControls!.begin()
     for (const row of fresh) {
+      sent.add(row.id)
       syncControls!.write({ type: `insert`, value: { ...row } })
     }
     // A load settles only after its writes apply, so it returns the commit's
@@ -4880,7 +4877,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
   // has sent, and for rows that now match a subset it has served (inserted);
   // it writes nothing for any other row.
   const sourceWrite = (type: `insert` | `update` | `delete`, value: Row) => {
-    const installed = source.has(value.id)
+    const installed = sent.has(value.id)
     if (
       testCase.path === `on-demand` &&
       !installed &&
@@ -4888,6 +4885,8 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
     ) {
       return
     }
+    if (type === `delete`) sent.delete(value.id)
+    else sent.add(value.id)
     syncControls!.begin()
     syncControls!.write({
       type:
@@ -5116,13 +5115,6 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
     }
     return model
   }
-  // The model window's order values, to tell whether a step changed it.
-  const windowRanks = () =>
-    JSON.stringify(
-      eagerWindow(modelRows(), testCase).map((rowId) =>
-        String(modelRows().get(rowId)?.rank),
-      ),
-    )
   const window = testCase.offset + testCase.limit
   // The bound for one load: a prefix, the boundary ties, a refill, and the
   // changed row. Null when a boundary value cannot be expressed as a cursor.
@@ -5162,9 +5154,14 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
         `initial Effect rows`,
       )
     }
-    const subscription = query.subscribeChanges(() => {
-      published.push(visibleIds())
-    })
+    // The subscriber starts with every visible key, so it receives each
+    // later change to them, including a removal.
+    const subscription = query.subscribeChanges(
+      () => {
+        published.push(visibleIds())
+      },
+      { includeInitialState: true },
+    )
     unsubscribe = () => subscription.unsubscribe()
     const initialBound = workBound(boundaryRanks(rows, testCase))
     // On demand, the provider's transfer is bounded; the local snapshot
@@ -5201,8 +5198,8 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       served = 0
       published.length = 0
       commits = 1
-      const requestsBefore = providerRequests.length
-      const ranksBefore = windowRanks()
+      const requestsBefore = providerRequests
+      const visibleBefore = JSON.stringify(visibleIds())
       if (command.type === `delete`) {
         if (!before) continue
         rows.delete(command.id)
@@ -5286,23 +5283,23 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       }
       // Each commit publishes at most once, and the commit that completes
       // the step publishes the final window. With one commit, every batch
-      // shows it. A step whose window changes publishes at least once. An
-      // on-demand repair or refill can publish an intermediate window first
-      // (#2131), so a step that made a provider request only needs its last
-      // publication to show the final window.
-      if (windowRanks() !== ranksBefore) {
+      // shows it. A step that changes the visible rows (their keys or order)
+      // publishes at least once; the subscriber holds every visible key, so
+      // no change is filtered away. An on-demand repair or refill can publish
+      // one intermediate window first (#2131), so a step that made a provider
+      // request allows one more publication and only its last must show the
+      // final window.
+      if (JSON.stringify(visibleIds()) !== visibleBefore) {
         expect(
           published.length,
           `publications by step ${step}`,
         ).toBeGreaterThan(0)
       }
-      const onDemand = providerRequests.length > requestsBefore
-      if (!onDemand) {
-        expect(
-          published.length,
-          `publications by step ${step}`,
-        ).toBeLessThanOrEqual(commits)
-      }
+      const onDemand = providerRequests > requestsBefore
+      expect(
+        published.length,
+        `publications by step ${step}`,
+      ).toBeLessThanOrEqual(onDemand ? commits + 1 : commits)
       for (const window of commits === 1 && !onDemand
         ? published
         : published.slice(-1)) {
@@ -5418,6 +5415,34 @@ describe(`eager indexed ordered windows`, () => {
       })
     },
   )
+
+  it(`publishes a full-join window that only loses a row`, async () => {
+    // The delete leaves fewer result rows than the offset, so the window
+    // only loses its row. A subscriber that did not start with that key
+    // receives no removal; this one starts with every visible key and must
+    // receive the change.
+    await checkEagerWindow({
+      path: `sync`,
+      filter: `full-joined`,
+      via: `marker`,
+      indexed: true,
+      direction: `asc`,
+      nulls: `first`,
+      terms: 1,
+      limit: 1,
+      offset: 1,
+      initial: [
+        { id: 0, rank: 0, eligible: false },
+        { id: 1, rank: Number.NaN, eligible: false },
+      ],
+      history: [
+        { type: `delete`, id: 0 },
+        { type: `flip`, id: 0 },
+      ],
+      fillers: 0,
+      orphans: [],
+    })
+  })
 
   it(`refills an unindexed on-demand anti-join window after a visible delete`, async () => {
     // The plan pages without an index; the anti-join drops row 0 after the
@@ -5577,15 +5602,17 @@ describe(`eager indexed ordered windows`, () => {
     checkEagerWindow,
   )
 
-  // Reconstruction: the campaign reaches the premise. Its initial windows
-  // include rootless rows and, separately, windows that hold a rootless row
-  // beside a root row with a null rank.
+  // Reconstruction: the fixed-seed campaign reaches the premise. Sampling
+  // its arbitrary with its seed and run count yields exactly the cases it
+  // executes. Their initial windows include rootless rows and, separately,
+  // windows that hold a rootless row beside a root row with a null rank.
+  const FULL_JOIN_SEED = 2073
   it(`generates full-join windows that reach the null group`, () => {
     let rootless = 0
     let mixedNullGroup = 0
-    for (const testCase of fc.sample(eagerFullJoinCase, {
-      numRuns: 300,
-      seed: 2071,
+    for (const [testCase] of fc.sample(fc.tuple(eagerFullJoinCase), {
+      numRuns: runs,
+      seed: FULL_JOIN_SEED,
     })) {
       const roots = [
         ...fillerRows(testCase.direction, testCase.fillers),
@@ -5615,11 +5642,12 @@ describe(`eager indexed ordered windows`, () => {
         mixedNullGroup++
       }
     }
-    expect(rootless).toBeGreaterThan(30)
-    expect(mixedNullGroup).toBeGreaterThan(5)
+    // At one times the run count: 16 and 2 of 40 cases.
+    expect(rootless).toBeGreaterThanOrEqual(10)
+    expect(mixedNullGroup).toBeGreaterThanOrEqual(1)
   })
 
-  fcTest.prop([eagerFullJoinCase], { numRuns: runs, seed: 2073 })(
+  fcTest.prop([eagerFullJoinCase], { numRuns: runs, seed: FULL_JOIN_SEED })(
     `keeps a full-join window to the first result rows for a fixed seed`,
     checkEagerWindow,
   )
