@@ -60,6 +60,9 @@ type Row = { id: string; group: string }
 
 // A real Electron process starts for each envelope, so waits are longer.
 const settleTimeout = { timeout: isElectronFullE2EEnabled() ? 60_000 : 1_000 }
+// Bound each history, so a stalled main process fails one history instead of
+// holding the run until the suite's timeout.
+const historyTimeout = isElectronFullE2EEnabled() ? 90_000 : 10_000
 
 type IpcHandler = (
   event: unknown,
@@ -385,5 +388,6 @@ describe(`Electron renderer initial readiness follows the composed load`, () => 
         expectedCheckpoints(history),
       )
     },
+    historyTimeout,
   )
 })
