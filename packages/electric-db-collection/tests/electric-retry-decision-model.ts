@@ -21,6 +21,10 @@ export type RetryStep =
   | { kind: `abort` }
   | { kind: `hold` }
   | { kind: `release` }
+  // The next up-to-date commit is accepted later, as a persistence wrapper
+  // accepts after its durable step; `accept` settles that acceptance.
+  | { kind: `hold-acceptance` }
+  | { kind: `accept` }
 export type RetryHistory = {
   wait: RetryWait
   hasOnError: boolean
@@ -47,6 +51,11 @@ export type RetryModel = {
   rows: boolean
   cleanupOnError: boolean
   cleanedUp: boolean
+  // The first up-to-date is committed and its acceptance is pending.
+  acceptanceArmed: boolean
+  committed: boolean
+  // The source stopped after its first snapshot was committed.
+  stopped: boolean
   ready: boolean
   visible: boolean
   held: boolean
@@ -59,6 +68,13 @@ export type RetryModel = {
 // Each error, throw, and abort has a tag, so a rejection's cause can be
 // compared by identity without reading production state.
 export function retryModelFail(model: RetryModel, cause: string): void {
+  // Once the first snapshot is committed, a final failure is a post-ready
+  // failure: the Collection still becomes ready when that snapshot is
+  // accepted, and the demands it covers settle with its rows.
+  if (model.committed && !model.ready) {
+    model.stopped = true
+    return
+  }
   if (model.ready || model.failed !== undefined) return
   model.failed = cause
   model.demands = model.demands.map((settlement): RetrySettlement =>
@@ -71,7 +87,21 @@ export function retryModelFail(model: RetryModel, cause: string): void {
 
 export function retryStepIsLegal(model: RetryModel, step: RetryStep): boolean {
   if (model.cleanedUp) return false
+  if (step.kind === `accept`) return model.committed && !model.ready
+  if (step.kind === `hold-acceptance`)
+    return !model.acceptanceArmed && !model.ready && !model.committed
   if (step.kind === `decide`) return model.deciding !== undefined
+  // A stopped stream delivers nothing more. A retry while the first
+  // snapshot's acceptance is pending is outside this grammar.
+  if (model.stopped)
+    return step.kind === `release` || (step.kind === `demand` && !model.aborted)
+  if (
+    model.committed &&
+    !model.ready &&
+    step.kind === `error` &&
+    (step.decision === `sync-retry` || step.decision === `async-retry`)
+  )
+    return false
   if (step.kind === `release`) return model.held
   // A failed or aborted Collection refuses new optimistic writes.
   if (model.failed !== undefined || model.aborted) return false
@@ -83,7 +113,7 @@ export function retryStepIsLegal(model: RetryModel, step: RetryStep): boolean {
     case `client-give-up`:
       return model.deciding === undefined
     case `up-to-date`:
-      return !model.ready && model.deciding === undefined
+      return !model.ready && !model.committed && model.deciding === undefined
     case `abort`:
       return true
   }
@@ -135,15 +165,26 @@ export function applyRetryModel(
       return
     }
     case `up-to-date`:
-      model.ready = true
+      // Core marks a Collection ready when a commit carries a truncate, as a
+      // progressive history's first up-to-date does, whatever its acceptance.
+      if (model.acceptanceArmed && !model.truncates) {
+        model.acceptanceArmed = false
+        model.committed = true
+      } else model.ready = true
       if (!model.held || model.truncates) retryModelApply(model)
+      return
+    case `hold-acceptance`:
+      model.acceptanceArmed = true
+      return
+    case `accept`:
+      model.ready = true
       return
     case `hold`:
       model.held = true
       return
     case `release`:
       model.held = false
-      if (model.ready) retryModelApply(model)
+      if (model.ready || model.committed) retryModelApply(model)
       return
     case `client-give-up`:
       retryModelFail(model, tag)
@@ -154,6 +195,7 @@ export function applyRetryModel(
       // so a waiting demand still settles when its rows apply.
       if (!model.ready) retryModelFail(model, `StreamAbortedError`)
       model.aborted = true
+      if (model.committed) model.stopped = true
       return
   }
 }
@@ -209,6 +251,9 @@ export function createRetryModel(
     rows: resolved !== `changes-only`,
     cleanupOnError,
     cleanedUp: false,
+    acceptanceArmed: false,
+    committed: false,
+    stopped: false,
     ready: false,
     visible: false,
     held: false,

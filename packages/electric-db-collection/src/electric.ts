@@ -1928,7 +1928,15 @@ function createElectricSync<T extends Row<unknown>>(
     // A final initial failure decides its waiting loads. A cleanup that a
     // status listener runs inside that failure must not relabel it.
     let initialSyncFailedFinally = false
+    // Once the first up-to-date is committed, a final failure is a post-ready
+    // failure: the Collection becomes ready when that snapshot is accepted.
+    let firstSnapshotCommitted = false
+    let stoppedAfterFirstSnapshot = false
     const failInitialSync = (cause: unknown) => {
+      if (firstSnapshotCommitted) {
+        stoppedAfterFirstSnapshot = true
+        return
+      }
       initialSyncFailedFinally = true
       markError(cause)
     }
@@ -2607,12 +2615,21 @@ function createElectricSync<T extends Row<unknown>>(
         const readyErrorVersion = streamErrorVersion
         // Readiness counts accepted rows.
         const accepted = whenSyncAccepted(applied)
-        if (commitPoint === `up-to-date`) resolveFullSnapshot(applied)
+        if (commitPoint === `up-to-date`) {
+          resolveFullSnapshot(applied)
+          if (collection.status === `loading`) firstSnapshotCommitted = true
+        }
         if (accepted === true) {
           wrappedMarkReady(wasBufferingInitialSync, readyErrorVersion)
         } else {
           void accepted.then(
-            () => wrappedMarkReady(wasBufferingInitialSync, readyErrorVersion),
+            () => {
+              // A stream that stopped for good still delivered this snapshot.
+              if (stoppedAfterFirstSnapshot) {
+                if (collection.status === `loading`) markReady()
+              } else
+                wrappedMarkReady(wasBufferingInitialSync, readyErrorVersion)
+            },
             () => undefined,
           )
         }

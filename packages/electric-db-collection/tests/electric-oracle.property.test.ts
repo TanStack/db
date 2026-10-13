@@ -1,7 +1,12 @@
 import { isDeepStrictEqual } from 'node:util'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { IR, createCollection, createTransaction } from '@tanstack/db'
+import {
+  IR,
+  createCollection,
+  createTransaction,
+  withAcceptedReceipt,
+} from '@tanstack/db'
 import { ShapeStream } from '@electric-sql/client'
 import { QueryClient } from '@tanstack/query-core'
 import {
@@ -587,6 +592,7 @@ function createOracleCollection(
     signal?: AbortSignal
     onError?: () => Promise<Record<string, never> | undefined>
   } = {},
+  wrapParams: <TParams>(params: TParams) => TParams = (params) => params,
 ) {
   let subscriber!: (messages: Array<Message<OracleRow>>) => void
   let sdkError!: (error: unknown) => void
@@ -613,7 +619,7 @@ function createOracleCollection(
       ...options,
       sync: {
         sync: (params: Parameters<typeof originalSync.sync>[0]) =>
-          originalSync.sync({ ...params, metadata }),
+          originalSync.sync(wrapParams({ ...params, metadata })),
       },
     }),
     subscriber,
@@ -5294,7 +5300,13 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
    * up by itself, or the stream's external signal aborts. Then the Collection
    * enters `error`, and every waiting demand and readiness wait rejects with
    * that same cause. A status listener that cleans the Collection up inside
-   * that failure does not turn a rejected demand into a quiet one. After
+   * that failure does not turn a rejected demand into a quiet one. Once the
+   * first up-to-date is committed, a final give-up is a post-ready failure,
+   * even while a persistence wrapper still holds that commit's acceptance:
+   * the Collection becomes `ready` when the snapshot is accepted, and the
+   * demands it covers settle with its rows. Core marks a Collection ready
+   * when a commit carries a truncate, so a progressive history's first
+   * up-to-date is ready at its commit. After
    * the first ready, a later failure does not change the status. A demand
    * whose snapshot arrived before an external abort still settles when its
    * rows apply. Cleanup ends a waiting demand quietly, except after an
@@ -5322,12 +5334,17 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
    * up on `error`. Its steps are errors whose decisions are a synchronous retry, a
    * synchronous give-up, a throw, an asynchronous retry, or an asynchronous
    * give-up; a later error after a retry; an Electric client give-up; an
-   * external abort before or during a decision; new demands; the first
+   * external abort before or during a decision; a held acceptance of the
+   * first up-to-date commit, followed by a give-up and its later acceptance;
+   * new demands; the first
    * up-to-date; a persisting transaction that starts before it and later
    * settles; and cleanup. It omits histories the client cannot produce:
    * a stream message or a second error while `onError` decides, because the
    * client awaits the decision; and stream steps after a final failure or an
-   * abort, because the stream has stopped. A progressive history starts with
+   * abort, because the stream has stopped. It also omits a retry, or a
+   * second up-to-date, while the first snapshot's acceptance is pending. The
+   * installed-client lane cannot hold an acceptance, so this dimension runs
+   * only here. A progressive history starts with
    * a must-refetch, so its demands wait on the established snapshot.
    *
    * The driver runs the real adapter and Collection behind the controlled
@@ -5353,6 +5370,8 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     fc.constant({ kind: `abort` as const }),
     fc.constant({ kind: `hold` as const }),
     fc.constant({ kind: `release` as const }),
+    fc.constant({ kind: `hold-acceptance` as const }),
+    fc.constant({ kind: `accept` as const }),
   )
   // Generated steps that the client cannot produce in the current model state
   // are dropped, so every history is legal.
@@ -5419,6 +5438,28 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
         decide = resolve
       })
     }
+    // A persistence wrapper accepts a commit after its durable step. Once
+    // armed, the driver holds the acceptance of every commit until `accept`;
+    // the rows are visible at once, as core applies the transaction.
+    let armAcceptance = false
+    const heldAcceptance = createDeferred<void>()
+    const holdAcceptance = <TParams>(params: TParams): TParams => {
+      const syncParams = params as unknown as {
+        commit: () => true | Promise<void>
+      }
+      const commit = syncParams.commit
+      return {
+        ...params,
+        commit: () => {
+          const receipt = commit()
+          if (!armAcceptance) return receipt
+          return withAcceptedReceipt(
+            receipt === true ? Promise.resolve() : receipt,
+            heldAcceptance.promise,
+          )
+        },
+      }
+    }
     const trace = createOracleCollection(
       id,
       history.wait === `progressive`
@@ -5437,6 +5478,7 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
             }
           : {}),
       },
+      holdAcceptance,
     )
     const streamOnError = (
       vi.mocked(ShapeStream).mock.calls.at(-1)?.[0] as unknown as {
@@ -5541,6 +5583,13 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
             persistence.resolve()
             await transaction!.isPersisted.promise
             break
+          case `hold-acceptance`:
+            armAcceptance = true
+            break
+          case `accept`:
+            armAcceptance = false
+            heldAcceptance.resolve()
+            break
         }
         applyRetryModel(model, step, history.hasOnError, tag)
         await turn()
@@ -5552,6 +5601,7 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
       }
       await trace.collection.cleanup()
       persistence.resolve()
+      heldAcceptance.resolve()
       // A decision still pending at cleanup cannot change the stopped run.
       decide?.(undefined)
       await Promise.all(decisions)
@@ -5741,6 +5791,46 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
           ],
         },
       ]),
+      // A final give-up after the first up-to-date is committed but before
+      // its acceptance settles is a post-ready failure: the Collection
+      // becomes ready when the snapshot is accepted, with its rows, and the
+      // demands it covers settle. One replay per give-up.
+      ...(
+        [
+          [false, { kind: `error`, decision: `sync-give-up` }],
+          [true, { kind: `error`, decision: `sync-give-up` }],
+          [true, { kind: `error`, decision: `throw` }],
+          [true, { kind: `client-give-up` }],
+          [true, { kind: `abort` }],
+        ] as Array<[boolean, RetryStep]>
+      ).map(([hasOnError, giveUp]): [RetryHistory] => [
+        {
+          wait: `full-log`,
+          hasOnError,
+          steps: [
+            { kind: `demand` },
+            { kind: `hold-acceptance` },
+            { kind: `up-to-date` },
+            giveUp,
+            { kind: `accept` },
+          ],
+        },
+      ]),
+      [
+        {
+          wait: `progressive`,
+          hasOnError: true,
+          steps: [
+            { kind: `demand` },
+            { kind: `hold-acceptance` },
+            { kind: `up-to-date` },
+            { kind: `error`, decision: `async-give-up` },
+            { kind: `decide` },
+            { kind: `demand` },
+            { kind: `accept` },
+          ],
+        },
+      ],
     ] satisfies Array<[RetryHistory]> as Array<[RetryHistory]>,
   )
 
