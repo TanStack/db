@@ -250,3 +250,25 @@ cache rotation, another Collection's shared Query, and custom query-key
 functions remain outside this witness. The #2135 guide and changeset clarify
 that a retained persisted scope uses an exact request under the current
 implementation; that provider-work choice is not an oracle requirement.
+
+## Historical window identity review at `bd6ac95d3`
+
+An independent reviewer attacked the migration parser with four one-field
+mutants. Before this follow-up, dropping a historical `limit`, `offset`,
+`orderBy`, or `cursor` left all 70 identity-oracle tests green. Each edit could
+collapse distinct old window keys. The revised fixed-key comparison rejects
+all four mutants at the normalized-key assertion; the unmodified parser passes.
+The order witness uses a typed direction and null placement. These assertions
+test persisted bytes from the previous encoder, not a second call to the
+normalizer to construct the expected key.
+
+The ownership oracle now drives a historical limit-1 owner through the real
+persisted Query Collection path. An unrelated limit-2 empty result leaves its
+durable row, owner, and marker intact. The matching limit-1 result retires
+them at applied settlement. The unmodified path passes. In an isolated scratch
+checkout, dropping `limit` from the legacy parser left the stale durable row
+after the matching request, so this receiving check rejects the mutant at its
+row assertion. The storage fixture supports a fixed-order finite prefix for
+this witness. Offset, ordering, and cursor migration have key-level checks but
+still need durable receiving histories; arbitrary old key shapes remain outside
+the finite grammar.
