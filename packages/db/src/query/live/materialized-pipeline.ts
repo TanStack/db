@@ -42,11 +42,16 @@ type CanonicalResult = {
   tuple: ResultTuple
 }
 
-export type BucketRow = {
-  publicKey: unknown
-  value: Record<PropertyKey, any>
-  order: string | undefined
-}
+// A bucket row leads with its public key. The D2 index tells apart values
+// with a different leading string, number or bigint without hashing them, so
+// a row of one bucket is hashed only against a row with the same key,
+// including its own retraction. A key of any other type has the whole row
+// hashed whenever it joins a bucket.
+export type BucketRow = readonly [
+  publicKey: unknown,
+  value: Record<PropertyKey, any>,
+  order: string | undefined,
+]
 
 export type BucketFacadeCompilation = {
   edgeId: string
@@ -330,17 +335,18 @@ function attachInlineInclude(
               routing.parentContext,
               valueIdentity,
             ),
-        { parentKey, tuple },
-      ] as [string, { parentKey: unknown; tuple: ResultTuple }]
+        [parentKey, tuple],
+      ] as [string, readonly [parentKey: unknown, tuple: ResultTuple]]
     }),
     join(bucketValues, `left`),
     map(([_bucketKey, [parent, bucketValue]]) => {
+      const [parentKey, tuple] = parent!
       const [value, order, correlationKey, parentContext, routing, publicKey] =
-        parent!.tuple
+        tuple
       const edgeRouting = routing?.[include.fieldName]
       if (edgeRouting?.active !== true) {
         return [
-          parent!.parentKey,
+          parentKey,
           [value, order, correlationKey, parentContext, routing, publicKey],
         ]
       }
@@ -349,7 +355,7 @@ function attachInlineInclude(
           ? emptyMaterializedValue(include.materialization)
           : bucketValue.value
       return [
-        parent!.parentKey,
+        parentKey,
         [
           setNestedValue(value, include.resultPath, materialized),
           order,
@@ -382,7 +388,7 @@ function createBucketRows(
         rawTuple as ResultTuple
       return [
         routeKey(correlationKey, parentContext, valueIdentity),
-        { publicKey: publicKey ?? internalKey, value, order },
+        [publicKey ?? internalKey, value, order],
       ] as [string, BucketRow]
     }),
   )
@@ -476,22 +482,23 @@ function routeKey(
 }
 
 function compareBucketRows(left: BucketRow, right: BucketRow): number {
-  if (left.order !== right.order) {
-    if (left.order === undefined) return 1
-    if (right.order === undefined) return -1
-    return left.order < right.order ? -1 : 1
+  const [leftPublicKey, , leftOrder] = left
+  const [rightPublicKey, , rightOrder] = right
+  if (leftOrder !== rightOrder) {
+    if (leftOrder === undefined) return 1
+    if (rightOrder === undefined) return -1
+    return leftOrder < rightOrder ? -1 : 1
   }
 
   if (
-    (typeof left.publicKey === `string` ||
-      typeof left.publicKey === `number`) &&
-    (typeof right.publicKey === `string` || typeof right.publicKey === `number`)
+    (typeof leftPublicKey === `string` || typeof leftPublicKey === `number`) &&
+    (typeof rightPublicKey === `string` || typeof rightPublicKey === `number`)
   ) {
-    return compareKeys(left.publicKey, right.publicKey)
+    return compareKeys(leftPublicKey, rightPublicKey)
   }
 
-  const leftKey = serializeValue(left.publicKey)
-  const rightKey = serializeValue(right.publicKey)
+  const leftKey = serializeValue(leftPublicKey)
+  const rightKey = serializeValue(rightPublicKey)
   return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0
 }
 
@@ -501,8 +508,8 @@ function materializeRows(
 ): unknown {
   const scalarField = include.scalarField
   const values = scalarField
-    ? rows.map(({ value }) => value[scalarField])
-    : rows.map(({ value }) => value)
+    ? rows.map(([, value]) => value[scalarField])
+    : rows.map(([, value]) => value)
 
   if (include.materialization === `array`) return values
   if (include.materialization === `singleton`) return values[0]

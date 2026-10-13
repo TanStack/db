@@ -1697,9 +1697,9 @@ describe(`CollectionSubscription status tracking`, () => {
     }
   })
 
-  // The next limited page starts after the rows this subscription published.
-  // A change its where clause drops is not published and cannot advance the
-  // offset, whether it arrives alone or beside a matching change. Change
+  // A change its where clause drops is not published and cannot count toward
+  // the safe provider prefix bound, whether it arrives alone or beside a
+  // matching change. Change
   // routing withholds dropped rows from an `eq` subscription before sent keys
   // are recorded, so an `or` predicate, which is not routed, is also needed to
   // reach that record.
@@ -1721,7 +1721,7 @@ describe(`CollectionSubscription status tracking`, () => {
       },
     ]),
   )(
-    `does not advance the page offset for a dropped change that arrives $grouping ($predicate)`,
+    `does not count a dropped change in the provider prefix after it arrives $grouping ($predicate)`,
     async ({ grouping, where }) => {
       type Row = { id: string; rank: number; status: string }
       const loads: Array<LoadSubsetOptions> = []
@@ -1778,6 +1778,8 @@ describe(`CollectionSubscription status tracking`, () => {
 
       try {
         requestPage()
+        const initialLimit = loads.at(-1)?.limit
+        expect(initialLimit).toBeDefined()
         sync.begin()
         if (grouping === `as an update beside a matching change`) {
           sync.write({
@@ -1802,7 +1804,12 @@ describe(`CollectionSubscription status tracking`, () => {
         expect([...published].sort()).toEqual(
           grouping === `alone` ? [`a1`] : [`a1`, `a2`],
         )
-        expect(loads.at(-1)?.offset).toBe(published.size)
+        expect(loads.at(-1)?.offset).toBe(0)
+        // A dropped source change cannot increase the provider prefix. Only
+        // the extra matching row in the grouped histories can add one slot.
+        expect(loads.at(-1)?.limit).toBe(
+          initialLimit! + (grouping === `alone` ? 0 : 1),
+        )
       } finally {
         subscription.unsubscribe()
         await collection.cleanup()

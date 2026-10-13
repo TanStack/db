@@ -160,9 +160,12 @@ function asWeighted<T>(state: State<T>): Weighted<T> {
 }
 
 function normalized<T>(state: State<T>): Array<[string, number]> {
-  return [...state.entries()]
-    .map(([key, { weight }]) => [key, weight] as [string, number])
-    .sort(([left], [right]) => left.localeCompare(right))
+  return (
+    [...state.entries()]
+      .map(([key, { weight }]) => [key, weight] as [string, number])
+      // Code-unit order is total; collation can tie distinct keys.
+      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+  )
 }
 
 function difference<T>(

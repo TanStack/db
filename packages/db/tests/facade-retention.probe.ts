@@ -31,21 +31,7 @@ function capture(
   const value = { id: 1, payload: new ArrayBuffer(1024 * 1024) }
   const bucketKey = `group`
   activeBuckets.sendData(new MultiSet([[[bucketKey, true], 1]]))
-  rows.sendData(
-    new MultiSet([
-      [
-        [
-          bucketKey,
-          {
-            publicKey: 1,
-            value,
-            order: undefined,
-          },
-        ],
-        1,
-      ],
-    ]),
-  )
+  rows.sendData(new MultiSet([[[bucketKey, [1, value, undefined]], 1]]))
   graph.run()
   const ref: BucketFacadeRef = {
     [BUCKET_FACADE_REF]: { edgeId: `children`, bucketKey },
@@ -58,11 +44,7 @@ function capture(
   assert.equal(view.get(1)?.id, 1)
   const retained = holder === `view` ? view : view.get.bind(view)
   if (pendingUpdate) {
-    rows.sendData(
-      new MultiSet([
-        [[bucketKey, { publicKey: 2, value: { id: 2 }, order: undefined }], 1],
-      ]),
-    )
+    rows.sendData(new MultiSet([[[bucketKey, [2, { id: 2 }, undefined]], 1]]))
     graph.run()
   }
   if (released) adapter.cleanup()
