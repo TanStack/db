@@ -173,3 +173,17 @@ passed 497 tests, and the full `@tanstack/db` run passed 12,345 tests in 281
 files, with no reported type errors. These are working-tree runs, not a
 committed-head review. The witness requires scan/index agreement for this
 fixture; it does not define a universal order between value families.
+
+## Follow-up to committed-head review
+
+Review of `d974d4a4f` found that the earlier paired inclusive range
+(`20 <= rank <= 30` over ranks 10, 20, and 30) did not make either bound
+exclude a row. The paired fixture now uses an upper bound of 25, so its
+independent model expects only rank 20. The ordinary index has separate
+positive spies for ascending take, descending reverse take, numeric lookup,
+and range traversal; the full mixed Date/number optimized read also proves
+its take was called. These additions make a wrong selected index or a skipped
+bound observable at the public snapshot and traversal checkpoints. The
+focused owner passed. They do not prove arbitrary numeric histories,
+providers, or the live-query compiler's index-use premise. A fresh hostile
+review of the final committed follow-up is pending.

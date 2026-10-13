@@ -69,10 +69,14 @@ const expectedAtMostTwenty = rows
   .filter(({ rank }) => 20 >= rank)
   .map(({ id }) => id)
   .sort()
-const inclusiveReversedBetweenTwentyAndThirty = new Func(`and`, [
+const inclusiveReversedBetweenTwentyAndTwentyFive = new Func(`and`, [
   twentyLessThanOrEqualRank,
-  new Func(`gte`, [new Value(30), new PropRef([`rank`])]),
+  new Func(`gte`, [new Value(25), new PropRef([`rank`])]),
 ])
+const expectedBetweenTwentyAndTwentyFive = rows
+  .filter(({ rank }) => 20 <= rank && rank <= 25)
+  .map(({ id }) => id)
+  .sort()
 const betweenTenAndThirty = new Func(`and`, [
   greaterThanTen,
   new Func(`lt`, [new PropRef([`rank`]), new Value(30)]),
@@ -162,6 +166,7 @@ describe.each(indexTypes)(
         // index is second and must serve the ordered read.
         const lookup = vi.spyOn(custom, `lookup`)
         const ordinaryTake = vi.spyOn(ordinary, `takeFromStart`)
+        const ordinaryReverseTake = vi.spyOn(ordinary, `takeReversedFromEnd`)
         const ordinaryLookup = vi.spyOn(ordinary, `lookup`)
         const ordinaryRange = vi.spyOn(ordinary, `rangeQuery`)
         expect(
@@ -178,12 +183,13 @@ describe.each(indexTypes)(
             .currentStateAsChanges({ ...ascendingFirst, optimizedOnly: true })
             ?.map(({ key }) => key),
         ).toEqual([expectedFirstKey])
+        expect(ordinaryTake).toHaveBeenCalled()
         expect(
           collection
             .currentStateAsChanges({ ...descendingFirst, optimizedOnly: true })
             ?.map(({ key }) => key),
         ).toEqual([`last`])
-        expect(ordinaryTake).toHaveBeenCalled()
+        expect(ordinaryReverseTake).toHaveBeenCalled()
 
         // Ordinary numeric predicates use relational order rather than the
         // custom index's descending walk. Both single and paired bounds must
@@ -198,6 +204,7 @@ describe.each(indexTypes)(
             .sort(),
         ).toEqual([`last`, `middle`])
         expect(ordinaryLookup).toHaveBeenCalledWith(`gt`, 10)
+        ordinaryRange.mockClear()
         expect(
           collection
             .currentStateAsChanges({
@@ -266,8 +273,8 @@ describe.each(indexTypes)(
         },
         {
           name: `paired-field-right-inclusive`,
-          where: inclusiveReversedBetweenTwentyAndThirty,
-          expectedKeys: expectedAtLeastTwenty,
+          where: inclusiveReversedBetweenTwentyAndTwentyFive,
+          expectedKeys: expectedBetweenTwentyAndTwentyFive,
         },
       ] as const
       await withCreatedCollections(async (create) => {
@@ -475,6 +482,8 @@ describe.each(indexTypes)(`%s public mixed-value order`, (name, IndexType) => {
       // class, although their public ordered positions are different.
       expect(index.equalityLookup(1)).toEqual(new Set([`date`, `equal-number`]))
       expect(keys(undefined, true)).toEqual(scanned)
+      expect(take).toHaveBeenCalled()
+      take.mockClear()
       expect(keys(1, true)).toEqual(scannedFirst)
       expect(take).toHaveBeenCalled()
     }, [() => cleanup?.()])

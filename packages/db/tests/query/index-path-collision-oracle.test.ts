@@ -29,8 +29,9 @@
  * subclasses while retaining native `getTime`. Its four relational predicates
  * use intrinsic timestamps in the model, then compare public scan and indexed
  * snapshots. Both index types must remain eligible for optimized-only reads.
- * Date/number scan comparisons in both operand orders use the same model;
- * mixed-domain range indexes make no eligibility claim here.
+ * A subclass bound also reaches both operand positions. Date/number scan
+ * comparisons in both operand orders use the same model; mixed-domain range
+ * indexes make no eligibility claim here.
  *
  * Production driver: `currentStateAsChanges`, Collection subscriptions, and
  * live-query Collections run the real predicates and callback compilers.
@@ -378,6 +379,7 @@ it.each([
         { id: `plain-after`, v: new Date(3) },
       ]
       const bound = new Date(1)
+      const subclassBound = new LaterDate(1)
       const nativeGetTime = Date.prototype.getTime
       const boundTime = nativeGetTime.call(bound)
       const field = new PropRef([`v`])
@@ -401,6 +403,26 @@ it.each([
           name: `lte`,
           where: lte(field, bound),
           accepts: (time: number) => time <= boundTime,
+        },
+        {
+          name: `gt with subclass bound`,
+          where: gt(field, subclassBound),
+          accepts: (time: number) => time > boundTime,
+        },
+        {
+          name: `lte with subclass bound`,
+          where: lte(field, subclassBound),
+          accepts: (time: number) => time <= boundTime,
+        },
+        {
+          name: `subclass bound less than field`,
+          where: lt(subclassBound, field),
+          accepts: (time: number) => boundTime < time,
+        },
+        {
+          name: `subclass bound greater than or equal to field`,
+          where: gte(subclassBound, field),
+          accepts: (time: number) => boundTime >= time,
         },
       ]
       const mixedPredicates = [
@@ -441,6 +463,7 @@ it.each([
       // positions, while ordinary Dates control both sides and equality.
       expect(Number(earlierForeign)).toBe(100)
       expect(Number(dateRows[3]!.v)).toBe(-100)
+      expect(Number(subclassBound)).toBe(-100)
       const expectedDateKeys = (accepts: (time: number) => boolean) =>
         dateRows
           .filter(({ v }) => accepts(nativeGetTime.call(v)))

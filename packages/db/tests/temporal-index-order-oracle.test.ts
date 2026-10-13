@@ -10,8 +10,9 @@ import { orderedEntriesArray, withOracleCleanup } from './utils.js'
  * A ZonedDateTime's ordered position is its instant. Two zones at the same
  * instant share an ordered position but remain distinct equality values.
  * Authority: Temporal.ZonedDateTime.compare/equals, the established WHERE
- * evaluator contract in query/compiler/evaluators-oracle.test.ts, and the
- * ordered Collection and IndexInterface contracts in docs/reference.
+ * evaluator contract in query/compiler/evaluators-oracle.test.ts, the
+ * ordered Collection contract, and the established direct key-tie rule in
+ * deterministic-ordering.test.ts. IndexInterface names the direct methods.
  *
  * This bounded oracle covers one polyfill copy, two opposing offset zones,
  * one equal-instant pair, a one-nanosecond successor, and negative instants
@@ -21,7 +22,8 @@ import { orderedEntriesArray, withOracleCleanup } from './utils.js'
  * removal/insertion/update continuation, then the public ordered Collection
  * snapshot with limit 1. Direct custom-comparator witnesses preserve the
  * former display-string operands and let the callback order two rows whose
- * values share one query-equality class. They check add/build, exact lookup,
+ * values share one query-equality class. An opposite callback distinguishes
+ * callback-result order from plain display-text order. They check add/build, exact lookup,
  * range and cursor boundaries, representative removal, and an update that
  * changes callback order without changing query equality. Fixed add/build
  * histories also shadow a genuine value's display tag; the value cursor must
@@ -400,6 +402,45 @@ describe.each(indexTypes)(
         expect(index.takeFromStart(2)).toEqual([`z-alias`])
         expect(orderedEntriesArray(index)[0]?.[0]).toBe(alias!.when)
         expect(index.equalityLookup(alias!.when)).toEqual(new Set([`z-alias`]))
+      },
+    )
+
+    it.each([`add`, `build`] as const)(
+      `follows an opposite callback for equal UTC aliases after %s`,
+      (construction) => {
+        const source = [
+          {
+            id: `z-utc`,
+            when: Temporal.ZonedDateTime.from(`2024-01-15T09:00:00+00:00[UTC]`),
+          },
+          {
+            id: `a-alias`,
+            when: Temporal.ZonedDateTime.from(
+              `2024-01-15T09:00:00+00:00[Etc/UTC]`,
+            ),
+          },
+        ]
+        const [utc, alias] = source
+        expect(utc!.when.equals(alias!.when)).toBe(true)
+        expect(
+          alias!.when.toString().localeCompare(utc!.when.toString()),
+        ).toBeLessThan(0)
+        const index = new IndexType(1, new PropRef([`when`]), undefined, {
+          compareFn: (left: string, right: string) => right.localeCompare(left),
+        })
+        // The callback puts UTC first. Both display-text order and source-key
+        // order put the alias first, so either shortcut fails this observation.
+        if (construction === `add`) {
+          for (const row of source) index.add(row.id, row)
+        } else {
+          index.build(source.map((row): [string, Row] => [row.id, row]))
+        }
+        expect(index.equalityLookup(utc!.when)).toEqual(
+          new Set([`z-utc`, `a-alias`]),
+        )
+        expect(index.takeFromStart(2)).toEqual([`z-utc`, `a-alias`])
+        expect(index.rangeQuery({ to: utc!.when })).toEqual(new Set([`z-utc`]))
+        expect(index.take(1, utc!.when)).toEqual([`a-alias`])
       },
     )
 

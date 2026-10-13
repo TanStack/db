@@ -275,3 +275,28 @@ polyfill's genuine subclass with inherited methods. The custom-prototype
 fake described above, replaced subclass methods, mixed implementations, and
 provider paths remain open. The working-tree repair still needs a fresh
 committed-head hostile review.
+
+## Tagged subclass follow-up after `d974d4a4f`
+
+The committed-head review found another native-brand hole. A genuine
+`ZonedDateTime` subclass whose own prototype shadows `Symbol.toStringTag`
+inherits Temporal's slot-checking methods. Native `.equals()` groups it with
+a UTC alias, and native `compare` gives it the same instant position. The
+classifier stopped at the immediate prototype, treated that genuine value as
+an ordinary object, and missed it in direct BasicIndex/BTreeIndex lookups and
+public `eq` snapshots. A distinct ordinary object borrowing that subclass
+prototype must still retain reference identity.
+
+The alias owner now adds the tagged subclass to its independent UTC class,
+checks direct add, build, lookup, removal, and unindexed and optimized-only
+public `eq`, and retains the borrowed-prototype negative controls. The
+comparison owner checks exact zeros and both signs through `ascComparator`
+and `compareValues`. Ten intended comparisons were RED before the one-line
+classifier repair. The repaired focused run passed 144 tests: 28 alias and
+116 comparison, with explicit test TypeScript, ESLint, Prettier, and diff
+checks passing. The repair removes the immediate-prototype tag gate and
+continues to require a slot-checking inherited Temporal method. This evidence
+covers one imported polyfill's subclass with inherited methods and one
+shadowed prototype tag. Replaced intrinsic methods, other implementations,
+arbitrary prototype chains, and provider paths remain open. A fresh hostile
+review of the final committed change is pending.

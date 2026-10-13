@@ -60,3 +60,13 @@ four Date-bound operators, and both index types. Invalid Dates,
 arbitrary coercion methods, later publication histories, provider cursors,
 and generated subclass histories remain outside the evidence. A fresh
 committed-head hostile review is pending.
+
+Review of committed head `d974d4a4f` found that the misleading `valueOf`
+subclasses were source values only. The fixed matrix now also uses a native
+subclass as the predicate bound on both operand sides, where its override
+returns a number opposite the native timestamp. Public scan and indexed
+key sets still come from captured native `Date.prototype.getTime` values.
+The focused owner passed 18 tests. This reaches the Date-bound compiler path;
+it does not establish arbitrary coercion methods, generated subclass
+histories, or other hosts. Fresh hostile review of the final committed
+follow-up is pending.

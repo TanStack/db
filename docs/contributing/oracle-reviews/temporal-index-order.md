@@ -7,8 +7,10 @@ keeps zones distinct. The law comes from Temporal's `ZonedDateTime.compare` and
 `equals` semantics, changelog #1519, and the Collection's ordered-read and
 IndexInterface contracts. The live-query architecture also requires an
 ordered comparator group to keep a representative from a live exact-value
-bucket. No public contract fixes the key order of two rows at the same
-instant, so the oracle accepts either tie order.
+bucket. The direct index's established source-key rule orders two rows at the
+same instant. The public ordered snapshot does not promise which
+equal-instant peer occupies a limit-one window, so that observation accepts
+either peer.
 
 ## Original failure and repair
 
@@ -124,16 +126,21 @@ found a source-inspection sensitivity gap, not a demonstrated production
 defect. The direct oracle had allowed either source-key order for two
 equal-instant peers. It now admits those peers in reverse key order through
 both `add` and `build` and requires the direct `takeFromStart(2)` result to
-follow the index interface's key order in BasicIndex and BTreeIndex. The
+follow the established source-key tie rule in BasicIndex and BTreeIndex. The
 public limit-one tie remains permissive. This addition covers only the
 named equal-instant fixture and direct index checkpoint.
 
 The maintainer confirmed the custom comparator contract: when a callback
 distinguishes two `ZonedDateTime` rows that native `.equals()` groups
 together, ordered index operations follow the callback for each row. The
-existing oracle already checks that decision through add/build, exact
-lookup, range and cursor reads, removal, and update for UTC/Etc-UTC peers.
-This round retains those witnesses; it does not collapse their positions or
-reject that comparator/value combination. The working-tree 497-test focused
-campaign and 12,345-test DB campaign passed. A fresh exact-commit hostile
-review of these additions is still pending.
+existing oracle checks that decision through add/build, exact lookup,
+range and cursor reads, removal, and update for UTC/Etc-UTC peers. Review of
+committed head `d974d4a4f` found that those checks could accept display-text
+order in place of callback order. A new opposite callback puts UTC first,
+while both display-text and source-key order put the alias first; add/build
+takes, range, and cursor results must follow that callback. Its focused run
+passed 33 tests. This round does not collapse the peers' positions or reject
+that comparator/value combination. The earlier 497-test focused campaign
+and 12,345-test DB campaign describe the committed baseline, before this
+opposite-callback witness. A fresh exact-commit hostile review of the
+follow-up remains pending.

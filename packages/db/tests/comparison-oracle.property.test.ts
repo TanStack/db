@@ -55,7 +55,9 @@ import type { CompareOptions } from '../src/query/builder/types'
  * they constrain this internal utility, not a public serialized format or a
  * universal performance bound. Own `length` and `byteLength` properties do
  * not change native byte content. The 32-character margin is the existing
- * constant-overhead budget for the sampled 0..200-byte keys.
+ * constant-overhead budget for the sampled 0..200-byte keys. Changed-byte
+ * equality and key histories cover lengths 1..200; a 129-byte interior change
+ * pins the first length beyond the 128-byte boundary.
  */
 
 const defaultOpts: CompareOptions = {
@@ -503,10 +505,13 @@ const arbitrarySameTypeTriple = fc.oneof(
   ),
 )
 
+// A legal changed-byte input retains length and all but one indexed byte.
+// The 1..200 range spans both sides of the 128-byte key-size boundary; the
+// empty input has no byte to change and is checked by the size-margin witness.
 const arbitraryChangedBytes = fc
   .tuple(
-    fc.uint8Array({ minLength: 1, maxLength: 50 }),
-    fc.integer({ min: 0, max: 49 }),
+    fc.uint8Array({ minLength: 1, maxLength: 200 }),
+    fc.integer({ min: 0, max: 199 }),
     fc.integer({ min: 1, max: 255 }),
   )
   .map(([bytes, indexHint, delta]) => {
@@ -1531,7 +1536,9 @@ describe(`areValuesEqual property-based tests`, () => {
  * ZonedDateTimes within two seconds of a fixed instant in four offset zones.
  * Equal-value branches construct separate objects, and the zoned branch forces
  * different zones at the same instant. A fixed genuine ZonedDateTime also
- * shadows its own display tag; the supplied instant still determines order.
+ * shadows its own display tag; a genuine subclass changes its prototype's
+ * display tag while inheriting Temporal's slot-checking method. The supplied
+ * instant still determines order for both.
  * The production paths are the exported
  * `ascComparator` under the default options and `compareValues` in hostile
  * dispatch histories. Each return is the observation checkpoint;
@@ -1770,6 +1777,38 @@ describe(`Temporal default-order refinement`, () => {
     expect(sign(ascComparator(utc, later, DEFAULT_COMPARE_OPTIONS))).toBe(-1)
   })
 
+  it.each([
+    [
+      `ascComparator`,
+      (left: unknown, right: unknown) =>
+        ascComparator(left, right, DEFAULT_COMPARE_OPTIONS),
+    ],
+    [`compareValues`, compareValues],
+  ] as const)(
+    `keeps a tagged ZonedDateTime subclass in instant order through %s`,
+    (_name, compare) => {
+      class TaggedZonedDateTime extends Temporal.ZonedDateTime {}
+      Object.defineProperty(TaggedZonedDateTime.prototype, Symbol.toStringTag, {
+        value: `Tagged`,
+      })
+      const tagged = new TaggedZonedDateTime(
+        zonedBaseEpochNanoseconds,
+        `+00:00`,
+      )
+      const peer = zonedValue(0, `+05:30`)
+      const later = zonedValue(1, `+00:00`)
+
+      // Model positions come from supplied nanosecond offsets. Native compare
+      // confirms that the tagged receiver still has genuine Temporal slots.
+      expect(Temporal.ZonedDateTime.compare(tagged, peer)).toBe(0)
+      expect(Temporal.ZonedDateTime.compare(tagged, later)).toBe(-1)
+      expect(compare(tagged, peer)).toBe(0)
+      expect(compare(peer, tagged)).toBe(0)
+      expect(sign(compare(tagged, later))).toBe(-1)
+      expect(sign(compare(later, tagged))).toBe(1)
+    },
+  )
+
   it(`keeps a PlainDate constructor override from poisoning later comparisons`, async () => {
     const { ascComparator: isolatedComparator, compareValues: isolatedValues } =
       await freshTemporalComparison()
@@ -1877,6 +1916,28 @@ describe(`native binary key content`, () => {
     const left = Uint8Array.of(1, 0, 2)
     const right = Uint8Array.of(1, 9, 2)
     expect(normalizeValue(left)).not.toBe(normalizeValue(right))
+  })
+
+  it(`distinguishes byte 64 in a 129-byte key`, () => {
+    const bytes = Uint8Array.from({ length: 129 }, (_, index) => index)
+    const changed = new Uint8Array(bytes)
+    changed[64] = (changed[64]! + 1) % 256
+    const sample = { bytes, changed, index: 64 }
+
+    // A key that reads only its first 64 bytes accepts this legal change.
+    // The normalizer must preserve it at the direct-return checkpoint.
+    expect(() =>
+      assertChangedBytes(
+        sample,
+        (left, right) =>
+          left.length === right.length &&
+          left.subarray(0, 64).every((byte, index) => byte === right[index]),
+      ),
+    ).toThrow(`changed byte must be unequal`)
+    assertChangedBytes(
+      sample,
+      (left, right) => normalizeValue(left) === normalizeValue(right),
+    )
   })
 
   comparisonProperty([arbitraryChangedBytes])(

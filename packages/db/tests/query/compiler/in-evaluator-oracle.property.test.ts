@@ -634,6 +634,9 @@ describe(`in evaluator`, () => {
     checkEqualityPaths(foreignDate, 1000, true)
     checkEqualityPaths(laterForeignDate, localDate, false)
     checkEqualityPaths(laterForeignDate, 1000, false)
+    // This Date comes from a second vm context. Its own timestamp must also
+    // match, so a classifier restricted to the first foreign prototype fails.
+    checkEqualityPaths(laterForeignDate, 1001, true)
     checkEqualityPaths(foreignInvalidDate, localInvalidDate, true)
     checkEqualityPaths(foreignInvalidDate, Number.NaN, true)
     checkEqualityPaths(foreignInvalidDate, localDate, false)

@@ -56,9 +56,11 @@
  * must be routed to exactly the subscribers they can satisfy; and the public
  * `Collection.currentStateAsChanges` snapshot.
  *
- * Refinement check: each consumer's exact key set equals the model after the
- * subscribers attach and after each sync transaction commits. Direct
- * subscribers are reconstructed from their callback batches. Two fixed
+ * Refinement check: live-query and subscriber key sets equal the model after
+ * attachment and after each sync transaction commits. The generated history
+ * checks a direct snapshot at attachment. Direct subscribers are reconstructed
+ * from their callback batches. The fixed Date matrix checks direct snapshots
+ * before and after its sync transaction. Two fixed
  * witnesses check boundaries outside the generated grammar: Collection
  * readiness reaches a filtered subscriber as one empty batch, and an eager
  * source restarted after cleanup retracts a vanished row even when its first

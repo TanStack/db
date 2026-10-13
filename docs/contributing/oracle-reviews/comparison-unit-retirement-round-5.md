@@ -106,3 +106,15 @@ property at the direct `normalizeValue` return. No hostile mutant was run for
 this addition, so the fixed pair and property are sensitivity evidence, not
 an exact-commit kill. The [Temporal transfer](comparison-unit-retirement-round-6.md)
 and [alias owner](temporal-equality-alias.md) record their separate domains.
+
+Review of committed head `d974d4a4f` found that the changed-byte generator
+reached only lengths 1–50 while the owner's bounded key-size claim reached
+200. The follow-up expands independently supplied changed-byte pairs to
+lengths 1–200 for both direct `areValuesEqual` and `normalizeValue` checks.
+A fixed 129-byte pair differs only at byte 64. A first-64-byte comparison
+fault fails the equality check at the intended direct return; the real
+normalizer returns distinct keys. The focused comparison owner passed 117
+tests, and explicit test TypeScript, ESLint, and Prettier checks passed. This
+is bounded sensitivity evidence, not a claim that every byte sequence or
+all binary consumers were exercised. Final exact-commit hostile review of
+the follow-up is pending.

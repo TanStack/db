@@ -332,7 +332,6 @@ type BrandedTemporal = { prototype: object; kind: string; text: string }
 function brandedTemporal(value: unknown): BrandedTemporal | undefined {
   if (value === null || typeof value !== `object`) return undefined
   let prototype: object | null = Object.getPrototypeOf(value)
-  if (!prototype || !isTemporal(prototype)) return undefined
   while (prototype) {
     const kind = Object.getOwnPropertyDescriptor(
       prototype,

@@ -166,3 +166,11 @@ The witness establishes this single local borrowed object at an unindexed
 public checkpoint. It does not cover indexed publication for that object,
 arbitrary prototype chains, or other host realms. A committed-head hostile
 review of the working-tree addition remains pending.
+
+The follow-up review of `d974d4a4f` also found an overstatement in the
+WHERE publication oracle's opening prose. Its generated histories compare
+direct snapshots when subscribers attach, then reconstruct subscriber and
+live-query key sets after each sync commit. The fixed Date matrix compares
+direct snapshots both before and after its commit. The prose now names those
+separate checkpoints. No behavior or product expectation changed in this
+clarification. Final exact-commit hostile review remains pending.

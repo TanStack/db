@@ -132,3 +132,16 @@ treated it as an ordinary object. The [Temporal alias owner](temporal-equality-a
 now supplies the subclass equality and borrowed-prototype controls and records
 the RED/GREEN production repair. This issue is outside the two retired direct
 comparison assertions. The custom-prototype question above remains open.
+
+At committed head `d974d4a4f`, review exposed a second subclass boundary:
+a genuine `ZonedDateTime` subclass with a shadowed prototype display tag was
+classified as an ordinary object. The direct comparison owner now supplies
+the instant and one-nanosecond successor independently, verifies the native
+`Temporal.ZonedDateTime.compare` premise, and checks exact equal-instant zeros
+and both signs through `ascComparator` and `compareValues`. The adjacent
+[alias review](temporal-equality-alias.md#tagged-subclass-follow-up-after-d974d4a4f)
+records the direct-index and public-`eq` RED/GREEN repair. This is an adjacent
+product defect, not a recovered assertion from the two retired ordinary-value
+blocks. Other subclasses, replaced methods, mixed implementations, and
+arbitrary prototype chains remain open. A fresh hostile review of the final
+committed follow-up is pending.

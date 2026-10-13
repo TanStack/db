@@ -114,8 +114,8 @@ found a false-green risk in `referenceEqual`: realm-local `instanceof Date`
 could classify a native foreign Date as an ordinary reference even when the
 compiled evaluator correctly compared its timestamp. The working-tree model
 now reads a captured native `Date.prototype.getTime`, uses valid and invalid
-foreign Dates, and rejects a local object that only borrows a Date subclass
-prototype. Fixed witnesses check compiled `eq`, constant-list `in`, and
+foreign Dates, and rejects a local object made with
+`Object.create(Date.prototype)`. Fixed witnesses check compiled `eq`, constant-list `in`, and
 row-supplied `in` in both operand directions. This was a reference-model gap,
 not an observed production defect. The focused receiving run passed 72 tests.
 
@@ -126,3 +126,11 @@ altering the native byte-content law. The open null-containing-list authority
 question recorded by the [Temporal alias review](temporal-equality-alias.md)
 is unchanged. The working-tree changes still need a fresh committed-head
 hostile review.
+
+The review of committed head `d974d4a4f` found that the positive foreign-Date
+controls came from one VM context, while a second context supplied only a
+different timestamp. The receiving oracle now requires that second context's
+Date to equal its own timestamp through compiled `eq`, constant-list `in`, and
+row-supplied `in`. The focused `in` owner passed after this addition. This
+checks the compiled equality return for two VM contexts; browser iframe
+behavior and a fresh exact-commit hostile review of the follow-up remain open.

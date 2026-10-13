@@ -472,23 +472,30 @@ through a Date prototype, checks valid and invalid subclass order in both
 directions against finite Dates, and rejects local and foreign
 borrowed-prototype impostors. The owner
 also checks an unindexed public ordered scan with a tagged foreign invalid
-Date. Exact `normalizeValue` results are direct utility observations. Indexed
+Date. A direct byte-key witness distinguishes two 129-byte native views that
+differ only at byte 64; the generated changed-byte grammar spans lengths
+1–200 and compares both `areValuesEqual` and `normalizeValue` returns.
+Exact `normalizeValue` results are direct utility observations. Indexed
 order, public Date range predicates, cursor continuation, proxies, deeper
 subclass chains, replaced Date prototypes or `getTime` methods, and other
 Date-consuming paths remain outside that witness.
 
-The comparison oracle also owns a bounded [Temporal order transfer](oracle-reviews/comparison-unit-retirement-round-6.md). Supplied ISO calendar fields and epoch-nanosecond offsets predict direct `ascComparator` signs and exact zeros for ordinary `PlainDate` and `ZonedDateTime` values from one polyfill copy. Fixed cases preserve the two retired unit blocks; generated cases vary calendar fields, offset zones, equal instants, and adjacent nanoseconds. Fresh-module histories reject a first-input constructor cache poisoned by a genuine instance or forged tag, including the direct `compareValues` path. Both direct helpers also receive a right-hand PlainDate with a constructor shadow. A genuine ZonedDateTime with an own shadowed display tag retains its instant position through both direct helpers. This lane does not establish public query or index behavior. Custom Temporal subclasses, spoofed or replaced instance prototypes, mixed native/polyfill implementations, other Temporal kinds, and public ordering/filter publication need separate witnesses. Spoofed Temporal prototypes can still cause asymmetric comparisons; the comparison owner needs a dedicated brand and mixed-value witness before that class can be called closed.
+The comparison oracle also owns a bounded [Temporal order transfer](oracle-reviews/comparison-unit-retirement-round-6.md). Supplied ISO calendar fields and epoch-nanosecond offsets predict direct `ascComparator` signs and exact zeros for ordinary `PlainDate` and `ZonedDateTime` values from one polyfill copy. Fixed cases preserve the two retired unit blocks; generated cases vary calendar fields, offset zones, equal instants, and adjacent nanoseconds. Fresh-module histories reject a first-input constructor cache poisoned by a genuine instance or forged tag, including the direct `compareValues` path. Both direct helpers also receive a right-hand PlainDate with a constructor shadow. A genuine ZonedDateTime with an own shadowed display tag retains its instant position through both direct helpers. One genuine tagged ZonedDateTime subclass with inherited Temporal methods retains native-equal and native-order-equal results against a UTC peer; an object borrowing its prototype is an ordinary-object control. This lane does not establish public query or index behavior. Other Temporal subclasses, spoofed or replaced instance prototypes, mixed native/polyfill implementations, other Temporal kinds, and public ordering/filter publication need separate witnesses. Spoofed Temporal prototypes can still cause asymmetric comparisons; the comparison owner needs a dedicated brand and mixed-value witness before that class can be called closed.
 
 The [Temporal index order oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/temporal-index-order-oracle.test.ts)
 and its [review record](oracle-reviews/temporal-index-order.md) own direct
 BasicIndex and BTreeIndex ordered takes after add/build and one mutation
 continuation, plus an optimized-only public Collection snapshot with an
 explicit index. Supplied epoch nanoseconds establish order without promising
-a key tie break for equal instants; distinct zones retain exact lookup
-identities. A focused callback witness preserves the former string operands
+a public key tie break for equal instants; direct index takes follow the
+established source-key tie rule, and the public snapshot permits either
+equal-instant peer. Distinct zones retain exact lookup identities. A focused
+callback witness preserves the former string operands
 for a custom comparator over two distinct pre-epoch values. A second callback
 witness splits query-equal UTC aliases into per-row comparator positions after
 add/build and checks direct range, cursors, removal, and same-class update.
+An opposite callback puts the UTC peer first even though display-text and
+source-key order put the alias first.
 An add/build witness checks that a genuine value's own shadowed display tag
 cannot move its default ordered position or the value cursor.
 Direct removal supplies the exact prior row. Mixed value domains, other
@@ -500,8 +507,9 @@ and its [review record](oracle-reviews/temporal-equality-alias.md) own the
 bounded `ZonedDateTime.equals()` partition for UTC/Etc/UTC aliases, a distinct
 fixed-offset zone, adjacent nanoseconds, and a different calendar. One native
 ZonedDateTime subclass with inherited Temporal methods belongs to the UTC
-class, while an ordinary object borrowing its prototype retains reference
-identity. Direct BasicIndex/BTreeIndex add, build, and removal checks compare
+class. A second genuine subclass shadows its prototype's display tag and
+remains in that class; ordinary objects borrowing either subclass prototype
+retain reference identity. Direct BasicIndex/BTreeIndex add, build, and removal checks compare
 independent fixture-assigned classes. Unindexed and optimized-only indexed
 Collection snapshots check public `eq`; the `in` evaluator oracle checks
 constant and row-supplied alias lists. A plain object with a forged Temporal tag and a
@@ -528,6 +536,9 @@ original classifier failed equal foreign/local byte pairs. The `in` property has
 direct replay selector that runs only its random/replay campaign.
 Native local and `node:vm` Dates, including invalid Dates and timestamp
 numbers, reach those three compiled equality paths in both operand directions.
+An equal-timestamp Date from a second VM context is a positive compiled
+equality control, so the reference cannot accept only the first foreign
+prototype.
 Borrowed Date prototypes remain ordinary reference values. The native-Date
 reference model uses a captured Date intrinsic rather than local `instanceof`.
 Own `length` and `byteLength` shadows, including a foreign byte view, and a
@@ -574,7 +585,10 @@ field-left and value-left single or paired relational predicates. A
 custom-only index cannot serve an optimized range read. The fixed ready-state
 fixture covers BasicIndex and BTreeIndex, one numeric field, and limit one.
 Positive spies observe the later ordinary index's ordered take and numeric
-lookup/range calls. Inclusive value-left boundaries are fixed controls.
+lookup/range calls, including a separate reverse take for descending order.
+The paired inclusive range selects only rank 20 from ranks 10, 20, and 30,
+so either misplaced bound changes the complete public key set. Inclusive
+value-left boundaries are fixed controls.
 Another fixed ready-state fixture compares unindexed and optimized indexed
 Date/number order, both full and limit one, with an index-take reach check.
 Mutation histories, arbitrary callbacks, and provider publication remain
@@ -600,6 +614,9 @@ including tagged foreign Dates and fixed local/foreign subclasses with an own
 display tag, plus number 1, NaN, and a foreign borrowed-prototype impostor, it
 compares public live-query keys, filtered subscriber keys, and direct snapshot
 keys after preload and a four-row sync transaction.
+The generated WHERE histories check direct snapshots at attachment; the fixed
+Date matrix also checks them after its commit. Subscriber batches reconstruct
+subscriber state after each generated commit.
 Auto-indexing is off in both modes; one mode adds BasicIndex explicitly and
 also checks its equality lookup and an optimized-only public snapshot. This
 proves a public indexed snapshot result but does not prove that the live-query
@@ -621,7 +638,9 @@ or the predicate bound. A genuine foreign Date subclass is a positive indexed
 range control. A later fixed history gives local and foreign native Date
 subclasses misleading `valueOf` results. Public scan and indexed `gt`, `gte`,
 `lt`, and `lte` snapshots use their intrinsic timestamps, with an
-optimized-only index-path check. Date/number scan predicates run in both
+optimized-only index-path check. A native subclass also serves as a bound on
+both predicate sides while its `valueOf` reports a misleading number.
+Date/number scan predicates run in both
 operand orders; mixed-domain index eligibility is not claimed. Other coercion
 methods, invalid Dates, later publication, and proxies remain open there.
 
