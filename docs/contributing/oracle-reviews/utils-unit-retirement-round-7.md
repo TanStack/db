@@ -95,3 +95,12 @@ recorded properties, including selector 34 with seed `20260911` and path
 public change events, cross-realm values, RegExp subclasses, or arbitrary
 cross-type pairs. Ordinal selectors can shift if future registrations are
 inserted ahead of them.
+
+## Frozen-head ledger recheck
+
+At `210651d207eefe9bbc025c780f6259e470225c9e`, the hostile reviewer
+read the six retired Date/RegExp assertions, their source, the direct
+`deepEquals` implementation, and the receiving oracle. Source inspection
+found no missing operand or expected result in the bounded transfer. This
+is a frozen-head no-loss verdict by inspection; it is not a new mutant kill
+or a fresh committed-head execution of subsequent working-tree changes.

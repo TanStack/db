@@ -191,3 +191,24 @@ The focused comparison oracle passed 111 tests with no type, lint, formatting,
 or diff-check errors. These additions do not establish indexed range behavior;
 the separate [range-domain review](borrowed-date-indexed-range.md) owns that
 public boundary.
+
+## Working-tree subclass and relational-order follow-up
+
+The hostile comparison review of frozen head
+`210651d207eefe9bbc025c780f6259e470225c9e` found no loss from the five
+retired same-realm blocks. It found that the direct invalid-Date control only
+used a foreign subclass. The working-tree control now also creates a local
+invalid subclass with an own display tag and requires native invalid-Date
+normalization, unorderability, and both finite comparison directions. This
+closes a fixture sensitivity gap; the review did not identify a new
+production failure for that added local value.
+
+The separate [public range owner](borrowed-date-indexed-range.md) found a
+production defect in relational scans: a genuine Date subclass can override
+`valueOf` while its native timestamp remains unchanged. A `gt` or `lt` scan
+could follow the override instead of the timestamp. The working-tree repair
+uses the native Date timestamp for relational comparisons, including mixed
+Date/number operands. The range owner records the original RED public
+snapshots and the bounded scan/index GREEN evidence. Direct Date order and
+public range order are separate observations; this record does not claim
+arbitrary coercion methods, providers, or cursor continuation.

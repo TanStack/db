@@ -15,7 +15,8 @@ import { orderedEntriesArray, withOracleCleanup } from './utils.js'
  *
  * This bounded oracle covers one polyfill copy, two opposing offset zones,
  * one equal-instant pair, a one-nanosecond successor, and negative instants
- * around the epoch. Equal-instant peers may appear in either key order. It
+ * around the epoch. Direct indexes order equal-instant peers by source key;
+ * a public Collection snapshot may choose either peer at a limit boundary. It
  * checks direct BasicIndex/BTreeIndex adds, builds, and value cursors, one
  * removal/insertion/update continuation, then the public ordered Collection
  * snapshot with limit 1. Direct custom-comparator witnesses preserve the
@@ -201,6 +202,24 @@ describe.each(indexTypes)(
           `a-one-nanosecond-later`,
           `d-minus-five`,
         ])
+      },
+    )
+
+    it.each([`add`, `build`] as const)(
+      `orders equal-instant source keys after reverse %s admission`,
+      (construction) => {
+        // The instant model ties these two rows; the direct IndexInterface
+        // contract orders keys inside a comparator group. Reverse admission
+        // distinguishes that law from insertion-order traversal.
+        const [plusFourteen, utc] = rowsFromFixtures()
+        const reversed = [utc!, plusFourteen!]
+        const index = new IndexType(1, new PropRef([`when`]))
+        if (construction === `add`) {
+          for (const row of reversed) index.add(row.id, row)
+        } else {
+          index.build(reversed.map((row): [string, Row] => [row.id, row]))
+        }
+        expect(index.takeFromStart(2)).toEqual([`b-plus-fourteen`, `c-utc`])
       },
     )
 

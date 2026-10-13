@@ -88,3 +88,21 @@ Date detector. The new direct and public oracle controls failed against that
 published implementation. The repair and its fresh committed-head verdict are
 recorded in [the Date order review](cross-realm-date-order.md). This finding
 does not restore a unique assertion to any of the five retired blocks.
+
+## Frozen-head hostile recheck and adjacent byte-key sensitivity
+
+At `210651d207eefe9bbc025c780f6259e470225c9e`, the hostile review again
+found no lost assertion among the five retired same-realm number/Date blocks.
+It reconstructed the ledger operands and the direct comparator and sort
+checkpoints. This verdict applies to the frozen commit, not to the later
+uncommitted repairs.
+
+Source inspection found a separate sensitivity gap in the comparison owner's
+native byte normalization law. Its changed-byte property reached the final
+byte, but could miss a wrong implementation that ignored an interior byte.
+The working-tree oracle now requires different normalized keys for
+`[1, 0, 2]` and `[1, 9, 2]` and runs an independently supplied changed-byte
+property at the direct `normalizeValue` return. No hostile mutant was run for
+this addition, so the fixed pair and property are sensitivity evidence, not
+an exact-commit kill. The [Temporal transfer](comparison-unit-retirement-round-6.md)
+and [alias owner](temporal-equality-alias.md) record their separate domains.

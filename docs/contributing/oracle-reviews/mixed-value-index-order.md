@@ -63,3 +63,27 @@ transitivity can still corrupt an ordered index. The direct index and
 comparison owners need further generated family-mix histories before a
 universal sorted-index claim. A fresh exact-commit hostile review and final
 package verification follow after commit.
+
+## Frozen-head retirement audit and public-order neighbor
+
+The hostile reviewer inspected the ledgers, both index implementations, and
+the receiving direct and public oracles at
+`210651d207eefe9bbc025c780f6259e470225c9e`. It found no lost assertion
+among the 18 retired BasicIndex/BTreeIndex blocks. The direct grammar's
+build and delete observations include string/number and callable/number
+histories. Array/object, Date/object, and PlainDate/object have incremental
+add/update observations here, without a build/delete claim. The
+[coverage map](../oracle-coverage.md) now states those boundaries explicitly.
+This was source and ledger inspection, not an exhaustive generated proof.
+
+An adjacent public Date/number history exposed a separate order defect.
+The unindexed ordered snapshot returned
+`[equal-number, number, date]`; after either index type was installed, the
+optimized snapshot returned `[date, equal-number, number]`. Two intended
+index-type assertions failed before the repair. The
+[custom-index selection owner](custom-index-order-selection.md) now compares
+the full public order and limit-one result before and after index installation
+and proves an index take ran. Retaining native Dates as order values while
+keeping their numeric exact keys made the 497-test focused campaign and
+12,345-test full DB campaign pass. This establishes scan/index agreement for
+that fixture, not a universal mixed-family order or arbitrary histories.

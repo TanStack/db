@@ -20,8 +20,9 @@ import { oraclePropertyOptions, oracleRuns } from '../../oracle-config.js'
  * `src/query/compiler/evaluators.ts`:
  *
  * - `NaN` and an invalid Date equal each other and nothing else.
- * - A valid Date equals its millisecond timestamp, and another Date with the
- *   same timestamp.
+ * - A native Date from either realm equals its millisecond timestamp, and
+ *   another Date with the same timestamp. A borrowed Date prototype does not
+ *   give an ordinary object native Date identity.
  * - Two Uint8Arrays (Buffers included) are equal when their native bytes are
  *   equal. Own `length` or `byteLength` properties cannot change that result.
  * - Temporal kinds with an intrinsic `.equals()` use that relation. This
@@ -41,7 +42,8 @@ import { oraclePropertyOptions, oracleRuns } from '../../oracle-config.js'
  * Domain: values and items come from a pool that contains the boundaries
  * of each rule: equal and unequal strings, a string that begins with the
  * internal normalization prefix, booleans, `0`, `-0`, `1`, `NaN`, `1n`, a
- * valid Date and its timestamp, an invalid Date, equal and unequal byte
+ * local and foreign valid Dates and their timestamps, local and foreign
+ * invalid Dates, borrowed Date prototypes, equal and unequal byte
  * arrays, a Buffer, native bytes from another realm with equal and unequal
  * content, genuine local and foreign bytes with own display-tag shadows, bytes
  * with own `length` or `byteLength` shadows, and a wide typed array with a
@@ -84,6 +86,13 @@ const otherPlainDateTime = Temporal.PlainDateTime.from(`2024-01-01T11:00`)
 const plainTime = Temporal.PlainTime.from(`10:00`)
 const samePlainTime = Temporal.PlainTime.from(`10:00`)
 const otherPlainTime = Temporal.PlainTime.from(`11:00`)
+const localDate = new Date(1000)
+const foreignDate = runInNewContext(`new Date(1000)`) as Date
+const laterForeignDate = runInNewContext(`new Date(1001)`) as Date
+const localInvalidDate = new Date(Number.NaN)
+const foreignInvalidDate = runInNewContext(`new Date(NaN)`) as Date
+const borrowedDate = Object.create(Date.prototype) as object
+const otherBorrowedDate = Object.create(Date.prototype) as object
 const shadowedTagBytes = new Uint8Array([1, 2])
 Object.defineProperty(shadowedTagBytes, Symbol.toStringTag, {
   value: `ordinary`,
@@ -205,10 +214,15 @@ const pool: ReadonlyArray<unknown> = [
   1,
   Number.NaN,
   1n,
+  localDate,
   new Date(1000),
-  new Date(1000),
+  foreignDate,
+  laterForeignDate,
   1000,
-  new Date(Number.NaN),
+  localInvalidDate,
+  foreignInvalidDate,
+  borrowedDate,
+  otherBorrowedDate,
   new Uint8Array([1, 2]),
   new Uint8Array([1, 2]),
   new Uint8Array([1, 3]),
@@ -282,6 +296,20 @@ const typedArrayLength = Object.getOwnPropertyDescriptor(
 )!.get!
 const typedArrayValues = Uint8Array.prototype.values
 
+// Date's native method reads the internal timestamp in either realm and
+// rejects an object that only borrows the prototype. The reference captures
+// that intrinsic directly; it does not import the production Date classifier.
+const nativeDateGetTime = Date.prototype.getTime
+
+function nativeDateTimestamp(value: unknown): number | undefined {
+  if (typeof value !== `object` || value === null) return undefined
+  try {
+    return Reflect.apply(nativeDateGetTime, value, [])
+  } catch {
+    return undefined
+  }
+}
+
 function isBytes(value: unknown): value is Uint8Array {
   return (
     ArrayBuffer.isView(value) &&
@@ -351,12 +379,12 @@ function temporalBrand(value: unknown): TemporalBrand | undefined {
 function isNotANumber(value: unknown): boolean {
   return (
     (typeof value === `number` && Number.isNaN(value)) ||
-    (value instanceof Date && Number.isNaN(value.getTime()))
+    Number.isNaN(nativeDateTimestamp(value))
   )
 }
 
 function asComparable(value: unknown): unknown {
-  return value instanceof Date ? value.getTime() : value
+  return nativeDateTimestamp(value) ?? value
 }
 
 function referenceEqual(left: unknown, right: unknown): boolean {
@@ -506,12 +534,15 @@ function describeCase(testCase: InCase): string {
     if (value === shadowedTextPlainDate) return `PlainDate with shadowed text`
     if (value === shadowedHourDuration) return `Duration with shadowed text`
     if (value === forgedHourDuration) return `forged Duration tag`
+    if (value === borrowedDate) return `borrowed Date prototype`
+    if (value === otherBorrowedDate) return `other borrowed Date prototype`
+    const dateTime = nativeDateTimestamp(value)
     return typeof value === `bigint`
       ? `${value}n`
       : Object.is(value, -0)
         ? `-0`
-        : value instanceof Date
-          ? `Date(${value.getTime()})`
+        : dateTime !== undefined
+          ? `Date(${dateTime})`
           : isBytes(value)
             ? `bytes[${[...value].join(`,`)}]`
             : value === shared
@@ -590,6 +621,26 @@ describe(`in evaluator`, () => {
     checkEqualityPaths(shadowedForeignBytes, shadowedTagBytes, true)
     checkEqualityPaths(unequalForeignBytes, new Uint8Array([1, 2]), false)
     checkEqualityPaths(foreignBytes, spoofedWideBytes, false)
+  })
+
+  it(`compares foreign native Dates by timestamp and excludes borrowed prototypes in every compiled equality path`, () => {
+    expect(foreignDate instanceof Date).toBe(false)
+    expect(foreignInvalidDate instanceof Date).toBe(false)
+    expect(borrowedDate instanceof Date).toBe(true)
+    expect(nativeDateTimestamp(foreignDate)).toBe(1000)
+    expect(Number.isNaN(nativeDateTimestamp(foreignInvalidDate))).toBe(true)
+    expect(nativeDateTimestamp(borrowedDate)).toBeUndefined()
+    checkEqualityPaths(foreignDate, localDate, true)
+    checkEqualityPaths(foreignDate, 1000, true)
+    checkEqualityPaths(laterForeignDate, localDate, false)
+    checkEqualityPaths(laterForeignDate, 1000, false)
+    checkEqualityPaths(foreignInvalidDate, localInvalidDate, true)
+    checkEqualityPaths(foreignInvalidDate, Number.NaN, true)
+    checkEqualityPaths(foreignInvalidDate, localDate, false)
+    checkEqualityPaths(borrowedDate, localDate, false)
+    checkEqualityPaths(borrowedDate, 1000, false)
+    checkEqualityPaths(borrowedDate, borrowedDate, true)
+    checkEqualityPaths(borrowedDate, otherBorrowedDate, false)
   })
 
   it(`ignores own byte-count shadows in every compiled equality path`, () => {

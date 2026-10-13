@@ -1077,10 +1077,16 @@ describe(`native Date order across JavaScript realms`, () => {
       `class D extends Date {}; new D(timestamp)`,
       { timestamp },
     ) as Date
+    const localInvalid = new LocalDate(Number.NaN)
     const foreignInvalid = runInNewContext(
       `class D extends Date {}; new D(Number.NaN)`,
     ) as Date
-    for (const value of [localSubclass, foreignSubclass, foreignInvalid]) {
+    for (const value of [
+      localSubclass,
+      foreignSubclass,
+      localInvalid,
+      foreignInvalid,
+    ]) {
       Object.defineProperty(value, Symbol.toStringTag, { value: `Other` })
     }
     // The supplied time and native slot establish the Date premise. The
@@ -1150,29 +1156,23 @@ describe(`native Date order across JavaScript realms`, () => {
     ).toThrowError()
     expect(reachedWrongOrder).toBe(true)
 
-    expect(normalizeValue(foreignInvalid)).toBeNaN()
-    expect(isUnorderable(foreignInvalid)).toBe(true)
-    expect(
-      ascComparator(foreignInvalid, Number.NaN, DEFAULT_COMPARE_OPTIONS),
-    ).toBe(0)
-    expect(
-      sign(
-        ascComparator(
-          foreignInvalid,
-          new Date(timestamp),
-          DEFAULT_COMPARE_OPTIONS,
+    for (const invalid of [localInvalid, foreignInvalid]) {
+      expect(normalizeValue(invalid)).toBeNaN()
+      expect(isUnorderable(invalid)).toBe(true)
+      expect(ascComparator(invalid, Number.NaN, DEFAULT_COMPARE_OPTIONS)).toBe(
+        0,
+      )
+      expect(
+        sign(
+          ascComparator(invalid, new Date(timestamp), DEFAULT_COMPARE_OPTIONS),
         ),
-      ),
-    ).toBe(1)
-    expect(
-      sign(
-        ascComparator(
-          new Date(timestamp),
-          foreignInvalid,
-          DEFAULT_COMPARE_OPTIONS,
+      ).toBe(1)
+      expect(
+        sign(
+          ascComparator(new Date(timestamp), invalid, DEFAULT_COMPARE_OPTIONS),
         ),
-      ),
-    ).toBe(-1)
+      ).toBe(-1)
+    }
 
     // Borrowing that prototype and display tag cannot forge native Date
     // slots. The intrinsic rejects this adjacent non-Date control.
@@ -1868,6 +1868,29 @@ describe(`Temporal default-order refinement`, () => {
       ].map(sign),
     ).toEqual([expected, expected])
   })
+})
+
+describe(`native binary key content`, () => {
+  it(`distinguishes a changed interior byte at the normalized-key return`, () => {
+    // Equal lengths and endpoints cannot conceal an interior byte change.
+    // Native byte content, not the production encoding, defines inequality.
+    const left = Uint8Array.of(1, 0, 2)
+    const right = Uint8Array.of(1, 9, 2)
+    expect(normalizeValue(left)).not.toBe(normalizeValue(right))
+  })
+
+  comparisonProperty([arbitraryChangedBytes])(
+    `a changed native byte changes the normalized key`,
+    (sample) => {
+      // Reuse the independently authored changed-byte history. This
+      // property has its own assertion site so a shrunk failure identifies
+      // key normalization rather than direct byte equality.
+      assertChangedBytes(
+        sample,
+        (left, right) => normalizeValue(left) === normalizeValue(right),
+      )
+    },
+  )
 })
 
 if (requestedProperty !== undefined) {

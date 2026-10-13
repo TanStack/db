@@ -37,3 +37,26 @@ local borrowed prototype, and one foreign native subclass. It does not prove
 arbitrary coercion methods, invalid Dates, later publication histories,
 other range operators, proxies, or provider reads. A fresh hostile review of
 the committed repair is pending.
+
+## Native timestamp law for subclass ranges
+
+The frozen-head review at `210651d207eefe9bbc025c780f6259e470225c9e`
+found a separate production defect. A genuine Date subclass can override
+`valueOf` so native relational operators place it away from its actual
+timestamp. The working-tree oracle uses a local and a foreign native subclass
+whose overrides reverse their apparent positions. An independent model calls
+the captured native `Date.prototype.getTime` and checks public scan results
+for `gt`, `gte`, `lt`, and `lte` against a Date bound. The old relational scan
+failed at this public key-set comparison. After the production repair, both
+BasicIndex and BTreeIndex preserve those sets in ordinary and
+`optimizedOnly` snapshots; lookup spies prove the indexed path is reached.
+Four mixed Date/number scan predicates check both operand positions without
+claiming mixed-domain index eligibility. The focused receiving run passed
+132 tests.
+
+This extends the range witness beyond the earlier borrowed-prototype `gt`
+and `lt` histories. It covers one ready in-memory Collection, fixed rows,
+four Date-bound operators, and both index types. Invalid Dates,
+arbitrary coercion methods, later publication histories, provider cursors,
+and generated subclass histories remain outside the evidence. A fresh
+committed-head hostile review is pending.

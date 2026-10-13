@@ -253,3 +253,25 @@ These witnesses cover native Uint8Array and Buffer content at the compiled
 equality and direct-key boundaries. They do not establish public indexed
 publication, detached buffers, proxies, or browser iframe behavior. A fresh
 hostile review of the committed repair is pending.
+
+## Genuine subclass counterexample after frozen-head review
+
+At frozen head `210651d207eefe9bbc025c780f6259e470225c9e`, a genuine
+`Temporal.ZonedDateTime` subclass inherited the native slot-checking
+`.equals()` relation but the production classifier treated it as an ordinary
+reference. The alias owner now constructs that subclass from independently
+supplied instant and zone facts, verifies native equality against a UTC peer,
+and requires its class in direct BasicIndex/BTreeIndex lookups and unindexed
+public `eq` reads. It also removes the subclass representative and checks the
+remaining class. An object that merely borrows the subclass prototype and a
+distinct borrowed copy must retain reference identity. Eight intended
+comparisons failed before the classifier repair; the focused receiving run
+passed 28 tests afterward. The repair recognizes an inherited Temporal
+prototype whose method checks native slots.
+
+This is a production defect adjacent to the retired comparison assertions,
+not a lost assertion from those blocks. The bounded claim covers this
+polyfill's genuine subclass with inherited methods. The custom-prototype
+fake described above, replaced subclass methods, mixed implementations, and
+provider paths remain open. The working-tree repair still needs a fresh
+committed-head hostile review.

@@ -116,3 +116,24 @@ independent bounded histories exercised both index types under both order
 rules, and a wrong-result probe confirmed that the optimized public snapshot
 uses the index result. Provider cursors, arbitrary callbacks, and live-query
 publication remain outside this verdict.
+
+## Frozen-head direct tie-order recheck
+
+The hostile review of `210651d207eefe9bbc025c780f6259e470225c9e`
+found a source-inspection sensitivity gap, not a demonstrated production
+defect. The direct oracle had allowed either source-key order for two
+equal-instant peers. It now admits those peers in reverse key order through
+both `add` and `build` and requires the direct `takeFromStart(2)` result to
+follow the index interface's key order in BasicIndex and BTreeIndex. The
+public limit-one tie remains permissive. This addition covers only the
+named equal-instant fixture and direct index checkpoint.
+
+The maintainer confirmed the custom comparator contract: when a callback
+distinguishes two `ZonedDateTime` rows that native `.equals()` groups
+together, ordered index operations follow the callback for each row. The
+existing oracle already checks that decision through add/build, exact
+lookup, range and cursor reads, removal, and update for UTC/Etc-UTC peers.
+This round retains those witnesses; it does not collapse their positions or
+reject that comparator/value combination. The working-tree 497-test focused
+campaign and 12,345-test DB campaign passed. A fresh exact-commit hostile
+review of these additions is still pending.

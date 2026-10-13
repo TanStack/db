@@ -13,7 +13,8 @@ import { withOracleCleanup } from './utils.js'
  * the fixed-offset +00:00 zone remains a different identity.
  *
  * The ZonedDateTime lane covers values from one polyfill copy and one instant,
- * including genuine instances with own display and intrinsic-getter shadows. A neighboring
+ * including a genuine subclass with inherited Temporal methods and instances
+ * with own display and intrinsic-getter shadows. A neighboring
  * PlainDate lane checks that native brand and equality survive those shadows
  * while forged tags retain ordinary object identity. Fixture-assigned classes,
  * independent of production normalization, predict exact key sets. Direct
@@ -33,7 +34,8 @@ import { withOracleCleanup } from './utils.js'
  * Indexed PlainMonthDay equality remains open. YearMonth and Duration store
  * several classes with identical default display and check indexed add,
  * build, removal, re-add, and public reads.
- * This oracle does not claim all IANA aliases, arbitrary spoofed prototypes,
+ * This oracle does not claim all IANA aliases, subclasses with replaced
+ * Temporal methods, arbitrary spoofed prototypes,
  * mixed Temporal implementations, joins, live-query publication, or provider
  * behavior.
  */
@@ -43,7 +45,10 @@ type Sample = {
   text: string
   identity: `utc` | `offset` | `later` | `calendar`
   ownShadow?: `tag` | `text` | `epoch` | `calendar`
+  subclass?: true
 }
+
+class ZonedDateTimeSubclass extends Temporal.ZonedDateTime {}
 
 const samples: ReadonlyArray<Sample> = [
   {
@@ -95,11 +100,24 @@ const samples: ReadonlyArray<Sample> = [
     identity: `utc`,
     ownShadow: `calendar`,
   },
+  {
+    id: `utc-subclass`,
+    text: `2024-01-15T09:00:00+00:00[UTC]`,
+    identity: `utc`,
+    subclass: true,
+  },
 ]
 
 function rows(): Array<Row> {
-  return samples.map(({ id, text, ownShadow }) => {
-    const when = Temporal.ZonedDateTime.from(text)
+  return samples.map(({ id, text, ownShadow, subclass }) => {
+    const base = Temporal.ZonedDateTime.from(text)
+    const when = subclass
+      ? new ZonedDateTimeSubclass(
+          base.epochNanoseconds,
+          base.timeZoneId,
+          base.calendarId,
+        )
+      : base
     if (ownShadow === `tag`) {
       Object.defineProperty(when, Symbol.toStringTag, { value: `ordinary` })
     } else if (ownShadow === `text`) {
@@ -125,6 +143,10 @@ function expectedKeys(identity: Sample[`identity`]): Set<string> {
 
 const aliasProbe = Temporal.ZonedDateTime.from(
   `2024-01-15T09:00:00+00:00[Etc/UTC]`,
+)
+const subclassProbe = new ZonedDateTimeSubclass(
+  aliasProbe.epochNanoseconds,
+  `UTC`,
 )
 const offsetProbe = Temporal.ZonedDateTime.from(
   `2024-01-15T09:00:00+00:00[+00:00]`,
@@ -265,6 +287,7 @@ it(`distinguishes equivalent aliases and own property shadows from a fixed-offse
     shadowedText,
     shadowedEpoch,
     shadowedCalendar,
+    subclass,
   ] = rows()
   // This checks the fixture against the external Temporal relation. Expected
   // index and query sets still come from the assigned identity classes.
@@ -296,6 +319,20 @@ it(`distinguishes equivalent aliases and own property shadows from a fixed-offse
       alias!.when,
     ),
   ).toBe(true)
+  // A subclass inherits Temporal's slot-checking method. The fixture assigns
+  // it the UTC class independently of the production classifier.
+  expect(Object.getPrototypeOf(subclass!.when)).toBe(
+    ZonedDateTimeSubclass.prototype,
+  )
+  expect(
+    Temporal.ZonedDateTime.prototype.equals.call(subclass!.when, alias!.when),
+  ).toBe(true)
+  expect(
+    Temporal.ZonedDateTime.prototype.equals.call(subclass!.when, fixed!.when),
+  ).toBe(false)
+  expect(
+    Temporal.ZonedDateTime.prototype.equals.call(subclassProbe, alias!.when),
+  ).toBe(true)
   expect(utc!.when.toString()).not.toBe(alias!.when.toString())
   expect(expectedKeys(`utc`)).toEqual(
     new Set([
@@ -305,6 +342,7 @@ it(`distinguishes equivalent aliases and own property shadows from a fixed-offse
       `utc-shadowed-text`,
       `utc-shadowed-epoch`,
       `utc-shadowed-calendar`,
+      `utc-subclass`,
     ]),
   )
   expect(expectedKeys(`offset`)).toEqual(new Set([`fixed-offset`]))
@@ -312,7 +350,7 @@ it(`distinguishes equivalent aliases and own property shadows from a fixed-offse
 
 describe.each(indexTypes)(`%s Temporal alias equality`, (_name, IndexType) => {
   it.each([`add`, `build`] as const)(
-    `finds the exact equality class after %s and one removal`,
+    `finds the exact equality class after %s and representative removals`,
     (construction) => {
       const source = rows()
       const index = new IndexType(1, new PropRef([`when`]))
@@ -330,9 +368,12 @@ describe.each(indexTypes)(`%s Temporal alias equality`, (_name, IndexType) => {
       // The query value is a fresh instance. A display-string key would omit
       // UTC; an instant-only key would also include fixed-offset.
       expect(index.equalityLookup(aliasProbe)).toEqual(expectedKeys(`utc`))
+      expect(index.equalityLookup(subclassProbe)).toEqual(expectedKeys(`utc`))
       expect(index.lookup(`eq`, aliasProbe)).toEqual(expectedKeys(`utc`))
+      expect(index.lookup(`eq`, subclassProbe)).toEqual(expectedKeys(`utc`))
       expect(index.inArrayLookup([aliasProbe])).toEqual(expectedKeys(`utc`))
       expect(index.equalityLookup(offsetProbe)).toEqual(expectedKeys(`offset`))
+
       // The neighboring instant and calendar classes ensure that a repair
       // does not collapse every Temporal value sharing a named zone.
       expect(index.equalityLookup(source[3]!.when)).toEqual(
@@ -344,6 +385,20 @@ describe.each(indexTypes)(`%s Temporal alias equality`, (_name, IndexType) => {
 
       index.remove(source[0]!.id, source[0]!)
       expect(index.equalityLookup(aliasProbe)).toEqual(
+        new Set([
+          `utc-alias`,
+          `utc-shadowed-tag`,
+          `utc-shadowed-text`,
+          `utc-shadowed-epoch`,
+          `utc-shadowed-calendar`,
+          `utc-subclass`,
+        ]),
+      )
+      // Removing the subclass itself must retract one member of the class.
+      // Its native-equal probe still finds every remaining UTC alias.
+      const subclassRow = source.find((row) => row.id === `utc-subclass`)!
+      index.remove(subclassRow.id, subclassRow)
+      expect(index.equalityLookup(subclassProbe)).toEqual(
         new Set([
           `utc-alias`,
           `utc-shadowed-tag`,
@@ -374,16 +429,17 @@ describe.each(indexTypes)(`%s Temporal alias equality`, (_name, IndexType) => {
           },
         },
       })
-      const predicate = new Func(`eq`, [
-        new PropRef([`when`]),
-        new Value(aliasProbe),
-      ])
-      const readKeys = () =>
-        new Set(
+      const readKeys = (probe: Temporal.ZonedDateTime) => {
+        const predicate = new Func(`eq`, [
+          new PropRef([`when`]),
+          new Value(probe),
+        ])
+        return new Set(
           collection
             .currentStateAsChanges({ where: predicate, optimizedOnly })
             ?.map(({ value }) => value.id),
         )
+      }
 
       await withOracleCleanup(async () => {
         await collection.stateWhenReady()
@@ -396,9 +452,12 @@ describe.each(indexTypes)(`%s Temporal alias equality`, (_name, IndexType) => {
               `lookup`,
             )
           : undefined
-        const result = readKeys()
-        if (lookup) expect(lookup).toHaveBeenCalled()
-        expect(result).toEqual(expectedKeys(`utc`))
+        for (const probe of [aliasProbe, subclassProbe]) {
+          lookup?.mockClear()
+          const result = readKeys(probe)
+          if (lookup) expect(lookup).toHaveBeenCalled()
+          expect(result).toEqual(expectedKeys(`utc`))
+        }
       }, [() => collection.cleanup()])
     },
   )
@@ -587,15 +646,27 @@ it(`keeps a forged tag and shadowed zone outside genuine UTC equality`, async ()
   const freshOffsetProbe = Temporal.ZonedDateTime.from(
     `2024-01-15T09:00:00+00:00[+00:00]`,
   )
+  const borrowedSubclass = Object.assign(
+    Object.create(ZonedDateTimeSubclass.prototype) as object,
+    { toString: () => `unrelated borrowed object` },
+  )
+  const borrowedSubclassCopy = Object.assign(
+    Object.create(ZonedDateTimeSubclass.prototype) as object,
+    { toString: () => `unrelated borrowed object` },
+  )
   Object.defineProperty(shadowed, `timeZoneId`, { value: `UTC` })
   expect(aliasProbe.equals(shadowed)).toBe(false)
   expect(shadowed).not.toBe(freshOffsetProbe)
   expect(shadowed.equals(freshOffsetProbe)).toBe(true)
   expect(() => Reflect.apply(aliasProbe.equals, aliasProbe, [fake])).toThrow()
+  expect(() =>
+    Temporal.ZonedDateTime.prototype.equals.call(borrowedSubclass, aliasProbe),
+  ).toThrow()
 
   const source = [
     { id: `forged`, when: fake },
     { id: `shadowed`, when: shadowed },
+    { id: `borrowed-subclass`, when: borrowedSubclass },
   ]
   const fakeCopy = { ...fake }
   for (const [, IndexType] of indexTypes) {
@@ -610,6 +681,8 @@ it(`keeps a forged tag and shadowed zone outside genuine UTC equality`, async ()
       expect(index.equalityLookup(row.when)).toEqual(new Set([row.id]))
       if (row.id === `forged`) {
         expect(index.equalityLookup(fakeCopy)).toEqual(new Set())
+      } else if (row.id === `borrowed-subclass`) {
+        expect(index.equalityLookup(borrowedSubclassCopy)).toEqual(new Set())
       } else {
         // The own zone accessor must not turn a genuine fixed-offset value
         // into reference-only equality with its native-equal fresh instance.
@@ -651,6 +724,8 @@ it(`keeps a forged tag and shadowed zone outside genuine UTC equality`, async ()
     expect(keysFor(freshOffsetProbe)).toEqual(new Set([`shadowed`]))
     expect(keysFor(fake)).toEqual(new Set([`forged`]))
     expect(keysFor(fakeCopy)).toEqual(new Set())
+    expect(keysFor(borrowedSubclass)).toEqual(new Set([`borrowed-subclass`]))
+    expect(keysFor(borrowedSubclassCopy)).toEqual(new Set())
   }, [() => collection.cleanup()])
 })
 

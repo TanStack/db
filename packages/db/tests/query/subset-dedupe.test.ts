@@ -411,6 +411,14 @@ describe(`DeduplicatedLoadSubset`, () => {
         const foreign: unknown = runInNewContext(
           type === `Date` ? `new Date(2)` : `new Uint8Array([1, 2])`,
         )
+        expect(foreign).not.toBe(local)
+        if (type === `Uint8Array`) {
+          // A genuine foreign view has the same native bytes despite having
+          // a different reference and failing this realm's instanceof check.
+          expect(foreign instanceof Uint8Array).toBe(false)
+          expect(ArrayBuffer.isView(foreign)).toBe(true)
+          expect(Array.from(foreign as Uint8Array)).toEqual([1, 2])
+        }
         const value = realm === `local` ? local : foreign
         for (const where of [
           eq(ref(`value`), val(value)),
@@ -423,13 +431,7 @@ describe(`DeduplicatedLoadSubset`, () => {
           const matches = compileSingleRowExpression(request.where!)
           expect(
             [foreign, local].map((item) => matches({ value: item })),
-          ).toEqual(
-            type === `Date`
-              ? [true, true]
-              : realm === `foreign`
-                ? [true, false]
-                : [false, true],
-          )
+          ).toEqual([true, true])
         }
       })
     },

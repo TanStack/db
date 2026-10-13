@@ -117,3 +117,18 @@ given a spoofed Temporal prototype. This is outside the declared
 custom-prototype domain and is not evidence of closure for that domain. The
 comparison owner needs a separate brand and mixed-value witness before
 claiming it. Fresh review of the final committed head remains pending.
+
+## Frozen-head hostile recheck
+
+At `210651d207eefe9bbc025c780f6259e470225c9e`, a hostile ledger/source
+review found no lost assertion in the two retired PlainDate and ZonedDateTime
+comparison blocks. Their direct helper checkpoints and supplied operand pairs
+remain covered. The review does not extend that verdict to the subsequent
+working-tree changes.
+
+A distinct counterexample involved a genuine `ZonedDateTime` subclass whose
+inherited native `.equals()` accepts an ordinary UTC peer. The old classifier
+treated it as an ordinary object. The [Temporal alias owner](temporal-equality-alias.md)
+now supplies the subclass equality and borrowed-prototype controls and records
+the RED/GREEN production repair. This issue is outside the two retired direct
+comparison assertions. The custom-prototype question above remains open.

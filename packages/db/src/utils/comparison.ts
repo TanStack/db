@@ -326,26 +326,40 @@ const durationFields = [
   `nanoseconds`,
 ] as const
 
-/** Read a Temporal brand and display through its prototype, not own shadows. */
+/** Read a Temporal brand and display through its slot-checking prototype. */
 type BrandedTemporal = { prototype: object; kind: string; text: string }
 
 function brandedTemporal(value: unknown): BrandedTemporal | undefined {
   if (value === null || typeof value !== `object`) return undefined
-  const prototype = Object.getPrototypeOf(value)
+  let prototype: object | null = Object.getPrototypeOf(value)
   if (!prototype || !isTemporal(prototype)) return undefined
-  const toString = Object.getOwnPropertyDescriptor(prototype, `toString`)?.value
-  if (typeof toString !== `function`) return undefined
-  try {
-    // The native/polyfill method checks internal slots. An own forged tag or
-    // borrowed Temporal prototype cannot claim an ordered position. Arbitrary
-    // custom prototypes that spoof these methods remain outside this guard.
-    const text = Reflect.apply(toString, value, [])
-    return typeof text === `string`
-      ? { prototype, kind: prototype[Symbol.toStringTag], text }
-      : undefined
-  } catch {
-    return undefined
+  while (prototype) {
+    const kind = Object.getOwnPropertyDescriptor(
+      prototype,
+      Symbol.toStringTag,
+    )?.value
+    const toString = Object.getOwnPropertyDescriptor(
+      prototype,
+      `toString`,
+    )?.value
+    if (
+      typeof kind === `string` &&
+      isTemporal(prototype) &&
+      typeof toString === `function`
+    ) {
+      try {
+        // A genuine subclass inherits this method from the Temporal prototype.
+        // Its receiver check rejects forged tags and borrowed prototypes.
+        // A custom prototype supplying both members remains outside this check.
+        const text = Reflect.apply(toString, value, [])
+        return typeof text === `string` ? { prototype, kind, text } : undefined
+      } catch {
+        return undefined
+      }
+    }
+    prototype = Object.getPrototypeOf(prototype)
   }
+  return undefined
 }
 
 /**
@@ -484,9 +498,11 @@ export function normalizeForBTree(value: any): any {
   return normalizeValue(value)
 }
 
-/** Keep Temporal's native order separate from its exact index lookup key. */
+/** Keep native Date and Temporal order separate from exact lookup keys. */
 export function indexOrderValue(value: any, exactKey: any): any {
-  return brandedTemporal(value) ? value : exactKey
+  return dateTimestamp(value) !== undefined || brandedTemporal(value)
+    ? value
+    : exactKey
 }
 
 /** Supply custom comparators the Temporal display key used before raw ordering. */
@@ -499,7 +515,9 @@ export function indexCustomComparatorValue(value: unknown): unknown {
 
 /** Recover the exact lookup key from a stored ordered value. */
 export function indexExactKey(value: any): any {
-  return brandedTemporal(value) ? normalizeValue(value) : value
+  return dateTimestamp(value) !== undefined || brandedTemporal(value)
+    ? normalizeValue(value)
+    : value
 }
 
 /**
@@ -573,8 +591,9 @@ function compareBrandedTemporalValues(
  *
  * Temporal types intentionally throw from `valueOf` to prevent silent
  * miscomparison via the native relational operators — delegate to
- * `compareTemporalValues` for them. For everything else (numbers, strings,
- * Dates via `valueOf`, etc.) the native operators do the right thing.
+ * `compareTemporalValues` for them. Native Dates compare by their intrinsic
+ * timestamps, including against numbers and when a subclass overrides
+ * `valueOf`. Other values retain the native relational comparison.
  *
  * Callers must handle null/undefined themselves — this helper assumes both
  * arguments are non-null.
@@ -585,7 +604,13 @@ export function compareValues(a: unknown, b: unknown): number {
   if (aTemporal && bTemporal) {
     return compareBrandedTemporalValues(a, b, aTemporal, bTemporal)
   }
-  return (a as any) < (b as any) ? -1 : (a as any) > (b as any) ? 1 : 0
+  const comparableA = dateTimestamp(a) ?? a
+  const comparableB = dateTimestamp(b) ?? b
+  return (comparableA as any) < (comparableB as any)
+    ? -1
+    : (comparableA as any) > (comparableB as any)
+      ? 1
+      : 0
 }
 
 /**

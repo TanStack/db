@@ -599,7 +599,7 @@ const pinnedChangeHistories: ReadonlyArray<History> = [
 // Fixed subclass rows and literals exercise inherited getTime on both sides of
 // eq; the forged row controls against trusting only the borrowed prototype.
 // Number literals test the Date/number and invalid-Date/NaN equality classes.
-// A later sync transaction moves three rows between those classes.
+// A later sync transaction moves four rows between those classes.
 const taggedDateRows: ReadonlyArray<TaggedDateRow> = [
   { id: `local-one`, tag: { kind: `date`, realm: `local`, timestamp: 1 } },
   { id: `foreign-one`, tag: { kind: `date`, realm: `foreign`, timestamp: 1 } },
@@ -1479,6 +1479,7 @@ describe(`WHERE predicate publication oracle`, () => {
       let collectionCleanup: (() => unknown) | undefined
       let notDateCleanup: (() => unknown) | undefined
       let sameObjectCleanup: (() => unknown) | undefined
+      let invalidDateCleanup: (() => unknown) | undefined
       await withOracleCleanup(async () => {
         const collection = createCollection(
           mockSyncCollectionOptions<{ id: string; v: object }>({
@@ -1499,15 +1500,25 @@ describe(`WHERE predicate publication oracle`, () => {
           q.from({ row: collection }).where(({ row }) => eq(row.v, forged)),
         )
         sameObjectCleanup = () => sameObject.cleanup()
+        const invalidDate = createLiveQueryCollection((q) =>
+          q
+            .from({ row: collection })
+            .where(({ row }) => eq(row.v, new Date(Number.NaN))),
+        )
+        invalidDateCleanup = () => invalidDate.cleanup()
         await notDate.preload()
         // A distinct Date is unequal to this object. The same object remains
-        // equal by identity at the public query publication checkpoint.
+        // equal by identity at the public query publication checkpoint. It
+        // also cannot join the invalid-Date/NaN equality class.
         expect([...notDate.keys()]).toEqual([`forged`])
         await sameObject.preload()
         expect([...sameObject.keys()]).toEqual([`forged`])
+        await invalidDate.preload()
+        expect([...invalidDate.keys()]).toEqual([])
       }, [
         () => notDateCleanup?.(),
         () => sameObjectCleanup?.(),
+        () => invalidDateCleanup?.(),
         () => collectionCleanup?.(),
       ])
     })

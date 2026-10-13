@@ -147,3 +147,29 @@ an on-demand source*. The eight-case oracle proves the public result and the
 provider's cached-row interaction. It does not measure ordinary-index use or
 an eager source path. The architecture's index work law needs a separate
 index-use witness before this owner claims that property.
+
+## Frozen-head review and mixed Date/number order
+
+Review of `210651d207eefe9bbc025c780f6259e470225c9e` found three
+source-inspection gaps in the ordered-selection oracle. Correct public rows
+alone did not prove the later ordinary index supplied the ordered and range
+reads. Inclusive value-left `gte`/`lte` boundaries were absent. Some
+Collection construction still preceded cleanup protection. The working-tree
+oracle now spies on the ordinary index's take, lookup, and range methods;
+checks lower, upper, and paired inclusive value-left predicates against
+independent row filters; and registers each Collection inside protected
+construction. These gaps did not demonstrate an additional production bug.
+
+An adjacent public witness did expose a production order mismatch for one
+Date/number fixture. Before the repair, the unindexed ordered snapshot was
+`[equal-number, number, date]`, while BasicIndex and BTreeIndex optimized
+snapshots returned `[date, equal-number, number]`. The two new index-type
+cases failed at that public full-order comparison. They now compare both
+full order and the first-row window before and after index installation,
+check the Date/timestamp exact-equality class, and spy on the optimized
+index take. The repair retains raw native Dates as index order values while
+preserving their normalized exact lookup key. The focused index campaign
+passed 497 tests, and the full `@tanstack/db` run passed 12,345 tests in 281
+files, with no reported type errors. These are working-tree runs, not a
+committed-head review. The witness requires scan/index agreement for this
+fixture; it does not define a universal order between value families.

@@ -498,11 +498,13 @@ live-query publication require separate witnesses.
 The [Temporal alias equality oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/temporal-equality-alias-oracle.test.ts)
 and its [review record](oracle-reviews/temporal-equality-alias.md) own the
 bounded `ZonedDateTime.equals()` partition for UTC/Etc/UTC aliases, a distinct
-fixed-offset zone, adjacent nanoseconds, and a different calendar. Direct
-BasicIndex/BTreeIndex add, build, and removal checks compare independent
-fixture-assigned classes. Unindexed and optimized-only indexed Collection
-snapshots check public `eq`; the `in` evaluator oracle checks constant and
-row-supplied alias lists. A plain object with a forged Temporal tag and a
+fixed-offset zone, adjacent nanoseconds, and a different calendar. One native
+ZonedDateTime subclass with inherited Temporal methods belongs to the UTC
+class, while an ordinary object borrowing its prototype retains reference
+identity. Direct BasicIndex/BTreeIndex add, build, and removal checks compare
+independent fixture-assigned classes. Unindexed and optimized-only indexed
+Collection snapshots check public `eq`; the `in` evaluator oracle checks
+constant and row-supplied alias lists. A plain object with a forged Temporal tag and a
 genuine value with a shadowed zone accessor must stay outside the UTC class.
 Forged and borrowed ordinary objects also retain reference self-identity in
 direct lookup and unindexed public `eq`; distinct structural copies do not
@@ -524,6 +526,10 @@ equal and unequal content, including an own tag shadow, also reach compiled
 `eq`, constant `in`, and row-supplied `in` in both operand directions; the
 original classifier failed equal foreign/local byte pairs. The `in` property has a guarded
 direct replay selector that runs only its random/replay campaign.
+Native local and `node:vm` Dates, including invalid Dates and timestamp
+numbers, reach those three compiled equality paths in both operand directions.
+Borrowed Date prototypes remain ordinary reference values. The native-Date
+reference model uses a captured Date intrinsic rather than local `instanceof`.
 Own `length` and `byteLength` shadows, including a foreign byte view, and a
 shadowed iterator cannot redefine native byte content. The compiled owner
 checks equal and unequal pairs in both operand directions through `eq` and
@@ -567,6 +573,10 @@ the compatible index; an eager range subscriber creates one when needed for
 field-left and value-left single or paired relational predicates. A
 custom-only index cannot serve an optimized range read. The fixed ready-state
 fixture covers BasicIndex and BTreeIndex, one numeric field, and limit one.
+Positive spies observe the later ordinary index's ordered take and numeric
+lookup/range calls. Inclusive value-left boundaries are fixed controls.
+Another fixed ready-state fixture compares unindexed and optimized indexed
+Date/number order, both full and limit one, with an index-take reach check.
 Mutation histories, arbitrary callbacks, and provider publication remain
 outside this direct snapshot owner. The separate
 [custom-index window selection oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/custom-index-window-selection-oracle.test.ts)
@@ -589,7 +599,7 @@ For local and `node:vm` Dates with timestamps 1 and 2 or invalid timestamps,
 including tagged foreign Dates and fixed local/foreign subclasses with an own
 display tag, plus number 1, NaN, and a foreign borrowed-prototype impostor, it
 compares public live-query keys, filtered subscriber keys, and direct snapshot
-keys after preload and a three-row sync transaction.
+keys after preload and a four-row sync transaction.
 Auto-indexing is off in both modes; one mode adds BasicIndex explicitly and
 also checks its equality lookup and an optimized-only public snapshot. This
 proves a public indexed snapshot result but does not prove that the live-query
@@ -598,7 +608,8 @@ Date prototype swaps or method replacement, public range predicates, and
 generated subclass histories need separate witnesses.
 A focused unindexed public query also keeps one local
 `Object.create(DateSubclass.prototype)` impostor outside Date equality while
-retaining its same-object match. Indexed publication for that local impostor
+retaining its same-object match. It also excludes the impostor from the
+invalid-Date/NaN equality class. Indexed publication for that local impostor
 remains open.
 
 The [borrowed-Date range review](oracle-reviews/borrowed-date-indexed-range.md)
@@ -607,21 +618,30 @@ Fixed `gt` and `lt` histories compare public snapshots before and after
 BasicIndex or BTreeIndex is installed. An ordinary object borrowing a local
 Date subclass prototype must take the scan path whether it is a source value
 or the predicate bound. A genuine foreign Date subclass is a positive indexed
-range control. Arbitrary coercion methods, invalid Dates, later publication,
-other range operators, and proxies remain open there.
+range control. A later fixed history gives local and foreign native Date
+subclasses misleading `valueOf` results. Public scan and indexed `gt`, `gte`,
+`lt`, and `lte` snapshots use their intrinsic timestamps, with an
+optimized-only index-path check. Date/number scan predicates run in both
+operand orders; mixed-domain index eligibility is not claimed. Other coercion
+methods, invalid Dates, later publication, and proxies remain open there.
 
 The [mixed-value index order review](oracle-reviews/mixed-value-index-order.md)
 links the direct index and public WHERE owners. The direct owner checks
 BasicIndex and BTreeIndex key conservation, exact membership, and within-kind
-order across build, incremental admission, delete, and update for fixed
-string/number, array/object, Date/object, PlainDate/object, and
-callable/number histories. The WHERE owner pins a generated string/number
-delete/update counterexample and compares public key sets after each commit.
+order through build, incremental admission, delete, and update for fixed
+string/number and callable/number histories. Array/object, Date/object, and
+PlainDate/object histories check incremental admission and updates; they do
+not check build or delete for those families. The WHERE owner pins a generated
+string/number delete/update counterexample and compares public key sets after
+each commit.
 The original default comparator failed these histories because cross-family
 ties and runtime-ID order conflicted with within-family order. Cross-family
-relative positions remain unspecified. Longer mixed histories, proxies,
-mixed Temporal kinds, and non-transitive user comparators need separate
-witnesses before a universal sorted-index claim.
+relative positions in these direct witnesses remain unspecified. A separate
+public ordered-snapshot witness in the custom index selection owner checks
+that adding either index preserves the scan's full and first-row order for
+one Date/number fixture. It does not define a universal cross-family order.
+Longer mixed histories, proxies, mixed Temporal kinds, and non-transitive user
+comparators need separate witnesses before a universal sorted-index claim.
 
 The direct [index refinement oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/index-update-oracle.property.test.ts)
 also owns exact nullish membership and direct `IN` set selection for BasicIndex

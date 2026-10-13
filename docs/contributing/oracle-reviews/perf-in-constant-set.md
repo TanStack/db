@@ -106,3 +106,23 @@ times with no source index:
 
 Median write times did not change beyond noise. Two of the three comparisons
 were 1.00× and 0.98×, and a same-code comparison was 0.96×.
+
+## Frozen-head reference-model correction
+
+The hostile review of `210651d207eefe9bbc025c780f6259e470225c9e`
+found a false-green risk in `referenceEqual`: realm-local `instanceof Date`
+could classify a native foreign Date as an ordinary reference even when the
+compiled evaluator correctly compared its timestamp. The working-tree model
+now reads a captured native `Date.prototype.getTime`, uses valid and invalid
+foreign Dates, and rejects a local object that only borrows a Date subclass
+prototype. Fixed witnesses check compiled `eq`, constant-list `in`, and
+row-supplied `in` in both operand directions. This was a reference-model gap,
+not an observed production defect. The focused receiving run passed 72 tests.
+
+The transport controls for equal native Uint8Arrays from different realms
+now expect `[true, true]` for the compiled equality paths; request-identity
+assertions remain in place. This corrects old test expectations rather than
+altering the native byte-content law. The open null-containing-list authority
+question recorded by the [Temporal alias review](temporal-equality-alias.md)
+is unchanged. The working-tree changes still need a fresh committed-head
+hostile review.

@@ -24,7 +24,7 @@ compares public live-query Collection keys, filtered source subscriber keys,
 and direct Collection snapshot keys after preload. The indexed mode also
 compares `BasicIndex.lookup('eq')` and a public snapshot with
 `optimizedOnly: true`; that snapshot cannot silently use the scan fallback.
-One sync transaction moves three source rows across equality classes, and the
+One sync transaction moves four source rows across equality classes, and the
 same checks run after commit. The test does not prove that the public live
 query planner selected the index. The source and live-query Collections and
 subscription are released through the owner's cleanup helper.
@@ -42,11 +42,11 @@ intrinsic. This is a product result mismatch at a public checkpoint.
 
 With the comparison utility repair, the complete WHERE publication oracle
 passed 18 tests with no type errors. The DB oracle suite passed 5,006 tests
-across 73 files with no type errors. The scope is native local and `node:vm`
-Dates, finite timestamps 1 and 2, invalid Dates and NaN, one three-row sync
-transaction, and the named observations. Other realm hosts, proxies,
-subclasses, spoofed tags, arbitrary timestamp histories, and planner proof of
-live-query index selection remain outside this witness.
+across 73 files with no type errors. At that first repair, the scope was native
+local and `node:vm` Dates, finite timestamps 1 and 2, invalid Dates and NaN,
+one three-row sync transaction, and the named observations. Other realm hosts,
+proxies, subclasses, spoofed tags, arbitrary timestamp histories, and
+planner proof of live-query index selection remain outside this witness.
 
 The full DB suite initially reported two failures in the existing
 `subset-dedupe.test.ts` Date transport test. It expected local `Date(2)` and
@@ -149,3 +149,20 @@ preload. It failed at the public key set on the reviewed commit and passed
 after the guarded Date-classifier repair. The matrix still preserves the
 foreign borrowed-prototype control. This addition covers one unindexed row;
 indexed publication for the local impostor and other host realms remain open.
+
+## Invalid-Date exclusion at the public WHERE cut
+
+The hostile review of frozen head
+`210651d207eefe9bbc025c780f6259e470225c9e` found one remaining
+source-inspection gap in the local borrowed-prototype control. The existing
+unindexed `not(eq(v, Date(1)))` and same-object `eq` checks could pass if
+the borrowed object also joined the invalid-Date/NaN equality class. The
+working-tree witness now preloads a public `eq(row.v, new Date(NaN))` query
+and requires an empty key set for that same borrowed row. This added cut
+did not demonstrate a new production failure. The coverage map now states
+the bounded matrix's four post-commit updated rows accurately.
+
+The witness establishes this single local borrowed object at an unindexed
+public checkpoint. It does not cover indexed publication for that object,
+arbitrary prototype chains, or other host realms. A committed-head hostile
+review of the working-tree addition remains pending.
