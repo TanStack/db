@@ -5,12 +5,23 @@ import { Index } from '../indexes.js'
 import type { DifferenceStreamReader } from '../graph.js'
 import type { IStreamBuilder, KeyValue } from '../types.js'
 
+/** The key identity of a Map: SameValueZero, so NaN equals NaN. */
+function sameOutput(left: unknown, right: unknown): boolean {
+  return left === right || (left !== left && right !== right)
+}
+
+/** The value a Map stores as a key: -0 becomes 0. */
+function asMapKey<T>(value: T): T {
+  return (value === 0 ? 0 : value) as T
+}
+
 /**
  * Base operator for reduction operations (version-free)
  */
 export class ReduceOperator<K, V1, V2> extends UnaryOperator<[K, V1], [K, V2]> {
+  // Reduce never reads presence, so its indexes skip that bookkeeping.
   #index: Index<K, V1>
-  #indexOut = new Index<K, V2>()
+  #indexOut = new Index<K, V2>({ trackPresence: false })
   #f: (values: Array<[V1, number]>) => Array<[V2, number]>
 
   constructor(
@@ -21,7 +32,7 @@ export class ReduceOperator<K, V1, V2> extends UnaryOperator<[K, V1], [K, V2]> {
     options?: ReduceOptions,
   ) {
     super(id, inputA, output)
-    this.#index = new Index<K, V1>(options)
+    this.#index = new Index<K, V1>({ ...options, trackPresence: false })
     this.#f = f
   }
 
@@ -42,6 +53,36 @@ export class ReduceOperator<K, V1, V2> extends UnaryOperator<[K, V1], [K, V2]> {
       const curr = this.#index.get(key)
       const currOut = this.#indexOut.get(key)
       const out = this.#f(curr)
+
+      // Most keys have at most one output before and after. Compare the two
+      // directly, by the SameValueZero identity the maps below use.
+      if (out.length <= 1 && currOut.length <= 1) {
+        // Earlier outputs were stored as Map keys, so only the new one needs it.
+        const before = currOut[0]
+        const after = out[0]
+        const value = after === undefined ? undefined : asMapKey(after[0])
+        if (
+          before !== undefined &&
+          after !== undefined &&
+          sameOutput(before[0], value)
+        ) {
+          const delta = after[1] - before[1]
+          if (delta !== 0) {
+            result.push([[key, before[0]], delta])
+            this.#indexOut.addValue(key, [before[0], delta])
+          }
+          continue
+        }
+        if (before !== undefined) {
+          result.push([[key, before[0]], -before[1]])
+          this.#indexOut.addValue(key, [before[0], -before[1]])
+        }
+        if (after !== undefined && after[1] !== 0) {
+          result.push([[key, value as V2], after[1]])
+          this.#indexOut.addValue(key, [value as V2, after[1]])
+        }
+        continue
+      }
 
       // Create maps for current and previous outputs using values directly as keys
       const newOutputMap = new Map<V2, number>()

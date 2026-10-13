@@ -39,8 +39,9 @@
  * `addValue`.
  *
  * Refinement check: after each addition, `get` and `has` for both keys equal
- * the model. Under `prefixIdentity` a merged value keeps one of its
- * instances, so `get` is compared through the same prefix identity.
+ * the model, and `get` returns what `getIterator` yields, in its order. Under
+ * `prefixIdentity` a merged value keeps one of its instances, so `get` is
+ * compared through the same prefix identity.
  *
  * Calibration: comparing prefixes with `===` kept a cancelled `NaN`-prefixed
  * value, or threw `Mismatching prefixes`, and fails the pinned histories and
@@ -217,6 +218,10 @@ function expectRefinement(
         model.get(key) ?? new Map(),
       )
       expect(index.has(key), `${checkpoint} has`).toBe(model.has(key))
+      // get and getIterator walk the storage separately; they must agree.
+      expect(index.get(key), `${checkpoint} get matches getIterator`).toEqual([
+        ...index.getIterator(key),
+      ])
     }
   }
 }

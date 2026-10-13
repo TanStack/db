@@ -11,6 +11,25 @@ import {
 
 describe(`Operators`, () => {
   describe(`Reduce operation`, () => {
+    test(`emits nothing when a key keeps the output NaN`, () => {
+      // An output map treats NaN as one key, so an unchanged NaN output is no
+      // change, however the reduction finds it.
+      const graph = new D2()
+      const input = graph.newInput<[string, number]>()
+      const messages: Array<Array<[[string, number], number]>> = []
+      input.pipe(
+        reduce(() => [[Number.NaN, 1]]),
+        output((message) => messages.push(message.getInner())),
+      )
+      graph.finalize()
+      input.sendData(new MultiSet([[[`k`, 1], 1]]))
+      graph.run()
+      expect(messages).toHaveLength(1)
+      input.sendData(new MultiSet([[[`k`, 2], 1]]))
+      graph.run()
+      expect(messages).toHaveLength(1)
+    })
+
     test(`basic reduce operation`, () => {
       const graph = new D2()
       const input = graph.newInput<[string, number]>()
