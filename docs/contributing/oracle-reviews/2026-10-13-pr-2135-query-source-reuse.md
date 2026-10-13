@@ -124,3 +124,28 @@ source remains a maintainer contract and versioning decision. Source reuse
 may retain and refetch a complete source rather than doing narrow work; this
 finite correctness oracle does not establish a memory or request-efficiency
 bound.
+
+## Follow-up review of direct-write request scope
+
+CodeRabbit review `5510417620` on head `486eac00a` found that the direct-write
+witness at `load-subset-lifecycle-oracle.test.ts:449` filtered its provider-call
+record to `full` requests. Its name claimed full-source reuse, while the test
+could pass after an exact filtered request. The independent oracle reviewer
+ran the real QueryClient path and observed `[full, filtered]`, with the promised
+`a1` and `b1` rows public after preload. This is permitted by the Query
+Collection guide: a direct cache patch is not a new fetched result for an
+unacquired scope. The original settled-full witness, with no intervening direct
+write, separately requires `[full]` and establishes reuse at that cut.
+
+The oracle correction at code head
+`a16fc95e42811ef25b457c86fab89059813851f5` names the direct-write law and
+compares the entire request sequence. Its bounded history permits `[full]` or
+`[full, filtered]`: one new filtered demand, a successful provider, and no
+retry, invalidation, or explicit refetch need no second request. A hostile
+production-path mutant called the filtered provider twice; the corrected test
+failed at the request-sequence assertion on `[full, filtered, filtered]`. The
+unmodified path passed **98 runtime and type tests** in the load-lifecycle file
+with no type errors, and changed-file ESLint passed. No production code changed.
+This correction strengthens ORC-003, ORC-005, ORC-006, and ORC-013 for the
+direct-write witness. It makes no claim about every later demand or about
+reuse after a direct write.
