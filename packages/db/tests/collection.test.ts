@@ -588,7 +588,7 @@ describe(`Collection`, () => {
       getKey: (item) => item.value,
       startSync: true,
       sync: {
-        sync: ({ begin, write, commit }) => {
+        sync: ({ begin, write, commit, markReady }) => {
           // Immediately execute the sync cycle
           begin()
           write({
@@ -596,6 +596,7 @@ describe(`Collection`, () => {
             value: { value: `initial value` },
           })
           commit()
+          markReady()
         },
       },
     })
@@ -634,13 +635,14 @@ describe(`Collection`, () => {
       getKey: (item) => item.id,
       startSync: true,
       sync: {
-        sync: ({ begin, write, commit }) => {
+        sync: ({ begin, write, commit, markReady }) => {
           begin()
           write({
             type: `insert`,
             value: { id: `item-1`, value: `initial value` },
           })
           commit()
+          markReady()
         },
       },
     })
@@ -723,7 +725,7 @@ describe(`Collection`, () => {
       getKey: (item) => item.id,
       startSync: true,
       sync: {
-        sync: ({ begin, write, commit }) => {
+        sync: ({ begin, write, commit, markReady }) => {
           // @ts-expect-error don't trust mitt's typing
           emitter.on(`*`, (_, changes: Array<PendingMutation>) => {
             begin()
@@ -735,6 +737,7 @@ describe(`Collection`, () => {
               })
             })
             commit()
+            markReady()
           })
         },
       },
@@ -1006,7 +1009,7 @@ describe(`Collection`, () => {
       },
       startSync: true,
       sync: {
-        sync: ({ begin, write, commit }) => {
+        sync: ({ begin, write, commit, markReady }) => {
           // @ts-expect-error don't trust Mitt's typing and this works.
           emitter.on(`*`, (_, changes: Array<PendingMutation>) => {
             begin()
@@ -1018,6 +1021,7 @@ describe(`Collection`, () => {
               })
             })
             commit()
+            markReady()
           })
         },
       },
@@ -1115,13 +1119,14 @@ describe(`Collection`, () => {
       getKey: (item) => item.id,
       startSync: true,
       sync: {
-        sync: ({ begin, write, commit }) => {
+        sync: ({ begin, write, commit, markReady }) => {
           begin()
           write({
             type: `insert`,
             value: { id: 1, value: `initial value` },
           })
           commit()
+          markReady()
         },
       },
     })
@@ -1345,13 +1350,14 @@ describe(`Collection`, () => {
       getKey: (item) => item.id,
       startSync: true,
       sync: {
-        sync: ({ begin, write, commit }) => {
+        sync: ({ begin, write, commit, markReady }) => {
           begin()
           write({
             type: `insert`,
             value: { id: 1, value: `initial value` },
           })
           commit()
+          markReady()
         },
       },
       // Add the new handler functions
@@ -1410,13 +1416,14 @@ describe(`Collection`, () => {
       getKey: (item) => item.id,
       startSync: true,
       sync: {
-        sync: ({ begin, write, commit }) => {
+        sync: ({ begin, write, commit, markReady }) => {
           begin()
           write({
             type: `insert`,
             value: { id: 1, value: `initial value` },
           })
           commit()
+          markReady()
         },
       },
       // Add the handler functions
@@ -1464,13 +1471,14 @@ describe(`Collection`, () => {
       getKey: (item) => item.id,
       startSync: true,
       sync: {
-        sync: ({ begin, write, commit }) => {
+        sync: ({ begin, write, commit, markReady }) => {
           begin()
           write({
             type: `insert`,
             value: { id: 1, value: `initial value` },
           })
           commit()
+          markReady()
         },
       },
       // No handler functions defined
@@ -1515,7 +1523,7 @@ describe(`Collection`, () => {
       getKey: (item) => item.id,
       startSync: true,
       sync: {
-        sync: ({ begin, write, commit }) => {
+        sync: ({ begin, write, commit, markReady }) => {
           // Initialize with some data
           begin()
           write({
@@ -1523,6 +1531,7 @@ describe(`Collection`, () => {
             value: { id: 1, value: `initial value` },
           })
           commit()
+          markReady()
 
           // @ts-expect-error don't trust mitt's typing
           emitter.on(`*`, (_, changes: Array<PendingMutation>) => {
@@ -1618,7 +1627,7 @@ describe(`Collection`, () => {
       getKey: (item) => item.id,
       startSync: true,
       sync: {
-        sync: ({ begin, write, commit }) => {
+        sync: ({ begin, write, commit, markReady }) => {
           // Initialize with some data
           begin()
           write({
@@ -1626,6 +1635,7 @@ describe(`Collection`, () => {
             value: { id: 1, value: `initial value` },
           })
           commit()
+          markReady()
 
           // @ts-expect-error don't trust mitt's typing
           emitter.on(`*`, (_, changes: Array<PendingMutation>) => {

@@ -182,6 +182,8 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
     makeSource: (data) => sources!.track(rawDriver.makeSource(data)),
     makeOnDemandSource: (data, delay) =>
       sources!.track(rawDriver.makeOnDemandSource(data, delay)),
+    makeLaggingOnDemandSource: (data) =>
+      sources!.track(rawDriver.makeLaggingOnDemandSource(data)),
     makePrecreated: (build) => sources!.track(rawDriver.makePrecreated(build)),
     mount: (build, config) => track(rawDriver.mount(build, config)),
     mountControllable: (build, initial, config) =>
@@ -818,6 +820,44 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         ])
         expect(handle.current().isFetchingNextPage).toBe(false)
         expectPageRows(handle.current(), rows(8).slice(0, 6), 3)
+        expectReadyObservationsMatchSource(handle, rows(8), 3)
+      },
+    )
+
+    scenario(
+      `lagging-on-demand-ready-at-settle`,
+      `is ready when its window requests settle, before an on-demand source is ready`,
+      async () => {
+        // Law (ARCHITECTURE.md law 10): the settled window requests, not the
+        // source's markReady, make the query initially ready. The source stays
+        // loading at the checkpoint, so a binding that waits for the source
+        // fails there. Rows written before settlement may already be visible.
+        const source = driver.makeLaggingOnDemandSource(rows(8))
+        const handle = driver.mount(
+          (q) =>
+            q
+              .from({ items: source.collection })
+              .orderBy(({ items }: any) => items.rank, `desc`),
+          { pageSize: 3 },
+        )
+        await handle.flush()
+        expect(source.pending()).toBeGreaterThan(0)
+        expect(handle.current().status).not.toBe(`ready`)
+
+        // A window can chain follow-up requests; settle each one it issues.
+        for (let round = 0; round < 5 && source.pending() > 0; round++) {
+          source.settle()
+          await handle.flush()
+        }
+        expect(source.pending()).toBe(0)
+        expect(source.collection.status).toBe(`loading`)
+        expect(handle.current().status).toBe(`ready`)
+        expectPageRows(handle.current(), rows(8).slice(0, 3), 3)
+        expect(handle.current().hasNextPage).toBe(true)
+
+        source.markReady()
+        await handle.flush()
+        expect(handle.current().status).toBe(`ready`)
         expectReadyObservationsMatchSource(handle, rows(8), 3)
       },
     )
@@ -1616,7 +1656,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
     )
 
     it(`registers every distinct scenario without whole-test waivers`, () => {
-      expect(registry.size).toBe(38)
+      expect(registry.size).toBe(39)
     })
   })
 }

@@ -293,3 +293,82 @@ function cachedReferenceHash(fn: object): number {
   }
   return valueHash
 }
+
+// One punctuation tag per objectParts marker, so values of different kinds
+// never share an identity (and no tag reads as an identifier in this source).
+const MARKER_TAGS = new Map<{ hash: number }, string>([
+  [ARRAY_MARKER, `[`],
+  [OBJECT_MARKER, `{`],
+  [DATE_MARKER, `<`],
+  [REGEXP_MARKER, `/`],
+  [MAP_MARKER, `&`],
+  [SET_MARKER, `*`],
+  [UINT8ARRAY_MARKER, `^`],
+  [TEMPORAL_MARKER, `?`],
+])
+
+// Nesting a structural identity follows: a min or max input is an array of
+// exact keys, and an exact key can hold a reference tuple.
+const MAX_IDENTITY_DEPTH = 4
+
+/**
+ * @internal An exact identity string for a value, or undefined when it has
+ * no cheap one. Two values that `equalHashValues` treats as equal get the
+ * same result, both undefined or one string; two that it treats as different
+ * never share a string. The decision uses only what equalHashValues reads:
+ * the type, the `objectParts` marker and headers, and enumerable own keys. groupBy uses it
+ * to merge equal contributions without hashing them.
+ */
+export function structuralIdentity(
+  value: unknown,
+  depth = 0,
+): string | undefined {
+  switch (typeof value) {
+    case `number`:
+      // The hash treats -0 as 0 and every NaN as one value.
+      return `#${value === 0 ? 0 : value}`
+    case `string`:
+      return `"${value.length}:${value}`
+    case `boolean`:
+      return value ? `+` : `-`
+    case `undefined`:
+      return `~`
+    case `bigint`:
+      return `%${value}`
+    case `symbol`:
+      return `$${getSymbolIdentity(value)}`
+    case `object`: {
+      if (value === null) return `!`
+      if (depth >= MAX_IDENTITY_DEPTH || isReferenceHashedObject(value))
+        return undefined
+      const [marker, header, body] = objectParts(value)
+      // equalHashValues compares headers with ===, so a NaN header is never
+      // equal to another value's, and gets no identity.
+      let head = MARKER_TAGS.get(marker)!
+      for (const part of header) {
+        if (Number.isNaN(part)) return undefined
+        head += structuralIdentity(part, depth + 1)
+      }
+      if (!body) return head
+      if (
+        Object.getOwnPropertySymbols(body).some((key) =>
+          Object.prototype.propertyIsEnumerable.call(body, key),
+        )
+      )
+        return undefined
+      let parts = ``
+      for (const key of Object.keys(body).sort()) {
+        const part = structuralIdentity(
+          (body as Record<string, unknown>)[key],
+          depth + 1,
+        )
+        if (part === undefined) return undefined
+        parts += `${key.length}:${key}=${part}|`
+      }
+      // An array's header is its length, so a hole differs from undefined.
+      return `${head}:${parts.length}:${parts}`
+    }
+    default:
+      return undefined
+  }
+}
