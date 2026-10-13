@@ -26414,6 +26414,326 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   // nothing but the owner's writes. Without a managed generation the old
   // durable cache stays in place, so the model predicts that an owner notice
   // during that recovery republishes none of the untrusted durable rows.
+  /**
+   * After a cache rotation, a follower reacquires every active demand into
+   * the new generation through the owner. The owner commits each demand's
+   * rows into that generation and broadcasts them before it replies, so the
+   * follower holds those notices. Scoped recovery may end only once every
+   * reacquisition has succeeded: before that, the new generation is still
+   * incomplete and its durable rows have no authority. Starting scoped
+   * recovery withdraws the old generation's rows.
+   *
+   * The independent model knows each demand's row version per generation:
+   * the owner wrote version 1 into the old generation and writes version 2
+   * into the new one when it reacquires the demand. Until every
+   * reacquisition has settled, neither demand shows a row. If all succeed,
+   * both show the new generation's rows, including an owner update that
+   * arrived while the reacquisitions were settling. If any fails, the
+   * follower stays in scoped recovery, shows no row from the incomplete
+   * generation, and the source reports the failure as soon as that
+   * reacquisition settles.
+   *
+   * The grammar crosses the order in which two demands' reacquisitions
+   * settle, whether the owner updates demand a's row (version 3) between
+   * the first and last settlement, and which reacquisitions fail. The driver
+   * observes both demands' rows and the source status after every
+   * settlement, plus the ensure count, which a refetch loop would exceed.
+   */
+  type RotatedReacquisitionHistory = {
+    order: [`a`, `b`] | [`b`, `a`]
+    noticeBetween: boolean
+    fails: `none` | `a` | `b` | `both`
+    // How rotation starts: the source asks for scoped recovery after both
+    // demands loaded, or both demands' first reads are in flight when the
+    // cache claim is found lost.
+    trigger?: `source` | `claim-lost-during-reads`
+  }
+  type VersionedRow = { id: string; group: string; v: number }
+  type ReacquisitionObservation = {
+    rows: Record<`a` | `b`, number | undefined>
+    status: `error` | `healthy`
+  }
+  const expectedReacquisition = (
+    history: RotatedReacquisitionHistory,
+    settled: number,
+  ): ReacquisitionObservation => {
+    const ended = settled === 2 && history.fails === `none`
+    // A failed reacquisition is reported when it settles.
+    const failed = history.order
+      .slice(0, settled)
+      .some((group) => history.fails === group || history.fails === `both`)
+    return {
+      rows: ended
+        ? { a: history.noticeBetween ? 3 : 2, b: 2 }
+        : { a: undefined, b: undefined },
+      status: failed ? `error` : `healthy`,
+    }
+  }
+
+  const assertRotatedReacquisition = async (
+    history: RotatedReacquisitionHistory,
+  ) => {
+    const errors = vi.spyOn(console, `error`).mockImplementation(() => {})
+    const warnings = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    const oldStorageId = `reacquire-old`
+    const newStorageId = `reacquire-new`
+    const durable = new Map<string, Map<string, VersionedRow>>([
+      [oldStorageId, new Map()],
+      [newStorageId, new Map()],
+    ])
+    let subscriber: ((message: ProtocolEnvelope<unknown>) => void) | undefined
+    const seqs = new Map<string, number>()
+    const ownerCommits = (storageId: string, row: VersionedRow) => {
+      const seq = (seqs.get(storageId) ?? 0) + 1
+      seqs.set(storageId, seq)
+      durable.get(storageId)!.set(row.id, row)
+      const payload: TxCommitted = {
+        type: `tx:committed`,
+        term: 1,
+        seq,
+        txId: `owner-${storageId}-${seq}`,
+        latestRowVersion: seq,
+        requiresFullReload: false,
+        changedRows: [{ key: row.id, value: row }],
+        deletedKeys: [],
+      }
+      subscriber?.({
+        v: 1,
+        dbName: `test-db`,
+        collectionId: storageId,
+        senderId: `owner`,
+        ts: Date.now(),
+        payload,
+      })
+    }
+    type Reply = {
+      resolve: () => void
+      reject: (error: unknown) => void
+    }
+    const replies = new Map<string, Reply>()
+    let ensures = 0
+    const groupOf = (options: LoadSubsetOptions) => {
+      const where = options.where as IR.Func | undefined
+      const value = where?.args[1] as IR.Value | undefined
+      return value?.value as `a` | `b` | undefined
+    }
+    const duringReads = history.trigger === `claim-lost-during-reads`
+    const firstReads = createDeferred()
+    let reads = 0
+    let claimLost = false
+    const adapter = {
+      loadSubset: async (
+        target: PersistedStorageTarget,
+      ): Promise<Array<{ key: string; value: VersionedRow }>> => {
+        if (duringReads && ++reads <= 2) {
+          await firstReads.promise
+          claimLost = true
+        }
+        return Array.from(
+          durable.get(recordedStorageId(target))!.values(),
+          (value) => ({ key: value.id, value: { ...value } }),
+        )
+      },
+      claimCacheGeneration: async () => ({
+        storageCollectionId: oldStorageId,
+        claimId: `reacquire-claim`,
+        expiresAtMs: Date.now() + 60_000,
+      }),
+      renewCacheGenerationClaim: async () =>
+        claimLost ? undefined : Date.now() + 60_000,
+      rotateCacheGeneration: async () => {
+        claimLost = false
+        return {
+          storageCollectionId: newStorageId,
+          claimId: `reacquire-claim-2`,
+          expiresAtMs: Date.now() + 60_000,
+        }
+      },
+      releaseCacheGenerationClaim: async () => {},
+      loadResumeSnapshot: () =>
+        Promise.resolve({
+          rows: [],
+          keySet: { status: `consistent` },
+          collectionMetadata: [],
+          latestTerm: 0,
+          latestSeq: 0,
+          latestRowVersion: 0,
+          resetEpoch: 0,
+        }),
+      applyCommittedTx: async () => {},
+      ensureIndex: async () => {},
+    } as unknown as PersistenceAdapter
+    const coordinator = {
+      getNodeId: () => `follower`,
+      subscribe: (
+        _collectionId: string,
+        onMessage: (message: ProtocolEnvelope<unknown>) => void,
+      ) => {
+        subscriber = onMessage
+        return () => {
+          subscriber = undefined
+        }
+      },
+      publish: () => {},
+      isLeader: () => false,
+      ensureLeadership: async () => {},
+      requestEnsurePersistedIndex: async () => {},
+      // The owner commits the demand's row into the requesting generation
+      // and broadcasts it before it replies. In the new generation the
+      // driver releases the reply; a later refetch finds nothing new.
+      requestEnsureRemoteSubset: (
+        storageId: string,
+        options: LoadSubsetOptions,
+      ) => {
+        ensures++
+        const group = groupOf(options)
+        if (!group) return Promise.resolve()
+        if (storageId === oldStorageId) {
+          ownerCommits(oldStorageId, { id: `${group}-row`, group, v: 1 })
+          return Promise.resolve()
+        }
+        if (replies.has(group)) return Promise.resolve()
+        ownerCommits(newStorageId, { id: `${group}-row`, group, v: 2 })
+        return new Promise<void>((resolve, reject) => {
+          replies.set(group, { resolve, reject })
+        })
+      },
+      requestReleaseRemoteSubset: async () => {},
+      registerRemoteSubsetOwner: () => () => {},
+      requestApplyCommittedTx: (_collectionId: string, tx: TxCommitted) =>
+        Promise.resolve({
+          type: `rpc:applyCommittedTx:res`,
+          rpcId: tx.txId,
+          ok: true,
+          term: tx.term,
+          seq: tx.seq,
+          latestRowVersion: tx.seq,
+        }),
+      pullSince: (storageId: string) =>
+        Promise.resolve({
+          type: `rpc:pullSince:res`,
+          rpcId: `reacquire-pull`,
+          ok: true,
+          latestTerm: 1,
+          latestSeq: seqs.get(storageId) ?? 0,
+          latestRowVersion: seqs.get(storageId) ?? 0,
+          requiresFullReload: true,
+          changedKeys: [],
+          deletedKeys: [],
+        }),
+    } as unknown as PersistedCollectionCoordinator
+    let sourceParams: SyncConfig<VersionedRow, string>[`sync`] extends (
+      params: infer P,
+    ) => unknown
+      ? P
+      : never
+    const source = createCollection(
+      persistedCollectionOptions<VersionedRow, string>({
+        id: `follower-reacquire-${Math.random().toString(36).slice(2)}`,
+        getKey: (row) => row.id,
+        persistence: { adapter, coordinator },
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            return {
+              loadSubset: () => Promise.resolve(),
+              restartAfterScopedRecovery: () => {},
+            }
+          },
+        },
+      }),
+    )
+    source.startSyncImmediate()
+    const observe = (): ReacquisitionObservation => ({
+      rows: { a: source.get(`a-row`)?.v, b: source.get(`b-row`)?.v },
+      status: source.status === `error` ? `error` : `healthy`,
+    })
+    const turn = () => new Promise((resolve) => setTimeout(resolve, 0))
+    const settle = async () => {
+      for (let i = 0; i < 8; i++) await turn()
+    }
+    const load = (group: `a` | `b`) =>
+      source._sync.loadSubset({
+        where: new IR.Func(`eq`, [
+          new IR.PropRef([`group`]),
+          new IR.Value(group),
+        ]),
+      })
+    try {
+      if (duringReads) {
+        // Both first reads are in flight when the claim is found lost.
+        void Promise.resolve(load(`a`)).catch(() => undefined)
+        void Promise.resolve(load(`b`)).catch(() => undefined)
+        await settle()
+        firstReads.resolve()
+      } else {
+        for (const group of [`a`, `b`] as const) await load(group)
+        await settle()
+        expect(observe().rows).toEqual({ a: 1, b: 1 })
+        void sourceParams!.metadata!.persistence!.startScopedRecovery!()
+      }
+      await vi.waitFor(() => expect(replies.size).toBe(2), { timeout: 2_000 })
+      await settle()
+      // Checkpoint: both reacquisitions are in flight.
+      expect(observe()).toEqual(expectedReacquisition(history, 0))
+      for (const [index, group] of history.order.entries()) {
+        if (index === 1 && history.noticeBetween) {
+          ownerCommits(newStorageId, { id: `a-row`, group: `a`, v: 3 })
+          await settle()
+        }
+        if (history.fails === group || history.fails === `both`)
+          replies.get(group)!.reject(new Error(`reacquire ${group} failed`))
+        else replies.get(group)!.resolve()
+        await settle()
+        // Checkpoint: after each settlement.
+        expect(observe()).toEqual(expectedReacquisition(history, index + 1))
+      }
+      // Two acquisitions and two reacquisitions, plus one refresh per held
+      // notice when recovery stays; a refetch loop exceeds the bound.
+      expect(ensures).toBeLessThanOrEqual(12)
+    } finally {
+      await source.cleanup()
+      errors.mockRestore()
+      warnings.mockRestore()
+    }
+  }
+
+  const rotatedReacquisitionHistories: Array<RotatedReacquisitionHistory> = (
+    [
+      [`a`, `b`],
+      [`b`, `a`],
+    ] as const
+  ).flatMap((order) =>
+    [false, true].flatMap((noticeBetween) =>
+      ([`none`, `a`, `b`, `both`] as const).map((fails) => ({
+        order: [...order],
+        noticeBetween,
+        fails,
+      })),
+    ),
+  )
+  it.each(rotatedReacquisitionHistories)(
+    `ends a follower's scoped recovery only after every reacquisition succeeds: order $order, notice between $noticeBetween, fails $fails`,
+    assertRotatedReacquisition,
+    10_000,
+  )
+  // Two hydrations that both find the claim lost queue work while the
+  // follower reacquires. Their flushes must leave the held notices alone;
+  // otherwise each notice refreshes the scoped demand and the follower spins.
+  it.each(
+    ([`none`, `a`] as const).map((fails) => ({
+      order: [`a`, `b`] as [`a`, `b`],
+      noticeBetween: false,
+      fails,
+      trigger: `claim-lost-during-reads` as const,
+    })),
+  )(
+    `holds a rotated follower's notices when two reads find the claim lost: fails $fails`,
+    assertRotatedReacquisition,
+    10_000,
+  )
+
   it(`an owner notice does not republish untrusted durable rows without rotation`, async () => {
     const errors = vi.spyOn(console, `error`).mockImplementation(() => {})
     const warnings = vi.spyOn(console, `warn`).mockImplementation(() => {})

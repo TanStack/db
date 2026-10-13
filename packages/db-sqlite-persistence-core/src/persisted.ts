@@ -4689,6 +4689,8 @@ class PersistedCollectionRuntime<
         this.scheduleCacheClaimRecovery(this.lifecycleGeneration)
         return
       }
+      // Reacquisition flushes the queue once every rotated demand settles.
+      if (this.reacquiringRotatedDemand) return
       const queued = this.queuedTxCommitted.shift()
       if (!queued) {
         continue
