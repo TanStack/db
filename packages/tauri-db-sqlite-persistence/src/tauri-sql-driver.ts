@@ -282,9 +282,3 @@ export class TauriSQLiteDriver implements SQLiteDriver {
     }
   }
 }
-
-export function createTauriSQLiteDriver(
-  options: TauriSQLiteDriverOptions,
-): TauriSQLiteDriver {
-  return new TauriSQLiteDriver(options)
-}

@@ -2,7 +2,6 @@ import { DuplicateTransactionIdError, createTransaction } from '@tanstack/db'
 import { OutboxTransactionNotFoundError } from '../outbox/OutboxManager'
 import { DefaultRetryPolicy } from '../retry/RetryPolicy'
 import { NonRetriableError } from '../types'
-import { withNestedSpan } from '../telemetry/tracer'
 import type { KeyScheduler } from './KeyScheduler'
 import type { OutboxManager } from '../outbox/OutboxManager'
 import type {
@@ -91,72 +90,48 @@ export class TransactionExecutor {
     transaction: OfflineTransaction,
   ): Promise<void> {
     try {
-      await withNestedSpan(
-        `transaction.execute`,
-        {
-          'transaction.id': transaction.id,
-          'transaction.mutationFnName': transaction.mutationFnName,
-          'transaction.retryCount': transaction.retryCount,
-          'transaction.keyCount': transaction.keys.length,
-        },
-        async (span) => {
-          const terminalError =
-            transaction.outboxPhase === `rejection-pending`
-              ? this.getTerminalError(transaction)
-              : undefined
-          this.scheduler.markStarted(transaction)
+      const terminalError =
+        transaction.outboxPhase === `rejection-pending`
+          ? this.getTerminalError(transaction)
+          : undefined
+      this.scheduler.markStarted(transaction)
 
-          if (transaction.retryCount > 0) {
-            span.setAttribute(`retry.attempt`, transaction.retryCount)
-          }
+      if (!transaction.outboxPhase) {
+        try {
+          await this.runMutationFn(transaction)
+        } catch (error) {
+          const err = toError(error)
 
-          if (!transaction.outboxPhase) {
-            try {
-              await this.runMutationFn(transaction)
-            } catch (error) {
-              const err = toError(error)
+          await this.handleError(transaction, err)
+          ;(err as any)[HANDLED_EXECUTION_ERROR] = true
+          throw err
+        }
+      }
 
-              span.setAttribute(`result`, `error`)
+      // A successful provider call can outlive this executor. Persist that
+      // fact before removal so a restarted executor only retries deletion.
+      const deletionPending: OfflineTransaction = transaction.outboxPhase
+        ? transaction
+        : { ...transaction, outboxPhase: `deletion-pending` }
+      try {
+        await this.removeSettledTransaction(
+          deletionPending,
+          !transaction.outboxPhase,
+        )
+      } catch (error) {
+        const storageError = error as Error
+        this.offlineExecutor.rejectTransaction(
+          transaction.id,
+          terminalError ?? storageError,
+        )
+        throw storageError
+      }
 
-              await this.handleError(transaction, err)
-              ;(err as any)[HANDLED_EXECUTION_ERROR] = true
-              throw err
-            }
-          }
-
-          // A successful provider call can outlive this executor. Persist that
-          // fact before removal so a restarted executor only retries deletion.
-          const deletionPending: OfflineTransaction = transaction.outboxPhase
-            ? transaction
-            : { ...transaction, outboxPhase: `deletion-pending` }
-          try {
-            await this.removeSettledTransaction(
-              deletionPending,
-              !transaction.outboxPhase,
-            )
-          } catch (error) {
-            const storageError = error as Error
-            span.recordException(storageError)
-            span.setAttribute(`result`, `outbox_failure`)
-            this.offlineExecutor.rejectTransaction(
-              transaction.id,
-              terminalError ?? storageError,
-            )
-            throw storageError
-          }
-
-          if (terminalError) {
-            span.setAttribute(`result`, `permanent_failure`)
-            this.offlineExecutor.rejectTransaction(
-              transaction.id,
-              terminalError,
-            )
-          } else {
-            span.setAttribute(`result`, `success`)
-            this.offlineExecutor.resolveTransaction(transaction.id, undefined)
-          }
-        },
-      )
+      if (terminalError) {
+        this.offlineExecutor.rejectTransaction(transaction.id, terminalError)
+      } else {
+        this.offlineExecutor.resolveTransaction(transaction.id, undefined)
+      }
     } catch (error) {
       if (
         error !== null &&
@@ -201,129 +176,97 @@ export class TransactionExecutor {
     transaction: OfflineTransaction,
     error: Error,
   ): Promise<void> {
-    return withNestedSpan(
-      `transaction.handleError`,
-      {
-        'transaction.id': transaction.id,
-        'error.name': error.name,
-        'error.message': error.message,
-      },
-      async (span) => {
-        let shouldRetry: boolean
-        let hookFailure: Error | undefined
-        if (error instanceof NonRetriableError) {
-          shouldRetry = false
-        } else {
-          let decision: boolean | undefined
-          try {
-            decision = this.config.shouldRetry?.(error, transaction.retryCount)
-            if (decision !== undefined && typeof decision !== `boolean`) {
-              // An async hook is invalid, but its rejection must stay row-local.
-              void Promise.resolve(decision).catch(() => {})
-              throw new TypeError(
-                `OfflineConfig.shouldRetry must return true, false, or undefined`,
-              )
-            }
-          } catch (hookError) {
-            hookFailure = toError(hookError)
-          }
-          if (hookFailure) {
-            shouldRetry = false
-          } else {
-            shouldRetry =
-              decision ??
-              this.retryPolicy.shouldRetry(error, transaction.retryCount)
-          }
-        }
-
-        span.setAttribute(`shouldRetry`, shouldRetry)
-
-        if (!shouldRetry) {
-          const terminalError = hookFailure ?? error
-          const rejectionPending: OfflineTransaction = {
-            ...transaction,
-            outboxPhase: `rejection-pending`,
-            lastError: {
-              name: terminalError.name,
-              message: terminalError.message,
-              stack: terminalError.stack,
-            },
-          }
-          if (hookFailure) {
-            span.recordException(hookFailure)
-            console.warn(
-              `Retry decision failed for transaction ${transaction.id}:`,
-              hookFailure,
-              `Named mutation function error:`,
-              error,
-            )
-          } else {
-            console.warn(
-              `Transaction ${transaction.id} failed permanently:`,
-              error,
-            )
-          }
-          try {
-            await this.removeSettledTransaction(rejectionPending, true)
-          } catch (storageError) {
-            span.recordException(storageError as Error)
-            span.setAttribute(`result`, `outbox_failure`)
-            this.offlineExecutor.rejectTransaction(
-              transaction.id,
-              terminalError,
-            )
-            throw storageError
-          }
-
-          span.setAttribute(
-            `result`,
-            hookFailure ? `retry_decision_failure` : `permanent_failure`,
+    let shouldRetry: boolean
+    let hookFailure: Error | undefined
+    if (error instanceof NonRetriableError) {
+      shouldRetry = false
+    } else {
+      let decision: boolean | undefined
+      try {
+        decision = this.config.shouldRetry?.(error, transaction.retryCount)
+        if (decision !== undefined && typeof decision !== `boolean`) {
+          // An async hook is invalid, but its rejection must stay row-local.
+          void Promise.resolve(decision).catch(() => {})
+          throw new TypeError(
+            `OfflineConfig.shouldRetry must return true, false, or undefined`,
           )
-          this.offlineExecutor.rejectTransaction(transaction.id, terminalError)
-          return
         }
+      } catch (hookError) {
+        hookFailure = toError(hookError)
+      }
+      if (hookFailure) {
+        shouldRetry = false
+      } else {
+        shouldRetry =
+          decision ??
+          this.retryPolicy.shouldRetry(error, transaction.retryCount)
+      }
+    }
 
-        const delay = Math.max(
-          0,
-          this.retryPolicy.calculateDelay(transaction.retryCount),
+    if (!shouldRetry) {
+      const terminalError = hookFailure ?? error
+      const rejectionPending: OfflineTransaction = {
+        ...transaction,
+        outboxPhase: `rejection-pending`,
+        lastError: {
+          name: terminalError.name,
+          message: terminalError.message,
+          stack: terminalError.stack,
+        },
+      }
+      if (hookFailure) {
+        console.warn(
+          `Retry decision failed for transaction ${transaction.id}:`,
+          hookFailure,
+          `Named mutation function error:`,
+          error,
         )
-        const updatedTransaction: OfflineTransaction = {
-          ...transaction,
-          retryCount: transaction.retryCount + 1,
-          nextAttemptAt: Date.now() + delay,
-          lastError: {
-            name: error.name,
-            message: error.message,
-            stack: error.stack,
-          },
-        }
+      } else {
+        console.warn(`Transaction ${transaction.id} failed permanently:`, error)
+      }
+      try {
+        await this.removeSettledTransaction(rejectionPending, true)
+      } catch (storageError) {
+        this.offlineExecutor.rejectTransaction(transaction.id, terminalError)
+        throw storageError
+      }
 
-        span.setAttribute(`retryDelay`, delay)
-        span.setAttribute(`nextRetryCount`, updatedTransaction.retryCount)
+      this.offlineExecutor.rejectTransaction(transaction.id, terminalError)
+      return
+    }
 
-        this.scheduler.updateTransaction(updatedTransaction)
-
-        try {
-          await this.outbox.update(transaction.id, updatedTransaction)
-          span.setAttribute(`result`, `scheduled_retry`)
-        } catch (persistError) {
-          // Public removal can finish while the named mutation function runs.
-          // The removed row cannot be retried, but its caller still owns the
-          // provider failure and later queued work must be able to run.
-          if (persistError instanceof OutboxTransactionNotFoundError) {
-            this.scheduler.markCompleted(transaction)
-            span.setAttribute(`result`, `outbox_removed`)
-            this.offlineExecutor.rejectTransaction(transaction.id, error)
-            return
-          }
-          span.recordException(persistError as Error)
-          span.setAttribute(`result`, `persist_failed`)
-          throw persistError
-        } finally {
-          this.scheduler.markFailed(transaction)
-        }
-      },
+    const delay = Math.max(
+      0,
+      this.retryPolicy.calculateDelay(transaction.retryCount),
     )
+    const updatedTransaction: OfflineTransaction = {
+      ...transaction,
+      retryCount: transaction.retryCount + 1,
+      nextAttemptAt: Date.now() + delay,
+      lastError: {
+        name: error.name,
+        message: error.message,
+        stack: error.stack,
+      },
+    }
+
+    this.scheduler.updateTransaction(updatedTransaction)
+
+    try {
+      await this.outbox.update(transaction.id, updatedTransaction)
+    } catch (persistError) {
+      // Public removal can finish while the named mutation function runs.
+      // The removed row cannot be retried, but its caller still owns the
+      // provider failure and later queued work must be able to run.
+      if (persistError instanceof OutboxTransactionNotFoundError) {
+        this.scheduler.markCompleted(transaction)
+        this.offlineExecutor.rejectTransaction(transaction.id, error)
+        return
+      }
+      throw persistError
+    } finally {
+      this.scheduler.markFailed(transaction)
+    }
   }
 
   private async removeSettledTransaction(

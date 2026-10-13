@@ -6,30 +6,17 @@ import type { IStreamBuilder, KeyValue } from '../types.js'
 
 type GroupKey = Record<string, unknown>
 
-type BasicAggregateFunction<T, R, V = unknown> = {
+type AggregateFunction<T, R, V = unknown> = {
   preMap: (data: T) => V
   reduce: (values: Array<[V, number]>) => V
   postMap?: (result: V) => R
 }
-
-type PipedAggregateFunction<T, R> = {
-  pipe: (stream: IStreamBuilder<T>) => IStreamBuilder<KeyValue<string, R>>
-}
-
-type AggregateFunction<T, R, V = unknown> =
-  BasicAggregateFunction<T, R, V> | PipedAggregateFunction<T, R>
 
 type ExtractAggregateReturnType<T, A> =
   A extends AggregateFunction<T, infer R, any> ? R : never
 
 type AggregatesReturnType<T, A> = {
   [K in keyof A]: ExtractAggregateReturnType<T, A[K]>
-}
-
-function isPipedAggregateFunction<T, R>(
-  aggregate: AggregateFunction<T, R>,
-): aggregate is PipedAggregateFunction<T, R> {
-  return `pipe` in aggregate
 }
 
 /**
@@ -44,27 +31,13 @@ export function groupBy<
 >(keyExtractor: (data: T) => K, aggregates: A = {} as A) {
   type ResultType = K & AggregatesReturnType<T, A>
 
-  const basicAggregates = Object.fromEntries(
-    Object.entries(aggregates).filter(
-      ([_, aggregate]) => !isPipedAggregateFunction(aggregate),
-    ),
-  ) as Record<string, BasicAggregateFunction<T, any, any>>
-
-  // @ts-expect-error - TODO: we don't use this yet, but we will
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const pipedAggregates = Object.fromEntries(
-    Object.entries(aggregates).filter(([_, aggregate]) =>
-      isPipedAggregateFunction(aggregate),
-    ),
-  ) as Record<string, PipedAggregateFunction<T, any>>
-
   return (
     stream: IStreamBuilder<T>,
   ): IStreamBuilder<KeyValue<string, ResultType>> => {
     // Special key to store the original key object
     const KEY_SENTINEL = Symbol(`original_group_key`)
 
-    const aggregateEntries = Object.entries(basicAggregates)
+    const aggregateEntries = Object.entries(aggregates)
 
     // First map to extract keys and pre-aggregate values. Each contribution
     // leads with an identity built from its group key and pre-aggregate
