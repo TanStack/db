@@ -297,20 +297,33 @@ outcome of every async hold.
 
 ## Open cells
 
-- TrailBase on-demand: a change committed between a subset fetch and the
-  change subscription can be missed. The owner is
-  `packages/trailbase-db-collection/tests/ORACLE.md`. This predates the change.
-
+- **Fixed: TrailBase on-demand.** A load now waits for the change
+  subscription before it fetches, so a query is not ready before the
+  subscription and a change after the fetch is kept.
+  `packages/trailbase-db-collection/tests/ORACLE.md` owns the law and its
+  remaining limits.
 - Effect `skipInitial` over an ordered window or an include child has no lane.
 - Vue, Svelte, and Angular have no Suspense surface in the shared suite.
-- A persisted follower tab's load may settle before the leader's rows apply
-  in that tab. Only the two-tab OPFS e2e suite can show this; it has not run.
-- Electron IPC, two on-demand roots, and include children apart from lazy
-  joins are not exercised.
-- Whether a load that was waiting at a retried stream error is a real failure
-  is a product decision.
+- **Fixed: persisted follower tabs.** A follower's load settled at the
+  leader's reply, before the follower applied the leader's broadcast commit.
+  It now waits for that apply. The two-tab OPFS e2e suite fails 3 of 3 runs on
+  the original code and passes with the fix.
+- **Exercised: Electron IPC.** Five witnesses pass in-process and through a
+  real Electron main process. A follower renderer uses the same coordinator as
+  a follower tab and has no two-renderer witness.
+- Two on-demand roots and include children apart from lazy joins are not
+  exercised.
+- **Decided: a retried stream error that succeeds is a success.** Electric
+  keeps waiting loads through an `onError` retry. A load that rejects while
+  its source is in `error` now detaches and is acquired again when the source
+  recovers (ARCHITECTURE.md law 16), for root and lazy demand alike. Before,
+  lazy demand entered terminal error, and a root query became ready on
+  recovery without reacquiring its demand. Model D's source-error histories
+  fail on the original code (80 cells). Open: an Effect still disposes on a
+  source error; one-shot reads reject with it; the ordered window has no
+  source-error history.
 - The Electric e2e progressive suite has no run receipt (see the coverage map).
-- A rejected acquisition or a source error while a source lags is outside
-  Model D.
+- A real rejection while a source lags is a Model D `fail` history, and a
+  source error is a `source-error` history. Both cover live queries only.
 - Before the full sync, an Electric progressive query's rows do not receive
   live changes. The source contract owns that behavior, not this law.

@@ -830,6 +830,22 @@ demand; releasing it before recovery creates no physical acquisition or unload.
 Queued reacquisition must not retry a failed attempt merely because both
 loading and ready notifications scheduled it.
 
+A source Collection's `error` status is recoverable within its sync run, so a
+load that rejects while its source is in `error` belongs to that source error,
+not to the request. The subscription detaches that demand, and the source's
+next `ready` in the same sync run acquires it again through a fresh replay
+barrier. A source that reports a final stream error rejects its loads and then
+enters `error` in the same synchronous turn, so the rejection is classified
+after the status change. Root and lazy demand recover alike: neither puts the
+live query in terminal error, and initial-query readiness after recovery waits
+for the reacquired demand to settle. The live query's readiness check can run
+on the source's `ready` before the subscription starts that replay, so a
+subscription reports detached demand that awaits recovery until the replay
+starts. A preload that already rejected with the source error stays rejected.
+A load that rejects while its source is healthy is a query failure: it puts
+the live query in terminal error, as before. An Effect still disposes on a
+source error.
+
 Requests waiting for a loader report one pending promise synchronously through
 `onLoadSubsetResult`, including requests made during initial error or after
 cleanup. The callback is not delayed until acquisition: query callers capture
@@ -1555,6 +1571,12 @@ create recursive Collection machinery.
     counts as a preload. A deferring live query keeps its sources from
     garbage collection but is not counted in their `subscriberCount` or
     `subscribers:change`, which adapters read as a request for live data.
+16. **Source-error recovery:** a load that rejects while its source Collection
+    is in `error` cannot put a live query in terminal error. When the source
+    becomes ready again in the same sync run, its root and lazy demand are
+    acquired again, and initial-query readiness waits for that demand to
+    settle. A load that rejects while its source is healthy remains a terminal
+    query failure.
 
 ## Glossary
 

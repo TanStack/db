@@ -113,6 +113,8 @@ type SubsetDemand = {
   acquisition: SubsetAcquisitionRecord
   acquisitionState: `starting` | `active` | `detached`
   initialResult?: Deferred<void>
+  /** Detached by a source error; recovery acquires it again. */
+  awaitsErrorRecovery?: true
 }
 
 type TruncateReplayAttempt = {
@@ -143,6 +145,26 @@ function createReplayCompletion(): Deferred<void> {
 function cancelAcquisition(acquisition: SubsetAcquisitionRecord): void {
   acquisition.abortController?.abort()
   acquisition.removeRequestAbortListener?.()
+}
+
+/**
+ * Wait for detached demand to be acquired again: the restart replay settles
+ * the wait, and release or abort rejects it with `AbortError`.
+ */
+function awaitRecovery(demand: SubsetDemand): Promise<void> {
+  if (demand.initialResult) return demand.initialResult.promise
+  const initialResult = createDeferred<void>()
+  demand.initialResult = initialResult
+  const signal = demand.requestOptions.signal
+  const abort = () =>
+    initialResult.reject(new LoadSubsetOperationAbortedError())
+  signal?.addEventListener(`abort`, abort, { once: true })
+  const finish = () => {
+    signal?.removeEventListener(`abort`, abort)
+    demand.initialResult = undefined
+  }
+  void initialResult.promise.then(finish, finish)
+  return initialResult.promise
 }
 
 export class CollectionSubscription
@@ -371,6 +393,8 @@ export class CollectionSubscription
     )
     const attempt = replayState.currentAttempt
     this.truncateReplayState = replayState
+    // From here the replay's own loading status holds dependent readiness.
+    for (const demand of demands) delete demand.awaitsErrorRecovery
     this.setStatus(`loadingSubset`)
     if (this.truncateReplayState !== replayState) return
     this.startTruncateReplayAttempt(replayState, attempt, demands)
@@ -895,6 +919,7 @@ export class CollectionSubscription
     if (!(syncResult instanceof Promise)) return
 
     const syncRunGeneration = this.collection._sync.getSyncRunGeneration()
+    const acquisition = demand.acquisition
     const participant = { demand, promise: syncResult }
 
     if (trackStatus) {
@@ -912,6 +937,10 @@ export class CollectionSubscription
     }
 
     void syncResult.then(finish, (error: unknown) => {
+      if (this.detachForErrorRecovery(demand, acquisition)) {
+        finish()
+        return
+      }
       if (
         this.isSyncRunGenerationCurrent(syncRunGeneration) &&
         shouldReportError()
@@ -923,6 +952,53 @@ export class CollectionSubscription
       }
       finish()
     })
+  }
+
+  /**
+   * A load that fails while its source Collection is in error belongs to that
+   * source error, not to the request. Its demand detaches, and recovery
+   * acquires it again, as for demand requested during the error.
+   */
+  private detachForErrorRecovery(
+    demand: SubsetDemand,
+    acquisition: SubsetAcquisitionRecord,
+  ): boolean {
+    if (
+      this.collection.status !== `error` ||
+      demand.acquisition !== acquisition ||
+      demand.acquisitionState !== `active` ||
+      !this.isDemandActive(demand) ||
+      !this.isSyncRunGenerationCurrent(acquisition.syncRunGeneration) ||
+      demand.requestOptions.signal?.aborted
+    ) {
+      return false
+    }
+    cancelAcquisition(acquisition)
+    demand.acquisitionState = `detached`
+    demand.acquisition = {
+      options: demand.requestOptions,
+      syncRunGeneration: acquisition.syncRunGeneration,
+    }
+    demand.awaitsErrorRecovery = true
+    void awaitRecovery(demand)
+    return true
+  }
+
+  /**
+   * Whether demand detached by a source error waits for its restart. A
+   * dependent's readiness check can run on the source's `ready` before this
+   * subscription starts the restart replay.
+   */
+  public get awaitsErrorRecovery(): boolean {
+    return this.subsetDemands.some((demand) => demand.awaitsErrorRecovery)
+  }
+
+  /** Settles when every demand detached by a source error is acquired again. */
+  public get pendingErrorRecovery(): Promise<void> | undefined {
+    const waits = this.subsetDemands.flatMap((demand) =>
+      demand.awaitsErrorRecovery ? [awaitRecovery(demand)] : [],
+    )
+    return waits.length > 0 ? Promise.all(waits).then(() => {}) : undefined
   }
 
   /** Give every logical observer of one transport rejection the same Error. */
@@ -1049,17 +1125,7 @@ export class CollectionSubscription
     ) {
       demand.acquisitionState = `detached`
       this.subsetDemands.push(demand)
-      const initialResult = createDeferred<void>()
-      demand.initialResult = initialResult
-      const abort = () =>
-        initialResult.reject(new LoadSubsetOperationAbortedError())
-      requestOptions.signal?.addEventListener(`abort`, abort, { once: true })
-      const finish = () => {
-        requestOptions.signal?.removeEventListener(`abort`, abort)
-        demand.initialResult = undefined
-      }
-      void initialResult.promise.then(finish, finish)
-      return { demand, result: initialResult.promise, started: false }
+      return { demand, result: awaitRecovery(demand), started: false }
     }
     const acquisition = this.createSubsetAcquisitionRecord(demand)
     demand.acquisition = acquisition

@@ -1178,7 +1178,12 @@ export class CollectionConfigBuilder<
     const allDemandsSettled = [...this.activeDemands.values()].every(
       (demand) => demand.settled,
     )
-    const isLoading = this.liveQueryCollection?.isLoadingSubset
+    const isLoading =
+      this.liveQueryCollection?.isLoadingSubset ||
+      // A recovered source acquires detached demand again after this check.
+      Object.values(this.subscriptions).some(
+        (subscription) => subscription.awaitsErrorRecovery,
+      )
     // Mark ready when:
     // 1. All subscriptions are set up (subscribedToAllCollections)
     // 2. All source collections are ready

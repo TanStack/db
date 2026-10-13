@@ -216,9 +216,12 @@ export class CollectionSubscriber<
         void ready.then(
           () => this.collectionConfigBuilder.settleDemand(plan.id, generation),
           (error) => {
-            // A truncate replay aborts the acquisition it supersedes. Its
-            // replacement decides the demand; a real failure rejects it too.
-            const replacement = subscription.pendingTruncateReplacement
+            // A truncate replay aborts the acquisition it supersedes, and a
+            // source error detaches it until recovery. The replacement
+            // decides the demand; a real failure rejects it too.
+            const replacement =
+              subscription.pendingTruncateReplacement ??
+              subscription.pendingErrorRecovery
             if (replacement) settleWith(replacement)
             else
               this.collectionConfigBuilder.failDemand(

@@ -2609,9 +2609,24 @@ async function expectProgressiveTraceMatches(
 // The driver uses real Collections, a live-query preload or `createEffect`,
 // and controlled source writes. Each step is followed by a timer turn. Each
 // checkpoint compares the consumer's observation and the number of
-// acquisitions; the ordered shape records only that it acquired. A rejected acquisition, source error, and later demand changes
-// are outside this lane; Models A to C, the Effect disposal oracle, and the
-// subscription lifecycle oracle own them. The Electric live-query tests hold
+// acquisitions; the ordered shape records only that it acquired.
+//
+// A source error is recoverable (ARCHITECTURE.md law 16). The live-query lane
+// for the direct, single-result, lazy-join, and include shapes also runs a
+// `source-error` before settlement: the pending load rejects and the source
+// Collection enters `error`, in that order. `source-ready` then recovers the
+// source, and the demand must be acquired again: the query is not ready until
+// a later `settle`, and it then shows its rows. Its preload has already
+// rejected with the source error. The hostile control, `fail`, rejects the
+// same load while the source stays healthy: the query stays in terminal error
+// and never becomes ready. Root and lazy shapes must agree. The restart
+// replay barrier owns publication between the error and that settlement, and
+// a failed query owes no rows, so the model judges neither; the twin compares
+// them. Effects, one-shot reads, and the ordered window are outside these
+// histories: an Effect disposes on a source error, and a read rejects with it.
+// Other rejected acquisitions and later demand changes are outside this lane;
+// Models A to C, the Effect disposal oracle, and the subscription lifecycle
+// oracle own them. The Electric live-query tests hold
 // the receiving witnesses for a real progressive source and for an on-demand
 // source that is ready before its subset loads.
 type LaggingSourceMode = `on-demand` | `eager`
@@ -2636,7 +2651,14 @@ const isReadConsumer = (consumer: LaggingSourceConsumer): boolean =>
   consumer === `to-array-when-ready` ||
   consumer === `state-when-ready`
 type LaggingSourceStep =
-  `deliver` | `settle` | `source-ready` | `change` | `rekey` | `truncate`
+  | `deliver`
+  | `settle`
+  | `source-ready`
+  | `change`
+  | `rekey`
+  | `truncate`
+  | `source-error`
+  | `fail`
 
 const LAGGING_SOURCE_SHAPES: Record<LaggingSourceShape, LaggingSourceMode> = {
   direct: `on-demand`,
@@ -2705,6 +2727,41 @@ function disturbedHistories(
   ]
 }
 
+// A source error before settlement rejects the pending load and puts the
+// source Collection in `error`, in that order, as Electric does when a stream
+// error is final. `source-ready` then recovers the source. Each history moves
+// the source's readiness after the error, so recovery is the source's first
+// `ready` after it; a history may also settle before recovery, when no
+// request is pending. A `fail` rejects the pending load while the source
+// stays healthy: the hostile control for the same rejection.
+function sourceErrorHistories(
+  failure: `source-error` | `fail`,
+): Array<Array<LaggingSourceStep>> {
+  const histories = new Map<string, Array<LaggingSourceStep>>()
+  for (const history of laggingSourceHistories(`on-demand`)) {
+    const rest = history.filter((step) => step !== `source-ready`)
+    for (let at = 0; at <= rest.indexOf(`settle`); at++) {
+      const failed = [...rest.slice(0, at), failure, ...rest.slice(at)]
+      const recoveries =
+        failure === `fail`
+          ? [history.slice(0, at).includes(`source-ready`) ? 0 : failed.length]
+          : Array.from(
+              { length: failed.length - at },
+              (_, offset) => at + 1 + offset,
+            )
+      for (const ready of recoveries) {
+        const candidate = [
+          ...failed.slice(0, ready),
+          `source-ready` as const,
+          ...failed.slice(ready),
+        ]
+        histories.set(candidate.join(), candidate)
+      }
+    }
+  }
+  return [...histories.values()]
+}
+
 const INITIAL_POST_ID = 2
 const CHANGED_POST_ID = 4
 
@@ -2723,15 +2780,24 @@ type LaggingSourceFacts = {
   // it started before readiness and so owes `idsAtReadiness`.
   readOwes: Array<number> | `at-readiness` | undefined
   replayPending: boolean
+  // The source Collection is in `error`: its rejected loads belong to that
+  // error, and recovery acquires their demand again.
+  sourceErrored: boolean
+  // A load rejected while its source was healthy: a terminal query failure.
+  failed: boolean
+  preloadFailed: boolean
 }
 
 function initiallyReady(mode: LaggingSourceMode, facts: LaggingSourceFacts) {
-  return mode === `on-demand` ? facts.settled : facts.sourceReady
+  return mode === `on-demand`
+    ? facts.settled && !facts.failed
+    : facts.sourceReady
 }
 
 type LiveQueryObservation = {
   ready: boolean
   preloadSettled: boolean
+  preloadFailed: boolean
   // `null` between a truncate and its settlement: the replay barrier owns
   // publication there, so only the metamorphic twin compares those rows.
   postIds: Array<number> | null
@@ -2769,14 +2835,19 @@ function expectedLiveQueryObservation(
     .sort((a, b) => a - b)
   return {
     ready,
-    preloadSettled: ready,
-    postIds: facts.replayPending
-      ? null
-      : shape !== `ordered`
-        ? heldIds
-        : facts.settled
-          ? heldIds.slice(-1)
-          : [],
+    // A preload settles at readiness, or rejects with the source error.
+    preloadSettled: ready || facts.preloadFailed,
+    preloadFailed: facts.preloadFailed,
+    // A failed query owes no rows; a recovering one publishes through the
+    // restart replay barrier.
+    postIds:
+      facts.replayPending || facts.failed
+        ? null
+        : shape !== `ordered`
+          ? heldIds
+          : facts.settled
+            ? heldIds.slice(-1)
+            : [],
     acquisitions: mode === `on-demand` ? 1 : 0,
   }
 }
@@ -2847,6 +2918,8 @@ type LaggingPosts = {
   write: (post: { id: number; userId: number }) => void
   truncate: () => void
   markReady: () => void
+  markError: (error: unknown) => void
+  rejectPending: (error: unknown) => void
 }
 
 // The source never calls `markReady()` on its own. `write` inserts one post
@@ -2865,6 +2938,7 @@ function createLaggingPosts(
         write: (change: { type: `insert`; value: ProgressivePost }) => void
         commit: () => unknown
         markReady: () => void
+        markError: (error: unknown) => void
         truncate: () => void
       }
     | undefined
@@ -2873,8 +2947,8 @@ function createLaggingPosts(
     getKey: (post) => post.id,
     ...(explicitMode ? { syncMode: mode } : {}),
     sync: {
-      sync: ({ begin, write, commit, markReady, truncate }) => {
-        sync = { begin, write, commit, markReady, truncate }
+      sync: ({ begin, write, commit, markReady, markError, truncate }) => {
+        sync = { begin, write, commit, markReady, markError, truncate }
         if (readyAtStart) markReady()
         if (mode === `eager`) return undefined
         return {
@@ -2904,6 +2978,11 @@ function createLaggingPosts(
       sync!.commit()
     },
     markReady: () => sync!.markReady(),
+    markError: (error) => sync!.markError(error),
+    rejectPending: (error) => {
+      for (const acquisition of acquisitions)
+        if (acquisition.isPending()) acquisition.reject(error)
+    },
   }
 }
 
@@ -3101,11 +3180,31 @@ function applyLaggingSourceStep(
     facts.posts = []
     facts.disturbed = true
     facts.replayPending = true
+  } else if (step === `source-error` || step === `fail`) {
+    const error = new Error(`subset load failed`)
+    for (const source of sources) {
+      source.rejectPending(error)
+      if (step === `source-error`) source.markError(error)
+    }
+    if (step === `source-error`) facts.sourceErrored = true
+    else facts.failed = true
+    facts.disturbed = true
+    facts.replayPending = step === `source-error`
+    facts.preloadFailed = true
   } else if (step === `settle`) {
     for (const source of sources)
       for (const acquisition of source.acquisitions) acquisition.resolve()
-    facts.settled = true
-    facts.replayPending = false
+    // During a source error no request is pending, and a failed query
+    // acquires nothing more.
+    if (!facts.sourceErrored && !facts.failed) {
+      facts.settled = true
+      facts.replayPending = false
+    }
+  } else if (facts.sourceErrored) {
+    // Recovery: both sources become ready and acquire their demand again.
+    for (const source of sources) source.markReady()
+    facts.sourceErrored = false
+    facts.sourceReady = true
   } else {
     // The twin's source has been ready since its start.
     main.source.markReady()
@@ -3155,6 +3254,9 @@ function createLaggingSourceDriver(
           idsAtReadiness: undefined,
           readOwes: undefined,
           replayPending: false,
+          sourceErrored: false,
+          failed: false,
+          preloadFailed: false,
         },
         main: startLaggingSourceConsumer(
           consumer,
@@ -3209,7 +3311,7 @@ function createLaggingSourceDriver(
         await flushPromises()
       }
     },
-    cleanup: async ({ users, main, twin }) => {
+    cleanup: async ({ users, main, twin, facts }) => {
       const states = [main, ...(twin ? [twin] : [])]
       for (const { source } of states)
         for (const acquisition of source.acquisitions) acquisition.resolve()
@@ -3218,7 +3320,9 @@ function createLaggingSourceDriver(
         states
           .flatMap(({ live, effect, source, preload }) => [
             () => live?.cleanup(),
-            () => (live ? finishPreload(preload) : undefined),
+            // Checkpoints already compared a preload failure with the model.
+            () =>
+              live && !facts.preloadFailed ? finishPreload(preload) : undefined,
             () => effect?.dispose(),
             () => source.collection.cleanup(),
           ])
@@ -3255,6 +3359,7 @@ function observeLaggingSourceConsumer(
     ? {
         ready: state.live!.isReady(),
         preloadSettled: state.preload.preloadSettled,
+        preloadFailed: state.preload.preloadFailure !== undefined,
         postIds: (state.live!.toArray as Array<Record<string, unknown>>)
           .flatMap((row) => rowPostIds(shape, row))
           .sort((a, b) => a - b),
@@ -3292,7 +3397,7 @@ function laggingSourceProjection(
         twin && observeLaggingSourceConsumer(consumer, shape, facts, twin)
       return {
         observation:
-          facts.replayPending && `postIds` in observation
+          (facts.replayPending || facts.failed) && `postIds` in observation
             ? { ...observation, postIds: null }
             : observation,
         twinDisagreement:
@@ -3541,6 +3646,23 @@ describe(`includes temporal oracle`, () => {
     )
     it.each(cells)(`$consumer $shape: $history`, ({ consumer, shape, steps }) =>
       expectLaggingSourceTraceMatches(consumer, shape, steps),
+    )
+
+    // A source error is recoverable; the same rejection from a healthy
+    // source is terminal. Root and lazy shapes must agree.
+    const errorCells = (
+      [`direct`, `find-one`, `join`, `include`] as const
+    ).flatMap((shape) =>
+      ([`source-error`, `fail`] as const).flatMap((failure) =>
+        sourceErrorHistories(failure).map((steps) => ({
+          shape,
+          steps,
+          history: steps.join(` → `),
+        })),
+      ),
+    )
+    it.each(errorCells)(`live-query $shape: $history`, ({ shape, steps }) =>
+      expectLaggingSourceTraceMatches(`live-query`, shape, steps),
     )
   })
 
