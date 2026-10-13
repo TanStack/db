@@ -222,15 +222,19 @@ export function trailBaseCollectionOptions<
 
       // Wait for the subscription, but let cleanup or the caller's abort end
       // the wait even when the subscription never resolves.
-      function waitForSubscription(signal: AbortSignal | undefined) {
-        const waits: Array<Promise<unknown>> = [subscribing, stopped]
-        if (signal)
-          waits.push(
-            new Promise((resolve) =>
-              signal.addEventListener(`abort`, resolve, { once: true }),
-            ),
-          )
-        return Promise.race(waits)
+      async function waitForSubscription(signal: AbortSignal | undefined) {
+        if (!signal) return Promise.race([subscribing, stopped])
+        let onAbort!: () => void
+        const aborted = new Promise<void>((resolve) => {
+          onAbort = resolve
+          signal.addEventListener(`abort`, onAbort, { once: true })
+        })
+        try {
+          await Promise.race([subscribing, stopped, aborted])
+        } finally {
+          // The request signal can outlive this wait; do not keep its listener.
+          signal.removeEventListener(`abort`, onAbort)
+        }
       }
 
       // Load (more) data.
