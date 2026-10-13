@@ -43,7 +43,16 @@ The same interpreter runs a fixed corpus and generated histories.
   enumerates 15 histories: eager startup or an on-demand load; an update,
   delete, or insert; committed before the list call (on-demand only), while
   the page is in flight, or after it applies. It compares the Collection's
-  rows with the service after the page settles and after a later change.
+  rows with the service after the page settles and after a later change. A
+  generated lane (`trailbase.page-event`) extends the same law: 258 service
+  rows read in two pages of 256, cursor or offset paging, one or two
+  overlapping on-demand loads, and up to four inserts, updates, and deletes
+  among page releases. After every step a changed key holds the service's
+  value; after the history drains, every returned or changed key does. Four
+  named replays pin an update between pages, an update then a delete during a
+  page, overlapping loads around an update, and offset paging with two
+  updates. The page fence orders events by a sequence that each sync run
+  counts, so a fresh run never skips a row because of an earlier run's event.
 - The adapter subscribes once per sync run and does not resubscribe. After the
   stream closes or fails, the Collection keeps its rows and stays ready, a
   later service change does not reach it, and a later on-demand load lists
@@ -75,13 +84,13 @@ Additional controls cover rejecting late cancellation in both modes and mutate
 provider-owned list, event, and buffered rows before parsing. Model rows derive
 separately from command scalars, so provider mutation cannot change the answer.
 
-This is not a model of pagination, filtered subsets, optimistic mutation
-acknowledgements, or service reconnects. The page-event lane covers one page
-and one change per history; several pages of one load, several changes, and
-two concurrent loads for the same key remain outside it. The page fence uses
-the adapter's per-key event timestamps, so a change event in the same
-millisecond as the list call also makes the page skip that row; the listener
-still holds the newer or equal value.
+This is not a model of filtered subsets, optimistic mutation
+acknowledgements, or service reconnects. Offset paging takes updates only: an
+insert or delete between pages moves rows across a position boundary at the
+service, which the adapter cannot correct. An eager load cannot overlap an
+on-demand one, because an eager source has no subset loader. The page lanes
+use one change listener per run; more than two concurrent loads and pages
+larger than two remain outside the generated grammar.
 The generated event phase starts after loading; existing loading-time unit
 matrices and the two held-cancellation startup controls remain valuable. Those
 controls were both RED when listener failure awaited cancellation, and GREEN
@@ -102,6 +111,9 @@ For a failing random campaign, use its reported seed and shrink path:
 ```sh
 TANSTACK_DB_ORACLE_SEED=123 TANSTACK_DB_ORACLE_PATH=0:1 TANSTACK_DB_ORACLE_PROPERTY=trailbase.lifecycle node --import tsx ../db/tests/oracle-replay.ts tests/lifecycle-oracle.property.test.ts --coverage.enabled=false -t 'random or replayed'
 ```
+
+Use `TANSTACK_DB_ORACLE_PROPERTY=trailbase.page-event` and `-t 'generated page
+histories with a random or replayed seed'` for the page lane.
 
 Replace the example seed/path with the failure's values. The guarded runner
 requires a witness that the named property executed with this seed and path;
@@ -133,6 +145,14 @@ collides the same way.
 | Adapter before this change           |                 6 |
 | Pages ignore change events in flight |                 4 |
 | Pages always insert                  |                 2 |
+
+The generated lane and its four replays all fail on the adapter before the
+fence and on the fence-less mutant; both properties shrink to one update while
+the first page is in flight. Always inserting survives that lane, because a
+page can only meet a different stored value after a missed event, which only
+the stream-end lane produces. A wall-clock fence failed the fresh-run cell: an
+earlier run's event in the same millisecond hid the row from the new run.
+The 10x campaign passed 800 generated page histories.
 
 Before the stale-startup fix, both campaigns independently shrank to: cancel a
 pending subscription, restart and load a healthy stream, reject the old subscribe.

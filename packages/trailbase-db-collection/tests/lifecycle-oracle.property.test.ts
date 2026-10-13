@@ -1048,3 +1048,352 @@ it.each([`close`, `read-error`] as const)(
     }
   },
 )
+
+/**
+ * ## Do several pages, several changes, and overlapping loads still converge?
+ *
+ * Law: the same one as the page-event lane. Once every page and every change
+ * event for a row have arrived, the Collection holds the service's current
+ * value for that row, or no row if the service deleted it. Between steps, a
+ * row that a change event touched never returns to an older value.
+ *
+ * Reference: the service holds 258 rows, so a full load reads two pages of
+ * 256. Each `list` call captures the service at the moment it is called and
+ * answers only when the history releases it. With cursor paging, a page
+ * returns the rows after the previous page's last key; with offset paging, it
+ * returns rows by position from the requested offset. A change commits to the
+ * service and reaches the established listener at once. The model records
+ * which keys the service returned and which keys changed, and predicts the
+ * Collection from the service's current rows for those keys. It never reads
+ * adapter state.
+ *
+ * Grammar (generated): one or two on-demand loads, the second starting at
+ * once or after a step; cursor or offset paging; up to four changes among
+ * page releases, each an insert, update, or delete of a key on the first
+ * page, the second page, or a new key. Offset paging takes updates only,
+ * because an insert or delete between pages moves rows across a position
+ * boundary at the service, not in the adapter. An eager load cannot overlap
+ * an on-demand one: an eager source has no subset loader.
+ *
+ * Checkpoints: after every step, every changed key holds the service's value;
+ * after the history drains, every returned or changed key does.
+ */
+type PagingMode = `cursor` | `offset`
+type PageStep =
+  | { kind: `release`; load: 0 | 1 }
+  | { kind: `change`; id: 1 | 258 | 300; operation: `set` | `delete` }
+  | { kind: `start-second` }
+type PageHistory = {
+  paging: PagingMode
+  loads: 1 | 2
+  secondAtOnce: boolean
+  steps: Array<PageStep>
+}
+
+const pageServiceSize = 258
+
+const pageHistoryArb: fc.Arbitrary<PageHistory> = fc
+  .record({
+    paging: fc.constantFrom<PagingMode>(`cursor`, `offset`),
+    loads: fc.constantFrom<1 | 2>(1, 2),
+    secondAtOnce: fc.boolean(),
+    steps: fc.array(
+      fc.oneof(
+        fc.record({
+          kind: fc.constant(`release` as const),
+          load: fc.constantFrom<0 | 1>(0, 1),
+        }),
+        fc.record({
+          kind: fc.constant(`change` as const),
+          id: fc.constantFrom<1 | 258 | 300>(1, 258, 300),
+          operation: fc.constantFrom<`set` | `delete`>(`set`, `delete`),
+        }),
+        fc.constant({ kind: `start-second` as const }),
+      ),
+      { maxLength: 10 },
+    ),
+  })
+  .map((history) => {
+    let changes = 0
+    return {
+      ...history,
+      steps: history.steps.filter((step) => {
+        if (step.kind !== `change`) return true
+        if (changes >= 4) return false
+        // Offset paging: only updates of rows the service already holds.
+        if (
+          history.paging === `offset` &&
+          (step.operation === `delete` || step.id === 300)
+        )
+          return false
+        changes++
+        return true
+      }),
+    }
+  })
+
+async function checkPageHistory(history: PageHistory) {
+  const service = new Map<number, RaceRow>()
+  for (let id = 1; id <= pageServiceSize; id++)
+    service.set(id, { id, data: `v0` })
+  const stream = new TransformStream<Event>()
+  const listener = stream.writable.getWriter()
+  // Each load's list calls, oldest first, with the answer captured at the call.
+  type PendingPage = { answer: ListResponse<RaceRow>; resolve: () => void }
+  const pending: [Array<PendingPage>, Array<PendingPage>] = [[], []]
+  const returnedKeys = new Set<number>()
+  const changedKeys = new Set<number>()
+  let version = 0
+  let loadOfNextCall: 0 | 1 = 0
+  const api = new MockRecordApi<RaceRow>()
+  api.subscribe.mockImplementation(() => Promise.resolve(stream.readable))
+  api.list.mockImplementation((opts) => {
+    const rows = [...service.values()].sort((a, b) => a.id - b.id)
+    const limit = opts?.pagination?.limit ?? 256
+    const after =
+      opts?.pagination?.cursor === undefined
+        ? undefined
+        : Number(opts.pagination.cursor)
+    const from =
+      after !== undefined
+        ? rows.findIndex((row) => row.id > after)
+        : (opts?.pagination?.offset ?? 0)
+    const records =
+      from < 0 ? [] : rows.slice(from, from + limit).map((row) => ({ ...row }))
+    const page = deferred<ListResponse<RaceRow>>()
+    const answer = {
+      records,
+      cursor: records.length > 0 ? String(records.at(-1)!.id) : undefined,
+    } as ListResponse<RaceRow>
+    pending[loadOfNextCall].push({
+      answer,
+      resolve: () => {
+        for (const record of records) returnedKeys.add(record.id)
+        page.resolve(answer)
+      },
+    })
+    return page.promise
+  })
+  const collection = createCollection(
+    trailBaseCollectionOptions({
+      recordApi: api,
+      getKey: (row: RaceRow) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      parse: {},
+      serialize: {},
+    }),
+  )
+  const options =
+    history.paging === `offset` ? ({ offset: 1 } as never) : ({} as never)
+  const loads: Array<ReturnType<typeof observe>> = []
+  const startLoad = async (load: 0 | 1) => {
+    loadOfNextCall = load
+    loads[load] = observe(Promise.resolve(collection._sync.loadSubset(options)))
+    await turn()
+  }
+  const value = (id: number) => {
+    const row = collection.get(id)
+    return row ? { id: row.id, data: row.data } : undefined
+  }
+  const trace = JSON.stringify(history)
+  const checkChangedKeys = (label: string) => {
+    for (const id of changedKeys)
+      expect(value(id), `${trace} ${label}: key ${id}`).toEqual(service.get(id))
+  }
+  const release = async (load: 0 | 1) => {
+    const next = pending[load].shift()
+    if (!next) return
+    loadOfNextCall = load
+    next.resolve()
+    await turn()
+    await turn()
+  }
+
+  try {
+    await turn()
+    await startLoad(0)
+    let secondStarted = false
+    if (history.loads === 2 && history.secondAtOnce) {
+      await startLoad(1)
+      secondStarted = true
+    }
+    for (const [index, step] of history.steps.entries()) {
+      if (step.kind === `release`) await release(step.load)
+      else if (step.kind === `start-second`) {
+        if (history.loads === 2 && !secondStarted) {
+          await startLoad(1)
+          secondStarted = true
+        }
+      } else {
+        const existing = service.get(step.id)
+        let event: Event | undefined
+        if (step.operation === `delete`) {
+          if (existing) {
+            service.delete(step.id)
+            event = { Delete: existing }
+          }
+        } else {
+          const row = { id: step.id, data: `v${++version}` }
+          service.set(step.id, row)
+          event = existing ? { Update: row } : { Insert: row }
+        }
+        if (event) {
+          changedKeys.add(step.id)
+          await listener.write(event)
+          await turn()
+        }
+      }
+      checkChangedKeys(`after step ${index}`)
+    }
+    if (history.loads === 2 && !secondStarted) await startLoad(1)
+
+    // Drain: release every remaining page, oldest load first.
+    for (let guard = 0; guard < 16; guard++) {
+      if (pending[0].length === 0 && pending[1].length === 0) break
+      await release(pending[0].length > 0 ? 0 : 1)
+    }
+    for (const load of loads)
+      expect(load.result, `${trace} load settled`).toBe(`fulfilled`)
+    for (const id of new Set([...returnedKeys, ...changedKeys]))
+      expect(value(id), `${trace} drained: key ${id}`).toEqual(service.get(id))
+  } finally {
+    for (const queue of pending)
+      for (const next of queue.splice(0)) next.resolve()
+    await collection.cleanup()
+    void listener.close().catch(() => undefined)
+    await turn()
+  }
+}
+
+// Named replays: each closes one dimension the single-page lane leaves open.
+const pageReplays: Array<[string, PageHistory]> = [
+  [
+    `an update between the two pages of one load`,
+    {
+      paging: `cursor`,
+      loads: 1,
+      secondAtOnce: false,
+      steps: [
+        { kind: `release`, load: 0 },
+        { kind: `change`, id: 258, operation: `set` },
+        { kind: `release`, load: 0 },
+      ],
+    },
+  ],
+  [
+    `an update then a delete while the first page is in flight`,
+    {
+      paging: `cursor`,
+      loads: 1,
+      secondAtOnce: false,
+      steps: [
+        { kind: `change`, id: 1, operation: `set` },
+        { kind: `change`, id: 1, operation: `delete` },
+        { kind: `release`, load: 0 },
+      ],
+    },
+  ],
+  [
+    `two overlapping loads around an update`,
+    {
+      paging: `cursor`,
+      loads: 2,
+      secondAtOnce: true,
+      steps: [
+        { kind: `change`, id: 1, operation: `set` },
+        { kind: `release`, load: 1 },
+        { kind: `release`, load: 0 },
+      ],
+    },
+  ],
+  [
+    `offset paging with two updates between pages`,
+    {
+      paging: `offset`,
+      loads: 1,
+      secondAtOnce: false,
+      steps: [
+        { kind: `release`, load: 0 },
+        { kind: `change`, id: 258, operation: `set` },
+        { kind: `change`, id: 258, operation: `set` },
+        { kind: `release`, load: 0 },
+      ],
+    },
+  ],
+]
+
+it.each(pageReplays)(`converges: %s`, (_name, history) =>
+  checkPageHistory(history),
+)
+fcTest.prop([pageHistoryArb], { seed: 205_917, numRuns: oracleRuns(40) })(
+  `converges across generated page histories with a fixed seed`,
+  (history) => checkPageHistory(history),
+)
+fcTest.prop(
+  [pageHistoryArb],
+  oraclePropertyOptions(40, `trailbase.page-event`),
+)(
+  `converges across generated page histories with a random or replayed seed`,
+  (history) => checkPageHistory(history),
+)
+
+/**
+ * ## Does a fresh sync run load a row an earlier run's event touched?
+ *
+ * Law: cleanup clears the Collection and retires the old run, so the new
+ * run's page is the only source for that row until a new event arrives. The
+ * page fence must compare against events of the current run only. A frozen
+ * clock makes the old run's event and the new run's list call share a
+ * millisecond, the case a wall-clock fence cannot order.
+ */
+it(`loads a row in a fresh run that an earlier run's event touched`, async () => {
+  const service = new Map(raceServiceRows.map((row) => [row.id, row]))
+  const streams: Array<WritableStreamDefaultWriter<Event>> = []
+  const api = new MockRecordApi<RaceRow>()
+  api.subscribe.mockImplementation(() => {
+    const stream = new TransformStream<Event>()
+    streams.push(stream.writable.getWriter())
+    return Promise.resolve(stream.readable)
+  })
+  api.list.mockImplementation(() =>
+    Promise.resolve({
+      records: [...service.values()].map((row) => ({ ...row })),
+    }),
+  )
+  const now = vi.spyOn(Date, `now`).mockReturnValue(1_000_000)
+  const collection = createCollection(
+    trailBaseCollectionOptions({
+      recordApi: api,
+      getKey: (row: RaceRow) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      parse: {},
+      serialize: {},
+    }),
+  )
+  try {
+    await turn()
+    await collection._sync.loadSubset({})
+    const changed = { id: 1, data: `v2` }
+    service.set(1, changed)
+    await streams[0]!.write({ Update: changed })
+    await turn()
+    expect(collection.get(1)?.data, `first run`).toBe(`v2`)
+
+    await collection.cleanup()
+    await collection.preload()
+    await turn()
+    await collection._sync.loadSubset({})
+    await turn()
+    expect(
+      sortedRows(collection.toArray),
+      `fresh run after an event in the same millisecond`,
+    ).toEqual(sortedRows(service.values()))
+  } finally {
+    now.mockRestore()
+    await collection.cleanup()
+    for (const writer of streams) void writer.close().catch(() => undefined)
+    await turn()
+  }
+})

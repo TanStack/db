@@ -205,6 +205,9 @@ export function trailBaseCollectionOptions<
       const cursors = new Map<string | number, string>()
 
       let listening = false
+      // Orders this run's change events against its list calls.
+      let eventSequence = 0
+      const eventSequenceByKey = new Map<TKey, number>()
       // Settles when the listener runs, cannot start (with the failure), or
       // the session cleans up, so a waiting load never depends on the order
       // of their continuations.
@@ -269,7 +272,7 @@ export function trailBaseCollectionOptions<
           const limit = Math.min(remaining, 256)
           let response
           // A change event after this point is newer than the page.
-          const listedAt = Date.now()
+          const listedAfter = eventSequence
           try {
             response = await config.recordApi.list({
               pagination: {
@@ -301,8 +304,7 @@ export function trailBaseCollectionOptions<
             const value = parse(response.records[i]!)
             const key = getKey(value)
             // The listener already applied a newer change for this row.
-            if ((seenIds.state.get(String(key)) ?? -Infinity) >= listedAt)
-              continue
+            if ((eventSequenceByKey.get(key) ?? 0) > listedAfter) continue
             write({ type: collection.has(key) ? `update` : `insert`, value })
           }
 
@@ -372,6 +374,7 @@ export function trailBaseCollectionOptions<
           void commit()
 
           if (value) {
+            eventSequenceByKey.set(getKey(value), ++eventSequence)
             seenIds.setState((curr: Map<string, number>) => {
               const newIds = new Map(curr)
               newIds.set(String(getKey(value)), Date.now())
