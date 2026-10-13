@@ -31,17 +31,45 @@ lead, not evidence that one contract governs every item.
    condition such as cardinality, ordering, identity, authority, or observation
    time. Keep other conditions fixed where possible. Check the boundary is
    within the claimed domain.
-5. Describe the smallest independent model that can make those predictions.
+5. Identify the checkpoint where the contract requires the proposed result; a
+   permitted pending state does not establish a gap. Check whether the result
+   is determined by the information available to the responsible production
+   path there. Seek two legal underlying histories that give the path the same
+   initial state and inputs through that checkpoint but require incompatible
+   public observations. If they exist, name the missing information or provider
+   obligation. A candidate law may be scoped explicitly; do not silently narrow
+   an accepted promise, which requires authority to revise.
+6. Describe the smallest independent model that enacts the obligation and limits
+   from step 1 and makes the rival and boundary predictions from steps 3–4.
+   Retain the source facts needed to examine any information gap from step 5,
+   even when the production path has not received them.
    For any proposed merge of model states, ask whether a legal next action can
    distinguish them. Map model abstractions to the project vocabulary.
 
+The information check concerns what production can receive. The test of model
+state concerns what the reference must remember. A model may know a source row
+that the production path has never received. For example, suppose a path must
+publish a full top-ten result after a deletion but receives only the old top
+ten and the deletion. If it cannot receive replacement rows before publication,
+two source datasets can require incompatible results while the path sees the
+same inputs. A live query can request replacement rows with `loadSubset`. If
+the provider supplies them through Collection sync writes that apply before
+publication, that path has the needed information; judge it at its own promised
+publication checkpoint.
+
 **Return:** the candidate law and status, its source, rival predictions, a
 concrete distinguishing witness, and the next experiment or unresolved decision.
+For an information gap, include the indistinguishable histories and the
+unresolved source, protocol, or scope decision.
 For a simple law, a short paragraph and a worked example suffice.
 
 **Control:** try a legal alternative implementation. Does the proposed law
 reject it only because its scheduling or representation differs? Also try a
-plausible wrong result: could the proposed observation distinguish it?
+plausible wrong result: could the proposed observation distinguish it? If an
+information gap is claimed, try a nearby path that supplies the missing input,
+such as a provider backfill. Check whether that input distinguishes the
+histories before the checkpoint; if it does, the original impossibility
+argument no longer applies to that path.
 
 **Distortion:** freezing an implementation accident into a law; treating a vivid
 edge case as representative; or overstating what is owed at an intermediate cut.

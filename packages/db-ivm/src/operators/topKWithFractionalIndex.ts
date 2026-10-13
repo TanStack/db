@@ -15,11 +15,19 @@ import type { IStreamBuilder, PipedOperator } from '../types.js'
 export interface TopKWithFractionalIndexOptions {
   limit?: number
   offset?: number
-  setSizeCallback?: (getSize: () => number) => void
+  setSizeCallback?: SetSizeCallback
   setWindowFn?: (
     windowFn: (options: { offset?: number; limit?: number }) => void,
   ) => void
 }
+
+/**
+ * Receives the window size. Given a predicate that holds for a prefix of the
+ * window order, the getter counts only the leading values that satisfy it.
+ */
+export type SetSizeCallback = (
+  getSize: (counts?: (value: unknown) => boolean) => number,
+) => void
 
 /**
  * Operator for fractional indexed topK operations
@@ -48,7 +56,9 @@ export class TopKWithFractionalIndexOperator<
       createKeyedComparator(comparator),
     )
     this.#state = new TopKState(topK)
-    options.setSizeCallback?.(() => this.#state.size)
+    options.setSizeCallback?.((counts) =>
+      counts ? this.#state.countLeadingInWindow(counts) : this.#state.size,
+    )
     options.setWindowFn?.(this.moveTopK.bind(this))
   }
 

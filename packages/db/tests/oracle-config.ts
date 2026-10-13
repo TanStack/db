@@ -151,6 +151,7 @@ const staticOracleProperties = [
   `ordered-work.consumer-parity`,
   `ordered-work.eager-indexed-window`,
   `ordered-work.eager-joined-window`,
+  `ordered-work.eager-joined-gap`,
   `ordered-work.lifecycle`,
   `ordered-work.nullable-lifecycle`,
   `pagination.async-cursor`,
