@@ -1925,15 +1925,19 @@ function createElectricSync<T extends Row<unknown>>(
     // Abort controller for the stream - wraps the signal if provided
     const abortController = new AbortController()
     let cleanupAbortedStream = false
-    const forwardExternalAbort = () => abortController.abort()
+    // An external abort stops the source for good. Before the first ready,
+    // that is the final initial failure; cleanup aborts internally instead.
+    const forwardExternalAbort = () => {
+      if (isActiveLifecycle() && collection.status === `loading`)
+        markError(new StreamAbortedError(collectionId))
+      abortController.abort()
+    }
 
     if (shapeOptions.signal) {
       shapeOptions.signal.addEventListener(`abort`, forwardExternalAbort, {
         once: true,
       })
-      if (shapeOptions.signal.aborted) {
-        abortController.abort()
-      }
+      if (shapeOptions.signal.aborted) forwardExternalAbort()
     }
 
     abortController.signal.addEventListener(`abort`, () => {

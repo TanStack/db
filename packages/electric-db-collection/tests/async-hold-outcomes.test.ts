@@ -59,7 +59,11 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
 
 function createProgressive(
   id: string,
-  onError?: () => Record<string, never> | undefined,
+  onError?: () =>
+    | Record<string, never>
+    | undefined
+    | Promise<Record<string, never> | undefined>,
+  signal?: AbortSignal,
 ) {
   return createCollection({
     ...electricCollectionOptions({
@@ -68,6 +72,7 @@ function createProgressive(
         url: `http://test-url`,
         params: { table: `users` },
         ...(onError ? { onError } : {}),
+        ...(signal ? { signal } : {}),
       },
       syncMode: `progressive`,
       getKey: (user: User) => user.id,
@@ -195,6 +200,56 @@ describe(`progressive load waiting on the established snapshot`, () => {
       await collection.cleanup()
     },
   )
+
+  // Aborting the stream's external signal stops the source for good. Before
+  // the first ready, that is a final initial failure, even while an
+  // asynchronous onError decision is still pending.
+  it.each([`while loading`, `during a pending onError decision`] as const)(
+    `fails the initial sync when the external signal aborts %s`,
+    async (when) => {
+      const controller = new AbortController()
+      let decide!: (retry: Record<string, never>) => void
+      const collection = createProgressive(
+        `hold-external-abort-${when}`,
+        when === `while loading`
+          ? undefined
+          : () =>
+              new Promise<Record<string, never>>((resolve) => {
+                decide = resolve
+              }),
+        controller.signal,
+      )
+      mustRefetch()
+      const load = observe(collection._sync.loadSubset({ limit: 1 }))
+      const preload = observe(collection.preload())
+      await flush()
+      if (when === `during a pending onError decision`) {
+        void streamOnError()(new Error(`stream failed`))
+        await flush()
+        expect(collection.status).toBe(`loading`)
+      }
+
+      controller.abort()
+      await flush()
+      expect(collection.status).toBe(`error`)
+      expect(load.state).toBe(`rejected`)
+      expect(preload.state).toBe(`rejected`)
+      if (when === `during a pending onError decision`) {
+        decide({})
+        await flush()
+        expect(collection.status).toBe(`error`)
+      }
+      await collection.cleanup()
+    },
+  )
+
+  it(`cleanup does not fail the initial sync`, async () => {
+    const collection = createProgressive(`hold-cleanup-status`)
+    mustRefetch()
+    await flush()
+    await collection.cleanup()
+    expect(collection.status).toBe(`cleaned-up`)
+  })
 
   // A retry that succeeds is a success: the wait settles on the snapshot the
   // retried stream establishes, and the initial sync never fails.
