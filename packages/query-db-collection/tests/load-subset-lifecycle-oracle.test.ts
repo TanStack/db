@@ -267,6 +267,79 @@ async function expectPendingFullSourceDoesNotServeFilteredDemand(): Promise<void
   }
 }
 
+/**
+ * A narrower lease can outlive the full view, but it is still the final owner
+ * of that Query. Releasing it during a held revalidation must abort the Query
+ * fetch and retire the old rows. Late provider settlement cannot republish.
+ */
+async function expectFinalFullSourceDependentCancelsFetch(): Promise<void> {
+  const queryClient = createQueryClient()
+  const id = `full-source-final-dependent-${collectionSequence++}`
+  let resolveHeldFetch: ((rows: Array<Row>) => void) | undefined
+  let heldSignal: AbortSignal | undefined
+  let requests = 0
+  const queryFn = vi.fn((context: QueryFunctionContext) => {
+    requests++
+    if (requests === 1) {
+      return Promise.resolve([
+        { id: `a1`, group: `a` },
+        { id: `b1`, group: `b` },
+      ])
+    }
+    heldSignal = context.meta?.loadSubsetOptions?.signal
+    expect(heldSignal).toBe(context.signal)
+    return new Promise<Array<Row>>((resolve) => {
+      resolveHeldFetch = resolve
+    })
+  })
+  const collection = createCollection(
+    queryCollectionOptions<Row>({
+      id,
+      queryClient,
+      queryKey: [id],
+      queryFn,
+      getKey: (row) => row.id,
+      startSync: true,
+      syncMode: `on-demand`,
+      staleTime: 5 * 60 * 1000,
+    }),
+  )
+  const full = createLiveQueryCollection((query) =>
+    query.from({ row: collection }).select(({ row }) => ({ id: row.id })),
+  )
+  const filtered = createLiveQueryCollection((query) =>
+    query
+      .from({ row: collection })
+      .where(({ row }) => eq(row.group, `a`))
+      .select(({ row }) => ({ id: row.id })),
+  )
+  try {
+    await full.preload()
+    await filtered.preload()
+    expect(requests).toBe(1)
+    await full.cleanup()
+    const invalidation = queryClient.invalidateQueries({
+      queryKey: [id],
+      exact: true,
+    })
+    await vi.waitFor(() => expect(resolveHeldFetch).toBeDefined())
+    expect(heldSignal?.aborted).toBe(false)
+    await filtered.cleanup()
+    expect(heldSignal?.aborted).toBe(true)
+    expect(collection.size).toBe(0)
+    resolveHeldFetch?.([{ id: `late`, group: `a` }])
+    await invalidation
+    expect(collection.size).toBe(0)
+    expect(collection.has(`late`)).toBe(false)
+  } finally {
+    resolveHeldFetch?.([])
+    await full.cleanup()
+    await filtered.cleanup()
+    await collection.cleanup()
+    queryClient.clear()
+  }
+}
+
 async function expectInitialQueryFailureStatus(): Promise<void> {
   const error = new Error(`initial query failed`)
   const queryClient = createQueryClient()
@@ -1565,6 +1638,10 @@ describe(`loadSubset lifecycle oracle`, () => {
 
   it(`loads a filtered demand while the full-source Query remains incomplete`, async () => {
     await expectPendingFullSourceDoesNotServeFilteredDemand()
+  })
+
+  it(`cancels a shared full-source fetch after its final filtered owner releases`, async () => {
+    await expectFinalFullSourceDependentCancelsFetch()
   })
 
   it(`refetches an existing semantic demand without changing its query or unload identity`, async () => {

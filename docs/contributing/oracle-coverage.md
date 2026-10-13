@@ -471,6 +471,8 @@ fails on the original implementation at the provider-call checkpoint.
 It checks that the initial full acquisition signal may abort while a later
 shared full fetch receives a live signal, and that a later equal demand sees
 a failed full revalidation rather than switching Query owners.
+Another held-fetch cut releases the final filtered owner during full Query
+revalidation, then checks transport abort and no late row publication.
 Arbitrary predicate containment, function-built Query keys, and persisted
 startup replay with a shared full-source lease still need distinct witnesses.
 Its real QueryClient witness loads ten disjoint on-demand subsets, then checks
