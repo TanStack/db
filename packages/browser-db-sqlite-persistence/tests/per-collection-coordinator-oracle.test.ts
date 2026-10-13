@@ -5117,6 +5117,10 @@ function createRealTab(options: {
   holdUpstream?: () => Promise<void>
   readGate?: (rows: ReadonlyArray<unknown>) => Promise<void>
   now?: () => number
+  // Commit on every load: a newer version of a delivered row (`update`), or
+  // the same row inserted again (`reinsert`, an equal-value insert core
+  // reconciles as an update).
+  commitEachLoad?: `update` | `reinsert`
 }) {
   const database = createWASQLiteTestDatabase({ filename: options.filename })
   const gatedDatabase: BrowserWASQLiteDatabase = {
@@ -5169,11 +5173,28 @@ function createRealTab(options: {
     return upstreamRows(where)
   }
   const delivered = new Set<string>()
+  let version = 0
   const receiptSource: SyncConfig<RealTabRow, string> = {
     sync: ({ begin, write, commit, markReady }) => {
       markReady()
       return {
         loadSubset: async (subset) => {
+          if (options.commitEachLoad) {
+            const fresh = await loadUpstream(subset.where)
+            if (fresh.length === 0) return
+            begin()
+            for (const row of fresh) {
+              const delivered_ = delivered.has(row.id)
+              delivered.add(row.id)
+              if (options.commitEachLoad === `update` && delivered_) {
+                const next = { ...row, group: `v${++version}` }
+                options.upstream.set(row.id, next)
+                write({ type: `update`, value: next })
+              } else write({ type: `insert`, value: row })
+            }
+            await whenSyncAccepted(commit())
+            return
+          }
           // Like a real source, deliver each upstream row version once.
           const rows = (await loadUpstream(subset.where)).filter(
             (row) => !delivered.has(row.id),
@@ -5215,11 +5236,7 @@ function createRealTab(options: {
               syncMode: `on-demand`,
               getKey: (row) => row.id,
               queryFn: (context) =>
-                loadUpstream(
-                  (
-                    context.meta?.loadSubsetOptions
-                  )?.where,
-                ),
+                loadUpstream(context.meta?.loadSubsetOptions?.where),
             }),
           }),
         )
@@ -5473,6 +5490,101 @@ describe(`follower remote-demand settlement across real tabs`, () => {
             status: follower.collection.status,
           }).toEqual({ remote: true, other: true, status: `ready` })
         } finally {
+          for (const tab of tabs.reverse())
+            await tab.cleanup().catch(() => undefined)
+          rmSync(directory, { recursive: true, force: true })
+        }
+      }),
+    30_000,
+  )
+})
+
+/*
+A leader source may commit on every load: a legal update with a new value, or
+an equal-value insert of a row it already delivered, which core reconciles as
+an update. A follower applies the leader's commit notice from durable rows.
+That apply must not release and request the follower's demand again: a new
+request makes the leader's source load and commit again, and the follower
+would never settle. The model: the follower's query is first ready with the
+leader's row, the follower sends at most two ensures (its demand, and at most
+one replay), and a later leader commit still reaches the follower with the
+leader's current value.
+*/
+describe(`follower stays bounded when the leader commits on every load`, () => {
+  it.each([`update`, `reinsert`] as const)(
+    `settles and stays bounded: commit on every load as $0`,
+    (commitEachLoad) =>
+      withNativeBrowserTransport(async () => {
+        const directory = mkdtempSync(join(tmpdir(), `db-real-tab-each-load-`))
+        const filename = join(directory, `tabs.sqlite`)
+        const dbName = `real-tab-each-load-${Math.random().toString(36).slice(2)}`
+        const upstream = new Map<string, RealTabRow>([
+          [`remote`, { id: `remote`, group: `a` }],
+        ])
+        const tabs: Array<ReturnType<typeof createRealTab>> = []
+        const queries: Array<{ cleanup: () => Promise<void> }> = []
+        const remote: LoadSubsetOptions = {
+          where: new IR.Func(`eq`, [
+            new IR.PropRef([`id`]),
+            new IR.Value(`remote`),
+          ]),
+        }
+        try {
+          const leader = createRealTab({
+            dbName,
+            filename,
+            source: `receipt`,
+            upstream,
+            commitEachLoad,
+          })
+          tabs.push(leader)
+          leader.collection.startSyncImmediate()
+          await leader.collection.stateWhenReady()
+          const follower = createRealTab({
+            dbName,
+            filename,
+            source: `receipt`,
+            upstream,
+            commitEachLoad,
+          })
+          tabs.push(follower)
+          follower.collection.startSyncImmediate()
+          await vi.waitFor(() =>
+            expect(follower.storageCollectionId()).toBeDefined(),
+          )
+          const items: Collection<RealTabRow, string> = follower.collection
+          const query = createLiveQueryCollection((q) =>
+            q.from({ item: items }).where(({ item }) => eq(item.id, `remote`)),
+          )
+          queries.push(query)
+          let rowsAtFirstReady: Array<string> | undefined
+          query.onFirstReady(() => {
+            rowsAtFirstReady = query.toArray.map((row) => row.id)
+          })
+          void query.preload().catch(() => undefined)
+          await vi.waitFor(() => expect(query.isReady()).toBe(true), {
+            timeout: 8_000,
+          })
+          expect(rowsAtFirstReady).toEqual([`remote`])
+          for (let turn = 0; turn < 200; turn++) await nextTurn()
+          const ensures = () =>
+            follower.trace.filter((entry) => entry === `ensure`).length
+          expect(ensures()).toBeLessThanOrEqual(2)
+
+          // A later leader commit still reaches the follower.
+          await leader.collection._sync.loadSubset(remote)
+          await vi.waitFor(
+            () =>
+              expect(follower.collection.get(`remote`)?.group).toBe(
+                upstream.get(`remote`)!.group,
+              ),
+            { timeout: 8_000 },
+          )
+          for (let turn = 0; turn < 200; turn++) await nextTurn()
+          expect(ensures()).toBeLessThanOrEqual(2)
+        } finally {
+          for (const query of queries)
+            await query.cleanup().catch(() => undefined)
           for (const tab of tabs.reverse())
             await tab.cleanup().catch(() => undefined)
           rmSync(directory, { recursive: true, force: true })

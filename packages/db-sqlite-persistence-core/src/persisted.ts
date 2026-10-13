@@ -3731,10 +3731,15 @@ class PersistedCollectionRuntime<
       ),
     )
     const rowKeys = new Set(rows.map((row) => row.key))
+    // A truncate replays the Collection's demand. A follower routes that
+    // demand to its leader, whose source loads and commits again, so a
+    // follower replaces its rows in place instead.
+    const truncate =
+      hydratedKeys.size === 0 && !this.canRouteRemoteDemandThroughCoordinator()
 
     return this.withInternalApply(() => {
       this.syncControls.begin?.()
-      if (hydratedKeys.size === 0) {
+      if (truncate) {
         this.syncControls.truncate?.()
       } else {
         for (const key of base?.keys() ?? []) {
@@ -3750,7 +3755,7 @@ class PersistedCollectionRuntime<
 
       for (const row of rows) {
         if (hydratedKeys.has(row.key)) continue
-        if (hydratedKeys.size > 0 && base?.has(row.key)) {
+        if (!truncate && base?.has(row.key)) {
           // Remove stale fields before applying a complete persisted row in
           // the default partial-update mode, without truncating seed keys.
           this.syncControls.write?.({ type: `delete`, key: row.key })
