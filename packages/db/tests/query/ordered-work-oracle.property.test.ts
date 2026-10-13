@@ -4922,7 +4922,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
   // row that moves between two pages still arrives. A request without a
   // limit or an order re-runs as it is. Rows in no range leave, as a
   // query-db-collection refetch removes rows no query holds. (query-db
-  // re-runs each page alone today, which leaves such gaps.)
+  // re-runs each page alone today, which leaves such gaps: #2136.)
   const coverage = (options: LoadSubsetOptions): Array<Row> => {
     const end = rangeEnds.get(options)
     if (end === undefined) return pageFor(options)
