@@ -1933,13 +1933,16 @@ function createElectricSync<T extends Row<unknown>>(
     // accepted, whatever errors, retries, or give-ups arrive meanwhile, and
     // fails if the acceptance fails.
     let firstSnapshotCommitted = false
+    // Cleanup, including a cache rotation's retirement, ends this session's
+    // claim on readiness; a replacement session decides it.
+    let sessionCleanedUp = false
     const failInitialSync = (cause: unknown) => {
       if (firstSnapshotCommitted) return
       initialSyncFailedFinally = true
       markError(cause)
     }
     const settleFirstSnapshot = (isBuffering: boolean, failure?: unknown) => {
-      if (collection.status !== `loading`) return
+      if (sessionCleanedUp || collection.status !== `loading`) return
       if (failure !== undefined) {
         initialSyncFailedFinally = true
         markError(failure)
@@ -2747,6 +2750,7 @@ function createElectricSync<T extends Row<unknown>>(
     return {
       loadSubset: loadSubsetDedupe?.loadSubset,
       cleanup: () => {
+        sessionCleanedUp = true
         if (!abortController.signal.aborted && !initialSyncFailedFinally)
           cleanupAbortedStream = true
         shapeOptions.signal?.removeEventListener(`abort`, forwardExternalAbort)

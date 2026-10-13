@@ -1,7 +1,11 @@
 import { isDeepStrictEqual } from 'node:util'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { createCollection, createTransaction } from '@tanstack/db'
+import {
+  createCollection,
+  createTransaction,
+  withAcceptedReceipt,
+} from '@tanstack/db'
 import { ShapeStream } from '@electric-sql/client'
 import {
   InvalidPersistedCollectionConfigError,
@@ -1144,6 +1148,104 @@ fixedCase(`rejects a demand after provider-session restart fails`, async () => {
     await run.cleanup?.()
   }
 })
+
+// A cache rotation retires the provider session and starts a replacement on
+// the same core sync run. If the retired session's first up-to-date was
+// committed but its persistence step has not accepted it, that acceptance
+// belongs to a cache generation the rotation discarded. The independent rule:
+// a retired session's acceptance settles nothing, whether it resolves or
+// rejects, and the replacement session's first up-to-date decides readiness.
+// The driver observes the Collection's readiness boundary (markReady and
+// markError) after the retired acceptance settles and after the replacement
+// delivers its snapshot.
+fixedCase.each([`resolves`, `rejects`] as const)(
+  `lets only the replacement session decide readiness when a retired acceptance %s`,
+  async (outcome) => {
+    const options = descriptor(`original`, false, `on-demand`)
+    const readiness: Array<string> = []
+    let status = `loading`
+    let releaseAcceptance!: () => void
+    let failAcceptance!: (error: Error) => void
+    const acceptance = new Promise<void>((resolve, reject) => {
+      releaseAcceptance = resolve
+      failAcceptance = reject
+    })
+    void acceptance.catch(() => undefined)
+    let holdNextCommit = true
+    const params = {
+      collection: {
+        utils: {},
+        getKeyFromItem: (row: TestRow) => row.id,
+        _state: { syncedData: new Map() },
+        get status() {
+          return status
+        },
+      },
+      begin: () => {},
+      write: () => {},
+      // The first commit's acceptance is held, as a persistence wrapper
+      // accepts after its durable step.
+      commit: () => {
+        if (!holdNextCommit) return true
+        holdNextCommit = false
+        return withAcceptedReceipt(Promise.resolve(), acceptance)
+      },
+      markReady: () => {
+        readiness.push(`ready`)
+        status = `ready`
+      },
+      markError: () => {
+        readiness.push(`error`)
+        status = `error`
+      },
+      truncate: () => {},
+      metadata: {
+        collection: { get: () => undefined, set: () => {} },
+        row: { get: () => undefined, set: () => {} },
+        persistence: {
+          protocol: `@tanstack/db/sync-persistence`,
+          version: 1,
+          managedCacheGeneration: true,
+          hydrateBaseline: async () => {},
+          startScopedRecovery: async () => {},
+          reserveCommitTurn: () => {},
+          scanPersistedRows: async () => [],
+          resumeSnapshot: {
+            certify: async () => {},
+            getKeySetEvidence: () => undefined,
+            expectCurrentCommit: () => {},
+          },
+        },
+      },
+    } as unknown as Parameters<typeof options.sync.sync>[0]
+    const run = options.sync.sync(params)
+    if (typeof run !== `object` || !run.restartAfterScopedRecovery) {
+      throw new Error(`Missing managed Electric restart hook`)
+    }
+    try {
+      streams[0]!.send([upToDate])
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect(readiness, `first snapshot committed, not accepted`).toEqual([])
+
+      await atCheckpoint(
+        Promise.resolve(run.restartAfterScopedRecovery(Promise.resolve())),
+        `cache rotation`,
+      )
+      if (outcome === `resolves`) releaseAcceptance()
+      else failAcceptance(new Error(`retired generation write aborted`))
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect(readiness, `retired acceptance ${outcome}`).toEqual([])
+
+      expect(streams).toHaveLength(2)
+      streams[1]!.send([upToDate])
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect(readiness, `replacement snapshot`).toEqual([`ready`])
+    } finally {
+      releaseAcceptance()
+      await run.cleanup?.()
+    }
+  },
+)
 
 // Two valid cache rotations may overlap in the persisted wrapper. The second
 // hook call owns a distinct cacheRotated gate: its replacement provider session
