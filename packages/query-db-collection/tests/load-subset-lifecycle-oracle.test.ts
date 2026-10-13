@@ -387,12 +387,12 @@ async function expectFullSourceReuseWaitsForApplication(
  * An accepted direct write changes the Collection's full-source rows. The
  * independent reference changes only that row, then filters the resulting
  * two rows. A later filtered acquisition may reuse those rows or fetch its
- * exact scope; it must not cause a redundant full-source request. The
+ * exact scope once; it must not cause a redundant full-source request. The
  * observation is provider scope and public rows after filtered preload, with
  * the full view still owning its Query. This bounded witness does not promise
  * that every newly acquired on-demand scope avoids provider work.
  */
-async function expectDirectWriteFullSourceServesFilteredDemand(): Promise<void> {
+async function expectFilteredDemandAfterDirectWriteAvoidsRedundantFetch(): Promise<void> {
   const queryClient = createQueryClient()
   const id = `direct-write-full-source-${collectionSequence++}`
   const requests: Array<`full` | `filtered`> = []
@@ -442,7 +442,8 @@ async function expectDirectWriteFullSourceServesFilteredDemand(): Promise<void> 
         ?.group,
     ).toBe(`b`)
     await filtered.preload()
-    expect(requests.filter((request) => request === `full`)).toEqual([`full`])
+    // Either source reuse or one exact-scope request satisfies this law.
+    expect([[`full`], [`full`, `filtered`]]).toContainEqual(requests)
     expect(filtered.toArray.map(({ id: rowId }) => rowId).sort()).toEqual([
       `a1`,
       `b1`,
@@ -2467,8 +2468,8 @@ describe(`loadSubset lifecycle oracle`, () => {
     },
   )
 
-  it(`serves a filtered demand from an applied full source after a direct write`, async () => {
-    await expectDirectWriteFullSourceServesFilteredDemand()
+  it(`avoids redundant fetches for a filtered demand after a direct write`, async () => {
+    await expectFilteredDemandAfterDirectWriteAvoidsRedundantFetch()
   })
 
   it(`cancels a shared full-source fetch after its final filtered owner releases`, async () => {

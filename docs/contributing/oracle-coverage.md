@@ -476,8 +476,11 @@ revalidation, then checks transport abort and no late row publication.
 Query-cache success reentry checks that initial and replacement full results
 cannot settle a filtered acquisition before Collection application; the
 replacement cut rejects a gate based only on previous full-row ownership. An
-applied direct cache patch permits exact filtered revalidation but cannot
-trigger a redundant full request. Signal witnesses cover providers that ignore
+applied direct cache patch permits reuse or one exact filtered revalidation
+for a new demand, but cannot trigger a redundant full request. The bounded
+history has no retry, invalidation, or explicit refetch; a duplicate filtered
+provider-call mutant fails its full request-sequence assertion. Signal
+witnesses cover providers that ignore
 their signal and may finish into Query cache after final unload for full-source
 and equal filtered sharing; equal full-source and filtered peers after the
 first releases; and two Collections sharing a Query whose later fetch runs the
