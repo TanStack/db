@@ -266,6 +266,19 @@ function normalizeBinary(value: Uint8Array): string {
   return normalizedKey(`binary`, bytes)
 }
 
+const durationFields = [
+  `years`,
+  `months`,
+  `weeks`,
+  `days`,
+  `hours`,
+  `minutes`,
+  `seconds`,
+  `milliseconds`,
+  `microseconds`,
+  `nanoseconds`,
+] as const
+
 /** Read a Temporal brand and display through its prototype, not own shadows. */
 type BrandedTemporal = { prototype: object; kind: string; text: string }
 
@@ -276,8 +289,9 @@ function brandedTemporal(value: unknown): BrandedTemporal | undefined {
   const toString = Object.getOwnPropertyDescriptor(prototype, `toString`)?.value
   if (typeof toString !== `function`) return undefined
   try {
-    // The native/polyfill method checks internal slots. A forged tag or a
-    // borrowed Temporal prototype cannot claim a Temporal ordered position.
+    // The native/polyfill method checks internal slots. An own forged tag or
+    // borrowed Temporal prototype cannot claim an ordered position. Arbitrary
+    // custom prototypes that spoof these methods remain outside this guard.
     const text = Reflect.apply(toString, value, [])
     return typeof text === `string`
       ? { prototype, kind: prototype[Symbol.toStringTag], text }
@@ -359,6 +373,42 @@ export function normalizeValue(value: any): any {
             calendarId,
           ]),
         )
+      }
+      return value
+    }
+    if (
+      kind === `Temporal.PlainMonthDay` ||
+      kind === `Temporal.PlainYearMonth`
+    ) {
+      // Default display omits the reference ISO year/day that native equals()
+      // compares. The intrinsic string form with the calendar shown includes
+      // those fields and ignores an instance's own toString shadow.
+      const toString = Object.getOwnPropertyDescriptor(
+        prototype,
+        `toString`,
+      )?.value
+      try {
+        const fullText = Reflect.apply(toString, value, [
+          { calendarName: `always` },
+        ])
+        return normalizedKey(`temporal`, `${kind}:${fullText}`)
+      } catch {
+        return value
+      }
+    }
+    if (kind === `Temporal.Duration`) {
+      // Duration's default display balances subsecond units. Equality under
+      // the #1519 contract instead preserves all ten intrinsic fields.
+      try {
+        const fields = durationFields.map((field) => {
+          const get = Object.getOwnPropertyDescriptor(prototype, field)?.get
+          return Reflect.apply(get!, value, []) as number
+        })
+        if (fields.every((field) => typeof field === `number`)) {
+          return normalizedKey(`temporal`, JSON.stringify([kind, ...fields]))
+        }
+      } catch {
+        // A borrowed prototype has no Temporal internal slots.
       }
       return value
     }

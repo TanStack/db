@@ -1619,6 +1619,86 @@ describe.each([
   },
 )
 
+// The caller's callback gives each signed zero its own order position, while
+// JavaScript Map gives them one exact membership class. This small source Map
+// is the authority for ownership; a fresh sort by the caller's stated numeric
+// rank predicts ordered reads. No index bucket or traversal helper is reused.
+function signedZeroPosition(value: number): number {
+  return Object.is(value, -0) ? -0.5 : value
+}
+
+const signedZeroCompare = (left: unknown, right: unknown): number =>
+  signedZeroPosition(left as number) - signedZeroPosition(right as number)
+
+function expectSignedZeroRefinement(
+  index: BaseIndex<string>,
+  rows: ReadonlyMap<string, number>,
+): void {
+  const ordered = [...rows].sort(
+    ([leftKey, leftValue], [rightKey, rightValue]) =>
+      signedZeroPosition(leftValue) - signedZeroPosition(rightValue) ||
+      (leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0),
+  )
+  const keys = ordered.map(([key]) => key)
+  const zeroOwners = new Set(
+    [...rows].filter(([, value]) => value === 0).map(([key]) => key),
+  )
+
+  // Observe the documented direct IndexInterface after every returned action.
+  // A set-only comparison would miss a skipped or duplicated ordered row.
+  expect(index.keyCount).toBe(rows.size)
+  expect(index.equalityLookup(-0)).toEqual(zeroOwners)
+  expect(index.equalityLookup(0)).toEqual(zeroOwners)
+  expect(index.takeFromStart(rows.size + 1)).toEqual(keys)
+  expect(index.takeReversedFromEnd(rows.size + 1)).toEqual([...keys].reverse())
+  for (const cursor of [-0, 0]) {
+    const position = signedZeroPosition(cursor)
+    expect(index.take(rows.size + 1, cursor)).toEqual(
+      ordered
+        .filter(([, value]) => signedZeroPosition(value) > position)
+        .map(([key]) => key),
+    )
+    expect(index.takeReversed(rows.size + 1, cursor)).toEqual(
+      ordered
+        .filter(([, value]) => signedZeroPosition(value) < position)
+        .reverse()
+        .map(([key]) => key),
+    )
+  }
+
+  // Distinct bounds with `===` equality are legal when a callback separates
+  // their positions. The reverse bound is empty; exclusive edges select one
+  // sign only. These probes reach both leaf and split BTree range traversal.
+  for (const options of [
+    { from: -0, to: -0 },
+    { from: 0, to: 0 },
+    { from: -0, to: 0 },
+    { from: -0, to: 0, fromInclusive: false },
+    { from: -0, to: 0, toInclusive: false },
+    { from: -0, to: 0, fromInclusive: false, toInclusive: false },
+    { from: 0, to: -0 },
+  ]) {
+    const lower = signedZeroPosition(options.from)
+    const upper = signedZeroPosition(options.to)
+    const expected = new Set(
+      [...rows]
+        .filter(([, value]) => {
+          const position = signedZeroPosition(value)
+          return (
+            (options.fromInclusive === false
+              ? position > lower
+              : position >= lower) &&
+            (options.toInclusive === false
+              ? position < upper
+              : position <= upper)
+          )
+        })
+        .map(([key]) => key),
+    )
+    expect(index.rangeQuery(options)).toEqual(expected)
+  }
+}
+
 describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
   test.each([`add`, `build`] as const)(
     `follows a custom callback that separates signed zero after %s`,
@@ -1657,6 +1737,74 @@ describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
       expect(index.takeFromStart(2)).toEqual([`positive`, `later`])
     },
   )
+
+  test(`tracks signed-zero order through updates, removal, and reuse`, () => {
+    const index = new IndexType(1, new PropRef([`value`]), undefined, {
+      compareFn: signedZeroCompare,
+    })
+    const rows = new Map<string, number>()
+    const put = (key: string, value: number): void => {
+      if (rows.has(key)) {
+        index.update(key, { value: rows.get(key) }, { value })
+      } else {
+        index.add(key, { value })
+      }
+      rows.set(key, value)
+      expectSignedZeroRefinement(index, rows)
+    }
+    const remove = (key: string): void => {
+      index.remove(key, { value: rows.get(key) })
+      rows.delete(key)
+      expectSignedZeroRefinement(index, rows)
+    }
+
+    // A sign-changing update keeps exact membership but must move the row's
+    // comparator position. Peers expose both stale and missing order buckets.
+    put(`negative-peer`, -0)
+    put(`moving`, -0)
+    put(`positive-peer`, 0)
+    put(`later`, 1)
+    put(`moving`, 0)
+    put(`moving`, -0)
+    remove(`moving`)
+    put(`moving`, 0)
+    remove(`negative-peer`)
+    put(`new-negative`, -0)
+  })
+
+  test(`preserves mixed-sign ranges across a BTree-sized split`, () => {
+    const index = new IndexType(1, new PropRef([`value`]), undefined, {
+      compareFn: signedZeroCompare,
+    })
+    const rows = new Map<string, number>()
+    // More than the BTree's default 32 keys places the two zero positions
+    // across an internal traversal. BasicIndex receives the same history.
+    const values = [
+      ...Array.from({ length: 15 }, (_, offset) => offset - 15),
+      -0,
+      0,
+      ...Array.from({ length: 16 }, (_, offset) => offset + 1),
+    ]
+    for (const [ordinal, value] of values.entries()) {
+      const key = `row-${String(ordinal).padStart(2, `0`)}`
+      index.add(key, { value })
+      rows.set(key, value)
+    }
+    expectSignedZeroRefinement(index, rows)
+
+    // Continue after the split so a stale old-position row cannot hide behind
+    // correct initial build order or leave an empty bucket after retirement.
+    const negative = `row-15`
+    index.update(negative, { value: -0 }, { value: 0 })
+    rows.set(negative, 0)
+    expectSignedZeroRefinement(index, rows)
+    index.remove(negative, { value: 0 })
+    rows.delete(negative)
+    expectSignedZeroRefinement(index, rows)
+    index.add(negative, { value: -0 })
+    rows.set(negative, -0)
+    expectSignedZeroRefinement(index, rows)
+  })
 
   test(`rejects stale retired identity outputs without rejecting live reuse`, () => {
     const symbol = Symbol(`same group`)

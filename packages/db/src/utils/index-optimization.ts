@@ -40,12 +40,15 @@ export interface OptimizationResult<TKey> {
 }
 
 /**
- * Finds an index that matches a given field path
+ * Finds an index that matches a field path. Exact predicates can use a custom
+ * comparator's equality buckets; ordered traversal needs an index whose order
+ * is represented by its comparison options.
  */
 export function findIndexForField<TKey extends string | number>(
   collection: CollectionLike<any, TKey>,
   fieldPath: Array<string>,
   compareOptions?: CompareOptions,
+  requireOrderedTraversal = false,
 ): IndexReader<TKey> | undefined {
   if (hasVirtualPropPath(fieldPath)) {
     return undefined
@@ -58,7 +61,8 @@ export function findIndexForField<TKey extends string | number>(
   for (const index of collection.indexes.values()) {
     if (
       index.matchesField(fieldPath) &&
-      index.matchesCompareOptions(compareOpts)
+      index.matchesCompareOptions(compareOpts) &&
+      (!requireOrderedTraversal || index.supportsRangeOptimization)
     ) {
       if (!index.matchesDirection(compareOpts.direction)) {
         // Reversing the index also reverses where it keeps nulls, so the
@@ -363,7 +367,7 @@ function optimizeCompoundRangeQuery<
   for (const [fieldKey, operations] of fieldOperations) {
     if (operations.length >= 2) {
       const fieldPath = JSON.parse(fieldKey) as Array<string>
-      const index = findIndexForField(collection, fieldPath)
+      const index = findIndexForField(collection, fieldPath, undefined, true)
 
       // Only collapse this field into a range query when every bound's domain
       // orders the same way the index does and the index supports trustworthy
@@ -526,7 +530,12 @@ function optimizeSimpleComparison<
 
   if (fieldArg && valueArg) {
     const fieldPath = (fieldArg as any).path
-    const index = findIndexForField(collection, fieldPath)
+    const index = findIndexForField(
+      collection,
+      fieldPath,
+      undefined,
+      operation !== `eq`,
+    )
 
     if (index) {
       const queryValue = (valueArg as any).value
@@ -602,7 +611,12 @@ function canOptimizeSimpleComparison<
   }
 
   if (fieldPath) {
-    const index = findIndexForField(collection, fieldPath)
+    const index = findIndexForField(
+      collection,
+      fieldPath,
+      undefined,
+      expression.name !== `eq`,
+    )
     return index !== undefined
   }
 

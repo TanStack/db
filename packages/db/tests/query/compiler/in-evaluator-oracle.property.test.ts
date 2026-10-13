@@ -21,8 +21,11 @@ import { oraclePropertyOptions, oracleRuns } from '../../oracle-config.js'
  * - Two Uint8Arrays (Buffers included) are equal when their bytes are equal.
  * - Temporal kinds with an intrinsic `.equals()` use that relation. This
  *   includes equivalent time-zone aliases for ZonedDateTime, but excludes a
- *   distinct fixed-offset zone. Duration has no `.equals()`; its ten fields
- *   must match, so PT1H and PT60M are distinct.
+ *   distinct fixed-offset zone. PlainMonthDay and PlainYearMonth also retain
+ *   their reference ISO year and day, even when default display omits them.
+ *   Duration has no `.equals()`; its ten fields must match, so PT1H and PT60M
+ *   are distinct. Changelog #1519 explicitly preserves that distinction for
+ *   equivalent Duration forms under `eq`.
  * - Every other pair compares with `===`, so `-0` equals `0`, `1n` does not
  *   equal `1`, and objects compare by reference.
  *
@@ -35,8 +38,9 @@ import { oraclePropertyOptions, oracleRuns } from '../../oracle-config.js'
  * internal normalization prefix, booleans, `0`, `-0`, `1`, `NaN`, `1n`, a
  * valid Date and its timestamp, an invalid Date, equal and unequal byte
  * arrays, a Buffer, Temporal values including ZonedDateTime zone aliases,
- * a forged tag, a borrowed prototype, shadowed display members, and Duration
- * forms, one shared object and a
+ * a forged tag, a borrowed prototype, shadowed display and field members,
+ * reference ISO year/day differences hidden by default display, and Duration carry
+ * forms with equal display but distinct fields, one shared object and a
  * structurally equal copy, `null` and `undefined`. Lists have zero to six
  * items and may repeat. The list is a constant `Value`, the shape that join
  * demand builds, or a row field, so changing lists are also checked.
@@ -52,7 +56,9 @@ import { oraclePropertyOptions, oracleRuns } from '../../oracle-config.js'
  * Limits: this owner checks the boolean result of `in` for ordinary values
  * from one Temporal polyfill copy and the listed display shadows. It does not
  * claim mixed Temporal implementations, replaced genuine prototypes, or
- * arbitrary custom prototypes that imitate Temporal intrinsics. WHERE
+ * arbitrary custom prototypes that imitate Temporal intrinsics. The byte
+ * classifier also excludes genuine Uint8Arrays with an own display-tag
+ * shadow. WHERE
  * publication, indexes, and subset loading have other owners.
  */
 
@@ -76,9 +82,38 @@ const shadowedTextPlainDate = Temporal.PlainDate.from(`2024-01-01`)
 Object.defineProperty(shadowedTextPlainDate, `toString`, {
   value: () => `unrelated text`,
 })
+const leapMonthDay = new Temporal.PlainMonthDay(2, 29, `iso8601`, 1972)
+const sameLeapMonthDay = new Temporal.PlainMonthDay(2, 29, `iso8601`, 1972)
+const otherReferenceMonthDay = new Temporal.PlainMonthDay(
+  2,
+  29,
+  `iso8601`,
+  2004,
+)
+const firstYearMonth = new Temporal.PlainYearMonth(2024, 2, `iso8601`, 1)
+const sameFirstYearMonth = new Temporal.PlainYearMonth(2024, 2, `iso8601`, 1)
+const otherReferenceYearMonth = new Temporal.PlainYearMonth(
+  2024,
+  2,
+  `iso8601`,
+  20,
+)
 const hourDuration = Temporal.Duration.from(`PT1H`)
 const sameHourDuration = Temporal.Duration.from(`PT1H`)
 const sixtyMinuteDuration = Temporal.Duration.from(`PT60M`)
+const secondDuration = Temporal.Duration.from({ seconds: 1 })
+const sameSecondDuration = Temporal.Duration.from({ seconds: 1 })
+const shadowedSecondDuration = Temporal.Duration.from({ seconds: 1 })
+Object.defineProperty(shadowedSecondDuration, `seconds`, { value: 2 })
+const thousandMillisecondDuration = Temporal.Duration.from({
+  milliseconds: 1000,
+})
+const sameThousandMillisecondDuration = Temporal.Duration.from({
+  milliseconds: 1000,
+})
+const millionMicrosecondDuration = Temporal.Duration.from({
+  microseconds: 1_000_000,
+})
 const shadowedHourDuration = Temporal.Duration.from(`PT1H`)
 Object.defineProperty(shadowedHourDuration, `toString`, {
   value: () => `PT2H`,
@@ -131,9 +166,21 @@ const pool: ReadonlyArray<unknown> = [
   borrowedPlainDate,
   shadowedTagPlainDate,
   shadowedTextPlainDate,
+  leapMonthDay,
+  sameLeapMonthDay,
+  otherReferenceMonthDay,
+  firstYearMonth,
+  sameFirstYearMonth,
+  otherReferenceYearMonth,
   hourDuration,
   sameHourDuration,
   sixtyMinuteDuration,
+  secondDuration,
+  sameSecondDuration,
+  shadowedSecondDuration,
+  thousandMillisecondDuration,
+  sameThousandMillisecondDuration,
+  millionMicrosecondDuration,
   shadowedHourDuration,
   forgedHourDuration,
   utcZoned,
@@ -289,6 +336,45 @@ function evaluateWithProduction(testCase: InCase): unknown {
   // between rows is checked against a list it must not reuse.
   evaluate({ row: { value: `a`, list: [`a`] } })
   return evaluate({ row: { value: testCase.value, list: testCase.list } })
+}
+
+// The same normalized equality also feeds compiled `eq`. Check its public
+// result alongside both `in` paths so a repaired list key cannot mask a
+// remaining direct-predicate collision.
+function evaluateEqWithProduction(left: unknown, right: unknown): unknown {
+  const evaluate = compileExpression(
+    new Func(`eq`, [
+      new PropRef([`row`, `value`]),
+      new PropRef([`row`, `other`]),
+    ]),
+  )
+  return evaluate({ row: { value: left, other: right } })
+}
+
+function checkEqualityPaths(
+  left: unknown,
+  right: unknown,
+  expected: boolean,
+): void {
+  expect(referenceEqual(left, right)).toBe(expected)
+  for (const [direction, value, other] of [
+    [`forward`, left, right],
+    [`reverse`, right, left],
+  ] as const) {
+    expect
+      .soft(evaluateEqWithProduction(value, other), `eq ${direction}`)
+      .toBe(expected)
+    for (const listFromRow of [false, true]) {
+      const testCase = { value, list: [other], listFromRow }
+      expect(referenceIn(value, testCase.list)).toBe(expected)
+      expect
+        .soft(
+          evaluateWithProduction(testCase),
+          `in ${listFromRow ? `row-supplied` : `constant`} ${direction}`,
+        )
+        .toBe(expected)
+    }
+  }
 }
 
 function check(evaluate: Evaluate, testCase: InCase): void {
@@ -451,6 +537,70 @@ describe(`in evaluator`, () => {
       })
     },
   )
+
+  it(`keeps reference ISO fields in PlainMonthDay and PlainYearMonth equality`, () => {
+    // Native equals, not default display, is the independent semantic base.
+    // Both pairs have equal display text but different reference ISO fields.
+    expect(leapMonthDay.toString()).toBe(otherReferenceMonthDay.toString())
+    expect(leapMonthDay.equals(sameLeapMonthDay)).toBe(true)
+    expect(leapMonthDay.equals(otherReferenceMonthDay)).toBe(false)
+    expect(firstYearMonth.toString()).toBe(otherReferenceYearMonth.toString())
+    expect(firstYearMonth.equals(sameFirstYearMonth)).toBe(true)
+    expect(firstYearMonth.equals(otherReferenceYearMonth)).toBe(false)
+    for (const value of [
+      leapMonthDay,
+      sameLeapMonthDay,
+      otherReferenceMonthDay,
+      firstYearMonth,
+      sameFirstYearMonth,
+      otherReferenceYearMonth,
+    ]) {
+      expect(pool).toContain(value)
+    }
+
+    checkEqualityPaths(leapMonthDay, sameLeapMonthDay, true)
+    checkEqualityPaths(leapMonthDay, otherReferenceMonthDay, false)
+    checkEqualityPaths(firstYearMonth, sameFirstYearMonth, true)
+    checkEqualityPaths(firstYearMonth, otherReferenceYearMonth, false)
+  })
+
+  it(`keeps Duration fields distinct across second and subsecond carries`, () => {
+    // Changelog #1519 promises that equivalent Duration representations stay
+    // unequal under `eq`. The captured intrinsic field getters in the model
+    // preserve that difference while their default display text collides.
+    expect(secondDuration.toString()).toBe(
+      thousandMillisecondDuration.toString(),
+    )
+    expect(thousandMillisecondDuration.toString()).toBe(
+      millionMicrosecondDuration.toString(),
+    )
+    for (const value of [
+      secondDuration,
+      sameSecondDuration,
+      shadowedSecondDuration,
+      thousandMillisecondDuration,
+      sameThousandMillisecondDuration,
+      millionMicrosecondDuration,
+    ]) {
+      expect(pool).toContain(value)
+    }
+
+    checkEqualityPaths(secondDuration, sameSecondDuration, true)
+    // An own getter shadow cannot change the intrinsic Duration fields.
+    expect(shadowedSecondDuration.seconds).toBe(2)
+    checkEqualityPaths(secondDuration, shadowedSecondDuration, true)
+    checkEqualityPaths(
+      thousandMillisecondDuration,
+      sameThousandMillisecondDuration,
+      true,
+    )
+    checkEqualityPaths(secondDuration, thousandMillisecondDuration, false)
+    checkEqualityPaths(
+      thousandMillisecondDuration,
+      millionMicrosecondDuration,
+      false,
+    )
+  })
 
   it(`rejects display-string equality for equivalent zone aliases`, () => {
     const lexical: Evaluate = ({ value, list }) =>

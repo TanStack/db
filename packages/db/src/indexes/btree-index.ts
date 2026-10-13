@@ -236,7 +236,7 @@ export class BTreeIndex<
       areSameValueZeroEqual(oldValue, newValue) &&
       this.valueMap.get(newValue)?.keys.has(key)
     ) {
-      if (!areSameValueZeroEqual(oldOrder, newOrder)) {
+      if (!Object.is(oldOrder, newOrder)) {
         this.removeFromOrder(key, oldOrder)
         this.addToOrder(key, newOrder)
       }

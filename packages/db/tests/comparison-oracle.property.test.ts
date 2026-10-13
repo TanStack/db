@@ -1645,6 +1645,7 @@ describe(`Temporal default-order refinement`, () => {
     )
     const observed = [
       isolatedComparator(january, shadowedJune, DEFAULT_COMPARE_OPTIONS),
+      isolatedValues(january, shadowedJune),
       isolatedComparator(
         ordinaryJanuary,
         ordinaryJune,
@@ -1652,7 +1653,7 @@ describe(`Temporal default-order refinement`, () => {
       ),
       isolatedValues(ordinaryJanuary, ordinaryJune),
     ]
-    expect(observed.map(sign)).toEqual([expected, expected, expected])
+    expect(observed.map(sign)).toEqual([expected, expected, expected, expected])
   })
 
   it(`keeps a compareValues-first constructor override from poisoning later comparisons`, async () => {

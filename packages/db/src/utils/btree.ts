@@ -303,8 +303,9 @@ class BNode<K, V> {
   ): void {
     const cmp = tree._compare
     let iLow, iHigh
-    if (high === low) {
-      // A point range (as used by delete) needs only one search.
+    if (Object.is(high, low)) {
+      // A point range (as used by delete) needs only one search. `===` also
+      // equates signed zero values that a supplied comparator can separate.
       if (!includeHigh) return
       iHigh = (iLow = this.indexOf(low, -1, cmp)) + 1
       if (iLow < 0) return
@@ -474,9 +475,10 @@ class BNodeInternal<K, V> extends BNode<K, V> {
       children = this.children
     let iLow = this.indexOf(low, 0, cmp),
       i = iLow
-    // A point range (as used by delete) needs only one search.
+    // Only identical bounds can use the one-child point-range shortcut.
+    // A supplied comparator may place -0 and +0 in different children.
     const iHigh = Math.min(
-      high === low ? iLow : this.indexOf(high, 0, cmp),
+      Object.is(high, low) ? iLow : this.indexOf(high, 0, cmp),
       keys.length - 1,
     )
     for (; i <= iHigh; i++) {

@@ -64,19 +64,19 @@ Temporal methods remain outside the one-polyfill brand guarantee.
 
 | Requirement | Evidence and limit |
 | --- | --- |
-| ORC-001 | Changelog #1519 and Temporal `.equals()` authorize the equality class; the opening oracle comment limits implementations, paths, and observations. |
-| ORC-002 | Fixture-assigned classes predict key sets without calling production normalization. A separate native `.equals()` check calibrates the fixture. |
+| ORC-001 | Changelog #1519 and Temporal `.equals()` authorize the equality classes. The Duration field-vector rule follows #1519's explicit `eq` distinction. The opening oracle comment limits implementations, paths, and observations. |
+| ORC-002 | Fixture-assigned classes predict key sets without calling production normalization. Native `.equals()` calibrates supported kinds; captured intrinsic Duration fields calibrate Duration. |
 | ORC-003 | Prose beside the model, add/build history, Collection driver, and assertions explains their roles. |
-| ORC-004 | Fixed classes distinguish alias equality, distinct zone, adjacent nanosecond, calendar, forged and borrowed brands, and genuine display shadows. The `in` owner generates list combinations over its bounded pool; no arbitrary object grammar is claimed. |
-| ORC-005 | Direct lookups observe both index types; an indexed public snapshot spies on `lookup`, and the unindexed snapshot checks the evaluator path after readiness. |
-| ORC-006 | The frozen display-string design failed alias checks. The first tuple design failed forged-tag and shadowed-zone controls. Commit `1265abeb5` failed eleven brand/shadow/Duration checks; a lexical `in` mutant fails its comparison. |
+| ORC-004 | Not triggered by this fixed oracle. The separate generated `in` owner controls its bounded list grammar. |
+| ORC-005 | Direct lookups observe both index types for orderable kinds; an indexed public snapshot spies on `lookup`, and unindexed snapshots check the evaluator path after readiness. PlainMonthDay has no indexed claim. |
+| ORC-006 | The frozen display-string design failed alias checks. The first tuple design failed forged-tag and shadowed-zone controls. Commit `1265abeb5` failed eleven brand/shadow/Duration checks; `c4c07da42` failed the intrinsic-field equality controls. A lexical `in` mutant fails its comparison. |
 | ORC-007 | Not triggered by this fixed oracle. The adjacent `in` owner retains fixed and random generated campaigns. |
 | ORC-008 | The fixture model is immutable and has no reference-model state. |
 | ORC-009 | The model's class labels denote query equality, distinct from the order oracle's instant labels. |
 | ORC-010 | Collection cleanup preserves the primary mismatch. Direct index checks own no external resource. |
-| ORC-011 | The direct lookup and public scan cross different production paths, but share normalization. Native `.equals()` is the independent semantic calibration; this record does not claim a second full reference model. |
-| ORC-012 | This record names the owner, RED controls, limits, and required exact-commit review. |
-| ORC-013 | Alias equality versus fixed-offset inequality separates display-only and instant-only keys; native-brand controls reject forged/borrowed impostors while genuine display shadows preserve equality. |
+| ORC-011 | Direct lookup and public scan cross different production paths, but share normalization. Native `.equals()` and the Duration field-vector rule provide independent semantic calibration; this record does not claim a second full reference model. |
+| ORC-012 | This record names the owner, RED controls, limits, the rejected PlainMonthDay index design, and required exact-commit review. |
+| ORC-013 | Alias equality versus fixed-offset inequality separates display-only and instant-only keys; same-display reference-field and Duration pairs reject string-only keys. Native-brand controls reject forged/borrowed impostors while genuine display shadows preserve equality. |
 | ORC-014 | The Collection uses controlled in-memory sync and ends its claim at the snapshot; no provider handoff is claimed. |
 
 ## Limits and exact-commit review
@@ -92,4 +92,38 @@ unproved. The index-order owner now checks a custom comparator that
 separates query-equal aliases. Direct D2 `groupBy` has a separately approved
 kind-and-string policy.
 
-Pending fresh hostile review of the exact final commit.
+At committed head `c4c07da42`, a fresh reviewer found no mismatch in the
+exercised alias cases but found that the previously reported genuine
+ZonedDateTime own-tag failure lacked a direct witness here. The fixture now
+adds genuine UTC rows with an own shadowed display tag and an own shadowed
+`toString`. Native `ZonedDateTime.prototype.equals` confirms their equality
+with the alias probe. Add, build, removal, unindexed public `eq`, and
+optimized-only indexed public `eq` must all retain those rows. The focused
+run passed 11 alias tests with no type errors. Final committed-head review
+remains pending.
+
+## Intrinsic-key counterexamples and index boundary
+
+The same `c4c07da42` review found three Temporal equality classes whose
+default display omits identity fields. Native `.equals()` distinguishes
+PlainMonthDay reference years and PlainYearMonth reference days. Changelog
+#1519 keeps Duration field representations distinct under `eq`, even when
+both display as `PT1S`. Compiled `eq`, constant `in`, and row-supplied `in`
+returned false matches before the production repair. New fixed pairs check
+equal copies and unequal same-display values in both operand directions.
+Normalization now reads the intrinsic reference fields and ten Duration
+fields. The receiving `in` model reads captured polyfill methods and getters.
+
+This alias oracle carries the same equality classes to a public unindexed
+PlainMonthDay scan. Its PlainYearMonth and Duration lanes check direct index
+add, build, removal, and re-add, plus public scan and indexed `eq`. Each
+fixture assigns classes from constructed fields without using production
+normalization. The six focused suites passed 619 tests after the repair.
+
+An attempted one-class PlainMonthDay index bypass was rejected during law
+review. With two native-equal rows, a BasicIndex made public `orderBy` return
+keys, while the unindexed query threw as changelog #1519 specifies. Adding a
+later distinct reference-year row then threw during a valid sync commit. The
+bypass was removed. Direct and public indexed PlainMonthDay equality across
+multiple classes remains open. An exact-only index path needs a separate
+oracle for add, build, remove, update, and the orderBy rejection.

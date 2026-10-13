@@ -12,15 +12,27 @@ import { withOracleCleanup } from './utils.js'
  * order. At one instant, UTC and Etc/UTC are equivalent zone aliases, while
  * the fixed-offset +00:00 zone remains a different identity.
  *
- * The ZonedDateTime lane covers ordinary values from one polyfill copy and one
- * instant. A neighboring PlainDate lane checks that native brand and equality
- * survive own display shadows while forged tags retain ordinary object
- * identity. Fixture-assigned classes, not production normalization, predict
- * exact key sets. Direct BasicIndex/BTreeIndex add, build, and removal
- * histories compare those sets after each returned action. Public Collection
+ * The ZonedDateTime lane covers values from one polyfill copy and one instant,
+ * including genuine instances with own display shadows. A neighboring
+ * PlainDate lane checks that native brand and equality survive those shadows
+ * while forged tags retain ordinary object identity. Fixture-assigned classes,
+ * independent of production normalization, predict exact key sets. Direct
+ * BasicIndex/BTreeIndex add, build, and removal histories compare those sets
+ * after each returned action. Public Collection
  * reads compare an unindexed scan and an optimized-only indexed snapshot after
  * readiness. The mixed forged/genuine PlainDate Collection has no index:
  * default range order across an ordinary object and Temporal is unspecified.
+ * A second lane uses one polyfill copy to check `PlainMonthDay` and
+ * `PlainYearMonth` reference ISO fields, and Duration's ten fields, under
+ * the same exact query equality. Changelog #1519 explicitly keeps equivalent
+ * Duration representations unequal for `eq`. Its fixture assigns equality
+ * classes from native constructors and intrinsic relations, never from
+ * production key encoding. Compiled `eq` and `in` for these classes are
+ * checked by the in-evaluator oracle. PlainMonthDay has no natural order, so
+ * this file checks its public Collection equality through an unindexed scan.
+ * Indexed PlainMonthDay equality remains open. YearMonth and Duration store
+ * several classes with identical default display and check indexed add,
+ * build, removal, re-add, and public reads.
  * This oracle does not claim all IANA aliases, arbitrary spoofed prototypes,
  * mixed Temporal implementations, joins, live-query publication, or provider
  * behavior.
@@ -30,6 +42,7 @@ type Sample = {
   id: string
   text: string
   identity: `utc` | `offset` | `later` | `calendar`
+  ownDisplay?: `tag` | `text`
 }
 
 const samples: ReadonlyArray<Sample> = [
@@ -58,13 +71,32 @@ const samples: ReadonlyArray<Sample> = [
     text: `2024-01-15T09:00:00+00:00[UTC][u-ca=gregory]`,
     identity: `calendar`,
   },
+  {
+    id: `utc-shadowed-tag`,
+    text: `2024-01-15T09:00:00+00:00[UTC]`,
+    identity: `utc`,
+    ownDisplay: `tag`,
+  },
+  {
+    id: `utc-shadowed-text`,
+    text: `2024-01-15T09:00:00+00:00[UTC]`,
+    identity: `utc`,
+    ownDisplay: `text`,
+  },
 ]
 
 function rows(): Array<Row> {
-  return samples.map(({ id, text }) => ({
-    id,
-    when: Temporal.ZonedDateTime.from(text),
-  }))
+  return samples.map(({ id, text, ownDisplay }) => {
+    const when = Temporal.ZonedDateTime.from(text)
+    if (ownDisplay === `tag`) {
+      Object.defineProperty(when, Symbol.toStringTag, { value: `ordinary` })
+    } else if (ownDisplay === `text`) {
+      Object.defineProperty(when, `toString`, {
+        value: () => `unrelated text`,
+      })
+    }
+    return { id, when }
+  })
 }
 
 function expectedKeys(identity: Sample[`identity`]): Set<string> {
@@ -87,16 +119,149 @@ const indexTypes = [
   [`BTreeIndex`, BTreeIndex],
 ] as const
 
-it(`distinguishes equivalent aliases from a fixed-offset zone`, () => {
-  const [utc, alias, fixed, later, gregory] = rows()
+type IntrinsicKind = `PlainMonthDay` | `PlainYearMonth` | `Duration`
+type IntrinsicRow = { id: string; when: unknown; identity: string }
+type IntrinsicProbe = { when: unknown; identity: string }
+type IntrinsicFixture = {
+  rows: Array<IntrinsicRow>
+  probes: Array<IntrinsicProbe>
+  checkNativeRelation: () => void
+}
+
+const indexedIntrinsicKinds: ReadonlyArray<
+  Exclude<IntrinsicKind, `PlainMonthDay`>
+> = [`PlainYearMonth`, `Duration`]
+
+// The fixture identity is a model-only equality class assigned from the
+// constructed Temporal fields. It combines no production state. Fresh probes
+// distinguish equal copies from different fields with the same display text.
+function intrinsicFixture(kind: IntrinsicKind): IntrinsicFixture {
+  if (kind === `PlainMonthDay`) {
+    const stored = new Temporal.PlainMonthDay(2, 29, `iso8601`, 1972)
+    const storedCopy = new Temporal.PlainMonthDay(2, 29, `iso8601`, 1972)
+    const equal = new Temporal.PlainMonthDay(2, 29, `iso8601`, 1972)
+    const other = new Temporal.PlainMonthDay(2, 29, `iso8601`, 2004)
+    return {
+      rows: [
+        { id: `reference-1972`, when: stored, identity: `1972` },
+        { id: `reference-1972-copy`, when: storedCopy, identity: `1972` },
+        { id: `reference-2004`, when: other, identity: `2004` },
+      ],
+      probes: [
+        { when: equal, identity: `1972` },
+        { when: other, identity: `2004` },
+      ],
+      checkNativeRelation: () => {
+        expect(stored.toString()).toBe(other.toString())
+        expect(stored.equals(storedCopy)).toBe(true)
+        expect(stored.equals(equal)).toBe(true)
+        expect(stored.equals(other)).toBe(false)
+      },
+    }
+  }
+
+  if (kind === `PlainYearMonth`) {
+    const stored = new Temporal.PlainYearMonth(2024, 2, `iso8601`, 1)
+    const equal = new Temporal.PlainYearMonth(2024, 2, `iso8601`, 1)
+    const other = new Temporal.PlainYearMonth(2024, 2, `iso8601`, 20)
+    return {
+      rows: [
+        { id: `reference-day-1`, when: stored, identity: `day-1` },
+        { id: `reference-day-1-copy`, when: equal, identity: `day-1` },
+        { id: `reference-day-20`, when: other, identity: `day-20` },
+      ],
+      probes: [
+        {
+          when: new Temporal.PlainYearMonth(2024, 2, `iso8601`, 1),
+          identity: `day-1`,
+        },
+        {
+          when: new Temporal.PlainYearMonth(2024, 2, `iso8601`, 20),
+          identity: `day-20`,
+        },
+      ],
+      checkNativeRelation: () => {
+        expect(stored.toString()).toBe(other.toString())
+        expect(stored.equals(equal)).toBe(true)
+        expect(stored.equals(other)).toBe(false)
+      },
+    }
+  }
+
+  const seconds = Temporal.Duration.from({ seconds: 1 })
+  const secondsCopy = Temporal.Duration.from({ seconds: 1 })
+  const shadowedSeconds = Temporal.Duration.from({ seconds: 1 })
+  Object.defineProperty(shadowedSeconds, `seconds`, { value: 2 })
+  const milliseconds = Temporal.Duration.from({ milliseconds: 1000 })
+  const microseconds = Temporal.Duration.from({ microseconds: 1_000_000 })
+  const intrinsicSeconds = Object.getOwnPropertyDescriptor(
+    Temporal.Duration.prototype,
+    `seconds`,
+  )!.get!
+  return {
+    rows: [
+      { id: `seconds`, when: seconds, identity: `seconds` },
+      { id: `seconds-copy`, when: secondsCopy, identity: `seconds` },
+      { id: `seconds-shadow`, when: shadowedSeconds, identity: `seconds` },
+      { id: `milliseconds`, when: milliseconds, identity: `milliseconds` },
+      { id: `microseconds`, when: microseconds, identity: `microseconds` },
+    ],
+    probes: [
+      { when: Temporal.Duration.from({ seconds: 1 }), identity: `seconds` },
+      {
+        when: Temporal.Duration.from({ milliseconds: 1000 }),
+        identity: `milliseconds`,
+      },
+      {
+        when: Temporal.Duration.from({ microseconds: 1_000_000 }),
+        identity: `microseconds`,
+      },
+    ],
+    checkNativeRelation: () => {
+      expect(seconds.toString()).toBe(milliseconds.toString())
+      expect(milliseconds.toString()).toBe(microseconds.toString())
+      expect(intrinsicSeconds.call(shadowedSeconds)).toBe(1)
+      expect(shadowedSeconds.seconds).toBe(2)
+      expect(seconds.seconds).toBe(1)
+      expect(milliseconds.milliseconds).toBe(1000)
+      expect(microseconds.microseconds).toBe(1_000_000)
+    },
+  }
+}
+
+function intrinsicExpectedKeys(
+  source: ReadonlyArray<IntrinsicRow>,
+  identity: string,
+): Set<string> {
+  return new Set(
+    source.filter((row) => row.identity === identity).map((row) => row.id),
+  )
+}
+
+it(`distinguishes equivalent aliases and own display shadows from a fixed-offset zone`, () => {
+  const [utc, alias, fixed, later, gregory, shadowedTag, shadowedText] = rows()
   // This checks the fixture against the external Temporal relation. Expected
   // index and query sets still come from the assigned identity classes.
   expect(utc!.when.equals(alias!.when)).toBe(true)
   expect(utc!.when.equals(fixed!.when)).toBe(false)
   expect(utc!.when.equals(later!.when)).toBe(false)
   expect(utc!.when.equals(gregory!.when)).toBe(false)
+  expect(
+    Temporal.ZonedDateTime.prototype.equals.call(
+      shadowedTag!.when,
+      alias!.when,
+    ),
+  ).toBe(true)
+  expect(
+    Temporal.ZonedDateTime.prototype.equals.call(
+      shadowedText!.when,
+      alias!.when,
+    ),
+  ).toBe(true)
   expect(utc!.when.toString()).not.toBe(alias!.when.toString())
-  expect(expectedKeys(`utc`)).toEqual(new Set([`utc`, `utc-alias`]))
+  expect(expectedKeys(`utc`)).toEqual(
+    new Set([`utc`, `utc-alias`, `utc-shadowed-tag`, `utc-shadowed-text`]),
+  )
   expect(expectedKeys(`offset`)).toEqual(new Set([`fixed-offset`]))
 })
 
@@ -133,7 +298,9 @@ describe.each(indexTypes)(`%s Temporal alias equality`, (_name, IndexType) => {
       )
 
       index.remove(source[0]!.id, source[0]!)
-      expect(index.equalityLookup(aliasProbe)).toEqual(new Set([`utc-alias`]))
+      expect(index.equalityLookup(aliasProbe)).toEqual(
+        new Set([`utc-alias`, `utc-shadowed-tag`, `utc-shadowed-text`]),
+      )
       expect(index.equalityLookup(offsetProbe)).toEqual(expectedKeys(`offset`))
     },
   )
@@ -185,6 +352,175 @@ describe.each(indexTypes)(`%s Temporal alias equality`, (_name, IndexType) => {
     },
   )
 })
+
+it(`keeps PlainMonthDay reference years distinct in an unindexed public equality scan`, async () => {
+  const fixture = intrinsicFixture(`PlainMonthDay`)
+  fixture.checkNativeRelation()
+  const collection = createCollection<IntrinsicRow, string>({
+    id: `temporal-monthday-unindexed-equality`,
+    getKey: (row) => row.id,
+    autoIndex: `off`,
+    startSync: true,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        begin()
+        for (const row of fixture.rows) write({ type: `insert`, value: row })
+        commit()
+        markReady()
+      },
+    },
+  })
+
+  // The source contains two native-equal copies and a distinct reference
+  // year with the same default display. The public scan has no index order
+  // obligation; each query must return exactly its modeled equality class.
+  await withOracleCleanup(async () => {
+    await collection.stateWhenReady()
+    expect(collection.indexes.size).toBe(0)
+    for (const probe of fixture.probes) {
+      const predicate = new Func(`eq`, [
+        new PropRef([`when`]),
+        new Value(probe.when),
+      ])
+      const keys = new Set(
+        collection
+          .currentStateAsChanges({ where: predicate, optimizedOnly: false })
+          ?.map(({ value }) => value.id),
+      )
+      expect(collection.indexes.size).toBe(0)
+      expect(keys).toEqual(intrinsicExpectedKeys(fixture.rows, probe.identity))
+    }
+  }, [() => collection.cleanup()])
+})
+
+describe.each(indexTypes)(
+  `%s Temporal intrinsic field equality`,
+  (indexName, IndexType) => {
+    it.each(indexedIntrinsicKinds)(
+      `keeps %s exact classes after each add, removal, and re-add`,
+      (kind) => {
+        const fixture = intrinsicFixture(kind)
+        fixture.checkNativeRelation()
+        const index = new IndexType(1, new PropRef([`when`]))
+        const added: Array<IntrinsicRow> = []
+
+        // Each returned add is a checkpoint. The model recomputes membership
+        // from fixture classes, independent of the index's equality key.
+        for (const row of fixture.rows) {
+          index.add(row.id, row)
+          added.push(row)
+          for (const probe of fixture.probes) {
+            expect(index.equalityLookup(probe.when)).toEqual(
+              intrinsicExpectedKeys(added, probe.identity),
+            )
+          }
+        }
+
+        for (const probe of fixture.probes) {
+          const expected = intrinsicExpectedKeys(added, probe.identity)
+          expect(index.lookup(`eq`, probe.when)).toEqual(expected)
+          expect(index.inArrayLookup([probe.when])).toEqual(expected)
+        }
+
+        const removed = added.shift()!
+        index.remove(removed.id, removed)
+        for (const probe of fixture.probes) {
+          expect(index.equalityLookup(probe.when)).toEqual(
+            intrinsicExpectedKeys(added, probe.identity),
+          )
+        }
+
+        const freshEqual = fixture.probes.find(
+          (probe) => probe.identity === removed.identity,
+        )!
+        const readded = { ...removed, when: freshEqual.when }
+        index.add(readded.id, readded)
+        added.push(readded)
+        for (const probe of fixture.probes) {
+          expect(index.equalityLookup(probe.when)).toEqual(
+            intrinsicExpectedKeys(added, probe.identity),
+          )
+        }
+      },
+    )
+
+    it.each(indexedIntrinsicKinds)(
+      `keeps %s exact classes after build`,
+      (kind) => {
+        const fixture = intrinsicFixture(kind)
+        fixture.checkNativeRelation()
+        const index = new IndexType(1, new PropRef([`when`]))
+        index.build(
+          fixture.rows.map((row): [string, IntrinsicRow] => [row.id, row]),
+        )
+        for (const probe of fixture.probes) {
+          expect(index.equalityLookup(probe.when)).toEqual(
+            intrinsicExpectedKeys(fixture.rows, probe.identity),
+          )
+        }
+      },
+    )
+
+    it.each(
+      indexedIntrinsicKinds.flatMap((kind) => [
+        { kind, optimizedOnly: false },
+        { kind, optimizedOnly: true },
+      ]),
+    )(
+      `returns $kind exact classes in a public snapshot with optimizedOnly=$optimizedOnly`,
+      async ({ kind, optimizedOnly }) => {
+        const fixture = intrinsicFixture(kind)
+        fixture.checkNativeRelation()
+        const collection = createCollection<IntrinsicRow, string>({
+          id: `temporal-intrinsic-${kind}-${indexName}-${optimizedOnly}`,
+          getKey: (row) => row.id,
+          autoIndex: `off`,
+          startSync: true,
+          sync: {
+            sync: ({ begin, write, commit, markReady }) => {
+              begin()
+              for (const row of fixture.rows)
+                write({ type: `insert`, value: row })
+              commit()
+              markReady()
+            },
+          },
+        })
+
+        // A scan supplies the public control. With optimizedOnly, a spy proves
+        // that the same `eq` predicate reaches the explicit index lookup.
+        await withOracleCleanup(async () => {
+          await collection.stateWhenReady()
+          expect(collection.indexes.size).toBe(0)
+          const lookup = optimizedOnly
+            ? vi.spyOn(
+                collection.createIndex((row) => row.when, {
+                  indexType: IndexType,
+                }),
+                `lookup`,
+              )
+            : undefined
+          for (const probe of fixture.probes) {
+            lookup?.mockClear()
+            const predicate = new Func(`eq`, [
+              new PropRef([`when`]),
+              new Value(probe.when),
+            ])
+            const keys = new Set(
+              collection
+                .currentStateAsChanges({ where: predicate, optimizedOnly })
+                ?.map(({ value }) => value.id),
+            )
+            if (lookup) expect(lookup).toHaveBeenCalled()
+            expect(keys).toEqual(
+              intrinsicExpectedKeys(fixture.rows, probe.identity),
+            )
+          }
+        }, [() => collection.cleanup()])
+      },
+    )
+  },
+)
 
 it(`keeps a forged tag and shadowed zone outside genuine UTC equality`, async () => {
   const fake = {

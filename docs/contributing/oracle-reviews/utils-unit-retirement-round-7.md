@@ -44,7 +44,7 @@ public change-event trace. Those need their own owner or receiving witness.
 | ORC-004 | Every removed operand and outcome has a fixed reconstruction; generated finite Dates and RegExps vary the new cross-type boundaries. |
 | ORC-005 | Each check calls exported `deepEquals` and observes the immediate boolean return. No public publication claim is made. |
 | ORC-006 | Injected primitive-coercing comparators fail the exact inequality assertion for all three newly recovered boundaries. |
-| ORC-007 | Existing `utilsProperty` runs each property with fixed seed and random seed and supports direct seed/path replay. |
+| ORC-007 | `utilsProperty` runs the same property with fixed and random seeds. The source/flags property replayed a captured failing seed/path directly, as recorded below. |
 | ORC-008 | Not triggered: the value model has no mutable state. |
 | ORC-009 | Date, RegExp, ISO text, epoch number, and source text are distinct value classes in this model; no production storage state is modeled. |
 | ORC-010 | The direct check owns no cleanup resource; its assertion is the failure checkpoint. |
@@ -53,6 +53,25 @@ public change-event trace. Those need their own owner or receiving witness.
 | ORC-013 | A primitive with matching displayed or numeric content distinguishes class-preserving equality from a plausible coercing design. |
 | ORC-014 | Not triggered: the direct call has no provider or host boundary. |
 
-## Exact-commit hostile review
+## Exact-commit hostile review and follow-up
 
-Pending fresh review of the final committed oracle and the removed blocks.
+At committed head `c4c07da42`, the fresh reviewer confirmed that all six
+retired assertions had fixed receiving witnesses and found no production bug
+in this transfer. It found two broader oracle weaknesses: the generated
+RegExp law varied flags but not source within a pair, and the two newly
+registered cross-type properties had shifted existing ordinal replay IDs.
+The generated source law now compares a same-flags, changed-source neighbor.
+The two added properties are registered after the original properties, so
+their old selectors retain their meanings. A focused run passed 139 oracle
+tests with no type errors.
+
+For ORC-007 calibration, a temporary wrong model rule expected an arbitrary
+RegExp to equal its changed-source neighbor. The fixed campaign failed at the
+`deepEquals` return comparison after one test with seed `20260911` and shrink
+path `0:0`. Direct replay through `UTILS_ORACLE_PROPERTY=36`,
+`UTILS_ORACLE_SEED=20260911`, and `UTILS_ORACLE_PATH=0:0` reproduced that
+same assertion failure. Restoring the model rule made the direct replay pass.
+The temporary rule is absent from the final oracle. This demonstrates replay
+fidelity for the changed-source property, not every property in the file.
+
+Fresh review of the final committed head remains pending.

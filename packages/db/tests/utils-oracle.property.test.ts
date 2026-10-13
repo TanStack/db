@@ -700,14 +700,6 @@ describe(`deepEquals property-based tests`, () => {
     // change-event equality keeps the Date value class distinct. The finite
     // generator makes both encodings legal; the 2023 case preserves the old
     // unit test's exact operands.
-    utilsProperty([arbitraryFiniteDate])(
-      `Date differs from its ISO text and epoch number in both directions`,
-      (date) => {
-        assertDistinctTypes(date, date.toISOString(), deepEquals)
-        assertDistinctTypes(date, date.getTime(), deepEquals)
-      },
-    )
-
     it(`keeps a 2023 Date distinct from its old primitive probes`, () => {
       const date = new Date(`2023-01-01T00:00:00Z`)
       expectCopyAndChanged(
@@ -722,11 +714,6 @@ describe(`deepEquals property-based tests`, () => {
     // RegExp source text does not acquire the regex's value class, even when
     // it spells the same pattern. The source and flags still govern equality
     // between two genuine RegExps in the laws below.
-    utilsProperty([arbitraryRegExp])(
-      `RegExp differs from its source text in both directions`,
-      (regex) => assertDistinctTypes(regex, regex.source, deepEquals),
-    )
-
     it(`keeps /abc/g distinct from its old source-text probe`, () => {
       expectCopyAndChanged(/abc/g, /abc/g, /abc/i)
       expectCopyAndChanged(/abc/g, /abc/g, /def/g)
@@ -1187,6 +1174,19 @@ describe(`deepEquals property-based tests`, () => {
   // Keep newly added generated laws after the original registration order:
   // UTILS_ORACLE_PROPERTY uses ordinal selectors for saved seed/path replays.
   describe(`additional non-ring value boundaries`, () => {
+    utilsProperty([arbitraryFiniteDate])(
+      `Date differs from its ISO text and epoch number in both directions`,
+      (date) => {
+        assertDistinctTypes(date, date.toISOString(), deepEquals)
+        assertDistinctTypes(date, date.getTime(), deepEquals)
+      },
+    )
+
+    utilsProperty([arbitraryRegExp])(
+      `RegExp differs from its source text in both directions`,
+      (regex) => assertDistinctTypes(regex, regex.source, deepEquals),
+    )
+
     utilsProperty([arbitraryRegExp])(
       `RegExp source and flags determine equality`,
       (regex) => {
@@ -1194,11 +1194,15 @@ describe(`deepEquals property-based tests`, () => {
         const changedFlags = regex.flags.includes(`i`)
           ? regex.flags.replace(`i`, ``)
           : `${regex.flags}i`
+        // The source neighbor keeps flags fixed; a source-blind comparator
+        // must fail even when generated flags happen to match.
+        const changedSource = new RegExp(`${regex.source}(?:x)`, regex.flags)
         expectCopyAndChanged(
           regex,
           copy,
           new RegExp(regex.source, changedFlags),
         )
+        expectEqualityPair(regex, changedSource, false)
       },
     )
 

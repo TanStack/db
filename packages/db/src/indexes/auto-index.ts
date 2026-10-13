@@ -22,6 +22,7 @@ export function ensureIndexForField<
   collection: CollectionImpl<T, TKey, any, any, any>,
   compareOptions?: CompareOptions,
   compareFn?: (a: any, b: any) => number,
+  requireOrderedTraversal = false,
 ) {
   if (hasVirtualPropPath(fieldPath)) {
     return
@@ -36,10 +37,13 @@ export function ensureIndexForField<
     ...collection.compareOptions,
   }
 
-  // Check if we already have an index for this field
+  // An ordered read needs an index whose comparator matches its options;
+  // an exact predicate can still use a custom index's equality buckets.
   const existingIndex = Array.from(collection.indexes.values()).find(
     (index) =>
-      index.matchesField(fieldPath) && index.matchesCompareOptions(compareOpts),
+      index.matchesField(fieldPath) &&
+      index.matchesCompareOptions(compareOpts) &&
+      (!requireOrderedTraversal || index.supportsRangeOptimization),
   )
 
   if (existingIndex) {
@@ -94,18 +98,33 @@ export function ensureIndexForExpression<
 
   const indexableExpressions = extractIndexableExpressions(expression)
 
-  for (const { fieldName, fieldPath } of indexableExpressions) {
-    ensureIndexForField(fieldName, fieldPath, collection)
+  for (const {
+    fieldName,
+    fieldPath,
+    requireOrderedTraversal,
+  } of indexableExpressions) {
+    ensureIndexForField(
+      fieldName,
+      fieldPath,
+      collection,
+      undefined,
+      undefined,
+      requireOrderedTraversal,
+    )
   }
 }
 
-/**
- * Extracts all indexable expressions from a where expression
- */
+type IndexableExpression = {
+  fieldName: string
+  fieldPath: Array<string>
+  requireOrderedTraversal: boolean
+}
+
+/** Extracts indexable predicates and whether they need relational order. */
 function extractIndexableExpressions(
   expression: BasicExpression,
-): Array<{ fieldName: string; fieldPath: Array<string> }> {
-  const results: Array<{ fieldName: string; fieldPath: Array<string> }> = []
+): Array<IndexableExpression> {
+  const results: Array<IndexableExpression> = []
 
   function extractFromExpression(expr: BasicExpression): void {
     if (expr.type !== `func`) {
@@ -144,7 +163,11 @@ function extractIndexableExpressions(
     // For nested paths, use the full path joined with underscores as the field name
     // For simple paths, use the first (and only) element
     const fieldName = fieldPath.join(`_`)
-    results.push({ fieldName, fieldPath })
+    results.push({
+      fieldName,
+      fieldPath,
+      requireOrderedTraversal: func.name !== `eq` && func.name !== `in`,
+    })
   }
 
   extractFromExpression(expression)

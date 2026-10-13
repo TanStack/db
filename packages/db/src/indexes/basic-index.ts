@@ -218,7 +218,7 @@ export class BasicIndex<
       this.valueMap.get(newValue)?.has(key) &&
       this.indexedKeys.has(key)
     ) {
-      if (!areSameValueZeroEqual(oldOrder, newOrder)) {
+      if (!Object.is(oldOrder, newOrder)) {
         this.removeFromOrder(key, oldOrder)
         this.addToOrder(key, newOrder)
       }

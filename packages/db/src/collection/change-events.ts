@@ -351,10 +351,12 @@ function getOrderedKeys<T extends object, TKey extends string | number>(
         fieldPath,
         collection as CollectionImpl<T, TKey>,
         compareOpts,
+        undefined,
+        true,
       )
 
       // Find the index
-      const index = findIndexForField(collection, fieldPath, compareOpts)
+      const index = findIndexForField(collection, fieldPath, compareOpts, true)
 
       // A user-supplied index comparator is not described by compareOptions.
       // Exact equality lookup may still use that index, but its ordered walk

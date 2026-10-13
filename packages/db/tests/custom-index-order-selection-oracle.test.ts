@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { BasicIndex } from '../src/indexes/basic-index.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
@@ -16,9 +16,13 @@ import { withOracleCleanup } from './utils.js'
  *
  * This bounded witness compares public snapshots of three unique numeric rows
  * in an unindexed Collection and a Collection with a descending custom index.
- * It covers BasicIndex and BTreeIndex at the ready checkpoint, with one order
- * term and limit one. It does not claim arbitrary custom comparator laws,
- * mutation histories, provider ordering, or live-query publication.
+ * It also checks a custom index followed by a compatible ordinary index, and
+ * eager index creation when the custom index is present first. Numeric range
+ * predicates must likewise find a later compatible index; a range subscriber
+ * must trigger eager creation when only a custom index exists. It covers
+ * BasicIndex and BTreeIndex at the ready checkpoint, with one order term and
+ * limit one. It does not claim arbitrary custom comparator laws, mutation
+ * histories, provider ordering, or live-query publication.
  */
 type Row = { id: string; rank: number }
 
@@ -31,6 +35,11 @@ const rows: ReadonlyArray<Row> = [
 // The reference sorts source facts numerically. It knows neither index order
 // nor the index-selection code; the first public key must be `first`.
 const expectedFirstKey = [...rows].sort((a, b) => a.rank - b.rank)[0]!.id
+const greaterThanTen = new Func(`gt`, [new PropRef([`rank`]), new Value(10)])
+const betweenTenAndThirty = new Func(`and`, [
+  greaterThanTen,
+  new Func(`lt`, [new PropRef([`rank`]), new Value(30)]),
+])
 const ascendingFirst = {
   orderBy: [
     {
@@ -53,11 +62,15 @@ const descendingFirst = {
   ],
 }
 
-function collectionWithRows(id: string) {
+function collectionWithRows(
+  id: string,
+  defaultIndexType?: typeof BasicIndex | typeof BTreeIndex,
+) {
   return createCollection<Row, string>({
     id,
     getKey: (row) => row.id,
-    autoIndex: `off`,
+    autoIndex: defaultIndexType ? `eager` : `off`,
+    defaultIndexType,
     startSync: true,
     sync: {
       sync: ({ begin, write, commit, markReady }) => {
@@ -78,6 +91,127 @@ const indexTypes = [
 describe.each(indexTypes)(
   `%s custom comparator order selection`,
   (name, IndexType) => {
+    it(`selects a later compatible index while exact equality keeps the first custom index`, async () => {
+      const collection = collectionWithRows(`custom-index-coexistence-${name}`)
+      await withOracleCleanup(async () => {
+        await collection.stateWhenReady()
+        const custom = collection.createIndex((row) => row.rank, {
+          indexType: IndexType,
+          options: { compareFn: (a: number, b: number) => b - a },
+        })
+        collection.createIndex((row) => row.rank, { indexType: IndexType })
+
+        // Legal declaration order matters to first-match index search. The
+        // custom index is first and still serves exact equality; the ordinary
+        // index is second and must serve the ordered read.
+        const lookup = vi.spyOn(custom, `lookup`)
+        expect(
+          collection
+            .currentStateAsChanges({
+              where: new Func(`eq`, [new PropRef([`rank`]), new Value(20)]),
+              optimizedOnly: true,
+            })
+            ?.map(({ key }) => key),
+        ).toEqual([`middle`])
+        expect(lookup).toHaveBeenCalledWith(`eq`, 20)
+        expect(
+          collection
+            .currentStateAsChanges({ ...ascendingFirst, optimizedOnly: true })
+            ?.map(({ key }) => key),
+        ).toEqual([expectedFirstKey])
+        expect(
+          collection
+            .currentStateAsChanges({ ...descendingFirst, optimizedOnly: true })
+            ?.map(({ key }) => key),
+        ).toEqual([`last`])
+
+        // Ordinary numeric predicates use relational order rather than the
+        // custom index's descending walk. Both single and paired bounds must
+        // search past the custom index to use the ordinary one.
+        expect(
+          collection
+            .currentStateAsChanges({
+              where: greaterThanTen,
+              optimizedOnly: true,
+            })
+            ?.map(({ key }) => key)
+            .sort(),
+        ).toEqual([`last`, `middle`])
+        expect(
+          collection
+            .currentStateAsChanges({
+              where: betweenTenAndThirty,
+              optimizedOnly: true,
+            })
+            ?.map(({ key }) => key),
+        ).toEqual([`middle`])
+        expect(lookup).not.toHaveBeenCalledWith(`gt`, 10)
+      }, [() => collection.cleanup()])
+    })
+
+    it(`creates a compatible eager index after an existing custom index`, async () => {
+      const collection = collectionWithRows(
+        `custom-index-eager-${name}`,
+        IndexType,
+      )
+      await withOracleCleanup(async () => {
+        await collection.stateWhenReady()
+        collection.createIndex((row) => row.rank, {
+          indexType: IndexType,
+          options: { compareFn: (a: number, b: number) => b - a },
+        })
+        expect(collection.indexes.size).toBe(1)
+
+        // The custom index cannot satisfy the ordinary order request. Eager
+        // indexing must add a compatible one before optimizedOnly reads it.
+        expect(
+          collection
+            .currentStateAsChanges({ ...ascendingFirst, optimizedOnly: true })
+            ?.map(({ key }) => key),
+        ).toEqual([expectedFirstKey])
+        expect(collection.indexes.size).toBe(2)
+        collection.currentStateAsChanges({
+          ...ascendingFirst,
+          optimizedOnly: true,
+        })
+        expect(collection.indexes.size).toBe(2)
+      }, [() => collection.cleanup()])
+    })
+
+    it(`creates a compatible eager index for a range subscriber`, async () => {
+      const collection = collectionWithRows(
+        `custom-index-eager-range-${name}`,
+        IndexType,
+      )
+      await withOracleCleanup(async () => {
+        await collection.stateWhenReady()
+        collection.createIndex((row) => row.rank, {
+          indexType: IndexType,
+          options: { compareFn: (a: number, b: number) => b - a },
+        })
+        const initialKeys: Array<string> = []
+        const subscription = collection.subscribeChanges(
+          (changes) => initialKeys.push(...changes.map(({ key }) => key)),
+          { whereExpression: greaterThanTen, includeInitialState: true },
+        )
+        try {
+          expect(initialKeys.sort()).toEqual([`last`, `middle`])
+          expect(collection.indexes.size).toBe(2)
+          expect(
+            collection
+              .currentStateAsChanges({
+                where: greaterThanTen,
+                optimizedOnly: true,
+              })
+              ?.map(({ key }) => key)
+              .sort(),
+          ).toEqual([`last`, `middle`])
+        } finally {
+          subscription.unsubscribe()
+        }
+      }, [() => collection.cleanup()])
+    })
+
     it(`keeps a descending custom index out of an ascending public snapshot`, async () => {
       const scanned = collectionWithRows(`custom-index-order-scan-${name}`)
       const indexed = collectionWithRows(`custom-index-order-indexed-${name}`)

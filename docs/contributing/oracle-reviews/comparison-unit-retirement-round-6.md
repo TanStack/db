@@ -101,3 +101,19 @@ and ZonedDateTime operands and checked all four assertions at the direct
 evaluator/index tests with no type errors. It replayed properties 39 and 40
 with seed `20260911` and path `0`. The reviewer corrected the ORC-011
 classification above. Cross-realm Temporal values remain outside this verdict.
+
+## Review of the next committed head
+
+At `c4c07da42`, a fresh reviewer again found all four retired assertions
+preserved. It found a helper-specific false green: the right-hand
+constructor-shadow history exercised `ascComparator` with the shadowed
+PlainDate, but passed ordinary values to `compareValues`. The direct helper
+now receives that same shadowed right operand and must return the supplied
+negative calendar sign. The focused comparison, alias, and utils run passed
+258 tests with no type errors after this addition.
+
+The reviewer also reproduced asymmetric comparisons for ordinary objects
+given a spoofed Temporal prototype. This is outside the declared
+custom-prototype domain and is not evidence of closure for that domain. The
+comparison owner needs a separate brand and mixed-value witness before
+claiming it. Fresh review of the final committed head remains pending.

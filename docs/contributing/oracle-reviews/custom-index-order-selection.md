@@ -24,8 +24,8 @@ index/query campaign passed with no type errors after repair.
 
 The oracle covers a ready in-memory Collection, one numeric field, one order
 term, limit one, and two built-in index types. It does not establish arbitrary
-custom comparator laws, mutation histories, live-query publication, provider
-ordering, or a performance guarantee that another eligible index is created.
+custom comparator laws, mutation histories, live-query publication, or
+provider ordering.
 
 ## Oracle guide audit
 
@@ -46,6 +46,31 @@ ordering, or a performance guarantee that another eligible index is created.
 | ORC-013 | A reverse-number callback makes the wrong index choice visibly return rank 30 instead of rank 10. |
 | ORC-014 | Controlled in-memory sync ends at the ready snapshot; no provider handoff is claimed. |
 
-## Exact-commit hostile review
+## Exact-commit hostile review and follow-up
 
-Pending fresh review of the final committed oracle and production path.
+At `c4c07da42`, a fresh reviewer reproduced a planner failure with two
+indexes on the same field: when the custom index was created first and a
+compatible ordinary index second, `optimizedOnly` ordered reads still
+returned no result. The original oracle put the indexes in separate
+Collections, so first-match selection was never challenged. An eager
+Collection also treated the custom index as sufficient and created no
+compatible ordinary index. Numeric range predicates had the same first-match
+problem. The reviewer reproduced both index types and both read directions.
+
+The extended fixture now puts both indexes in one Collection and checks
+ascending and descending public first rows. It also starts with a custom
+index under eager mode, requires one compatible index to be created, and
+checks a repeated read does not create another. Optimized exact `eq` still
+uses the first custom index, verified through its lookup spy. The fixture
+also checks optimized single and compound numeric ranges and an eager range
+subscriber. Four ordered-selection cases failed before that repair at the
+missing first row. Four more cases failed before the range repair: both index
+types returned no optimized `gt` result, and both eager subscriptions failed
+to create a compatible index. The compound assertion followed the single
+range assertion in one test, so no separate pre-fix compound failure was
+observed. Selection and eager admission now skip a custom index only when
+ordered traversal is required. The new oracle passed 8 cases, and the
+six-file related campaign passed 145 tests with no type errors. Lint and
+diff checks passed.
+
+Fresh review of the final committed head remains pending.

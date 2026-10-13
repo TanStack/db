@@ -473,7 +473,7 @@ order, public Date range predicates, cursor continuation, proxies, subclasses,
 replaced Date prototypes or `getTime` methods, and other Date-consuming paths
 remain outside that witness.
 
-The comparison oracle also owns a bounded [Temporal order transfer](oracle-reviews/comparison-unit-retirement-round-6.md). Supplied ISO calendar fields and epoch-nanosecond offsets predict direct `ascComparator` signs and exact zeros for ordinary `PlainDate` and `ZonedDateTime` values from one polyfill copy. Fixed cases preserve the two retired unit blocks; generated cases vary calendar fields, offset zones, equal instants, and adjacent nanoseconds. Fresh-module histories reject a first-input constructor cache poisoned by a genuine instance or forged tag, including the direct `compareValues` path. A genuine ZonedDateTime with an own shadowed display tag retains its instant position through both direct helpers. This lane does not establish public query or index behavior. Custom Temporal subclasses, replaced instance prototypes, mixed native/polyfill implementations, other Temporal kinds, and public ordering/filter publication need separate witnesses.
+The comparison oracle also owns a bounded [Temporal order transfer](oracle-reviews/comparison-unit-retirement-round-6.md). Supplied ISO calendar fields and epoch-nanosecond offsets predict direct `ascComparator` signs and exact zeros for ordinary `PlainDate` and `ZonedDateTime` values from one polyfill copy. Fixed cases preserve the two retired unit blocks; generated cases vary calendar fields, offset zones, equal instants, and adjacent nanoseconds. Fresh-module histories reject a first-input constructor cache poisoned by a genuine instance or forged tag, including the direct `compareValues` path. Both direct helpers also receive a right-hand PlainDate with a constructor shadow. A genuine ZonedDateTime with an own shadowed display tag retains its instant position through both direct helpers. This lane does not establish public query or index behavior. Custom Temporal subclasses, spoofed or replaced instance prototypes, mixed native/polyfill implementations, other Temporal kinds, and public ordering/filter publication need separate witnesses. Spoofed Temporal prototypes can still cause asymmetric comparisons; the comparison owner needs a dedicated brand and mixed-value witness before that class can be called closed.
 
 The [Temporal index order oracle](../../packages/db/tests/temporal-index-order-oracle.test.ts)
 and its [review record](oracle-reviews/temporal-index-order.md) own direct
@@ -502,6 +502,21 @@ row-supplied alias lists. A plain object with a forged Temporal tag and a
 genuine value with a shadowed zone accessor must stay outside the UTC class.
 The neighboring PlainDate lane checks forged tags, borrowed prototypes, and
 genuine own-tag or display shadows at direct lookup and unindexed public `eq`.
+The ZonedDateTime fixture also contains genuine UTC rows with own display-tag
+and `toString` shadows; direct indexes and both public `eq` snapshot paths
+retain their alias equality. The `in` evaluator owner distinguishes
+PlainMonthDay reference years, PlainYearMonth reference days, and Duration
+field vectors that share default display text. Fixed controls reach compiled
+`eq`, constant-list `in`, and row-supplied `in` in both operand directions.
+The alias owner also checks a public unindexed `eq` scan with two native-equal
+PlainMonthDay rows and a distinct reference year. Direct BasicIndex/BTreeIndex
+add, build, removal, re-add, and public indexed `eq` cover the orderable
+PlainYearMonth and Duration cases. Indexed PlainMonthDay equality with multiple
+classes remains open: the ordered indexes cannot compare those classes. A
+future exact-only path must preserve equality while making public `orderBy`
+throw for PlainMonthDay, as changelog #1519 requires. A one-class index bypass
+failed that order law and was not retained.
+Its byte model excludes a genuine Uint8Array with an own display-tag shadow.
 Other zone aliases, custom spoofed prototypes, mixed Temporal implementations,
 mixed ordinary-object/Temporal ordered indexes, joins, grouping, query
 identity, live-query publication, and provider paths remain unproved. Direct
@@ -513,9 +528,14 @@ that a public ordered Collection snapshot does not select a reverse-number
 custom comparator by default ascending or descending `compareOptions`.
 Unindexed and ordinary-index snapshots supply controls; optimized-only reads
 reject the custom order while optimized exact equality still uses that index.
-The fixed ready-state fixture covers BasicIndex and BTreeIndex, one numeric
-field, and limit one. Mutation histories, arbitrary callbacks, and provider or
-live-query publication remain outside this owner.
+With a custom index created before a compatible ordinary index, ordered reads
+select the latter in both directions. Eager indexing adds one compatible
+index when the custom index alone is present and does not add a duplicate on
+repeated reads. Single and compound numeric range predicates also select
+the compatible index; an eager range subscriber creates one when needed.
+The fixed ready-state fixture covers BasicIndex and
+BTreeIndex, one numeric field, and limit one. Mutation histories, arbitrary
+callbacks, and provider or live-query publication remain outside this owner.
 
 The [WHERE predicate publication oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/where-predicate-publication-oracle.property.test.ts)
 also has a [cross-realm Date equality matrix](oracle-reviews/cross-realm-date-where-publication.md).
@@ -564,10 +584,12 @@ records the current transfer boundary and review.
 The [signed-zero custom comparator witness](oracle-reviews/custom-comparator-signed-zero.md)
 in the index refinement oracle separates `-0` and `+0` into two ordered
 positions while exact lookup retains one SameValueZero class. Fixed add/build
-and removal histories check BasicIndex and BTreeIndex takes, a cursor, a
-bounded range, and exact membership. It does not establish arbitrary custom
-callbacks or public planner selection; the custom index order selection owner
-above checks that separate boundary.
+and removal histories check BasicIndex and BTreeIndex takes, cursors, ranges,
+and exact membership. Sign-changing updates and removal/re-addition must move
+or release the ordered position; mixed-sign inclusive/exclusive and reversed
+ranges are checked at a BTree leaf and across a 33-row split. It does not
+establish arbitrary custom callbacks or public planner selection; the custom
+index order selection owner above checks that separate boundary.
 
 The alias-scope owner also has a compiler invariant witness for a malformed
 include plan: removing a captured ancestor's parent projection after the
