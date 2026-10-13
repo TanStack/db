@@ -1,8 +1,9 @@
 # PR #2134 identity and persisted-key oracle review
 
-**Final evidence, 2026-10-13:** The append-only final review below supersedes
+**Current evidence, 2026-10-13:** The append-only final reviews below supersede
 the earlier scope, calibration counts, proxy-collision premise, and ORC-014
-status in this record. It reviews code head `de5d4189bc906cd8375ad174357c027bcfea98cf`.
+status in this record. They review code heads
+`de5d4189bc906cd8375ad174357c027bcfea98cf` and `5239c25c2`.
 The earlier sections remain as the history of how the oracle and repair changed.
 
 Reviewed PR head: `5e224075f`. Semantic repair: `9092cbf26`, 2026-10-13.
@@ -220,3 +221,32 @@ setting should extend that historical owner is an unresolved cross-version
 retention-policy decision, not a confirmed implementation defect. These
 remaining cells are owned by the Query Collection ownership oracle and its
 SQLite receiving path in the coverage map.
+
+## Full-source handoff follow-up at `5239c25c2`
+
+The accepted on-demand ownership rule assigns an absence claim to its Query
+scope. A complete, applied full-source result therefore does not silently
+retire an old filtered owner. The new fixed history keeps the full Query active
+with an unrelated `detail` row, while a historical singleton-filtered owner
+retains `shared`. It crosses retention marker present/absent; the latter is a
+legal interrupted-unload state. After the filtered demand loads, its public
+row has retired at the immediate applied-settlement cut, and durable rows,
+exact owners, and markers agree after persistence settles. The full-source
+row keeps its exact owner. The oracle permits either an exact filtered fetch
+or safe reconciliation from the applied full result; it does not require a
+provider call count for this handoff.
+
+Both variants passed on #2134 alone and in a scratch merge with #2135 head
+`d429e0dd8`. An independent oracle-review agent confirmed the law, model
+independence, and immediate checkpoint, then ran both revised variants with no
+type errors. Two isolated mutants calibrated the merged path. Removing
+historical pending revalidation from the full-source reuse gate left `shared`
+public after the filtered load settled in both variants. Discovering old
+aliases from retention markers alone failed the markerless variant at that same
+assertion while the marked control passed. Both mutants were restored; neither
+was committed. This closes the identified cross-PR handoff for static keys,
+one applied full result, and these two durable metadata shapes. Concurrent
+cache rotation, another Collection's shared Query, and custom query-key
+functions remain outside this witness. The #2135 guide and changeset clarify
+that a retained persisted scope uses an exact request under the current
+implementation; that provider-work choice is not an oracle requirement.

@@ -589,7 +589,13 @@ the other's result. A public LiveQuery preload/cleanup/remount history checks
 retired-preload rejection and fresh remount settlement with a signal-consuming
 provider. The old singleton-IN implementation failed the public-row or durable-owner and marker
 checkpoints; the warm-cache gate and alias parser have separate hostile-mutant
-checks in the review record. These histories cover static on-demand keys and
+checks in the review record. A separate full-source handoff keeps an applied
+full Query with an unrelated row active beside a historical filtered owner.
+Marker-present and markerless variants require that owner's public row to
+retire when the filtered load settles and its durable edge to retire afterward,
+while the full-source row keeps its exact owner. In a scratch merge with #2135,
+removing the retained-owner reuse gate fails both variants; searching markers
+alone fails the markerless variant. These histories cover static on-demand keys and
 the adapter's singleton-IN demand shape. Custom query-key functions, other
 key-format changes, cross-version finite-TTL-to-infinite retention policy,
 arbitrary nested predicates, proxy-owned rows across a cold restart,
