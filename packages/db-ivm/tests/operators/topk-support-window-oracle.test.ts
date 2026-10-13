@@ -70,8 +70,8 @@ const campaigns: Array<{
 // out-of-range slots, negative net support, and negative or fractional windows.
 // The fixed example reaches a zero-width window on present rows, a one-row
 // window, an offset beyond all rows, and a return to the original window. The
-// same history reaches the fixed BTree limit with five present rows and a
-// partial then final withdrawal. A shifted start or inclusive end selects a
+// same history holds all five keys present and then withdraws support
+// partially and finally. A shifted start or inclusive end selects a
 // different row at the one-row boundary checkpoint.
 const boundaryHistory: Array<Step> = [
   { slot: 0, support: 2, offset: 0, limit: 3 },
