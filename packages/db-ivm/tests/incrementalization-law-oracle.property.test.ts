@@ -78,6 +78,42 @@ import type { Weighted } from './incrementalization-law-oracle.js'
 type Keyed = [number, number]
 type JoinOutput = [number, [number, number]]
 type OuterJoinOutput = [number, [number | null, number | null]]
+type GroupedMeanOutput = [string, { bucket: number; mean: number }]
+
+type GroupedTextOutput = [
+  string,
+  {
+    bucket: number
+    lowFirst: string | undefined
+    highFirst: string | undefined
+    lowSecond: string | undefined
+    highSecond: string | undefined
+  },
+]
+
+/**
+ * Each value names a pair of strings. groupBy merges contributions with equal
+ * pre-aggregate values without hashing them, so its identity for a string
+ * must not depend on where one value ends and the next begins. A string's
+ * identity is `"` and its text, joined to the next part with `|`, so the
+ * pairs `["x|\"y", ""]` and `["x", "y|\""]`, and `["|\"", ""]` and
+ * `["", "|\""]`, read the same without each string's length.
+ */
+const TEXT_PAIRS: ReadonlyArray<readonly [string, string]> = [
+  [`x|"y`, ``],
+  [`x`, `y|"`],
+  [`|"`, ``],
+  [``, `|"`],
+  [`a`, `"`],
+  [`a|"`, ``],
+  [``, ``],
+]
+// Named witnesses reach past the generated -3..3 range, so the table wraps.
+const textPair = (value: number) =>
+  TEXT_PAIRS[
+    ((value % TEXT_PAIRS.length) + TEXT_PAIRS.length) % TEXT_PAIRS.length
+  ]!
+
 type GroupedOutput = [
   string,
   {
@@ -85,6 +121,7 @@ type GroupedOutput = [
     total: number
     minimum: number | undefined
     maximum: number | undefined
+    mean: number
   },
 ]
 
@@ -136,6 +173,8 @@ const keyedPolicy = jsonLawValuePolicy<Keyed>()
 const joinPolicy = jsonLawValuePolicy<JoinOutput>()
 const outerJoinPolicy = jsonLawValuePolicy<OuterJoinOutput>()
 const groupedPolicy = jsonLawValuePolicy<GroupedOutput>()
+const groupedTextPolicy = jsonLawValuePolicy<GroupedTextOutput>()
+const groupedMeanPolicy = jsonLawValuePolicy<GroupedMeanOutput>()
 const uniqueRowSplitDomain = {
   uniqueKey: ([key]: Keyed) => String(key),
 }
@@ -264,7 +303,7 @@ function joinedSums(
 function groupedAggregates(input: Weighted<Keyed>): Weighted<GroupedOutput> {
   const groups = new Map<
     number,
-    { total: number; minimum: number; maximum: number }
+    { total: number; minimum: number; maximum: number; count: number }
   >()
   for (const [[key, value], weight] of keyedIdentity(input)) {
     const bucket = key % 2
@@ -272,18 +311,80 @@ function groupedAggregates(input: Weighted<Keyed>): Weighted<GroupedOutput> {
     groups.set(
       bucket,
       current === undefined
-        ? { total: value * weight, minimum: value, maximum: value }
+        ? {
+            total: value * weight,
+            minimum: value,
+            maximum: value,
+            count: weight,
+          }
         : {
             total: current.total + value * weight,
             minimum: Math.min(current.minimum, value),
             maximum: Math.max(current.maximum, value),
+            count: current.count + weight,
           },
     )
   }
-  return [...groups].map(([bucket, aggregates]) => [
-    [JSON.stringify({ bucket }), { bucket, ...aggregates }],
+  return [...groups].map(([bucket, { count, ...aggregates }]) => [
+    [
+      JSON.stringify({ bucket }),
+      // The mean is the weighted total over the weighted row count.
+      { bucket, ...aggregates, mean: aggregates.total / count },
+    ],
     1,
   ])
+}
+
+/**
+ * The per-bucket mean alone. With no other aggregate, every value's identity
+ * comes from avg, so an avg identity that merges different sums shows here.
+ */
+function groupedMean(input: Weighted<Keyed>): Weighted<GroupedMeanOutput> {
+  const groups = new Map<number, { total: number; count: number }>()
+  for (const [[key, value], weight] of keyedIdentity(input)) {
+    const current = groups.get(key % 2) ?? { total: 0, count: 0 }
+    groups.set(key % 2, {
+      total: current.total + value * weight,
+      count: current.count + weight,
+    })
+  }
+  return [...groups].map(([bucket, { total, count }]) => [
+    [JSON.stringify({ bucket }), { bucket, mean: total / count }],
+    1,
+  ])
+}
+
+/** Per-bucket string extrema of both parts, recomputed from plain rows. */
+function groupedTextExtrema(
+  input: Weighted<Keyed>,
+): Weighted<GroupedTextOutput> {
+  const groups = new Map<number, Array<readonly [string, string]>>()
+  for (const [[key, value]] of keyedIdentity(input)) {
+    const pairs = groups.get(key % 2) ?? []
+    pairs.push(textPair(value))
+    groups.set(key % 2, pairs)
+  }
+  const low = (values: Array<string>) =>
+    values.reduce((left, right) => (right < left ? right : left))
+  const high = (values: Array<string>) =>
+    values.reduce((left, right) => (right > left ? right : left))
+  return [...groups].map(([bucket, pairs]) => {
+    const first = pairs.map(([text]) => text)
+    const second = pairs.map(([, text]) => text)
+    return [
+      [
+        JSON.stringify({ bucket }),
+        {
+          bucket,
+          lowFirst: low(first),
+          highFirst: high(first),
+          lowSecond: low(second),
+          highSecond: high(second),
+        },
+      ],
+      1,
+    ]
+  })
 }
 
 function topTwo(input: Weighted<Keyed>): Weighted<Keyed> {
@@ -389,9 +490,49 @@ describe(`DBSP incrementalization laws`, () => {
                     total: groupByOperators.sum(([, value]) => value),
                     minimum: groupByOperators.min(([, value]) => value),
                     maximum: groupByOperators.max(([, value]) => value),
+                    mean: groupByOperators.avg(([, value]) => value),
                   }),
                 ),
               evaluate: groupedAggregates,
+            })
+            assertUnaryIncrementalization({
+              name: `groupBy mean alone`,
+              initial: worlds[0]!,
+              batches,
+              inputPolicy: keyedPolicy,
+              outputPolicy: groupedMeanPolicy,
+              build: (input) =>
+                input.pipe(
+                  groupBy(([key]) => ({ bucket: key % 2 }), {
+                    mean: groupByOperators.avg(([, value]) => value),
+                  }),
+                ),
+              evaluate: groupedMean,
+            })
+            assertUnaryIncrementalization({
+              name: `groupBy string extrema`,
+              initial: worlds[0]!,
+              batches,
+              inputPolicy: keyedPolicy,
+              outputPolicy: groupedTextPolicy,
+              build: (input) =>
+                input.pipe(
+                  groupBy(([key]) => ({ bucket: key % 2 }), {
+                    lowFirst: groupByOperators.min(
+                      ([, value]) => textPair(value)[0],
+                    ),
+                    highFirst: groupByOperators.max(
+                      ([, value]) => textPair(value)[0],
+                    ),
+                    lowSecond: groupByOperators.min(
+                      ([, value]) => textPair(value)[1],
+                    ),
+                    highSecond: groupByOperators.max(
+                      ([, value]) => textPair(value)[1],
+                    ),
+                  }),
+                ),
+              evaluate: groupedTextExtrema,
             })
             assertUnaryIncrementalization({
               name: `top-K`,
@@ -630,6 +771,7 @@ describe(`DBSP incrementalization laws`, () => {
             total: groupByOperators.sum(([, value]) => value),
             minimum: groupByOperators.min(([, value]) => value),
             maximum: groupByOperators.max(([, value]) => value),
+            mean: groupByOperators.avg(([, value]) => value),
           }),
         ),
       evaluate: groupedAggregates,
@@ -890,6 +1032,7 @@ describe(`DBSP incrementalization laws`, () => {
               total: groupByOperators.sum(([, value]) => value),
               minimum: truthinessMinimum,
               maximum: truthinessMaximum,
+              mean: groupByOperators.avg(([, value]) => value),
             }),
           ),
         evaluate: groupedAggregates,
