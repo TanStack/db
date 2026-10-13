@@ -1,7 +1,12 @@
 # PR #2134 identity and persisted-key oracle review
 
+**Final evidence, 2026-10-13:** The append-only final review below supersedes
+the earlier scope, calibration counts, proxy-collision premise, and ORC-014
+status in this record. It reviews code head `de5d4189bc906cd8375ad174357c027bcfea98cf`.
+The earlier sections remain as the history of how the oracle and repair changed.
+
 Reviewed PR head: `5e224075f`. Semantic repair: `9092cbf26`, 2026-10-13.
-This record correction changes no production code or executable oracle.
+The initial record correction changed no production code or executable oracle.
 The review supplied a ref-proxy identity collision, a persisted key change,
 and gaps in both oracle owners. The [coverage map](../oracle-coverage.md)
 records their bounded owners.
@@ -118,3 +123,100 @@ decision and an oracle for that decision.
 The repair location was production code for the accepted ownership law and
 oracle history grammar for the missed upgrade path. The proxy ambiguity is a
 contract and cache-policy question, not an assertion to silently relax.
+
+## Final review of `de5d4189b`
+
+The exact ref-proxy collision asserted in the external review was false on the
+reviewed head: literal `inArray(a, [b])` retains a `val` wrapper, whereas
+`eq(a, b)` uses a row reference. The first three of four original
+joined-demand tests passed on `origin/main`; only direct equality followed by
+a singleton join failed there. The real identity defect was narrower and
+different: separately created literal reference proxies with the same path
+had the same key while the evaluator distinguished them. The repaired identity
+oracle compares independently created proxies and equal-content, distinct
+byte arrays at evaluation and identity checkpoints. The exact direct/join
+acquisition matrix checks both orders, each first-owner release, one provider
+request, and surviving public rows. Removing the singleton equivalence in a
+hostile mutant made those receiving tests fail at provider count.
+
+The persisted-owner law is now exercised across a cold key-format change. A
+fixed historical serialized key supplies the old owner; the current encoder
+does not compute that premise. The model tracks old and current owner edges
+separately. Its grammar crosses old/current keys, equality/membership
+reacquisition, retained markers present/absent, sole/shared rows, and
+empty/surviving/failed provider results. It compares public rows, durable
+rows, exact owner IDs, and retention markers before and after application.
+An empty successful result retires every equivalent historical owner, while
+a failed fetch preserves it. Two distinct nested old keys that converge on
+one current key must both retire. A malformed same-prefix key remains foreign;
+removing the parser's extra-field guard in an isolated mutant failed at the
+durable row, owner, and marker assertions.
+
+A warm current-key Query result cannot stand in for revalidation of an old
+owner. A held provider result leaves that owner and marker intact until
+application, and two equal acquisitions share one physical fetch. The
+pre-repair warm-cache gate made a second provider request; the corrected
+oracle caught it at the call-count checkpoint. Releasing one peer leaves the
+other's pending revalidation and eventual row ownership intact. After final
+unload, a new acquisition starts new work. A separate public LiveQuery
+preload/cleanup/remount witness checks that the retired preload rejects with
+`AbortError` before either endpoint settles, and the remount waits for its
+fresh result. This witness uses a provider that consumes `context.signal`;
+the raw internal `_sync.loadSubset` settlement is not a public claim here.
+
+The finite-TTL witness compares a historical owner with a current-key control:
+after failed revalidation and final unload, each renews to the configured
+deadline, retains its row before that deadline, and expires at it. A real
+file-backed SQLite restart matrix supplies the historical owner through
+durable storage and checks markerless interruption, shared rows, and a warm
+current cache with a different matching row. This closes the earlier ORC-014
+receiving gap for these exact histories. The pre-repair marker-gated path left
+a markerless old owner durable after a successful empty fetch. A separate
+empty historical proxy-demand witness retires ambiguous old EQ and IN markers
+after a matching proxy demand applies, preserves them on fetch failure, and
+leaves them alone for a genuine row-reference demand. The old encoder
+distinguished literal proxies from row references but collapsed distinct
+literal proxies with the same path. The accepted policy retires such an
+ambiguous old key after matching revalidation; it can discard an old owner of
+a different same-path proxy. No legal proxy-owned-row restart history has
+been established, so that migration case is outside the claim.
+
+The implementing agent ran 70 identity-oracle tests, 570 ownership tests, and
+121 related lifecycle/direct-write tests, with build, type, lint, and diff
+checks passing. An independent oracle reviewer reran 70 identity and 375
+ownership runtime tests on this head, confirmed the SQLite and finite-TTL
+checkpoints, and found no reachable counterexample inside the finite grammar.
+These runs and the mutants calibrate the named laws; they are not a universal
+proof for arbitrary predicates, adapters, or schedules.
+
+### Final ORC-001–014 disposition and limits
+
+The identity and ownership laws and their limits are stated next to independent
+evaluation and owner-edge models (ORC-001–003, ORC-009). Fixed, bounded
+operator/value and upgrade histories are used; no generated campaign or
+shrinker is claimed (ORC-004, ORC-007). Real QueryClient, Query Collection,
+LiveQuery, and SQLite paths reach the named public and durable checkpoints
+(ORC-005). Original-code failures and hostile mutants reached assertions,
+including provider count and malformed-key owner/marker comparisons
+(ORC-006). Distinct old/current edges remain necessary until application or
+expiry (ORC-008). Cleanup aggregates normal test failures, but no injected
+simultaneous assertion-plus-cleanup fault was checked (ORC-010). Evaluator
+results, literal reference identity, fixed old serialized bytes, and a real
+SQLite restart give independent formulations of the checked premises
+(ORC-002, ORC-011, ORC-014). The finite matrix distinguishes nullish and
+non-null singleton members, proxy values, equal-content byte arrays,
+acquisition order, ownership overlap, warm cache, and failure (ORC-012–013).
+
+Custom query-key functions, other key-format changes, arbitrary nested
+values, legal proxy-owned rows after cold restart, signal-ignoring public
+remount, and overlapping expiry with alias discovery need separate receiving
+witnesses. One metadata scan is requested per sync run, but SQLite still
+decodes row values, and later eligible demands parse candidate owner and
+marker hashes. The current bound is roughly
+`O(demands × (owners + markers))` parsing work; no latency budget is proved.
+If an old finite-TTL marker meets a new `persistedGcTime: Infinity` setting
+after failed revalidation, the old deadline remains binding. Whether the new
+setting should extend that historical owner is an unresolved cross-version
+retention-policy decision, not a confirmed implementation defect. These
+remaining cells are owned by the Query Collection ownership oracle and its
+SQLite receiving path in the coverage map.

@@ -572,26 +572,37 @@ also retires two overlapping claims one at a time and compares durable owner
 identities and public rows after each empty result. This does not establish every persisted
 adapter, overlapping result schedule, or ownership of an inferred window
 replacement; the persisted direct-write owner retains the wider durable
-receiving boundary. A cold upgrade history seeds a historical literal
-singleton-IN demand key with a retained row and `until-revalidated` marker.
-The current-key control and old-key cases cross sole and shared ownership;
-empty results compare public rows, durable rows, exact owners, and markers
-after application. A surviving result moves ownership to the current key,
-including its later retention marker; a failed result leaves the old owner
-and marker intact. An EQ-first acquisition checks later IN revalidation on
-the same physical Query. The old-key empty cases failed before migration at
-the owner, marker, and public-row checkpoints. These controlled histories
-cover static on-demand keys and the adapter's singleton-IN demand shape.
-Custom query-key functions, changed key formats beyond this singleton-IN
-rewrite, real SQLite upgrade/restart, TTL expiry, and arbitrary nested
-predicates remain open. Historical reference-proxy members are excluded:
-the old encoder represented them as row references, which could collide with
-valid row-reference queries. New object-valued demand keys carry a runtime
-nonce and cannot identify the old object after restart. An old
-`until-revalidated` marker in either class can remain indefinitely; a safe
-invalidation or versioned-cache policy needs a separate decision. The
+receiving boundary. A cold upgrade grammar seeds fixed historical singleton-IN
+keys with retained rows, with and without `until-revalidated` markers, and
+crosses EQ/IN reacquisition, sole/shared ownership, empty/surviving/failed
+results, and a warm current-key Query cache. It compares public and durable
+rows, exact owner IDs, and markers before and after application. Two nested
+historical keys that converge on one current key must both retire; a malformed
+same-prefix key must survive. After failed revalidation and final unload, a
+finite-TTL historical owner renews and expires like a current-key control. A
+matching literal reference-proxy demand retires ambiguous old retention markers
+after successful revalidation, while a genuine
+row-reference demand leaves them alone. A real SQLite restart receiving matrix
+checks marker-free interruption, shared owners, and warm cache. Held equal
+acquisitions share one revalidation fetch, and releasing one peer preserves
+the other's result. A public LiveQuery preload/cleanup/remount history checks
+retired-preload rejection and fresh remount settlement with a signal-consuming
+provider. The old singleton-IN implementation failed the public-row or durable-owner and marker
+checkpoints; the warm-cache gate and alias parser have separate hostile-mutant
+checks in the review record. These histories cover static on-demand keys and
+the adapter's singleton-IN demand shape. Custom query-key functions, other
+key-format changes, cross-version finite-TTL-to-infinite retention policy,
+arbitrary nested predicates, proxy-owned rows across a cold restart,
+signal-ignoring public remount, and overlapping application or expiry/alias
+scan schedules remain open. The old encoder distinguished a literal proxy from a genuine row reference, but
+collapsed distinct literal proxies with the same path; the accepted migration
+policy retires that ambiguous old key when a matching proxy demand succeeds. The
 [PR #2134 oracle review](oracle-reviews/pr-2134-identity-and-persisted-key.md)
-records the RED/GREEN and hostile-mutant checks. Shared-Query cached-result authority
+records the RED/GREEN and hostile-mutant checks. The first eligible demand
+requests one persisted-row metadata scan per sync run; the SQLite adapter still
+reads row values in that scan. Later eligible demands parse every persisted
+owner hash and retention marker. The oracle bounds scan count, not latency or
+total parsing work. Shared-Query cached-result authority
 across an unobserved Collection is now an accepted law: a newer physical fetch
 may replace and claim a direct row on later acquisition, while an older cached
 result or another Collection's local cache edit may not. The 24-history matrix
