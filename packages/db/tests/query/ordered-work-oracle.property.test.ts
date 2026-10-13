@@ -4354,6 +4354,12 @@ describe(`ordered source work oracle`, () => {
  *   read, which is one pass; a bounded read that then sorts the whole source in
  *   memory makes a second pass and fails. A joined plan reads its full source
  *   twice per change on `main` too, so the scan law does not cover it.
+ * - **Full join:** the result holds every root row, and one rootless row for
+ *   each marker whose id names no root row. A rootless row sorts with the null
+ *   ranks. Its window is the first result rows in that order. The plan reads
+ *   its full source, because a marker looks unmatched until its root row has
+ *   loaded; a bounded root prefix showed such markers as rootless rows. Only
+ *   the rows law applies.
  *
  * The grammar crosses the sync path (sync writes, or local-only direct writes),
  * the filter (a predicate on the source, a function filter, or a filter on a
@@ -4365,7 +4371,14 @@ describe(`ordered source work oracle`, () => {
  * inside and at the edge of the window, rank changes across its boundary, and
  * distant rows the query has already received all occur. A second campaign
  * fixes the premise of the joined law: a joined filter, an index and one order
- * term. A joined step can change a row and its marker in two commits; each
+ * term. Null ranks sort first or last, with a matching index. Joined filters
+ * also run as anti-joins and change eligibility through the marker or the root
+ * row's join key, and an Effect runs the same query beside the Collection.
+ * A third campaign fixes the full-join premise: few or no filler rows, null
+ * ranks among root rows, and orphan markers, so a window can reach the null
+ * group where rootless rows and null-ranked root rows tie. A reconstruction
+ * check samples that campaign and requires such windows. A joined step can
+ * change a row and its marker in two commits; each
  * commit publishes at most once, and the last publication shows the final
  * window. The observation point is after each change and a flush. Work is
  * counted twice, and both counts are bounded: rows a local snapshot returns
@@ -4401,6 +4414,14 @@ type EagerCase = {
   via?: `marker` | `link`
   indexed: boolean
   direction: `asc` | `desc`
+  // Where null ranks sort, and a full join's rootless rows with them. The
+  // index uses the same placement. Omitted means first, the default.
+  nulls?: `first` | `last`
+  // Filler rows sort after every domain row. Omitted means 200; a full-join
+  // case may have none, so its window can reach the null group.
+  fillers?: number
+  // Full join only: markers whose id names no root row.
+  orphans?: Array<number>
   terms: 1 | 2
   limit: number
   offset: number
@@ -4410,10 +4431,13 @@ type EagerCase = {
 
 const EAGER_FILLER = 200
 
-function fillerRows(direction: `asc` | `desc`): Array<Row> {
+function fillerRows(
+  direction: `asc` | `desc`,
+  count: number = EAGER_FILLER,
+): Array<Row> {
   // Eligible rows that sort after every domain row, so a correct window never
   // needs them and a full rescan must deliver them.
-  return Array.from({ length: EAGER_FILLER }, (_, index) => ({
+  return Array.from({ length: count }, (_, index) => ({
     id: 1000 + index,
     rank: direction === `asc` ? 100 + index : -100 - index,
     eligible: true,
@@ -4477,6 +4501,7 @@ const eagerCase: fc.Arbitrary<EagerCase> = fc.record({
   via: fc.constantFrom(`marker` as const, `link` as const),
   indexed: fc.boolean(),
   direction: fc.constantFrom(`asc` as const, `desc` as const),
+  nulls: fc.constantFrom(`first` as const, `last` as const),
   terms: fc.constantFrom(1 as const, 2 as const),
   limit: fc.integer({ min: 1, max: 3 }),
   offset: fc.integer({ min: 0, max: 1 }),
@@ -4584,18 +4609,51 @@ const eagerJoinedGapCase: fc.Arbitrary<EagerCase> = fc
     ],
   }))
 
+// The full-join law's premise: a window that can reach the null group, where
+// rootless rows and root rows with a null rank tie on the first order term.
+// Cases favor no filler rows, so a few domain rows fill the window. Initial
+// orphan markers (ids 20 to 29) start as rootless rows; root deletes and
+// eligibility changes create and remove more.
+const eagerFullJoinCase: fc.Arbitrary<EagerCase> = fc
+  .record({
+    base: eagerCase,
+    fillers: fc.oneof(
+      { weight: 3, arbitrary: fc.constant(0) },
+      { weight: 1, arbitrary: fc.constant(EAGER_FILLER) },
+    ),
+    initial: fc.uniqueArray(
+      fc.record({ id: fc.nat(9), rank: gapRank, eligible: fc.boolean() }),
+      { minLength: 2, maxLength: 8, selector: (row) => row.id },
+    ),
+    orphans: fc.uniqueArray(fc.integer({ min: 20, max: 29 }), {
+      maxLength: 3,
+    }),
+    history: eagerJoinedHistory,
+  })
+  .map(({ base, fillers, initial, orphans, history }) => ({
+    ...base,
+    filter: `full-joined` as const,
+    via: `marker` as const,
+    indexed: true,
+    fillers,
+    initial,
+    orphans,
+    history,
+  }))
+
 function isJoinedFilter({ filter }: EagerCase): boolean {
   return filter === `joined` || filter === `anti-joined`
 }
 
 function eagerOrder(
   rows: ReadonlyMap<number, Row>,
-  { direction }: EagerCase,
+  { direction, nulls }: EagerCase,
 ): Array<Row> {
-  // Documented order (live-queries guide): nulls first in either direction;
-  // NaN is greater than every other non-null value; ties by ascending id.
+  // Documented order (live-queries guide): nulls first in either direction
+  // unless the query asks for them last; NaN is greater than every other
+  // non-null value; ties by ascending id.
   const position = (rank: number | null): [number, number] => {
-    if (rank === null) return [0, 0]
+    if (rank === null) return [nulls === `last` ? 3 : 0, 0]
     if (Number.isNaN(rank)) return [direction === `asc` ? 2 : 1, 0]
     return [direction === `asc` ? 1 : 2, direction === `asc` ? rank : -rank]
   }
@@ -4669,7 +4727,10 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
   const linkFor = (id: number, eligible: boolean) =>
     !viaLink || eligible === admitsWhenMatched ? id : -1 - id
   const rows = new Map<number, Row>()
-  for (const row of [...fillerRows(testCase.direction), ...testCase.initial]) {
+  for (const row of [
+    ...fillerRows(testCase.direction, testCase.fillers),
+    ...testCase.initial,
+  ]) {
     rows.set(row.id, {
       label: `row`,
       ...row,
@@ -4714,7 +4775,16 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
           },
         })
   if (testCase.indexed) {
-    source.createIndex((row) => row.rank, { indexType: BTreeIndex })
+    source.createIndex((row) => row.rank, {
+      indexType: BTreeIndex,
+      options: {
+        compareOptions: {
+          direction: `asc`,
+          nulls: testCase.nulls ?? `first`,
+          stringSort: `locale`,
+        },
+      },
+    })
   }
   // A joined filter keeps eligibility on a marker per matched row.
   const markers = createCollection(
@@ -4729,8 +4799,15 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
               ...[...rows.keys()].filter((rowId) => rowId >= 1000),
             ].map((rowId) => ({ rowId }))
           : [...rows.values()]
-              .filter((row) => row.eligible === admitsWhenMatched)
-              .map((row) => ({ rowId: row.id })),
+              // A full join's markers are sparse: fillers have none, so a
+              // window can need far fewer root rows than the source holds.
+              .filter(
+                (row) =>
+                  row.eligible === admitsWhenMatched &&
+                  !(fullJoin && row.id >= 1000),
+              )
+              .map((row) => ({ rowId: row.id }))
+              .concat((testCase.orphans ?? []).map((rowId) => ({ rowId }))),
     }),
   )
   // Source changes committed by the current step. A joined step can change a
@@ -4791,7 +4868,10 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
           : testCase.filter === `function`
             ? q.from({ row: source }).fn.where(({ row }) => row.eligible)
             : q.from({ row: source }).where(({ row }) => eq(row.eligible, true))
-    ).orderBy(({ row }) => row.rank, testCase.direction)
+    ).orderBy(({ row }) => row.rank, {
+      direction: testCase.direction,
+      nulls: testCase.nulls ?? `first`,
+    })
     return (
       testCase.terms === 2 ? ordered.orderBy(({ row }) => row.id) : ordered
     )
@@ -4805,22 +4885,33 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
   // An Effect runs the same joined query through its own graph loop, so the
   // window law must hold for both consumers. It holds its rows by result key.
   const effectRows = new Map<string | number, number>()
-  const effect = joined
-    ? createEffect({
-        query: buildQuery,
-        onBatch: (events) => {
-          for (const event of events) {
-            if (event.type === `exit`) effectRows.delete(event.key)
-            else effectRows.set(event.key, (event.value as { row: Row }).row.id)
-          }
-        },
-      })
-    : undefined
+  const effect =
+    joined || fullJoin
+      ? createEffect({
+          query: buildQuery,
+          onBatch: (events) => {
+            for (const event of events) {
+              if (event.type === `exit`) {
+                effectRows.delete(event.key)
+                continue
+              }
+              const { row, marker } = event.value as {
+                row?: Row
+                marker?: { rowId: number }
+              }
+              effectRows.set(event.key, row ? row.id : -1 - marker!.rowId)
+            }
+          },
+        })
+      : undefined
   // Effect events carry no position; order its rows as the model orders all
   // rows, so a row that should not be visible still shows its rank.
   const effectIds = () => {
     const everyRow = new Map(
-      [...rows].map(([rowId, row]) => [rowId, { ...row, eligible: true }]),
+      [...modelRows()].map(([rowId, row]) => [
+        rowId,
+        { ...row, eligible: true },
+      ]),
     )
     const order = eagerOrder(everyRow, testCase).map((row) => row.id)
     return [...effectRows.values()].sort(
@@ -4868,6 +4959,8 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
     // bounded prefix cannot prove the window is the first eligible rows; the
     // loader reads the full source and only the rows law applies.
     if (!testCase.indexed || testCase.terms !== 1) return undefined
+    // A full join reads its full source too: a rootless row cannot be shown
+    // unmatched until every root row has loaded.
     if (testCase.filter !== `source`) return undefined
     if (boundary.some((rank) => rank === null || Number.isNaN(rank))) return
     // Rows in a tie group, of two or more equal ranks, at a boundary value.
@@ -4890,7 +4983,12 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
     expectEagerWindow(visibleIds(), modelRows(), testCase, `initial rows`)
     if (effect) {
       await flushPromises()
-      expectEagerWindow(effectIds(), rows, testCase, `initial Effect rows`)
+      expectEagerWindow(
+        effectIds(),
+        modelRows(),
+        testCase,
+        `initial Effect rows`,
+      )
     }
     const subscription = query.subscribeChanges(() => {
       published.push(visibleIds())
@@ -5006,7 +5104,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       if (effect) {
         expectEagerWindow(
           effectIds(),
-          rows,
+          modelRows(),
           testCase,
           `Effect rows after step ${step}`,
         )
@@ -5130,22 +5228,62 @@ describe(`eager indexed ordered windows`, () => {
     },
   )
 
-  it.each([`sync`, `local-only`] as const)(
-    `shows no rootless full-join row whose root row is past the prefix (%s)`,
-    async (path) => {
-      // Every filler row has a marker. A bounded root prefix would leave most
-      // markers unmatched in the graph, and their null-ranked rootless rows
-      // would take the window from the first root row.
+  it.each([
+    [`sync`, 1],
+    [`local-only`, 1],
+    [`sync`, 2],
+    [`local-only`, 2],
+  ] as const)(
+    `shows no rootless full-join row for a null-ranked root past the prefix (%s, %s terms)`,
+    async (path, terms) => {
+      // Nulls last. The prefix ends inside the null group, where row 2 and the
+      // marker of unloaded row 3 tie on rank. A null boundary is not an
+      // expressible cursor, so the loader reads the full source and row 3's
+      // marker is matched; a loader that paged from a null boundary could
+      // show that marker as a rootless row.
       await checkEagerWindow({
         path,
         filter: `full-joined`,
         via: `marker`,
         indexed: true,
         direction: `asc`,
+        nulls: `last`,
+        fillers: 0,
+        terms,
+        limit: 2,
+        offset: 0,
+        initial: [
+          { id: 1, rank: 1, eligible: false },
+          { id: 2, rank: null as unknown as number, eligible: false },
+          { id: 3, rank: null as unknown as number, eligible: true },
+        ],
+        history: [{ type: `touch`, id: 1 }],
+      })
+    },
+  )
+
+  it.each([`sync`, `local-only`] as const)(
+    `shows no rootless full-join row whose root row is past the prefix (%s)`,
+    async (path) => {
+      // Every domain row has a marker, and nulls sort first. A bounded root
+      // prefix of one row would leave the other markers unmatched in the
+      // graph, and their null-ranked rootless rows would take the window
+      // from the first root row.
+      await checkEagerWindow({
+        path,
+        filter: `full-joined`,
+        via: `marker`,
+        indexed: true,
+        direction: `asc`,
+        nulls: `first`,
         terms: 1,
         limit: 1,
         offset: 0,
-        initial: [],
+        initial: [0, 1, 2, 3, 4, 5].map((id) => ({
+          id,
+          rank: id,
+          eligible: true,
+        })),
         history: [{ type: `delete-visible` }],
       })
     },
@@ -5221,6 +5359,61 @@ describe(`eager indexed ordered windows`, () => {
     oracleRandomParameters(runs, replay, `ordered-work.eager-indexed-window`),
   )(
     `keeps rows and per-change work bounded for a random or replayed seed`,
+    checkEagerWindow,
+  )
+
+  // Reconstruction: the campaign reaches the premise. Its initial windows
+  // include rootless rows and, separately, windows that hold a rootless row
+  // beside a root row with a null rank.
+  it(`generates full-join windows that reach the null group`, () => {
+    let rootless = 0
+    let mixedNullGroup = 0
+    for (const testCase of fc.sample(eagerFullJoinCase, {
+      numRuns: 300,
+      seed: 2071,
+    })) {
+      const roots = [
+        ...fillerRows(testCase.direction, testCase.fillers),
+        ...testCase.initial,
+      ]
+      const model = new Map<number, Row>()
+      for (const row of roots) {
+        model.set(row.id, { label: `row`, ...row, eligible: true })
+      }
+      for (const markerId of testCase.orphans ?? []) {
+        model.set(-1 - markerId, {
+          id: -1 - markerId,
+          rank: null as unknown as number,
+          eligible: true,
+          label: `marker`,
+        })
+      }
+      const window = eagerWindow(model, testCase)
+      const hasRootless = window.some((id) => id < 0)
+      if (hasRootless) rootless++
+      if (
+        hasRootless &&
+        window.some(
+          (id) => id >= 0 && (model.get(id)!.rank as number | null) === null,
+        )
+      ) {
+        mixedNullGroup++
+      }
+    }
+    expect(rootless).toBeGreaterThan(30)
+    expect(mixedNullGroup).toBeGreaterThan(5)
+  })
+
+  fcTest.prop([eagerFullJoinCase], { numRuns: runs, seed: 2073 })(
+    `keeps a full-join window to the first result rows for a fixed seed`,
+    checkEagerWindow,
+  )
+
+  fcTest.prop(
+    [eagerFullJoinCase],
+    oracleRandomParameters(runs, replay, `ordered-work.eager-full-join`),
+  )(
+    `keeps a full-join window to the first result rows for a random or replayed seed`,
     checkEagerWindow,
   )
 
