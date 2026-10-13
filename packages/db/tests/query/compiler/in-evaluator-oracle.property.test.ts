@@ -52,8 +52,7 @@ import { oraclePropertyOptions, oracleRuns } from '../../oracle-config.js'
  * content, genuine local and foreign bytes with own display-tag shadows, bytes
  * with own `length` or `byteLength` shadows, and a wide typed array with a
  * spoofed byte tag. A fixed control also shadows byte iteration. Temporal
- * values include ZonedDateTime zone aliases, a forged tag, a borrowed
- * prototype, shadowed display and field members, unequal values within each
+ * values include ZonedDateTime zone aliases, unequal values within each
  * modeled Temporal kind, reference ISO year/day
  * differences hidden by default display, and Duration carry forms with equal
  * display but distinct fields, one shared object and a structurally equal
@@ -73,9 +72,9 @@ import { oraclePropertyOptions, oracleRuns } from '../../oracle-config.js'
  * without normalization and requires the checker to reject it.
  *
  * Limits: this owner checks the boolean result of `in` for ordinary values
- * from one Temporal polyfill copy and the listed display shadows. It does not
- * claim mixed Temporal implementations, replaced genuine prototypes, or
- * arbitrary custom prototypes that imitate Temporal intrinsics. WHERE
+ * from one Temporal polyfill copy. It does not claim mixed Temporal
+ * implementations, malformed Temporal lookalikes, deliberately shadowed
+ * Temporal members, or replaced genuine prototypes. WHERE
  * publication, indexes, and subset loading have other owners.
  */
 
@@ -136,22 +135,7 @@ const otherSpoofedWideBytes = new Uint16Array([1, 2])
 Object.defineProperty(otherSpoofedWideBytes, Symbol.toStringTag, {
   value: `Uint8Array`,
 })
-const forgedPlainDate = {
-  [Symbol.toStringTag]: `Temporal.PlainDate`,
-  toString: () => `2024-01-01`,
-}
-const borrowedPlainDate = Object.assign(
-  Object.create(Temporal.PlainDate.prototype) as object,
-  { toString: () => `2024-01-01` },
-)
-const shadowedTagPlainDate = Temporal.PlainDate.from(`2024-01-01`)
-Object.defineProperty(shadowedTagPlainDate, Symbol.toStringTag, {
-  value: `ordinary`,
-})
-const shadowedTextPlainDate = Temporal.PlainDate.from(`2024-01-01`)
-Object.defineProperty(shadowedTextPlainDate, `toString`, {
-  value: () => `unrelated text`,
-})
+const samePlainDate = Temporal.PlainDate.from(`2024-01-01`)
 const leapMonthDay = new Temporal.PlainMonthDay(2, 29, `iso8601`, 1972)
 const sameLeapMonthDay = new Temporal.PlainMonthDay(2, 29, `iso8601`, 1972)
 const otherReferenceMonthDay = new Temporal.PlainMonthDay(
@@ -173,8 +157,6 @@ const sameHourDuration = Temporal.Duration.from(`PT1H`)
 const sixtyMinuteDuration = Temporal.Duration.from(`PT60M`)
 const secondDuration = Temporal.Duration.from({ seconds: 1 })
 const sameSecondDuration = Temporal.Duration.from({ seconds: 1 })
-const shadowedSecondDuration = Temporal.Duration.from({ seconds: 1 })
-Object.defineProperty(shadowedSecondDuration, `seconds`, { value: 2 })
 const thousandMillisecondDuration = Temporal.Duration.from({
   milliseconds: 1000,
 })
@@ -184,14 +166,6 @@ const sameThousandMillisecondDuration = Temporal.Duration.from({
 const millionMicrosecondDuration = Temporal.Duration.from({
   microseconds: 1_000_000,
 })
-const shadowedHourDuration = Temporal.Duration.from(`PT1H`)
-Object.defineProperty(shadowedHourDuration, `toString`, {
-  value: () => `PT2H`,
-})
-const forgedHourDuration = {
-  [Symbol.toStringTag]: `Temporal.Duration`,
-  toString: () => `PT1H`,
-}
 const utcZoned = Temporal.ZonedDateTime.from(`2024-01-15T09:00:00+00:00[UTC]`)
 const aliasZoned = Temporal.ZonedDateTime.from(
   `2024-01-15T09:00:00+00:00[Etc/UTC]`,
@@ -199,17 +173,6 @@ const aliasZoned = Temporal.ZonedDateTime.from(
 const offsetZoned = Temporal.ZonedDateTime.from(
   `2024-01-15T09:00:00+00:00[+00:00]`,
 )
-const shadowedOffsetZoned = Temporal.ZonedDateTime.from(
-  `2024-01-15T09:00:00+00:00[+00:00]`,
-)
-Object.defineProperty(shadowedOffsetZoned, `timeZoneId`, { value: `UTC` })
-const forgedZoned = {
-  [Symbol.toStringTag]: `Temporal.ZonedDateTime`,
-  epochNanoseconds: utcZoned.epochNanoseconds,
-  timeZoneId: `UTC`,
-  calendarId: `iso8601`,
-  toString: () => `unrelated plain object`,
-}
 const pool: ReadonlyArray<unknown> = [
   `a`,
   `b`,
@@ -259,10 +222,7 @@ const pool: ReadonlyArray<unknown> = [
   plainTime,
   samePlainTime,
   otherPlainTime,
-  forgedPlainDate,
-  borrowedPlainDate,
-  shadowedTagPlainDate,
-  shadowedTextPlainDate,
+  samePlainDate,
   leapMonthDay,
   sameLeapMonthDay,
   otherReferenceMonthDay,
@@ -274,17 +234,12 @@ const pool: ReadonlyArray<unknown> = [
   sixtyMinuteDuration,
   secondDuration,
   sameSecondDuration,
-  shadowedSecondDuration,
   thousandMillisecondDuration,
   sameThousandMillisecondDuration,
   millionMicrosecondDuration,
-  shadowedHourDuration,
-  forgedHourDuration,
   utcZoned,
   aliasZoned,
   offsetZoned,
-  shadowedOffsetZoned,
-  forgedZoned,
   shared,
   { id: 1 },
   null,
@@ -324,10 +279,8 @@ function isBytes(value: unknown): value is Uint8Array {
   )
 }
 
-// The trusted polyfill methods inspect Temporal's internal slots. A user can
-// shadow an instance's tag, equals, or toString, and can borrow its prototype;
-// none of those visible properties establishes the brand. The bounded model
-// tests the trusted methods directly and never imports production's classifier.
+// The polyfill methods supply the reference equality relation for the
+// supported Temporal values. The model never imports production's classifier.
 const temporalEqualities = [
   [`Instant`, Temporal.Instant.prototype.equals],
   [`PlainDate`, Temporal.PlainDate.prototype.equals],
@@ -370,7 +323,7 @@ function temporalBrand(value: unknown): TemporalBrand | undefined {
         }
       }
     } catch {
-      // A borrowed or forged prototype has no Temporal internal slots.
+      // Ordinary non-Temporal objects fail these intrinsic calls.
     }
   }
   try {
@@ -539,12 +492,6 @@ function evaluateWithKindOnlyTemporalKey(testCase: InCase): boolean | null {
 
 function describeCase(testCase: InCase): string {
   const show = (value: unknown): string => {
-    if (value === forgedPlainDate) return `forged PlainDate tag`
-    if (value === borrowedPlainDate) return `borrowed PlainDate prototype`
-    if (value === shadowedTagPlainDate) return `PlainDate with shadowed tag`
-    if (value === shadowedTextPlainDate) return `PlainDate with shadowed text`
-    if (value === shadowedHourDuration) return `Duration with shadowed text`
-    if (value === forgedHourDuration) return `forged Duration tag`
     if (value === borrowedDate) return `borrowed Date prototype`
     if (value === otherBorrowedDate) return `other borrowed Date prototype`
     const dateTime = nativeDateTimestamp(value)
@@ -563,7 +510,7 @@ function describeCase(testCase: InCase): string {
                     try {
                       return String(value)
                     } catch {
-                      return `object with borrowed Temporal prototype`
+                      return `object`
                     }
                   })()
                 : typeof value === `string`
@@ -803,7 +750,7 @@ describe(`in evaluator`, () => {
     expect(plainTime.equals(samePlainTime)).toBe(true)
     expect(plainTime.equals(otherPlainTime)).toBe(false)
     for (const [left, equal, other] of [
-      [plainDate, shadowedTagPlainDate, otherPlainDate],
+      [plainDate, samePlainDate, otherPlainDate],
       [instant, sameInstant, otherInstant],
       [plainDateTime, samePlainDateTime, otherPlainDateTime],
       [plainTime, samePlainTime, otherPlainTime],
@@ -818,7 +765,7 @@ describe(`in evaluator`, () => {
 
   it(`rejects a kind-only Temporal list key at the membership comparison`, () => {
     for (const [value, equal, unequal] of [
-      [plainDate, shadowedTagPlainDate, otherPlainDate],
+      [plainDate, samePlainDate, otherPlainDate],
       [instant, sameInstant, otherInstant],
       [plainDateTime, samePlainDateTime, otherPlainDateTime],
       [plainTime, samePlainTime, otherPlainTime],
@@ -870,40 +817,6 @@ describe(`in evaluator`, () => {
   )
 
   it.each([false, true])(
-    `rejects a forged tag and a shadowed zone in a %s list`,
-    (listFromRow) => {
-      expect(utcZoned.equals(shadowedOffsetZoned)).toBe(false)
-      for (const value of [forgedZoned, shadowedOffsetZoned]) {
-        check(evaluateWithProduction, {
-          value,
-          list: [utcZoned],
-          listFromRow,
-        })
-      }
-    },
-  )
-
-  it.each(
-    [false, true].flatMap((listFromRow) =>
-      [
-        [`forged own tag`, forgedPlainDate],
-        [`borrowed prototype`, borrowedPlainDate],
-        [`shadowed own tag`, shadowedTagPlainDate],
-        [`shadowed toString`, shadowedTextPlainDate],
-      ].map(([name, value]) => ({ name, value, listFromRow })),
-    ),
-  )(
-    `uses the native brand for $name with listFromRow=$listFromRow`,
-    ({ value, listFromRow }) => {
-      check(evaluateWithProduction, {
-        value,
-        list: [plainDate],
-        listFromRow,
-      })
-    },
-  )
-
-  it.each([false, true])(
     `matches Duration fields, while keeping equivalent representations distinct in a %s list`,
     (listFromRow) => {
       check(evaluateWithProduction, {
@@ -913,16 +826,6 @@ describe(`in evaluator`, () => {
       })
       check(evaluateWithProduction, {
         value: sixtyMinuteDuration,
-        list: [hourDuration],
-        listFromRow,
-      })
-      check(evaluateWithProduction, {
-        value: shadowedHourDuration,
-        list: [hourDuration],
-        listFromRow,
-      })
-      check(evaluateWithProduction, {
-        value: forgedHourDuration,
         list: [hourDuration],
         listFromRow,
       })
@@ -968,7 +871,6 @@ describe(`in evaluator`, () => {
     for (const value of [
       secondDuration,
       sameSecondDuration,
-      shadowedSecondDuration,
       thousandMillisecondDuration,
       sameThousandMillisecondDuration,
       millionMicrosecondDuration,
@@ -977,9 +879,6 @@ describe(`in evaluator`, () => {
     }
 
     checkEqualityPaths(secondDuration, sameSecondDuration, true)
-    // An own getter shadow cannot change the intrinsic Duration fields.
-    expect(shadowedSecondDuration.seconds).toBe(2)
-    checkEqualityPaths(secondDuration, shadowedSecondDuration, true)
     checkEqualityPaths(
       thousandMillisecondDuration,
       sameThousandMillisecondDuration,

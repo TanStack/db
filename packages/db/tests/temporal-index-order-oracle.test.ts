@@ -25,11 +25,16 @@ import { orderedEntriesArray, withOracleCleanup } from './utils.js'
  * values share one query-equality class. An opposite callback distinguishes
  * callback-result order from plain display-text order. They check add/build,
  * exact lookup, range and cursor boundaries, representative removal, and
- * updates that change callback order without changing query equality. Fixed add/build
- * histories also shadow a genuine value's display tag; the value cursor must
- * still cross its native instant position. These checks do not claim arbitrary
+ * updates that change callback order without changing query equality. These
+ * checks do not claim arbitrary
  * Temporal kinds, time-zone transitions, longer histories,
  * public/provider cursor continuation, or live-query publication.
+ * The separate admission lane below protects default equality indexes for
+ * genuine Temporal values that lack a public order. It does not assign those
+ * values a public `orderBy` result: changelog #1519 requires `orderBy` to
+ * reject PlainMonthDay and mixed Temporal kinds. Its admission and exact
+ * membership authority is the public createIndex contract and #1519's
+ * unchanged Temporal `eq` relation; #1370 established Temporal index keys.
  */
 
 type Row = { id: string; when: Temporal.ZonedDateTime }
@@ -293,28 +298,6 @@ describe.each(indexTypes)(
       },
     )
 
-    it.each([`add`, `build`] as const)(
-      `keeps instant order when a genuine value shadows its display tag after %s`,
-      (construction) => {
-        const rows = rowsFromFixtures().slice(0, 3)
-        Object.defineProperty(rows[0]!.when, Symbol.toStringTag, {
-          value: `ordinary`,
-        })
-        const index = new IndexType(1, new PropRef([`when`]))
-        if (construction === `add`) {
-          for (const row of rows) index.add(row.id, row)
-        } else {
-          index.build(rows.map((row): [string, Row] => [row.id, row]))
-        }
-
-        // The source fixture supplies the instant labels. An instance display
-        // property cannot move its row out of the shared earliest position.
-        expectOrderedPrefix(index.takeFromStart(3), 3, fixtures.slice(0, 3))
-        expectOrderedPrefix(index.takeFromStart(1), 1, fixtures.slice(0, 3))
-        expect(index.take(1, rows[0]!.when)).toEqual([`a-one-nanosecond-later`])
-      },
-    )
-
     it(`retains a string-compatible custom comparator across negative instants`, () => {
       const [minusTen, minusHundred] = rowsFromFixtures(negativeFixtures)
       const index = new IndexType(1, new PropRef([`when`]), undefined, {
@@ -575,3 +558,241 @@ describe.each(indexTypes)(
     })
   },
 )
+
+type AdmissionRow = { id: string; when: unknown; equalityClass: string }
+type AdmissionProbe = { when: unknown; equalityClass: string }
+
+// These are valid values from one Temporal implementation. The model's class
+// labels come from constructor fields and the native equality distinction,
+// independent of index normalization or the index's internal sort order.
+const admissionFixtures = [
+  {
+    name: `Duration with calendar units`,
+    orderErrorType: RangeError,
+    orderErrorMessage: `Missing relativeTo`,
+    rows: [
+      {
+        id: `a`,
+        when: Temporal.Duration.from({ months: 1 }),
+        equalityClass: `one-month`,
+      },
+      {
+        id: `b`,
+        when: Temporal.Duration.from({ months: 2 }),
+        equalityClass: `two-months`,
+      },
+      {
+        id: `c`,
+        when: Temporal.Duration.from({ hours: 1 }),
+        equalityClass: `one-hour`,
+      },
+    ],
+    probes: [
+      {
+        when: Temporal.Duration.from({ months: 1 }),
+        equalityClass: `one-month`,
+      },
+      {
+        when: Temporal.Duration.from({ months: 2 }),
+        equalityClass: `two-months`,
+      },
+      { when: Temporal.Duration.from({ hours: 1 }), equalityClass: `one-hour` },
+    ],
+  },
+  {
+    name: `PlainMonthDay with distinct reference years`,
+    orderErrorType: TypeError,
+    orderErrorMessage: `Temporal.PlainMonthDay has no defined ordering`,
+    rows: [
+      {
+        id: `a`,
+        when: new Temporal.PlainMonthDay(2, 29, `iso8601`, 1972),
+        equalityClass: `1972`,
+      },
+      {
+        id: `b`,
+        when: new Temporal.PlainMonthDay(2, 29, `iso8601`, 2004),
+        equalityClass: `2004`,
+      },
+      {
+        id: `c`,
+        when: new Temporal.PlainMonthDay(3, 1, `iso8601`, 1972),
+        equalityClass: `march`,
+      },
+    ],
+    probes: [
+      {
+        when: new Temporal.PlainMonthDay(2, 29, `iso8601`, 1972),
+        equalityClass: `1972`,
+      },
+      {
+        when: new Temporal.PlainMonthDay(2, 29, `iso8601`, 2004),
+        equalityClass: `2004`,
+      },
+      {
+        when: new Temporal.PlainMonthDay(3, 1, `iso8601`, 1972),
+        equalityClass: `march`,
+      },
+    ],
+  },
+  {
+    name: `mixed Temporal kinds`,
+    orderErrorType: TypeError,
+    orderErrorMessage: `Cannot order Temporal values of different types`,
+    rows: [
+      {
+        id: `a`,
+        when: Temporal.Instant.from(`2024-01-01T00:00:00Z`),
+        equalityClass: `instant-one`,
+      },
+      {
+        id: `b`,
+        when: Temporal.PlainDate.from(`2024-01-02`),
+        equalityClass: `date`,
+      },
+      {
+        id: `c`,
+        when: Temporal.Instant.from(`2024-01-03T00:00:00Z`),
+        equalityClass: `instant-two`,
+      },
+    ],
+    probes: [
+      {
+        when: Temporal.Instant.from(`2024-01-01T00:00:00Z`),
+        equalityClass: `instant-one`,
+      },
+      { when: Temporal.PlainDate.from(`2024-01-02`), equalityClass: `date` },
+      {
+        when: Temporal.Instant.from(`2024-01-03T00:00:00Z`),
+        equalityClass: `instant-two`,
+      },
+    ],
+  },
+] satisfies Array<{
+  name: string
+  orderErrorType: typeof Error
+  orderErrorMessage: string
+  rows: Array<AdmissionRow>
+  probes: Array<AdmissionProbe>
+}>
+
+describe.each(indexTypes)(`%s valid Temporal admission`, (_name, IndexType) => {
+  it.each(admissionFixtures)(
+    `retains exact membership across add/build order for $name`,
+    ({ rows, probes }) => {
+      const expectedKeys = new Set(rows.map(({ id }) => id))
+      // Admission order is not a public order contract for these values.
+      // Every construction must retain every key in its internal traversal.
+      for (const construction of [`forward`, `reverse`, `build`] as const) {
+        const index = new IndexType(1, new PropRef([`when`]))
+        const admission =
+          construction === `reverse` ? [...rows].reverse() : rows
+        if (construction === `build`) {
+          index.build(
+            admission.map((row): [string, AdmissionRow] => [row.id, row]),
+          )
+        } else {
+          for (const row of admission) index.add(row.id, row)
+        }
+        for (const row of rows) {
+          expect(index.equalityLookup(row.when)).toEqual(new Set([row.id]))
+        }
+        for (const probe of probes) {
+          const matchingKeys = rows
+            .filter((row) => row.equalityClass === probe.equalityClass)
+            .map((row) => row.id)
+          expect(index.equalityLookup(probe.when)).toEqual(
+            new Set(matchingKeys),
+          )
+        }
+        const ordered = index.takeFromStart(rows.length)
+        expect(ordered).toHaveLength(rows.length)
+        expect(new Set(ordered).size).toBe(ordered.length)
+        expect(new Set(ordered)).toEqual(expectedKeys)
+      }
+    },
+  )
+
+  it.each(admissionFixtures)(
+    `publishes each valid $name row with its exact index membership`,
+    async ({ rows, orderErrorType, orderErrorMessage }) => {
+      let commitRow!: (row: AdmissionRow) => void
+      const collection = createCollection<AdmissionRow, string>({
+        id: `temporal-admission-${_name}-${rows[0]!.equalityClass}`,
+        getKey: (row) => row.id,
+        autoIndex: `off`,
+        startSync: true,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            commitRow = (row) => {
+              begin()
+              write({ type: `insert`, value: row })
+              commit()
+            }
+            markReady()
+          },
+        },
+      })
+
+      await withOracleCleanup(async () => {
+        await collection.stateWhenReady()
+        const index = collection.createIndex((row) => row.when, {
+          indexType: IndexType,
+        })
+        const observed: Array<{
+          key: string
+          stored: boolean
+          exact: Array<string | number>
+        }> = []
+        const subscription = collection.subscribeChanges(
+          (changes) => {
+            for (const change of changes) {
+              observed.push({
+                key: change.key,
+                stored: collection.get(change.key)?.id === change.key,
+                exact: [...index.equalityLookup(change.value.when)],
+              })
+            }
+          },
+          { includeInitialState: false },
+        )
+        try {
+          // Each synchronous commit is a public checkpoint. The second valid
+          // value must neither crash the Collection nor leave a stored row
+          // invisible to the index and subscriber.
+          commitRow(rows[0]!)
+          commitRow(rows[1]!)
+          expect(collection.status).toBe(`ready`)
+          expect([...collection.keys()]).toEqual([`a`, `b`])
+          expect(observed).toEqual([
+            { key: `a`, stored: true, exact: [`a`] },
+            { key: `b`, stored: true, exact: [`b`] },
+          ])
+          // An equality index must not turn its private storage order into a
+          // public orderBy result. Changelog #1519 delegates to Temporal's
+          // static comparison, which rejects these pairs without relativeTo
+          // or a common ordered kind. Limit 1 catches an index that returns
+          // before comparing the second row.
+          let orderFailure: unknown
+          try {
+            collection.currentStateAsChanges({
+              orderBy: [
+                {
+                  expression: new PropRef([`when`]),
+                  compareOptions: { direction: `asc`, nulls: `first` },
+                },
+              ],
+              limit: 1,
+            })
+          } catch (error) {
+            orderFailure = error
+          }
+          expect(orderFailure).toBeInstanceOf(orderErrorType)
+          expect((orderFailure as Error).message).toContain(orderErrorMessage)
+        } finally {
+          subscription.unsubscribe()
+        }
+      }, [() => collection.cleanup()])
+    },
+  )
+})

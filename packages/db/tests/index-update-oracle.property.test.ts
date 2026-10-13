@@ -477,6 +477,177 @@ describe.each(indexTypes)(`%s update properties`, (_indexName, IndexType) => {
 })
 
 /**
+ * Equal native Dates identify one exact index value by timestamp, even when
+ * an add and its later remove receive different Date objects. Authority: the
+ * IndexInterface equality and ordered-read methods, together with the native
+ * Date timestamp comparison law in the comparison oracle. Both direct-index
+ * histories use valid Dates: one follows default timestamp order, while the
+ * other lets a custom callback separate rows with equal timestamps. Neither
+ * claims arbitrary object equivalence or Collection publication.
+ *
+ * The default lane's independent source Map stores supplied epoch numbers,
+ * not the objects or an index-normalized value. Its fresh sort predicts the
+ * public order; filtering its rows predicts exact and lower-bound membership.
+ * The callback lane's Map stores supplied order positions separately from
+ * exact timestamp membership. A same-object re-add after an equal-but-distinct
+ * removal distinguishes a live comparator position from an obsolete one. A
+ * second row and neighboring epochs exercise promotion and bounded traversal.
+ * Each add, remove, and update uses the direct index API and is compared after
+ * return.
+ */
+function expectDateIndexMatchesEpochModel(
+  index: BaseIndex<string>,
+  rows: ReadonlyMap<string, number>,
+): void {
+  const ordered = [...rows].sort(
+    ([leftKey, leftEpoch], [rightKey, rightEpoch]) =>
+      leftEpoch - rightEpoch ||
+      (leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0),
+  )
+  expect(index.keyCount).toBe(rows.size)
+  expect(index.takeFromStart(rows.size + 1)).toEqual(
+    ordered.map(([key]) => key),
+  )
+  expect(index.takeReversedFromEnd(rows.size + 1)).toEqual(
+    ordered.map(([key]) => key).reverse(),
+  )
+
+  for (const epoch of [0, 100, 200]) {
+    const exact = new Set(
+      [...rows].filter(([, value]) => value === epoch).map(([key]) => key),
+    )
+    const atOrAbove = new Set(
+      [...rows].filter(([, value]) => value >= epoch).map(([key]) => key),
+    )
+    expect(index.equalityLookup(new Date(epoch))).toEqual(exact)
+    expect(index.lookup(`eq`, new Date(epoch))).toEqual(exact)
+    expect(index.rangeQuery({ from: new Date(epoch) })).toEqual(atOrAbove)
+    expect(index.lookup(`gte`, new Date(epoch))).toEqual(atOrAbove)
+  }
+}
+
+describe.each(indexTypes)(`%s equivalent Date removal`, (_name, IndexType) => {
+  test(`keeps re-added rows in ordered reads after removal by an equal Date`, () => {
+    const index = new IndexType(1, new PropRef([`value`]))
+    const rows = new Map<string, number>()
+    const original = new Date(100)
+    const peer = new Date(100)
+
+    const add = (key: string, value: Date, epoch: number) => {
+      index.add(key, { value })
+      rows.set(key, epoch)
+      expectDateIndexMatchesEpochModel(index, rows)
+    }
+    const remove = (key: string, value: Date) => {
+      index.remove(key, { value })
+      rows.delete(key)
+      expectDateIndexMatchesEpochModel(index, rows)
+    }
+    const update = (
+      key: string,
+      oldValue: Date,
+      newValue: Date,
+      newEpoch: number,
+    ) => {
+      index.update(key, { value: oldValue }, { value: newValue })
+      rows.set(key, newEpoch)
+      expectDateIndexMatchesEpochModel(index, rows)
+    }
+
+    expectDateIndexMatchesEpochModel(index, rows)
+    add(`first`, original, 100)
+    remove(`first`, new Date(100))
+    add(`second`, original, 100)
+    remove(`second`, new Date(100))
+    add(`before`, new Date(0), 0)
+    add(`first`, original, 100)
+    add(`peer`, peer, 100)
+    remove(`first`, new Date(100))
+    add(`after`, new Date(200), 200)
+    update(`peer`, new Date(100), new Date(200), 200)
+    add(`first`, original, 100)
+  })
+
+  test(`keeps callback-distinct Date positions through equivalent removal and update`, () => {
+    // The callback is a declared ordering fact. Two Dates with one exact
+    // timestamp can occupy different positions; the source model records each
+    // row's supplied position separately from its timestamp. A fresh old-item
+    // Date at position zero is legal during removal and update.
+    const first = new Date(100)
+    const second = new Date(100)
+    const replacement = new Date(100)
+    const positions = new WeakMap<Date, number>([
+      [first, 0],
+      [second, 1],
+      [replacement, 1],
+    ])
+    const index = new IndexType(1, new PropRef([`value`]), undefined, {
+      compareFn: (left: unknown, right: unknown) =>
+        (left as Date).getTime() - (right as Date).getTime() ||
+        (positions.get(left as Date) ?? 0) -
+          (positions.get(right as Date) ?? 0),
+    })
+    const rows = new Map<string, number>()
+    const check = () => {
+      const ordered = [...rows].sort(
+        ([leftKey, leftPosition], [rightKey, rightPosition]) =>
+          leftPosition - rightPosition ||
+          (leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0),
+      )
+      expect(index.keyCount).toBe(rows.size)
+      expect(index.equalityLookup(new Date(100))).toEqual(new Set(rows.keys()))
+      expect(index.takeFromStart(rows.size + 1)).toEqual(
+        ordered.map(([key]) => key),
+      )
+      for (const [position, bound] of [
+        [0, first],
+        [1, second],
+      ] as const) {
+        expect(index.rangeQuery({ from: bound, to: bound })).toEqual(
+          new Set(
+            [...rows]
+              .filter(([, rowPosition]) => rowPosition === position)
+              .map(([key]) => key),
+          ),
+        )
+      }
+    }
+
+    check()
+    index.add(`z`, { value: first })
+    rows.set(`z`, 0)
+    check()
+    index.add(`a`, { value: second })
+    rows.set(`a`, 1)
+    check()
+    index.remove(`z`, { value: new Date(100) })
+    rows.delete(`z`)
+    check()
+    index.add(`z`, { value: first })
+    rows.set(`z`, 0)
+    check()
+    index.update(`z`, { value: new Date(100) }, { value: replacement })
+    rows.set(`z`, 1)
+    check()
+    index.add(`b`, { value: first })
+    rows.set(`b`, 0)
+    check()
+    // The old item has the same exact timestamp as `a`, but its callback
+    // position is zero while `a` was stored at position one. `b` occupies
+    // position zero, so searching by the old item would find the wrong bucket.
+    index.remove(`a`, { value: new Date(100) })
+    rows.delete(`a`)
+    check()
+    index.update(`z`, { value: new Date(100) }, { value: first })
+    rows.set(`z`, 0)
+    check()
+    index.add(`a`, { value: second })
+    rows.set(`a`, 1)
+    check()
+  })
+})
+
+/**
  * Direct index equality keeps `undefined` and `null` in distinct exact-value
  * buckets, even though the default ordering comparator places both at one
  * position. An `IN` lookup returns the union of the requested exact-value

@@ -5,8 +5,9 @@ import {
   dateTimestamp,
   indexCustomComparatorValue,
   indexOrderValue,
+  indexTemporalKind,
   makeCheckedComparator,
-  makeComparator,
+  makeIndexComparator,
 } from '../utils/comparison.js'
 import { codedMessage, codedWarning, devBuild } from '../error-message.js'
 import type { CompiledSingleRowExpression } from '../query/compiler/evaluators.js'
@@ -158,7 +159,7 @@ export abstract class BaseIndex<
     const compareFn = options?.compareFn
     this.compareFn = makeCheckedComparator(
       compareFn == null
-        ? makeComparator(this.compareOptions)
+        ? makeIndexComparator(this.compareOptions)
         : (a, b) =>
             compareFn(
               indexCustomComparatorValue(a),
@@ -219,7 +220,21 @@ export abstract class BaseIndex<
   }
 
   get supportsRangeOptimization(): boolean {
-    return !this.hasCustomComparator
+    if (this.hasCustomComparator) return false
+    // The default index can retain these genuine values for exact lookup,
+    // but its internal total order does not stand in for public `orderBy`.
+    let temporalKind: string | undefined
+    for (const domain of this.rangeValueDomains.keys()) {
+      if (!domain.startsWith(`Temporal.`)) continue
+      if (
+        domain === `Temporal.Duration` ||
+        domain === `Temporal.PlainMonthDay` ||
+        (temporalKind !== undefined && temporalKind !== domain)
+      )
+        return false
+      temporalKind = domain
+    }
+    return true
   }
 
   /** Ordering sees raw values; exact lookup keeps its normalized key. */
@@ -341,7 +356,7 @@ export abstract class BaseIndex<
 function rangeValueDomain(value: unknown): string | undefined {
   if (value == null) return undefined
   if (dateTimestamp(value) !== undefined) return `date`
-  return typeof value
+  return indexTemporalKind(value) ?? typeof value
 }
 
 function isNativeRangeDomain(domain: string): boolean {

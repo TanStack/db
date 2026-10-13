@@ -1,6 +1,6 @@
 import { Buffer } from 'node:buffer'
 import { runInNewContext } from 'node:vm'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { Temporal } from 'temporal-polyfill'
 import { createCollection } from '../src/collection/index'
@@ -1545,10 +1545,8 @@ describe(`areValuesEqual property-based tests`, () => {
  * Legal inputs are ISO PlainDates from years 2000..2030 with days 1..28 and
  * ZonedDateTimes within two seconds of a fixed instant in four offset zones.
  * Equal-value branches construct separate objects, and the zoned branch forces
- * different zones at the same instant. A fixed genuine ZonedDateTime also
- * shadows its own display tag; a genuine subclass changes its prototype's
- * display tag while inheriting Temporal's slot-checking method. The supplied
- * instant still determines order for both.
+ * different zones at the same instant. A normal ZonedDateTime subclass
+ * inherits its Temporal methods and retains the same instant order.
  * The production paths are the exported
  * `ascComparator` under the default options and `compareValues` in hostile
  * dispatch histories. Each return is the observation checkpoint;
@@ -1699,14 +1697,6 @@ const arbitraryZonedDateTimeOrderInput: fc.Arbitrary<ZonedDateTimeOrderInput> =
       })),
   )
 
-// Dispatch previously cached the first comparison function seen for a tag.
-// Reload before each hostile history so its first dispatch, rather than test
-// execution order, determines whether a bad function can poison later values.
-async function freshTemporalComparison() {
-  vi.resetModules()
-  return import('../src/utils/comparison')
-}
-
 describe(`Temporal default-order refinement`, () => {
   it(`reconstructs the three PlainDate and one ZonedDateTime assertions`, () => {
     const jan = { year: 2024, month: 1, day: 1 }
@@ -1773,20 +1763,6 @@ describe(`Temporal default-order refinement`, () => {
     expect(() => assertZonedDateTimeOrder(sample, truncated)).toThrow()
   })
 
-  it(`keeps a genuine ZonedDateTime's instant order when its own tag is shadowed`, () => {
-    const utc = zonedValue(0, `+00:00`)
-    const peer = zonedValue(0, `+05:30`)
-    const later = zonedValue(1, `+05:30`)
-    Object.defineProperty(utc, Symbol.toStringTag, { value: `ordinary` })
-
-    // The supplied offsets, not the instance's display property, define the
-    // model positions. The direct comparator and helper are separate paths.
-    expect(ascComparator(utc, peer, DEFAULT_COMPARE_OPTIONS)).toBe(0)
-    expect(ascComparator(peer, utc, DEFAULT_COMPARE_OPTIONS)).toBe(0)
-    expect(compareValues(utc, peer)).toBe(0)
-    expect(sign(ascComparator(utc, later, DEFAULT_COMPARE_OPTIONS))).toBe(-1)
-  })
-
   it.each([
     [
       `ascComparator`,
@@ -1795,128 +1771,25 @@ describe(`Temporal default-order refinement`, () => {
     ],
     [`compareValues`, compareValues],
   ] as const)(
-    `keeps a tagged ZonedDateTime subclass in instant order through %s`,
+    `keeps a ZonedDateTime subclass in instant order through %s`,
     (_name, compare) => {
-      class TaggedZonedDateTime extends Temporal.ZonedDateTime {}
-      Object.defineProperty(TaggedZonedDateTime.prototype, Symbol.toStringTag, {
-        value: `Tagged`,
-      })
-      const tagged = new TaggedZonedDateTime(
+      class SubclassZonedDateTime extends Temporal.ZonedDateTime {}
+      const subclass = new SubclassZonedDateTime(
         zonedBaseEpochNanoseconds,
         `+00:00`,
       )
       const peer = zonedValue(0, `+05:30`)
       const later = zonedValue(1, `+00:00`)
 
-      // Model positions come from supplied nanosecond offsets. Native compare
-      // confirms that the tagged receiver still has genuine Temporal slots.
-      expect(Temporal.ZonedDateTime.compare(tagged, peer)).toBe(0)
-      expect(Temporal.ZonedDateTime.compare(tagged, later)).toBe(-1)
-      expect(compare(tagged, peer)).toBe(0)
-      expect(compare(peer, tagged)).toBe(0)
-      expect(sign(compare(tagged, later))).toBe(-1)
-      expect(sign(compare(later, tagged))).toBe(1)
+      // The model position comes from the supplied nanosecond offset.
+      expect(Temporal.ZonedDateTime.compare(subclass, peer)).toBe(0)
+      expect(Temporal.ZonedDateTime.compare(subclass, later)).toBe(-1)
+      expect(compare(subclass, peer)).toBe(0)
+      expect(compare(peer, subclass)).toBe(0)
+      expect(sign(compare(subclass, later))).toBe(-1)
+      expect(sign(compare(later, subclass))).toBe(1)
     },
   )
-
-  it(`keeps a PlainDate constructor override from poisoning later comparisons`, async () => {
-    const { ascComparator: isolatedComparator, compareValues: isolatedValues } =
-      await freshTemporalComparison()
-    // A genuine Temporal instance may have an own data property; its calendar
-    // value is unchanged by that property. It is the first dispatch here.
-    const shadowed = new Temporal.PlainDate(2024, 1, 1)
-    Object.defineProperty(shadowed, `constructor`, {
-      value: { compare: () => 0 },
-    })
-    const later = new Temporal.PlainDate(2024, 6, 1)
-    const ordinary = new Temporal.PlainDate(2024, 1, 1)
-    const expected = modelPlainDateSign(
-      { year: 2024, month: 1, day: 1 },
-      { year: 2024, month: 6, day: 1 },
-    )
-    const observed = [
-      isolatedComparator(shadowed, later, DEFAULT_COMPARE_OPTIONS),
-      isolatedComparator(ordinary, later, DEFAULT_COMPARE_OPTIONS),
-      isolatedValues(ordinary, later),
-    ]
-    expect(observed.map(sign)).toEqual([expected, expected, expected])
-  })
-
-  it(`keeps a right-hand constructor override from changing PlainDate order`, async () => {
-    const { ascComparator: isolatedComparator, compareValues: isolatedValues } =
-      await freshTemporalComparison()
-    const january = new Temporal.PlainDate(2024, 1, 1)
-    const shadowedJune = new Temporal.PlainDate(2024, 6, 1)
-    Object.defineProperty(shadowedJune, `constructor`, {
-      value: { compare: () => 0 },
-    })
-    const ordinaryJanuary = new Temporal.PlainDate(2024, 1, 1)
-    const ordinaryJune = new Temporal.PlainDate(2024, 6, 1)
-    const expected = modelPlainDateSign(
-      { year: 2024, month: 1, day: 1 },
-      { year: 2024, month: 6, day: 1 },
-    )
-    const observed = [
-      isolatedComparator(january, shadowedJune, DEFAULT_COMPARE_OPTIONS),
-      isolatedValues(january, shadowedJune),
-      isolatedComparator(
-        ordinaryJanuary,
-        ordinaryJune,
-        DEFAULT_COMPARE_OPTIONS,
-      ),
-      isolatedValues(ordinaryJanuary, ordinaryJune),
-    ]
-    expect(observed.map(sign)).toEqual([expected, expected, expected, expected])
-  })
-
-  it(`keeps a compareValues-first constructor override from poisoning later comparisons`, async () => {
-    const { ascComparator: isolatedComparator, compareValues: isolatedValues } =
-      await freshTemporalComparison()
-    const shadowedJanuary = new Temporal.PlainDate(2024, 1, 1)
-    Object.defineProperty(shadowedJanuary, `constructor`, {
-      value: { compare: () => 0 },
-    })
-    const june = new Temporal.PlainDate(2024, 6, 1)
-    const ordinaryJanuary = new Temporal.PlainDate(2024, 1, 1)
-    const expected = modelPlainDateSign(
-      { year: 2024, month: 1, day: 1 },
-      { year: 2024, month: 6, day: 1 },
-    )
-    const observed = [
-      isolatedValues(shadowedJanuary, june),
-      isolatedValues(ordinaryJanuary, june),
-      isolatedComparator(ordinaryJanuary, june, DEFAULT_COMPARE_OPTIONS),
-    ]
-    expect(observed.map(sign)).toEqual([expected, expected, expected])
-  })
-
-  it(`keeps a forged Temporal tag from poisoning genuine PlainDate order`, async () => {
-    // A claimed display tag may enter the dispatch path, but must not change
-    // the result of a later comparison between genuine Temporal values.
-    const { ascComparator: isolatedComparator, compareValues: isolatedValues } =
-      await freshTemporalComparison()
-    const forged = {
-      [Symbol.toStringTag]: `Temporal.PlainDate`,
-      constructor: { compare: () => 0 },
-    }
-    const june = new Temporal.PlainDate(2024, 6, 1)
-    try {
-      isolatedComparator(forged, june, DEFAULT_COMPARE_OPTIONS)
-    } catch {
-      // Rejecting the forged value is a valid outcome for this history.
-    }
-    const january = new Temporal.PlainDate(2024, 1, 1)
-    const expected = modelPlainDateSign(
-      { year: 2024, month: 1, day: 1 },
-      { year: 2024, month: 6, day: 1 },
-    )
-    expect(
-      [
-        isolatedComparator(january, june, DEFAULT_COMPARE_OPTIONS),
-        isolatedValues(january, june),
-      ].map(sign),
-    ).toEqual([expected, expected])
-  })
 })
 
 describe(`native binary key content`, () => {

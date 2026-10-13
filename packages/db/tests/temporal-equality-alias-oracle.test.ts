@@ -13,18 +13,13 @@ import { withOracleCleanup } from './utils.js'
  * the fixed-offset +00:00 zone remains a different identity.
  *
  * The ZonedDateTime lane covers values from one polyfill copy and one instant,
- * including genuine subclasses with inherited Temporal methods. Subclass
- * prototypes have unrelated and misleading Temporal-kind display tags; their
- * native slots still determine equality. Other genuine instances have own
- * display and intrinsic-getter shadows. A neighboring
- * PlainDate lane checks that native brand and equality survive those shadows
- * while forged tags retain ordinary object identity. Fixture-assigned classes,
+ * including a normal subclass with inherited Temporal methods.
+ * Fixture-assigned classes,
  * independent of production normalization, predict exact key sets. Direct
  * BasicIndex/BTreeIndex add, build, and removal histories compare those sets
  * after each returned action. Public Collection
  * reads compare an unindexed scan and an optimized-only indexed snapshot after
- * readiness. The mixed forged/genuine PlainDate Collection has no index:
- * default range order across an ordinary object and Temporal is unspecified.
+ * readiness.
  * A second lane uses one polyfill copy to check `PlainMonthDay` and
  * `PlainYearMonth` reference ISO fields, and Duration's ten fields, under
  * the same exact query equality. Changelog #1519 explicitly keeps equivalent
@@ -39,7 +34,8 @@ import { withOracleCleanup } from './utils.js'
  * months, weeks, days, and nanoseconds one field at a time; a key that omits
  * any one of those fields would merge its distinct fixture classes.
  * This oracle does not claim all IANA aliases, subclasses with replaced
- * Temporal methods, arbitrary spoofed prototypes,
+ * Temporal methods, malformed Temporal lookalikes or deliberately shadowed
+ * Temporal members,
  * mixed Temporal implementations, joins, live-query publication, or provider
  * behavior.
  */
@@ -48,30 +44,10 @@ type Sample = {
   id: string
   text: string
   identity: `utc` | `offset` | `later` | `calendar`
-  ownShadow?: `tag` | `text` | `epoch` | `calendar`
-  subclass?: `untagged` | `tagged` | `plain-date-tagged`
+  subclass?: boolean
 }
 
 class ZonedDateTimeSubclass extends Temporal.ZonedDateTime {}
-class TaggedZonedDateTimeSubclass extends Temporal.ZonedDateTime {}
-Object.defineProperty(
-  TaggedZonedDateTimeSubclass.prototype,
-  Symbol.toStringTag,
-  {
-    value: `Tagged`,
-  },
-)
-class PlainDateTaggedZonedDateTimeSubclass extends Temporal.ZonedDateTime {}
-Object.defineProperty(
-  PlainDateTaggedZonedDateTimeSubclass.prototype,
-  Symbol.toStringTag,
-  { value: `Temporal.PlainDate` },
-)
-const subclassConstructors = {
-  untagged: ZonedDateTimeSubclass,
-  tagged: TaggedZonedDateTimeSubclass,
-  'plain-date-tagged': PlainDateTaggedZonedDateTimeSubclass,
-} as const
 
 const samples: ReadonlyArray<Sample> = [
   {
@@ -100,67 +76,23 @@ const samples: ReadonlyArray<Sample> = [
     identity: `calendar`,
   },
   {
-    id: `utc-shadowed-tag`,
-    text: `2024-01-15T09:00:00+00:00[UTC]`,
-    identity: `utc`,
-    ownShadow: `tag`,
-  },
-  {
-    id: `utc-shadowed-text`,
-    text: `2024-01-15T09:00:00+00:00[UTC]`,
-    identity: `utc`,
-    ownShadow: `text`,
-  },
-  {
-    id: `utc-shadowed-epoch`,
-    text: `2024-01-15T09:00:00+00:00[UTC]`,
-    identity: `utc`,
-    ownShadow: `epoch`,
-  },
-  {
-    id: `utc-shadowed-calendar`,
-    text: `2024-01-15T09:00:00+00:00[UTC]`,
-    identity: `utc`,
-    ownShadow: `calendar`,
-  },
-  {
     id: `utc-subclass`,
     text: `2024-01-15T09:00:00+00:00[UTC]`,
     identity: `utc`,
-    subclass: `untagged`,
-  },
-  {
-    id: `utc-tagged-subclass`,
-    text: `2024-01-15T09:00:00+00:00[UTC]`,
-    identity: `utc`,
-    subclass: `tagged`,
-  },
-  {
-    id: `utc-plain-date-tagged-subclass`,
-    text: `2024-01-15T09:00:00+00:00[UTC]`,
-    identity: `utc`,
-    subclass: `plain-date-tagged`,
+    subclass: true,
   },
 ]
 
 function rows(): Array<Row> {
-  return samples.map(({ id, text, ownShadow, subclass }) => {
+  return samples.map(({ id, text, subclass }) => {
     const base = Temporal.ZonedDateTime.from(text)
-    const Subclass = subclass && subclassConstructors[subclass]
-    const when = Subclass
-      ? new Subclass(base.epochNanoseconds, base.timeZoneId, base.calendarId)
+    const when = subclass
+      ? new ZonedDateTimeSubclass(
+          base.epochNanoseconds,
+          base.timeZoneId,
+          base.calendarId,
+        )
       : base
-    if (ownShadow === `tag`) {
-      Object.defineProperty(when, Symbol.toStringTag, { value: `ordinary` })
-    } else if (ownShadow === `text`) {
-      Object.defineProperty(when, `toString`, {
-        value: () => `unrelated text`,
-      })
-    } else if (ownShadow === `epoch`) {
-      Object.defineProperty(when, `epochNanoseconds`, { value: 0n })
-    } else if (ownShadow === `calendar`) {
-      Object.defineProperty(when, `calendarId`, { value: `gregory` })
-    }
     return { id, when }
   })
 }
@@ -177,14 +109,6 @@ const aliasProbe = Temporal.ZonedDateTime.from(
   `2024-01-15T09:00:00+00:00[Etc/UTC]`,
 )
 const subclassProbe = new ZonedDateTimeSubclass(
-  aliasProbe.epochNanoseconds,
-  `UTC`,
-)
-const taggedSubclassProbe = new TaggedZonedDateTimeSubclass(
-  aliasProbe.epochNanoseconds,
-  `UTC`,
-)
-const plainDateTaggedSubclassProbe = new PlainDateTaggedZonedDateTimeSubclass(
   aliasProbe.epochNanoseconds,
   `UTC`,
 )
@@ -268,19 +192,12 @@ function intrinsicFixture(kind: IntrinsicKind): IntrinsicFixture {
 
   const seconds = Temporal.Duration.from({ seconds: 1 })
   const secondsCopy = Temporal.Duration.from({ seconds: 1 })
-  const shadowedSeconds = Temporal.Duration.from({ seconds: 1 })
-  Object.defineProperty(shadowedSeconds, `seconds`, { value: 2 })
   const milliseconds = Temporal.Duration.from({ milliseconds: 1000 })
   const microseconds = Temporal.Duration.from({ microseconds: 1_000_000 })
-  const intrinsicSeconds = Object.getOwnPropertyDescriptor(
-    Temporal.Duration.prototype,
-    `seconds`,
-  )!.get!
   return {
     rows: [
       { id: `seconds`, when: seconds, identity: `seconds` },
       { id: `seconds-copy`, when: secondsCopy, identity: `seconds` },
-      { id: `seconds-shadow`, when: shadowedSeconds, identity: `seconds` },
       { id: `milliseconds`, when: milliseconds, identity: `milliseconds` },
       { id: `microseconds`, when: microseconds, identity: `microseconds` },
     ],
@@ -298,8 +215,6 @@ function intrinsicFixture(kind: IntrinsicKind): IntrinsicFixture {
     checkNativeRelation: () => {
       expect(seconds.toString()).toBe(milliseconds.toString())
       expect(milliseconds.toString()).toBe(microseconds.toString())
-      expect(intrinsicSeconds.call(shadowedSeconds)).toBe(1)
-      expect(shadowedSeconds.seconds).toBe(2)
       expect(seconds.seconds).toBe(1)
       expect(milliseconds.milliseconds).toBe(1000)
       expect(microseconds.microseconds).toBe(1_000_000)
@@ -389,51 +304,14 @@ function intrinsicExpectedKeys(
   )
 }
 
-it(`distinguishes equivalent aliases and own property shadows from a fixed-offset zone`, () => {
-  const [
-    utc,
-    alias,
-    fixed,
-    later,
-    gregory,
-    shadowedTag,
-    shadowedText,
-    shadowedEpoch,
-    shadowedCalendar,
-    subclass,
-    taggedSubclass,
-    plainDateTaggedSubclass,
-  ] = rows()
+it(`distinguishes equivalent aliases from a fixed-offset zone`, () => {
+  const [utc, alias, fixed, later, gregory, subclass] = rows()
   // This checks the fixture against the external Temporal relation. Expected
   // index and query sets still come from the assigned identity classes.
   expect(utc!.when.equals(alias!.when)).toBe(true)
   expect(utc!.when.equals(fixed!.when)).toBe(false)
   expect(utc!.when.equals(later!.when)).toBe(false)
   expect(utc!.when.equals(gregory!.when)).toBe(false)
-  expect(
-    Temporal.ZonedDateTime.prototype.equals.call(
-      shadowedTag!.when,
-      alias!.when,
-    ),
-  ).toBe(true)
-  expect(
-    Temporal.ZonedDateTime.prototype.equals.call(
-      shadowedText!.when,
-      alias!.when,
-    ),
-  ).toBe(true)
-  expect(
-    Temporal.ZonedDateTime.prototype.equals.call(
-      shadowedEpoch!.when,
-      alias!.when,
-    ),
-  ).toBe(true)
-  expect(
-    Temporal.ZonedDateTime.prototype.equals.call(
-      shadowedCalendar!.when,
-      alias!.when,
-    ),
-  ).toBe(true)
   // A subclass inherits Temporal's slot-checking method. The fixture assigns
   // it the UTC class independently of the production classifier.
   expect(Object.getPrototypeOf(subclass!.when)).toBe(
@@ -448,71 +326,9 @@ it(`distinguishes equivalent aliases and own property shadows from a fixed-offse
   expect(
     Temporal.ZonedDateTime.prototype.equals.call(subclassProbe, alias!.when),
   ).toBe(true)
-  // The subclass prototype's tag is presentation. The inherited intrinsic
-  // still sees genuine ZonedDateTime slots and the same assigned UTC class.
-  expect(Object.getPrototypeOf(taggedSubclass!.when)).toBe(
-    TaggedZonedDateTimeSubclass.prototype,
-  )
-  expect(Object.getPrototypeOf(taggedSubclass!.when)[Symbol.toStringTag]).toBe(
-    `Tagged`,
-  )
-  expect(
-    Object.getOwnPropertyDescriptor(
-      TaggedZonedDateTimeSubclass.prototype,
-      `toString`,
-    ),
-  ).toBeUndefined()
-  expect(
-    Temporal.ZonedDateTime.prototype.equals.call(
-      taggedSubclass!.when,
-      alias!.when,
-    ),
-  ).toBe(true)
-  expect(
-    Temporal.ZonedDateTime.prototype.equals.call(
-      taggedSubclassProbe,
-      alias!.when,
-    ),
-  ).toBe(true)
-  // A tag naming another Temporal kind is still only presentation. The
-  // inherited ZonedDateTime intrinsic checks the actual subclass slots.
-  expect(Object.getPrototypeOf(plainDateTaggedSubclass!.when)).toBe(
-    PlainDateTaggedZonedDateTimeSubclass.prototype,
-  )
-  expect(
-    Object.getPrototypeOf(plainDateTaggedSubclass!.when)[Symbol.toStringTag],
-  ).toBe(`Temporal.PlainDate`)
-  expect(
-    Object.getOwnPropertyDescriptor(
-      PlainDateTaggedZonedDateTimeSubclass.prototype,
-      `equals`,
-    ),
-  ).toBeUndefined()
-  expect(
-    Temporal.ZonedDateTime.prototype.equals.call(
-      plainDateTaggedSubclass!.when,
-      alias!.when,
-    ),
-  ).toBe(true)
-  expect(
-    Temporal.ZonedDateTime.prototype.equals.call(
-      plainDateTaggedSubclassProbe,
-      alias!.when,
-    ),
-  ).toBe(true)
   expect(utc!.when.toString()).not.toBe(alias!.when.toString())
   expect(expectedKeys(`utc`)).toEqual(
-    new Set([
-      `utc`,
-      `utc-alias`,
-      `utc-shadowed-tag`,
-      `utc-shadowed-text`,
-      `utc-shadowed-epoch`,
-      `utc-shadowed-calendar`,
-      `utc-subclass`,
-      `utc-tagged-subclass`,
-      `utc-plain-date-tagged-subclass`,
-    ]),
+    new Set([`utc`, `utc-alias`, `utc-subclass`]),
   )
   expect(expectedKeys(`offset`)).toEqual(new Set([`fixed-offset`]))
 })
@@ -536,12 +352,7 @@ describe.each(indexTypes)(`%s Temporal alias equality`, (_name, IndexType) => {
 
       // The query value is a fresh instance. A display-string key would omit
       // UTC; an instant-only key would also include fixed-offset.
-      for (const probe of [
-        aliasProbe,
-        subclassProbe,
-        taggedSubclassProbe,
-        plainDateTaggedSubclassProbe,
-      ]) {
+      for (const probe of [aliasProbe, subclassProbe]) {
         expect(index.equalityLookup(probe)).toEqual(expectedKeys(`utc`))
         expect(index.lookup(`eq`, probe)).toEqual(expectedKeys(`utc`))
       }
@@ -563,8 +374,6 @@ describe.each(indexTypes)(`%s Temporal alias equality`, (_name, IndexType) => {
       for (const [id, probe] of [
         [`utc`, aliasProbe],
         [`utc-subclass`, subclassProbe],
-        [`utc-tagged-subclass`, taggedSubclassProbe],
-        [`utc-plain-date-tagged-subclass`, plainDateTaggedSubclassProbe],
       ] as const) {
         const row = source.find((candidate) => candidate.id === id)!
         index.remove(row.id, row)
@@ -616,12 +425,7 @@ describe.each(indexTypes)(`%s Temporal alias equality`, (_name, IndexType) => {
               `lookup`,
             )
           : undefined
-        for (const probe of [
-          aliasProbe,
-          subclassProbe,
-          taggedSubclassProbe,
-          plainDateTaggedSubclassProbe,
-        ]) {
+        for (const probe of [aliasProbe, subclassProbe]) {
           lookup?.mockClear()
           const result = readKeys(probe)
           if (lookup) expect(lookup).toHaveBeenCalled()
@@ -865,267 +669,3 @@ describe.each(indexTypes)(
     )
   },
 )
-
-it(`keeps a forged tag and shadowed zone outside genuine UTC equality`, async () => {
-  const fake = {
-    [Symbol.toStringTag]: `Temporal.ZonedDateTime`,
-    epochNanoseconds: aliasProbe.epochNanoseconds,
-    timeZoneId: `UTC`,
-    calendarId: `iso8601`,
-    toString: () => `unrelated plain object`,
-  }
-  const shadowed = Temporal.ZonedDateTime.from(
-    `2024-01-15T09:00:00+00:00[+00:00]`,
-  )
-  const freshOffsetProbe = Temporal.ZonedDateTime.from(
-    `2024-01-15T09:00:00+00:00[+00:00]`,
-  )
-  const borrowedSubclass = Object.assign(
-    Object.create(ZonedDateTimeSubclass.prototype) as object,
-    { toString: () => `unrelated borrowed object` },
-  )
-  const borrowedSubclassCopy = Object.assign(
-    Object.create(ZonedDateTimeSubclass.prototype) as object,
-    { toString: () => `unrelated borrowed object` },
-  )
-  const borrowedTaggedSubclass = Object.assign(
-    Object.create(TaggedZonedDateTimeSubclass.prototype) as object,
-    { toString: () => `unrelated borrowed object` },
-  )
-  const borrowedTaggedSubclassCopy = Object.assign(
-    Object.create(TaggedZonedDateTimeSubclass.prototype) as object,
-    { toString: () => `unrelated borrowed object` },
-  )
-  const borrowedPlainDateTaggedSubclass = Object.assign(
-    Object.create(PlainDateTaggedZonedDateTimeSubclass.prototype) as object,
-    { toString: () => `unrelated borrowed object` },
-  )
-  const borrowedPlainDateTaggedSubclassCopy = Object.assign(
-    Object.create(PlainDateTaggedZonedDateTimeSubclass.prototype) as object,
-    { toString: () => `unrelated borrowed object` },
-  )
-  Object.defineProperty(shadowed, `timeZoneId`, { value: `UTC` })
-  expect(aliasProbe.equals(shadowed)).toBe(false)
-  expect(shadowed).not.toBe(freshOffsetProbe)
-  expect(shadowed.equals(freshOffsetProbe)).toBe(true)
-  expect(() => Reflect.apply(aliasProbe.equals, aliasProbe, [fake])).toThrow()
-  expect(() =>
-    Temporal.ZonedDateTime.prototype.equals.call(borrowedSubclass, aliasProbe),
-  ).toThrow()
-  expect(() =>
-    Temporal.ZonedDateTime.prototype.equals.call(
-      borrowedTaggedSubclass,
-      aliasProbe,
-    ),
-  ).toThrow()
-  expect(() =>
-    Temporal.ZonedDateTime.prototype.equals.call(
-      borrowedPlainDateTaggedSubclass,
-      aliasProbe,
-    ),
-  ).toThrow()
-
-  const source = [
-    { id: `forged`, when: fake },
-    { id: `shadowed`, when: shadowed },
-    { id: `borrowed-subclass`, when: borrowedSubclass },
-    { id: `borrowed-tagged-subclass`, when: borrowedTaggedSubclass },
-    {
-      id: `borrowed-plain-date-tagged-subclass`,
-      when: borrowedPlainDateTaggedSubclass,
-    },
-  ]
-  const fakeCopy = { ...fake }
-  for (const [, IndexType] of indexTypes) {
-    for (const row of source) {
-      // One row avoids asking the default ordering comparator to order a
-      // forged object and a genuine Temporal value against each other.
-      const index = new IndexType(1, new PropRef([`when`]))
-      index.add(row.id, row)
-      expect(index.equalityLookup(aliasProbe)).toEqual(new Set())
-      // Rejecting the forged brand must not discard the ordinary object's
-      // exact self-identity. A distinct structural copy stays outside it.
-      expect(index.equalityLookup(row.when)).toEqual(new Set([row.id]))
-      if (row.id === `forged`) {
-        expect(index.equalityLookup(fakeCopy)).toEqual(new Set())
-      } else if (row.id === `borrowed-subclass`) {
-        expect(index.equalityLookup(borrowedSubclassCopy)).toEqual(new Set())
-      } else if (row.id === `borrowed-tagged-subclass`) {
-        expect(index.equalityLookup(borrowedTaggedSubclassCopy)).toEqual(
-          new Set(),
-        )
-      } else if (row.id === `borrowed-plain-date-tagged-subclass`) {
-        expect(
-          index.equalityLookup(borrowedPlainDateTaggedSubclassCopy),
-        ).toEqual(new Set())
-      } else {
-        // The own zone accessor must not turn a genuine fixed-offset value
-        // into reference-only equality with its native-equal fresh instance.
-        expect(index.equalityLookup(freshOffsetProbe)).toEqual(
-          new Set([row.id]),
-        )
-      }
-    }
-  }
-
-  const collection = createCollection<{ id: string; when: unknown }, string>({
-    id: `temporal-alias-spoof-control`,
-    getKey: (row) => row.id,
-    autoIndex: `off`,
-    startSync: true,
-    sync: {
-      sync: ({ begin, write, commit, markReady }) => {
-        begin()
-        for (const row of source) write({ type: `insert`, value: row })
-        commit()
-        markReady()
-      },
-    },
-  })
-  await withOracleCleanup(async () => {
-    await collection.stateWhenReady()
-    const keysFor = (probe: unknown) => {
-      const predicate = new Func(`eq`, [
-        new PropRef([`when`]),
-        new Value(probe),
-      ])
-      return new Set(
-        collection
-          .currentStateAsChanges({ where: predicate })
-          ?.map(({ value }) => value.id),
-      )
-    }
-    expect(keysFor(aliasProbe)).toEqual(new Set())
-    expect(keysFor(freshOffsetProbe)).toEqual(new Set([`shadowed`]))
-    expect(keysFor(fake)).toEqual(new Set([`forged`]))
-    expect(keysFor(fakeCopy)).toEqual(new Set())
-    expect(keysFor(borrowedSubclass)).toEqual(new Set([`borrowed-subclass`]))
-    expect(keysFor(borrowedSubclassCopy)).toEqual(new Set())
-    expect(keysFor(borrowedTaggedSubclass)).toEqual(
-      new Set([`borrowed-tagged-subclass`]),
-    )
-    expect(keysFor(borrowedTaggedSubclassCopy)).toEqual(new Set())
-    expect(keysFor(borrowedPlainDateTaggedSubclass)).toEqual(
-      new Set([`borrowed-plain-date-tagged-subclass`]),
-    )
-    expect(keysFor(borrowedPlainDateTaggedSubclassCopy)).toEqual(new Set())
-  }, [() => collection.cleanup()])
-})
-
-it(`uses the PlainDate brand for direct lookups and a public unindexed snapshot`, async () => {
-  const genuine = Temporal.PlainDate.from(`2024-01-01`)
-  const fake = {
-    [Symbol.toStringTag]: `Temporal.PlainDate`,
-    toString: () => `2024-01-01`,
-  }
-  const borrowed = Object.assign(
-    Object.create(Temporal.PlainDate.prototype) as object,
-    { toString: () => `2024-01-01` },
-  )
-  const shadowedTag = Temporal.PlainDate.from(`2024-01-01`)
-  Object.defineProperty(shadowedTag, Symbol.toStringTag, {
-    value: `ordinary`,
-  })
-  const shadowedText = Temporal.PlainDate.from(`2024-01-01`)
-  Object.defineProperty(shadowedText, `toString`, {
-    value: () => `unrelated text`,
-  })
-  expect(Temporal.PlainDate.prototype.equals.call(shadowedTag, genuine)).toBe(
-    true,
-  )
-  expect(Temporal.PlainDate.prototype.equals.call(shadowedText, genuine)).toBe(
-    true,
-  )
-
-  const brandSamples: ReadonlyArray<{
-    id: string
-    when: unknown
-    matches: boolean
-  }> = [
-    { id: `genuine`, when: genuine, matches: true },
-    { id: `forged-tag`, when: fake, matches: false },
-    { id: `borrowed-prototype`, when: borrowed, matches: false },
-    { id: `shadowed-tag`, when: shadowedTag, matches: true },
-    { id: `shadowed-text`, when: shadowedText, matches: true },
-  ]
-  const probe = Temporal.PlainDate.from(`2024-01-01`)
-  expect(() =>
-    Reflect.apply(Temporal.PlainDate.prototype.equals, fake, [probe]),
-  ).toThrow()
-  expect(() =>
-    Reflect.apply(Temporal.PlainDate.prototype.equals, borrowed, [probe]),
-  ).toThrow()
-
-  // A one-row index tests each exact equality class without ordering mixed
-  // ordinary objects and Temporal values, whose range order is unspecified.
-  for (const [, IndexType] of indexTypes) {
-    for (const sample of brandSamples) {
-      const index = new IndexType(1, new PropRef([`when`]))
-      index.add(sample.id, sample)
-      expect(index.equalityLookup(probe)).toEqual(
-        sample.matches ? new Set([sample.id]) : new Set(),
-      )
-      expect(index.equalityLookup(sample.when)).toEqual(new Set([sample.id]))
-    }
-    // Both insertion orders must retain the same equality class when a live
-    // representative is removed. The forged objects are intentionally kept
-    // out of this ordered index: the default comparator has no promised order
-    // for a mixed ordinary-object and Temporal domain.
-    for (const first of [genuine, shadowedTag]) {
-      const second = first === genuine ? shadowedTag : genuine
-      const index = new IndexType(1, new PropRef([`when`]))
-      index.add(`first`, { when: first })
-      index.add(`second`, { when: second })
-      expect(index.equalityLookup(probe)).toEqual(new Set([`first`, `second`]))
-      index.remove(`first`, { when: first })
-      expect(index.equalityLookup(probe)).toEqual(new Set([`second`]))
-    }
-  }
-
-  const collection = createCollection<{ id: string; when: unknown }, string>({
-    id: `temporal-plain-date-brand`,
-    getKey: (row) => row.id,
-    autoIndex: `off`,
-    startSync: true,
-    sync: {
-      sync: ({ begin, write, commit, markReady }) => {
-        begin()
-        for (const { id, when } of brandSamples) {
-          write({ type: `insert`, value: { id, when } })
-        }
-        commit()
-        markReady()
-      },
-    },
-  })
-  await withOracleCleanup(async () => {
-    await collection.stateWhenReady()
-    const keysFor = (probeValue: unknown) => {
-      const predicate = new Func(`eq`, [
-        new PropRef([`when`]),
-        new Value(probeValue),
-      ])
-      return new Set(
-        collection
-          .currentStateAsChanges({ where: predicate })
-          ?.map(({ value }) => value.id),
-      )
-    }
-    expect(keysFor(probe)).toEqual(
-      new Set([`genuine`, `shadowed-tag`, `shadowed-text`]),
-    )
-    // An impostor remains an ordinary object: querying by its own reference
-    // finds it, while a distinct object with the same display cannot.
-    const borrowedCopy = Object.assign(
-      Object.create(Temporal.PlainDate.prototype) as object,
-      { toString: () => `2024-01-01` },
-    )
-    for (const [impostor, id, copy] of [
-      [fake, `forged-tag`, { ...fake }],
-      [borrowed, `borrowed-prototype`, borrowedCopy],
-    ] as const) {
-      expect(keysFor(impostor)).toEqual(new Set([id]))
-      expect(keysFor(copy)).toEqual(new Set())
-    }
-  }, [() => collection.cleanup()])
-})

@@ -60,8 +60,8 @@ export class BasicIndex<
   private sortedValues: Array<any> = []
   // Each bucket stays at the same array position as its order representative.
   private orderedBuckets: Array<Map<TKey, unknown>> = []
-  // Set of all indexed PKs
-  private indexedKeys = new Set<TKey>()
+  // Each indexed key retains the order value used for its current position.
+  private indexedKeys = new Map<TKey, unknown>()
 
   protected initialize(_options?: BasicIndexOptions): void {}
 
@@ -71,15 +71,12 @@ export class BasicIndex<
   add(key: TKey, item: any): void {
     const indexedValue = this.evaluateAddedValue(key, item)
     const normalizedValue = normalizeValue(indexedValue)
+    const orderValue = this.orderValue(indexedValue, normalizedValue)
 
-    this.addToBucket(
-      key,
-      normalizedValue,
-      this.orderValue(indexedValue, normalizedValue),
-    )
+    this.addToBucket(key, normalizedValue, orderValue)
     this.addRangeValue(indexedValue)
 
-    this.indexedKeys.add(key)
+    this.indexedKeys.set(key, orderValue)
   }
 
   private addToBucket(
@@ -128,11 +125,7 @@ export class BasicIndex<
 
     const normalizedValue = normalizeValue(indexedValue)
 
-    this.removeFromBucket(
-      key,
-      normalizedValue,
-      this.orderValue(indexedValue, normalizedValue),
-    )
+    this.removeFromBucket(key, normalizedValue, this.indexedKeys.get(key))
     this.removeRangeValue(indexedValue)
 
     this.indexedKeys.delete(key)
@@ -198,7 +191,7 @@ export class BasicIndex<
 
     const oldValue = normalizeValue(oldIndexedValue)
     const newValue = normalizeValue(newIndexedValue)
-    const oldOrder = this.orderValue(oldIndexedValue, oldValue)
+    const oldOrder = this.indexedKeys.get(key)
     const newOrder = this.orderValue(newIndexedValue, newValue)
     if (
       areSameValueZeroEqual(oldValue, newValue) &&
@@ -211,6 +204,7 @@ export class BasicIndex<
       }
       this.removeRangeValue(oldIndexedValue)
       this.addRangeValue(newIndexedValue)
+      this.indexedKeys.set(key, newOrder)
       return
     }
 
@@ -218,7 +212,7 @@ export class BasicIndex<
     this.removeRangeValue(oldIndexedValue)
     this.addToBucket(key, newValue, newOrder)
     this.addRangeValue(newIndexedValue)
-    this.indexedKeys.add(key)
+    this.indexedKeys.set(key, newOrder)
   }
 
   /**
@@ -232,13 +226,14 @@ export class BasicIndex<
     for (const [key, item] of entries) {
       const indexedValue = this.evaluateAddedValue(key, item)
       const value = normalizeValue(indexedValue)
+      const orderValue = this.orderValue(indexedValue, value)
       entriesArray.push({
         key,
         value,
-        orderValue: this.orderValue(indexedValue, value),
+        orderValue,
       })
       this.addRangeValue(indexedValue)
-      this.indexedKeys.add(key)
+      this.indexedKeys.set(key, orderValue)
     }
 
     // Native Array.sort moves raw undefined values last without comparing them.

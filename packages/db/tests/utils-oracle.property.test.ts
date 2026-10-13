@@ -9,6 +9,10 @@ import { deepEquals, equalPersistedSnapshotValues } from '../src/utils'
  * established examples in `utils.test.ts`, promises change-event equality for
  * its supported value classes. This oracle checks bounded equality and
  * inequality laws for those classes, not general graph isomorphism.
+ * The native Date timestamp rule in `docs/guides/live-queries.md` applies
+ * across realms. The Collection change-message mirror contract in
+ * `change-event-history-oracle.test.ts` requires settled events to reconstruct
+ * public rows. The Date law below checks the resulting equality boundary.
  *
  * Independent value constructors exercise reflexivity, symmetry, copied
  * structure, and changed-leaf inequality for primitives, arrays, records,
@@ -19,6 +23,15 @@ import { deepEquals, equalPersistedSnapshotValues } from '../src/utils'
  * A native typed-array length shadow cannot change how many intrinsic
  * elements participate in change-event equality. A supplied changed byte
  * must remain unequal even when both views report an own `length` of zero.
+ * Ordinary native Dates compare by time across JavaScript realms. One fixed
+ * pair with the same own string label tests a changed-time fallback. It does
+ * not define equality for Dates with different own labels or replaced methods.
+ * Ordinary Temporal.Duration values compare by their ten supplied fields,
+ * including opposite signs and carried units that represent equal lengths.
+ * `packages/db/CHANGELOG.md` says equivalent Duration forms remain unequal
+ * under `eq`. This is the exact-field equality already used by query
+ * normalization; the direct boundary here does not establish every Collection
+ * publication path.
  * Keyless DataViews have hidden state but no typed-array elements. Distinct
  * views from one foreign realm remain unequal by the keyless-instance law;
  * pairing one with a typed array must return false without reading a typed-
@@ -101,6 +114,68 @@ const arbitraryFiniteDate = fc
   .integer({ min: -1_000_000_000_000, max: 2_000_000_000_000 })
   .map((time) => new Date(time))
 
+type DateRealm = `local` | `foreign`
+type NativeDatePair = {
+  leftTime: number | null
+  rightTime: number | null
+  leftRealm: DateRealm
+  rightRealm: DateRealm
+  ownLabel?: boolean
+}
+
+// `null` is a model-only invalid-time marker. The supplied times, rather than
+// a production Date classifier, determine equality. Both foreign operands are
+// constructed in one realm so a labeled unequal pair can reach the historical
+// same-prototype fallback that hid its different native timestamps.
+function nativeDatePair(spec: NativeDatePair): [Date, Date] {
+  const leftTime = spec.leftTime ?? Number.NaN
+  const rightTime = spec.rightTime ?? Number.NaN
+  const [foreignLeft, foreignRight] = runInNewContext(
+    `[new Date(leftTime), new Date(rightTime)]`,
+    { leftTime, rightTime },
+  ) as [Date, Date]
+  const left = spec.leftRealm === `foreign` ? foreignLeft : new Date(leftTime)
+  const right =
+    spec.rightRealm === `foreign` ? foreignRight : new Date(rightTime)
+  if (spec.ownLabel) {
+    for (const date of [left, right]) {
+      Object.defineProperty(date, `label`, {
+        value: `same`,
+        enumerable: true,
+      })
+    }
+  }
+  return [left, right]
+}
+
+function assertNativeDateEquality(
+  spec: NativeDatePair,
+  equal: (left: unknown, right: unknown) => boolean = deepEquals,
+): void {
+  const [left, right] = nativeDatePair(spec)
+  const expected = Object.is(spec.leftTime, spec.rightTime)
+  expect(equal(left, right), `forward ${JSON.stringify(spec)}`).toBe(expected)
+  expect(equal(right, left), `reverse ${JSON.stringify(spec)}`).toBe(expected)
+}
+
+const arbitraryNativeDatePair = fc
+  .record({
+    leftTime: fc.oneof(
+      fc.integer({ min: -1_000_000_000_000, max: 1_000_000_000_000 }),
+      fc.constant(null),
+    ),
+    relation: fc.constantFrom(`equal` as const, `changed` as const),
+    leftRealm: fc.constantFrom(`local` as const, `foreign` as const),
+    rightRealm: fc.constantFrom(`local` as const, `foreign` as const),
+  })
+  .map(({ leftTime, relation, leftRealm, rightRealm }) => ({
+    leftTime,
+    rightTime:
+      relation === `equal` ? leftTime : leftTime === null ? 1 : leftTime + 1,
+    leftRealm,
+    rightRealm,
+  }))
+
 const arbitraryRegExp = fc
   .tuple(fc.string(), fc.constantFrom(``, `g`, `i`, `gi`, `m`, `gim`))
   .map(([source, flags]) => {
@@ -131,6 +206,92 @@ const arbitraryTemporalDuration = fc
   .map(([hours, minutes, seconds]) =>
     Temporal.Duration.from({ hours, minutes, seconds }),
   )
+
+// The supplied vector is the independent model: equality means every named
+// Duration field agrees. It does not consult display text or the production
+// normalizer. One shared sign keeps every generated Duration valid.
+const exactDurationFields = [
+  `years`,
+  `months`,
+  `weeks`,
+  `days`,
+  `hours`,
+  `minutes`,
+  `seconds`,
+  `milliseconds`,
+  `microseconds`,
+  `nanoseconds`,
+] as const
+type ExactDurationField = (typeof exactDurationFields)[number]
+type ExactDurationSpec = Record<ExactDurationField, number>
+
+// These are the adjacent unit conversions with a fixed factor. Month-to-week
+// conversion has no fixed factor, so it is deliberately absent.
+const durationCarryPairs = [
+  [`years`, `months`, 12],
+  [`weeks`, `days`, 7],
+  [`days`, `hours`, 24],
+  [`hours`, `minutes`, 60],
+  [`minutes`, `seconds`, 60],
+  [`seconds`, `milliseconds`, 1000],
+  [`milliseconds`, `microseconds`, 1000],
+  [`microseconds`, `nanoseconds`, 1000],
+] as const
+
+const arbitraryExactDurationMagnitudes: fc.Arbitrary<ExactDurationSpec> =
+  fc.record({
+    years: fc.integer({ min: 0, max: 3 }),
+    months: fc.integer({ min: 0, max: 3 }),
+    weeks: fc.integer({ min: 0, max: 3 }),
+    days: fc.integer({ min: 0, max: 3 }),
+    hours: fc.integer({ min: 0, max: 3 }),
+    minutes: fc.integer({ min: 0, max: 3 }),
+    seconds: fc.integer({ min: 0, max: 3 }),
+    milliseconds: fc.integer({ min: 0, max: 3 }),
+    microseconds: fc.integer({ min: 0, max: 3 }),
+    nanoseconds: fc.integer({ min: 0, max: 3 }),
+  })
+
+function signedDurationSpec(
+  magnitudes: ExactDurationSpec,
+  sign: -1 | 1,
+): ExactDurationSpec {
+  return Object.fromEntries(
+    exactDurationFields.map((field) => [
+      field,
+      magnitudes[field] === 0 ? 0 : magnitudes[field] * sign,
+    ]),
+  ) as ExactDurationSpec
+}
+
+function assertExactDurationEquality(
+  leftSpec: ExactDurationSpec,
+  rightSpec: ExactDurationSpec,
+  equal: (left: unknown, right: unknown) => boolean = deepEquals,
+): void {
+  const left = Temporal.Duration.from(leftSpec)
+  const right = Temporal.Duration.from(rightSpec)
+  const expected = exactDurationFields.every(
+    (field) => leftSpec[field] === rightSpec[field],
+  )
+  expect(
+    equal(left, right),
+    `forward ${JSON.stringify([leftSpec, rightSpec])}`,
+  ).toBe(expected)
+  expect(
+    equal(right, left),
+    `reverse ${JSON.stringify([leftSpec, rightSpec])}`,
+  ).toBe(expected)
+}
+
+function singleDurationField(
+  field: ExactDurationField,
+  value: number,
+): ExactDurationSpec {
+  return Object.fromEntries(
+    exactDurationFields.map((name) => [name, name === field ? value : 0]),
+  ) as ExactDurationSpec
+}
 
 // Same-type value arbitraries for testing equivalence properties
 // Mixed Date/Temporal inequality has its own generated and fixed witnesses below.
@@ -901,6 +1062,71 @@ describe(`deepEquals property-based tests`, () => {
       )
     })
 
+    // Legal pairs cross both realm placements and equal or changed valid and
+    // invalid times. The direct deepEquals result is the observation cut. A
+    // local-only classifier fails an equal mixed-realm pair. Own properties,
+    // non-Date objects, and changed prototypes are outside this grammar.
+    it(`reconstructs native Date realm and time margins`, () => {
+      for (const leftRealm of [`local`, `foreign`] as const) {
+        for (const rightRealm of [`local`, `foreign`] as const) {
+          for (const leftTime of [1, null]) {
+            for (const rightTime of [leftTime, leftTime === null ? 1 : 2]) {
+              assertNativeDateEquality({
+                leftTime,
+                rightTime,
+                leftRealm,
+                rightRealm,
+              })
+            }
+          }
+        }
+      }
+    })
+
+    it(`rejects a local-only Date classifier and a changed-time fallback`, () => {
+      const mixedEqual: NativeDatePair = {
+        leftTime: 1,
+        rightTime: 1,
+        leftRealm: `local`,
+        rightRealm: `foreign`,
+        ownLabel: false,
+      }
+      const labeledChanged: NativeDatePair = {
+        leftTime: 1,
+        rightTime: 2,
+        leftRealm: `foreign`,
+        rightRealm: `foreign`,
+        ownLabel: true,
+      }
+      expect(() =>
+        assertNativeDateEquality(
+          mixedEqual,
+          (left, right) =>
+            left instanceof Date &&
+            right instanceof Date &&
+            Object.is(left.getTime(), right.getTime()),
+        ),
+      ).toThrow(`forward`)
+      expect(() =>
+        assertNativeDateEquality(labeledChanged, () => true),
+      ).toThrow(`forward`)
+      // This fixed diagnostic preserves the missed-event counterexample
+      // without extending the generated grammar to modified Date objects.
+      assertNativeDateEquality(labeledChanged)
+    })
+
+    it(`keeps a foreign Date distinct from an equal-keyed plain record`, () => {
+      const date = runInNewContext(`new Date(1)`) as Date
+      Object.defineProperty(date, `label`, {
+        value: `same`,
+        enumerable: true,
+      })
+      const record = { label: `same` }
+      expect(Date.prototype.getTime.call(date)).toBe(1)
+      expect(deepEquals(date, record)).toBe(false)
+      expect(deepEquals(record, date)).toBe(false)
+    })
+
     utilsProperty([arbitraryTemporalPlainDate])(
       `Temporal.PlainDate with same values are equal`,
       (date) => {
@@ -1278,6 +1504,139 @@ describe(`deepEquals property-based tests`, () => {
     utilsProperty([arbitraryRegExp])(
       `RegExp differs from its source text in both directions`,
       (regex) => assertDistinctTypes(regex, regex.source, deepEquals),
+    )
+  })
+
+  // Keep this generated property after every existing ordinal registration so
+  // saved UTILS_ORACLE_PROPERTY seed/path replays keep their original targets.
+  describe(`ordinary native Date realm boundary`, () => {
+    utilsProperty([arbitraryNativeDatePair])(
+      `ordinary native Date equality follows time across realms`,
+      assertNativeDateEquality,
+    )
+  })
+
+  // Keep both registrations after every existing ordinal replay selector.
+  describe(`exact Temporal.Duration field equality`, () => {
+    // Fresh equal vectors and each single-field change reconstruct the whole
+    // ten-field grammar. Generated magnitudes range from 0 to 3 under one
+    // shared positive or negative sign; a selected field changes away from
+    // zero. Equal and changed relations, and both signs, contribute distinct
+    // outcomes. Mixed-sign vectors are invalid and excluded. The direct
+    // deepEquals result is the observation cut.
+    it(`accepts fresh copies and distinguishes each of ten fields`, () => {
+      for (const field of exactDurationFields) {
+        const zero = singleDurationField(field, 0)
+        assertExactDurationEquality(zero, { ...zero })
+        for (const sign of [-1, 1]) {
+          assertExactDurationEquality(zero, singleDurationField(field, sign))
+        }
+      }
+    })
+
+    it(`distinguishes opposite signs and every fixed-factor unit carry`, () => {
+      const positive = singleDurationField(`seconds`, 1)
+      const negative = singleDurationField(`seconds`, -1)
+      assertExactDurationEquality(positive, negative)
+      expect(() =>
+        assertExactDurationEquality(positive, negative, (a, b) =>
+          exactDurationFields.every(
+            (field) =>
+              Math.abs((a as Temporal.Duration)[field]) ===
+              Math.abs((b as Temporal.Duration)[field]),
+          ),
+        ),
+      ).toThrow(`forward`)
+
+      for (const [larger, smaller, factor] of durationCarryPairs) {
+        for (const sign of [-1, 1]) {
+          const leftSpec = singleDurationField(larger, sign)
+          const rightSpec = singleDurationField(smaller, sign * factor)
+          assertExactDurationEquality(leftSpec, rightSpec)
+          // A comparator that balances just this adjacent pair is wrong even
+          // when the two Durations represent the same elapsed length.
+          expect(() =>
+            assertExactDurationEquality(leftSpec, rightSpec, (a, b) => {
+              const left = a as Temporal.Duration
+              const right = b as Temporal.Duration
+              return (
+                exactDurationFields.every(
+                  (field) =>
+                    field === larger ||
+                    field === smaller ||
+                    left[field] === right[field],
+                ) &&
+                left[larger] * factor + left[smaller] ===
+                  right[larger] * factor + right[smaller]
+              )
+            }),
+          ).toThrow(`forward`)
+        }
+      }
+    })
+
+    it(`rejects display equality for all subsecond representations`, () => {
+      for (const [larger, smaller] of [
+        [`seconds`, `milliseconds`],
+        [`milliseconds`, `microseconds`],
+        [`microseconds`, `nanoseconds`],
+      ] as const) {
+        for (const sign of [-1, 1]) {
+          const leftSpec = singleDurationField(larger, sign)
+          const rightSpec = singleDurationField(smaller, sign * 1000)
+          const left = Temporal.Duration.from(leftSpec)
+          const right = Temporal.Duration.from(rightSpec)
+          expect(left.toString()).toBe(right.toString())
+          assertExactDurationEquality(leftSpec, rightSpec)
+          // A display-only comparator is a plausible wrong design. The model
+          // rejects it at the same direct-result checkpoint as production.
+          expect(() =>
+            assertExactDurationEquality(
+              leftSpec,
+              rightSpec,
+              (a, b) => String(a) === String(b),
+            ),
+          ).toThrow(`forward`)
+        }
+      }
+    })
+
+    utilsProperty([
+      arbitraryExactDurationMagnitudes,
+      fc.constantFrom(-1 as const, 1 as const),
+      fc.constantFrom(...exactDurationFields),
+      fc.boolean(),
+    ])(
+      `fresh Duration copies agree and any changed field differs`,
+      (magnitudes, sign, field, changed) => {
+        const base = signedDurationSpec(magnitudes, sign)
+        const next = { ...base, [field]: base[field] + (changed ? sign : 0) }
+        assertExactDurationEquality(base, next)
+      },
+    )
+
+    // These three unit-pair axes are the display-collision margin. The
+    // magnitude ranges 1–100 with either shared sign; omitting either sign or
+    // an axis leaves a valid subsecond representation outside this claim.
+    utilsProperty([
+      fc.integer({ min: 1, max: 100 }),
+      fc.constantFrom(-1 as const, 1 as const),
+      fc.constantFrom(
+        [`seconds`, `milliseconds`] as const,
+        [`milliseconds`, `microseconds`] as const,
+        [`microseconds`, `nanoseconds`] as const,
+      ),
+    ])(
+      `equal-display Duration field vectors remain unequal`,
+      (n, sign, pair) => {
+        const [larger, smaller] = pair
+        const leftSpec = singleDurationField(larger, sign * n)
+        const rightSpec = singleDurationField(smaller, sign * 1000 * n)
+        expect(Temporal.Duration.from(leftSpec).toString()).toBe(
+          Temporal.Duration.from(rightSpec).toString(),
+        )
+        assertExactDurationEquality(leftSpec, rightSpec)
+      },
     )
   })
 })

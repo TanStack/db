@@ -29,6 +29,51 @@ export function nativeTypedArrayLength(value: ArrayBufferView): number {
   return Reflect.apply(typedArrayLength, value, []) as number
 }
 
+// Duration equality retains the exact units, including subsecond units that
+// share a default display. Query normalization uses the same field order.
+export const durationFields = [
+  `years`,
+  `months`,
+  `weeks`,
+  `days`,
+  `hours`,
+  `minutes`,
+  `seconds`,
+  `milliseconds`,
+  `microseconds`,
+  `nanoseconds`,
+] as const
+
+// The Date intrinsic recognizes native Dates across realms. A display tag
+// cannot hide a Date's timestamp or make an ordinary object into a Date.
+export function dateTimestamp(value: unknown): number | undefined {
+  if (value === null || typeof value !== `object`) return undefined
+  try {
+    if (value instanceof Date) return Date.prototype.getTime.call(value)
+    if (Symbol.toStringTag in value) {
+      // A Date subclass can inherit getTime from its Date prototype. Walk
+      // descriptors without reading a user display-tag or getTime getter;
+      // the intrinsic below still checks for the native Date slot.
+      let prototype = Object.getPrototypeOf(value)
+      while (prototype !== null) {
+        const descriptor = Object.getOwnPropertyDescriptor(prototype, `getTime`)
+        if (descriptor) {
+          if (typeof descriptor.value !== `function`) return undefined
+          break
+        }
+        prototype = Object.getPrototypeOf(prototype)
+      }
+      if (prototype === null) return undefined
+    } else if (Object.prototype.toString.call(value) !== `[object Date]`) {
+      return undefined
+    }
+    return Date.prototype.getTime.call(value)
+  } catch {
+    // An ordinary object or proxy has no native Date timestamp.
+    return undefined
+  }
+}
+
 /**
  * Deep equality function that compares two values recursively
  * Handles primitives, objects, arrays, Date, RegExp, Map, Set, TypedArrays, and Temporal objects
@@ -103,13 +148,13 @@ export function deepEqualsInternal(
     return false
   }
 
-  // Handle Date objects
-  if (a instanceof Date) {
-    if (!(b instanceof Date)) return false
-    return Object.is(a.getTime(), b.getTime())
+  // Native Dates compare by time even when their constructors come from
+  // different realms. An invalid Date has a NaN time, distinct from no Date.
+  const aDateTime = dateTimestamp(a)
+  const bDateTime = dateTimestamp(b)
+  if (aDateTime !== undefined || bDateTime !== undefined) {
+    return Object.is(aDateTime, bDateTime)
   }
-  // Symmetric check: if b is Date but a is not, they're not equal
-  if (b instanceof Date) return false
 
   // Handle RegExp objects
   if (a instanceof RegExp) {
@@ -278,13 +323,15 @@ export function deepEqualsInternal(
     // If they're different Temporal types, they're not equal
     if (aTag !== bTag) return false
 
-    // Use Temporal's built-in equals method if available
-    if (typeof a.equals === `function`) {
-      return a.equals(b)
+    if (aTag === `Temporal.Duration`) {
+      const left = a as typeof a &
+        Record<(typeof durationFields)[number], number>
+      const right = b as typeof b &
+        Record<(typeof durationFields)[number], number>
+      return durationFields.every((field) => left[field] === right[field])
     }
 
-    // Fallback to toString comparison for other types
-    return a.toString() === b.toString()
+    return a.equals!(b)
   }
   // Symmetric check: if b is Temporal but a is not, they're not equal
   if (isTemporal(b)) return false
@@ -382,7 +429,7 @@ export interface TemporalLike {
   equals?: (other: unknown) => boolean
 }
 
-/** Checks if the value is a Temporal object by checking for the Temporal brand */
+/** Recognizes a supported Temporal tag; callers assume tagged values are valid. */
 export function isTemporal(a: unknown): a is TemporalLike {
   if (a == null || typeof a !== `object`) return false
   const tag = (a as Record<symbol, unknown>)[Symbol.toStringTag]

@@ -1,4 +1,6 @@
 import {
+  dateTimestamp,
+  durationFields,
   isTemporal,
   nativeTypedArrayLength,
   nativeTypedArrayTag,
@@ -6,6 +8,8 @@ import {
 import { getRuntimeReferenceIdentity } from '../query/runtime-reference-identity'
 import { codedMessage, devBuild } from '../error-message'
 import type { CompareOptions } from '../query/builder/types'
+
+export { dateTimestamp } from '../utils'
 
 // WeakMap to store stable IDs for objects
 const objectIds = new WeakMap<object, number>()
@@ -21,37 +25,6 @@ function getObjectId(obj: object): number {
   const id = nextObjectId++
   objectIds.set(obj, id)
   return id
-}
-
-// The Date intrinsic checks the native brand across realms. Cheap shape gates
-// avoid that throwing probe for ordinary objects and Temporal values. A Date
-// display tag cannot hide its timestamp, and a forged tag cannot supply one.
-export function dateTimestamp(value: unknown): number | undefined {
-  if (value === null || typeof value !== `object`) return undefined
-  try {
-    if (value instanceof Date) return Date.prototype.getTime.call(value)
-    if (Symbol.toStringTag in value) {
-      // A Date subclass can inherit getTime from its Date prototype. Walk
-      // descriptors without reading a user display-tag or getTime getter;
-      // the intrinsic below still checks for the native Date slot.
-      let prototype = Object.getPrototypeOf(value)
-      while (prototype !== null) {
-        const descriptor = Object.getOwnPropertyDescriptor(prototype, `getTime`)
-        if (descriptor) {
-          if (typeof descriptor.value !== `function`) return undefined
-          break
-        }
-        prototype = Object.getPrototypeOf(prototype)
-      }
-      if (prototype === null) return undefined
-    } else if (Object.prototype.toString.call(value) !== `[object Date]`) {
-      return undefined
-    }
-    return Date.prototype.getTime.call(value)
-  } catch {
-    // An ordinary object or proxy has no native Date timestamp.
-    return undefined
-  }
 }
 
 function hasUnorderableValue(
@@ -133,10 +106,10 @@ export const ascComparator = (a: any, b: any, opts: CompareOptions): number => {
   }
 
   // If both are Temporal objects, use compareTemporalValues for correct semantic ordering
-  const aTemporal = brandedTemporal(a)
-  const bTemporal = brandedTemporal(b)
+  const aTemporal = isTemporal(a)
+  const bTemporal = isTemporal(b)
   if (aTemporal && bTemporal) {
-    return compareBrandedTemporalValues(a, b, aTemporal, bTemporal)
+    return compareTemporalValues(a, b)
   }
 
   // Native byte views use their unsigned contents for default order. This
@@ -240,6 +213,45 @@ export function makeComparator(
 }
 
 /**
+ * Index storage needs a total order even for Temporal values that have no
+ * public `orderBy` relation. Keep kinds in separate groups, and consistently
+ * order every Duration and PlainMonthDay by its exact equality key. Public
+ * comparisons still use `makeComparator` and retain their strict semantics.
+ */
+export function makeIndexComparator(
+  opts: CompareOptions,
+): (a: any, b: any) => number {
+  const compare = makeComparator(opts)
+  return (a, b) => {
+    const aTemporal = isTemporal(a)
+    const bTemporal = isTemporal(b)
+    if (!aTemporal || !bTemporal) return compare(a, b)
+
+    const aKind = a[Symbol.toStringTag]
+    const bKind = b[Symbol.toStringTag]
+    let order: number
+    if (aKind !== bKind) {
+      order = aKind < bKind ? -1 : 1
+    } else if (
+      aKind === `Temporal.Duration` ||
+      aKind === `Temporal.PlainMonthDay`
+    ) {
+      const aKey = normalizeValue(a) as string
+      const bKey = normalizeValue(b) as string
+      order = aKey < bKey ? -1 : aKey > bKey ? 1 : 0
+    } else {
+      return compare(a, b)
+    }
+    return opts.direction === `desc` ? -order : order
+  }
+}
+
+/** Identify a supported Temporal tag for index ordering. */
+export function indexTemporalKind(value: unknown): string | undefined {
+  return isTemporal(value) ? value[Symbol.toStringTag] : undefined
+}
+
+/**
  * Wraps a user comparator so an index crashes on a result that cannot order
  * its storage, instead of silently misplacing rows.
  */
@@ -317,54 +329,6 @@ function normalizeBinary(value: Uint8Array): string {
   return normalizedKey(`binary`, bytes)
 }
 
-const durationFields = [
-  `years`,
-  `months`,
-  `weeks`,
-  `days`,
-  `hours`,
-  `minutes`,
-  `seconds`,
-  `milliseconds`,
-  `microseconds`,
-  `nanoseconds`,
-] as const
-
-/** Read a Temporal brand and display through its slot-checking prototype. */
-type BrandedTemporal = { prototype: object; kind: string; text: string }
-
-function brandedTemporal(value: unknown): BrandedTemporal | undefined {
-  if (value === null || typeof value !== `object`) return undefined
-  let prototype: object | null = Object.getPrototypeOf(value)
-  while (prototype) {
-    const kind = Object.getOwnPropertyDescriptor(
-      prototype,
-      Symbol.toStringTag,
-    )?.value
-    const toString = Object.getOwnPropertyDescriptor(
-      prototype,
-      `toString`,
-    )?.value
-    if (
-      typeof kind === `string` &&
-      isTemporal(prototype) &&
-      typeof toString === `function`
-    ) {
-      try {
-        // A genuine subclass inherits this method from the Temporal prototype.
-        // Its receiver check rejects forged tags and borrowed prototypes.
-        // A custom prototype supplying both members remains outside this check.
-        const text = Reflect.apply(toString, value, [])
-        return typeof text === `string` ? { prototype, kind, text } : undefined
-      } catch {
-        return undefined
-      }
-    }
-    prototype = Object.getPrototypeOf(prototype)
-  }
-  return undefined
-}
-
 /**
  * Sentinel value representing undefined in normalized form.
  * This allows distinguishing between "start from beginning" (undefined parameter)
@@ -394,89 +358,46 @@ export function normalizeValue(value: any): any {
   const timestamp = dateTimestamp(value)
   if (timestamp !== undefined) return timestamp
 
-  // Query equality comes from the branded value, never an own display shadow.
-  const temporal = brandedTemporal(value)
-  if (temporal) {
-    const { prototype, kind, text } = temporal
+  if (isTemporal(value)) {
+    const kind = value[Symbol.toStringTag]
     if (kind === `Temporal.ZonedDateTime`) {
-      // Read Temporal's internal slots through its prototype getters. Own
-      // properties can shadow the public accessors without changing equals().
-      let epochNanoseconds: unknown
-      let timeZoneId: unknown
-      let calendarId: unknown
-      try {
-        epochNanoseconds = Object.getOwnPropertyDescriptor(
-          prototype,
-          `epochNanoseconds`,
-        )?.get?.call(value)
-        timeZoneId = Object.getOwnPropertyDescriptor(
-          prototype,
-          `timeZoneId`,
-        )?.get?.call(value)
-        calendarId = Object.getOwnPropertyDescriptor(
-          prototype,
-          `calendarId`,
-        )?.get?.call(value)
-      } catch {
-        // A borrowed prototype is not a branded Temporal instance.
-        return value
+      const zoned = value as typeof value & {
+        epochNanoseconds: bigint
+        timeZoneId: string
+        calendarId: string
       }
-      if (
-        typeof epochNanoseconds === `bigint` &&
-        typeof timeZoneId === `string` &&
-        typeof calendarId === `string`
-      ) {
-        // Equality retains the instant, calendar, and canonical zone. A fixed
-        // +00:00 zone stays distinct from named UTC, while UTC aliases merge.
-        return normalizedKey(
-          `temporal`,
-          JSON.stringify([
-            kind,
-            String(epochNanoseconds),
-            canonicalTemporalZone(timeZoneId),
-            calendarId,
-          ]),
-        )
-      }
-      return value
+      // Equality retains the instant, calendar, and canonical zone. A fixed
+      // +00:00 zone stays distinct from named UTC, while UTC aliases merge.
+      return normalizedKey(
+        `temporal`,
+        JSON.stringify([
+          kind,
+          String(zoned.epochNanoseconds),
+          canonicalTemporalZone(zoned.timeZoneId),
+          zoned.calendarId,
+        ]),
+      )
     }
     if (
       kind === `Temporal.PlainMonthDay` ||
       kind === `Temporal.PlainYearMonth`
     ) {
       // Default display omits the reference ISO year/day that native equals()
-      // compares. The intrinsic string form with the calendar shown includes
-      // those fields and ignores an instance's own toString shadow.
-      const toString = Object.getOwnPropertyDescriptor(
-        prototype,
-        `toString`,
-      )?.value
-      try {
-        const fullText = Reflect.apply(toString, value, [
-          { calendarName: `always` },
-        ])
-        return normalizedKey(`temporal`, `${kind}:${fullText}`)
-      } catch {
-        return value
-      }
+      // compares. The calendar-inclusive display preserves those fields.
+      const fullText = (
+        value.toString as (options: { calendarName: `always` }) => string
+      )({ calendarName: `always` })
+      return normalizedKey(`temporal`, `${kind}:${fullText}`)
     }
     if (kind === `Temporal.Duration`) {
       // Duration's default display balances subsecond units. Equality under
-      // the #1519 contract instead preserves all ten intrinsic fields.
-      try {
-        const fields = durationFields.map((field) => {
-          const get = Object.getOwnPropertyDescriptor(prototype, field)?.get
-          return Reflect.apply(get!, value, []) as number
-        })
-        if (fields.every((field) => typeof field === `number`)) {
-          return normalizedKey(`temporal`, JSON.stringify([kind, ...fields]))
-        }
-      } catch {
-        // A borrowed prototype has no Temporal internal slots.
-      }
-      return value
+      // the #1519 contract instead preserves all ten fields.
+      const duration = value as typeof value &
+        Record<(typeof durationFields)[number], number>
+      const fields = durationFields.map((field) => duration[field])
+      return normalizedKey(`temporal`, JSON.stringify([kind, ...fields]))
     }
-    return normalizedKey(`temporal`, `${kind}:${text}`)
+    return normalizedKey(`temporal`, `${kind}:${value.toString()}`)
   }
 
   // Normalize Uint8Arrays/Buffers to a string representation for Map key usage
@@ -508,9 +429,11 @@ export function indexOrderValue(value: any, exactKey: any): any {
 
 /** Supply custom comparators the Temporal display key used before raw ordering. */
 export function indexCustomComparatorValue(value: unknown): unknown {
-  const temporal = brandedTemporal(value)
-  return temporal
-    ? normalizedKey(`temporal`, `${temporal.kind}:${temporal.text}`)
+  return isTemporal(value)
+    ? normalizedKey(
+        `temporal`,
+        `${value[Symbol.toStringTag]}:${value.toString()}`,
+      )
     : value
 }
 
@@ -535,41 +458,24 @@ export function denormalizeUndefined(value: any): any {
 /**
  * Compare two Temporal values of the same type, returning -1, 0, or 1.
  *
- * The tag checks type agreement; the prototype supplies the static compare
- * function. An instance's own `constructor` can be shadowed, and a claimed tag
- * must not install a comparator that later genuine values use. Types without
- * a static `.compare` (e.g. `PlainMonthDay`) throw instead of using text order.
+ * The tags check type agreement. Types without a static `.compare` (e.g.
+ * `PlainMonthDay`) throw instead of using text order.
  *
  * Callers must ensure both arguments are Temporal objects; mixed types throw.
  */
 export function compareTemporalValues(a: unknown, b: unknown): number {
-  return compareBrandedTemporalValues(
-    a,
-    b,
-    brandedTemporal(a),
-    brandedTemporal(b),
-  )
-}
-
-function compareBrandedTemporalValues(
-  a: unknown,
-  b: unknown,
-  aTemporal: BrandedTemporal | undefined,
-  bTemporal: BrandedTemporal | undefined,
-): number {
-  const aTag = aTemporal?.kind ?? `unbranded`
-  const bTag = bTemporal?.kind ?? `unbranded`
-  if (!aTemporal || !bTemporal || aTag !== bTag) {
+  const aTag = (a as Record<symbol, unknown>)[Symbol.toStringTag]
+  const bTag = (b as Record<symbol, unknown>)[Symbol.toStringTag]
+  if (aTag !== bTag) {
     throw new TypeError(
       devBuild() && process.env.NODE_ENV !== `production`
         ? `Cannot order Temporal values of different types: ${aTag} vs ${bTag}`
         : codedMessage(167, { aTag, bTag }),
     )
   }
-  const prototype = aTemporal.prototype as {
-    constructor?: { compare?: (x: unknown, y: unknown) => number }
-  } | null
-  const compare = prototype?.constructor?.compare
+  const compare = (
+    a as { constructor: { compare?: (x: unknown, y: unknown) => number } }
+  ).constructor.compare
   if (typeof compare !== `function`) {
     throw new TypeError(
       devBuild() && process.env.NODE_ENV !== `production`
@@ -593,10 +499,8 @@ function compareBrandedTemporalValues(
  * arguments are non-null.
  */
 export function compareValues(a: unknown, b: unknown): number {
-  const aTemporal = brandedTemporal(a)
-  const bTemporal = brandedTemporal(b)
-  if (aTemporal && bTemporal) {
-    return compareBrandedTemporalValues(a, b, aTemporal, bTemporal)
+  if (isTemporal(a) && isTemporal(b)) {
+    return compareTemporalValues(a, b)
   }
   const comparableA = dateTimestamp(a) ?? a
   const comparableB = dateTimestamp(b) ?? b

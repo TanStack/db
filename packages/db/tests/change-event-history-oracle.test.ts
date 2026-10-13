@@ -1,5 +1,6 @@
 import { runInNewContext } from 'node:vm'
 import { fc, test as fcTest } from '@fast-check/vitest'
+import { Temporal } from 'temporal-polyfill'
 import { describe, expect, it, vi } from 'vitest'
 import {
   BTreeIndex,
@@ -1112,4 +1113,345 @@ describe(`opaque DataView change publication`, () => {
       }, [() => unsubscribe?.(), () => cleanup?.()])
     },
   )
+})
+
+describe(`native Date change publication across realms`, () => {
+  /**
+   * A settled sync replacement must leave a change-message mirror equal to the
+   * Collection's public row, as the Collection change-message contract above
+   * states. The native Date timestamp rule in `docs/guides/live-queries.md`
+   * includes Dates from another JavaScript realm and invalid Dates. The model
+   * knows the two supplied times and predicts one update exactly when they
+   * differ. One fixed pair has the same own string label on both Dates; it
+   * preserves a missed-update counterexample without defining behavior for
+   * differently labeled Dates. The driver uses real sync writes and a public
+   * subscriber; it checks the callback and the settled commit. These fixed
+   * histories do not claim optimistic writes, indexes, or other hosts.
+   */
+  it.each([
+    {
+      name: `changed equally labeled Dates in one foreign realm`,
+      beforeTime: 1,
+      afterTime: 2,
+      beforeRealm: `foreign`,
+      afterRealm: `foreign`,
+      ownLabel: true,
+    },
+    {
+      name: `equal Dates in one foreign realm`,
+      beforeTime: 1,
+      afterTime: 1,
+      beforeRealm: `foreign`,
+      afterRealm: `foreign`,
+      ownLabel: false,
+    },
+    {
+      name: `equal local-to-foreign Dates`,
+      beforeTime: 1,
+      afterTime: 1,
+      beforeRealm: `local`,
+      afterRealm: `foreign`,
+      ownLabel: false,
+    },
+    {
+      name: `equal foreign-to-local Dates`,
+      beforeTime: 1,
+      afterTime: 1,
+      beforeRealm: `foreign`,
+      afterRealm: `local`,
+      ownLabel: false,
+    },
+    {
+      name: `equal invalid local-to-foreign Dates`,
+      beforeTime: null,
+      afterTime: null,
+      beforeRealm: `local`,
+      afterRealm: `foreign`,
+      ownLabel: false,
+    },
+    {
+      name: `foreign invalid-to-valid Dates`,
+      beforeTime: null,
+      afterTime: 1,
+      beforeRealm: `foreign`,
+      afterRealm: `foreign`,
+      ownLabel: false,
+    },
+    {
+      name: `foreign valid-to-invalid Dates`,
+      beforeTime: 1,
+      afterTime: null,
+      beforeRealm: `foreign`,
+      afterRealm: `foreign`,
+      ownLabel: false,
+    },
+  ] as const)(`keeps the public mirror for $name`, async (sample) => {
+    type DateRow = { id: string; value: Date }
+    type DateSync = Parameters<SyncConfig<DateRow, string>[`sync`]>[0]
+    const beforeTime = sample.beforeTime ?? Number.NaN
+    const afterTime = sample.afterTime ?? Number.NaN
+    const [foreignBefore, foreignAfter] = runInNewContext(
+      `[new Date(beforeTime), new Date(afterTime)]`,
+      { beforeTime, afterTime },
+    ) as [Date, Date]
+    const before =
+      sample.beforeRealm === `foreign` ? foreignBefore : new Date(beforeTime)
+    const after =
+      sample.afterRealm === `foreign` ? foreignAfter : new Date(afterTime)
+    if (sample.ownLabel) {
+      for (const date of [before, after]) {
+        Object.defineProperty(date, `label`, {
+          value: `same`,
+          enumerable: true,
+        })
+      }
+    }
+    // The native intrinsic verifies the host supplied real Dates. The model
+    // itself uses the constructor inputs, never the production classifier.
+    expect(Date.prototype.getTime.call(before)).toEqual(beforeTime)
+    expect(Date.prototype.getTime.call(after)).toEqual(afterTime)
+
+    let sync!: DateSync
+    let unsubscribe: (() => unknown) | undefined
+    let cleanup: (() => unknown) | undefined
+    await withOracleCleanup(async () => {
+      const collection = createCollection<DateRow, string>({
+        id: `native-date-publication-${sample.name}`,
+        getKey: ({ id }) => id,
+        autoIndex: `off`,
+        startSync: true,
+        sync: {
+          sync: (actions) => {
+            sync = actions
+            actions.begin()
+            actions.write({ type: `insert`, value: { id: `a`, value: before } })
+            actions.commit()
+            actions.markReady()
+          },
+        },
+      })
+      cleanup = () => collection.cleanup()
+      await collection.stateWhenReady()
+
+      let mirrorTime = beforeTime
+      const batches: Array<
+        Array<{
+          type: string
+          previousTime: number | undefined
+          time: number
+        }>
+      > = []
+      const callbackTimes: Array<number> = []
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          batches.push(
+            changes.map((change) => ({
+              type: change.type,
+              previousTime:
+                change.type === `update`
+                  ? Date.prototype.getTime.call(change.previousValue!.value)
+                  : undefined,
+              time: Date.prototype.getTime.call(change.value.value),
+            })),
+          )
+          for (const change of changes) {
+            mirrorTime = Date.prototype.getTime.call(change.value.value)
+          }
+          callbackTimes.push(
+            Date.prototype.getTime.call(collection.get(`a`)!.value),
+          )
+        },
+        { includeInitialState: false },
+      )
+      unsubscribe = () => subscription.unsubscribe()
+
+      sync.begin()
+      sync.write({ type: `update`, value: { id: `a`, value: after } })
+      await sync.commit()
+
+      const changed = !Object.is(beforeTime, afterTime)
+      expect(batches).toEqual(
+        changed
+          ? [[{ type: `update`, previousTime: beforeTime, time: afterTime }]]
+          : [],
+      )
+      expect(callbackTimes).toEqual(changed ? [afterTime] : [])
+      expect(mirrorTime).toEqual(afterTime)
+      expect(Date.prototype.getTime.call(collection.get(`a`)!.value)).toEqual(
+        afterTime,
+      )
+    }, [() => unsubscribe?.(), () => cleanup?.()])
+  })
+})
+
+describe(`Temporal.Duration change publication`, () => {
+  /**
+   * The Collection change-message contract above requires a mirror built from
+   * delivered messages to equal the public row after sync commit. The query
+   * equality contract already distinguishes all ten Duration fields, even
+   * when default display text agrees. The model supplies fresh ordinary
+   * Durations with either one second or one thousand milliseconds under a
+   * shared positive or negative sign, plus one hour versus 60 minutes. It
+   * predicts an update for each field change and no event for a fresh copy.
+   * The production driver writes through ready sync Collections; subscriber
+   * batches, callback-time public rows, the mirror, and settled public rows
+   * are the observations. These fixed histories do not cover optimistic
+   * writes, other Temporal kinds, or every possible ten-field transition.
+   */
+  const fields = [
+    `years`,
+    `months`,
+    `weeks`,
+    `days`,
+    `hours`,
+    `minutes`,
+    `seconds`,
+    `milliseconds`,
+    `microseconds`,
+    `nanoseconds`,
+  ] as const
+  const snapshot = (value: Temporal.Duration): Array<number> =>
+    fields.map((field) => value[field])
+
+  it.each([
+    {
+      name: `seconds to milliseconds`,
+      before: { seconds: 1 },
+      after: { milliseconds: 1000 },
+      changed: true,
+      sameDisplay: true,
+    },
+    {
+      name: `milliseconds to seconds`,
+      before: { milliseconds: 1000 },
+      after: { seconds: 1 },
+      changed: true,
+      sameDisplay: true,
+    },
+    {
+      name: `fresh equal seconds`,
+      before: { seconds: 1 },
+      after: { seconds: 1 },
+      changed: false,
+      sameDisplay: true,
+    },
+    {
+      name: `fresh equal milliseconds`,
+      before: { milliseconds: 1000 },
+      after: { milliseconds: 1000 },
+      changed: false,
+      sameDisplay: true,
+    },
+    {
+      name: `negative seconds to milliseconds`,
+      before: { seconds: -1 },
+      after: { milliseconds: -1000 },
+      changed: true,
+      sameDisplay: true,
+    },
+    {
+      name: `negative milliseconds to seconds`,
+      before: { milliseconds: -1000 },
+      after: { seconds: -1 },
+      changed: true,
+      sameDisplay: true,
+    },
+    {
+      name: `fresh equal negative seconds`,
+      before: { seconds: -1 },
+      after: { seconds: -1 },
+      changed: false,
+      sameDisplay: true,
+    },
+    {
+      name: `fresh equal negative milliseconds`,
+      before: { milliseconds: -1000 },
+      after: { milliseconds: -1000 },
+      changed: false,
+      sameDisplay: true,
+    },
+    {
+      name: `hours to 60 minutes`,
+      before: { hours: 1 },
+      after: { minutes: 60 },
+      changed: true,
+      sameDisplay: false,
+    },
+  ])(`keeps the public mirror for $name`, async (sample) => {
+    type DurationRow = { id: string; value: Temporal.Duration }
+    type DurationSync = Parameters<SyncConfig<DurationRow, string>[`sync`]>[0]
+    const before = Temporal.Duration.from(sample.before)
+    const after = Temporal.Duration.from(sample.after)
+    expect(before).not.toBe(after)
+    expect(before.toString() === after.toString()).toBe(sample.sameDisplay)
+    const beforeFields = snapshot(before)
+    const afterFields = snapshot(after)
+    expect(
+      beforeFields.every((field, index) => field === afterFields[index]),
+    ).toBe(!sample.changed)
+
+    let sync!: DurationSync
+    let unsubscribe: (() => unknown) | undefined
+    let cleanup: (() => unknown) | undefined
+    await withOracleCleanup(async () => {
+      const collection = createCollection<DurationRow, string>({
+        id: `duration-publication-${sample.name}`,
+        getKey: ({ id }) => id,
+        autoIndex: `off`,
+        startSync: true,
+        sync: {
+          sync: (actions) => {
+            sync = actions
+            actions.begin()
+            actions.write({ type: `insert`, value: { id: `a`, value: before } })
+            actions.commit()
+            actions.markReady()
+          },
+        },
+      })
+      cleanup = () => collection.cleanup()
+      await collection.stateWhenReady()
+
+      let mirror = beforeFields
+      const batches: Array<
+        Array<{
+          type: string
+          previous: Array<number> | undefined
+          value: Array<number>
+        }>
+      > = []
+      const callbackRows: Array<Array<number>> = []
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          batches.push(
+            changes.map((change) => ({
+              type: change.type,
+              previous:
+                change.type === `update`
+                  ? snapshot(change.previousValue!.value)
+                  : undefined,
+              value: snapshot(change.value.value),
+            })),
+          )
+          for (const change of changes) mirror = snapshot(change.value.value)
+          callbackRows.push(snapshot(collection.get(`a`)!.value))
+        },
+        { includeInitialState: false },
+      )
+      unsubscribe = () => subscription.unsubscribe()
+
+      sync.begin()
+      sync.write({ type: `update`, value: { id: `a`, value: after } })
+      await sync.commit()
+
+      expect(batches).toEqual(
+        sample.changed
+          ? [[{ type: `update`, previous: beforeFields, value: afterFields }]]
+          : [],
+      )
+      expect(callbackRows).toEqual(sample.changed ? [afterFields] : [])
+      expect(mirror).toEqual(afterFields)
+      expect(snapshot(collection.get(`a`)!.value)).toEqual(afterFields)
+    }, [() => unsubscribe?.(), () => cleanup?.()])
+  })
 })
