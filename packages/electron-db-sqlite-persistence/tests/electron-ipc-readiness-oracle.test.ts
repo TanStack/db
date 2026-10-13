@@ -31,18 +31,29 @@ import type {
  * subset through the Electron IPC adapter, which reads SQLite in the main
  * process, and then awaits the upstream source's load. The upstream never
  * calls `markReady()`, as a progressive source would not during its full
- * sync. Each witness records the rows visible at the query's first-ready
- * transition.
+ * sync.
+ *
+ * The independent model below predicts, for each history, what a live query
+ * over the demanded rows shows at three checkpoints: while the main process's
+ * `loadSubset` reply is held, after that reply but before the upstream load
+ * settles, and after the upstream load settles. It knows only the rows that an
+ * earlier renderer run persisted and the outcome of each step; it knows
+ * nothing about the IPC protocol or the wrapper's internals.
+ *
+ * The history grammar crosses a fresh or reopened renderer (an earlier run
+ * persisted one local row) with the IPC hydration outcome (a reply, or a
+ * failed reply) and what follows a reply: the upstream load succeeds, fails,
+ * or the query releases its demand while the IPC hydration is in flight.
  *
  * The driver uses the real renderer adapter and the real main-process
  * handler over a real SQLite file. The `ipcMain` double forwards each
- * envelope in process and lets a witness hold or fail the `loadSubset` reply,
- * which is the only part of the IPC transport that this law depends on. With
- * `TANSTACK_DB_ELECTRON_E2E_ALL=1`, each envelope instead crosses a real
- * Electron main process through the runtime bridge. These witnesses cover a
- * renderer
- * without a coordinator; a follower renderer routes upstream demand through
- * the shared broadcast coordinator, which the persistence-core owners cover.
+ * envelope in process and lets the driver hold or fail the `loadSubset`
+ * reply, which is the only part of the IPC transport that this law depends
+ * on. With `TANSTACK_DB_ELECTRON_E2E_ALL=1`, each envelope instead crosses a
+ * real Electron main process through the runtime bridge. The histories cover
+ * a renderer without a coordinator; a follower renderer routes upstream
+ * demand through the shared broadcast coordinator, which the persisted
+ * oracle's follower remote-demand lane owns.
  */
 
 type Row = { id: string; group: string }
@@ -205,118 +216,121 @@ function quietLogs() {
   })
 }
 
-describe(`Electron renderer initial readiness follows the composed load`, () => {
-  // A reopened renderer hydrates the rows that an earlier run persisted. The
-  // query is first ready only after that IPC reply and the upstream load.
-  it(`a reopened renderer is first ready with its IPC-hydrated local rows`, async () => {
-    const main = electronMain()
-    const id = `electron-readiness-reopen-${Math.random().toString(36).slice(2)}`
-    {
-      const [source, upstream] = persistedOnDemand(main, id)
-      const query = groupA(source)
-      const preload = query.preload()
-      await vi.waitFor(
-        () => expect(upstream.calls).toHaveLength(1),
-        settleTimeout,
-      )
-      upstream.respond([{ id: `local`, group: `a` }])
-      await preload
-      await query.cleanup()
-      await source.cleanup()
-    }
+type IpcReadinessHistory = {
+  renderer: `fresh` | `reopened`
+  hydration: `reply` | `fails`
+  // What follows a hydration reply.
+  next: `upstream-ok` | `upstream-fails` | `release-during-hydration`
+}
 
-    const held = main.holdLoads()
+type Checkpoints = {
+  whileReplyHeld?: {
+    ready: boolean
+    rows: Array<string>
+    upstreamCalls: number
+  }
+  afterReply:
+    | { ready: false; rows: Array<string>; upstreamCalls: 1 }
+    | { status: `error`; upstreamCalls: 0; firstReadyRows: undefined }
+    | { releasedQuietly: true }
+  afterUpstream?:
+    | { firstReadyRows: Array<string>; sourceReady: false }
+    | { status: `error`; firstReadyRows: undefined }
+}
+
+// The model: readiness waits for both loads, and each load's rows are visible
+// when the query is first ready. A failure of either load errors the query
+// before it is ever ready. A demand released while its hydration is in flight
+// starts no live upstream load, installs no upstream rows, and causes no
+// error. Whether locally hydrated rows stay is retention, which the persisted
+// oracle's retained-demand lane owns, so the model does not predict it.
+function expectedCheckpoints(history: IpcReadinessHistory): Checkpoints {
+  const local = history.renderer === `reopened` ? [`local`] : []
+  if (history.hydration === `fails`)
+    return {
+      afterReply: {
+        status: `error`,
+        upstreamCalls: 0,
+        firstReadyRows: undefined,
+      },
+    }
+  const whileReplyHeld = { ready: false, rows: [], upstreamCalls: 0 }
+  if (history.next === `release-during-hydration`)
+    return { whileReplyHeld, afterReply: { releasedQuietly: true } }
+  return {
+    whileReplyHeld,
+    afterReply: { ready: false, rows: local, upstreamCalls: 1 },
+    afterUpstream:
+      history.next === `upstream-ok`
+        ? { firstReadyRows: [...local, `remote`].sort(), sourceReady: false }
+        : { status: `error`, firstReadyRows: undefined },
+  }
+}
+
+const ipcReadinessHistories: Array<IpcReadinessHistory> = (
+  [`fresh`, `reopened`] as const
+).flatMap((renderer) => [
+  { renderer, hydration: `fails` as const, next: `upstream-ok` as const },
+  ...(
+    [`upstream-ok`, `upstream-fails`, `release-during-hydration`] as const
+  ).map((next) => ({ renderer, hydration: `reply` as const, next })),
+])
+
+async function observeIpcReadinessHistory(
+  history: IpcReadinessHistory,
+): Promise<Checkpoints> {
+  quietLogs()
+  const main = electronMain()
+  const id = `electron-readiness-${history.renderer}-${Math.random().toString(36).slice(2)}`
+  if (history.renderer === `reopened`) {
+    // An earlier renderer run persists one local row.
+    const [source, upstream] = persistedOnDemand(main, id)
+    const query = groupA(source)
+    const preload = query.preload()
+    await vi.waitFor(
+      () => expect(upstream.calls).toHaveLength(1),
+      settleTimeout,
+    )
+    upstream.respond([{ id: `local`, group: `a` }])
+    await preload
+    await query.cleanup()
+    await source.cleanup()
+  }
+
+  const observed: Checkpoints = { afterReply: { releasedQuietly: true } }
+  if (history.hydration === `fails`) {
+    main.failNextLoad(new Error(`main process unavailable`))
     const [source, upstream] = persistedOnDemand(main, id)
     const query = groupA(source)
     const seen = rowsAtFirstReady(query)
-    const preload = query.preload()
-    await held.arrived
-    expect(query.toArray).toEqual([])
-    expect(upstream.calls).toHaveLength(0)
-
-    held.release()
-    await vi.waitFor(
-      () => expect(upstream.calls).toHaveLength(1),
-      settleTimeout,
-    )
-    expect(query.toArray.map((row: Row) => row.id)).toEqual([`local`])
-    expect(query.isReady()).toBe(false)
-
-    upstream.respond([{ id: `remote`, group: `a` }])
-    await preload
-    expect(source.isReady()).toBe(false)
-    expect(seen.rows).toEqual([`local`, `remote`])
-  })
-
-  it(`is first ready with upstream subset rows visible after the IPC hydration reply`, async () => {
-    const main = electronMain()
-    const held = main.holdLoads()
-    const [source, upstream] = persistedOnDemand(main)
-    const query = groupA(source)
-    const seen = rowsAtFirstReady(query)
-    const preload = query.preload()
-
-    await held.arrived
-    expect(upstream.calls).toHaveLength(0)
-    expect(query.isReady()).toBe(false)
-
-    held.release()
-    await vi.waitFor(
-      () => expect(upstream.calls).toHaveLength(1),
-      settleTimeout,
-    )
-    expect(main.loadReplies).toContain(`sent`)
-    expect(query.isReady()).toBe(false)
-
-    upstream.respond([{ id: `remote`, group: `a` }])
-    await preload
-    expect(source.isReady()).toBe(false)
-    expect(seen.rows).toEqual([`remote`])
-  })
-
-  it(`a failed IPC hydration errors the query and never readies it`, async () => {
-    quietLogs()
-    const main = electronMain()
-    main.failNextLoad(new Error(`main process unavailable`))
-    const [source, upstream] = persistedOnDemand(main)
-    const query = groupA(source)
-    const seen = rowsAtFirstReady(query)
     void query.preload().catch(() => {})
-
     await vi.waitFor(
       () => expect(main.loadReplies).toContain(`failed`),
       settleTimeout,
     )
     await vi.waitFor(() => expect(query.status).toBe(`error`), settleTimeout)
-    expect(upstream.calls).toHaveLength(0)
-    expect(seen.rows).toBeUndefined()
-  })
+    observed.afterReply = {
+      status: query.status as `error`,
+      upstreamCalls: upstream.calls.length as 0,
+      firstReadyRows: seen.rows as undefined,
+    }
+    return observed
+  }
 
-  it(`an upstream failure after IPC hydration errors the query and never readies it`, async () => {
-    quietLogs()
-    const main = electronMain()
-    const [source, upstream] = persistedOnDemand(main)
-    const query = groupA(source)
-    const seen = rowsAtFirstReady(query)
-    void query.preload().catch(() => {})
+  const held = main.holdLoads()
+  const [source, upstream] = persistedOnDemand(main, id)
+  const query = groupA(source)
+  const seen = rowsAtFirstReady(query)
+  const preload = query.preload()
+  void preload.catch(() => {})
+  await held.arrived
+  observed.whileReplyHeld = {
+    ready: query.isReady(),
+    rows: query.toArray.map((row: Row) => row.id).sort(),
+    upstreamCalls: upstream.calls.length,
+  }
 
-    await vi.waitFor(
-      () => expect(upstream.calls).toHaveLength(1),
-      settleTimeout,
-    )
-    upstream.fail(new Error(`upstream failed`))
-    await vi.waitFor(() => expect(query.status).toBe(`error`), settleTimeout)
-    expect(seen.rows).toBeUndefined()
-  })
-
-  it(`a demand released during an in-flight IPC hydration starts no upstream load`, async () => {
-    const main = electronMain()
-    const held = main.holdLoads()
-    const [source, upstream] = persistedOnDemand(main)
-    const query = groupA(source)
-    void query.preload().catch(() => {})
-
-    await held.arrived
+  if (history.next === `release-during-hydration`) {
     await query.cleanup()
     held.release()
     await vi.waitFor(
@@ -324,11 +338,52 @@ describe(`Electron renderer initial readiness follows the composed load`, () => 
       settleTimeout,
     )
     await new Promise((resolve) => setTimeout(resolve, 20))
+    observed.afterReply = {
+      releasedQuietly: (upstream.calls.every(
+        (options) => options.signal?.aborted,
+      ) &&
+        !source.has(`remote`) &&
+        source.status !== `error`) as true,
+    }
+    return observed
+  }
 
-    expect(upstream.calls.every((options) => options.signal?.aborted)).toBe(
-      true,
-    )
-    expect(source.size).toBe(0)
-    expect(source.status).not.toBe(`error`)
-  })
+  held.release()
+  await vi.waitFor(
+    () => expect(upstream.calls.length).toBeGreaterThan(0),
+    settleTimeout,
+  )
+  observed.afterReply = {
+    ready: query.isReady() as false,
+    rows: query.toArray.map((row: Row) => row.id).sort(),
+    upstreamCalls: upstream.calls.length as 1,
+  }
+
+  if (history.next === `upstream-ok`) {
+    upstream.respond([{ id: `remote`, group: `a` }])
+    await preload
+    observed.afterUpstream = {
+      firstReadyRows: seen.rows as Array<string>,
+      sourceReady: source.isReady() as false,
+    }
+  } else {
+    upstream.fail(new Error(`upstream failed`))
+    await vi.waitFor(() => expect(query.status).toBe(`error`), settleTimeout)
+    observed.afterUpstream = {
+      status: query.status as `error`,
+      firstReadyRows: seen.rows as undefined,
+    }
+  }
+  return observed
+}
+
+describe(`Electron renderer initial readiness follows the composed load`, () => {
+  it.each(ipcReadinessHistories)(
+    `matches the model: $renderer renderer, hydration $hydration, then $next`,
+    async (history) => {
+      expect(await observeIpcReadinessHistory(history)).toEqual(
+        expectedCheckpoints(history),
+      )
+    },
+  )
 })

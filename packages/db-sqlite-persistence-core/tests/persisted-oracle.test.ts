@@ -215,7 +215,8 @@ const describeUnlessOracleReplay =
   requestedOracleReplayProperty === undefined ||
   requestedOracleReplayProperty === `persistence.retained-demand` ||
   requestedOracleReplayProperty === `persistence.generation-notice` ||
-  requestedOracleReplayProperty === `persistence.follower-generation-notice`
+  requestedOracleReplayProperty === `persistence.follower-generation-notice` ||
+  requestedOracleReplayProperty === `persistence.follower-remote-demand`
     ? describe
     : describe.skip
 
@@ -25898,6 +25899,356 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   )(
     `checks generated follower generation-notice histories (random or replayed)`,
     assertFollowerGenerationNoticeHistory,
+  )
+
+  /**
+   * A follower routes demand it cannot serve to the elected owner. The owner
+   * loads the rows upstream, commits them durably, and broadcasts the commit
+   * before it answers the ensure request on the same channel. The follower
+   * applies that broadcast asynchronously, by reading durable rows under its
+   * apply mutex. Law 7 therefore owes: the follower's load settles only after
+   * the broadcasts that preceded the reply have applied here, and it rejects,
+   * with the runtime terminal, if applying them failed.
+   *
+   * The independent model knows only whether the owner's commit applies.
+   * While that apply is held, no consumer of the demand has settled. If it
+   * applies, the consumer settles successfully with the owner's row visible.
+   * If it fails, the consumer rejects without the row, and the source is in
+   * error. The model does not know how the follower queues commits.
+   *
+   * The grammar crosses where the owner's broadcast meets the follower with
+   * whether its apply succeeds. A direct broadcast applies at once. A queued
+   * broadcast arrives while another subset's hydration holds the apply mutex,
+   * so it waits in the queue. A rotated history loses the cache claim after
+   * the first hydration read, so the demand reacquires through the owner
+   * under a new generation. The read that applies the owner's row is the one
+   * whose durable snapshot contains it; the driver holds that read to observe
+   * the not-ready checkpoint, or fails it. The consumer is a live query
+   * over the demanded rows or the follower's load itself. Observations, while
+   * the apply is held and after it settles: whether the consumer settled, its
+   * outcome, the demanded rows it sees when it settles (the query's
+   * first-ready rows, or the source's rows at load settlement), and the
+   * query's and source's status. The coordinator
+   * is a controlled double of an elected owner that broadcasts before it
+   * replies, as the built-in coordinator does; the two-tab OPFS suite is the
+   * receiving witness for the browser transport.
+   */
+  type FollowerRemoteDemandHistory = {
+    placement: `direct` | `queued` | `rotated`
+    apply: `ok` | `fails`
+    // A live query over the demand, or the follower's load itself.
+    consumer: `live-query` | `load`
+  }
+  type FollowerRow = { id: string; group: string }
+
+  const expectedFollowerRemoteDemand = (
+    history: FollowerRemoteDemandHistory,
+  ) => {
+    const applied = history.apply === `ok`
+    return {
+      // While the owner's commit has not applied here, nothing has settled.
+      whileApplyHeld: { settled: false, rows: undefined },
+      settled:
+        history.consumer === `live-query`
+          ? applied
+            ? { outcome: `fulfilled`, rows: [`remote`], status: `ready` }
+            : { outcome: `rejected`, rows: undefined, status: `error` }
+          : applied
+            ? { outcome: `fulfilled`, rows: [`remote`], status: undefined }
+            : { outcome: `rejected`, rows: undefined, status: `error` },
+    }
+  }
+
+  function createFollowerTab(history: FollowerRemoteDemandHistory) {
+    const durable: Array<FollowerRow> = []
+    const applyRead = createDeferred()
+    const applyReadStarted = createDeferred()
+    const otherHydrationStarted = createDeferred()
+    const otherHydration = createDeferred()
+    let reads = 0
+    let storageId = `follower-demand-cache-1`
+    let loseClaim = false
+    const claim = () => ({
+      storageCollectionId: storageId,
+      claimId: `follower-demand-claim`,
+      expiresAtMs: Date.now() + 10_000,
+    })
+    const rotated = history.placement === `rotated`
+    const adapter: PersistenceAdapter = {
+      loadSubset: async () => {
+        const read = ++reads
+        const snapshot = durable.slice()
+        if (snapshot.some((row) => row.id === `remote`)) {
+          applyReadStarted.resolve()
+          await applyRead.promise
+          if (history.apply === `fails`) throw new Error(`apply read failed`)
+        } else if (history.placement === `queued` && read === 2) {
+          otherHydrationStarted.resolve()
+          await otherHydration.promise
+        }
+        if (rotated && read === 1) loseClaim = true
+        return snapshot.map((value) => ({ key: value.id, value }))
+      },
+      ...(rotated
+        ? {
+            claimCacheGeneration: async () => claim(),
+            renewCacheGenerationClaim: async () =>
+              loseClaim ? undefined : Date.now() + 10_000,
+            rotateCacheGeneration: async () => {
+              loseClaim = false
+              storageId = `follower-demand-cache-2`
+              return claim()
+            },
+            releaseCacheGenerationClaim: async () => {},
+          }
+        : {}),
+      loadResumeSnapshot: () =>
+        Promise.resolve({
+          rows: [],
+          keySet: { status: `consistent` },
+          collectionMetadata: [],
+          latestTerm: 0,
+          latestSeq: 0,
+          latestRowVersion: 0,
+          resetEpoch: 0,
+        }),
+      applyCommittedTx: async () => {},
+      ensureIndex: async () => {},
+    } as PersistenceAdapter
+    let subscriber: ((message: ProtocolEnvelope<unknown>) => void) | undefined
+    let ensures = 0
+    const coordinator: PersistedCollectionCoordinator = {
+      getNodeId: () => `follower`,
+      getLeaderId: () => `owner`,
+      subscribe: (_collectionId, onMessage) => {
+        subscriber = onMessage
+        return () => {
+          subscriber = undefined
+        }
+      },
+      publish: () => {},
+      isLeader: () => false,
+      ensureLeadership: async () => {},
+      requestEnsurePersistedIndex: async () => {},
+      // The owner commits once, broadcasts, then replies; later ensures find
+      // nothing new.
+      requestEnsureRemoteSubset: async (collectionId) => {
+        if (++ensures > 1) return
+        if (history.placement === `queued`) await otherHydrationStarted.promise
+        const value = { id: `remote`, group: `a` }
+        durable.push(value)
+        const payload: TxCommitted = {
+          type: `tx:committed`,
+          term: 1,
+          seq: 1,
+          txId: `owner-tx-1`,
+          latestRowVersion: 1,
+          requiresFullReload: false,
+          changedRows: [{ key: value.id, value }],
+          deletedKeys: [],
+        }
+        subscriber?.({
+          v: 1,
+          dbName: `test-db`,
+          collectionId,
+          senderId: `owner`,
+          ts: Date.now(),
+          payload,
+        })
+      },
+      requestReleaseRemoteSubset: async () => {},
+      registerRemoteSubsetOwner: () => () => {},
+      requestApplyCommittedTx: (_collectionId, tx) =>
+        Promise.resolve({
+          type: `rpc:applyCommittedTx:res`,
+          rpcId: tx.txId,
+          ok: true,
+          term: tx.term,
+          seq: tx.seq,
+          latestRowVersion: tx.rowVersion,
+        }),
+      pullSince: () =>
+        Promise.resolve({
+          type: `rpc:pullSince:res`,
+          rpcId: `follower-demand-pull`,
+          ok: true,
+          latestTerm: 1,
+          latestSeq: 0,
+          latestRowVersion: 0,
+          requiresFullReload: false,
+          changedKeys: [],
+          deletedKeys: [],
+        }),
+    }
+    const source = createCollection(
+      persistedCollectionOptions<FollowerRow, string>({
+        id: `follower-demand-${Math.random().toString(36).slice(2)}`,
+        getKey: (row) => row.id,
+        persistence: { adapter, coordinator },
+        syncMode: `on-demand`,
+        sync: {
+          sync: () => ({
+            loadSubset: () => Promise.resolve(),
+            restartAfterScopedRecovery: () => {},
+          }),
+        },
+      }),
+    )
+    source.startSyncImmediate()
+    return {
+      source,
+      applyReadStarted: applyReadStarted.promise,
+      otherHydrationStarted: otherHydrationStarted.promise,
+      releaseApply: () => applyRead.resolve(),
+      releaseOtherHydration: () => otherHydration.resolve(),
+    }
+  }
+
+  // Wait for a driver event, but turn a missing event into an observation
+  // rather than a timeout.
+  const within = (promise: Promise<unknown>, ms = 200) =>
+    Promise.race([
+      promise.then(() => true),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), ms)),
+    ])
+
+  const assertFollowerRemoteDemandHistory = async (
+    history: FollowerRemoteDemandHistory,
+  ) => {
+    const expected = expectedFollowerRemoteDemand(history)
+    const errors = vi.spyOn(console, `error`).mockImplementation(() => {})
+    const warnings = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    const tab = createFollowerTab(history)
+    const groupQuery = (group: string) =>
+      createLiveQueryCollection((q) =>
+        q.from({ row: tab.source }).where(({ row }) => eq(row.group, group)),
+      )
+    const query = groupQuery(`a`)
+    const other = groupQuery(`b`)
+    try {
+      // The consumer's observation: its outcome, and the demanded rows it
+      // sees when it settles.
+      const seen: {
+        outcome: `pending` | `fulfilled` | `rejected`
+        rows?: Array<string>
+      } = { outcome: `pending` }
+      const demandedRows = () =>
+        Array.from(tab.source.values())
+          .filter((row) => row.group === `a`)
+          .map((row) => row.id)
+          .sort()
+      let settled: Promise<unknown>
+      if (history.consumer === `live-query`) {
+        query.onFirstReady(() => {
+          seen.rows = query.toArray.map((row) => (row as FollowerRow).id).sort()
+        })
+        settled = query.preload().then(
+          () => (seen.outcome = `fulfilled`),
+          () => (seen.outcome = `rejected`),
+        )
+      } else {
+        settled = Promise.resolve(
+          tab.source._sync.loadSubset({
+            where: new IR.Func(`eq`, [
+              new IR.PropRef([`group`]),
+              new IR.Value(`a`),
+            ]),
+          }),
+        ).then(
+          () => {
+            seen.outcome = `fulfilled`
+            seen.rows = demandedRows()
+          },
+          () => (seen.outcome = `rejected`),
+        )
+      }
+      if (history.placement === `queued`) void other.preload().catch(() => {})
+
+      if (history.placement === `queued`) {
+        // The owner's broadcast arrives while this hydration holds the apply
+        // mutex, so it waits in the queue until the hydration ends.
+        await within(tab.otherHydrationStarted)
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        tab.releaseOtherHydration()
+      }
+      const applyStarted = await within(tab.applyReadStarted)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      // Checkpoint: the owner has replied, but its row has not applied here.
+      expect({
+        applyStarted,
+        settled: seen.outcome !== `pending`,
+        rows: seen.rows,
+      }).toEqual({ applyStarted: true, ...expected.whileApplyHeld })
+
+      tab.releaseApply()
+      await within(settled)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      // Checkpoint: the apply settled.
+      expect({
+        outcome: seen.outcome,
+        rows: seen.rows,
+        status:
+          expected.settled.status === undefined
+            ? undefined
+            : history.consumer === `live-query` &&
+                expected.settled.status === `ready`
+              ? query.status
+              : expected.settled.status === `error`
+                ? history.consumer === `live-query`
+                  ? `${query.status}/${tab.source.status}`
+                  : tab.source.status
+                : tab.source.status,
+      }).toEqual({
+        outcome: expected.settled.outcome,
+        rows: expected.settled.rows,
+        status:
+          expected.settled.status === `error` &&
+          history.consumer === `live-query`
+            ? `error/error`
+            : expected.settled.status,
+      })
+    } finally {
+      await query.cleanup()
+      await other.cleanup()
+      await tab.source.cleanup()
+      errors.mockRestore()
+      warnings.mockRestore()
+    }
+  }
+
+  const followerRemoteDemandHistories: Array<FollowerRemoteDemandHistory> = (
+    [`direct`, `queued`, `rotated`] as const
+  ).flatMap((placement) =>
+    ([`ok`, `fails`] as const).flatMap((apply) =>
+      ([`live-query`, `load`] as const).map((consumer) => ({
+        placement,
+        apply,
+        consumer,
+      })),
+    ),
+  )
+  it.each(followerRemoteDemandHistories)(
+    `settles a follower's remote demand with the owner's applied rows: $placement broadcast, apply $apply, $consumer`,
+    assertFollowerRemoteDemandHistory,
+  )
+  const followerRemoteDemandHistory = fc.record({
+    placement: fc.constantFrom<FollowerRemoteDemandHistory[`placement`]>(
+      `direct`,
+      `queued`,
+      `rotated`,
+    ),
+    apply: fc.constantFrom<FollowerRemoteDemandHistory[`apply`]>(`ok`, `fails`),
+    consumer: fc.constantFrom<FollowerRemoteDemandHistory[`consumer`]>(
+      `live-query`,
+      `load`,
+    ),
+  })
+  fcTest.prop(
+    [followerRemoteDemandHistory],
+    oraclePropertyOptions(12, `persistence.follower-remote-demand`),
+  )(
+    `checks generated follower remote-demand histories (random or replayed)`,
+    assertFollowerRemoteDemandHistory,
   )
 
   // The model has one one-shot refresh lease. The grammar crosses cleanup
