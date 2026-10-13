@@ -20,6 +20,32 @@ levels; they are different questions, not a mandatory sequence:
 | Composition | Find obligations that conflict, duplicate each other, or require a shared ordering or authority rule. Use the tension or restructuring card if that is the material uncertainty.               |
 | Concepts    | Question the chosen identity, state, ownership, or boundary distinctions. Describe the same case without relying on its current names and check what is lost or becomes visible.               |
 
+For a suspected information gap, use [law discovery](law-discovery.md#operation),
+step 5.
+
+### Locate the repair
+
+The attack level names what to challenge. Once evidence shows a problem, use
+this table to locate the repair:
+
+| Finding or question                                                             | Possible repair location                                                  |
+| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Production disagrees with an accepted law.                                      | Production code.                                                          |
+| The reference predicts behavior the accepted law does not allow.                | Reference model.                                                          |
+| An accepted law over-promises, under-promises, or conflicts with another law.   | Authorized contract decision, then model and test updates.                |
+| The law needs information the production path lacks at the promised checkpoint. | Provider, protocol, architecture, or an authorized contract decision.     |
+| The check rejects an allowed intermediate observation or accepts a wrong one.   | Evaluation: checkpoint, history grammar, driver, recorder, or comparison. |
+| Correct behavior still fails the user's need.                                   | Requirement and its suitability for the intended use.                     |
+
+These locations can overlap. Name the evidence for each before choosing a
+repair; an assertion change cannot resolve a code defect or supply missing
+information.
+
+An accepted contract remains an obligation even if the current path lacks the
+information needed to meet it. A repair might require additional provider
+data. Moving the promised checkpoint or narrowing the guarantee needs an
+authorized contract decision; changing an assertion supplies no data.
+
 For each material attack, name the broken claim and construct a small legal
 history or concrete failure scene. State the competing expected observations,
 the evidence that could decide between them, and a possible repair condition.

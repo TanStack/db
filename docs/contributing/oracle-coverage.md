@@ -681,7 +681,19 @@ The following related oracles own distinct production paths or observation cuts:
 - The [Collection lifecycle publication oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts)
   owns exact public rows and change batches. The
   [replay oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-subscription-replay-oracle.property.test.ts)
-  applies that law to competing replay schedules and same-key writes.
+  applies that law to competing replay schedules and same-key writes. Both
+  models publish a replay's rows when its last owner is released and its
+  current attempt has not failed, and keep a failed one private; the
+  publication oracle's named histories cover a value written, rewritten or
+  deleted during the replay, a row no demand names, a failed replay, a
+  later request that updates a row still shown at an older value, and a row
+  retained by a failed replay that the source deletes before a later replay
+  retires. The replay oracle's named witnesses fail each synchronous failure
+  site (a replay load, an old lease's unload, a new request) and then release
+  the last owner; removing that site's sticky failure fails its witness.
+  Limit: the generated grammars reach a failed retirement followed by another
+  retired replay only rarely (the replay grammar releases one demand, on the
+  last attempt), so the named histories own that sequence.
   Bounded three-row histories now compare a subscription's selected keys with
   callback key/type batches across full, explicit, filtered, and empty snapshots,
   two later ordered selections, both initial-state modes, and callback reentry.
