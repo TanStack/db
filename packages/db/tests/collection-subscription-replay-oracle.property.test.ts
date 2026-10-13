@@ -607,8 +607,19 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
           pending: Set<number>
           currentAttemptIndex: number
           publicationCount: number
+          // The current attempt failed, even if its demand was released since.
+          failed: boolean
         }
       | undefined
+
+    // A new attempt supersedes the previous one, and its failure with it.
+    const startModelAttempt = (
+      state: NonNullable<typeof modelReplayState>,
+      attemptIndex: number,
+    ): void => {
+      state.currentAttemptIndex = attemptIndex
+      state.failed = false
+    }
 
     const writeReplayRows = (
       pending: PendingReplay,
@@ -654,6 +665,7 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
       } else {
         if (isCurrent) {
           lastReportedError = pending.error
+          replayState.failed = true
         } else {
           expect(pending.signal?.aborted).toBe(true)
         }
@@ -724,8 +736,9 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
         pending: new Set(),
         currentAttemptIndex: attemptIndex,
         publicationCount: expectedPublicationCount,
+        failed: false,
       }
-      modelReplayState.currentAttemptIndex = attemptIndex
+      startModelAttempt(modelReplayState, attemptIndex)
 
       for (const load of attempt.loads) {
         queuedLoads.push({ attemptIndex, load })
@@ -760,8 +773,29 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
           }
         }
         // A released request does not retract rows already applied by the
-        // source, nor change the retained baseline of an unfinished replay.
+        // source. Releasing the final demand retires the replay: one that has
+        // not failed publishes the rows the source applied, since nothing can
+        // complete it; a failed one keeps the retained baseline (law 9).
         if (modelReplayState.pending.size === 0 && activeDemandIds.size === 0) {
+          if (!modelReplayState.failed) {
+            const previousPublication = new Map(expectedPublished)
+            expectedPublished.clear()
+            for (const [id, row] of sourceRows) {
+              expectedPublished.set(id, { ...row })
+            }
+            const expectedBatch = publicationDiff(
+              previousPublication,
+              expectedPublished,
+            )
+            expect(publicationCount - modelReplayState.publicationCount).toBe(
+              Number(expectedBatch.length > 0),
+            )
+            if (expectedBatch.length > 0) {
+              expect(sortedChanges(publicationBatches.at(-1)!)).toEqual(
+                sortedChanges(expectedBatch),
+              )
+            }
+          }
           expectedPublicationCount = publicationCount
           modelReplayState = undefined
         }
@@ -2785,6 +2819,103 @@ describe(`CollectionSubscription replay oracle`, () => {
     })
   })
 
+  // Law 9 at retirement: a failure in the current attempt keeps the replay
+  // private even after the last owner is released. Each site writes a row
+  // before it fails, so publishing the private rows would show that row.
+  it.each([
+    `replay load throws`,
+    `old lease unload throws`,
+    `new request throws`,
+  ])(
+    `keeps a replay private at retirement after a synchronous failure: %s`,
+    async (site) => {
+      let begin!: () => void
+      let write!: (message: {
+        type: `insert` | `update`
+        value: ReplayRow
+      }) => void
+      let commit!: () => void
+      let truncate!: () => void
+      let loads = 0
+      let unloads = 0
+      const writeRow = (row: ReplayRow) => {
+        begin()
+        write({ type: `insert`, value: row })
+        commit()
+      }
+      const collection = createCollection<ReplayRow>({
+        id: `retired-replay-synchronous-failure-${site}`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (operations) => {
+            begin = operations.begin
+            write = operations.write
+            commit = operations.commit
+            truncate = operations.truncate
+            operations.markReady()
+            return {
+              loadSubset: () => {
+                loads++
+                if (loads === 1) {
+                  writeRow({ id: `one`, value: 1 })
+                  return true
+                }
+                if (site === `replay load throws` && loads === 2) {
+                  writeRow({ id: `one`, value: 5 })
+                  throw new Error(`replay load failed`)
+                }
+                if (site === `new request throws` && loads === 3) {
+                  writeRow({ id: `two`, value: 2 })
+                  throw new Error(`request failed`)
+                }
+                return createDeferred<void>().promise
+              },
+              unloadSubset: () => {
+                unloads++
+                if (site === `old lease unload throws` && unloads === 1) {
+                  writeRow({ id: `two`, value: 2 })
+                  throw new Error(`unload failed`)
+                }
+              },
+            }
+          },
+        },
+      })
+      const visible = new Map<string | number, ReplayRow>()
+      const subscription = collection.subscribeChanges((changes) => {
+        recordPublishedChanges(visible, changes)
+      })
+      const where = new Func(`eq`, [new PropRef([`id`]), new Value(`one`)])
+      try {
+        subscription.requestSnapshot({ where, optimizedOnly: false })
+        await flushPromises()
+        expect(sortedRows(visible)).toEqual([{ id: `one`, value: 1 }])
+
+        begin()
+        truncate()
+        commit()
+        await flushPromises()
+        if (site === `new request throws`) {
+          expect(() =>
+            subscription.requestSnapshot({
+              where: new Func(`eq`, [new PropRef([`id`]), new Value(`two`)]),
+              optimizedOnly: false,
+            }),
+          ).toThrow(`request failed`)
+        }
+        subscription.releaseSnapshot(where)
+        await flushPromises()
+
+        expect(subscription.pendingTruncateReplacement).toBeUndefined()
+        expect(sortedRows(visible)).toEqual([{ id: `one`, value: 1 }])
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
   it(`replaces a retained snapshot with a later empty replay`, async () => {
     await runReplayScenario({
       initialRows: [{ id: `one`, value: 1 }],
@@ -4612,11 +4743,10 @@ describe(`CollectionSubscription replay oracle`, () => {
         reacquireOnReady = reacquireTiming === `during-ready`
         reacquireInUnload = reacquireTiming === `during-unload`
         subscription.releaseSnapshot(where)
+        // Releasing the final demand retires the replay, which publishes the
+        // row it holds, so the replacement resolves.
         if (reacquireTiming === `after-release`) {
-          await expect(settlement).resolves.toMatchObject({
-            status: `rejected`,
-            error: { name: `AbortError` },
-          })
+          await expect(settlement).resolves.toEqual({ status: `resolved` })
           subscription.requestSnapshot({ where })
         } else if (reacquireTiming === `during-unload`) {
           let settled = false
@@ -4640,10 +4770,7 @@ describe(`CollectionSubscription replay oracle`, () => {
           await expect(settlement).resolves.toEqual({ status: `resolved` })
         } else {
           expect(subscription.pendingTruncateReplacement).toBeUndefined()
-          await expect(settlement).resolves.toMatchObject({
-            status: `rejected`,
-            error: { name: `AbortError` },
-          })
+          await expect(settlement).resolves.toEqual({ status: `resolved` })
         }
 
         expect(subscription.pendingTruncateReplacement).toBeUndefined()
@@ -4651,7 +4778,11 @@ describe(`CollectionSubscription replay oracle`, () => {
         expect(sortedChanges(batches[0]!)).toEqual([
           { type: `insert`, key: `one`, value: { id: `one`, value: 1 } },
         ])
-        expect(sortedChanges(batches.at(-1)!)).toEqual([
+        // Retiring the replay publishes its applied row at the release; the
+        // reacquired demand then has nothing new to deliver.
+        expect(
+          sortedChanges(batches.filter((batch) => batch.length > 0).at(-1)!),
+        ).toEqual([
           {
             type: `update`,
             key: `one`,

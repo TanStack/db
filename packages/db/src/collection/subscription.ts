@@ -129,6 +129,8 @@ type TruncateReplayState = {
   pendingSetups: number
   currentAttempt: TruncateReplayAttempt
   failures: Map<SubsetDemand, Error>
+  /** The current attempt failed, even if its failed demand was released since. */
+  failed: boolean
   completion: Deferred<void>
 }
 
@@ -408,6 +410,7 @@ export class CollectionSubscription
       // before a request returns its promise and joins the pending set.
       replayState.pendingSetups++
       replayState.failures.clear()
+      replayState.failed = false
       replayState.currentAttempt = { pendingCount: 0, setupComplete: false }
     } else {
       // Every overlapping attempt shares one publication baseline and buffer.
@@ -471,7 +474,10 @@ export class CollectionSubscription
       this.isSyncRunGenerationCurrent(replayState.syncRunGeneration) &&
       this.isDemandActive(demand)
     const fail = (error: unknown) => {
-      if (isCurrent()) replayState.failures.set(demand, normalizeError(error))
+      if (isCurrent()) {
+        replayState.failures.set(demand, normalizeError(error))
+        replayState.failed = true
+      }
     }
     if (demand.initialResult) {
       void replayState.completion.promise.then(
@@ -587,6 +593,7 @@ export class CollectionSubscription
         ) {
           const normalized = this.normalizeLoadSubsetPromiseError(result, error)
           replayState.failures.set(demand, normalized)
+          replayState.failed = true
         }
         this.settleTruncateReplay(replayState, pending)
       },
@@ -649,9 +656,19 @@ export class CollectionSubscription
     if (this.truncateReplayState !== replayState) return
     this.truncateReplayState = undefined
     this.truncateReplacementPending = false
+    try {
+      this.publishReplayRows(replayState.privateRows)
+    } finally {
+      replayState.completion.resolve()
+      this.options.truncateReplayPublication?.succeed()
+    }
+  }
 
+  /** Replace the public snapshot with a replay's private rows in one batch. */
+  private publishReplayRows(
+    privateRows: Map<string | number, object> | undefined,
+  ): void {
     // Retained rows the source never re-delivered leave the replacement.
-    const { privateRows } = replayState
     for (const key of this.stalePublishedRows.keys()) privateRows?.delete(key)
     this.stalePublishedRows.clear()
     try {
@@ -666,8 +683,6 @@ export class CollectionSubscription
     } finally {
       // Restore tracking even when a subscriber rejects the replacement.
       this.restorePublishedSnapshotTracking()
-      replayState.completion.resolve()
-      this.options.truncateReplayPublication?.succeed()
     }
   }
 
@@ -778,6 +793,7 @@ export class CollectionSubscription
       pendingSetups: 1,
       currentAttempt: { pendingCount: 0, setupComplete: false },
       failures: new Map(),
+      failed: false,
       completion: createReplayCompletion(),
     }
   }
@@ -1074,6 +1090,7 @@ export class CollectionSubscription
           replayState.currentAttempt === replayAttempt
         ) {
           replayState.failures.set(demand, normalizeError(error))
+          replayState.failed = true
         }
         this.subsetDemands.splice(demandIndex, 1)
       }
@@ -1358,9 +1375,19 @@ export class CollectionSubscription
     runAllCallbacks(releaseCallbacks)
   }
 
-  /** A replay with no remaining logical demand cannot establish more rows. */
+  /**
+   * A replay with no remaining logical demand cannot establish more rows. One
+   * that has not failed publishes the rows it holds, so the subscriber does
+   * not keep values the source has replaced or deleted. A failed replay keeps
+   * the last public snapshot until an authoritative replay succeeds.
+   */
   private retireEmptyReplay(): void {
-    if (this.subsetDemands.length !== 0 || !this.truncateReplayState) {
+    const replayState = this.truncateReplayState
+    if (this.subsetDemands.length !== 0 || !replayState) {
+      return
+    }
+    if (replayState.privateRows && !replayState.failed) {
+      this.flushTruncateReplay(replayState)
       return
     }
     this.discardTruncateReplay()
