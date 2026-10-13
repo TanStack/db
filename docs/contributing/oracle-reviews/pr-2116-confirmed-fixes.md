@@ -38,9 +38,10 @@ The captured-`inArray` list rebuild and per-row custom index callback ordering
 were proposed extensions, then withdrawn by the maintainer. This PR does not
 promise behavior after callers modify standard data objects in place, unsigned
 byte ordering, or special handling for malformed Temporal lookalikes. The
-[deferred record](pr-2116-deferred-findings.md) keeps valid Temporal admission,
-mixed-kind query order, the confirmed pre-existing indexed Temporal exception
-gap, and earlier-branch observations separate from the confirmed fixes above.
+[earlier-findings record](pr-2116-deferred-findings.md) keeps Temporal admission
+observations, mixed-kind query order, the confirmed pre-existing indexed
+Temporal exception gap, and earlier-branch observations separate from the
+confirmed fixes above.
 
 The repeatable workflow is: freeze source assertions in a loss ledger; name
 the receiving law and its limits; obtain a baseline failure before production
