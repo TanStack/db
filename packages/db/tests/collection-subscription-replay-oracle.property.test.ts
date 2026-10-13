@@ -7,11 +7,11 @@ import { ReverseIndex } from '../src/indexes/reverse-index.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
 import { DeduplicatedLoadSubset } from '../src/query/subset-dedupe.js'
 import { createTransaction } from '../src/transactions.js'
+import { valueOrderBy } from './collection-subscription-ordered-fixture.js'
 import { oracleRandomParameters, readOracleRunConfig } from './oracle-config.js'
 import { flushPromises } from './utils.js'
 import type { Collection } from '../src/collection/index.js'
 import type { CollectionSubscription } from '../src/collection/subscription.js'
-import type { OrderBy } from '../src/query/ir.js'
 import type {
   ChangeMessageOrDeleteKeyMessage,
   LoadSubsetOptions,
@@ -27,6 +27,9 @@ import type { Scheduler } from 'fast-check'
  * snapshot must change only when the newest complete replay earns authority.
  * Older, failed, aborted, or released work may settle and release resources,
  * but it must not leak rows or overwrite a newer snapshot.
+ * A direct snapshot can select source rows while replay keeps publication
+ * private. A later ordered local snapshot must continue after those selected
+ * rows, including during subscriber callback reentry.
  *
  * Small scenario records describe source rows, logical demands, replay
  * attempts, settlement order, release points, and later source actions. Plain
@@ -1951,7 +1954,7 @@ describe(`CollectionSubscription replay oracle`, () => {
   ])
 
   it.each(orderedReplayCases)(
-    `restores ordered offset and cursor state after replay: $name`,
+    `requests a safe ordered provider prefix after replay: $name`,
     async ({ direction, delivery, identity }) => {
       type OrderedReplayRow = {
         id: `one` | `two` | `three` | `four`
@@ -2033,12 +2036,7 @@ describe(`CollectionSubscription replay oracle`, () => {
       })
       const orderedIndex =
         direction === `asc` ? index : new ReverseIndex(index, true)
-      const orderBy: OrderBy = [
-        {
-          expression: new PropRef([`value`]),
-          compareOptions: { direction, nulls: `first` },
-        },
-      ]
+      const orderBy = valueOrderBy(direction)
       const batches: Array<Array<OrderedReplayRow[`id`]>> = []
       const subscription = collection.subscribeChanges((changes) => {
         batches.push(changes.map(({ value }) => value.id))
@@ -2064,10 +2062,9 @@ describe(`CollectionSubscription replay oracle`, () => {
           limit: 1,
           minValues: [direction === `asc` ? 1 : 2],
         })
-        expect(loadOptions[1]).toMatchObject({
-          offset: 1,
-          cursor: { lastKey: initialIds[1] },
-        })
+        expect(loadOptions[1]).toMatchObject({ offset: 0 })
+        expect(loadOptions[1]?.limit).toBeUndefined()
+        expect(loadOptions[1]?.cursor?.lastKey).toBeUndefined()
 
         begin()
         truncate()
@@ -2099,12 +2096,8 @@ describe(`CollectionSubscription replay oracle`, () => {
           limit: 1,
           minValues: [direction === `asc` ? 2 : 1],
         })
-        expect(loadOptions[4]).toMatchObject({
-          offset: 2,
-          cursor: {
-            lastKey: succeeds ? expectedIds[1] : initialIds[1],
-          },
-        })
+        expect(loadOptions[4]).toMatchObject({ offset: 0 })
+        expect(loadOptions[4]?.cursor?.lastKey).toBeUndefined()
         if (succeeds) expect(batches.at(-1)).toEqual([])
         else expect(batches).toHaveLength(batchCount)
       } finally {
@@ -2113,6 +2106,411 @@ describe(`CollectionSubscription replay oracle`, () => {
       }
     },
   )
+
+  // A successful replacement restores the public row, but that row need not
+  // be a provider prefix. The plain remote array is the reference order. A
+  // provider may honor a last-key cursor before an offset; naming the sparse
+  // public row as that cursor would hide every earlier row. The held replay
+  // separates replacement settlement from the next ordered acquisition.
+  it(`loads rows before a sparse public key after successful replay`, async () => {
+    type Row = { id: string; value: number }
+    const remote: Array<Row> = [
+      { id: `one`, value: 1 },
+      { id: `two`, value: 2 },
+      { id: `three`, value: 3 },
+    ]
+    let begin!: () => void
+    let write!: (message: { type: `insert`; value: Row }) => void
+    let commit!: () => void
+    let truncate!: () => void
+    let holdReplay = false
+    let heldRequests = 0
+    const held = createDeferred<void>()
+    const orderedLoads: Array<LoadSubsetOptions> = []
+    const collection = createCollection<Row>({
+      id: `ordered-replay-sparse-provider-prefix`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          commit = params.commit
+          truncate = params.truncate
+          begin()
+          write({ type: `insert`, value: remote[2]! })
+          commit()
+          params.markReady()
+          return {
+            loadSubset: (options) => {
+              if (holdReplay && options.orderBy === undefined) {
+                holdReplay = false
+                heldRequests++
+                return held.promise
+              }
+              if (options.orderBy === undefined) return true
+
+              orderedLoads.push(options)
+              const cursorKey = options.cursor?.lastKey
+              const start =
+                cursorKey === undefined
+                  ? (options.offset ?? 0)
+                  : remote.findIndex(({ id }) => id === cursorKey) + 1
+              const page = remote.slice(
+                start,
+                options.limit === undefined ? undefined : start + options.limit,
+              )
+              const missing = page.filter(({ id }) => !collection.has(id))
+              if (missing.length > 0) {
+                begin()
+                for (const value of missing) write({ type: `insert`, value })
+                commit()
+              }
+              return true
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const index = collection.createIndex((row) => row.value, {
+      indexType: BTreeIndex,
+    })
+    const orderBy = valueOrderBy()
+    const whereThree = new Func(`eq`, [new PropRef([`id`]), new Value(`three`)])
+    const publicRows = new Map<string, Row>()
+    const invalidChanges: Array<string> = []
+    const subscription = collection.subscribeChanges((changes) => {
+      for (const change of changes) {
+        const key = String(change.key)
+        if (change.type === `delete`) {
+          if (!publicRows.delete(key))
+            invalidChanges.push(`delete absent:${key}`)
+        } else {
+          if (change.type === `insert` && publicRows.has(key))
+            invalidChanges.push(`duplicate insert:${key}`)
+          publicRows.set(key, change.value)
+        }
+      }
+    })
+    subscription.setOrderByIndex(index)
+    try {
+      subscription.requestSnapshot({ where: whereThree })
+      expect([...publicRows.keys()]).toEqual([`three`])
+
+      holdReplay = true
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+      expect(heldRequests).toBe(1)
+      begin()
+      write({ type: `insert`, value: remote[2]! })
+      commit()
+      expect([...publicRows.keys()]).toEqual([`three`])
+      held.resolve()
+      await flushPromises()
+
+      for (const expectedRow of remote) {
+        subscription.requestLimitedSnapshot({
+          orderBy,
+          limit: 1,
+          minValues: [0],
+        })
+        expect(publicRows.has(expectedRow.id)).toBe(true)
+      }
+      await flushPromises()
+      expect(orderedLoads).toHaveLength(remote.length)
+      expect(orderedLoads[0]).toMatchObject({ offset: 0 })
+      expect(orderedLoads[0]?.cursor?.lastKey).toBeUndefined()
+      expect(invalidChanges).toEqual([])
+      expect([...publicRows.keys()].sort()).toEqual(
+        remote.map(({ id }) => id).sort(),
+      )
+    } finally {
+      held.resolve()
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  // A direct subscriber buffers ordered rows privately while a replay is
+  // pending. Each row still counts once: repeated ordered snapshots during the
+  // replay continue after the rows already chosen. Those private selections
+  // widen the provider prefix without claiming a provider cursor boundary.
+  it(`continues after buffered rows when ordered snapshots repeat during a replay`, async () => {
+    type Row = { id: string; value: number }
+    let begin!: () => void
+    let write!: (message: { type: `insert`; value: Row }) => void
+    let commit!: () => void
+    let truncate!: () => void
+    const loadOptions: Array<LoadSubsetOptions> = []
+    const heldReplay = createDeferred<void>()
+    let holdReplayRequest = false
+    let heldRequestCount = 0
+    const rows: Array<Row> = [
+      { id: `one`, value: 1 },
+      { id: `two`, value: 2 },
+      { id: `three`, value: 3 },
+    ]
+    const collection = createCollection<Row>({
+      id: `ordered-replay-repeated-snapshots`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          commit = params.commit
+          truncate = params.truncate
+          begin()
+          for (const value of rows) write({ type: `insert`, value })
+          commit()
+          params.markReady()
+          return {
+            // Hold the replay of the first ordered demand. The phase and
+            // request data identify it independently of other load calls.
+            loadSubset: (options) => {
+              loadOptions.push(options)
+              if (
+                holdReplayRequest &&
+                options.orderBy !== undefined &&
+                options.offset === 0 &&
+                options.cursor === undefined
+              ) {
+                holdReplayRequest = false
+                heldRequestCount++
+                return heldReplay.promise
+              }
+              return true
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const index = collection.createIndex((row) => row.value, {
+      indexType: BTreeIndex,
+    })
+    const orderBy = valueOrderBy()
+    // The public subscriber model starts with one visible row. Replay adds
+    // the other two as one replacement batch, without re-inserting that row.
+    const publicRows = new Map<string, Row>()
+    const batches: Array<Array<string>> = []
+    const invalidChanges: Array<string> = []
+    const subscription = collection.subscribeChanges((changes) => {
+      const batch: Array<string> = []
+      for (const change of changes) {
+        batch.push(`${change.type}:${change.key}`)
+        if (change.type === `insert`) {
+          if (publicRows.has(String(change.key)))
+            invalidChanges.push(`duplicate insert:${change.key}`)
+          publicRows.set(String(change.key), change.value)
+        } else if (change.type === `delete`) {
+          publicRows.delete(String(change.key))
+        } else {
+          publicRows.set(String(change.key), change.value)
+        }
+      }
+      if (batch.length > 0) batches.push(batch)
+    })
+    subscription.setOrderByIndex(index)
+    try {
+      subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
+      expect(batches).toEqual([[`insert:one`]])
+      // An unrelated empty demand may be added before replay. It must not
+      // determine which acquisition the fixture holds.
+      subscription.requestSnapshot({
+        where: new Func(`eq`, [new PropRef([`id`]), new Value(`missing`)]),
+      })
+      holdReplayRequest = true
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+      expect(heldRequestCount).toBe(1)
+      begin()
+      for (const value of rows) write({ type: `insert`, value })
+      commit()
+      await flushPromises()
+      expect(batches).toEqual([[`insert:one`]])
+
+      const before = loadOptions.length
+      subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
+      subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
+      subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
+      expect(loadOptions[before + 2]).toMatchObject({ offset: 0 })
+      expect(loadOptions[before + 2]?.limit).toBeGreaterThanOrEqual(4)
+      expect(loadOptions[before + 2]?.cursor?.lastKey).toBeUndefined()
+      expect(batches).toEqual([[`insert:one`]])
+      heldReplay.resolve()
+      await flushPromises()
+      expect(batches.map((batch) => [...batch].sort())).toEqual([
+        [`insert:one`],
+        [`insert:three`, `insert:two`],
+      ])
+      expect(invalidChanges).toEqual([])
+      expect([...publicRows.keys()].sort()).toEqual(
+        rows.map(({ id }) => id).sort(),
+      )
+    } finally {
+      heldReplay.resolve()
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  // A snapshot chosen while a direct truncate replay is pending enters the
+  // private replacement, not the callback mirror. Its key still excludes that
+  // row from the next ordered local selection. An earlier subscriber's callback
+  // is a legal reentry cut: it can read the source replacement before this
+  // subscriber receives the same source transaction.
+  it(`continues after a privately selected filtered snapshot during callback reentry`, async () => {
+    type Row = { id: string; value: number }
+    const rows: Array<Row> = [
+      { id: `one`, value: 1 },
+      { id: `two`, value: 2 },
+      { id: `three`, value: 3 },
+    ]
+    // The model separates a callback-visible row from rows selected locally
+    // during replay. Neither all source rows nor the callback mirror determines
+    // the next choice; only the filtered snapshot selected `one` here.
+    const privatelySelected = new Set(
+      rows.filter(({ id }) => id === `one`).map(({ id }) => id),
+    )
+    const nextOrdered = rows
+      .filter(({ value }) => value >= 1)
+      .sort((left, right) => left.value - right.value)
+      .find(({ id }) => !privatelySelected.has(id))
+    const initialPublicRows = new Map<string, Row>([[`one`, rows[0]!]])
+    const expectedReplacement = rows
+      .filter(({ id }) => !initialPublicRows.has(id))
+      .map(({ id }) => `insert:${id}`)
+    const publicRows = new Map<string, Row>()
+
+    let begin!: () => void
+    let write!: (message: { type: `insert`; value: Row }) => void
+    let commit!: () => void
+    let truncate!: () => void
+    const heldReplay = createDeferred<void>()
+    const loadOptions: Array<LoadSubsetOptions> = []
+    let holdReplayRequest = false
+    let heldRequestCount = 0
+    const collection = createCollection<Row>({
+      id: `ordered-replay-mixed-snapshot-reentry`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          commit = params.commit
+          truncate = params.truncate
+          begin()
+          for (const value of rows) write({ type: `insert`, value })
+          commit()
+          params.markReady()
+          return {
+            loadSubset: (options) => {
+              loadOptions.push(options)
+              if (
+                holdReplayRequest &&
+                options.orderBy !== undefined &&
+                options.offset === 0 &&
+                options.cursor === undefined
+              ) {
+                holdReplayRequest = false
+                heldRequestCount++
+                return heldReplay.promise
+              }
+              return true
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const index = collection.createIndex((row) => row.value, {
+      indexType: BTreeIndex,
+    })
+    const orderBy = valueOrderBy()
+    const whereOne = new Func(`eq`, [new PropRef([`id`]), new Value(`one`)])
+    const batches: Array<Array<string>> = []
+    const invalidChanges: Array<string> = []
+    let armed = false
+    let reentered = false
+    const trigger = collection.subscribeChanges(
+      (changes) => {
+        if (!armed || !changes.some(({ type }) => type === `insert`)) return
+        armed = false
+        reentered = true
+        target.requestSnapshot({ where: whereOne })
+        target.requestLimitedSnapshot({ orderBy, limit: 1 })
+      },
+      { includeInitialState: false },
+    )
+    const target = collection.subscribeChanges((changes) => {
+      if (changes.length === 0) return
+      const batch: Array<string> = []
+      for (const change of changes) {
+        batch.push(`${change.type}:${change.key}`)
+        if (change.type === `insert`) {
+          if (publicRows.has(String(change.key)))
+            invalidChanges.push(`duplicate insert:${change.key}`)
+          publicRows.set(String(change.key), change.value)
+        } else if (change.type === `delete`) {
+          publicRows.delete(String(change.key))
+        } else {
+          publicRows.set(String(change.key), change.value)
+        }
+      }
+      batches.push(batch)
+    })
+    target.setOrderByIndex(index)
+    try {
+      target.requestLimitedSnapshot({ orderBy, limit: 1 })
+      expect(batches).toEqual([[`insert:one`]])
+      batches.length = 0
+
+      target.requestSnapshot({
+        where: new Func(`eq`, [new PropRef([`id`]), new Value(`missing`)]),
+      })
+      holdReplayRequest = true
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+      expect(heldRequestCount).toBe(1)
+
+      armed = true
+      begin()
+      for (const value of rows) write({ type: `insert`, value })
+      commit()
+      await flushPromises()
+
+      expect(reentered).toBe(true)
+      expect(batches).toEqual([])
+      expect(loadOptions.at(-1)).toMatchObject({ offset: 0 })
+      expect(loadOptions.at(-1)?.limit).toBeGreaterThanOrEqual(
+        1 + privatelySelected.size + Number(nextOrdered !== undefined),
+      )
+      expect(loadOptions.at(-1)?.cursor?.lastKey).toBeUndefined()
+      heldReplay.resolve()
+      await flushPromises()
+      expect(batches.map((batch) => [...batch].sort())).toEqual([
+        expectedReplacement.sort(),
+      ])
+      expect(invalidChanges).toEqual([])
+      expect([...publicRows.keys()].sort()).toEqual(
+        rows.map(({ id }) => id).sort(),
+      )
+    } finally {
+      heldReplay.resolve()
+      trigger.unsubscribe()
+      target.unsubscribe()
+      await collection.cleanup()
+    }
+  })
 
   it(`keeps private row tracking through consecutive failed replays`, async () => {
     await runReplayScenario({

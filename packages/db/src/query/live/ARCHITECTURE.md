@@ -529,6 +529,15 @@ type BucketValue<Value> = readonly [bucketKey: BucketKey, value: Value]
 type CellValue<Value> = readonly [cellId: MaterializationCellId, value: Value]
 ```
 
+Physical layout: a value that D2 keeps in join or reduce state under a key
+it shares with other values leads with its own string, number or bigint
+key, as the `[publicKey, row, order]` child of a bucket row and the routed
+parent of an inline include do. The D2 index tells apart values with
+different leading keys without hashing them, so a value is hashed only
+against a value with the same leading key, such as its own retraction. A
+value of another shape is still correct, but the index hashes it whenever
+it shares a key. This is a cost rule, not part of the relation semantics.
+
 A route move is an ordinary weighted batch:
 
 ```text
@@ -912,7 +921,16 @@ identity; it must not invent source extent from a requested limit. A local row
 seen before the first ordered source request proves neither a continuation
 boundary nor a remote offset. This matters when a zero-sized window admits live
 source changes before it opens: the first nonzero window must still request its
-prefix from the start. Starting that request proves nothing until it succeeds;
+prefix from the start. An optimistic delete or update can hide one provider row
+per changed key from the local ordered window. A finite source-prefix request
+must leave room for those rows, including during ordered repair. An optimistic
+insert or rank move may fill a visible window, but it does not establish a
+provider offset or cursor boundary. The loader therefore counts source-derived
+rows for continuation even when optimistic rows make the visible window full.
+The extra provider limit used for optimistic headroom does not enlarge the
+local count from which a settled boundary is inferred; a held mutation may
+become authoritative before that request settles. Starting that
+request proves nothing until it succeeds;
 if it rejects, an explicit retry must also start at offset zero without a
 cursor. The same holds after any later ordered request fails or is canceled:
 the adapter may already have written only part of its response, so those rows

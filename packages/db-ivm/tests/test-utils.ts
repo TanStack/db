@@ -85,8 +85,11 @@ export function mapToSortedArray<T>(
   const compareFn =
     compare ??
     ((a: T, b: T) => {
-      // Sort by JSON string representation for consistent ordering
-      return JSON.stringify(a).localeCompare(JSON.stringify(b))
+      // Sort by JSON text in code-unit order, a total order; collation can
+      // tie distinct strings.
+      const left = JSON.stringify(a)
+      const right = JSON.stringify(b)
+      return left < right ? -1 : left > right ? 1 : 0
     })
   return Array.from(map.values()).sort(compareFn)
 }

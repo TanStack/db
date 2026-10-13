@@ -198,9 +198,10 @@ export function trailBaseCollectionOptions<
         }
       }
 
-      // NOTE: We cache cursors from prior fetches. TanStack/db expects that
-      // cursors can be derived from a key, which is not true for TB, since
-      // cursors are encrypted. This is leaky and therefore not ideal.
+      // TrailBase cursors are opaque. Cache a cursor by its last fetched key
+      // for callers that supply an established lastKey on a later request.
+      // CollectionSubscription does not derive lastKey from local snapshots,
+      // so its ordered requests use the offset fallback.
       const cursors = new Map<string | number, string>()
 
       // Load (more) data.
@@ -263,7 +264,7 @@ export function trailBaseCollectionOptions<
           for (let i = 0; i < Math.min(length, remaining); ++i) {
             write({
               type: `insert`,
-              value: parse(response.records[i]!),
+              value: parse(response.records[i]),
             })
           }
 
@@ -278,9 +279,15 @@ export function trailBaseCollectionOptions<
 
           // Drained or read enough.
           if (length < limit || remaining <= 0) {
-            if (response.cursor) {
+            // Core subscriptions cannot send lastKey, so retaining their
+            // cursors only grows this cache. Direct callers can use the key
+            // from a completed page as their next opaque boundary.
+            if (
+              response.cursor &&
+              (opts.subscription === undefined || lastKey !== undefined)
+            ) {
               cursors.set(
-                getKey(parse(response.records.at(-1)!)),
+                getKey(parse(response.records.at(-1))),
                 response.cursor,
               )
             }
