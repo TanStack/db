@@ -803,6 +803,7 @@ export function queryCollectionOptions(
 
   // Validate required parameters
 
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (!queryKey) {
     throw new QueryKeyRequiredError()
   }
@@ -812,6 +813,7 @@ export function queryCollectionOptions(
     throw new QueryFnRequiredError()
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (!queryClient) {
     throw new QueryClientRequiredError()
   }
