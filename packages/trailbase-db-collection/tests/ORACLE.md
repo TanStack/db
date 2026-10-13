@@ -18,9 +18,14 @@ The same interpreter runs a fixed corpus and generated histories.
   Since #2115 a live query is ready when its subset load settles, not at the
   source's `markReady()`, so the load itself must carry this ordering.
   `initial-readiness-exposure.test.ts` holds two witnesses under a real live
-  query: readiness before the subscription, and a change committed after the
-  fetch began but before the subscription. Both fail when the load does not
-  wait.
+  query: readiness before the subscription, and a change committed before the
+  subscription starts. Both fail when the load does not wait. The wait still
+  honors its caller: an abort rejects a waiting load, cleanup ends it quietly,
+  and a listener that cannot start rejects it instead of fetching. Each of
+  those three has its own witness. Starting the listener before waiting loads
+  resume relies on `start` awaiting the subscription first; a mutant that adds
+  an earlier await survives, because the established stream buffers events
+  until the listener reads them.
   Required startup failures reject. Later stream failures retain rows and report
   the error, matching the adapter's current policy.
 - Graceful closure drains buffered events before releasing the reader.

@@ -188,9 +188,15 @@ export function trailBaseCollectionOptions<
       const { begin, write, commit, markReady, markError, collection } = params
       let cancelled = false
       let periodicCleanupTask: ReturnType<typeof setInterval> | undefined
+      // Ends loads that wait for a subscription when the session cleans up.
+      let endWaits!: () => void
+      const stopped = new Promise<void>((resolve) => {
+        endWaits = resolve
+      })
 
       const cleanup = () => {
         cancelled = true
+        endWaits()
         cancelEventReader()
         if (periodicCleanupTask !== undefined) {
           clearInterval(periodicCleanupTask)
@@ -211,6 +217,21 @@ export function trailBaseCollectionOptions<
         resolve(config.recordApi.subscribe(`*`)),
       )
       let listening = false
+      // Set when the listener could not start after the subscription resolved.
+      let startFailure: { error: unknown } | undefined
+
+      // Wait for the subscription, but let cleanup or the caller's abort end
+      // the wait even when the subscription never resolves.
+      function waitForSubscription(signal: AbortSignal | undefined) {
+        const waits: Array<Promise<unknown>> = [subscribing, stopped]
+        if (signal)
+          waits.push(
+            new Promise((resolve) =>
+              signal.addEventListener(`abort`, resolve, { once: true }),
+            ),
+          )
+        return Promise.race(waits)
+      }
 
       // Load (more) data.
       // A caller that aborts sees `AbortError`. Pages a commit accepted still
@@ -219,9 +240,10 @@ export function trailBaseCollectionOptions<
         if (cancelled) return
         if (opts.signal?.aborted) throw new LoadSubsetOperationAbortedError()
         if (!listening) {
-          await subscribing
+          await waitForSubscription(opts.signal)
           if (cancelled) return
           if (opts.signal?.aborted) throw new LoadSubsetOperationAbortedError()
+          if (startFailure) throw startFailure.error
         }
 
         const lastKey = opts.cursor?.lastKey
@@ -359,6 +381,8 @@ export function trailBaseCollectionOptions<
       async function start() {
         let reader: ReadableStreamDefaultReader<Event> | undefined
         try {
+          // No await may come before this one. Waiting loads resume after
+          // start's continuation, so the listener runs before they fetch.
           const eventStream = await subscribing
           if (cancelled) {
             await eventStream.cancel()
@@ -402,6 +426,7 @@ export function trailBaseCollectionOptions<
         } catch (error) {
           // An abandoned startup must not cancel a replacement session's reader.
           if (cancelled) return
+          startFailure = { error }
           cancelEventReader()
           if (collection.status === `loading`) {
             markError(error)

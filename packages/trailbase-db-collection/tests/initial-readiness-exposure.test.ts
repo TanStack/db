@@ -28,6 +28,21 @@ function rowsAtFirstReady(query: Collection<any, any, any>) {
   return seen
 }
 
+// Record a load's outcome so a load that never settles fails an assertion at
+// an explicit checkpoint instead of timing out.
+function settlement(result: unknown) {
+  const record = { state: `pending` }
+  void Promise.resolve(result).then(
+    () => {
+      record.state = `fulfilled`
+    },
+    (error: unknown) => {
+      record.state = `rejected:${(error as Error).name}`
+    },
+  )
+  return record
+}
+
 function createSource(recordApi: MockRecordApi<Data>, onDemand = true) {
   const source = createCollection(
     trailBaseCollectionOptions({
@@ -143,7 +158,9 @@ describe(`TrailBase initial readiness follows applied subset settlement`, () => 
 
   // A small service model: `list` answers from the current rows, and a change
   // reaches only a subscription that was established when it was committed.
-  it(`an on-demand query keeps a change committed after its fetch began`, async () => {
+  // Without the wait, the fetch would start first and this change would fall
+  // between the fetch and the listener.
+  it(`an on-demand query keeps a change committed before its subscription starts`, async () => {
     const recordApi = new MockRecordApi<Data>()
     const server = new Map(rows.records.map((row) => [row.id, row]))
     const listeners: Array<WritableStreamDefaultWriter<Event>> = []
@@ -171,5 +188,51 @@ describe(`TrailBase initial readiness follows applied subset settlement`, () => 
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     expect(query.toArray.map((row) => row.id)).toEqual([2])
+  })
+  // A load waiting for a subscription that never starts still honors its
+  // caller: an abort rejects it, and cleanup ends it quietly.
+  it.each([`aborted`, `cleaned up`] as const)(
+    `a load waiting for a stalled subscription settles when %s`,
+    async (outcome) => {
+      const recordApi = new MockRecordApi<Data>()
+      recordApi.list.mockResolvedValue(rows)
+      recordApi.subscribe.mockReturnValue(new Promise(() => {}))
+      const source = createSource(recordApi)
+      const controller = new AbortController()
+      const load = settlement(
+        source._sync.loadSubset({ signal: controller.signal } as never),
+      )
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(load.state).toBe(`pending`)
+
+      if (outcome === `aborted`) controller.abort()
+      else await source.cleanup()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(load.state).toBe(
+        outcome === `aborted` ? `rejected:AbortError` : `fulfilled`,
+      )
+      expect(recordApi.list).not.toHaveBeenCalled()
+    },
+  )
+
+  // If the listener cannot start after the subscription resolves, the source
+  // has failed. A waiting load rejects with that failure instead of fetching
+  // rows that no listener would keep current.
+  it(`a waiting load rejects when the listener cannot start`, async () => {
+    const recordApi = new MockRecordApi<Data>()
+    recordApi.list.mockResolvedValue(rows)
+    const subscribe = createDeferred<ReadableStream<Event>>()
+    recordApi.subscribe.mockReturnValue(subscribe.promise)
+    const source = createSource(recordApi)
+    const load = settlement(source._sync.loadSubset({}))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const locked = new TransformStream<Event>().readable
+    locked.getReader()
+    subscribe.resolve(locked)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(source.status).toBe(`error`)
+    expect(load.state).toMatch(/^rejected/)
+    expect(recordApi.list).not.toHaveBeenCalled()
   })
 })
