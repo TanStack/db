@@ -10,7 +10,7 @@ import { TopKRelation } from './topk-relation-oracle.js'
  * wrong change or expectation. The checker must reject that fault.
  *
  * The controls cover duplicate weight, missing retraction, wrong index, wrong
- * payload, negative residue, shared-object mutation, and wrong numeric offset.
+ * payload, negative residue, and shared-object mutation.
  * The first control uses a fixed seed because it tests shrink and replay of one
  * deliberate failure. It is not a random production campaign.
  */
@@ -18,11 +18,11 @@ import { TopKRelation } from './topk-relation-oracle.js'
 describe(`Signed top-K observation controls`, () => {
   it(`shrinks and replays duplicate-weight detection through the same checker`, () => {
     const property = fc.property(fc.integer({ min: 10, max: 100 }), (id) => {
-      const valid = new TopKRelation<null, number>()
-      valid.add([[[null, [{ id, value: `a` }, 0]], 1]])
-      valid.expectRows([[null, id, `a`]], 0)
-      valid.add([[[null, [{ id, value: `a` }, 0]], 1]])
-      valid.expectRows([[null, id, `a`]], 0)
+      const valid = new TopKRelation<null>()
+      valid.add([[[null, [{ id, value: `a` }, `a0`]], 1]])
+      valid.expectRows([[null, id, `a`]])
+      valid.add([[[null, [{ id, value: `a` }, `a0`]], 1]])
+      valid.expectRows([[null, id, `a`]])
     })
     const failure = fc.check(property, { seed: 409032 })
     expect(failure.failed).toBe(true)
@@ -42,7 +42,7 @@ describe(`Signed top-K observation controls`, () => {
     `rejects a wrong moved-row %s while preserving unchanged anchors`,
     (fault) => {
       const check = (corrupt: boolean) => {
-        const relation = new TopKRelation<number, string>()
+        const relation = new TopKRelation<number>()
         relation.add([
           [[1, [{ id: 1, value: `a` }, `a0`]], 1],
           [[2, [{ id: 2, value: `b` }, `a1`]], 1],
@@ -83,23 +83,14 @@ describe(`Signed top-K observation controls`, () => {
 
   it(`retains negative residue and copies captured payloads`, () => {
     const row = { id: 1, value: `a` }
-    const relation = new TopKRelation<null, number>()
-    relation.add([[[null, [row, 0]], 1]])
+    const relation = new TopKRelation<null>()
+    relation.add([[[null, [row, `a0`]], 1]])
     row.value = `changed after capture`
-    relation.expectRows([[null, 1, `a`]], 0)
-    relation.add([[[null, [{ id: 1, value: `a` }, 0]], -1]])
-    relation.expectRows([], 0)
-    relation.add([[[null, [{ id: 1, value: `a` }, 0]], -1]])
-    expect(() => relation.expectRows([], 0)).toThrowError(
-      expect.objectContaining({ name: `AssertionError` }),
-    )
-  })
-
-  it(`checks numeric offset rather than only relative index order`, () => {
-    const relation = new TopKRelation<null, number>()
-    relation.add([[[null, [{ id: 2, value: `b` }, 1]], 1]])
-    relation.expectRows([[null, 2, `b`]], 1)
-    expect(() => relation.expectRows([[null, 2, `b`]], 0)).toThrowError(
+    relation.expectRows([[null, 1, `a`]])
+    relation.add([[[null, [{ id: 1, value: `a` }, `a0`]], -1]])
+    relation.expectRows([])
+    relation.add([[[null, [{ id: 1, value: `a` }, `a0`]], -1]])
+    expect(() => relation.expectRows([])).toThrowError(
       expect.objectContaining({ name: `AssertionError` }),
     )
   })

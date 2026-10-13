@@ -1,4 +1,3 @@
-import { withSyncSpan } from '../telemetry/tracer'
 import type { OfflineTransaction } from '../types'
 
 export class KeyScheduler {
@@ -6,56 +5,28 @@ export class KeyScheduler {
   private activeTransactionId: string | undefined
 
   schedule(transaction: OfflineTransaction): boolean {
-    return withSyncSpan(
-      `scheduler.schedule`,
-      {
-        'transaction.id': transaction.id,
-        queueLength: this.pendingTransactions.length,
-      },
-      () => {
-        if (
-          this.pendingTransactions.some(
-            (pending) => pending.id === transaction.id,
-          )
-        ) {
-          return false
-        }
-        this.pendingTransactions.push(transaction)
-        // Sort by creation time to maintain FIFO order
-        this.pendingTransactions.sort(
-          (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
-        )
-        return true
-      },
+    if (
+      this.pendingTransactions.some((pending) => pending.id === transaction.id)
+    ) {
+      return false
+    }
+    this.pendingTransactions.push(transaction)
+    // Sort by creation time to maintain FIFO order
+    this.pendingTransactions.sort(
+      (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
     )
+    return true
   }
 
   getNext(): OfflineTransaction | undefined {
-    return withSyncSpan(
-      `scheduler.getNext`,
-      { pendingCount: this.pendingTransactions.length },
-      (span) => {
-        if (
-          this.activeTransactionId !== undefined ||
-          this.pendingTransactions.length === 0
-        ) {
-          span.setAttribute(`result`, `empty`)
-          return undefined
-        }
-
-        const firstTransaction = this.pendingTransactions[0]!
-
-        if (!this.isReadyToRun(firstTransaction)) {
-          span.setAttribute(`result`, `waiting_for_first`)
-          span.setAttribute(`transaction.id`, firstTransaction.id)
-          return undefined
-        }
-
-        span.setAttribute(`result`, `found`)
-        span.setAttribute(`transaction.id`, firstTransaction.id)
-        return firstTransaction
-      },
-    )
+    if (
+      this.activeTransactionId !== undefined ||
+      this.pendingTransactions.length === 0
+    ) {
+      return undefined
+    }
+    const firstTransaction = this.pendingTransactions[0]!
+    return this.isReadyToRun(firstTransaction) ? firstTransaction : undefined
   }
 
   private isReadyToRun(transaction: OfflineTransaction): boolean {

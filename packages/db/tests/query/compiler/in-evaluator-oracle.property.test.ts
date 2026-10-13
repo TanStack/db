@@ -19,7 +19,8 @@ import { oraclePropertyOptions, oracleRuns } from '../../oracle-config.js'
  * - A valid Date equals its millisecond timestamp, and another Date with the
  *   same timestamp.
  * - Two Uint8Arrays (Buffers included) are equal when their bytes are equal.
- * - A Temporal value equals a Temporal value of the same kind and string.
+ * - A Temporal value equals one of the same kind and string, except Duration:
+ *   its ten fields determine equality even when two forms display alike.
  * - Every other pair compares with `===`, so `-0` equals `0`, `1n` does not
  *   equal `1`, and objects compare by reference.
  *
@@ -73,6 +74,9 @@ const pool: ReadonlyArray<unknown> = [
   Temporal.PlainDate.from(`2024-01-01`),
   Temporal.PlainDate.from(`2024-01-01`),
   Temporal.PlainTime.from(`10:00`),
+  Temporal.Duration.from({ seconds: 1 }),
+  Temporal.Duration.from({ seconds: 1 }),
+  Temporal.Duration.from({ milliseconds: 1000 }),
   shared,
   { id: 1 },
   null,
@@ -111,6 +115,19 @@ function asComparable(value: unknown): unknown {
   return value instanceof Date ? value.getTime() : value
 }
 
+const durationFields = [
+  `years`,
+  `months`,
+  `weeks`,
+  `days`,
+  `hours`,
+  `minutes`,
+  `seconds`,
+  `milliseconds`,
+  `microseconds`,
+  `nanoseconds`,
+] as const
+
 function referenceEqual(left: unknown, right: unknown): boolean {
   if (isNotANumber(left) || isNotANumber(right)) {
     return isNotANumber(left) && isNotANumber(right)
@@ -121,6 +138,13 @@ function referenceEqual(left: unknown, right: unknown): boolean {
       isBytes(right) &&
       left.length === right.length &&
       Array.from(left).every((byte, index) => byte === right[index])
+    )
+  }
+  if (left instanceof Temporal.Duration || right instanceof Temporal.Duration) {
+    return (
+      left instanceof Temporal.Duration &&
+      right instanceof Temporal.Duration &&
+      durationFields.every((field) => left[field] === right[field])
     )
   }
   if (isTemporalValue(left) || isTemporalValue(right)) {
@@ -219,6 +243,18 @@ describe(`in evaluator`, () => {
     [`equal bytes`, Buffer.from([1, 2]), [new Uint8Array([1, 2])], true],
     [`bytes and their internal key`, PREFIX, [new Uint8Array([])], false],
     [`a structural copy`, { id: 1 }, [shared], false],
+    [
+      `equal Duration fields`,
+      Temporal.Duration.from({ seconds: 1 }),
+      [Temporal.Duration.from({ seconds: 1 })],
+      true,
+    ],
+    [
+      `equivalent Duration forms with different fields`,
+      Temporal.Duration.from({ seconds: 1 }),
+      [Temporal.Duration.from({ milliseconds: 1000 })],
+      false,
+    ],
     [`an empty list`, `a`, [], false],
   ] as const)(`pins %s`, (_name, value, list, expected) => {
     const testCase = { value, list: [...list], listFromRow: false }
@@ -238,6 +274,20 @@ describe(`in evaluator`, () => {
         fc.property(inCase, (testCase) => check(raw, testCase)),
         { numRuns: 500, seed: 0x2029 },
       ),
+    ).toThrow(/in mismatch/)
+  })
+
+  it(`rejects display-text equality for equivalent Duration forms`, () => {
+    const seconds = Temporal.Duration.from({ seconds: 1 })
+    const milliseconds = Temporal.Duration.from({ milliseconds: 1000 })
+    const textual: Evaluate = ({ value, list }) =>
+      list.some((entry) => String(entry) === String(value))
+    expect(() =>
+      check(textual, {
+        value: seconds,
+        list: [milliseconds],
+        listFromRow: false,
+      }),
     ).toThrow(/in mismatch/)
   })
 })

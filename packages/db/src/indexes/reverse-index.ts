@@ -103,6 +103,10 @@ export class ReverseIndex<
     return this.originalIndex.supportsRangeOptimization
   }
 
+  get supportsOrderOptimization(): boolean {
+    return this.originalIndex.supportsOrderOptimization === true
+  }
+
   canOptimizeRangeFor(value: unknown): boolean {
     return this.originalIndex.canOptimizeRangeFor?.(value) ?? true
   }

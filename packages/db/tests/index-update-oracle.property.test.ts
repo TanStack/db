@@ -1,15 +1,19 @@
 import { describe, expect, expectTypeOf, test, vi } from 'vitest'
 import { fc } from '@fast-check/vitest'
+import { Temporal } from 'temporal-polyfill'
 import { createCollection } from '../src/collection/index.js'
 import { CollectionInErrorStateError } from '../src/errors.js'
 import { BasicIndex } from '../src/indexes/basic-index.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
+import { eq } from '../src/query/builder/functions.js'
 import { PropRef } from '../src/query/ir.js'
 import { DEFAULT_COMPARE_OPTIONS } from '../src/utils.js'
-import { indexedKeysSet, orderedEntriesArray, valueMapData } from './utils'
+import { mockSyncCollectionOptions } from './utils'
 import { oraclePropertyOptions, oracleRuns } from './oracle-config'
 import type { BaseIndex, IndexInterface } from '../src/indexes/base-index.js'
 import type { CompareOptions } from '../src/query/builder/types.js'
+import type { BasicExpression } from '../src/query/ir.js'
+import type { StringCollationConfig } from '../src/types.js'
 
 /**
  * An index is a derived multimap from indexed value to source keys.
@@ -23,20 +27,35 @@ import type { CompareOptions } from '../src/query/builder/types.js'
  * A native Map is the sole ownership model. After put, delete, or full build,
  * the oracle groups that Map by value and freshly sorts the groups. BasicIndex
  * and BTreeIndex must agree on key count, key membership, equality/range lookup,
- * ordered entries, and rebuild behavior. Small duplicate values and signed zero
+ * full ordered reads, and rebuild behavior. Small duplicate values and signed zero
  * force collisions in the value groups without copying either index structure.
  * The comparison runs after every direct index action, after fresh build, and
  * after each named Collection read. Collection rows and their order are public;
  * direct index observations are the documented IndexInterface boundary.
  * The Map retains each key's value because a later same-key put or delete can
  * distinguish states with the same value multiplicities but different owners.
+ * An absent lower range bound includes the minimum even when its unused
+ * `fromInclusive` flag is false. With an explicit exclusive lower bound,
+ * the value at that bound is excluded.
+ * Exact equality membership also stays distinct from comparator position:
+ * replacing a value with one in a different exact-equality bucket at the
+ * same comparator position must move its exact lookup membership. This law
+ * concerns returned index results, not bucket identity or maintenance work.
+ * A build is one of those direct actions even when a source value is
+ * `undefined`: default nulls-first order must hold after build just as it
+ * does after incremental add. The nullish lane below exercises both paths.
+ * A separate mixed number/string lane checks key conservation only. A full
+ * ordered read and an indexed public snapshot must contain each live source
+ * key once, even when unlike values have no declared relative sort order.
+ * A separate two-value callback lane checks legacy scalar input kinds for
+ * immutable Date, Temporal.Instant, and byte values across both index types.
  */
 
 type IndexValue = number
 
 type IndexConstructor = new (
   id: number,
-  expression: PropRef,
+  expression: BasicExpression,
   name?: string,
   options?: {
     compareFn?: (left: unknown, right: unknown) => number
@@ -91,7 +110,10 @@ const arbitraryAction: fc.Arbitrary<IndexAction> = fc.oneof(
  * updates, delete supplies retirement, and build supplies arbitrary replacement
  * sets. Removing any one action loses that transition. Removing the narrow
  * key/value overlap loses collisions; removing -0 loses signed-zero equality.
- * Range probes straddle -2, 0, and 2, including their exact boundaries.
+ * Range probes straddle -2, 0, and 2, including their exact boundaries and
+ * upper-only reads with an unused exclusive-lower flag and paired reads with
+ * an explicit exclusive lower bound. Both run after every action, including
+ * changes to the minimum and an empty build.
  * Duplicate keys passed directly to build are excluded: the source Map first
  * resolves them, since duplicate raw build entries have no contract here.
  */
@@ -99,10 +121,10 @@ const arbitraryAction: fc.Arbitrary<IndexAction> = fc.oneof(
 const probeValues: Array<IndexValue> = [-3, -2, -1, -0, 0, 1, 2, 3, 99]
 const rangeBoundaries: Array<IndexValue> = [-2, 0, 2]
 
-function groupKeysByValue(
-  rows: Map<string, IndexValue>,
-): Map<IndexValue, Set<string>> {
-  const groups = new Map<IndexValue, Set<string>>()
+function groupKeysByValue<T>(
+  rows: ReadonlyMap<string, T>,
+): Map<T, Set<string>> {
+  const groups = new Map<T, Set<string>>()
   for (const [key, value] of rows) {
     const keys = groups.get(value)
     if (keys) {
@@ -119,21 +141,22 @@ function expectIndexMatchesModel(
   rows: Map<string, IndexValue>,
 ): void {
   const groups = groupKeysByValue(rows)
+  const orderedKeys = [...groups]
+    .sort(([left], [right]) => left - right)
+    .flatMap(([, keys]) => [...keys].sort())
 
   expect(index.keyCount).toBe(rows.size)
-  expect(indexedKeysSet(index)).toEqual(new Set(rows.keys()))
-  expect(valueMapData(index)).toEqual(groups)
-  // The index may retain either zero sign as a bucket representative. Its
-  // comparator and the source Map place both signs in the same value group.
-  expect(
-    orderedEntriesArray(index).map(([value, keys]) => [
-      value === 0 ? 0 : value,
-      keys,
-    ]),
-  ).toEqual([...groups].sort(([left], [right]) => left - right))
+  // Complete returned arrays preserve key multiplicity and comparator order
+  // without requiring a particular bucket or ordered-storage representation.
+  expect(index.takeFromStart(rows.size + 1)).toEqual(orderedKeys)
+  expect(index.takeReversedFromEnd(rows.size + 1)).toEqual(
+    [...orderedKeys].reverse(),
+  )
 
   for (const value of probeValues) {
-    expect(index.lookup(`eq`, value)).toEqual(groups.get(value) ?? new Set())
+    const expected = groups.get(value) ?? new Set()
+    expect(index.equalityLookup(value)).toEqual(expected)
+    expect(index.lookup(`eq`, value)).toEqual(expected)
   }
 
   for (const boundary of rangeBoundaries) {
@@ -146,6 +169,22 @@ function expectIndexMatchesModel(
 
     expect(index.rangeQuery({ from: boundary })).toEqual(keysAtOrAbove)
     expect(index.rangeQuery({ to: boundary })).toEqual(keysAtOrBelow)
+    // The model has no lower predicate here. An inclusivity flag cannot
+    // exclude the minimum when the caller supplied no lower bound.
+    expect(index.rangeQuery({ to: boundary, fromInclusive: false })).toEqual(
+      keysAtOrBelow,
+    )
+    // Supplying the lower bound changes the model predicate. Keys at that
+    // bound are excluded, while later keys through the upper bound remain.
+    expect(
+      index.rangeQuery({ from: boundary, to: 2, fromInclusive: false }),
+    ).toEqual(
+      new Set(
+        [...rows]
+          .filter(([, value]) => value > boundary && value <= 2)
+          .map(([key]) => key),
+      ),
+    )
     expect(index.rangeQueryReversed({ from: boundary })).toEqual(keysAtOrBelow)
     expect(index.rangeQueryReversed({ to: boundary })).toEqual(keysAtOrAbove)
   }
@@ -309,6 +348,30 @@ describe.each(indexTypes)(`%s update properties`, (_indexName, IndexType) => {
     expect(index.canOptimizeRangeFor(100)).toBe(false)
   })
 
+  test.each([
+    [`duplicate key`, `takeFromStart`, [`a`, `a`]],
+    [`wrong reverse order`, `takeReversedFromEnd`, [`a`, `b`]],
+  ] as const)(`full traversal rejects a %s`, (_name, method, wrongKeys) => {
+    const index = new IndexType(1, new PropRef([`value`]))
+    index.add(`a`, { value: 1 })
+    index.add(`b`, { value: 2 })
+    const wrongOutput = vi.spyOn(index, method).mockReturnValue([...wrongKeys])
+    try {
+      expect(() =>
+        expectIndexMatchesModel(
+          index,
+          new Map([
+            [`a`, 1],
+            [`b`, 2],
+          ]),
+        ),
+      ).toThrowError(/expected/)
+      expect(wrongOutput).toHaveBeenCalled()
+    } finally {
+      wrongOutput.mockRestore()
+    }
+  })
+
   test(`inclusive lower bound rejects an exclusive-boundary result`, () => {
     const index = new IndexType(1, new PropRef([`value`]))
     index.add(`boundary`, { value: -2 })
@@ -321,6 +384,61 @@ describe.each(indexTypes)(`%s update properties`, (_indexName, IndexType) => {
     try {
       expect(() =>
         expectIndexMatchesModel(index, new Map([[`boundary`, -2]])),
+      ).toThrowError(/expected/)
+    } finally {
+      wrongOutput.mockRestore()
+    }
+  })
+
+  test(`upper-only range rejects a dropped minimum when the lower flag is exclusive`, () => {
+    const index = new IndexType(1, new PropRef([`value`]))
+    index.add(`minimum`, { value: -2 })
+    const rangeQuery = index.rangeQuery.bind(index)
+    const wrongOutput = vi
+      .spyOn(index, `rangeQuery`)
+      .mockImplementation((options) => {
+        const result = rangeQuery(options)
+        if (!(`from` in options) && options.fromInclusive === false) {
+          result.delete(`minimum`)
+        }
+        return result
+      })
+    try {
+      expect(() =>
+        expectIndexMatchesModel(index, new Map([[`minimum`, -2]])),
+      ).toThrowError(/expected/)
+    } finally {
+      wrongOutput.mockRestore()
+    }
+  })
+
+  test(`explicit exclusive lower bound rejects an included boundary value`, () => {
+    const index = new IndexType(1, new PropRef([`value`]))
+    index.add(`boundary`, { value: -2 })
+    index.add(`later`, { value: 0 })
+    const rangeQuery = index.rangeQuery.bind(index)
+    const wrongOutput = vi
+      .spyOn(index, `rangeQuery`)
+      .mockImplementation((options) => {
+        const result = rangeQuery(options)
+        if (
+          options.from === -2 &&
+          options.to === 2 &&
+          options.fromInclusive === false
+        ) {
+          result.add(`boundary`)
+        }
+        return result
+      })
+    try {
+      expect(() =>
+        expectIndexMatchesModel(
+          index,
+          new Map([
+            [`boundary`, -2],
+            [`later`, 0],
+          ]),
+        ),
       ).toThrowError(/expected/)
     } finally {
       wrongOutput.mockRestore()
@@ -390,6 +508,813 @@ describe.each(indexTypes)(`%s update properties`, (_indexName, IndexType) => {
 })
 
 /**
+ * Direct index equality keeps `undefined` and `null` in distinct exact-value
+ * buckets, even though the default ordering comparator places both at one
+ * position. An `IN` lookup returns the union of the requested exact-value
+ * memberships, including every owner of a repeated value and no unrequested
+ * value. The established direct-index tests exercise these methods. This law
+ * does not describe the live-query WHERE evaluator, which uses three-valued
+ * nullish equality.
+ *
+ * A source Map predicts membership without index normalization or comparator
+ * classification. Fresh singleton histories preserve the old update cuts;
+ * coexisting values expose a wrong union of nullish buckets. Fixed histories
+ * also retain two undefined owners beside strings, a nonempty state without
+ * undefined, and both mixed and undefined-only `IN` lists. A fixed build
+ * history starts with `undefined` and 1 in both source orders, then continues
+ * with an add; it distinguishes full rebuild from incremental insertion.
+ * The generated tail
+ * adds nearby put/delete/build histories over three keys and five values, with both
+ * orders of a mixed `IN` list, while a fixed four-key history keeps a third
+ * defined distractor. An absent source key is added, while an owned key is
+ * updated. A direct update of an absent key is outside this grammar. Each
+ * nullish value is needed to distinguish the buckets. Defined values exercise
+ * mixed-list selection and moves across the nullish boundary. At least two
+ * keys are needed to expose surviving peers.
+ * After each direct action returns, exact and `IN` methods, their `lookup`
+ * dispatches, unfiltered ordered reads, selected forward ranges, and key count must agree with
+ * the Map. The default comparator puts null and undefined at one ordered
+ * position before the positive numbers in this bounded domain, although
+ * exact lookup keeps them apart. Endpoint reads start at an end; an explicit
+ * cursor excludes its entire comparator position. Range bounds constrain
+ * positions only when supplied, even when the supplied value is undefined.
+ * The source Map is sorted anew for ordered reads and filtered for ranges;
+ * neither expectation uses the production comparator or traversal. Fixed
+ * histories keep three undefined owners, a remove-one-of-two cut, a mixed
+ * four-row range, and explicit versus omitted lower bounds. The generated
+ * tail varies owners and values at each returned-action cut. Build replaces
+ * source ownership; duplicate generated keys are resolved by the Map before
+ * invoking production, so a raw duplicate-entry build is excluded. Removing
+ * build loses the native-sort path; removing the
+ * nullish values loses the boundary distinction, one owner loses repeated
+ * bucket traversal, and one defined value loses cursor continuation. Values
+ * outside the positive 1..3 domain, mixed-type numeric/string order, custom options,
+ * reverse ranges, all bound combinations, filtered takes, bucket object
+ * identity, and instrumentation are outside this ordered and range claim.
+ */
+type NullishIndexValue = number | null | undefined
+type NullishIndexAction =
+  | { type: `put`; key: string; value: NullishIndexValue }
+  | { type: `delete`; key: string }
+  | { type: `build`; entries: Array<[string, NullishIndexValue]> }
+
+const nullishProbeValues: ReadonlyArray<NullishIndexValue> = [
+  undefined,
+  null,
+  1,
+  2,
+  3,
+]
+const nullishInProbes: ReadonlyArray<ReadonlyArray<NullishIndexValue>> = [
+  [],
+  [undefined],
+  [null],
+  [undefined, 1],
+  [1, undefined],
+  [undefined, null],
+  [3],
+  [1, 2],
+  [1, 1],
+]
+const arbitraryNullishAction: fc.Arbitrary<NullishIndexAction> = fc.oneof(
+  fc.record({
+    type: fc.constant(`put` as const),
+    key: fc.constantFrom(`a`, `b`, `c`),
+    value: fc.constantFrom(...nullishProbeValues),
+  }),
+  fc.record({
+    type: fc.constant(`delete` as const),
+    key: fc.constantFrom(`a`, `b`, `c`),
+  }),
+  fc.record({
+    type: fc.constant(`build` as const),
+    entries: fc.array(
+      fc.tuple(
+        fc.constantFrom(`a`, `b`, `c`),
+        fc.constantFrom(...nullishProbeValues),
+      ),
+      { maxLength: 3 },
+    ),
+  }),
+)
+
+function expectExactMembership<T>(
+  index: BaseIndex<string>,
+  rows: ReadonlyMap<string, T>,
+  exactProbes: ReadonlyArray<T>,
+  inProbes: ReadonlyArray<ReadonlyArray<T>>,
+): void {
+  // Map key identity distinguishes null from undefined without consulting the
+  // index's normalized keys or its ordering comparator. IN membership follows
+  // from source-value membership in the operand list, including an empty list.
+  const groups = groupKeysByValue(rows)
+  expect(index.keyCount).toBe(rows.size)
+  const traversedKeys = index.takeFromStart(rows.size + 1)
+  expect(traversedKeys).toHaveLength(rows.size)
+  expect(new Set(traversedKeys)).toEqual(new Set(rows.keys()))
+  for (const value of exactProbes) {
+    const expected = groups.get(value) ?? new Set<string>()
+    expect(index.equalityLookup(value)).toEqual(expected)
+    expect(index.lookup(`eq`, value)).toEqual(expected)
+  }
+  for (const values of inProbes) {
+    const expected = new Set(
+      [...rows]
+        .filter(([, value]) => values.includes(value))
+        .map(([key]) => key),
+    )
+    expect(index.inArrayLookup([...values])).toEqual(expected)
+    expect(index.lookup(`in`, [...values])).toEqual(expected)
+  }
+}
+
+function expectNullishMembership(
+  index: BaseIndex<string>,
+  rows: ReadonlyMap<string, NullishIndexValue>,
+): void {
+  expectExactMembership(index, rows, nullishProbeValues, nullishInProbes)
+  expectNullishOrderedReads(index, rows)
+}
+
+type ModelBound = Readonly<{
+  value: NullishIndexValue
+  inclusive: boolean
+}>
+type ModelRange = Readonly<{
+  lower?: ModelBound
+  upper?: ModelBound
+  unusedLowerInclusive?: false
+}>
+
+const nullishRangeProbes: ReadonlyArray<ModelRange> = [
+  {},
+  { upper: { value: 2, inclusive: true } },
+  { upper: { value: 2, inclusive: true }, unusedLowerInclusive: false },
+  {
+    lower: { value: undefined, inclusive: true },
+    upper: { value: 2, inclusive: true },
+  },
+  {
+    lower: { value: undefined, inclusive: false },
+    upper: { value: 2, inclusive: true },
+  },
+  {
+    lower: { value: undefined, inclusive: true },
+    upper: { value: undefined, inclusive: true },
+  },
+  {
+    lower: { value: null, inclusive: true },
+    upper: { value: null, inclusive: true },
+  },
+  { lower: { value: null, inclusive: false } },
+  { upper: { value: undefined, inclusive: false } },
+  {
+    lower: { value: 1, inclusive: true },
+    upper: { value: 2, inclusive: false },
+  },
+]
+
+// "Position" is a model label, not a stored index bucket. In the declared
+// domain 1..3, zero names the shared nullish comparator position. Source key
+// ownership remains in the Map even when two values share that position.
+function nullishPosition(value: NullishIndexValue): number {
+  return value === null || value === undefined ? 0 : value
+}
+
+function expectNullishOrderedReads(
+  index: BaseIndex<string>,
+  rows: ReadonlyMap<string, NullishIndexValue>,
+): void {
+  const ordered = [...rows]
+    .sort(
+      ([leftKey, leftValue], [rightKey, rightValue]) =>
+        nullishPosition(leftValue) - nullishPosition(rightValue) ||
+        (leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0),
+    )
+    .map(([key, value]) => ({ key, value }))
+
+  // The public arrays preserve both ordering and multiplicity. A set-only
+  // check would miss a repeated undefined owner or a skipped peer.
+  for (const n of [1, 3, 10]) {
+    expect(index.takeFromStart(n)).toEqual(
+      ordered.slice(0, n).map(({ key }) => key),
+    )
+    expect(index.takeReversedFromEnd(n)).toEqual(
+      [...ordered]
+        .reverse()
+        .slice(0, n)
+        .map(({ key }) => key),
+    )
+    for (const cursor of nullishProbeValues) {
+      const cursorPosition = nullishPosition(cursor)
+      expect(index.take(n, cursor)).toEqual(
+        ordered
+          .filter(({ value }) => nullishPosition(value) > cursorPosition)
+          .slice(0, n)
+          .map(({ key }) => key),
+      )
+      expect(index.takeReversed(n, cursor)).toEqual(
+        [...ordered]
+          .reverse()
+          .filter(({ value }) => nullishPosition(value) < cursorPosition)
+          .slice(0, n)
+          .map(({ key }) => key),
+      )
+    }
+  }
+
+  // Model bounds are separate objects, so an absent lower bound is not
+  // conflated with a present bound whose value is literally undefined.
+  for (const probe of nullishRangeProbes) {
+    const options = {
+      ...(probe.lower && {
+        from: probe.lower.value,
+        fromInclusive: probe.lower.inclusive,
+      }),
+      ...(probe.upper && {
+        to: probe.upper.value,
+        toInclusive: probe.upper.inclusive,
+      }),
+      ...(probe.unusedLowerInclusive === false && { fromInclusive: false }),
+    }
+    const expected = new Set(
+      ordered
+        .filter(({ value }) => {
+          const position = nullishPosition(value)
+          const lower = probe.lower
+          const upper = probe.upper
+          return (
+            (lower === undefined ||
+              (lower.inclusive
+                ? position >= nullishPosition(lower.value)
+                : position > nullishPosition(lower.value))) &&
+            (upper === undefined ||
+              (upper.inclusive
+                ? position <= nullishPosition(upper.value)
+                : position < nullishPosition(upper.value)))
+          )
+        })
+        .map(({ key }) => key),
+    )
+    expect(index.rangeQuery(options)).toEqual(expected)
+  }
+}
+
+function applyNullishAction(
+  index: BaseIndex<string>,
+  rows: Map<string, NullishIndexValue>,
+  action: NullishIndexAction,
+): void {
+  // The driver maps source ownership to the real add, update, and remove API.
+  if (action.type === `put`) {
+    if (rows.has(action.key)) {
+      index.update(
+        action.key,
+        { value: rows.get(action.key) },
+        { value: action.value },
+      )
+    } else {
+      index.add(action.key, { value: action.value })
+    }
+    rows.set(action.key, action.value)
+  } else if (action.type === `build`) {
+    // Resolve duplicate generated source keys before calling build; their raw
+    // duplicate-entry policy is outside this law. Build replaces the Map.
+    const replacement = new Map(action.entries)
+    index.build([...replacement].map(([key, value]) => [key, { value }]))
+    rows.clear()
+    for (const [key, value] of replacement) rows.set(key, value)
+  } else if (rows.has(action.key)) {
+    index.remove(action.key, { value: rows.get(action.key) })
+    rows.delete(action.key)
+  }
+  expectNullishMembership(index, rows)
+}
+
+describe.each(indexTypes)(
+  `%s nullish direct index refinement`,
+  (_indexName, IndexType) => {
+    test.each([
+      [`undefined to null`, undefined, null],
+      [`null to undefined`, null, undefined],
+      [`defined to undefined`, 1, undefined],
+      [`undefined to defined`, undefined, 1],
+      [`undefined to undefined`, undefined, undefined],
+    ] as const)(`keeps membership after %s`, (_label, before, after) => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>()
+      applyNullishAction(index, rows, { type: `put`, key: `a`, value: before })
+      applyNullishAction(index, rows, { type: `put`, key: `a`, value: after })
+    })
+
+    test(`keeps coexisting null and undefined buckets distinct`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>()
+      for (const [key, value] of [
+        [`null1`, null],
+        [`undef1`, undefined],
+        [`num1`, 1],
+      ] as const) {
+        applyNullishAction(index, rows, { type: `put`, key, value })
+      }
+    })
+
+    test(`finds every undefined owner beside distinct string values`, () => {
+      const index = new IndexType(1, new PropRef([`status`]))
+      const rows = new Map<string, string | undefined>()
+      const exactProbes = [undefined, `active`, `inactive`]
+      const inProbes = [[undefined], [undefined, `active`]]
+      for (const [key, value] of [
+        [`a`, `active`],
+        [`b`, undefined],
+        [`c`, `inactive`],
+        [`d`, undefined],
+      ] as const) {
+        index.add(key, { status: value })
+        rows.set(key, value)
+        expectExactMembership(index, rows, exactProbes, inProbes)
+      }
+    })
+
+    test(`returns no undefined key from a nonempty all-defined index`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>()
+      applyNullishAction(index, rows, { type: `put`, key: `a`, value: 1 })
+      applyNullishAction(index, rows, { type: `put`, key: `b`, value: 2 })
+    })
+
+    test(`unites undefined and defined IN members without distractors`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>()
+      for (const [key, value] of [
+        [`undef`, undefined],
+        [`one`, 1],
+        [`two`, 2],
+        [`three`, 3],
+      ] as const) {
+        applyNullishAction(index, rows, { type: `put`, key, value })
+      }
+    })
+
+    test(`returns every undefined owner from a singleton IN list`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>()
+      for (const [key, value] of [
+        [`undef1`, undefined],
+        [`undef2`, undefined],
+        [`one`, 1],
+      ] as const) {
+        applyNullishAction(index, rows, { type: `put`, key, value })
+      }
+    })
+
+    test(`distinguishes endpoint reads from explicit undefined cursors`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>()
+      for (const [key, value] of [
+        [`a`, undefined],
+        [`b`, 1],
+        [`c`, 2],
+      ] as const) {
+        applyNullishAction(index, rows, { type: `put`, key, value })
+      }
+    })
+
+    test(`traverses every undefined owner before continuing to numbers`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>()
+      for (const [key, value] of [
+        [`undef1`, undefined],
+        [`undef2`, undefined],
+        [`undef3`, undefined],
+        [`one`, 1],
+        [`two`, 2],
+      ] as const) {
+        applyNullishAction(index, rows, { type: `put`, key, value })
+      }
+    })
+
+    test(`retains the second undefined owner after removing the first`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>()
+      applyNullishAction(index, rows, {
+        type: `put`,
+        key: `a`,
+        value: undefined,
+      })
+      applyNullishAction(index, rows, {
+        type: `put`,
+        key: `b`,
+        value: undefined,
+      })
+      applyNullishAction(index, rows, { type: `delete`, key: `a` })
+    })
+
+    test(`distinguishes explicit and omitted undefined lower bounds`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>()
+      for (const [key, value] of [
+        [`undef`, undefined],
+        [`one`, 1],
+        [`two`, 2],
+        [`three`, 3],
+      ] as const) {
+        applyNullishAction(index, rows, { type: `put`, key, value })
+      }
+    })
+
+    test(`includes both undefined owners within double undefined bounds`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>()
+      for (const [key, value] of [
+        [`a`, undefined],
+        [`b`, undefined],
+        [`c`, 1],
+      ] as const) {
+        applyNullishAction(index, rows, { type: `put`, key, value })
+      }
+    })
+
+    test(`build preserves nulls-first ordered reads and ranges`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>()
+      applyNullishAction(index, rows, {
+        type: `build`,
+        entries: [
+          [`undefined`, undefined],
+          [`one`, 1],
+        ],
+      })
+      // A second build changes insertion order; the model still predicts the
+      // same returned key order and complete upper-bound results.
+      applyNullishAction(index, rows, {
+        type: `build`,
+        entries: [
+          [`one`, 1],
+          [`undefined`, undefined],
+        ],
+      })
+      applyNullishAction(index, rows, {
+        type: `put`,
+        key: `two`,
+        value: 2,
+      })
+      applyNullishAction(index, rows, {
+        type: `build`,
+        entries: [
+          [`undef2`, undefined],
+          [`null`, null],
+          [`undef1`, undefined],
+          [`one`, 1],
+        ],
+      })
+    })
+
+    test.each([20261012, undefined])(
+      `refines nullish membership histories (seed %s)`,
+      async (seed) => {
+        await fc.assert(
+          fc.asyncProperty(
+            fc.array(arbitraryNullishAction, { minLength: 1, maxLength: 40 }),
+            async (actions) => {
+              const index = new IndexType(1, new PropRef([`value`]))
+              const rows = new Map<string, NullishIndexValue>()
+              expectNullishMembership(index, rows)
+              for (const action of actions) {
+                applyNullishAction(index, rows, action)
+              }
+            },
+          ),
+          seed === undefined
+            ? oraclePropertyOptions(100, `index-update.nullish-membership`)
+            : { seed, numRuns: oracleRuns(100) },
+        )
+      },
+    )
+
+    test(`rejects a skipped undefined-to-null update`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>()
+      applyNullishAction(index, rows, {
+        type: `put`,
+        key: `a`,
+        value: undefined,
+      })
+      const skipped = vi.spyOn(index, `update`).mockImplementation(() => {})
+      try {
+        expect(() =>
+          applyNullishAction(index, rows, {
+            type: `put`,
+            key: `a`,
+            value: null,
+          }),
+        ).toThrowError(/expected/)
+        expect(skipped).toHaveBeenCalledOnce()
+      } finally {
+        skipped.mockRestore()
+      }
+    })
+
+    test(`rejects lookup dispatch that unites nullish buckets`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>()
+      applyNullishAction(index, rows, {
+        type: `put`,
+        key: `null1`,
+        value: null,
+      })
+      applyNullishAction(index, rows, {
+        type: `put`,
+        key: `undef1`,
+        value: undefined,
+      })
+      const lookup = index.lookup.bind(index)
+      const united = vi
+        .spyOn(index, `lookup`)
+        .mockImplementation((op, value) =>
+          op === `eq` && value === undefined
+            ? new Set([`null1`, `undef1`])
+            : lookup(op, value),
+        )
+      try {
+        expect(() => expectNullishMembership(index, rows)).toThrowError(
+          /expected/,
+        )
+        expect(united).toHaveBeenCalledWith(`eq`, undefined)
+      } finally {
+        united.mockRestore()
+      }
+    })
+
+    test(`rejects an exact lookup that loses one undefined owner`, () => {
+      const index = new IndexType(1, new PropRef([`status`]))
+      const rows = new Map<string, string | undefined>([
+        [`a`, `active`],
+        [`b`, undefined],
+        [`c`, `inactive`],
+        [`d`, undefined],
+      ])
+      for (const [key, status] of rows) index.add(key, { status })
+      const lookup = index.equalityLookup.bind(index)
+      const truncated = vi
+        .spyOn(index, `equalityLookup`)
+        .mockImplementation((value) =>
+          value === undefined ? new Set([`b`]) : lookup(value),
+        )
+      try {
+        expect(() =>
+          expectExactMembership(index, rows, [undefined], [[undefined]]),
+        ).toThrowError(/expected/)
+        expect(truncated).toHaveBeenCalledWith(undefined)
+      } finally {
+        truncated.mockRestore()
+      }
+    })
+
+    test(`rejects an IN lookup that drops an undefined operand`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>()
+      applyNullishAction(index, rows, {
+        type: `put`,
+        key: `undef`,
+        value: undefined,
+      })
+      applyNullishAction(index, rows, { type: `put`, key: `one`, value: 1 })
+      const lookup = index.inArrayLookup.bind(index)
+      const dropped = vi
+        .spyOn(index, `inArrayLookup`)
+        .mockImplementation((values) =>
+          values.length === 2 && values[0] === 1 && values[1] === undefined
+            ? new Set([`one`])
+            : lookup(values),
+        )
+      try {
+        expect(() => expectNullishMembership(index, rows)).toThrowError(
+          /expected/,
+        )
+        expect(dropped).toHaveBeenCalledWith([1, undefined])
+      } finally {
+        dropped.mockRestore()
+      }
+    })
+
+    test(`rejects an IN lookup that loses a same-value owner`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>()
+      applyNullishAction(index, rows, {
+        type: `put`,
+        key: `undef1`,
+        value: undefined,
+      })
+      applyNullishAction(index, rows, {
+        type: `put`,
+        key: `undef2`,
+        value: undefined,
+      })
+      const lookup = index.inArrayLookup.bind(index)
+      const truncated = vi
+        .spyOn(index, `inArrayLookup`)
+        .mockImplementation((values) =>
+          values.length === 1 && values[0] === undefined
+            ? new Set([`undef1`])
+            : lookup(values),
+        )
+      try {
+        expect(() => expectNullishMembership(index, rows)).toThrowError(
+          /expected/,
+        )
+        expect(truncated).toHaveBeenCalledWith([undefined])
+      } finally {
+        truncated.mockRestore()
+      }
+    })
+
+    test(`rejects IN dispatch that returns only its first value group`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>()
+      applyNullishAction(index, rows, {
+        type: `put`,
+        key: `undef`,
+        value: undefined,
+      })
+      applyNullishAction(index, rows, { type: `put`, key: `one`, value: 1 })
+      const lookup = index.lookup.bind(index)
+      const firstOnly = vi
+        .spyOn(index, `lookup`)
+        .mockImplementation((op, value) =>
+          op === `in` &&
+          Array.isArray(value) &&
+          value.length === 2 &&
+          value[0] === undefined &&
+          value[1] === 1
+            ? new Set([`undef`])
+            : lookup(op, value),
+        )
+      try {
+        expect(() => expectNullishMembership(index, rows)).toThrowError(
+          /expected/,
+        )
+        expect(firstOnly).toHaveBeenCalledWith(`in`, [undefined, 1])
+      } finally {
+        firstOnly.mockRestore()
+      }
+    })
+
+    test(`rejects an endpoint read that drops the undefined owner`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>([
+        [`a`, undefined],
+        [`b`, 1],
+        [`c`, 2],
+      ])
+      for (const [key, value] of rows) index.add(key, { value })
+      const dropped = vi
+        .spyOn(index, `takeFromStart`)
+        .mockImplementation(() => [`b`, `c`])
+      try {
+        expect(() => expectNullishOrderedReads(index, rows)).toThrowError(
+          /expected/,
+        )
+        expect(dropped).toHaveBeenCalled()
+      } finally {
+        dropped.mockRestore()
+      }
+    })
+
+    test(`rejects a cursor that repeats the last undefined owner`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>([
+        [`undef1`, undefined],
+        [`undef2`, undefined],
+        [`undef3`, undefined],
+        [`one`, 1],
+        [`two`, 2],
+      ])
+      for (const [key, value] of rows) index.add(key, { value })
+      const take = index.take.bind(index)
+      const repeated = vi
+        .spyOn(index, `take`)
+        .mockImplementation((n, from, filter) =>
+          n === 10 && from === undefined
+            ? [`undef3`, `one`, `two`]
+            : take(n, from, filter),
+        )
+      try {
+        expect(() => expectNullishOrderedReads(index, rows)).toThrowError(
+          /expected/,
+        )
+        expect(repeated).toHaveBeenCalledWith(10, undefined)
+      } finally {
+        repeated.mockRestore()
+      }
+    })
+
+    test(`rejects a forward range that drops an explicit undefined lower bound`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>([
+        [`undef`, undefined],
+        [`one`, 1],
+        [`two`, 2],
+        [`three`, 3],
+      ])
+      for (const [key, value] of rows) index.add(key, { value })
+      const rangeQuery = index.rangeQuery.bind(index)
+      const dropped = vi
+        .spyOn(index, `rangeQuery`)
+        .mockImplementation((options) =>
+          `from` in options &&
+          options.from === undefined &&
+          options.to === 2 &&
+          options.fromInclusive === true
+            ? new Set([`one`, `two`])
+            : rangeQuery(options),
+        )
+      try {
+        expect(() => expectNullishOrderedReads(index, rows)).toThrowError(
+          /expected/,
+        )
+        expect(dropped).toHaveBeenCalledWith({
+          from: undefined,
+          fromInclusive: true,
+          to: 2,
+          toInclusive: true,
+        })
+      } finally {
+        dropped.mockRestore()
+      }
+    })
+
+    test(`rejects a double undefined range that loses one owner`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>([
+        [`a`, undefined],
+        [`b`, undefined],
+        [`c`, 1],
+      ])
+      for (const [key, value] of rows) index.add(key, { value })
+      const rangeQuery = index.rangeQuery.bind(index)
+      const truncated = vi
+        .spyOn(index, `rangeQuery`)
+        .mockImplementation((options) =>
+          `from` in options &&
+          options.from === undefined &&
+          `to` in options &&
+          options.to === undefined
+            ? new Set([`a`])
+            : rangeQuery(options),
+        )
+      try {
+        expect(() => expectNullishOrderedReads(index, rows)).toThrowError(
+          /expected/,
+        )
+        expect(truncated).toHaveBeenCalledWith({
+          from: undefined,
+          fromInclusive: true,
+          to: undefined,
+          toInclusive: true,
+        })
+      } finally {
+        truncated.mockRestore()
+      }
+    })
+
+    test(`rejects a null bound that drops its undefined peer`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, NullishIndexValue>([
+        [`a`, undefined],
+        [`b`, null],
+        [`c`, 1],
+      ])
+      for (const [key, value] of rows) index.add(key, { value })
+      const rangeQuery = index.rangeQuery.bind(index)
+      const exactOnly = vi
+        .spyOn(index, `rangeQuery`)
+        .mockImplementation((options) =>
+          `from` in options &&
+          options.from === null &&
+          `to` in options &&
+          options.to === null
+            ? new Set([`b`])
+            : rangeQuery(options),
+        )
+      try {
+        expect(() => expectNullishOrderedReads(index, rows)).toThrowError(
+          /expected/,
+        )
+        expect(exactOnly).toHaveBeenCalledWith({
+          from: null,
+          fromInclusive: true,
+          to: null,
+          toInclusive: true,
+        })
+      } finally {
+        exactOnly.mockRestore()
+      }
+    })
+  },
+)
+
+/**
  * A custom index comparator must return a number that is not NaN.
  *
  * A broken comparator is a programming error, so the index crashes: the
@@ -408,7 +1333,10 @@ describe.each(indexTypes)(`%s update properties`, (_indexName, IndexType) => {
  * operation. The probe inserts or reads the non-numeric value `ann`. An
  * empty prefix is included: its first write compares nothing, so it must
  * succeed, and the next comparing operation must throw. Comparator
- * transitivity is outside this owner.
+ * transitivity is outside this owner. A removal need not compare a surviving
+ * value with its neighbors: the former representative-promotion example
+ * prescribed one storage layout, while the rejected-removal witness above
+ * retains the atomicity law for comparisons that actually occur.
  */
 describe.each(indexTypes)(
   `%s invalid comparator results`,
@@ -546,25 +1474,19 @@ describe.each(indexTypes)(
       expect(index.lookup(`eq`, `x`)).toEqual(new Set([`x`]))
     })
 
-    // `A` and `a` share one comparator position. Removing the representative
-    // `A` promotes `a`, whose comparison with `z` is the only invalid pair.
-    test(`a rejected representative replacement leaves the index unchanged`, () => {
-      const { index, step } = createRecordedIndex((left, right) => {
-        if ([left, right].includes(`a`) && [left, right].includes(`z`))
-          return NaN
-        const l = String(left).toLowerCase()
-        const r = String(right).toLowerCase()
-        return l === r ? 0 : l < r ? -1 : 1
-      })
-      expect(step(() => index.add(`upper`, { value: `A` }))).toBe(false)
-      expect(step(() => index.add(`lower`, { value: `a` }))).toBe(false)
-      expect(step(() => index.add(`zed`, { value: `z` }))).toBe(false)
-      // Equality lookups and key count read the index without comparing.
-      if (step(() => index.remove(`upper`, { value: `A` }))) {
-        expect(index.keyCount).toBe(3)
-        expect(index.lookup(`eq`, `A`)).toEqual(new Set([`upper`]))
-        expect(index.lookup(`eq`, `a`)).toEqual(new Set([`lower`]))
-        expect(index.lookup(`eq`, `z`)).toEqual(new Set([`zed`]))
+    test(`a rejected remove preserves other exact values`, () => {
+      const { index, step } = createRecordedIndex((left, right) =>
+        left === `x` && right === `x`
+          ? NaN
+          : String(left).localeCompare(String(right)),
+      )
+      for (const value of [`a`, `x`, `z`]) {
+        expect(step(() => index.add(value, { value }))).toBe(false)
+      }
+      expect(step(() => index.remove(`x`, { value: `x` }))).toBe(true)
+      expect(index.keyCount).toBe(3)
+      for (const value of [`a`, `x`, `z`]) {
+        expect(index.lookup(`eq`, value)).toEqual(new Set([value]))
       }
     })
 
@@ -819,14 +1741,114 @@ describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
     expectCustomGroups(index, rows, identities)
   })
 
+  test(`moves exact string membership across a comparator-equal update`, () => {
+    // The input facts put A/a in one order group and B/b in another. The
+    // comparator implements that order, but the expected exact memberships
+    // come from the source Map's unchanged strings, not from the comparator.
+    const group = { A: 0, a: 0, B: 1, b: 1 } as const
+    type Value = keyof typeof group
+    const rows = new Map<string, Value>()
+    const index = new IndexType(1, new PropRef([`value`]), undefined, {
+      compareFn: (left, right) =>
+        (left as string)
+          .toLowerCase()
+          .localeCompare((right as string).toLowerCase()),
+    })
+    const expectMatchesSource = () => {
+      expect(index.keyCount).toBe(rows.size)
+      for (const value of Object.keys(group) as Array<Value>) {
+        const exactKeys = new Set(
+          [...rows]
+            .filter(([, current]) => current === value)
+            .map(([key]) => key),
+        )
+        expect(index.equalityLookup(value)).toEqual(exactKeys)
+        expect(index.lookup(`eq`, value)).toEqual(exactKeys)
+        expect(index.rangeQuery({ from: value, to: value })).toEqual(
+          new Set(
+            [...rows]
+              .filter(([, current]) => group[current] === group[value])
+              .map(([key]) => key),
+          ),
+        )
+      }
+    }
+
+    // Check after each direct index action. First update a singleton, as in
+    // the legacy witness; then add peers in both comparator groups. A shortcut
+    // limited to singleton indexes must fail before the peers can mask it.
+    index.add(`changed`, { value: `A` })
+    rows.set(`changed`, `A`)
+    expectMatchesSource()
+
+    const skipEqualUpdate = vi.spyOn(index, `update`).mockImplementation(() => {
+      if (index.keyCount === 1) return
+    })
+    try {
+      index.update(`changed`, { value: `A` }, { value: `a` })
+      rows.set(`changed`, `a`)
+      expect(() => expectMatchesSource()).toThrowError(/expected/)
+    } finally {
+      skipEqualUpdate.mockRestore()
+      rows.set(`changed`, `A`)
+    }
+
+    for (const [key, oldValue, newValue] of [
+      [`changed`, `A`, `a`],
+      [`changed`, `a`, `A`],
+    ] as Array<[string, Value, Value]>) {
+      index.update(key, { value: oldValue }, { value: newValue })
+      rows.set(key, newValue)
+      expectMatchesSource()
+    }
+
+    index.add(`anchor`, { value: `a` })
+    rows.set(`anchor`, `a`)
+    expectMatchesSource()
+    index.add(`other`, { value: `B` })
+    rows.set(`other`, `B`)
+    expectMatchesSource()
+
+    // These histories additionally retain another exact value in the same
+    // order group and then move a key across groups.
+    for (const [key, oldValue, newValue] of [
+      [`changed`, `A`, `a`],
+      [`other`, `B`, `b`],
+      [`other`, `b`, `a`],
+    ] as Array<[string, Value, Value]>) {
+      index.update(key, { value: oldValue }, { value: newValue })
+      rows.set(key, newValue)
+      expectMatchesSource()
+    }
+
+    // EqualityLookup and the public lookup dispatch are separate methods.
+    // A dispatch that substitutes the comparator group for exact equality
+    // would pass an equalityLookup-only check after the same-group update.
+    const lookup = index.lookup.bind(index)
+    const wrongLookup = vi
+      .spyOn(index, `lookup`)
+      .mockImplementation((operation, value) =>
+        operation === `eq`
+          ? index.rangeQuery({ from: value, to: value })
+          : lookup(operation, value),
+      )
+    try {
+      expect(() => expectMatchesSource()).toThrowError(/expected/)
+    } finally {
+      wrongLookup.mockRestore()
+    }
+  })
+
   // Group grammar: 2..20 generated IDs in 0..4, with a forced duplicate first
   // group and a distinct group 5. The same bounded input is run in both index
   // types. The exact-identity lane gives every row a fresh array, then retires
   // and reuses handles. The custom-comparator lane additionally reverses
   // insertion. Without the duplicate, representative retirement is absent;
   // without the distinct group, group order is unobservable; without reversed
-  // insertion, insertion order can masquerade as lexical key order. The pinned
-  // [0, 1] case reconstructs all three distinctions. Invalid comparator
+  // insertion, insertion order can masquerade as lexical key order. Replacing
+  // one value with a fresh value in the same group checks exact membership
+  // independently of comparator position; a later update crosses groups.
+  // The pinned [0, 1] case reconstructs these distinctions. Invalid comparator
   // results and inconsistent comparator order are outside these two grammars.
   test.each([20260930, undefined])(
     `preserves exact equality while ordered traversal retains every row (seed %s)`,
@@ -885,15 +1907,6 @@ describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
               expect(
                 subject.takeReversedFromEnd(currentRows.length + 1),
               ).toEqual(reversed)
-              for (const [representative, keys] of orderedEntriesArray(
-                subject,
-              )) {
-                expect(
-                  currentRows.some(
-                    (row) => row.value === representative && keys.has(row.key),
-                  ),
-                ).toBe(true)
-              }
               for (const row of currentRows) {
                 expect(subject.equalityLookup(row.value)).toEqual(
                   new Set([row.key]),
@@ -1023,6 +2036,23 @@ describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
               expectCustomGroups(index, rows, identities)
 
               const previous = rows[0]!
+              const equalGroup = Object.freeze({
+                key: previous.key,
+                groupId: previous.groupId,
+                value: {
+                  groupId: previous.groupId,
+                  position: previous.value.position,
+                },
+              })
+              identities.push(equalGroup.value)
+              index.update(
+                previous.key,
+                { value: previous.value },
+                { value: equalGroup.value },
+              )
+              rows[0] = equalGroup
+              expectCustomGroups(index, rows, identities)
+
               const changed = Object.freeze({
                 key: previous.key,
                 groupId: 99,
@@ -1031,16 +2061,20 @@ describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
               identities.push(changed.value)
               index.update(
                 previous.key,
-                { value: previous.value },
+                { value: equalGroup.value },
                 { value: changed.value },
               )
               rows[0] = changed
               expectCustomGroups(index, rows, identities)
 
-              for (const retired of [removed, previous]) {
+              for (const [ordinal, retired] of [
+                removed,
+                previous,
+                equalGroup,
+              ].entries()) {
                 const reused = Object.freeze({
                   ...retired,
-                  key: `reused-${retired.key}`,
+                  key: `reused-${ordinal}-${retired.key}`,
                 })
                 index.add(reused.key, { value: reused.value })
                 rows.push(reused)
@@ -1150,7 +2184,7 @@ const collationCases = [
 ] as const
 
 function createCollationCollection(
-  collation: (typeof collationCases)[number][`collation`],
+  collation: StringCollationConfig,
   autoIndex: `off` | `eager`,
   defaultIndexType?: typeof BasicIndex | typeof BTreeIndex,
   labels: ReadonlyArray<string> = [`item10`, `item2`],
@@ -1164,8 +2198,8 @@ function createCollationCollection(
     sync: {
       sync: ({ begin, write, commit, markReady }) => {
         begin()
-        for (const label of labels) {
-          write({ type: `insert`, value: { id: label, label } })
+        for (const [ordinal, label] of labels.entries()) {
+          write({ type: `insert`, value: { id: String(ordinal), label } })
         }
         commit()
         markReady()
@@ -1271,3 +2305,502 @@ test(`ordered scan resolves inherited collation outside each comparison`, async 
     expect(collection.indexes.size).toBe(0)
   })
 })
+
+/**
+ * Public ordered reads compare the user's string values. An index escapes a
+ * leading internal prefix for exact-key storage; that storage encoding must
+ * not change the Collection's declared string order. The en-US locale and a
+ * custom callback both place the prefixed value first. The scan and the
+ * bounded indexed read must return that same first row.
+ */
+const prefixedLabel = `\u0000tanstack-db:a`
+const plainLabel = `tanstack-db:r`
+const prefixedStringCases = [
+  {
+    name: `locale`,
+    collation: { stringSort: `locale`, locale: `en-US` },
+  },
+  {
+    name: `custom collation`,
+    collation: {
+      stringSort: `custom`,
+      compare: (left: string, right: string) =>
+        left.localeCompare(right, `en-US`),
+    },
+  },
+] as const satisfies ReadonlyArray<{
+  name: string
+  collation: StringCollationConfig
+}>
+
+describe.each([
+  [`BasicIndex`, BasicIndex],
+  [`BTreeIndex`, BTreeIndex],
+] as const)(`%s prefixed-string public order`, (_name, IndexType) => {
+  test.each(prefixedStringCases)(
+    `$name scan and bounded index return the same first row`,
+    async ({ collation }) => {
+      const labels = [plainLabel, prefixedLabel]
+      expect(prefixedLabel.localeCompare(plainLabel, `en-US`)).toBeLessThan(0)
+      const orderBy = [
+        {
+          expression: new PropRef([`label`]),
+          compareOptions: {
+            direction: `asc` as const,
+            nulls: `first` as const,
+          },
+        },
+      ]
+
+      const scan = createCollationCollection(
+        collation,
+        `off`,
+        undefined,
+        labels,
+      )
+      await withCollectionCleanup(scan, async () => {
+        await scan.stateWhenReady()
+        const changes = scan.currentStateAsChanges({ orderBy, limit: 1 })
+        expect(changes?.map(({ value }) => value.label)).toEqual([
+          prefixedLabel,
+        ])
+        expect(scan.indexes.size, `scan path reached`).toBe(0)
+      })
+
+      const indexed = createCollationCollection(
+        collation,
+        `eager`,
+        IndexType,
+        labels,
+      )
+      await withCollectionCleanup(indexed, async () => {
+        await indexed.stateWhenReady()
+        const changes = indexed.currentStateAsChanges({
+          orderBy,
+          limit: 1,
+          optimizedOnly: true,
+        })
+        expect(changes?.map(({ value }) => value.label)).toEqual([
+          prefixedLabel,
+        ])
+        expect(indexed.indexes.size, `index path reached`).toBe(1)
+      })
+    },
+  )
+})
+
+/**
+ * Mixed primitive values can share a comparator position without sharing an
+ * exact value. The source Map owns each key once. This model intentionally
+ * predicts membership and multiplicity, not the relative order of a number
+ * and a string. Its fixed grammar adds 2, "2", and "10", then removes each
+ * possible owner in a fresh history. A second history deletes, updates across
+ * value kinds, then re-adds an earlier key. A third history adds two ordered
+ * Temporal values beside an ordinary string that resembles an internal key,
+ * then deletes one Temporal owner. After each returned action, both full index
+ * traversals must contain exactly the live source keys.
+ *
+ * In the public lane a ready Collection receives the same rows and deletes
+ * the number. A manual index serves a bounded `currentStateAsChanges` read
+ * with room for one more row than the source contains. The returned change
+ * messages must contain each live key once. `optimizedOnly` and the take spy
+ * establish that this observation came through the index. No mixed-kind
+ * `orderBy` sequence, custom callback, or modified built-in is claimed.
+ */
+const mixedRows: ReadonlyArray<{ id: string; value: number | string }> = [
+  { id: `a`, value: 2 },
+  { id: `b`, value: `2` },
+  { id: `c`, value: `10` },
+]
+
+function expectConservedIndexKeys(
+  index: BaseIndex<string>,
+  rows: ReadonlyMap<string, unknown>,
+): void {
+  const expected = new Set(rows.keys())
+  expect(index.keyCount).toBe(expected.size)
+  for (const keys of [
+    index.takeFromStart(rows.size + 1),
+    index.takeReversedFromEnd(rows.size + 1),
+  ]) {
+    expect(keys).toHaveLength(expected.size)
+    expect(new Set(keys)).toEqual(expected)
+  }
+}
+
+describe.each(indexTypes)(
+  `%s mixed-value key conservation`,
+  (_indexName, IndexType) => {
+    test.each(mixedRows)(
+      `keeps every surviving key once after deleting $id`,
+      (removed) => {
+        const index = new IndexType(1, new PropRef([`value`]))
+        const rows = new Map<string, number | string>()
+        for (const row of mixedRows) {
+          index.add(row.id, row)
+          rows.set(row.id, row.value)
+          expectConservedIndexKeys(index, rows)
+        }
+        index.remove(removed.id, removed)
+        rows.delete(removed.id)
+        expectConservedIndexKeys(index, rows)
+      },
+    )
+
+    test(`keeps one copy of each key after a mixed-value delete, update, and add`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const rows = new Map<string, number | string>()
+      const add = (id: string, value: number | string) => {
+        index.add(id, { id, value })
+        rows.set(id, value)
+        expectConservedIndexKeys(index, rows)
+      }
+
+      add(`a`, 2)
+      add(`b`, `2`)
+      add(`d`, `10`)
+      index.remove(`a`, { id: `a`, value: 2 })
+      rows.delete(`a`)
+      expectConservedIndexKeys(index, rows)
+      index.update(`b`, { id: `b`, value: `2` }, { id: `b`, value: 2 })
+      rows.set(`b`, 2)
+      expectConservedIndexKeys(index, rows)
+      add(`a`, `2`)
+    })
+
+    test.each([
+      {
+        name: `ZonedDateTime`,
+        first:
+          Temporal.Instant.fromEpochNanoseconds(9n).toZonedDateTimeISO(`UTC`),
+        second:
+          Temporal.Instant.fromEpochNanoseconds(10n).toZonedDateTimeISO(`UTC`),
+        text: `tanstack-db:temporal:Temporal.ZonedDateTime:5:fake`,
+      },
+      {
+        name: `Duration`,
+        first: Temporal.Duration.from({ nanoseconds: 9 }),
+        second: Temporal.Duration.from({ nanoseconds: 10 }),
+        text: `tanstack-db:temporal:Temporal.Duration:time:5:fake`,
+      },
+    ])(
+      `keeps $name and ordinary-string owners after deletion`,
+      ({ first, second, text }) => {
+        const index = new IndexType(1, new PropRef([`value`]))
+        const rows = new Map<string, unknown>()
+        for (const [id, value] of [
+          [`a`, first],
+          [`b`, second],
+          [`c`, text],
+        ] as const) {
+          index.add(id, { id, value })
+          rows.set(id, value)
+          expectConservedIndexKeys(index, rows)
+        }
+        index.remove(`b`, { id: `b`, value: second })
+        rows.delete(`b`)
+        expectConservedIndexKeys(index, rows)
+      },
+    )
+  },
+)
+
+describe.each([
+  [`BasicIndex`, BasicIndex],
+  [`BTreeIndex`, BTreeIndex],
+] as const)(`%s mixed-value public snapshot`, (_indexName, IndexType) => {
+  test(`returns each surviving key once after a source deletion`, async () => {
+    const options = mockSyncCollectionOptions<{
+      id: string
+      value: number | string
+    }>({
+      id: `mixed-value-public-snapshot-${IndexType.name}`,
+      getKey: (row) => row.id,
+      initialData: mixedRows.map((row) => ({ ...row })),
+      autoIndex: `off`,
+    })
+    const collection = createCollection(options)
+    await withCollectionCleanup(collection, async () => {
+      await collection.stateWhenReady()
+      const index = collection.createIndex((row) => row.value, {
+        indexType: IndexType,
+      })
+      const take = vi.spyOn(index, `takeFromStart`)
+      const rows = new Map(mixedRows.map((row) => [row.id, row.value]))
+
+      options.utils.begin()
+      options.utils.write({ type: `delete`, value: mixedRows[0]! })
+      options.utils.commit()
+      rows.delete(mixedRows[0]!.id)
+
+      take.mockClear()
+
+      const changes = collection.currentStateAsChanges({
+        orderBy: [
+          {
+            expression: new PropRef([`value`]),
+            compareOptions: { direction: `asc`, nulls: `first` },
+          },
+        ],
+        limit: rows.size + 1,
+        optimizedOnly: true,
+      })
+      expect(take).toHaveBeenCalled()
+      expect(changes).toBeDefined()
+      const keys = changes!.map((change) => change.key)
+      expect(keys).toHaveLength(rows.size)
+      expect(new Set(keys)).toEqual(new Set(rows.keys()))
+    })
+  })
+})
+
+/**
+ * Binary equality is by byte content, so a fresh byte array can remove an
+ * earlier equal value. The source Map predicts exact membership after removal,
+ * re-addition, and replacement while another byte value remains. Complete
+ * index reads must contain each live key once; byte ordering is unspecified.
+ */
+describe.each(indexTypes)(`%s binary-value ownership`, (_name, IndexType) => {
+  test(`does not retain an ordered entry after equal-content removal`, () => {
+    const index = new IndexType(1, new PropRef([`value`]))
+    const rows = new Map<string, Uint8Array>()
+    const bytes = (value = 1) => new Uint8Array([value])
+    const check = () => {
+      const expected = new Set(rows.keys())
+      expect(index.keyCount).toBe(rows.size)
+      expect(index.equalityLookup(bytes())).toEqual(
+        new Set(
+          [...rows].filter(([, value]) => value[0] === 1).map(([key]) => key),
+        ),
+      )
+      for (const read of [
+        index.takeFromStart(rows.size + 1),
+        index.takeReversedFromEnd(rows.size + 1),
+      ]) {
+        expect(read).toHaveLength(rows.size)
+        expect(new Set(read)).toEqual(expected)
+      }
+    }
+
+    index.add(`a`, { value: bytes() })
+    rows.set(`a`, bytes())
+    check()
+    index.remove(`a`, { value: bytes() })
+    rows.delete(`a`)
+    check()
+    index.add(`b`, { value: bytes() })
+    rows.set(`b`, bytes())
+    check()
+
+    const oldBytes = bytes()
+    index.add(`c`, { value: bytes(2) })
+    rows.set(`c`, bytes(2))
+    index.add(`d`, { value: oldBytes })
+    rows.set(`d`, oldBytes)
+    check()
+    index.remove(`b`, { value: bytes() })
+    rows.delete(`b`)
+    check()
+    index.update(`d`, { value: oldBytes }, { value: bytes() })
+    rows.set(`d`, bytes())
+    check()
+  })
+
+  test.each([2, 8193])(
+    `compares every byte for exact membership (%i bytes)`,
+    (length) => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const left = new Uint8Array(length)
+      left[0] = 1
+      const right = left.slice()
+      right[length - 1] = 1
+      index.add(`left`, { value: left })
+      index.add(`right`, { value: right })
+      expect(index.equalityLookup(left.slice())).toEqual(new Set([`left`]))
+      expect(index.equalityLookup(right.slice())).toEqual(new Set([`right`]))
+      for (const read of [
+        index.takeFromStart(3),
+        index.takeReversedFromEnd(3),
+      ]) {
+        expect(read).toHaveLength(2)
+        expect(new Set(read)).toEqual(new Set([`left`, `right`]))
+      }
+    },
+  )
+})
+
+/**
+ * PlainMonthDay has exact equality but no intrinsic order. The two-row source
+ * Map predicts one key for a copy of February 1, both before and after index
+ * creation. The index may choose any storage order; a public equality read
+ * must not fail merely because both values are present.
+ */
+describe.each(indexTypes)(
+  `%s unordered Temporal equality`,
+  (_name, IndexType) => {
+    test(`accepts distinct PlainMonthDay values for exact lookup`, async () => {
+      const rows = [
+        { id: `jan`, value: Temporal.PlainMonthDay.from(`--01-01`) },
+        { id: `feb`, value: Temporal.PlainMonthDay.from(`--02-01`) },
+      ]
+      const probe = Temporal.PlainMonthDay.from(`--02-01`)
+      const expected = new Set(
+        rows
+          .filter(
+            (row) =>
+              row.value.monthCode === probe.monthCode &&
+              row.value.day === probe.day,
+          )
+          .map((row) => row.id),
+      )
+      const index = new IndexType(1, new PropRef([`value`]))
+      for (const row of rows) index.add(row.id, row)
+      expect(index.lookup(`eq`, probe)).toEqual(expected)
+
+      const collection = createCollection(
+        mockSyncCollectionOptions({
+          id: `month-day-equality-${IndexType.name}`,
+          getKey: (row: (typeof rows)[number]) => row.id,
+          initialData: rows,
+          autoIndex: `off`,
+          defaultIndexType: IndexType,
+        }),
+      )
+      await withCollectionCleanup(collection, async () => {
+        await collection.stateWhenReady()
+        const where = eq(new PropRef([`value`]), probe)
+        const read = () =>
+          collection
+            .currentStateAsChanges({ where })!
+            .map((row) => row.key)
+            .sort()
+        expect(read()).toEqual([...expected].sort())
+        const publicIndex = collection.createIndex((row) => row.value)
+        const lookup = vi.spyOn(publicIndex, `lookup`)
+        expect(read()).toEqual([...expected].sort())
+        expect(lookup).toHaveBeenCalled()
+      })
+    })
+  },
+)
+
+/**
+ * A bounded read should not make more comparator calls as retired values
+ * accumulate. A fixed history retains one row while adding and removing 16,
+ * 64, or 256 earlier values. A user comparator records calls made by the
+ * public takeFromStart method after each history. This witnesses comparator
+ * work only: a traversal over tombstones that avoids the comparator could
+ * pass, and retained memory is measured separately.
+ */
+describe.each(indexTypes)(`%s retired-value read work`, (_name, IndexType) => {
+  test(`takeFromStart comparator work does not grow with retired values`, () => {
+    const comparisons = [16, 64, 256].map((retiredCount) => {
+      let calls = 0
+      const index = new IndexType(1, new PropRef([`value`]), undefined, {
+        compareFn: (left: unknown, right: unknown) => {
+          calls++
+          return (left as number) - (right as number)
+        },
+      })
+      index.add(`live`, { value: 1000 })
+      for (let value = 0; value < retiredCount; value++) {
+        const key = String(value)
+        index.add(key, { value })
+        index.remove(key, { value })
+      }
+      expect(index.keyCount).toBe(1)
+      calls = 0
+      expect(index.takeFromStart(1)).toEqual([`live`])
+      return calls
+    })
+
+    expect(comparisons[2]).toBeLessThanOrEqual(comparisons[0]! + 4)
+  })
+})
+
+/**
+ * Distinct exact values can share one comparator position. An ordered first
+ * row still requires sorting that group's keys, but it need not recompare
+ * every value in the group. The fixed 16/64/256 sizes distinguish a grouped
+ * read from one tree search per tied exact value. This bounds comparator work
+ * at the direct read checkpoint, not elapsed time or retained memory.
+ */
+test(`BTreeIndex bounded reads do not recompare every live tie`, () => {
+  const comparisons = [16, 64, 256].map((count) => {
+    let calls = 0
+    const index = new BTreeIndex<string>(1, new PropRef([`value`]), undefined, {
+      compareFn: () => {
+        calls++
+        return 0
+      },
+    })
+    for (let value = 0; value < count; value++) {
+      index.add(String(value), { value })
+    }
+    calls = 0
+    expect(index.takeFromStart(1)).toEqual([`0`])
+    return calls
+  })
+  expect(comparisons[2]).toBeLessThanOrEqual(comparisons[0]! + 4)
+})
+
+/**
+ * Preserve a bounded legacy callback input: older indexes supplied a Date's
+ * timestamp and a string for Temporal and binary values. For two immutable
+ * values of each named kind, a direct add comparison supplies that same scalar
+ * kind in both index types. The model uses two values with a known order; it
+ * does not copy or specify the index's string encoding. A callback that accepts
+ * only the old scalar kind distinguishes a raw-object leak. After both adds,
+ * full ordered keys and exact owners must match the supplied facts. This does
+ * not establish arbitrary callbacks, build/update/range paths, or mutation of
+ * the value objects after admission.
+ */
+describe.each(indexTypes)(
+  `%s comparator input compatibility`,
+  (_name, IndexType) => {
+    test.each([
+      {
+        name: `Date`,
+        values: [new Date(1), new Date(2)],
+        kind: `number`,
+      },
+      {
+        name: `Temporal.Instant`,
+        values: [
+          Temporal.Instant.from(`2020-01-01T00:00:00Z`),
+          Temporal.Instant.from(`2021-01-01T00:00:00Z`),
+        ],
+        kind: `string`,
+      },
+      {
+        name: `Uint8Array`,
+        values: [new Uint8Array([1]), new Uint8Array([2])],
+        kind: `string`,
+      },
+    ])(
+      `passes $name to callbacks in its legacy scalar kind`,
+      ({ values, kind }) => {
+        let comparisons = 0
+        const index = new IndexType(1, new PropRef([`value`]), undefined, {
+          compareFn: (left, right) => {
+            comparisons++
+            expect(typeof left).toBe(kind)
+            expect(typeof right).toBe(kind)
+            if (kind === `number`) return (left as number) - (right as number)
+            const a = left as string
+            const b = right as string
+            return a < b ? -1 : a > b ? 1 : 0
+          },
+        })
+        // Keys oppose value order, so collapsing both inputs to one comparator
+        // position cannot pass by key-tie ordering alone.
+        index.add(`a`, { value: values[1] })
+        index.add(`z`, { value: values[0] })
+        expect(comparisons).toBeGreaterThan(0)
+        expect(index.takeFromStart(2)).toEqual([`z`, `a`])
+        expect(index.equalityLookup(values[0])).toEqual(new Set([`z`]))
+        expect(index.equalityLookup(values[1])).toEqual(new Set([`a`]))
+      },
+    )
+  },
+)

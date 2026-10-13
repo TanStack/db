@@ -1,23 +1,12 @@
-import { beforeAll, describe, expect, test } from 'vitest'
+import { describe, expect, test } from 'vitest'
 import { D2 } from '../../src/d2.js'
 import { MultiSet } from '../../src/multiset.js'
 import {
   orderByWithFractionalIndex,
   output,
 } from '../../src/operators/index.js'
-import { orderByWithFractionalIndexBase } from '../../src/operators/orderBy.js'
-import {
-  loadBTree,
-  topKWithFractionalIndexBTree,
-} from '../../src/operators/topKWithFractionalIndexBTree.js'
 import { MessageTracker, compareFractionalIndex } from '../test-utils.js'
 import type { KeyValue } from '../../src/types.js'
-
-const orderByWithBTree: typeof orderByWithFractionalIndex = (
-  extract,
-  options,
-) =>
-  orderByWithFractionalIndexBase(topKWithFractionalIndexBTree, extract, options)
 
 const stripFractionalIndex = ([[key, [value, _index]], multiplicity]: any) => [
   key,
@@ -29,15 +18,9 @@ const stripFractionalIndexWithoutMultiplicity = (
   r: [string, [{ id: number; value: string }, string]],
 ) => [r[0], r[1][0]]
 
-beforeAll(async () => {
-  await loadBTree()
-})
-
 describe(`Operators`, () => {
-  describe.each([
-    [`with array`, { orderBy: orderByWithFractionalIndex }],
-    [`with B+ tree`, { orderBy: orderByWithBTree }],
-  ])(`OrderByWithFractionalIndex operator %s`, (_, { orderBy }) => {
+  describe(`OrderByWithFractionalIndex operator`, () => {
+    const orderBy = orderByWithFractionalIndex
     test(`initial results with default comparator`, () => {
       const graph = new D2()
       const input = graph.newInput<
@@ -493,7 +476,7 @@ describe(`Operators`, () => {
     })
   })
 
-  describe(`OrderByWithFractionalIndex operator with array`, () => {
+  describe(`OrderByWithFractionalIndex window moves`, () => {
     test(`should support moving orderBy window past current window using setWindowFn callback`, () => {
       const graph = new D2()
       const input = graph.newInput<

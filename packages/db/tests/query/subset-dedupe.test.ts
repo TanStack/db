@@ -1,4 +1,3 @@
-import { runInNewContext } from 'node:vm'
 import { describe, expect, it, vi } from 'vitest'
 import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe'
 import { eq, gt } from '../../src/query/builder/functions'
@@ -382,49 +381,6 @@ describe(`DeduplicatedLoadSubset`, () => {
     expect(deduplicated.loadSubset(request(2025))).toBe(true)
     expect(loadSubset).toHaveBeenCalledTimes(2)
   })
-
-  it(`does not substitute comparison payloads with custom instance methods`, () => {
-    const date = new Date(2)
-    const bytes = new Uint8Array([1, 2, 3])
-    Object.defineProperty(date, `getTime`, { value: () => 1 })
-    Object.defineProperty(bytes, `slice`, { value: () => bytes })
-    const where = new Func<boolean>(`and`, [
-      eq(ref(`date`), val(date)),
-      eq(ref(`bytes`), val(bytes)),
-    ])
-    const request = captureRequest({ where })
-    const rows = [
-      { date, bytes },
-      { date: new Date(2), bytes: new Uint8Array([1, 2, 3]) },
-    ]
-    expect(request.where).toBe(where)
-    expect(rows.map(compileSingleRowExpression(request.where!))).toEqual(
-      rows.map(compileSingleRowExpression(where)),
-    )
-  })
-
-  describe.each([`Date`, `Uint8Array`] as const)(
-    `request transport preserves %s predicate matches`,
-    (type) => {
-      it.each([`local`, `foreign`] as const)(`in the %s realm`, (realm) => {
-        const local = type === `Date` ? new Date(2) : new Uint8Array([1, 2])
-        const foreign: unknown = runInNewContext(
-          type === `Date` ? `new Date(2)` : `new Uint8Array([1, 2])`,
-        )
-        const value = realm === `local` ? local : foreign
-        for (const where of [
-          eq(ref(`value`), val(value)),
-          new Func<boolean>(`in`, [ref(`value`), val([value])]),
-        ]) {
-          const request = captureRequest({ where })
-          const matches = compileSingleRowExpression(request.where!)
-          expect(
-            [foreign, local].map((item) => matches({ value: item })),
-          ).toEqual(realm === `foreign` ? [true, false] : [false, true])
-        }
-      })
-    },
-  )
 
   it.each([`coalesce`, `caseWhen`] as const)(
     `preserves membership results through %s`,

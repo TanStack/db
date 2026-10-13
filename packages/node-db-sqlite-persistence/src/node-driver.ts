@@ -264,9 +264,3 @@ export class BetterSqlite3SQLiteDriver implements SQLiteDriver {
     }
   }
 }
-
-export function createBetterSqlite3Driver(
-  options: BetterSqlite3DriverOptions,
-): BetterSqlite3SQLiteDriver {
-  return new BetterSqlite3SQLiteDriver(options)
-}
