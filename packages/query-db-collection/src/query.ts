@@ -8,6 +8,7 @@ import {
   LoadSubsetOperationAbortedError,
   compileSingleRowExpression,
   deepEquals,
+  getLegacyLoadSubsetDemandKey,
   getLoadSubsetDemandKey,
   toBooleanPredicate,
   validateSyncPersistenceCapability,
@@ -1204,6 +1205,7 @@ export function queryCollectionOptions(
       string,
       ReturnType<typeof setTimeout>
     >()
+    const legacyPersistedOwnerHashes = new Map<string, string>()
     let persistedRetentionMaintenance = Promise.resolve()
 
     const invalidatePendingResultApplication = (hashedQueryKey: string) => {
@@ -1493,6 +1495,7 @@ export function queryCollectionOptions(
         return new Set(knownRows)
       }
 
+      const legacyOwnerHash = legacyPersistedOwnerHashes.get(hashedQueryKey)
       const ownedRows = new Set<string | number>()
       for (const [rowKey] of collection._state.syncedData.entries()) {
         const owners = getPersistedOwners(rowKey)
@@ -1502,7 +1505,10 @@ export function queryCollectionOptions(
 
         addRowOwners(rowKey, owners)
 
-        if (owners.has(hashedQueryKey)) {
+        if (
+          owners.has(hashedQueryKey) ||
+          (legacyOwnerHash !== undefined && owners.has(legacyOwnerHash))
+        ) {
           ownedRows.add(rowKey)
         }
       }
@@ -1522,11 +1528,13 @@ export function queryCollectionOptions(
       >
     > => {
       const recoveryEpoch = scopedRecoveryEpoch
+      const legacyOwnerHash = legacyPersistedOwnerHashes.get(hashedQueryKey)
       const knownRows = queryToRows.get(hashedQueryKey)
       // An empty result cannot collide with an unseen durable owner. A later
       // nonempty result can, so scan storage before assigning its row owners.
       if (
         knownRows &&
+        legacyOwnerHash === undefined &&
         (knownRows.size > 0 || incomingItemsAreEmpty) &&
         Array.from(knownRows).every((rowKey) => collection.has(rowKey))
       ) {
@@ -1596,7 +1604,10 @@ export function queryCollectionOptions(
 
         addRowOwners(row.key, ownerSet)
 
-        if (ownerSet.has(hashedQueryKey)) {
+        if (
+          ownerSet.has(hashedQueryKey) ||
+          (legacyOwnerHash !== undefined && ownerSet.has(legacyOwnerHash))
+        ) {
           baseline.set(row.key, {
             value: row.value,
             owners: ownerSet,
@@ -1885,6 +1896,31 @@ export function queryCollectionOptions(
       // Generate key using common function
       const key = generateQueryKeyFromOptions(opts)
       const hashedQueryKey = hashKey(key)
+      let discoveredLegacyOwner = false
+      if (
+        metadata &&
+        syncMode === `on-demand` &&
+        typeof queryKey !== `function`
+      ) {
+        const oldDemandKey = getLegacyLoadSubsetDemandKey(opts)
+        if (oldDemandKey !== undefined) {
+          const oldHash = hashKey([...queryKey, oldDemandKey])
+          if (oldHash !== hashedQueryKey) {
+            const oldEntry = metadata.collection.get(
+              `${QUERY_COLLECTION_GC_PREFIX}${oldHash}`,
+            )
+            if (
+              parsePersistedQueryRetentionEntry(oldEntry, oldHash) !== undefined
+            ) {
+              discoveredLegacyOwner =
+                !legacyPersistedOwnerHashes.has(hashedQueryKey)
+              legacyPersistedOwnerHashes.set(hashedQueryKey, oldHash)
+              retainedQueriesPendingRevalidation.add(hashedQueryKey)
+              cancelPersistedRetentionExpiry(oldHash)
+            }
+          }
+        }
+      }
       const {
         subscription: _subscription,
         refetch: _refetch,
@@ -1925,6 +1961,9 @@ export function queryCollectionOptions(
 
         if (opts.refetch) {
           return refetchAndWaitForApplication(observer, hashedQueryKey)
+        }
+        if (discoveredLegacyOwner) {
+          return refetchOrWaitForEnabledQuery(observer, hashedQueryKey)
         }
 
         const query = observer.getCurrentQuery()
@@ -2255,6 +2294,7 @@ export function queryCollectionOptions(
         collection._state.acceptedSyncedEntries(),
       )
       const shouldUsePersistedBaseline = persistedBaseline !== undefined
+      const legacyOwnerHash = legacyPersistedOwnerHashes.get(hashedQueryKey)
       const previouslyOwnedRows = shouldUsePersistedBaseline
         ? new Set(persistedBaseline.keys())
         : getHydratedOwnedRowsForQueryBaseline(hashedQueryKey)
@@ -2335,6 +2375,10 @@ export function queryCollectionOptions(
       const previousOwnedRows = queryToRows.has(hashedQueryKey)
         ? new Set(queryToRows.get(hashedQueryKey))
         : undefined
+      const previousLegacyOwnedRows =
+        legacyOwnerHash !== undefined && queryToRows.has(legacyOwnerHash)
+          ? new Set(queryToRows.get(legacyOwnerHash))
+          : undefined
       const affectedRowKeys = new Set([
         ...previouslyOwnedRows,
         ...newItemsMap.keys(),
@@ -2386,6 +2430,13 @@ export function queryCollectionOptions(
         } else {
           queryToRows.set(hashedQueryKey, previousOwnedRows)
         }
+        if (legacyOwnerHash !== undefined) {
+          if (previousLegacyOwnedRows === undefined) {
+            queryToRows.delete(legacyOwnerHash)
+          } else {
+            queryToRows.set(legacyOwnerHash, previousLegacyOwnedRows)
+          }
+        }
         previousOwnersByRow.forEach((owners, key) => {
           if (owners === undefined) {
             rowToQueries.delete(key)
@@ -2425,6 +2476,11 @@ export function queryCollectionOptions(
           metadata.collection.delete(
             `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,
           )
+          if (legacyOwnerHash !== undefined) {
+            metadata.collection.delete(
+              `${QUERY_COLLECTION_GC_PREFIX}${legacyOwnerHash}`,
+            )
+          }
         }
 
         previouslyOwnedRows.forEach((key) => {
@@ -2432,12 +2488,16 @@ export function queryCollectionOptions(
             ? persistedBaseline.get(key)?.value
             : currentSyncedItems.get(key)
           const newItem = newItemsMap.get(key)
+          if (legacyOwnerHash !== undefined) {
+            removeRowOwner(key, legacyOwnerHash)
+          }
           if (!newItem) {
             const directPosition = unownedDirectWritePositions.get(key)
             if (directPosition !== undefined)
               settledDirectPositions.set(key, directPosition)
             const owners = getPersistedOwners(key)
             owners.delete(hashedQueryKey)
+            if (legacyOwnerHash !== undefined) owners.delete(legacyOwnerHash)
             setPersistedOwners(key, owners)
             const needToRemove = removeRowOwner(key, hashedQueryKey)
             // A superseded result's row can still be waiting for durable
@@ -2470,6 +2530,8 @@ export function queryCollectionOptions(
             settledDirectPositions.set(key, directPosition)
           }
           const owners = getPersistedOwners(key)
+          const retiredLegacyOwner =
+            legacyOwnerHash !== undefined && owners.delete(legacyOwnerHash)
           const addsOwner = !owners.has(hashedQueryKey)
           const insertsRow = !currentSyncedItems.has(key)
           if (addsOwner) {
@@ -2490,7 +2552,7 @@ export function queryCollectionOptions(
             // claim also replaces the direct value with the server value.
             write({ type: `update`, value: newItem })
           }
-          if (addsOwner || insertsRow) {
+          if (addsOwner || insertsRow || retiredLegacyOwner) {
             // An insert clears stale metadata for its key. Stage ownership
             // afterward so rows and ownership commit as one state change.
             setPersistedOwners(key, owners)
@@ -2516,6 +2578,10 @@ export function queryCollectionOptions(
         // Readiness counts accepted rows; the application, which settles a
         // subset load, waits for them to be visible.
         const finishApplication = () => {
+          if (legacyOwnerHash !== undefined) {
+            queryToRows.delete(legacyOwnerHash)
+            legacyPersistedOwnerHashes.delete(hashedQueryKey)
+          }
           removedRows.forEach((key) => {
             if (collection._state.getAcceptedSyncedRow(key) === undefined)
               acceptedRowPositions.delete(key)

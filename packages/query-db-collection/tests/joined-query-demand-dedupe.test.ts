@@ -43,9 +43,10 @@ function createChildSource() {
     { id: 20, parentId: 2 },
   ]
   const queryFn = vi.fn((context: QueryFunctionContext) => {
-    const parentId = extractSimpleComparisons(
-      context.meta?.loadSubsetOptions?.where,
-    ).find(({ field }) => field.join(`.`) === `parentId`)
+    const where = context.meta?.loadSubsetOptions?.where
+    const parentId = extractSimpleComparisons(where).find(
+      ({ field }) => field.join(`.`) === `parentId`,
+    )
     if (parentId?.operator === `eq`)
       return Promise.resolve(
         rows.filter((row) => row.parentId === parentId.value),
@@ -54,7 +55,8 @@ function createChildSource() {
       return Promise.resolve(
         rows.filter((row) => parentId.value.includes(row.parentId)),
       )
-    return Promise.resolve(rows)
+    if (where === undefined) return Promise.resolve(rows)
+    throw new Error(`Unexpected joined-demand predicate`)
   })
   const children = createCollection(
     queryCollectionOptions({
@@ -133,3 +135,45 @@ it(`shares a direct equality request with the same joined singleton request`, as
   expect(direct.toArray.map((row) => row.id)).toEqual([10])
   expect(joined.toArray.map((row) => row.child?.id)).toEqual([10])
 })
+
+for (const firstOwner of [`joined`, `direct`] as const) {
+  for (const retiredOwner of [`joined`, `direct`] as const) {
+    it(`keeps peer rows when ${firstOwner} loads first and ${retiredOwner} retires first`, async () => {
+      // One source row satisfies both logical owners. The reference keeps it
+      // visible until the last owner retires, independent of acquisition order.
+      const parents = createParentSource([1])
+      const { children, queryFn } = createChildSource()
+      const joined = createJoin(parents, children)
+      const direct = createLiveQueryCollection((q) =>
+        q.from({ child: children }).where(({ child }) => eq(child.parentId, 1)),
+      )
+      cleanups.push(() => direct.cleanup())
+      const owners = { joined, direct }
+      await owners[firstOwner].preload()
+      await owners[firstOwner === `joined` ? `direct` : `joined`].preload()
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      const firstWhere =
+        queryFn.mock.calls[0]![0].meta?.loadSubsetOptions?.where
+      const firstComparison = extractSimpleComparisons(firstWhere).find(
+        ({ field }) => field.join(`.`) === `parentId`,
+      )
+      expect(firstComparison?.operator).toBe(
+        firstOwner === `joined` ? `in` : `eq`,
+      )
+      expect(firstComparison?.value).toEqual(firstOwner === `joined` ? [1] : 1)
+      expect(joined.toArray.map((row) => row.child?.id)).toEqual([10])
+      expect(direct.toArray.map((row) => row.id)).toEqual([10])
+
+      await owners[retiredOwner].cleanup()
+      if (retiredOwner === `joined`) {
+        expect(direct.toArray.map((row) => row.id)).toEqual([10])
+      } else {
+        expect(joined.toArray.map((row) => row.child?.id)).toEqual([10])
+      }
+      expect(children.has(10)).toBe(true)
+      await owners[retiredOwner === `joined` ? `direct` : `joined`].cleanup()
+      await vi.waitFor(() => expect(children.has(10)).toBe(false))
+      expect(queryFn).toHaveBeenCalledTimes(1)
+    })
+  }
+}

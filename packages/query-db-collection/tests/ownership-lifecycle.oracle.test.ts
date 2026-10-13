@@ -17,6 +17,7 @@ import {
 } from '@tanstack/db'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createDeferred } from '../../db/src/deferred.js'
+import { createSingleRowRefProxy } from '../../db/src/query/builder/ref-proxy.js'
 import {
   compileSingleRowExpression,
   toBooleanPredicate,
@@ -1184,6 +1185,10 @@ type StoredOwnership = {
   collectionMetadata: Map<string, unknown>
 }
 
+// A persisted key from before literal singleton IN shared EQ's identity.
+// Keep the historical bytes independent of the current encoder.
+const legacySingletonCategoryDemandKey = `{"type":"loadSubsetDemand","query":{"type":"loadSubsetQuery","where":{"type":"func","name":"in","args":[{"type":"ref","path":[["string","category"]]},{"type":"val","value":["set",[["string","shared"]]]}]}}}`
+
 function categorySubset(category: `detail` | `list`): LoadSubsetOptions {
   return {
     where: new IR.Func(`in`, [
@@ -1207,6 +1212,21 @@ function selectOwnershipRows(
   }
   const { where } = options
   if (!where) return Array.from(items, (item) => structuredClone(item))
+  if (
+    where.type === `func` &&
+    where.name === `eq` &&
+    where.args.length === 2 &&
+    where.args[0]?.type === `ref` &&
+    where.args[0].path.length === 1 &&
+    where.args[0].path[0] === `category` &&
+    where.args[1]?.type === `val` &&
+    typeof where.args[1].value === `string`
+  ) {
+    const category = where.args[1].value
+    return Array.from(items)
+      .filter((item) => item.category === category)
+      .map((item) => structuredClone(item))
+  }
   if (
     where.type !== `func` ||
     where.name !== `in` ||
@@ -11368,6 +11388,70 @@ describe(`query collection ownership lifecycle`, () => {
   )
 
   /**
+   * Literal proxy values use object identity even when their encoded query
+   * paths match. The reference evaluates each authored predicate against one
+   * source row and expects a separate provider acquisition for the predicate
+   * that does not match. The first owner then retires: its row must disappear
+   * while the second owner remains active. This receiving history checks that
+   * the identity oracle's distinct keys affect real QueryClient ownership.
+   */
+  it(`does not reuse a Query result for a different literal proxy value`, async () => {
+    type Row = { id: string; value: unknown }
+    const id = `literal-proxy-query-identity`
+    const firstValue = createSingleRowRefProxy<{ value: number }>().value
+    const secondValue = createSingleRowRefProxy<{ value: number }>().value
+    const source: Row = { id: `one`, value: firstValue }
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    })
+    const queryFn = vi.fn((context: QueryFunctionContext) => {
+      const where = context.meta?.loadSubsetOptions?.where
+      if (
+        where?.type !== `func` ||
+        where.name !== `in` ||
+        where.args[1]?.type !== `val` ||
+        !Array.isArray(where.args[1].value)
+      ) {
+        throw new Error(`Expected a literal membership request`)
+      }
+      const member = where.args[1].value[0]
+      return Promise.resolve(Object.is(source.value, member) ? [source] : [])
+    })
+    const collection = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+      }),
+    )
+    cleanups.push(async () => {
+      await collection.cleanup()
+      queryClient.clear()
+    })
+    const request = (value: unknown) => ({
+      where: new IR.Func<boolean>(`in`, [
+        new IR.PropRef([`value`]),
+        new IR.Value([value]),
+      ]),
+    })
+    const first = request(firstValue)
+    const second = request(secondValue)
+
+    await collection._sync.loadSubset(first)
+    expect(collection.has(`one`)).toBe(true)
+    await collection._sync.loadSubset(second)
+    expect(queryFn).toHaveBeenCalledTimes(2)
+    expect(collection.has(`one`)).toBe(true)
+    collection._sync.unloadSubset(first)
+    await vi.waitFor(() => expect(collection.has(`one`)).toBe(false))
+    collection._sync.unloadSubset(second)
+  })
+
+  /**
    * A Query Core hash may coalesce equivalent subset predicates into one
    * physical Query while DB retains two logical subset demands. A response
    * from a fetch started before an accepted direct write cannot undo that
@@ -11375,10 +11459,10 @@ describe(`query collection ownership lifecycle`, () => {
    * a later fetch may replace it. The reference is the order of the authored
    * fetches and write, independent of the Query cache's chosen first key.
    *
-   * The legal history uses `id = x` and `id IN [x, NULL]`. The constant-list
-   * evaluator ignores the nullish candidate, so both select the same rows.
-   * The conservative demand identity still keeps their keys distinct. The
-   * real QueryClient coalesces them by a custom hash.
+   * The legal history asks for the first one and first two rows under the
+   * same predicate. Its one-row provider result satisfies both windows, while
+   * the exact-demand contract keeps their limit values distinct. The real
+   * QueryClient coalesces them by a custom hash.
    * The public row is compared after the write, after the held
    * older result applies, and after a post-write result applies. The provider
    * call count proves each requested fetch ran.
@@ -11422,20 +11506,10 @@ describe(`query collection ownership lifecycle`, () => {
       await collection.cleanup()
       queryClient.clear()
     })
-    const a = { where: eq(new IR.PropRef([`id`]), `x`) }
-    const b = {
-      where: new IR.Func(`in`, [
-        new IR.PropRef([`id`]),
-        new IR.Value([`x`, null]),
-      ]),
-    }
+    const where = eq(new IR.PropRef([`id`]), `x`)
+    const a = { where, limit: 1 }
+    const b = { where, limit: 2 }
     expect(getLoadSubsetDemandKey(a)).not.toBe(getLoadSubsetDemandKey(b))
-    for (const candidate of [`x`, `other`, null, undefined]) {
-      const row = { id: candidate }
-      expect(compileSingleRowExpression(a.where)(row)).toBe(
-        compileSingleRowExpression(b.where)(row),
-      )
-    }
 
     await collection._sync.loadSubset(a)
     await collection._sync.loadSubset({ ...b, refetch: true })
@@ -11910,6 +11984,254 @@ describe(`query collection ownership lifecycle`, () => {
 
   it(`preserves committed peer ownership through a cold revalidation`, async () => {
     expectColdOwnerRevalidation(await observeColdOwnerRevalidation())
+  })
+
+  /**
+   * A persisted owner belongs to its logical demand across an upgrade that
+   * changes the demand's cache key. This serialized key is a fixture written
+   * by the older singleton-IN encoder, not an expected value computed with
+   * the current encoder. Revalidating that demand with an empty source result
+   * must retire its old owner and retention marker at application. Another
+   * demand's claim on the same row must survive until it too revalidates.
+   */
+  it.each(
+    [false, true].flatMap((preUpgrade) =>
+      [false, true].map((sharedRow) => ({ preUpgrade, sharedRow })),
+    ),
+  )(
+    `retires a persisted singleton membership owner after cold revalidation, pre-upgrade $preUpgrade, shared row $sharedRow`,
+    async ({ preUpgrade, sharedRow }) => {
+      const id = `persisted-singleton-membership-${preUpgrade}-${sharedRow}`
+      const singleton = {
+        where: new IR.Func(`in`, [
+          new IR.PropRef([`category`]),
+          new IR.Value([`shared`]),
+        ]),
+      }
+      const other = categorySubset(`detail`)
+      const oldDemandKey = legacySingletonCategoryDemandKey
+      const oldHash = hashKey([id, oldDemandKey])
+      const currentDemandKey = getLoadSubsetDemandKey(singleton)
+      const currentHash = hashKey([id, currentDemandKey])
+      const otherHash = hashKey([id, getLoadSubsetDemandKey(other)])
+      expect(currentDemandKey).not.toBe(oldDemandKey)
+      expect(currentHash).not.toBe(oldHash)
+
+      // The reference owner graph has one or two edges to the stored row.
+      // Each empty source result removes exactly its demand's edge.
+      const singletonHash = preUpgrade ? oldHash : currentHash
+      const initialOwners = sharedRow
+        ? [singletonHash, otherHash]
+        : [singletonHash]
+      const storage = createOwnershipStorage({
+        rows: new Map([[shared.id, shared]]),
+        rowMetadata: new Map([
+          [
+            shared.id,
+            {
+              queryCollection: {
+                owners: Object.fromEntries(
+                  initialOwners.map((hash) => [hash, true]),
+                ),
+              },
+            },
+          ],
+        ]),
+        collectionMetadata: new Map(
+          initialOwners.map((hash) => [
+            `queryCollection:gc:${hash}`,
+            { queryHash: hash, mode: `until-revalidated` },
+          ]),
+        ),
+      })
+      const { collection, queryFn } = createPersistedOwnershipFixture(
+        id,
+        storage,
+        [],
+      )
+      const observe = () => {
+        const snapshot = storage.snapshot()
+        return {
+          stored: storedItems(storage),
+          public: collection.toArray.map(({ id: rowId, category, name }) => ({
+            id: rowId,
+            category,
+            name,
+          })),
+          owners: persistedOwners(snapshot.rowMetadata, shared.id),
+          markers: [...snapshot.collectionMetadata.keys()].sort(),
+        }
+      }
+      const expected = (owners: Array<string>, publicVisible: boolean) => ({
+        stored: owners.length ? [shared] : [],
+        public: publicVisible ? [shared] : [],
+        owners: [...owners].sort(),
+        markers: owners.map((hash) => `queryCollection:gc:${hash}`).sort(),
+      })
+
+      await collection.stateWhenReady()
+      expect(queryFn).not.toHaveBeenCalled()
+      expect(observe()).toEqual(expected(initialOwners, false))
+
+      await collection._sync.loadSubset(singleton)
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      await vi.waitFor(() =>
+        expect(observe()).toEqual(
+          expected(sharedRow ? [otherHash] : [], sharedRow),
+        ),
+      )
+      if (sharedRow) {
+        await collection._sync.loadSubset(other)
+        await vi.waitFor(() => expect(observe()).toEqual(expected([], false)))
+        expect(queryFn).toHaveBeenCalledTimes(2)
+      }
+    },
+  )
+
+  it(`moves a pre-upgrade singleton owner to the current key when its row remains`, async () => {
+    const id = `pre-upgrade-singleton-row-remains`
+    const singleton = {
+      where: new IR.Func(`in`, [
+        new IR.PropRef([`category`]),
+        new IR.Value([`shared`]),
+      ]),
+    }
+    const oldDemandKey = legacySingletonCategoryDemandKey
+    const oldHash = hashKey([id, oldDemandKey])
+    const currentHash = hashKey([id, getLoadSubsetDemandKey(singleton)])
+    const storage = createOwnershipStorage({
+      rows: new Map([[shared.id, shared]]),
+      rowMetadata: new Map([
+        [shared.id, { queryCollection: { owners: { [oldHash]: true } } }],
+      ]),
+      collectionMetadata: new Map([
+        [
+          `queryCollection:gc:${oldHash}`,
+          { queryHash: oldHash, mode: `until-revalidated` },
+        ],
+      ]),
+    })
+    const { collection, queryFn } = createPersistedOwnershipFixture(
+      id,
+      storage,
+      [shared],
+    )
+    await collection.stateWhenReady()
+    await collection._sync.loadSubset(singleton)
+    await vi.waitFor(() => {
+      const snapshot = storage.snapshot()
+      expect(storedItems(storage)).toEqual([shared])
+      expect(persistedOwners(snapshot.rowMetadata, shared.id)).toEqual([
+        currentHash,
+      ])
+      expect(snapshot.collectionMetadata.size).toBe(0)
+      expect(rows(collection)).toEqual([shared.id])
+    })
+    expect(queryFn).toHaveBeenCalledTimes(1)
+
+    collection._sync.unloadSubset(singleton)
+    await vi.waitFor(() => {
+      const snapshot = storage.snapshot()
+      expect(persistedOwners(snapshot.rowMetadata, shared.id)).toEqual([
+        currentHash,
+      ])
+      expect([...snapshot.collectionMetadata.keys()]).toEqual([
+        `queryCollection:gc:${currentHash}`,
+      ])
+    })
+  })
+
+  it(`revalidates an old singleton owner when an equal current Query loaded first`, async () => {
+    const id = `pre-upgrade-singleton-after-equality`
+    const singleton = {
+      where: new IR.Func(`in`, [
+        new IR.PropRef([`category`]),
+        new IR.Value([`shared`]),
+      ]),
+    }
+    const equality = { where: eq(new IR.PropRef([`category`]), `shared`) }
+    const oldDemandKey = legacySingletonCategoryDemandKey
+    const oldHash = hashKey([id, oldDemandKey])
+    expect(getLoadSubsetDemandKey(singleton)).toBe(
+      getLoadSubsetDemandKey(equality),
+    )
+    const storage = createOwnershipStorage({
+      rows: new Map([[shared.id, shared]]),
+      rowMetadata: new Map([
+        [shared.id, { queryCollection: { owners: { [oldHash]: true } } }],
+      ]),
+      collectionMetadata: new Map([
+        [
+          `queryCollection:gc:${oldHash}`,
+          { queryHash: oldHash, mode: `until-revalidated` },
+        ],
+      ]),
+    })
+    const { collection, queryFn } = createPersistedOwnershipFixture(
+      id,
+      storage,
+      [],
+    )
+    queryFn.mockResolvedValue([])
+    await collection.stateWhenReady()
+    await collection._sync.loadSubset(equality)
+    expect(queryFn).toHaveBeenCalledTimes(1)
+    expect(
+      storage
+        .snapshot()
+        .collectionMetadata.has(`queryCollection:gc:${oldHash}`),
+    ).toBe(true)
+
+    await collection._sync.loadSubset(singleton)
+    await vi.waitFor(() => {
+      const snapshot = storage.snapshot()
+      expect(storedItems(storage)).toEqual([])
+      expect(persistedOwners(snapshot.rowMetadata, shared.id)).toEqual([])
+      expect(snapshot.collectionMetadata.size).toBe(0)
+      expect(rows(collection)).toEqual([])
+    })
+    expect(queryFn).toHaveBeenCalledTimes(2)
+  })
+
+  it(`keeps a pre-upgrade singleton owner after failed revalidation`, async () => {
+    const id = `pre-upgrade-singleton-revalidation-fails`
+    const singleton = {
+      where: new IR.Func(`in`, [
+        new IR.PropRef([`category`]),
+        new IR.Value([`shared`]),
+      ]),
+    }
+    const oldDemandKey = legacySingletonCategoryDemandKey
+    const oldHash = hashKey([id, oldDemandKey])
+    const storage = createOwnershipStorage({
+      rows: new Map([[shared.id, shared]]),
+      rowMetadata: new Map([
+        [shared.id, { queryCollection: { owners: { [oldHash]: true } } }],
+      ]),
+      collectionMetadata: new Map([
+        [
+          `queryCollection:gc:${oldHash}`,
+          { queryHash: oldHash, mode: `until-revalidated` },
+        ],
+      ]),
+    })
+    const { collection, queryFn } = createPersistedOwnershipFixture(
+      id,
+      storage,
+      [],
+    )
+    queryFn.mockRejectedValueOnce(new Error(`provider failed`))
+    await collection.stateWhenReady()
+    await expect(collection._sync.loadSubset(singleton)).rejects.toThrow(
+      `provider failed`,
+    )
+    expect(queryFn).toHaveBeenCalledTimes(1)
+    const snapshot = storage.snapshot()
+    expect(storedItems(storage)).toEqual([shared])
+    expect(persistedOwners(snapshot.rowMetadata, shared.id)).toEqual([oldHash])
+    expect([...snapshot.collectionMetadata.keys()]).toEqual([
+      `queryCollection:gc:${oldHash}`,
+    ])
   })
 
   it(`rejects a superseded accepted result while publishing its successor`, async () => {

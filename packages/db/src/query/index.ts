@@ -98,6 +98,7 @@ export { type LiveQueryCollectionUtils } from './live/collection-config-builder.
 export {
   UnhashableQueryIRError,
   canonicalizeQueryIR,
+  getLegacyLoadSubsetDemandKey,
   getLoadSubsetDemandKey,
   getQueryIdentity,
   getStableQueryBuilderHash,

@@ -3,6 +3,7 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { Temporal } from 'temporal-polyfill'
 import { CollectionImpl } from '../../src/collection/index.js'
 import { Query, getQueryIR } from '../../src/query/builder/index.js'
+import { createSingleRowRefProxy } from '../../src/query/builder/ref-proxy.js'
 import {
   add,
   and,
@@ -32,6 +33,7 @@ import {
   UnhashableQueryIRError,
   getLoadSubsetDemandKey,
   getQueryIdentity,
+  getStableQueryBuilderHash,
   getStableQueryIRHash,
   getStableValueHash,
 } from '../../src/query/ir-stable-identity.js'
@@ -43,6 +45,7 @@ import {
   QueryRef,
   UnionAll,
   Value,
+  getWhereExpression,
 } from '../../src/query/ir.js'
 import {
   compileExpression,
@@ -639,6 +642,111 @@ describe(`semantic expression identity`, () => {
  * does not claim general semantic matching or reuse for broader subsets.
  */
 describe(`loadSubset demand identity`, () => {
+  for (const operator of [`in`, `eq`] as const) {
+    for (const path of [`value`, `other`] as const) {
+      it(`keeps distinct literal reference proxies distinct for ${operator} on ${path}`, () => {
+        // This finite grammar varies the operator and proxy path. A Value
+        // containing a RefProxy is data in both operators. The independent
+        // reference rule for these object values is identity, not equal paths.
+        // A canonical ref path would erase an observable distinction.
+        const first = createSingleRowRefProxy<{
+          value: number
+          other: number
+        }>()[path]
+        const second = createSingleRowRefProxy<{
+          value: number
+          other: number
+        }>()[path]
+        const field = new PropRef<unknown>([`value`])
+        const membership = (member: unknown) =>
+          new Func<boolean>(operator, [
+            field,
+            new Value(operator === `in` ? [member] : member),
+          ])
+        const firstWhere = membership(first)
+        const secondWhere = membership(second)
+        const row = { value: first }
+
+        expect(first).not.toBe(second)
+        const expected = (member: unknown) => Object.is(row.value, member)
+        expect(compileSingleRowExpression(firstWhere)(row)).toBe(
+          expected(first),
+        )
+        expect(compileSingleRowExpression(secondWhere)(row)).toBe(
+          expected(second),
+        )
+        expect(getLoadSubsetDemandKey({ where: firstWhere })).not.toBe(
+          getLoadSubsetDemandKey({ where: secondWhere }),
+        )
+        expect(getProjectedExpressionIdentity(firstWhere)).not.toBe(
+          getProjectedExpressionIdentity(secondWhere),
+        )
+        const query = (member: unknown) =>
+          new Query()
+            .from({ user: usersCollection })
+            .where(({ user }) =>
+              operator === `in`
+                ? inArray(user.teamId, [member])
+                : eq(user.teamId, new Value(member)),
+            )
+        expect(getStableQueryBuilderHash(query(first))).not.toBe(
+          getStableQueryBuilderHash(query(second)),
+        )
+      })
+    }
+  }
+
+  it(`keeps a literal IN member distinct from a row reference`, () => {
+    // A reference inside a constant-list Value remains a runtime object. It
+    // does not read the row's named property. EQ's right operand does read it.
+    // Equal identity would let either result stand in for the other, so the
+    // independent expected observations below require separate keys.
+    const membership = new Query()
+      .from({ user: usersCollection })
+      .where(({ user }) => inArray(user.teamId, [user.name]))
+    const equality = new Query()
+      .from({ user: usersCollection })
+      .where(({ user }) => eq(user.teamId, user.name))
+    const memberExpression = getWhereExpression(
+      getQueryIR(membership).where![0]!,
+    )
+    const equalExpression = getWhereExpression(getQueryIR(equality).where![0]!)
+    const row = { user: { teamId: `same`, name: `same` } }
+
+    expect(compileExpression(memberExpression)(row)).toBe(false)
+    expect(compileExpression(equalExpression)(row)).toBe(true)
+    expect(getLoadSubsetDemandKey({ where: memberExpression })).not.toBe(
+      getLoadSubsetDemandKey({ where: equalExpression }),
+    )
+    expect(getStableQueryIRHash(getQueryIR(membership))).not.toBe(
+      getStableQueryIRHash(getQueryIR(equality)),
+    )
+    expect(getStableQueryBuilderHash(membership)).not.toBe(
+      getStableQueryBuilderHash(equality),
+    )
+  })
+
+  it(`evaluates content-equal distinct byte-array members alike`, () => {
+    const field = new PropRef<Uint8Array>([`value`])
+    const first = new Uint8Array([1, 2, 3])
+    const second = new Uint8Array([1, 2, 3])
+    const different = new Uint8Array([1, 2, 4])
+    const row = { value: new Uint8Array([1, 2, 3]) }
+    const membership = (value: Uint8Array) =>
+      new Func<boolean>(`in`, [field, new Value([value])])
+
+    expect(first).not.toBe(second)
+    expect(compileSingleRowExpression(membership(first))(row)).toBe(true)
+    expect(compileSingleRowExpression(membership(second))(row)).toBe(true)
+    expect(compileSingleRowExpression(membership(different))(row)).toBe(false)
+    expect(getLoadSubsetDemandKey({ where: membership(first) })).toBe(
+      getLoadSubsetDemandKey({ where: membership(second) }),
+    )
+    expect(getLoadSubsetDemandKey({ where: membership(first) })).not.toBe(
+      getLoadSubsetDemandKey({ where: membership(different) }),
+    )
+  })
+
   it(`shares non-null singleton membership with equality and keeps the boundaries distinct`, () => {
     // A one-member set asks for the same rows as equality with its member.
     // Nullish members are excluded: under NOT, equality is UNKNOWN while the

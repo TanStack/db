@@ -572,7 +572,26 @@ also retires two overlapping claims one at a time and compares durable owner
 identities and public rows after each empty result. This does not establish every persisted
 adapter, overlapping result schedule, or ownership of an inferred window
 replacement; the persisted direct-write owner retains the wider durable
-receiving boundary. Shared-Query cached-result authority
+receiving boundary. A cold upgrade history seeds a historical literal
+singleton-IN demand key with a retained row and `until-revalidated` marker.
+The current-key control and old-key cases cross sole and shared ownership;
+empty results compare public rows, durable rows, exact owners, and markers
+after application. A surviving result moves ownership to the current key,
+including its later retention marker; a failed result leaves the old owner
+and marker intact. An EQ-first acquisition checks later IN revalidation on
+the same physical Query. The old-key empty cases failed before migration at
+the owner, marker, and public-row checkpoints. These controlled histories
+cover static on-demand keys and the adapter's singleton-IN demand shape.
+Custom query-key functions, changed key formats beyond this singleton-IN
+rewrite, real SQLite upgrade/restart, TTL expiry, and arbitrary nested
+predicates remain open. Historical reference-proxy members are excluded:
+the old encoder represented them as row references, which could collide with
+valid row-reference queries. New object-valued demand keys carry a runtime
+nonce and cannot identify the old object after restart. An old
+`until-revalidated` marker in either class can remain indefinitely; a safe
+invalidation or versioned-cache policy needs a separate decision. The
+[PR #2134 oracle review](oracle-reviews/pr-2134-identity-and-persisted-key.md)
+records the RED/GREEN and hostile-mutant checks. Shared-Query cached-result authority
 across an unobserved Collection is now an accepted law: a newer physical fetch
 may replace and claim a direct row on later acquisition, while an older cached
 result or another Collection's local cache edit may not. The 24-history matrix
@@ -757,11 +776,20 @@ The following related oracles own distinct production paths or observation cuts:
   owns abort timing around sync acceptance and publication.
   The IR identity owner also equates equality and non-null singleton membership
   demands while keeping nullish members, broader sets, and opaque reference
-  identities distinct. `packages/query-db-collection/tests/joined-query-demand-dedupe.test.ts`
+  identities distinct. Its literal-value grammar now distinguishes separately
+  created reference proxies with the same path in both EQ and IN, checks the
+  difference between a literal proxy and a row reference, and compares distinct
+  byte arrays with equal contents at evaluation and key construction. The
+  original proxy-literal canonicalizer fails the key assertion. These bounded
+  values and paths do not establish identity soundness for every runtime value
+  or arbitrary expression context. `packages/query-db-collection/tests/joined-query-demand-dedupe.test.ts`
   checks one Query Collection provider call for settled and concurrent identical
-  joins, independent parent sources with the same keys, and a direct equality
-  query followed by a one-key join. These witnesses do not establish sharing
-  across different adapters or general subset containment.
+  joins, independent parent sources with the same keys, and both acquisition
+  and release orders for a direct equality query and a one-key join. The
+  provider predicate shape and surviving peer rows are checked at each release.
+  These witnesses do not establish sharing across different adapters, general
+  subset containment, or persistence beyond the static singleton-IN upgrade
+  histories owned by the Query DB ownership oracle.
 
 The LocalStorage owners above also cover the [peer and materialization
 review](oracle-reviews/2026-10-08-localstorage-peer-review.md): a failing

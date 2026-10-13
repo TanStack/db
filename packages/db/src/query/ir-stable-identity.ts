@@ -97,6 +97,37 @@ export function getQueryIdentity(query: QueryIR): QueryIdentity {
 export function getLoadSubsetDemandKey(
   options: LoadSubsetOptions,
 ): DemandKey | undefined {
+  return encodeLoadSubsetDemandKey(options, false)
+}
+
+/** @internal The key persisted for literal singleton IN before it shared EQ identity. */
+export function getLegacyLoadSubsetDemandKey(
+  options: LoadSubsetOptions,
+): DemandKey | undefined {
+  if (
+    ![
+      options.where,
+      ...(options.orderBy ?? []).map(({ expression }) => expression),
+      options.cursor?.whereFrom,
+      options.cursor?.whereCurrent,
+    ].some((expression) => expression && containsMembership(expression))
+  ) {
+    return undefined
+  }
+  return encodeLoadSubsetDemandKey(options, true)
+}
+
+function containsMembership(expression: BasicExpression): boolean {
+  return (
+    expression.type === `func` &&
+    (expression.name === `in` || expression.args.some(containsMembership))
+  )
+}
+
+function encodeLoadSubsetDemandKey(
+  options: LoadSubsetOptions,
+  preserveSingletonIn: boolean,
+): DemandKey | undefined {
   if (
     options.where === undefined &&
     !options.orderBy?.length &&
@@ -112,7 +143,12 @@ export function getLoadSubsetDemandKey(
   const seen = new WeakSet<object>()
   const result: Record<string, StableIdentityValue> = {
     type: `loadSubsetDemand`,
-    query: canonicalizeLoadSubsetQuery(options, `loadSubset`, seen),
+    query: canonicalizeLoadSubsetQuery(
+      options,
+      `loadSubset`,
+      seen,
+      preserveSingletonIn,
+    ),
   }
 
   if (options.limit !== undefined) {
@@ -138,12 +174,16 @@ export function getLoadSubsetDemandKey(
         `loadSubset.cursor.whereFrom`,
         seen,
         `exact-output`,
+        undefined,
+        preserveSingletonIn,
       ),
       whereCurrent: canonicalizeExpression(
         options.cursor.whereCurrent,
         `loadSubset.cursor.whereCurrent`,
         seen,
         `exact-output`,
+        undefined,
+        preserveSingletonIn,
       ),
     }
     if (options.cursor.lastKey !== undefined) {
@@ -368,6 +408,7 @@ function canonicalizeLoadSubsetQuery(
   options: LoadSubsetOptions,
   path: string,
   seen: WeakSet<object>,
+  preserveSingletonIn: boolean,
 ): StableIdentityValue {
   const result: Record<string, StableIdentityValue> = {
     type: `loadSubsetQuery`,
@@ -379,6 +420,8 @@ function canonicalizeLoadSubsetQuery(
       `${path}.where`,
       seen,
       `exact-output`,
+      undefined,
+      preserveSingletonIn,
     )
   }
 
@@ -389,6 +432,8 @@ function canonicalizeLoadSubsetQuery(
         `${path}.orderBy[${index}]`,
         seen,
         `ordering-operand`,
+        undefined,
+        preserveSingletonIn,
       ),
     )
   }
@@ -548,6 +593,7 @@ function canonicalizeOrderBy(
   seen: WeakSet<object>,
   valueContext: ValueIdentityContext = `exact-output`,
   scope?: AliasScope,
+  preserveSingletonIn = false,
 ): StableIdentityValue {
   return {
     expression: canonicalizeExpression(
@@ -556,6 +602,7 @@ function canonicalizeOrderBy(
       seen,
       valueContext,
       scope,
+      preserveSingletonIn,
     ),
     compareOptions: canonicalizeCompareOptions(
       orderBy.compareOptions,
@@ -584,6 +631,7 @@ function canonicalizeExpression(
   seen: WeakSet<object>,
   valueContext: ValueIdentityContext = `exact-output`,
   scope?: AliasScope,
+  preserveSingletonIn = false,
 ): StableIdentityValue {
   if (expression.type === `ref`) {
     const explicitAlias = getPropRefSourceAlias(expression)
@@ -658,7 +706,6 @@ function canonicalizeExpression(
               expression.value,
               `${path}.value`,
               seen,
-              scope,
             )
           : valueContext === `ordering-operand`
             ? canonicalizeOrderingRuntimeValue(
@@ -686,27 +733,32 @@ function canonicalizeExpression(
           value,
           `${path}.args[1].value[${index}]`,
           seen,
-          scope,
         ),
       )
       // IN candidates form a set; their order and duplicates do not matter.
       const members = sortUniqueStableIdentityValues(candidates)
+      const operand = canonicalizeExpression(
+        expression.args[0]!,
+        `${path}.args[0]`,
+        seen,
+        `equality-operand`,
+        scope,
+        preserveSingletonIn,
+      )
       // A non-null singleton has EQ's three-valued result; nullish ones do not.
-      const singletonEquality =
+      if (
+        !preserveSingletonIn &&
         members.length === 1 &&
         expression.args[1].value.every((value) => value != null)
-      return canonicalizeFunction(singletonEquality ? `eq` : expression.name, [
-        canonicalizeExpression(
-          expression.args[0]!,
-          `${path}.args[0]`,
-          seen,
-          `equality-operand`,
-          scope,
-        ),
-        {
-          type: `val`,
-          value: singletonEquality ? members[0]! : [`set`, members],
-        },
+      ) {
+        return canonicalizeFunction(`eq`, [
+          operand,
+          { type: `val`, value: members[0]! },
+        ])
+      }
+      return canonicalizeFunction(`in`, [
+        operand,
+        { type: `val`, value: [`set`, members] },
       ])
     }
 
@@ -726,6 +778,7 @@ function canonicalizeExpression(
         seen,
         operandContext,
         scope,
+        preserveSingletonIn,
       ),
     )
     return canonicalizeFunction(expression.name, args)
@@ -1055,18 +1108,7 @@ function canonicalizeEqualityRuntimeValue(
   value: unknown,
   path: string,
   seen: WeakSet<object>,
-  scope?: AliasScope,
 ): StableIdentityValue {
-  if (isRefProxy(value)) {
-    return canonicalizeExpression(
-      toExpression(value),
-      path,
-      seen,
-      `equality-operand`,
-      scope,
-    )
-  }
-
   if (typeof value === `number` && Object.is(value, -0)) {
     return canonicalizeRuntimeValue(0, path, seen)
   }
