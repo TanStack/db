@@ -42,7 +42,7 @@ function createSource(recordApi: MockRecordApi<Data>, onDemand = true) {
   return source
 }
 
-function visible(source: Collection<any, any, any>) {
+function visible(source: ReturnType<typeof createSource>) {
   const query = createLiveQueryCollection((q) =>
     q.from({ row: source }).where(({ row }) => eq(row.data, `visible`)),
   )

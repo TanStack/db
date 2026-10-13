@@ -3043,15 +3043,13 @@ function startLaggingSourceConsumer(
     state.live = createLiveQueryCollection(query)
     void startPreload(state.live, state.preload)
   } else if (isReadConsumer(consumer)) {
-    const resolve = (rows: Array<Record<string, unknown>>) => {
+    const resolve = (rows: ReadonlyArray<object>) => {
       state.resolvedIds = rows
-        .flatMap((row) => rowPostIds(shape, row))
+        .flatMap((row) => rowPostIds(shape, row as Record<string, unknown>))
         .sort((a, b) => a - b)
     }
     if (consumer === `query-once`) {
-      void queryOnce(query).then((rows) =>
-        resolve(rows as Array<Record<string, unknown>>),
-      )
+      void queryOnce(query).then((rows) => resolve(rows as Array<object>))
     } else {
       const live = createLiveQueryCollection(query)
       state.live = live
@@ -3061,9 +3059,7 @@ function startLaggingSourceConsumer(
           consumer === `to-array-when-ready`
             ? live.toArrayWhenReady()
             : live.stateWhenReady().then((rows) => [...rows.values()])
-        void read.then((rows) =>
-          resolve(rows as Array<Record<string, unknown>>),
-        )
+        void read.then(resolve)
       }
     }
   } else {
