@@ -457,3 +457,21 @@ uses unsigned byte content. The planner declined byte range optimization in
 the reviewed public path, so indexed and unindexed results agreed there. The
 two comparison rules remain a product-design question beyond this PR's byte
 equality repair.
+
+## Pushed-head byte and DataView recheck at `b51f0c79d`
+
+A fresh hostile reviewer checked the byte comparison, direct index, and
+Collection publication paths against the retirement ledgers at the clean
+pushed head. Ten receiving and retained files passed 1,246 tests. An isolated
+comparator that read only the first two bytes failed the generated direct
+comparison and both ready indexed order checks. No production defect appeared
+in those paths.
+
+The reviewer found another callback-time enforcement gap. An isolated index
+mutant kept both the old and new exact memberships during notification, then
+removed the old membership before `commit()` settled. Both existing DataView
+cases passed because they checked the new membership during notification and
+the old membership only afterward. The revised callback snapshot also checks
+that the old membership is absent. It fails the mutant in both index types and
+passes unchanged production. This checks one-key, two-commit publication; it
+does not prove every callback schedule or broader byte live-query behavior.

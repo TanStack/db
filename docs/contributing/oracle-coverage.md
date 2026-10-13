@@ -505,8 +505,9 @@ pair. The Collection change-event owner receives that boundary through a
 typed-array-to-foreign-DataView update and a same-realm foreign-DataView
 replacement. Both commits must settle with public state, BasicIndex or
 BTreeIndex exact lookup, and whole subscriber batches aligned. The callback
-also records the current public row and exact index keys, so a late index
-refresh fails at the publication cut. This rejects
+also records the current public row, new exact index keys, and absence of the
+previous exact membership. A late index refresh or transient dual membership
+fails at the publication cut. This rejects
 the getter failure that changed the row while leaving its index and subscriber
 behind. It does not assert content equality for DataViews.
 Exact `normalizeValue` results are direct utility observations. Indexed

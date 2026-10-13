@@ -1045,16 +1045,25 @@ describe(`opaque DataView change publication`, () => {
         const callbackSnapshots: Array<{
           row: string | undefined
           indexKeys: Array<string>
+          previousIndexKeys: Array<string>
         }> = []
         const subscription = collection.subscribeChanges(
           (changes) => {
             // Publication must expose the new row and index before invoking
-            // the subscriber. Recording inside the callback distinguishes a
-            // torn publication that repairs its index only after notification.
+            // the subscriber, without retaining the old index membership.
+            // Recording inside the callback distinguishes a torn publication
+            // that repairs either side only after notification.
             const published = collection.get(`a`)?.value
+            const previous =
+              changes[0]?.type === `update`
+                ? changes[0].previousValue!.value
+                : undefined
             callbackSnapshots.push({
               row: labels.get(published),
               indexKeys: published ? [...index.equalityLookup(published)] : [],
+              previousIndexKeys: previous
+                ? [...index.equalityLookup(previous)]
+                : [],
             })
             batches.push(
               changes.map((change) => ({
@@ -1082,7 +1091,9 @@ describe(`opaque DataView change publication`, () => {
         expect(batches).toEqual([
           [{ type: `update`, key: `a`, previous: `bytes`, value: `first` }],
         ])
-        expect(callbackSnapshots).toEqual([{ row: `first`, indexKeys: [`a`] }])
+        expect(callbackSnapshots).toEqual([
+          { row: `first`, indexKeys: [`a`], previousIndexKeys: [] },
+        ])
 
         sync.begin()
         sync.write({ type: `update`, value: { id: `a`, value: second } })
@@ -1095,8 +1106,8 @@ describe(`opaque DataView change publication`, () => {
           [{ type: `update`, key: `a`, previous: `first`, value: `second` }],
         ])
         expect(callbackSnapshots).toEqual([
-          { row: `first`, indexKeys: [`a`] },
-          { row: `second`, indexKeys: [`a`] },
+          { row: `first`, indexKeys: [`a`], previousIndexKeys: [] },
+          { row: `second`, indexKeys: [`a`], previousIndexKeys: [] },
         ])
       }, [() => unsubscribe?.(), () => cleanup?.()])
     },

@@ -280,3 +280,15 @@ whole-result refresh. An Effect with `skipInitial` and a lagging on-demand
 source is another untested intersection. These are coverage limits, not
 observed production failures. The execution-based hostile review found no
 further defect in the two new witnesses.
+
+## Exact pushed-head review at `b51f0c79d`
+
+A read-only hostile reviewer reran the unbounded Collection and Effect
+witnesses on the clean pushed head. Both passed with no type errors. Three
+isolated mutants failed at their intended observations. Sending `orderBy` in
+either first request failed the recorded no-hints request shape. Treating the
+second graph-input revision as readiness failed the pending-status assertion
+before subset settlement. Returning equality for every local comparison in
+the unbounded captured-list path failed the opposed key/value order check.
+The reviewer found no further defect in those two witnesses. Their stated
+composition and provider limits still apply.
