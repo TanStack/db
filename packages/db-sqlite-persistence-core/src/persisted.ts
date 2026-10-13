@@ -1915,6 +1915,13 @@ class PersistedCollectionRuntime<
     )
   }
 
+  // An ensure reply settles a follower's load (law 7). The leader broadcasts
+  // its commits before it replies on the same channel, so they are already
+  // queued on the apply mutex. Settle only after they show here.
+  private applyLeaderCommitsBeforeReply(): Promise<void> {
+    return this.applyMutex.run(() => this.flushQueuedTxCommittedUnsafe())
+  }
+
   private clearSyncControls(): void {
     this.syncControls = {
       begin: null,
@@ -2740,6 +2747,7 @@ class PersistedCollectionRuntime<
               this.storageCollectionId,
               rotatedOptions,
             ))
+          await this.applyLeaderCommitsBeforeReply()
         }
         return
       }
@@ -2793,6 +2801,7 @@ class PersistedCollectionRuntime<
         this.queueRemoteSubsetEnsure(options)
         throw error
       }
+      await this.applyLeaderCommitsBeforeReply()
       return
     }
 

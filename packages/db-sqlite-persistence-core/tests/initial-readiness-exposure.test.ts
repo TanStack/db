@@ -3,7 +3,12 @@ import { createCollection, createLiveQueryCollection, eq } from '@tanstack/db'
 import { createDeferred } from '../../db/src/deferred.js'
 import { persistedCollectionOptions } from '../src/index.js'
 import type { Collection, LoadSubsetOptions } from '@tanstack/db'
-import type { PersistenceAdapter } from '../src/index.js'
+import type {
+  PersistedCollectionCoordinator,
+  PersistenceAdapter,
+  ProtocolEnvelope,
+  TxCommitted,
+} from '../src/index.js'
 
 /**
  * # Does the persisted wrapper carry initial-query readiness?
@@ -155,5 +160,136 @@ describe(`persisted on-demand initial readiness follows the composed load`, () =
       true,
     )
     expect(source.has(`remote`)).toBe(false)
+  })
+})
+
+/**
+ * A follower tab routes its demand to the elected leader. The leader loads the
+ * rows upstream, commits them durably, and broadcasts `tx:committed` before it
+ * answers the ensure request on the same channel. The follower applies that
+ * broadcast asynchronously: it reads the durable rows under its apply mutex.
+ * Law 7 therefore requires the follower's load to settle only after the
+ * broadcasts that preceded the ensure reply have applied in this tab.
+ *
+ * The history holds the follower's durable read for the broadcast, so the
+ * reply arrives while the leader's rows are committed but not yet visible.
+ */
+function followerTab() {
+  const durable: Array<Row> = []
+  let holdNextRead: Promise<void> | undefined
+  let reads = 0
+  const adapter: PersistenceAdapter = {
+    loadSubset: async () => {
+      reads++
+      const hold = holdNextRead
+      holdNextRead = undefined
+      await hold
+      return durable.map((value) => ({ key: value.id, value }))
+    },
+    loadResumeSnapshot: () =>
+      Promise.resolve({
+        rows: [],
+        keySet: { status: `consistent` },
+        collectionMetadata: [],
+        latestTerm: 0,
+        latestSeq: 0,
+        latestRowVersion: 0,
+        resetEpoch: 0,
+      }),
+    applyCommittedTx: async () => {},
+    ensureIndex: async () => {},
+  }
+  const broadcastRead = createDeferred<void>()
+  let subscriber: ((message: ProtocolEnvelope<unknown>) => void) | undefined
+  const coordinator: PersistedCollectionCoordinator = {
+    getNodeId: () => `follower`,
+    subscribe: (_collectionId, onMessage) => {
+      subscriber = onMessage
+      return () => {
+        subscriber = undefined
+      }
+    },
+    publish: () => {},
+    isLeader: () => false,
+    ensureLeadership: async () => {},
+    requestEnsurePersistedIndex: async () => {},
+    // The leader commits the row, broadcasts it, then replies.
+    requestEnsureRemoteSubset: (collectionId) => {
+      const value = { id: `remote`, group: `a` }
+      durable.push(value)
+      holdNextRead = broadcastRead.promise
+      const payload: TxCommitted = {
+        type: `tx:committed`,
+        term: 1,
+        seq: 1,
+        txId: `leader-tx-1`,
+        latestRowVersion: 1,
+        requiresFullReload: false,
+        changedRows: [{ key: value.id, value }],
+        deletedKeys: [],
+      }
+      subscriber?.({
+        v: 1,
+        dbName: `test-db`,
+        collectionId,
+        senderId: `leader`,
+        ts: Date.now(),
+        payload,
+      })
+      return Promise.resolve()
+    },
+    requestReleaseRemoteSubset: async () => {},
+    registerRemoteSubsetOwner: () => () => {},
+    requestApplyCommittedTx: (_collectionId, tx) =>
+      Promise.resolve({
+        type: `rpc:applyCommittedTx:res`,
+        rpcId: tx.txId,
+        ok: true,
+        term: tx.term,
+        seq: tx.seq,
+        latestRowVersion: tx.rowVersion,
+      }),
+    pullSince: () =>
+      Promise.resolve({
+        type: `rpc:pullSince:res`,
+        rpcId: `pull-0`,
+        ok: true,
+        latestTerm: 1,
+        latestSeq: 0,
+        latestRowVersion: 0,
+        requiresFullReload: false,
+        changedKeys: [],
+        deletedKeys: [],
+      }),
+  }
+  const source = createCollection(
+    persistedCollectionOptions<Row, string>({
+      id: `follower-${Math.random().toString(36).slice(2)}`,
+      getKey: (row) => row.id,
+      persistence: { adapter, coordinator },
+      syncMode: `on-demand`,
+      sync: {
+        sync: () => ({ loadSubset: () => Promise.resolve() }),
+      },
+    }),
+  )
+  onTestFinished(() => source.cleanup())
+  return { source, broadcastRead, reads: () => reads }
+}
+
+describe(`a persisted follower tab's load settles with the leader's rows`, () => {
+  it(`is first ready only after the leader's broadcast applies here`, async () => {
+    const tab = followerTab()
+    const query = groupA(tab.source)
+    const seen = rowsAtFirstReady(query)
+    const preload = query.preload()
+
+    // The hydration read and the broadcast's durable read have both started.
+    await vi.waitFor(() => expect(tab.reads()).toBe(2))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    tab.broadcastRead.resolve()
+    await preload
+
+    expect(seen.rows).toEqual([`remote`])
   })
 })
