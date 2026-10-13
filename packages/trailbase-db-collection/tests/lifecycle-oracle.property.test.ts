@@ -1,6 +1,6 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { expect, it, vi } from 'vitest'
-import { createCollection } from '@tanstack/db'
+import { createCollection, createLiveQueryCollection, eq } from '@tanstack/db'
 import { oraclePropertyOptions, oracleRuns } from '../../db/tests/oracle-config'
 import { trailBaseCollectionOptions } from '../src/trailbase'
 import { MockRecordApi } from './mock-record-api'
@@ -600,4 +600,232 @@ fcTest.prop([scenarioArb], { seed: 714_203, numRuns: oracleRuns(50) })(
 fcTest.prop([scenarioArb], oraclePropertyOptions(50, `trailbase.lifecycle`))(
   `matches generated lifecycle histories with a random or replayed seed`,
   (scenario) => checkLifecycle(scenario),
+)
+
+/**
+ * ## Does an early on-demand load wait for the change listener?
+ *
+ * Law: an on-demand load that arrives before the change listener runs must not
+ * fetch until `start` reports that the listener runs or cannot start. Since
+ * #2115 a live query is ready when its subset load settles, so this ordering
+ * is what keeps readiness after the subscription and keeps a change that the
+ * service commits before the subscription. The wait still answers its caller:
+ * an abort rejects it with `AbortError`, cleanup ends it quietly, and a listener
+ * that cannot start rejects it with that failure instead of fetching.
+ *
+ * Reference: a small service holds rows by key. `list` answers from the rows
+ * at the moment it is called; a change reaches only the subscriptions that
+ * exist when the change commits. The model predicts the list calls, the load
+ * or query outcome, and the rows at first ready from the plan alone. It never
+ * reads adapter state.
+ *
+ * Grammar (exhaustive, 16 histories): the subscription outcome is `listen`,
+ * `subscribe-rejects`, `reader-fails` (the resolved stream is already locked),
+ * `abort`, or `cleanup`; a service change before the subscription is present
+ * or absent; the consumer is a real live query over the source, or the core
+ * subset boundary with an abort signal. `abort` and `cleanup` use the subset
+ * boundary, because a live query does not expose its demand's settlement.
+ *
+ * Checkpoints: after the demand is issued, after the service change, after the
+ * subscription outcome, and, for `listen`, after a later change through the
+ * listener. Each compares list calls, load or query state, collection status,
+ * first-ready rows, and current rows.
+ */
+type EarlyRow = { id: number; data: string }
+type EarlyOutcome =
+  `listen` | `subscribe-rejects` | `reader-fails` | `abort` | `cleanup`
+type EarlyDemandPlan = {
+  outcome: EarlyOutcome
+  serviceChange: boolean
+  consumer: `live-query` | `subset`
+}
+
+const earlyServiceRows: Array<EarlyRow> = [
+  { id: 1, data: `visible` },
+  { id: 2, data: `visible` },
+]
+
+// The rows the query's filter selects from a service snapshot.
+const visibleIds = (rows: Iterable<EarlyRow>) =>
+  [...rows]
+    .filter((row) => row.data === `visible`)
+    .map((row) => row.id)
+    .sort((a, b) => a - b)
+
+function expectedEarlyDemand(plan: EarlyDemandPlan) {
+  const service = new Map(earlyServiceRows.map((row) => [row.id, row]))
+  if (plan.serviceChange) service.set(1, { id: 1, data: `hidden` })
+  const failed =
+    plan.outcome === `subscribe-rejects` || plan.outcome === `reader-fails`
+  return {
+    // Nothing may fetch before the listener runs.
+    waiting: { listCalls: 0, settled: false },
+    afterOutcome: {
+      listCalls: plan.outcome === `listen` ? 1 : 0,
+      status:
+        plan.outcome === `cleanup`
+          ? `cleaned-up`
+          : failed
+            ? `error`
+            : plan.outcome === `abort`
+              ? `loading`
+              : `ready`,
+      load:
+        plan.outcome === `listen` || plan.outcome === `cleanup`
+          ? `fulfilled`
+          : `rejected`,
+      abortError: plan.outcome === `abort`,
+      // The list runs after the subscription, so it sees the service change.
+      firstReadyRows:
+        plan.outcome === `listen` ? visibleIds(service.values()) : undefined,
+    },
+    // A later change reaches the established listener.
+    afterLaterChange:
+      plan.outcome === `listen`
+        ? visibleIds(
+            [...service.values()].map((row) =>
+              row.id === 2 ? { id: 2, data: `hidden` } : row,
+            ),
+          )
+        : undefined,
+  }
+}
+
+async function checkEarlyDemand(plan: EarlyDemandPlan) {
+  const expected = expectedEarlyDemand(plan)
+  const service = new Map(earlyServiceRows.map((row) => [row.id, row]))
+  const listeners: Array<WritableStreamDefaultWriter<Event>> = []
+  const subscription = deferred<ReadableStream<Event>>()
+  let listCalls = 0
+  const api = new MockRecordApi<EarlyRow>()
+  api.subscribe.mockImplementation(() => subscription.promise)
+  api.list.mockImplementation(() => {
+    listCalls++
+    return Promise.resolve({ records: [...service.values()] })
+  })
+  const commit = (row: EarlyRow) => {
+    service.set(row.id, row)
+    for (const writer of listeners) void writer.write({ Update: row })
+  }
+  const reported = vi.spyOn(console, `error`).mockImplementation(() => {})
+  const collection = createCollection(
+    trailBaseCollectionOptions({
+      recordApi: api,
+      getKey: (row: EarlyRow) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      parse: {},
+      serialize: {},
+    }),
+  )
+  const query =
+    plan.consumer === `live-query`
+      ? createLiveQueryCollection((q) =>
+          q
+            .from({ row: collection })
+            .where(({ row }) => eq(row.data, `visible`)),
+        )
+      : undefined
+  let firstReadyRows: Array<number> | undefined
+  query?.onFirstReady(() => {
+    firstReadyRows = query.toArray.map((row) => row.id).sort((a, b) => a - b)
+  })
+  const controller = new AbortController()
+  const consumer = observe(
+    query
+      ? query.preload()
+      : Promise.resolve(
+          collection._sync.loadSubset({ signal: controller.signal } as never),
+        ),
+  )
+  const state = () =>
+    consumer.result === `pending`
+      ? { listCalls, settled: false }
+      : { listCalls, settled: true }
+  const trace = JSON.stringify(plan)
+
+  try {
+    await turn()
+    expect(state(), `${trace} waiting`).toEqual(expected.waiting)
+    if (plan.serviceChange) {
+      commit({ id: 1, data: `hidden` })
+      await turn()
+      expect(state(), `${trace} after service change`).toEqual(expected.waiting)
+    }
+
+    if (plan.outcome === `listen`) {
+      const stream = new TransformStream<Event>()
+      listeners.push(stream.writable.getWriter())
+      subscription.resolve(stream.readable)
+    } else if (plan.outcome === `subscribe-rejects`) {
+      subscription.reject(failure)
+    } else if (plan.outcome === `reader-fails`) {
+      const locked = new TransformStream<Event>().readable
+      locked.getReader()
+      subscription.resolve(locked)
+    } else if (plan.outcome === `abort`) {
+      controller.abort()
+    } else {
+      await collection.cleanup()
+    }
+    await turn()
+    await turn()
+
+    const after = expected.afterOutcome
+    expect(listCalls, `${trace} list calls`).toBe(after.listCalls)
+    expect(collection.status, `${trace} status`).toBe(after.status)
+    if (query) {
+      expect(consumer.result, `${trace} query preload`).toBe(after.load)
+      expect(firstReadyRows, `${trace} first-ready rows`).toEqual(
+        after.firstReadyRows,
+      )
+    } else {
+      expect(consumer.result, `${trace} load`).toBe(after.load)
+      if (after.abortError)
+        expect(consumer.error, `${trace} abort`).toMatchObject({
+          name: `AbortError`,
+        })
+      else if (after.load === `rejected`)
+        expect(consumer.error, `${trace} failure`).toBeDefined()
+    }
+
+    if (expected.afterLaterChange && query) {
+      commit({ id: 2, data: `hidden` })
+      await turn()
+      expect(
+        query.toArray.map((row) => row.id).sort((a, b) => a - b),
+        `${trace} after a later change`,
+      ).toEqual(expected.afterLaterChange)
+    }
+
+    // Late subscription work after abort or cleanup must not fetch.
+    if (plan.outcome === `abort` || plan.outcome === `cleanup`) {
+      subscription.resolve(new TransformStream<Event>().readable)
+      await turn()
+      expect(listCalls, `${trace} late list calls`).toBe(0)
+    }
+  } finally {
+    subscription.resolve(new TransformStream<Event>().readable)
+    await query?.cleanup()
+    await collection.cleanup()
+    for (const writer of listeners) void writer.close().catch(() => undefined)
+    await turn()
+    reported.mockRestore()
+  }
+}
+
+const earlyDemandPlans: Array<EarlyDemandPlan> = (
+  [`listen`, `subscribe-rejects`, `reader-fails`, `abort`, `cleanup`] as const
+).flatMap((outcome) =>
+  [false, true].flatMap((serviceChange) =>
+    (outcome === `abort` || outcome === `cleanup`
+      ? ([`subset`] as const)
+      : ([`live-query`, `subset`] as const)
+    ).map((consumer) => ({ outcome, serviceChange, consumer })),
+  ),
+)
+
+it.each(earlyDemandPlans)(
+  `waits for the listener before an early on-demand fetch: $outcome / change=$serviceChange / $consumer`,
+  (plan) => checkEarlyDemand(plan),
 )

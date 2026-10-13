@@ -17,18 +17,22 @@ The same interpreter runs a fixed corpus and generated histories.
   An on-demand subset load that arrives before the listener runs waits until
   `start` reports that the listener runs or cannot start.
   Since #2115 a live query is ready when its subset load settles, not at the
-  source's `markReady()`, so the load itself must carry this ordering.
-  `initial-readiness-exposure.test.ts` holds two witnesses under a real live
-  query: readiness before the subscription, and a change committed before the
-  subscription starts. Both fail when the load does not wait. The wait still
-  honors its caller: an abort rejects a waiting load, cleanup ends it quietly,
-  and a listener that cannot start rejects it instead of fetching. Each of
-  those three has its own witness. Because a load waits for the listener and
-  not for the subscription, it does not depend on the order in which `start`
-  and the load resume. A mutant that adds an await before `start` subscribes
-  is therefore equivalent. A mutant that lets loads skip the wait fails five
-  witnesses, and one that never settles the wait after a start failure fails
-  the listener witness.
+  source's `markReady()`, so the load itself must carry this ordering. The
+  wait still honors its caller: an abort rejects a waiting load with
+  `AbortError`, cleanup ends it quietly, and a listener that cannot start
+  rejects it with that failure instead of fetching. Because a load waits for
+  the listener and not for the subscription, it does not depend on the order
+  in which `start` and the load resume; a mutant that adds an await before
+  `start` subscribes is equivalent.
+- The early-demand lane checks that law with its own service model: `list`
+  answers from the service rows at the moment it is called, and a change
+  reaches only subscriptions that exist when it commits. Its 16 histories
+  cross the subscription outcome (listen, subscribe rejects, reader fails,
+  abort, cleanup), a service change committed before the subscription, and a
+  real live query or the core subset boundary. Checkpoints after the demand,
+  after the service change, after the outcome, and after a later change
+  through the listener compare list calls, load or query state, status,
+  first-ready rows, and current rows.
   Required startup failures reject. Later stream failures retain rows and report
   the error, matching the adapter's current policy.
 - Graceful closure drains buffered events before releasing the reader.
@@ -66,8 +70,8 @@ subscription.
 The generated event phase starts after loading; existing loading-time unit
 matrices and the two held-cancellation startup controls remain valuable. Those
 controls were both RED when listener failure awaited cancellation, and GREEN
-when cancellation was observed separately. The on-demand driver calls the core subset boundary,
-not a live query. Service-backed E2E coverage remains separate.
+when cancellation was observed separately. The lifecycle driver calls the core subset boundary;
+the early-demand lane also drives a real live query. Service-backed E2E coverage remains separate.
 
 ## Run and replay
 
@@ -91,6 +95,17 @@ that guard. Shared configuration lives in `packages/db/tests/oracle-config.ts`;
 do not copy its replay parser.
 
 ## Evidence against false greens
+
+The early-demand lane fails all 16 histories on the adapter from before the
+listener wait (#2115's `main`): each history lists rows before the listener
+runs. Four mutants of the wait fail it at assertions:
+
+| Mutant of the wait                     | Failing histories |
+| -------------------------------------- | ----------------: |
+| Loads skip the wait                    |                16 |
+| A start failure never settles the wait |                 4 |
+| The wait ignores the caller's abort    |                 2 |
+| Cleanup does not settle the wait       |                 2 |
 
 Before the stale-startup fix, both campaigns independently shrank to: cancel a
 pending subscription, restart and load a healthy stream, reject the old subscribe.
