@@ -578,7 +578,11 @@ crosses EQ/IN reacquisition, sole/shared ownership, empty/surviving/failed
 results, and a warm current-key Query cache. It compares public and durable
 rows, exact owner IDs, and markers before and after application. Two nested
 historical keys that converge on one current key must both retire; a malformed
-same-prefix key must survive. After failed revalidation and final unload, a
+same-prefix key must survive. A historical limit-1 owner survives an unrelated
+limit-2 empty result and retires after its own window revalidates. Fixed
+historical-key comparisons also keep
+offset, order, and cursor identity distinct; those three modifiers have no
+durable receiving history yet. After failed revalidation and final unload, a
 finite-TTL historical owner renews and expires like a current-key control. A
 matching literal reference-proxy demand retires ambiguous old retention markers
 after successful revalidation, while a genuine

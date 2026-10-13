@@ -1223,25 +1223,33 @@ function selectOwnershipRows(
 ): Array<Item> {
   if (
     options.orderBy !== undefined ||
-    options.limit !== undefined ||
     options.offset !== undefined ||
     options.cursor !== undefined
   ) {
     throw new Error(`Ownership fixture does not support ordering or windows`)
   }
+  // This fixture's insertion order is fixed. A finite prefix is enough for
+  // the historical limit-owner history; ordering and cursors remain outside
+  // its grammar.
+  const window = (selectedRows: Array<Item>) =>
+    options.limit === undefined
+      ? selectedRows
+      : selectedRows.slice(0, options.limit)
   const { where } = options
-  if (!where) return Array.from(items, (item) => structuredClone(item))
+  if (!where) return window(Array.from(items, (item) => structuredClone(item)))
   const sourceRows = Array.from(items)
   if (sourceRows.length === 0) return []
   if (where.type === `func` && where.name === `and`) {
-    return sourceRows
-      .filter((item) =>
-        where.args.every(
-          (clause) =>
-            selectOwnershipRows([item], { where: clause }).length === 1,
-        ),
-      )
-      .map((item) => structuredClone(item))
+    return window(
+      sourceRows
+        .filter((item) =>
+          where.args.every(
+            (clause) =>
+              selectOwnershipRows([item], { where: clause }).length === 1,
+          ),
+        )
+        .map((item) => structuredClone(item)),
+    )
   }
   if (
     where.type === `func` &&
@@ -1254,9 +1262,11 @@ function selectOwnershipRows(
     typeof where.args[1].value === `string`
   ) {
     const category = where.args[1].value
-    return sourceRows
-      .filter((item) => item.category === category)
-      .map((item) => structuredClone(item))
+    return window(
+      sourceRows
+        .filter((item) => item.category === category)
+        .map((item) => structuredClone(item)),
+    )
   }
   if (
     where.type !== `func` ||
@@ -1272,9 +1282,11 @@ function selectOwnershipRows(
     throw new Error(`Ownership fixture supports only category membership`)
   }
   const categories = new Set<string>(where.args[1].value)
-  return sourceRows
-    .filter((item) => categories.has(item.category))
-    .map((item) => structuredClone(item))
+  return window(
+    sourceRows
+      .filter((item) => categories.has(item.category))
+      .map((item) => structuredClone(item)),
+  )
 }
 
 function createOwnershipStorage(seed?: StoredOwnership, gatedCommit?: number) {
@@ -12256,6 +12268,68 @@ describe(`query collection ownership lifecycle`, () => {
 
     await collection._sync.loadSubset(singleton)
     expect(queryFn).toHaveBeenCalledTimes(1)
+  })
+
+  /**
+   * The independent ownership graph has one historical limit-1 owner. A
+   * limit-2 request has a different window, even when its singleton-IN
+   * predicate normalizes to equality. Its empty result cannot retire the
+   * limit-1 edge. The later limit-1 result can. This history drives the real
+   * persisted owner matcher and compares durable rows, owner, and marker at
+   * each applied subset settlement.
+   */
+  it(`keeps a historical window owner until its own window revalidates`, async () => {
+    const id = `historical-singleton-window-owner`
+    const oldDemandKey = `${legacySingletonCategoryDemandKey.slice(0, -1)},"limit":["number",1]}`
+    const oldHash = hashKey([id, oldDemandKey])
+    const where = eq(new IR.PropRef([`category`]), `shared`)
+    const narrow = { where, limit: 1 }
+    const wider = { where, limit: 2 }
+    expect(
+      getLegacyLoadSubsetDemandKey({
+        where: new IR.Func(`in`, [
+          new IR.PropRef([`category`]),
+          new IR.Value([`shared`]),
+        ]),
+        limit: 1,
+      }),
+    ).toBe(oldDemandKey)
+    const storage = createOwnershipStorage({
+      rows: new Map([[shared.id, shared]]),
+      rowMetadata: new Map([
+        [shared.id, { queryCollection: { owners: { [oldHash]: true } } }],
+      ]),
+      collectionMetadata: new Map([
+        [
+          `queryCollection:gc:${oldHash}`,
+          { queryHash: oldHash, mode: `until-revalidated` },
+        ],
+      ]),
+    })
+    const { collection, queryFn } = createPersistedOwnershipFixture(
+      id,
+      storage,
+      [],
+    )
+
+    await collection.stateWhenReady()
+    await collection._sync.loadSubset(wider)
+    expect(queryFn).toHaveBeenCalledTimes(1)
+    expect(storedItems(storage)).toEqual([shared])
+    expect(persistedOwners(storage.snapshot().rowMetadata, shared.id)).toEqual([
+      oldHash,
+    ])
+    expect([...storage.snapshot().collectionMetadata.keys()]).toEqual([
+      `queryCollection:gc:${oldHash}`,
+    ])
+
+    await collection._sync.loadSubset(narrow)
+    expect(queryFn).toHaveBeenCalledTimes(2)
+    expect(storedItems(storage)).toEqual([])
+    expect(persistedOwners(storage.snapshot().rowMetadata, shared.id)).toEqual(
+      [],
+    )
+    expect(storage.snapshot().collectionMetadata.size).toBe(0)
   })
 
   /**

@@ -650,6 +650,10 @@ describe(`loadSubset demand identity`, () => {
     const oldSingleton = `{"type":"loadSubsetDemand","query":{"type":"loadSubsetQuery","where":{"type":"func","name":"in","args":[{"type":"ref","path":[["string","category"]]},{"type":"val","value":["set",[["string","shared"]]]}]}}}`
     const oldAndSingleton = `{"type":"loadSubsetDemand","query":{"type":"loadSubsetQuery","where":{"type":"func","name":"and","args":[{"type":"func","name":"in","args":[{"type":"ref","path":[["string","category"]]},{"type":"val","value":["set",[["string","shared"]]]}]}]}}}`
     const oldAndSingletonWithEquality = `{"type":"loadSubsetDemand","query":{"type":"loadSubsetQuery","where":{"type":"func","name":"and","args":[{"type":"func","name":"eq","args":[{"type":"ref","path":[["string","category"]]},{"type":"val","value":["string","shared"]}]},{"type":"func","name":"in","args":[{"type":"ref","path":[["string","category"]]},{"type":"val","value":["set",[["string","shared"]]]}]}]}}}`
+    const oldLimitedSingleton = `${oldSingleton.slice(0, -1)},"limit":["number",1]}`
+    const oldOffsetSingleton = `${oldSingleton.slice(0, -1)},"offset":["number",1]}`
+    const oldOrderedSingleton = `${oldSingleton.slice(0, -2)},"orderBy":[{"expression":{"type":"ref","path":[["string","category"]]},"compareOptions":["object",[["direction",["string","asc"]],["nulls",["string","first"]]]]}]}}`
+    const oldCursorSingleton = `${oldSingleton.slice(0, -1)},"cursor":{"whereFrom":{"type":"func","name":"gt","args":[{"type":"ref","path":[["string","category"]]},{"type":"val","value":["string","a"]}]},"whereCurrent":{"type":"func","name":"eq","args":[{"type":"ref","path":[["string","category"]]},{"type":"val","value":["string","a"]}]},"lastKey":["string","a"]}}`
     const currentEquality = `{"type":"loadSubsetDemand","query":{"type":"loadSubsetQuery","where":{"type":"func","name":"eq","args":[{"type":"ref","path":[["string","category"]]},{"type":"val","value":["string","shared"]}]}}}`
     const currentAndEquality = `{"type":"loadSubsetDemand","query":{"type":"loadSubsetQuery","where":{"type":"func","name":"and","args":[{"type":"func","name":"eq","args":[{"type":"ref","path":[["string","category"]]},{"type":"val","value":["string","shared"]}]}]}}}`
     const field = new PropRef<string>([`category`])
@@ -671,6 +675,52 @@ describe(`loadSubset demand identity`, () => {
         where: new Func(`and`, [singleton, equality]),
       }),
     ).toBe(currentAndEquality)
+    // A historical window remains part of the demand after IN becomes EQ.
+    // Otherwise an unrelated wider request can retire its durable owner.
+    expect(normalizeLegacyLoadSubsetDemandKey(oldLimitedSingleton)).toBe(
+      getLoadSubsetDemandKey({ where: equality, limit: 1 }),
+    )
+    expect(normalizeLegacyLoadSubsetDemandKey(oldLimitedSingleton)).not.toBe(
+      getLoadSubsetDemandKey({ where: equality, limit: 2 }),
+    )
+    expect(normalizeLegacyLoadSubsetDemandKey(oldOffsetSingleton)).toBe(
+      getLoadSubsetDemandKey({ where: equality, offset: 1 }),
+    )
+    expect(normalizeLegacyLoadSubsetDemandKey(oldOffsetSingleton)).not.toBe(
+      getLoadSubsetDemandKey({ where: equality, offset: 2 }),
+    )
+    const ascending: NonNullable<LoadSubsetOptions[`orderBy`]> = [
+      {
+        expression: field,
+        compareOptions: { direction: `asc`, nulls: `first` },
+      },
+    ]
+    const descending: NonNullable<LoadSubsetOptions[`orderBy`]> = [
+      {
+        expression: field,
+        compareOptions: { direction: `desc`, nulls: `first` },
+      },
+    ]
+    expect(normalizeLegacyLoadSubsetDemandKey(oldOrderedSingleton)).toBe(
+      getLoadSubsetDemandKey({ where: equality, orderBy: ascending }),
+    )
+    expect(normalizeLegacyLoadSubsetDemandKey(oldOrderedSingleton)).not.toBe(
+      getLoadSubsetDemandKey({ where: equality, orderBy: descending }),
+    )
+    const cursor = {
+      whereFrom: new Func<boolean>(`gt`, [field, new Value(`a`)]),
+      whereCurrent: new Func<boolean>(`eq`, [field, new Value(`a`)]),
+      lastKey: `a`,
+    }
+    expect(normalizeLegacyLoadSubsetDemandKey(oldCursorSingleton)).toBe(
+      getLoadSubsetDemandKey({ where: equality, cursor }),
+    )
+    expect(normalizeLegacyLoadSubsetDemandKey(oldCursorSingleton)).not.toBe(
+      getLoadSubsetDemandKey({
+        where: equality,
+        cursor: { ...cursor, lastKey: `b` },
+      }),
+    )
 
     const malformed = oldSingleton.replace(
       `"name":"in"`,
