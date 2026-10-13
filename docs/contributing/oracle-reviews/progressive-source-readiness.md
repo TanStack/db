@@ -254,6 +254,47 @@ with its subset loads:
   to core subset loads; readiness no longer hides it.
 - **RxDB:** has no on-demand mode.
 
+## Exposure, grammar, and async-hold round
+
+After three review rounds kept finding defects, the author audited every
+producer and consumer of the readiness signal. The author designed the
+grammar from the boundary matrix, checked it with TLA+, and listed every
+outcome of every async hold.
+
+- **Grammar.** `progressive-source-readiness-tla/` holds a bounded TLA+
+  model of the frozen grammar, its trace table, the boundary matrix, and the
+  exclusions. Four safe configurations pass. Nine weakened configurations
+  each produce the expected counterexample: the original rule, ignoring
+  eager readiness, both Effect hold defects, the lazy-truncate failure,
+  settling during a reset without rows, a retry without renewal,
+  recomputed readiness, and a late window continuation. One encoding
+  failure (lazy demand missing after a snapshot settle) was corrected, with a
+  receipt.
+- **Consumers.** The shared framework conformance suite now has a lagging
+  on-demand source and the readiness law for a list query, a `findOne` query,
+  and the infinite query. The original rule fails each new scenario in every
+  driver (13 failures, all assertions). Solid's Suspense keeps its own
+  witness, because the shared suite has no Suspense surface.
+- **Fixed: `toArrayWhenReady()` and `stateWhenReady()`.** They resolved as
+  soon as the Collection held a row, so a live query's read could resolve
+  before readiness. They now resolve through `preload()`. Model D's two new
+  read lanes start the read after `deliver`. The original shortcut fails 236
+  cells, all at that checkpoint.
+- **Producers.** Witnesses under a real live query show that query-db,
+  PowerSync, TrailBase, and the SQLite persisted wrapper settle a load only
+  with its rows visible, reject real failures, and install no rows for a
+  released demand. These adapters call `markReady()` early, so the witnesses
+  check applied settlement, not the readiness rule. PowerSync resolves an
+  aborted acquisition instead of rejecting it; the generation check ignores
+  it.
+- **TrailBase widened.** An `it.fails` witness shows that a query can now be
+  first ready before the change subscription starts. The original rule
+  passes it.
+- **Async holds.** Six holds by eight outcomes: 12 new tests, 8 of 11 mutants
+  killed, and 3 equivalent survivors. A progressive load that is waiting when
+  a stream error arrives rejects, even if `onError` retries; a test pins
+  this.
+
 ## Open cells
 
 - TrailBase on-demand: a change committed between a subset fetch and the
@@ -261,8 +302,13 @@ with its subset loads:
   `packages/trailbase-db-collection/tests/ORACLE.md`. This predates the change.
 
 - Effect `skipInitial` over an ordered window or an include child has no lane.
-- Vue, Solid, Svelte, and Angular have no Suspense or readiness witness over a
-  lagging source. They read the same Collection readiness.
+- Vue, Svelte, and Angular have no Suspense surface in the shared suite.
+- A persisted follower tab's load may settle before the leader's rows apply
+  in that tab. Only the two-tab OPFS e2e suite can show this; it has not run.
+- Electron IPC, two on-demand roots, and include children apart from lazy
+  joins are not exercised.
+- Whether a load that was waiting at a retried stream error is a real failure
+  is a product decision.
 - The Electric e2e progressive suite has no run receipt (see the coverage map).
 - A rejected acquisition or a source error while a source lags is outside
   Model D.

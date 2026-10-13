@@ -2317,7 +2317,7 @@ describe(`Collection Indexes`, () => {
         startSync: true,
         defaultIndexType: BTreeIndex,
         sync: {
-          sync: ({ begin, write, commit }) => {
+          sync: ({ begin, write, commit, markReady }) => {
             begin()
             for (const item of specialData) {
               write({
@@ -2326,6 +2326,7 @@ describe(`Collection Indexes`, () => {
               })
             }
             commit()
+            markReady()
           },
         },
       })

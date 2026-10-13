@@ -9,4 +9,6 @@ An effect with `skipInitial: true` ends its initial suppression at the same poin
 
 A live query no longer enters an error state when a truncate of a lazily loaded source (a joined or included collection) aborts that source's pending load during the initial load. The truncate's replacement load now decides the demand.
 
-A progressive Electric load that arrives while a must-refetch is replacing the initial snapshot now settles when the replacement completes. After a stream error that `onError` retries, later progressive loads settle once the stream recovers. Before, it settled at once without loading rows, which the new readiness rule would have reported as a ready, empty query.
+A progressive Electric load that arrives while a must-refetch is replacing the initial snapshot now settles when the replacement completes. Before, it settled at once without loading rows, which the new readiness rule would have reported as a ready, empty query. After a stream error that `onError` retries, later progressive loads settle once the stream recovers.
+
+`toArrayWhenReady()` and `stateWhenReady()` now resolve when `preload()` does. Before, they resolved as soon as the collection held any row, so on a live query they could resolve before the query was ready.

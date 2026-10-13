@@ -2546,9 +2546,14 @@ async function expectProgressiveTraceMatches(
 // is the only evidence. The architecture's initial-readiness law states this
 // rule; this lane is its executable owner.
 //
-// The law has three consumers. A live-query Collection becomes ready, and its
-// preload settles, at initial-query readiness. A `queryOnce` read resolves at
-// the same point with the rows held then. An Effect with `skipInitial`
+// The law has three kinds of consumer. A live-query Collection becomes ready,
+// and its preload settles, at initial-query readiness. A one-shot read resolves
+// at the same point with the rows held then: `queryOnce`, and a live query's
+// `toArrayWhenReady()` and `stateWhenReady()`. Rows that are visible before
+// readiness do not resolve a read. The `queryOnce` read starts with the
+// trace. A live query's read starts right after `deliver`, when its rows are
+// already visible; the live query itself preloads from the start. A read
+// that starts after readiness resolves with the rows it sees then. An Effect with `skipInitial`
 // suppresses every delta until the same point and delivers every later delta.
 //
 // Each on-demand cell also runs a metamorphic twin: the same consumer over an
@@ -2618,7 +2623,18 @@ type LaggingSourceShape =
   | `join`
   | `eager-root`
   | `eager-default`
-type LaggingSourceConsumer = `live-query` | `effect` | `query-once`
+type LaggingSourceConsumer =
+  | `live-query`
+  | `effect`
+  | `query-once`
+  | `to-array-when-ready`
+  | `state-when-ready`
+
+// One-shot reads share the read model: rows at initial-query readiness.
+const isReadConsumer = (consumer: LaggingSourceConsumer): boolean =>
+  consumer === `query-once` ||
+  consumer === `to-array-when-ready` ||
+  consumer === `state-when-ready`
 type LaggingSourceStep =
   `deliver` | `settle` | `source-ready` | `change` | `rekey` | `truncate`
 
@@ -2703,6 +2719,9 @@ type LaggingSourceFacts = {
   writtenAfterReadiness: Array<number>
   exitsAfterReadiness: number
   idsAtReadiness: Array<number> | undefined
+  // A read started after `deliver`: the rows it owes, or `at-readiness` when
+  // it started before readiness and so owes `idsAtReadiness`.
+  readOwes: Array<number> | `at-readiness` | undefined
   replayPending: boolean
 }
 
@@ -2763,11 +2782,15 @@ function expectedLiveQueryObservation(
 }
 
 function expectedReadObservation(
+  consumer: LaggingSourceConsumer,
   mode: LaggingSourceMode,
   facts: LaggingSourceFacts,
 ): ReadObservation {
   return {
-    resolvedIds: facts.idsAtReadiness,
+    resolvedIds:
+      consumer === `query-once` || facts.readOwes === `at-readiness`
+        ? facts.idsAtReadiness
+        : facts.readOwes,
     acquisitions: mode === `on-demand` ? 1 : 0,
   }
 }
@@ -2980,6 +3003,8 @@ type LaggingSourceConsumerState = {
   effect: Effect | undefined
   enteredPostIds: Array<number>
   otherEvents: number
+  // Starts a live query's `toArrayWhenReady()` or `stateWhenReady()` read.
+  startRead: (() => void) | undefined
 }
 
 type LaggingSourceContext = {
@@ -3011,17 +3036,36 @@ function startLaggingSourceConsumer(
     effect: undefined,
     enteredPostIds: [],
     otherEvents: 0,
+    startRead: undefined,
   }
   const query = laggingSourceQuery(shape, source.collection, users)
   if (consumer === `live-query`) {
     state.live = createLiveQueryCollection(query)
     void startPreload(state.live, state.preload)
-  } else if (consumer === `query-once`) {
-    void queryOnce(query).then((rows) => {
-      state.resolvedIds = (rows as Array<Record<string, unknown>>)
+  } else if (isReadConsumer(consumer)) {
+    const resolve = (rows: Array<Record<string, unknown>>) => {
+      state.resolvedIds = rows
         .flatMap((row) => rowPostIds(shape, row))
         .sort((a, b) => a - b)
-    })
+    }
+    if (consumer === `query-once`) {
+      void queryOnce(query).then((rows) =>
+        resolve(rows as Array<Record<string, unknown>>),
+      )
+    } else {
+      const live = createLiveQueryCollection(query)
+      state.live = live
+      void startPreload(live, state.preload)
+      state.startRead = () => {
+        const read =
+          consumer === `to-array-when-ready`
+            ? live.toArrayWhenReady()
+            : live.stateWhenReady().then((rows) => [...rows.values()])
+        void read.then((rows) =>
+          resolve(rows as Array<Record<string, unknown>>),
+        )
+      }
+    }
   } else {
     state.effect = createEffect({
       query,
@@ -3113,6 +3157,7 @@ function createLaggingSourceDriver(
           writtenAfterReadiness: [],
           exitsAfterReadiness: 0,
           idsAtReadiness: undefined,
+          readOwes: undefined,
           replayPending: false,
         },
         main: startLaggingSourceConsumer(
@@ -3138,6 +3183,19 @@ function createLaggingSourceDriver(
     apply: async (step, context) => {
       applyLaggingSourceStep(step, context)
       await flushPromises()
+      if (step === `deliver` && context.main.startRead) {
+        const { facts, shape } = context
+        facts.readOwes =
+          facts.idsAtReadiness === undefined
+            ? `at-readiness`
+            : facts.posts
+                .filter((post) => postMatchesShape(shape, facts, post))
+                .map(({ id }) => id)
+                .sort((a, b) => a - b)
+        context.main.startRead()
+        context.twin?.startRead?.()
+        await flushPromises()
+      }
       // An ordered window may issue continuation requests to reach its fixed
       // point. `settle` completes that whole chain without new rows.
       const sources = [
@@ -3192,7 +3250,7 @@ function observeLaggingSourceConsumer(
   facts: LaggingSourceFacts,
   state: LaggingSourceConsumerState,
 ): LiveQueryObservation | EffectObservation | ReadObservation {
-  if (consumer === `query-once`)
+  if (isReadConsumer(consumer))
     return {
       resolvedIds: state.resolvedIds,
       acquisitions: observedAcquisitions(shape, facts, state.source),
@@ -3252,8 +3310,8 @@ function laggingSourceProjection(
       observation:
         consumer === `live-query`
           ? expectedLiveQueryObservation(shape, facts)
-          : consumer === `query-once`
-            ? expectedReadObservation(mode, facts)
+          : isReadConsumer(consumer)
+            ? expectedReadObservation(consumer, mode, facts)
             : expectedEffectObservation(mode, facts),
       twinDisagreement: undefined,
     }),
@@ -3472,6 +3530,8 @@ describe(`includes temporal oracle`, () => {
       ],
       effect: [`direct`, `join`, `eager-root`, `eager-default`],
       'query-once': [`direct`, `eager-root`],
+      'to-array-when-ready': [`direct`, `find-one`, `join`, `eager-root`],
+      'state-when-ready': [`direct`, `find-one`, `eager-root`],
     }
     const cells = Object.entries(consumers).flatMap(([consumer, shapes]) =>
       shapes.flatMap((shape) =>
