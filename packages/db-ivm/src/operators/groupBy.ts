@@ -6,13 +6,11 @@ import type { IStreamBuilder, KeyValue } from '../types.js'
 
 type GroupKey = Record<string, unknown>
 
-type BasicAggregateFunction<T, R, V = unknown> = {
+type AggregateFunction<T, R, V = unknown> = {
   preMap: (data: T) => V
   reduce: (values: Array<[V, number]>) => V
   postMap?: (result: V) => R
 }
-
-type AggregateFunction<T, R, V = unknown> = BasicAggregateFunction<T, R, V>
 
 type ExtractAggregateReturnType<T, A> =
   A extends AggregateFunction<T, infer R, any> ? R : never
@@ -33,18 +31,13 @@ export function groupBy<
 >(keyExtractor: (data: T) => K, aggregates: A = {} as A) {
   type ResultType = K & AggregatesReturnType<T, A>
 
-  const basicAggregates = aggregates as Record<
-    string,
-    BasicAggregateFunction<T, any, any>
-  >
-
   return (
     stream: IStreamBuilder<T>,
   ): IStreamBuilder<KeyValue<string, ResultType>> => {
     // Special key to store the original key object
     const KEY_SENTINEL = Symbol(`original_group_key`)
 
-    const aggregateEntries = Object.entries(basicAggregates)
+    const aggregateEntries = Object.entries(aggregates)
 
     // First map to extract keys and pre-aggregate values. Each contribution
     // leads with an identity built from its group key and pre-aggregate

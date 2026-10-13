@@ -12,17 +12,17 @@ import { TopKRelation } from './topk-relation-oracle.js'
  *
  * The top-K operator APIs and existing window tests establish selection of
  * present relation rows in key order within an offset/limit window.
- * Fractional-index top-K emits one indexed row for positive support. The model below integrates signed input weights by typed key and
- * selects from a fixed, independently ordered key domain. `TopKRelation` only
+ * Fractional-index top-K emits one indexed row for positive support. The
+ * model below integrates signed input weights by typed key and selects from a
+ * fixed, independently ordered key domain. `TopKRelation` only
  * checks accumulated signed fractional-index output; its companion tests
  * calibrate that checker without exercising production.
  *
  * The grammar covers five finite scalar keys, one fixed payload per key,
  * support 0..3, and offset/limit 0..6. Every input turn and supported window
  * move has a graph-run checkpoint for output rows and reported window size.
- * The pinned
- * 0/1/2 support crossing and boundary history distinguish presence from raw
- * multiplicity and inclusive from displaced window cuts. Row replacements,
+ * The pinned 0/1/2 support crossing and boundary history distinguish presence
+ * from raw multiplicity and inclusive from displaced window cuts. Row replacements,
  * multiple groups, negative net support, and downstream lazy acquisition are
  * outside this owner.
  */

@@ -1,4 +1,3 @@
-import { withSpan } from '../telemetry/tracer'
 import {
   MissingTemporalConstructorError,
   TransactionSerializer,
@@ -49,45 +48,26 @@ export class OutboxManager {
   }
 
   async add(transaction: OfflineTransaction): Promise<void> {
-    return withSpan(
-      `outbox.add`,
-      {
-        'transaction.id': transaction.id,
-        'transaction.mutationFnName': transaction.mutationFnName,
-        'transaction.keyCount': transaction.keys.length,
-      },
-      async () => {
-        const key = this.getStorageKey(transaction.id)
-        const serialized = this.serializer.serialize(transaction)
-        await this.storage.set(key, serialized)
-      },
-    )
+    const key = this.getStorageKey(transaction.id)
+    const serialized = this.serializer.serialize(transaction)
+    await this.storage.set(key, serialized)
   }
 
   async get(id: string): Promise<OfflineTransaction | null> {
-    return withSpan(`outbox.get`, { 'transaction.id': id }, async (span) => {
-      const key = this.getStorageKey(id)
-      const data = await this.storage.get(key)
+    const key = this.getStorageKey(id)
+    const data = await this.storage.get(key)
+    if (!data) return null
 
-      if (!data) {
-        span.setAttribute(`result`, `not_found`)
-        return null
+    try {
+      return this.serializer.deserialize(data)
+    } catch (error) {
+      if (error instanceof MissingTemporalConstructorError) {
+        error.message = `transaction ${id}: ${error.message}`
+        throw error
       }
-
-      try {
-        const transaction = this.serializer.deserialize(data)
-        span.setAttribute(`result`, `found`)
-        return transaction
-      } catch (error) {
-        if (error instanceof MissingTemporalConstructorError) {
-          error.message = `transaction ${id}: ${error.message}`
-          throw error
-        }
-        console.warn(`Failed to deserialize transaction ${id}:`, error)
-        span.setAttribute(`result`, `deserialize_error`)
-        return null
-      }
-    })
+      console.warn(`Failed to deserialize transaction ${id}:`, error)
+      return null
+    }
   }
 
   async getAll(): Promise<Array<OfflineTransaction>> {
@@ -100,13 +80,11 @@ export class OutboxManager {
     const read = { revision: this.removalRevision }
     this.activeReads.add(read)
     try {
-      return await withSpan(`outbox.getAll`, {}, async (span) => {
+      {
         const keys = await this.storage.keys()
         const transactionKeys = keys.filter((key) =>
           key.startsWith(this.keyPrefix),
         )
-
-        span.setAttribute(`transactionCount`, transactionKeys.length)
 
         const transactions: Array<OfflineTransaction> = []
 
@@ -137,7 +115,7 @@ export class OutboxManager {
         // Keep the read registered until replay admission completes. A durable
         // removal cannot land between filtering and this synchronous consumer.
         return consume(currentTransactions)
-      })
+      }
     } finally {
       this.activeReads.delete(read)
       this.pruneRemovalHistory()
@@ -157,29 +135,21 @@ export class OutboxManager {
     id: string,
     updates: Partial<OfflineTransaction>,
   ): Promise<void> {
-    return withSpan(`outbox.update`, { 'transaction.id': id }, async () => {
-      const existing = await this.get(id)
-      if (!existing) {
-        throw new OutboxTransactionNotFoundError(`Transaction ${id} not found`)
-      }
-
-      const updated = { ...existing, ...updates }
-      await this.add(updated)
-    })
+    const existing = await this.get(id)
+    if (!existing) {
+      throw new OutboxTransactionNotFoundError(`Transaction ${id} not found`)
+    }
+    await this.add({ ...existing, ...updates })
   }
 
   async remove(id: string): Promise<void> {
-    return withSpan(`outbox.remove`, { 'transaction.id': id }, async () => {
-      const key = this.getStorageKey(id)
-      await this.storage.delete(key)
-      this.recordRemovals([id])
-    })
+    const key = this.getStorageKey(id)
+    await this.storage.delete(key)
+    this.recordRemovals([id])
   }
 
   async removeMany(ids: Array<string>): Promise<void> {
-    return withSpan(`outbox.removeMany`, { count: ids.length }, async () => {
-      await Promise.all(ids.map((id) => this.remove(id)))
-    })
+    await Promise.all(ids.map((id) => this.remove(id)))
   }
 
   async clear(): Promise<void> {

@@ -11,7 +11,7 @@ The API is almost identical to D2TS, but without the need to specify a version w
 Here's a simple example that demonstrates the core concepts:
 
 ```typescript
-import { D2, map, filter, debug, MultiSet } from '@tanstack/db-ivm'
+import { D2, map, filter, output, MultiSet } from '@tanstack/db-ivm'
 
 // Create a new D2 graph
 const graph = new D2()
@@ -25,10 +25,10 @@ const input = graph.newInput<number>()
 // 2. Adds 5 to each number
 // 3. Filters to keep only even numbers
 // Pipelines can have multiple inputs and outputs.
-const output = input.pipe(
+input.pipe(
   map((x) => x + 5),
   filter((x) => x % 2 === 0),
-  debug('output'),
+  output((message) => console.log(message.getInner())),
 )
 
 // Finalize the pipeline, after this point we can no longer add operators or

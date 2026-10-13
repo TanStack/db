@@ -193,8 +193,9 @@ const uniqueRowSplitDomain = {
 }
 
 /**
- * The model observes relation membership and multiplicity. Plain `orderBy`
- * exposes selected members, not their sequence indices. Publication timing and
+ * The model observes relation membership and multiplicity. The ordered
+ * window operators also annotate each selected member with a fractional
+ * index, which these laws drop before comparing. Publication timing and
  * SQL meaning are separate contracts.
  *
  * Normal runs pair a stable campaign with a new random seed. Replay variables
@@ -655,7 +656,7 @@ describe(`DBSP incrementalization laws`, () => {
           async (worlds) => {
             await setImmediate()
             assertUnaryIncrementalization({
-              name: `orderBy`,
+              name: `ordered window`,
               initial: worlds[0]!,
               batches: transitions(worlds),
               inputPolicy: keyedPolicy,
@@ -857,6 +858,27 @@ describe(`DBSP incrementalization laws`, () => {
         ),
       evaluate: (input) => firstThree(input).slice(0, 1),
     })
+
+    // At two values, limit 2 retains both. The third value lands past the
+    // boundary; a wrong limit of 3 would leak it at checkpoint 1. Removing the
+    // first value then requires the third to enter the window.
+    const promotion = assertUnaryIncrementalization({
+      name: `ordered window boundary and promotion`,
+      initial: [
+        [[0, 1] as Keyed, 1],
+        [[1, 2] as Keyed, 1],
+      ],
+      batches: [[[[2, 3] as Keyed, 1]], [[[0, 1] as Keyed, -1]]],
+      inputPolicy: keyedPolicy,
+      outputPolicy: keyedPolicy,
+      build: (input) =>
+        input.pipe(
+          orderByWithFractionalIndex((rank) => rank, { limit: 2 }),
+          withoutIndex(),
+        ),
+      evaluate: (input) => firstThree(input).slice(0, 2),
+    })
+    expect(promotion.atomicCheckpoints).toBe(3)
   })
 
   it(`rejects invalid negative and duplicate-key input states`, () => {
@@ -953,6 +975,25 @@ describe(`DBSP incrementalization laws`, () => {
         evaluate: firstThree,
       }),
     ).toThrow(/output delta diverged/)
+    expect(() =>
+      assertUnaryIncrementalization({
+        name: `wrong window limit fault`,
+        initial: [
+          [[0, 1] as Keyed, 1],
+          [[1, 2] as Keyed, 1],
+          [[2, 3] as Keyed, 1],
+        ],
+        batches: [],
+        inputPolicy: keyedPolicy,
+        outputPolicy: keyedPolicy,
+        build: (input) =>
+          input.pipe(
+            orderByWithFractionalIndex((rank) => rank, { limit: 3 }),
+            withoutIndex(),
+          ),
+        evaluate: (input) => firstThree(input).slice(0, 2),
+      }),
+    ).toThrow(/output delta diverged at checkpoint 0/)
 
     const truthinessMinimum = {
       preMap: ([, value]: Keyed): number | undefined => value,
