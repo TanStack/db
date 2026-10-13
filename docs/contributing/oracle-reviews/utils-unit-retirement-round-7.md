@@ -85,3 +85,13 @@ replay of selector 34, seed `20260911`, path `0:0`, after one test at the
 forward `deepEquals` return. Removing the temporary rule made that replay pass
 with only the selected generated property active. Fresh review of the next
 committed head remains pending.
+
+At committed head `be5b7a3c4`, a fresh hostile reviewer found no blocker in
+the six-test Date and RegExp transfer. All six retired assertions still have
+fixed witnesses and broader generated laws. The owner passed 139 tests with
+no type errors. Direct replays confirmed that selectors 34–38 name the
+recorded properties, including selector 34 with seed `20260911` and path
+`0:0`. The result covers direct `deepEquals` calls. It does not establish
+public change events, cross-realm values, RegExp subclasses, or arbitrary
+cross-type pairs. Ordinal selectors can shift if future registrations are
+inserted ahead of them.

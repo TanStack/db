@@ -83,72 +83,79 @@ async function observeWindowMove(
   const replies: Array<Array<number>> = []
   const writes: Array<number> = []
   const delivered = new Set([2, 4])
-  const source = createCollection<Row>({
-    id: `custom-window-source-${suffix}-${layout}`,
-    getKey: ({ id }) => id,
-    syncMode: `on-demand`,
-    startSync: true,
-    autoIndex: layout === `eager-custom-only` ? `eager` : `off`,
-    defaultIndexType: indexType,
-    sync: {
-      sync: ({ begin, write, commit, markReady }) => {
-        begin()
-        for (const row of rows.filter(({ id }) => delivered.has(id))) {
-          write({ type: `insert`, value: row })
-        }
-        commit()
-        markReady()
-        return {
-          loadSubset: (options: LoadSubsetOptions) => {
-            const reply = requestedRows(options)
-            replies.push(reply.map(({ id }) => id))
-            begin()
-            for (const row of reply) {
-              if (delivered.has(row.id)) continue
-              delivered.add(row.id)
-              writes.push(row.id)
-              write({ type: `insert`, value: row })
-            }
-            const receipt = commit(options.signal)
-            return receipt === true ? Promise.resolve() : receipt
-          },
-        }
+  const createSource = () =>
+    createCollection<Row>({
+      id: `custom-window-source-${suffix}-${layout}`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: layout === `eager-custom-only` ? `eager` : `off`,
+      defaultIndexType: indexType,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          for (const row of rows.filter(({ id }) => delivered.has(id))) {
+            write({ type: `insert`, value: row })
+          }
+          commit()
+          markReady()
+          return {
+            loadSubset: (options: LoadSubsetOptions) => {
+              const reply = requestedRows(options)
+              replies.push(reply.map(({ id }) => id))
+              begin()
+              for (const row of reply) {
+                if (delivered.has(row.id)) continue
+                delivered.add(row.id)
+                writes.push(row.id)
+                write({ type: `insert`, value: row })
+              }
+              const receipt = commit(options.signal)
+              return receipt === true ? Promise.resolve() : receipt
+            },
+          }
+        },
       },
-    },
-  })
-  await source.stateWhenReady()
-  const custom = () =>
-    source.createIndex((row) => row.rank, {
-      indexType,
-      options: { compareFn: (a: number, b: number) => b - a },
     })
-  const ordinary = () => source.createIndex((row) => row.rank, { indexType })
-  if (layout === `custom-first`) {
-    custom()
-    ordinary()
-  } else if (layout === `ordinary-first`) {
-    ordinary()
-    custom()
-  } else if (layout === `eager-custom-only`) {
-    custom()
-  }
-
-  const live = createLiveQueryCollection((query) =>
-    query
-      .from({ row: source })
-      .orderBy(({ row }) => row.rank, `asc`)
-      .offset(0)
-      .limit(1)
-      .select(({ row }) => ({ id: row.id, rank: row.rank })),
-  )
   const publications: Array<Array<number>> = []
-  let subscription: ReturnType<typeof live.subscribeChanges> | undefined
+  let unsubscribe: (() => unknown) | undefined
+  let cleanupLive: (() => unknown) | undefined
+  let cleanupSource: (() => unknown) | undefined
   return withOracleCleanup(async () => {
+    const source = createSource()
+    cleanupSource = () => source.cleanup()
+    await source.stateWhenReady()
+    const custom = () =>
+      source.createIndex((row) => row.rank, {
+        indexType,
+        options: { compareFn: (a: number, b: number) => b - a },
+      })
+    const ordinary = () => source.createIndex((row) => row.rank, { indexType })
+    if (layout === `custom-first`) {
+      custom()
+      ordinary()
+    } else if (layout === `ordinary-first`) {
+      ordinary()
+      custom()
+    } else if (layout === `eager-custom-only`) {
+      custom()
+    }
+
+    const live = createLiveQueryCollection((query) =>
+      query
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank, `asc`)
+        .offset(0)
+        .limit(1)
+        .select(({ row }) => ({ id: row.id, rank: row.rank })),
+    )
+    cleanupLive = () => live.cleanup()
     await live.preload()
     const initial = Array.from(live.values(), ({ id }) => id)
-    subscription = live.subscribeChanges(() => {
+    const subscription = live.subscribeChanges(() => {
       publications.push(Array.from(live.values(), ({ id }) => id))
     })
+    unsubscribe = () => subscription.unsubscribe()
     publications.length = 0
     await live.utils.setWindow({ offset: 1, limit: 2 })
     const moved = Array.from(live.values(), ({ id }) => id)
@@ -163,11 +170,7 @@ async function observeWindowMove(
     if (layout === `eager-custom-only`) {
       expect(source.indexes.size).toBe(2)
     }
-  }, [
-    () => subscription?.unsubscribe(),
-    () => live.cleanup(),
-    () => source.cleanup(),
-  ])
+  }, [() => unsubscribe?.(), () => cleanupLive?.(), () => cleanupSource?.()])
 }
 
 describe.each([

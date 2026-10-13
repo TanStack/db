@@ -584,8 +584,13 @@ it(`keeps a forged tag and shadowed zone outside genuine UTC equality`, async ()
   const shadowed = Temporal.ZonedDateTime.from(
     `2024-01-15T09:00:00+00:00[+00:00]`,
   )
+  const freshOffsetProbe = Temporal.ZonedDateTime.from(
+    `2024-01-15T09:00:00+00:00[+00:00]`,
+  )
   Object.defineProperty(shadowed, `timeZoneId`, { value: `UTC` })
   expect(aliasProbe.equals(shadowed)).toBe(false)
+  expect(shadowed).not.toBe(freshOffsetProbe)
+  expect(shadowed.equals(freshOffsetProbe)).toBe(true)
   expect(() => Reflect.apply(aliasProbe.equals, aliasProbe, [fake])).toThrow()
 
   const source = [
@@ -605,6 +610,12 @@ it(`keeps a forged tag and shadowed zone outside genuine UTC equality`, async ()
       expect(index.equalityLookup(row.when)).toEqual(new Set([row.id]))
       if (row.id === `forged`) {
         expect(index.equalityLookup(fakeCopy)).toEqual(new Set())
+      } else {
+        // The own zone accessor must not turn a genuine fixed-offset value
+        // into reference-only equality with its native-equal fresh instance.
+        expect(index.equalityLookup(freshOffsetProbe)).toEqual(
+          new Set([row.id]),
+        )
       }
     }
   }
@@ -637,6 +648,7 @@ it(`keeps a forged tag and shadowed zone outside genuine UTC equality`, async ()
       )
     }
     expect(keysFor(aliasProbe)).toEqual(new Set())
+    expect(keysFor(freshOffsetProbe)).toEqual(new Set([`shadowed`]))
     expect(keysFor(fake)).toEqual(new Set([`forged`]))
     expect(keysFor(fakeCopy)).toEqual(new Set())
   }, [() => collection.cleanup()])

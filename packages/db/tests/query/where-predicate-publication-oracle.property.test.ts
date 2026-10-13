@@ -70,7 +70,8 @@
  * lookup checks the indexed equality key when an index is present. Fixed local
  * and foreign Date subclasses with inherited `getTime` join the same
  * timestamp classes. A forged object with a borrowed subclass prototype does
- * not join a Date class.
+ * not join a Date class. A separate unindexed public query checks the local
+ * borrowed-prototype case against Date inequality and object identity.
  *
  * Calibration: pinned histories separate Kleene from two-valued logic, and a
  * checker test requires the two-valued answer to fail. Hostile production
@@ -93,6 +94,11 @@
  * prototypes, including own display tags, and fixed local and foreign Date
  * subclasses with inherited `getTime`. It excludes proxies, prototype swaps,
  * replaced `getTime` methods, other hosts, and generated subclass histories.
+ * The local borrowed-prototype query uses one row and observes keys after
+ * preload. It does not claim indexed publication for that forged object.
+ * A pinned mixed-scalar history checks an indexed source after deleting and
+ * replacing rows. Its WHERE result still follows `eq` truth; the index's
+ * private order must not lose an equality member or interrupt publication.
  */
 import { runInNewContext } from 'node:vm'
 import { fc, test as fcTest } from '@fast-check/vitest'
@@ -504,6 +510,18 @@ const pinnedPrefilteredSnapshot: History = {
 // Each change history moves rows across a predicate whose equality operand a
 // skip-if-no-match shortcut can misread.
 const pinnedChangeHistories: ReadonlyArray<History> = [
+  {
+    // The default ordered index must keep distinct string and number rows
+    // available to exact equality after a delete and two same-key updates.
+    kind: `changes`,
+    rows: [`b`, 1, `a`],
+    predicate: fieldEq(`a`),
+    transactions: [
+      [{ type: `delete`, target: 0 }],
+      [{ type: `update`, target: 0, v: `b` }],
+      [{ type: `update`, target: 0, v: 2 }],
+    ],
+  },
   {
     // `or` operands are alternatives, not conjuncts.
     kind: `changes`,
@@ -1449,6 +1467,49 @@ describe(`WHERE predicate publication oracle`, () => {
           await observeTaggedDateEquality(literal, indexed)
         }
       }
+    })
+
+    it(`keeps a forged local Date subclass prototype outside Date equality`, async () => {
+      class LocalDate extends Date {}
+      const forged = Object.create(LocalDate.prototype) as object
+      // The native-slot check establishes that this is an ordinary object,
+      // despite local instanceof reporting Date.
+      expect(forged instanceof Date).toBe(true)
+      expect(() => Date.prototype.getTime.call(forged)).toThrow(TypeError)
+      let collectionCleanup: (() => unknown) | undefined
+      let notDateCleanup: (() => unknown) | undefined
+      let sameObjectCleanup: (() => unknown) | undefined
+      await withOracleCleanup(async () => {
+        const collection = createCollection(
+          mockSyncCollectionOptions<{ id: string; v: object }>({
+            id: `where-publication-forged-date-${collectionSerial++}`,
+            getKey: (row) => row.id,
+            autoIndex: `off`,
+            initialData: [{ id: `forged`, v: forged }],
+          }),
+        )
+        collectionCleanup = () => collection.cleanup()
+        const notDate = createLiveQueryCollection((q) =>
+          q
+            .from({ row: collection })
+            .where(({ row }) => not(eq(row.v, new Date(1)))),
+        )
+        notDateCleanup = () => notDate.cleanup()
+        const sameObject = createLiveQueryCollection((q) =>
+          q.from({ row: collection }).where(({ row }) => eq(row.v, forged)),
+        )
+        sameObjectCleanup = () => sameObject.cleanup()
+        await notDate.preload()
+        // A distinct Date is unequal to this object. The same object remains
+        // equal by identity at the public query publication checkpoint.
+        expect([...notDate.keys()]).toEqual([`forged`])
+        await sameObject.preload()
+        expect([...sameObject.keys()]).toEqual([`forged`])
+      }, [
+        () => notDateCleanup?.(),
+        () => sameObjectCleanup?.(),
+        () => collectionCleanup?.(),
+      ])
     })
 
     for (const history of [

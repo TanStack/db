@@ -1,5 +1,6 @@
 import { describe, expect, expectTypeOf, test, vi } from 'vitest'
 import { fc } from '@fast-check/vitest'
+import { Temporal } from 'temporal-polyfill'
 import { createCollection } from '../src/collection/index.js'
 import { CollectionInErrorStateError } from '../src/errors.js'
 import { BasicIndex } from '../src/indexes/basic-index.js'
@@ -2469,3 +2470,234 @@ test(`ordered scan resolves inherited collation outside each comparison`, async 
     expect(collection.indexes.size).toBe(0)
   })
 })
+
+/**
+ * Mixed string/number source values remain legal index inputs. A default
+ * comparator cannot put every string at the same position as a number while
+ * still ordering those strings: that would make comparator equality
+ * non-transitive and leave no stable ordered partition for a delete or update.
+ * A plain Map predicts exact membership and key conservation; the two strings
+ * still follow their configured collation. Their position relative to the
+ * number is left free. This lane covers two scalar types, three source keys,
+ * build and incremental admission, and returned direct actions. It does not
+ * claim a universal order over objects, Dates, or arbitrary custom callbacks.
+ */
+describe.each(indexTypes)(
+  `%s mixed scalar index refinement`,
+  (_name, IndexType) => {
+    test.each([
+      [`build`, `forward`],
+      [`build`, `reverse`],
+      [`incremental`, `forward`],
+      [`incremental`, `reverse`],
+    ] as const)(
+      `%s %s keeps ordered positions and exact members through delete and update`,
+      (admission, sourceOrder) => {
+        const index = new IndexType(1, new PropRef([`value`]))
+        const rows = new Map<string, string | number>([
+          [`r0`, `b`],
+          [`r1`, 1],
+          [`r2`, `a`],
+        ])
+        const sourceRows =
+          sourceOrder === `forward` ? [...rows] : [...rows].reverse()
+        const source: Array<[string, { value: string | number }]> =
+          sourceRows.map(([key, value]) => [key, { value }])
+        if (admission === `build`) index.build(source)
+        else for (const [key, value] of source) index.add(key, value)
+
+        const check = () => {
+          const ordered = index.takeFromStart(rows.size + 1)
+          expect(ordered).toHaveLength(rows.size)
+          expect(new Set(ordered)).toEqual(new Set(rows.keys()))
+          const stringKeys = [...rows]
+            .filter(([, value]) => typeof value === `string`)
+            .sort((left, right) =>
+              (left[1] as string).localeCompare(right[1] as string),
+            )
+            .map(([key]) => key)
+          expect(ordered.filter((key) => stringKeys.includes(key))).toEqual(
+            stringKeys,
+          )
+          for (const value of [`a`, `b`, 1, 2]) {
+            expect(index.equalityLookup(value)).toEqual(
+              new Set(
+                [...rows]
+                  .filter(([, candidate]) => candidate === value)
+                  .map(([key]) => key),
+              ),
+            )
+          }
+        }
+
+        check() // source admission
+        index.remove(`r0`, { value: `b` })
+        rows.delete(`r0`)
+        check()
+        index.update(`r1`, { value: 1 }, { value: `b` })
+        rows.set(`r1`, `b`)
+        check()
+        index.update(`r1`, { value: `b` }, { value: 2 })
+        rows.set(`r1`, 2)
+        check()
+      },
+    )
+
+    test(`keeps a numeric string and its number as distinct live keys`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      index.add(`number`, { value: 1 })
+      index.add(`text`, { value: `1` })
+      expect(index.equalityLookup(1)).toEqual(new Set([`number`]))
+      expect(index.equalityLookup(`1`)).toEqual(new Set([`text`]))
+      expect(new Set(index.takeFromStart(2))).toEqual(
+        new Set([`text`, `number`]),
+      )
+    })
+  },
+)
+
+/**
+ * A default index must retain every key through legal mutations even when its
+ * field holds an array, Date, or Temporal value beside an ordinary object.
+ * Element, timestamp, and calendar order compare values within their own kind;
+ * this model makes no claim about their position relative to the ordinary
+ * object. Its source Map and supplied labels predict exact membership and keys in an unfiltered
+ * ordered take. This fixed history reaches representative replacement and a
+ * later update that exposed a stale ordered position in BasicIndex.
+ */
+describe.each(indexTypes)(
+  `%s mixed object index refinement`,
+  (_name, IndexType) => {
+    test.each([`Array`, `Date`, `PlainDate`] as const)(
+      `retains every key through %s and ordinary-object updates`,
+      (valueKind) => {
+        const values =
+          valueKind === `Array`
+            ? { high: [2], ordinary: {}, low: [1] }
+            : valueKind === `Date`
+              ? { high: new Date(2), ordinary: {}, low: new Date(1) }
+              : {
+                  high: Temporal.PlainDate.from(`2024-01-02`),
+                  ordinary: {},
+                  low: Temporal.PlainDate.from(`2024-01-01`),
+                }
+        type Label = keyof typeof values
+        const index = new IndexType(1, new PropRef([`value`]))
+        const rows = new Map<string, Label>([
+          [`high`, `high`],
+          [`ordinary`, `ordinary`],
+          [`low`, `low`],
+        ])
+        for (const [key, label] of rows) {
+          index.add(key, { value: values[label] })
+        }
+
+        const check = () => {
+          const orderedKeys = index.takeFromStart(rows.size + 1)
+          expect(orderedKeys).toHaveLength(rows.size)
+          expect(new Set(orderedKeys)).toEqual(new Set(rows.keys()))
+          for (const label of [`high`, `ordinary`, `low`] as const) {
+            expect(index.equalityLookup(values[label])).toEqual(
+              new Set(
+                [...rows]
+                  .filter(([, candidate]) => candidate === label)
+                  .map(([key]) => key),
+              ),
+            )
+          }
+          const lowKeys = [...rows]
+            .filter(([, label]) => label === `low`)
+            .map(([key]) => key)
+          const highKeys = [...rows]
+            .filter(([, label]) => label === `high`)
+            .map(([key]) => key)
+          if (lowKeys.length > 0 && highKeys.length > 0) {
+            expect(
+              Math.max(...lowKeys.map((key) => orderedKeys.indexOf(key))),
+            ).toBeLessThan(
+              Math.min(...highKeys.map((key) => orderedKeys.indexOf(key))),
+            )
+          }
+        }
+
+        check()
+        index.update(
+          `ordinary`,
+          { value: values.ordinary },
+          { value: values.high },
+        )
+        rows.set(`ordinary`, `high`)
+        check()
+        index.update(`ordinary`, { value: values.high }, { value: values.low })
+        rows.set(`ordinary`, `low`)
+        check()
+        index.update(`low`, { value: values.low }, { value: values.high })
+        rows.set(`low`, `high`)
+        check()
+      },
+    )
+  },
+)
+
+/**
+ * An index expression may return a function reference. The source Map predicts
+ * exact reference membership and one ordered occurrence per live key; it does
+ * not prescribe an order between functions and numbers. Two distinct function
+ * values beside a number exercise build, incremental admission, deletion, and
+ * replacement. Native relational comparison can otherwise tie each function
+ * to the number while ordering the two functions apart.
+ */
+describe.each(indexTypes)(
+  `%s callable index refinement`,
+  (_name, IndexType) => {
+    test.each([`build`, `incremental`] as const)(
+      `%s conserves live keys through function and number changes`,
+      (admission) => {
+        const values = {
+          a: function a() {},
+          b: function b() {},
+          one: 1,
+          two: 2,
+        }
+        type Label = keyof typeof values
+        const rows = new Map<string, Label>([
+          [`b`, `b`],
+          [`number`, `one`],
+          [`a`, `a`],
+        ])
+        const index = new IndexType(1, new PropRef([`value`]))
+        const source: Array<[string, { value: (typeof values)[Label] }]> = [
+          ...rows,
+        ].map(([key, label]) => [key, { value: values[label] }])
+        if (admission === `build`) index.build(source)
+        else for (const [key, value] of source) index.add(key, value)
+
+        const check = () => {
+          const orderedKeys = index.takeFromStart(rows.size + 1)
+          expect(orderedKeys).toHaveLength(rows.size)
+          expect(new Set(orderedKeys)).toEqual(new Set(rows.keys()))
+          for (const label of [`a`, `b`, `one`, `two`] as const) {
+            expect(index.equalityLookup(values[label])).toEqual(
+              new Set(
+                [...rows]
+                  .filter(([, candidate]) => candidate === label)
+                  .map(([key]) => key),
+              ),
+            )
+          }
+        }
+
+        check()
+        index.remove(`b`, { value: values.b })
+        rows.delete(`b`)
+        check()
+        index.update(`number`, { value: values.one }, { value: values.b })
+        rows.set(`number`, `b`)
+        check()
+        index.update(`number`, { value: values.b }, { value: values.two })
+        rows.set(`number`, `two`)
+        check()
+      },
+    )
+  },
+)

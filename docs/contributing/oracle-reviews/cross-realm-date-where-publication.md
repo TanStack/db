@@ -135,3 +135,17 @@ oracles, 127 tests, with no type errors. Live-query planner index use, generated
 subclass histories, deeper subclass chains, other hosts, public ranges, and
 prototype/method replacement remain outside this witness. Fresh exact-commit
 review is pending.
+
+## Local borrowed-prototype counterexample at `be5b7a3c4`
+
+A fresh hostile reviewer found that the matrix's foreign borrowed-prototype
+object never reached the local `instanceof Date` fast path. An ordinary object
+made with `Object.create(LocalDateSubclass.prototype)` has no native Date
+slot, although local `instanceof Date` returns true. In an unindexed public
+query, `not(eq(v, Date(1)))` omitted its only row instead of publishing that
+row. The new focused witness establishes the missing slot with the native
+intrinsic, then checks both Date inequality and same-object identity after
+preload. It failed at the public key set on the reviewed commit and passed
+after the guarded Date-classifier repair. The matrix still preserves the
+foreign borrowed-prototype control. This addition covers one unindexed row;
+indexed publication for the local impostor and other host realms remain open.

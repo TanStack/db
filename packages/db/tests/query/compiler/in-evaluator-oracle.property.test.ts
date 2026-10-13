@@ -1,3 +1,4 @@
+import { runInNewContext } from 'node:vm'
 import { describe, expect, it } from 'vitest'
 import fc from 'fast-check'
 import { Temporal } from 'temporal-polyfill'
@@ -40,8 +41,9 @@ import { oraclePropertyOptions, oracleRuns } from '../../oracle-config.js'
  * of each rule: equal and unequal strings, a string that begins with the
  * internal normalization prefix, booleans, `0`, `-0`, `1`, `NaN`, `1n`, a
  * valid Date and its timestamp, an invalid Date, equal and unequal byte
- * arrays, a Buffer, genuine bytes with an own display-tag shadow, a wide
- * typed array with a spoofed byte tag, Temporal values including ZonedDateTime
+ * arrays, a Buffer, native bytes from another realm with equal and unequal
+ * content, genuine local and foreign bytes with own display-tag shadows, a
+ * wide typed array with a spoofed byte tag, Temporal values including ZonedDateTime
  * zone aliases, a forged tag, a borrowed prototype, shadowed display and
  * field members,
  * unequal values within each modeled Temporal kind, reference ISO year/day
@@ -84,6 +86,13 @@ const shadowedTagBytes = new Uint8Array([1, 2])
 Object.defineProperty(shadowedTagBytes, Symbol.toStringTag, {
   value: `ordinary`,
 })
+const foreignBytes = runInNewContext(`new Uint8Array([1, 2])`) as Uint8Array
+const unequalForeignBytes = runInNewContext(
+  `new Uint8Array([1, 3])`,
+) as Uint8Array
+const shadowedForeignBytes = runInNewContext(
+  `Object.defineProperty(new Uint8Array([1, 2]), Symbol.toStringTag, { value: 'ordinary' })`,
+) as Uint8Array
 const spoofedWideBytes = new Uint16Array([1, 2])
 Object.defineProperty(spoofedWideBytes, Symbol.toStringTag, {
   value: `Uint8Array`,
@@ -186,6 +195,9 @@ const pool: ReadonlyArray<unknown> = [
   new Uint8Array([1, 3]),
   Buffer.from([1, 2]),
   shadowedTagBytes,
+  foreignBytes,
+  unequalForeignBytes,
+  shadowedForeignBytes,
   spoofedWideBytes,
   otherSpoofedWideBytes,
   plainDate,
@@ -520,6 +532,23 @@ describe(`in evaluator`, () => {
     expect(isBytes(spoofedWideBytes)).toBe(false)
     checkEqualityPaths(shadowedTagBytes, new Uint8Array([1, 2]), true)
     checkEqualityPaths(spoofedWideBytes, otherSpoofedWideBytes, false)
+  })
+
+  it(`compares native bytes from another realm by content in every compiled equality path`, () => {
+    // The independent model's captured typed-array intrinsic accepts a native
+    // view across realms. An own display tag does not change its byte class.
+    expect(foreignBytes instanceof Uint8Array).toBe(false)
+    expect(ArrayBuffer.isView(foreignBytes)).toBe(true)
+    expect(Object.prototype.toString.call(shadowedForeignBytes)).toBe(
+      `[object ordinary]`,
+    )
+    expect(isBytes(foreignBytes)).toBe(true)
+    expect(isBytes(shadowedForeignBytes)).toBe(true)
+    expect(isBytes(spoofedWideBytes)).toBe(false)
+    checkEqualityPaths(foreignBytes, new Uint8Array([1, 2]), true)
+    checkEqualityPaths(shadowedForeignBytes, shadowedTagBytes, true)
+    checkEqualityPaths(unequalForeignBytes, new Uint8Array([1, 2]), false)
+    checkEqualityPaths(foreignBytes, spoofedWideBytes, false)
   })
 
   it(`distinguishes unequal intrinsic values within each Temporal kind`, () => {

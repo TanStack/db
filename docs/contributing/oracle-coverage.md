@@ -468,7 +468,9 @@ records the five retired same-realm examples. A separate
 native `node:vm` Dates by supplied timestamps and invalidity, including equal
 times, numeric NaN with an invalid Date, and Dates with an own display tag.
 A fixed local/foreign subclass witness checks native timestamps inherited
-through a Date prototype and rejects a borrowed-prototype impostor. The owner
+through a Date prototype, checks valid and invalid subclass order in both
+directions against finite Dates, and rejects local and foreign
+borrowed-prototype impostors. The owner
 also checks an unindexed public ordered scan with a tagged foreign invalid
 Date. Exact `normalizeValue` results are direct utility observations. Indexed
 order, public Date range predicates, cursor continuation, proxies, deeper
@@ -477,7 +479,7 @@ Date-consuming paths remain outside that witness.
 
 The comparison oracle also owns a bounded [Temporal order transfer](oracle-reviews/comparison-unit-retirement-round-6.md). Supplied ISO calendar fields and epoch-nanosecond offsets predict direct `ascComparator` signs and exact zeros for ordinary `PlainDate` and `ZonedDateTime` values from one polyfill copy. Fixed cases preserve the two retired unit blocks; generated cases vary calendar fields, offset zones, equal instants, and adjacent nanoseconds. Fresh-module histories reject a first-input constructor cache poisoned by a genuine instance or forged tag, including the direct `compareValues` path. Both direct helpers also receive a right-hand PlainDate with a constructor shadow. A genuine ZonedDateTime with an own shadowed display tag retains its instant position through both direct helpers. This lane does not establish public query or index behavior. Custom Temporal subclasses, spoofed or replaced instance prototypes, mixed native/polyfill implementations, other Temporal kinds, and public ordering/filter publication need separate witnesses. Spoofed Temporal prototypes can still cause asymmetric comparisons; the comparison owner needs a dedicated brand and mixed-value witness before that class can be called closed.
 
-The [Temporal index order oracle](../../packages/db/tests/temporal-index-order-oracle.test.ts)
+The [Temporal index order oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/temporal-index-order-oracle.test.ts)
 and its [review record](oracle-reviews/temporal-index-order.md) own direct
 BasicIndex and BTreeIndex ordered takes after add/build and one mutation
 continuation, plus an optimized-only public Collection snapshot with an
@@ -493,7 +495,7 @@ Direct removal supplies the exact prior row. Mixed value domains, other
 Temporal kinds, public WHERE ranges, provider cursors, longer histories, and
 live-query publication require separate witnesses.
 
-The [Temporal alias equality oracle](../../packages/db/tests/temporal-equality-alias-oracle.test.ts)
+The [Temporal alias equality oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/temporal-equality-alias-oracle.test.ts)
 and its [review record](oracle-reviews/temporal-equality-alias.md) own the
 bounded `ZonedDateTime.equals()` partition for UTC/Etc/UTC aliases, a distinct
 fixed-offset zone, adjacent nanoseconds, and a different calendar. Direct
@@ -517,7 +519,10 @@ field vectors that share default display text. Fixed controls reach compiled
 Equal and unequal values within Instant, PlainDate, PlainDateTime, and
 PlainTime reject a kind-only Temporal equality key at those same paths. A
 genuine Uint8Array with a shadowed display tag and a spoof-tagged Uint16Array
-check the intrinsic byte-class boundary. The `in` property has a guarded
+check the intrinsic byte-class boundary. Native `node:vm` Uint8Arrays with
+equal and unequal content, including an own tag shadow, also reach compiled
+`eq`, constant `in`, and row-supplied `in` in both operand directions; the
+original classifier failed equal foreign/local byte pairs. The `in` property has a guarded
 direct replay selector that runs only its random/replay campaign.
 The alias owner also checks a public unindexed `eq` scan with two native-equal
 PlainMonthDay rows and a distinct reference year. Direct BasicIndex/BTreeIndex
@@ -535,8 +540,13 @@ Other zone aliases, custom spoofed prototypes, mixed Temporal implementations,
 mixed ordinary-object/Temporal ordered indexes, joins, grouping, query
 identity, live-query publication, and provider paths remain unproved. Direct
 D2 `groupBy` has its separately approved kind-and-string identity policy.
+The alias owner records a concrete custom-prototype fake that currently
+matches a genuine PlainDate and a distinct fake copy in direct indexes and
+public `eq`. Its stated grammar excludes that boundary. A future contract
+decision about non-branded object identity and a trusted Temporal intrinsic
+witness are needed before it can be claimed closed.
 
-The [custom index order selection oracle](../../packages/db/tests/custom-index-order-selection-oracle.test.ts)
+The [custom index order selection oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/custom-index-order-selection-oracle.test.ts)
 and its [review record](oracle-reviews/custom-index-order-selection.md) check
 that a public ordered Collection snapshot does not select a reverse-number
 custom comparator by default ascending or descending `compareOptions`.
@@ -552,7 +562,7 @@ custom-only index cannot serve an optimized range read. The fixed ready-state
 fixture covers BasicIndex and BTreeIndex, one numeric field, and limit one.
 Mutation histories, arbitrary callbacks, and provider publication remain
 outside this direct snapshot owner. The separate
-[custom-index window selection oracle](../../packages/db/tests/query/custom-index-window-selection-oracle.test.ts)
+[custom-index window selection oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/custom-index-window-selection-oracle.test.ts)
 checks the live-query compiler's receiving path. A controlled on-demand source
 starts with ranks 20 and 40 cached, then serves exact ordered requests from
 ranks 10, 20, 30, and 40. Moving a public window from offset 0/limit 1 to
@@ -562,13 +572,15 @@ eager-custom-only layouts cross BasicIndex and BTreeIndex. Provider reply and
 write observations prove that the cached row reaches the local ordered path.
 The owner does not establish ties, nullish or nonnumeric orders, mutations,
 replays, multiple order terms, arbitrary callbacks, real providers, or other
-window schedules.
+window schedules. The eager-custom-only layout is eager auto-indexing on an
+on-demand source. The public result rejects wrong custom-index admission;
+ordinary-index use and an eager source path need distinct witnesses.
 
 The [WHERE predicate publication oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/where-predicate-publication-oracle.property.test.ts)
 also has a [cross-realm Date equality matrix](oracle-reviews/cross-realm-date-where-publication.md).
 For local and `node:vm` Dates with timestamps 1 and 2 or invalid timestamps,
 including tagged foreign Dates and fixed local/foreign subclasses with an own
-display tag, plus number 1, NaN, and a borrowed-prototype impostor, it
+display tag, plus number 1, NaN, and a foreign borrowed-prototype impostor, it
 compares public live-query keys, filtered subscriber keys, and direct snapshot
 keys after preload and a three-row sync transaction.
 Auto-indexing is off in both modes; one mode adds BasicIndex explicitly and
@@ -577,8 +589,25 @@ proves a public indexed snapshot result but does not prove that the live-query
 planner chose the index. Other realm hosts, proxies, deeper subclass chains,
 Date prototype swaps or method replacement, public range predicates, and
 generated subclass histories need separate witnesses.
+A focused unindexed public query also keeps one local
+`Object.create(DateSubclass.prototype)` impostor outside Date equality while
+retaining its same-object match. Indexed publication for that local impostor
+remains open.
 
-The direct [index refinement oracle](../../packages/db/tests/index-update-oracle.property.test.ts)
+The [mixed-value index order review](oracle-reviews/mixed-value-index-order.md)
+links the direct index and public WHERE owners. The direct owner checks
+BasicIndex and BTreeIndex key conservation, exact membership, and within-kind
+order across build, incremental admission, delete, and update for fixed
+string/number, array/object, Date/object, PlainDate/object, and
+callable/number histories. The WHERE owner pins a generated string/number
+delete/update counterexample and compares public key sets after each commit.
+The original default comparator failed these histories because cross-family
+ties and runtime-ID order conflicted with within-family order. Cross-family
+relative positions remain unspecified. Longer mixed histories, proxies,
+mixed Temporal kinds, and non-transitive user comparators need separate
+witnesses before a universal sorted-index claim.
+
+The direct [index refinement oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/index-update-oracle.property.test.ts)
 also owns exact nullish membership and direct `IN` set selection for BasicIndex
 and BTreeIndex. Fresh single-key updates cross `undefined→null`,
 `null→undefined`, `1→undefined`, `undefined→1`, and

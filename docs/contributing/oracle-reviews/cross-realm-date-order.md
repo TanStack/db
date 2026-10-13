@@ -160,3 +160,22 @@ oracles passed 127 focused tests after the repair. The separate WHERE owner
 records the public RED and GREEN observations. Proxies, deeper subclass chains,
 replaced methods or prototypes, indexed order, ranges, and cursor continuation
 remain unproved. Fresh exact-commit review of this follow-up remains pending.
+
+At committed head `be5b7a3c4`, a fresh hostile reviewer found no loss from the
+five retired comparison blocks and confirmed the tagged-subclass repair. It
+found a narrower order-check gap: valid subclasses were compared with the
+subclass only on the left, and an invalid subclass was compared with NaN but
+not a finite Date. The receiving oracle now checks both operand directions
+against equal and later finite Dates and places an invalid subclass after a
+finite Date in both directions. These are direct order observations; they do
+not extend the indexed or public range claim.
+
+The same review wave found a local ordinary object that borrowed a Date
+subclass prototype. `instanceof Date` accepted it, but the native Date
+intrinsic rejected its missing internal slot. At `be5b7a3c4`, direct
+`normalizeValue` threw instead of retaining the object's reference identity.
+The repair places the fast local branch inside the existing guarded intrinsic
+call, so this object falls through as an ordinary object. The direct witness
+failed before the repair and passed after it. The separate WHERE record owns
+the public key-set witness. Proxies, arbitrary prototype changes, and indexed
+behavior for the impostor remain outside this addition.

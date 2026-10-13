@@ -2,4 +2,4 @@
 '@tanstack/db': patch
 ---
 
-Use a custom-comparator index for exact lookup without selecting its order for an ordinary Collection `orderBy` read. When a compatible ordinary index also exists, select it for ordered reads; eager indexing now creates one if needed, including for equivalent value-left range predicates.
+Use a custom-comparator index for exact lookup without selecting its order for an ordinary Collection `orderBy` read. Select a compatible ordinary index for ordered reads, including live-query window moves with cached rows. Eager indexing creates a compatible index when needed, including for equivalent value-left range predicates.

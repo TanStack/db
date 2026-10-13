@@ -191,3 +191,39 @@ null-only-list authority question above and identified the older
 record now explicitly supersedes the sentence for null-containing lists.
 Two lint-only edits to the compiled `in` owner follow this review and require
 a fresh exact-commit check.
+
+## Hostile review of `be5b7a3c4`
+
+The alias reviewer found no loss from the retired comparison assertions. It
+identified a positive native-equality gap: a genuine `[+00:00]`
+ZonedDateTime with an own `timeZoneId = 'UTC'` shadow had been checked against
+a UTC value and itself, but not against a fresh native-equal `[+00:00]`
+value. The oracle now calibrates native `.equals()` on that fresh probe and
+requires direct BasicIndex/BTreeIndex lookup and unindexed public `eq` to find
+the shadowed row. Current production passed this probe. It rejects a wrong
+classifier that treats every shadowed value as reference-only.
+
+The reviewer also demonstrated a custom-prototype ordinary object that
+supplies a `Temporal.PlainDate` tag and matching display text. Current direct
+indexes and public `eq` match it with a genuine PlainDate and a distinct fake
+copy, while the native PlainDate intrinsic rejects it as a receiver. This is
+outside this owner's declared custom-prototype grammar, so it does not undo
+the bounded retirement verdict. It remains an open brand/ordinary-object
+contract question under this owner: decide whether all non-branded objects
+retain reference identity, then add genuine/fake/copy direct-index and public
+`eq` witnesses. A shape or candidate-method guard can be spoofed; a robust
+repair needs a trusted Temporal intrinsic boundary that supports the imported
+polyfill without relying on `globalThis.Temporal`.
+
+The separate compiled `in` reviewer found native `Uint8Array` values from a
+second JavaScript realm missing from its otherwise independent byte model.
+Equal foreign/local bytes failed compiled `eq`, constant `in`, and row-supplied
+`in` in both operand directions at `be5b7a3c4`. The receiving owner now
+generates equal and unequal foreign bytes, including an own display-tag
+shadow, and keeps a spoof-tagged wide-array negative control. The production
+classifier uses a captured native typed-array getter after `ArrayBuffer.isView`
+so realm and user display tags cannot change the byte class. The fixed
+witness failed in twelve intended assertions before that repair and passed
+after it; 359 related tests and static checks passed. This proves compiled
+boolean equality in the `node:vm` realm, not browser iframe behavior or public
+WHERE publication. The null-only-list law question above remains open.

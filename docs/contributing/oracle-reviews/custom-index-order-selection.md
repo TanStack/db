@@ -104,7 +104,7 @@ graph. Ordinary-first, ordinary-only, and no-index controls returned the
 correct rows. The reviewer reproduced both index types and found 16 public
 mismatches in a separate 64-scenario cache/window sweep.
 
-The new [window oracle](../../../packages/db/tests/query/custom-index-window-selection-oracle.test.ts)
+The new [window oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/custom-index-window-selection-oracle.test.ts)
 assigns numeric ranks in its source model and sorts and slices those four
 facts independently of index selection. Its controlled adapter evaluates
 each request's predicate and cursor against the source facts, records the
@@ -135,3 +135,15 @@ receipts; the claim does not extend to remote hosts (ORC-014). Ties, nullish
 or nonnumeric orders, mutations, replay, multiple order terms, arbitrary
 callbacks, and other window schedules remain open. Fresh hostile review of
 the final committed oracle is pending.
+
+At committed head `be5b7a3c4`, a fresh hostile reviewer found no additional
+numeric window mismatch in 128 controlled cache/layout scenarios. A read-only
+wrong-index admission fault changed the settled public rows, confirming the
+comparison rejects that error. The reviewer found that readiness and live
+query construction happened before cleanup protection; the driver now enters
+`withOracleCleanup` before those steps and releases any handles created before
+a setup failure. The `eager-custom-only` layout means eager *auto-indexing on
+an on-demand source*. The eight-case oracle proves the public result and the
+provider's cached-row interaction. It does not measure ordinary-index use or
+an eager source path. The architecture's index work law needs a separate
+index-use witness before this owner claims that property.

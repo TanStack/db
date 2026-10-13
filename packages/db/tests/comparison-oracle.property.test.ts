@@ -1099,6 +1099,9 @@ describe(`native Date order across JavaScript realms`, () => {
         ascComparator(value, new Date(timestamp), DEFAULT_COMPARE_OPTIONS),
       ).toBe(0)
       expect(
+        ascComparator(new Date(timestamp), value, DEFAULT_COMPARE_OPTIONS),
+      ).toBe(0)
+      expect(
         sign(
           ascComparator(
             value,
@@ -1107,12 +1110,39 @@ describe(`native Date order across JavaScript realms`, () => {
           ),
         ),
       ).toBe(-1)
+      expect(
+        sign(
+          ascComparator(
+            new Date(timestamp + 1),
+            value,
+            DEFAULT_COMPARE_OPTIONS,
+          ),
+        ),
+      ).toBe(1)
     }
     expect(normalizeValue(foreignInvalid)).toBeNaN()
     expect(isUnorderable(foreignInvalid)).toBe(true)
     expect(
       ascComparator(foreignInvalid, Number.NaN, DEFAULT_COMPARE_OPTIONS),
     ).toBe(0)
+    expect(
+      sign(
+        ascComparator(
+          foreignInvalid,
+          new Date(timestamp),
+          DEFAULT_COMPARE_OPTIONS,
+        ),
+      ),
+    ).toBe(1)
+    expect(
+      sign(
+        ascComparator(
+          new Date(timestamp),
+          foreignInvalid,
+          DEFAULT_COMPARE_OPTIONS,
+        ),
+      ),
+    ).toBe(-1)
 
     // Borrowing that prototype and display tag cannot forge native Date
     // slots. The intrinsic rejects this adjacent non-Date control.
@@ -1123,6 +1153,22 @@ describe(`native Date order across JavaScript realms`, () => {
     expect(
       ascComparator(forged, foreignSubclass, DEFAULT_COMPARE_OPTIONS),
     ).not.toBe(0)
+  })
+
+  it(`rejects a local Date subclass prototype without a native Date slot`, () => {
+    class LocalDate extends Date {}
+    const forged = Object.create(LocalDate.prototype) as object
+    const real = new Date(1)
+    // instanceof sees the borrowed local prototype, but the Date intrinsic
+    // rejects the missing native slot. The object keeps reference identity.
+    expect(forged instanceof Date).toBe(true)
+    expect(() => Date.prototype.getTime.call(forged)).toThrow(TypeError)
+    expect(normalizeValue(forged)).toBe(forged)
+    expect(isUnorderable(forged)).toBe(false)
+    const forward = sign(ascComparator(forged, real, DEFAULT_COMPARE_OPTIONS))
+    const reverse = sign(ascComparator(real, forged, DEFAULT_COMPARE_OPTIONS))
+    expect(forward).not.toBe(0)
+    expect(reverse).toBe(-forward)
   })
 
   it(`treats numeric NaN and invalid Dates as one non-finite order position`, () => {

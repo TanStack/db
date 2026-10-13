@@ -24,8 +24,8 @@ function getObjectId(obj: object): number {
 // display tag cannot hide its timestamp, and a forged tag cannot supply one.
 function dateTimestamp(value: unknown): number | undefined {
   if (value === null || typeof value !== `object`) return undefined
-  if (value instanceof Date) return Date.prototype.getTime.call(value)
   try {
+    if (value instanceof Date) return Date.prototype.getTime.call(value)
     if (Symbol.toStringTag in value) {
       // A Date subclass can inherit getTime from its Date prototype. Walk
       // descriptors without reading a user display-tag or getTime getter;
@@ -105,6 +105,12 @@ export const ascComparator = (a: any, b: any, opts: CompareOptions): number => {
     // For lexical sort we rely on direct comparison for primitive values
   }
 
+  // Keep the string collation class separate from other value types. Native
+  // relational comparison ties every nonnumeric string with every number,
+  // although those same strings have a distinct order among themselves.
+  if (typeof a === `string` && typeof b !== `string`) return -1
+  if (typeof b === `string` && typeof a !== `string`) return 1
+
   // if a and b are both arrays, compare them element by element
   if (Array.isArray(a) && Array.isArray(b)) {
     for (let i = 0; i < Math.min(a.length, b.length); i++) {
@@ -141,13 +147,32 @@ export const ascComparator = (a: any, b: any, opts: CompareOptions): number => {
   if (aIsSymbol) return 1
   if (bIsSymbol) return -1
 
-  // If at least one of the values is an object, use stable IDs for comparison
-  const aIsObject = typeof a === `object`
-  const bIsObject = typeof b === `object`
+  // Function values are references too; coercing them against numbers can
+  // create the same non-transitive ties as unlike ordered object kinds.
+  const aIsObject = typeof a === `object` || typeof a === `function`
+  const bIsObject = typeof b === `object` || typeof b === `function`
 
   if (aIsObject || bIsObject) {
-    // If both are objects, compare their stable IDs
+    // Compare unlike ordered kinds before assigning stable IDs to ordinary objects.
     if (aIsObject && bIsObject) {
+      // Array, Date, and Temporal comparisons order values within their own
+      // kinds above. Keep those kinds apart from ordinary objects: mixing a
+      // calendar comparison with runtime object IDs creates order cycles.
+      const aKind = Array.isArray(a)
+        ? 0
+        : aDateTime !== undefined
+          ? 1
+          : aTemporal
+            ? 2
+            : 3
+      const bKind = Array.isArray(b)
+        ? 0
+        : bDateTime !== undefined
+          ? 1
+          : bTemporal
+            ? 2
+            : 3
+      if (aKind !== bKind) return aKind - bKind
       const aId = getObjectId(a)
       const bId = getObjectId(b)
       return aId - bId
@@ -217,11 +242,19 @@ export const defaultComparator = makeComparator({
   stringSort: `locale`,
 })
 
-/** Include host Buffers when the current realm has a different Uint8Array. */
+// The native getter reads a view's typed-array class across realms even when
+// its own display tag shadows Symbol.toStringTag. Buffer has the same native
+// byte class as Uint8Array.
+const typedArrayTag = Object.getOwnPropertyDescriptor(
+  Object.getPrototypeOf(Uint8Array.prototype),
+  Symbol.toStringTag,
+)!.get!
+
+/** Recognize native Uint8Array values, including Buffers and foreign realms. */
 export function isUint8Array(value: unknown): value is Uint8Array {
   return (
-    value instanceof Uint8Array ||
-    (typeof Buffer !== `undefined` && value instanceof Buffer)
+    ArrayBuffer.isView(value) &&
+    Reflect.apply(typedArrayTag, value, []) === `Uint8Array`
   )
 }
 
