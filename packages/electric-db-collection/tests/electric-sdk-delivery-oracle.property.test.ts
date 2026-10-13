@@ -2087,3 +2087,68 @@ fixedCase.each([
     ])
   },
 )
+
+/**
+ * A retry object from `onError` does not guarantee that the SDK retries. The
+ * SDK gives up by itself on a response without Electric headers and when its
+ * consecutive-retry budget is spent, and then reports the error only to its
+ * subscribers. Before the first ready, that give-up is the source's final
+ * initial failure: the Collection must enter `error` and a waiting full-log
+ * demand must reject. Otherwise the Collection stays `loading` with no live
+ * stream, and every readiness wait hangs.
+ */
+fixedCase.each([
+  [`a response without Electric headers`, `missing-headers`],
+  [`an exhausted retry budget`, `exhausted`],
+] as const)(
+  `fails the initial sync when the SDK gives up after %s`,
+  async (_label, giveUp) => {
+    const metadata = resetResumeMetadata()
+    const fetchClient: typeof fetch = () =>
+      Promise.resolve(
+        giveUp === `missing-headers`
+          ? new Response(`[]`, { status: 200 })
+          : new Response(`transient`, { status: 503 }),
+      )
+    const options = electricCollectionOptions<Item>({
+      id: `sdk-give-up-${giveUp}-${++sequence}`,
+      shapeOptions: {
+        url: `http://test-url/give-up`,
+        params: { table: `rows` },
+        fetchClient,
+        backoffOptions: {
+          initialDelay: 0,
+          maxDelay: 0,
+          multiplier: 1,
+          maxRetries: 0,
+        },
+        onError: () => ({}),
+      },
+      syncMode: `on-demand`,
+      startSync: true,
+      getKey: (row) => row.id,
+    })
+    const originalSync = options.sync
+    const collection = createCollection({
+      ...options,
+      sync: {
+        sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+          originalSync.sync({ ...params, metadata }),
+      },
+    })
+    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+    const consoleWarn = vi.spyOn(console, `warn`).mockImplementation(() => {})
+
+    await withElectricCleanup(async () => {
+      const waiting = Promise.resolve(collection._sync.loadSubset({ limit: 1 }))
+      void waiting.catch(() => undefined)
+      await vi.waitFor(() => expect(collection.status).toBe(`error`))
+      await expect(waiting).rejects.toBeDefined()
+      await expect(collection.preload()).rejects.toBeDefined()
+    }, [
+      () => collection.cleanup(),
+      () => consoleError.mockRestore(),
+      () => consoleWarn.mockRestore(),
+    ])
+  },
+)

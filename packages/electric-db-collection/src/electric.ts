@@ -2668,9 +2668,16 @@ function createElectricSync<T extends Row<unknown>>(
         processMessages(messages)
       },
       (error) => {
-        // The SDK rejected the retry decision or exhausted its retry loop.
-        // In that case no provider batch will settle the renewed gate.
+        // The SDK gave up: it rejected the retry decision or exhausted its
+        // retry loop. No provider batch will settle the gate, and before the
+        // first ready this is the source's final initial failure.
         rejectFullSnapshot(error)
+        if (
+          isActiveLifecycle() &&
+          !abortController.signal.aborted &&
+          collection.status === `loading`
+        )
+          markError(error)
       },
     )
 
