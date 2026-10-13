@@ -139,6 +139,16 @@ names and shapes.
 - [ ] **TrailBase** (`trailbase-db-collection/src/trailbase.ts`, 4 sites):
       post-ready stream failures call `reportError`. Check them against the
       #2126 fix.
+  - [ ] A stream that ends, whether it closes or errors, reports
+        `reportError(error, { final: true })` after the first ready. The
+        adapter does not resubscribe. The `trailbase` SDK (0.10.0) has no
+        reconnect or resume: `subscribe` is one `fetch` stream, and
+        `subscribeWs` closes without retrying. A correct reconnect would
+        have to subscribe again and re-list every active subset. The
+        maintainer decided to leave reconnect to the TrailBase maintainers.
+  - [ ] Update the stream-end lane in `tests/lifecycle-oracle.property.test.ts`
+        (added in #2126) from "rows stay, later changes are not delivered"
+        to also expect a final health error.
 - [ ] **RxDB** (`rxdb-db-collection/src/rxdb.ts`, 3 sites): post-ready
       failures call `reportError`. Observe what happens to pending loads on a
       final error (evidence gap V10).
