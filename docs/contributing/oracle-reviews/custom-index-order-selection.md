@@ -187,3 +187,12 @@ bound observable at the public snapshot and traversal checkpoints. The
 focused owner passed. They do not prove arbitrary numeric histories,
 providers, or the live-query compiler's index-use premise. A fresh hostile
 review of the final committed follow-up is pending.
+
+The read-only hostile review of `0c236f448` ran all 10 owner tests and found
+no blocker in the fixed selection domain. It corrected one claim about the
+paired inclusive bound: with ranks 10, 20, and 30 and predicate
+`20 <= rank <= 25`, omitting either bound changes the result. Moving either
+bound slightly does not necessarily change it, so the coverage map now says
+"omitting" rather than "misplacing." This is a documentation correction,
+not a new production bug or an added witness. Final review of the next
+committed head remains pending.

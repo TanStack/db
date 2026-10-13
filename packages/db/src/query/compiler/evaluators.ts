@@ -17,7 +17,7 @@ import {
   getParentContextProjectedValue,
 } from '../equality-value-identity.js'
 import { getNamespacedRouteMetadata } from './route-metadata.js'
-import type { BasicExpression, Func, PropRef } from '../ir.js'
+import type { Aggregate, BasicExpression, Func, PropRef } from '../ir.js'
 import type { NamespacedRow } from '../../types.js'
 
 /**
@@ -30,6 +30,42 @@ function isUnknown(value: any): boolean {
 function normalizeEqualityOperand(value: unknown): unknown {
   // Byte comparison needs no Map-key encoding, even for large binary values.
   return isUint8Array(value) ? value : normalizeValue(value)
+}
+
+export function isStablePrimitiveList(list: ReadonlyArray<unknown>): boolean {
+  if (!Object.isFrozen(list)) return false
+  for (let index = 0; index < list.length; index++) {
+    const slot = Object.getOwnPropertyDescriptor(list, index)
+    // Frozen arrays can still have getters or mutable objects. A missing slot
+    // can also resolve through the prototype, so none may be cached.
+    if (!slot || !(`value` in slot)) return false
+    const item = slot.value
+    if (
+      (typeof item === `object` && item !== null) ||
+      typeof item === `function`
+    )
+      return false
+  }
+  return true
+}
+
+export function hasMutableInList(
+  expression: BasicExpression | Aggregate,
+  lists?: Set<ReadonlyArray<unknown>>,
+): boolean {
+  if (expression.type !== `func` && expression.type !== `agg`) return false
+  const list = expression.args[1]
+  const values = list?.type === `val` ? list.value : undefined
+  let found =
+    expression.type === `func` &&
+    expression.name === `in` &&
+    Array.isArray(values) &&
+    !isStablePrimitiveList(values)
+  if (found) lists?.add(values as Array<unknown>)
+  for (const arg of expression.args) {
+    found = hasMutableInList(arg, lists) || found
+  }
+  return found
 }
 
 /**
@@ -445,23 +481,22 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
       const valueEvaluator = compiledArgs[0]!
       const arrayEvaluator = compiledArgs[1]!
       const list = func.args[1]!
-      if (list.type === `val` && Array.isArray(list.value)) {
-        // A constant list, such as join demand's key list, becomes a Set of
-        // normalized keys. Set membership uses SameValueZero, which matches
-        // `valuesEqual` on normalized operands: NaN equals NaN and -0 equals
-        // 0. Byte arrays stay out of the Set and compare by content, so no
-        // byte array is encoded as a string.
+      if (
+        list.type === `val` &&
+        Array.isArray(list.value) &&
+        isStablePrimitiveList(list.value)
+      ) {
+        // An immutable primitive list, such as internally owned join demand,
+        // can be indexed once. Caller-owned arrays and mutable members must
+        // instead be read at each evaluation. SameValueZero on normalized
+        // keys preserves NaN and -0 equality. Byte values cannot match a
+        // primitive item and are never encoded here.
         const items = list.value.filter((item) => !isUnknown(item))
-        const bytes = items.filter(isUint8Array)
-        const keys = new Set(
-          items.filter((item) => !isUint8Array(item)).map(normalizeValue),
-        )
+        const keys = new Set(items.map(normalizeValue))
         return (data) => {
           const value = valueEvaluator(data)
           if (isUnknown(value)) return null
-          return isUint8Array(value)
-            ? bytes.some((item) => areValuesEqual(item, value))
-            : keys.has(normalizeValue(value))
+          return isUint8Array(value) ? false : keys.has(normalizeValue(value))
         }
       }
       return (data) => {

@@ -1129,7 +1129,11 @@ export class CollectionStateManager<
       // Application is now the point of no return. Event listeners run before
       // the receipts resolve, so a signal aborted from one of those listeners
       // must not cancel writes that are already becoming visible.
+      // A layout-only update can change the comparator's fractional index
+      // before these writes run. Rebuild after the batch rather than searching
+      // the old order with a comparator that already sees new positions.
       const deferOrder =
+        layoutChanged ||
         committedSyncedTransactions.reduce(
           (count, transaction) => count + transaction.operations.length,
           0,

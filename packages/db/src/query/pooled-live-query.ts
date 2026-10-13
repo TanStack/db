@@ -6,7 +6,11 @@ import { isVirtualPropName } from '../virtual-props.js'
 import { getPersistedReadinessSource } from '../persisted-readiness.js'
 import { getWhereExpression } from './ir.js'
 import { equalityConjunct, equalityKey, readPath } from './equality-conjunct.js'
-import { compileExpression, toBooleanPredicate } from './compiler/evaluators.js'
+import {
+  compileExpression,
+  hasMutableInList,
+  toBooleanPredicate,
+} from './compiler/evaluators.js'
 import { buildCompareOptions } from './compiler/order-by.js'
 import { createLiveQueryCollection } from './live-query-collection.js'
 import type { BasicExpression, OrderBy, QueryIR } from './ir.js'
@@ -396,6 +400,10 @@ function poolableShape(query: QueryIR): PoolableShape | undefined {
       return undefined
     }
   }
+  // A source event in another partition must still refresh membership when a
+  // captured list changes. The shared group does not notify this view there.
+  if (residual.some((expression) => hasMutableInList(expression)))
+    return undefined
   // A partition needs at least one equality to group by.
   if (conjuncts.length === 0) return undefined
   const orderBy = query.orderBy?.length ? query.orderBy : undefined

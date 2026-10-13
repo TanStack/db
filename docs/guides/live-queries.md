@@ -2647,6 +2647,15 @@ inArray(user.id, [1, 2, 3])
 inArray(user.role, ['admin', 'moderator'])
 ```
 
+If a query captures a caller-owned array, it reads that array's current
+members when the next source change is processed. That source change updates
+the whole existing query result, including rows that did not change. This
+applies when `inArray` filters rows, computes selected values, forms a join or
+group, supplies an aggregate even inside another selected expression, filters
+with `having`, or determines order. The
+resulting values and order are published together. Editing the array alone
+does not publish a new result.
+
 #### `like(value, pattern)`, `ilike(value, pattern)`
 String pattern matching:
 ```ts

@@ -73,7 +73,30 @@
  * and foreign Date subclasses with inherited `getTime` join the same
  * timestamp classes. A forged object with a borrowed subclass prototype does
  * not join a Date class. A separate unindexed public query checks the local
- * borrowed-prototype case against Date inequality and object identity.
+ * borrowed-prototype case against Date inequality and object identity,
+ * including the zero timestamp class.
+ *
+ * Captured-list law: a caller-owned array passed to `inArray` remains live
+ * input. Editing that array alone need not publish. At the next delivered
+ * source event, the entire retained result, including untouched rows, uses
+ * its current members. The fixed model starts with authored source rows and
+ * filters them against the list at that checkpoint; it does not reuse the
+ * compiled predicate, source index, or emitted delta. The direct Collection
+ * snapshot, retained live query, ordered limit, on-demand source, join,
+ * filtered QueryRef, and correlated include witnesses compare public results
+ * with that model. On-demand ordered, joined, and include receivers check that
+ * the first acquisition is unfiltered when the captured list is mutable.
+ * The retained direct query also checks exact insert/delete
+ * events and no duplicate event when the list did not change. Separate fixed
+ * Date and byte-item cases change contents inside the captured list, then
+ * check the next source event. An ordered limit witness deletes a source row
+ * outside the old loaded prefix after a list edit; it requires the newly
+ * matching row to appear, so ordered acquisition must retain all source rows
+ * while this live list is captured. Joined and included on-demand sources use
+ * an unrelated source delete to prove that keyed lazy demand cannot hide the
+ * event. A 40-row work witness requires an unchanged
+ * list to inspect fewer than ten list slots and a changed list to revisit
+ * retained candidates; a constant-key all-row rescan fails the first bound.
  *
  * Calibration: pinned histories separate Kleene from two-valued logic, and a
  * checker test requires the two-valued answer to fail. Hostile production
@@ -84,10 +107,16 @@
  * reconciliation each passed the pre-existing `@tanstack/db` suite and fail
  * here.
  *
- * Known omissions: comparison operators other than `eq`, `in`, `like`,
- * Temporal and binary operands, joins, ordering, optimistic updates and
- * deletes, truncate, and failed replay are outside this owner. The structural
- * comparison, cold-join, and subscription replay oracles own those boundaries.
+ * Known omissions: the generated WHERE grammar still covers `eq`, `not`,
+ * `and`, and `or`, not other comparison operators, `like`, or arbitrary
+ * `inArray` histories. The fixed captured-list witnesses cover the named
+ * scalar, Date, byte, ordered (including unseen deletion), on-demand, joined,
+ * QueryRef, and include cuts;
+ * they do not establish those paths for all list values, source schedules,
+ * optimizers, or real providers. Temporal operands, general join and ordering
+ * laws, optimistic updates and deletes, truncate, and failed replay remain
+ * with their structural comparison, cold-join, ordered, and subscription
+ * replay owners.
  * Generated cleanup and restart histories for filtered subscribers remain
  * open; the lifecycle publication owner needs a predicate dimension to reach
  * them. The mock sync source is a controlled provider; this oracle claims only
@@ -107,7 +136,14 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
-import { and, eq, not, or } from '../../src/query/builder/functions.js'
+import {
+  and,
+  eq,
+  inArray,
+  materialize,
+  not,
+  or,
+} from '../../src/query/builder/functions.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
 import { createLiveQueryCollection } from '../../src/query/index.js'
 import {
@@ -1325,6 +1361,881 @@ describe(`WHERE predicate publication oracle`, () => {
       ])
     })
 
+    it(`direct snapshots read current inArray members after a source update`, async () => {
+      type MembershipRow = { id: string; v: number; revision: number }
+      const source = createCollection(
+        mockSyncCollectionOptions<MembershipRow>({
+          id: `where-publication-snapshot-in-${collectionSerial++}`,
+          getKey: (row) => row.id,
+          initialData: [
+            { id: `one`, v: 1, revision: 0 },
+            { id: `two`, v: 2, revision: 0 },
+          ],
+        }),
+      )
+      const members = [1]
+      const where = inArray(new PropRef([`v`]), members)
+      await withOracleCleanup(async () => {
+        await source.stateWhenReady()
+        const expected = (rows: ReadonlyArray<MembershipRow>) =>
+          rows.filter((row) => members.includes(row.v)).map((row) => row.id)
+        const initialRows = [
+          { id: `one`, v: 1, revision: 0 },
+          { id: `two`, v: 2, revision: 0 },
+        ]
+        const snapshotKeys = () =>
+          source
+            .currentStateAsChanges({ where })
+            ?.map((change) => change.key)
+            .sort()
+        expect(snapshotKeys()).toEqual(expected(initialRows))
+
+        members[0] = 2
+        source.utils.begin()
+        source.utils.write({
+          type: `update`,
+          value: { id: `one`, v: 1, revision: 1 },
+        })
+        source.utils.write({
+          type: `update`,
+          value: { id: `two`, v: 2, revision: 1 },
+        })
+        source.utils.commit()
+        expect(snapshotKeys()).toEqual(
+          expected(initialRows.map((row) => ({ ...row, revision: 1 }))),
+        )
+      }, [() => source.cleanup()])
+    })
+
+    it(`a source event refreshes untouched rows after a captured inArray list changes`, async () => {
+      type MembershipRow = { id: string; v: number; revision: number }
+      const source = createCollection(
+        mockSyncCollectionOptions<MembershipRow>({
+          id: `where-publication-live-in-${collectionSerial++}`,
+          getKey: (row) => row.id,
+          autoIndex: `off`,
+          initialData: [
+            { id: `one`, v: 1, revision: 0 },
+            { id: `two`, v: 2, revision: 0 },
+            { id: `trigger`, v: 3, revision: 0 },
+          ],
+        }),
+      )
+      const members = [1]
+      const modelRows = [
+        { id: `one`, v: 1 },
+        { id: `two`, v: 2 },
+        { id: `trigger`, v: 3 },
+      ]
+      const live = createLiveQueryCollection((q) =>
+        q.from({ row: source }).where(({ row }) => inArray(row.v, members)),
+      )
+      const events: Array<{ type: string; key: string }> = []
+      let unsubscribe: (() => void) | undefined
+      await withOracleCleanup(async () => {
+        await live.preload()
+        const subscription = live.subscribeChanges(
+          (changes) => {
+            events.push(
+              ...changes.map((change) => ({
+                type: change.type,
+                key: String(change.key),
+              })),
+            )
+          },
+          { includeInitialState: false },
+        )
+        unsubscribe = () => subscription.unsubscribe()
+        const expected = () =>
+          modelRows
+            .filter((row) => members.includes(row.v))
+            .map((row) => row.id)
+            .sort()
+        const check = () => expect([...live.keys()].sort()).toEqual(expected())
+        check()
+
+        members[0] = 2
+        source.utils.begin()
+        source.utils.write({
+          type: `update`,
+          value: { id: `trigger`, v: 3, revision: 1 },
+        })
+        source.utils.commit()
+        check()
+        expect(
+          events.sort((left, right) => left.key.localeCompare(right.key)),
+        ).toEqual([
+          { type: `delete`, key: `one` },
+          { type: `insert`, key: `two` },
+        ])
+        events.length = 0
+
+        members.push(1)
+        source.utils.begin()
+        source.utils.write({
+          type: `update`,
+          value: { id: `trigger`, v: 3, revision: 2 },
+        })
+        source.utils.commit()
+        check()
+        expect(events).toEqual([{ type: `insert`, key: `one` }])
+        events.length = 0
+
+        // A source update with no further list edit cannot republish the
+        // unchanged result merely because the reduction revisits every row.
+        source.utils.begin()
+        source.utils.write({
+          type: `update`,
+          value: { id: `trigger`, v: 3, revision: 3 },
+        })
+        source.utils.commit()
+        check()
+        expect(events).toEqual([])
+
+        source.utils.begin()
+        source.utils.write({ type: `delete`, key: `two` })
+        source.utils.commit()
+        modelRows.splice(
+          modelRows.findIndex((row) => row.id === `two`),
+          1,
+        )
+        check()
+        expect(events).toEqual([{ type: `delete`, key: `two` }])
+      }, [() => unsubscribe?.(), () => live.cleanup(), () => source.cleanup()])
+    })
+
+    it(`a source event reads current Date and byte list-item contents`, async () => {
+      type MembershipRow = {
+        id: string
+        date: Date
+        bytes: Uint8Array
+        revision: number
+      }
+      const source = createCollection(
+        mockSyncCollectionOptions<MembershipRow>({
+          id: `where-publication-mutable-items-${collectionSerial++}`,
+          getKey: (row) => row.id,
+          initialData: [1, 2, 3].map((value) => ({
+            id: String(value),
+            date: new Date(value),
+            bytes: new Uint8Array([value]),
+            revision: 0,
+          })),
+        }),
+      )
+      const dateMembers = [new Date(1)]
+      const byteMembers = [new Uint8Array([1])]
+      const dates = createLiveQueryCollection((q) =>
+        q
+          .from({ row: source })
+          .where(({ row }) => inArray(row.date, dateMembers)),
+      )
+      const bytes = createLiveQueryCollection((q) =>
+        q
+          .from({ row: source })
+          .where(({ row }) => inArray(row.bytes, byteMembers)),
+      )
+      await withOracleCleanup(async () => {
+        await Promise.all([dates.preload(), bytes.preload()])
+        expect([...dates.keys()]).toEqual([`1`])
+        expect([...bytes.keys()]).toEqual([`1`])
+
+        dateMembers[0]!.setTime(2)
+        byteMembers[0]![0] = 2
+        source.utils.begin()
+        source.utils.write({
+          type: `update`,
+          value: {
+            id: `3`,
+            date: new Date(3),
+            bytes: new Uint8Array([3]),
+            revision: 1,
+          },
+        })
+        source.utils.commit()
+        expect([...dates.keys()]).toEqual([`2`])
+        expect([...bytes.keys()]).toEqual([`2`])
+      }, [() => dates.cleanup(), () => bytes.cleanup(), () => source.cleanup()])
+    })
+
+    it(`an ordered limit can admit an untouched row from a changed inArray list`, async () => {
+      type MembershipRow = {
+        id: string
+        v: number
+        rank: number
+        revision: number
+      }
+      const source = createCollection(
+        mockSyncCollectionOptions<MembershipRow>({
+          id: `where-publication-ordered-in-${collectionSerial++}`,
+          getKey: (row) => row.id,
+          autoIndex: `eager`,
+          initialData: [0, 1, 2, 3, 4].map((v) => ({
+            id: String(v),
+            v,
+            rank: v,
+            revision: 0,
+          })),
+        }),
+      )
+      const members = [1]
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ row: source })
+          .where(({ row }) => inArray(row.v, members))
+          .orderBy(({ row }) => row.rank)
+          .limit(1),
+      )
+      await withOracleCleanup(async () => {
+        await live.preload()
+        const expected = () =>
+          [0, 1, 2, 3, 4]
+            .filter((value) => members.includes(value))
+            .sort((left, right) => left - right)
+            .slice(0, 1)
+            .map(String)
+        const check = () => expect([...live.keys()]).toEqual(expected())
+        check()
+        // The previously excluded row 0 is before the old top row. An
+        // unfiltered ordered prefix must already hold it.
+        members.push(0)
+        source.utils.begin()
+        source.utils.write({
+          type: `update`,
+          value: { id: `2`, v: 2, rank: 2, revision: 1 },
+        })
+        source.utils.commit()
+        check()
+        // Removing every prefix match requires the loader to continue until
+        // it finds the next current member.
+        members.splice(0, members.length, 4)
+        source.utils.begin()
+        source.utils.write({
+          type: `update`,
+          value: { id: `2`, v: 2, rank: 2, revision: 2 },
+        })
+        source.utils.commit()
+        check()
+      }, [() => live.cleanup(), () => source.cleanup()])
+    })
+
+    it(`an unseen ordered-source delete refreshes changed inArray members`, async () => {
+      type MembershipRow = { id: string; v: number; rank: number }
+      const source = createCollection(
+        mockSyncCollectionOptions<MembershipRow>({
+          id: `where-publication-unseen-ordered-delete-${collectionSerial++}`,
+          getKey: (row) => row.id,
+          autoIndex: `eager`,
+          initialData: [0, 1, 2, 3, 4].map((v) => ({
+            id: String(v),
+            v,
+            rank: v,
+          })),
+        }),
+      )
+      const members = [1]
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ row: source })
+          .where(({ row }) => inArray(row.v, members))
+          .orderBy(({ row }) => row.rank)
+          .limit(1),
+      )
+      await withOracleCleanup(async () => {
+        await live.preload()
+        expect([...live.keys()]).toEqual([`1`])
+        members[0] = 0
+        // The deleted rank-4 row is outside the acquired prefix. The event
+        // still clocks the complete result to the list's current membership.
+        source.utils.begin()
+        source.utils.write({ type: `delete`, key: `4` })
+        source.utils.commit()
+        expect([...live.keys()]).toEqual([`0`])
+      }, [() => live.cleanup(), () => source.cleanup()])
+    })
+
+    it(`an ordered on-demand query requests the full source for a mutable inArray list`, async () => {
+      type MembershipRow = { id: string; v: number; rank: number }
+      const rows = [0, 1, 2, 3, 4].map((v) => ({
+        id: String(v),
+        v,
+        rank: v,
+      }))
+      const requests: Array<{
+        hasWhere: boolean
+        hasOrder: boolean
+        hasLimit: boolean
+      }> = []
+      let begin!: () => void
+      let write!: (message: { type: `delete`; key: string }) => void
+      let commit!: () => unknown
+      const source = createCollection<MembershipRow>({
+        id: `where-publication-ordered-demand-in-${collectionSerial++}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        autoIndex: `eager`,
+        defaultIndexType: BasicIndex,
+        sync: {
+          sync: (params) => {
+            begin = params.begin
+            write = params.write
+            commit = params.commit
+            params.markReady()
+            return {
+              loadSubset: (options) => {
+                requests.push({
+                  hasWhere: options.where !== undefined,
+                  hasOrder: options.orderBy !== undefined,
+                  hasLimit: options.limit !== undefined,
+                })
+                params.begin()
+                for (const row of rows) {
+                  params.write({ type: `insert`, value: row })
+                }
+                params.commit()
+                return true
+              },
+            }
+          },
+        },
+      })
+      const members = [1]
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ row: source })
+          .where(({ row }) => inArray(row.v, members))
+          .orderBy(({ row }) => row.rank)
+          .limit(1),
+      )
+      await withOracleCleanup(async () => {
+        await live.preload()
+        expect(requests[0]).toEqual({
+          hasWhere: false,
+          hasOrder: false,
+          hasLimit: false,
+        })
+        expect([...live.keys()]).toEqual([`1`])
+
+        members[0] = 0
+        begin()
+        write({ type: `delete`, key: `4` })
+        commit()
+        expect([...live.keys()]).toEqual([`0`])
+      }, [() => live.cleanup(), () => source.cleanup()])
+    })
+
+    it(`an on-demand query acquires rows for a captured inArray list's future members`, async () => {
+      type MembershipRow = { id: string; v: number; revision: number }
+      const rows: Array<MembershipRow> = [
+        { id: `one`, v: 1, revision: 0 },
+        { id: `two`, v: 2, revision: 0 },
+        { id: `trigger`, v: 3, revision: 0 },
+      ]
+      let begin!: () => void
+      let write!: (message: { type: `update`; value: MembershipRow }) => void
+      let commit!: () => unknown
+      const source = createCollection<MembershipRow>({
+        id: `where-publication-demand-in-${collectionSerial++}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            begin = params.begin
+            write = params.write
+            commit = params.commit
+            params.markReady()
+            return {
+              loadSubset: ({ where }) => {
+                params.begin()
+                for (const row of where ? rows.slice(0, 1) : rows) {
+                  params.write({ type: `insert`, value: row })
+                }
+                params.commit()
+                return true
+              },
+            }
+          },
+        },
+      })
+      const members = [1]
+      const live = createLiveQueryCollection((q) =>
+        q.from({ row: source }).where(({ row }) => inArray(row.v, members)),
+      )
+      await withOracleCleanup(async () => {
+        await live.preload()
+        const expected = () =>
+          rows.filter((row) => members.includes(row.v)).map((row) => row.id)
+        const check = () => expect([...live.keys()].sort()).toEqual(expected())
+        check()
+
+        members[0] = 2
+        begin()
+        write({
+          type: `update`,
+          value: { id: `trigger`, v: 3, revision: 1 },
+        })
+        commit()
+        check()
+      }, [() => live.cleanup(), () => source.cleanup()])
+    })
+
+    it(`a source event with no joined-row delta refreshes a changed inArray list`, async () => {
+      type MemberRow = {
+        id: string
+        v: number
+        groupId: string
+        revision: number
+      }
+      const rows = createCollection(
+        mockSyncCollectionOptions<MemberRow>({
+          id: `where-publication-join-in-rows-${collectionSerial++}`,
+          getKey: (row) => row.id,
+          autoIndex: `eager`,
+          initialData: [
+            { id: `one`, v: 1, groupId: `g`, revision: 0 },
+            { id: `two`, v: 2, groupId: `g`, revision: 0 },
+            { id: `trigger`, v: 3, groupId: `missing`, revision: 0 },
+          ],
+        }),
+      )
+      const groups = createCollection(
+        mockSyncCollectionOptions<{ id: string; revision: number }>({
+          id: `where-publication-join-in-groups-${collectionSerial++}`,
+          getKey: (row) => row.id,
+          initialData: [
+            { id: `g`, revision: 0 },
+            { id: `spare`, revision: 0 },
+          ],
+        }),
+      )
+      const members = [1]
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ row: rows })
+          .innerJoin({ group: groups }, ({ row, group }) =>
+            eq(row.groupId, group.id),
+          )
+          .where(({ row }) => inArray(row.v, members)),
+      )
+      const batches: Array<Array<{ type: string; id: string }>> = []
+      let unsubscribe: (() => void) | undefined
+      await withOracleCleanup(async () => {
+        await live.preload()
+        const subscription = live.subscribeChanges(
+          (changes) =>
+            batches.push(
+              changes.map((change) => ({
+                type: change.type,
+                id: change.value.row.id,
+              })),
+            ),
+          { includeInitialState: false },
+        )
+        unsubscribe = () => subscription.unsubscribe()
+        const expected = () =>
+          [
+            { id: `one`, v: 1 },
+            { id: `two`, v: 2 },
+          ]
+            .filter((row) => members.includes(row.v))
+            .map((row) => row.id)
+        const check = () =>
+          expect(live.toArray.map((result) => result.row.id).sort()).toEqual(
+            expected(),
+          )
+        check()
+
+        members[0] = 2
+        rows.utils.begin()
+        rows.utils.write({
+          type: `update`,
+          value: { id: `trigger`, v: 3, groupId: `missing`, revision: 1 },
+        })
+        rows.utils.commit()
+        check()
+        expect(batches).toHaveLength(1)
+        expect(batches[0]!.sort((a, b) => a.id.localeCompare(b.id))).toEqual([
+          { type: `delete`, id: `one` },
+          { type: `insert`, id: `two` },
+        ])
+        batches.length = 0
+
+        rows.utils.begin()
+        rows.utils.write({
+          type: `update`,
+          value: { id: `trigger`, v: 3, groupId: `missing`, revision: 2 },
+        })
+        rows.utils.commit()
+        check()
+        expect(batches).toEqual([])
+
+        // A pulse must also come from the joined source. The spare group has
+        // no joined row, so this write cannot reach the WHERE through the
+        // joined relation itself.
+        members[0] = 1
+        groups.utils.begin()
+        groups.utils.write({
+          type: `update`,
+          value: { id: `spare`, revision: 1 },
+        })
+        groups.utils.commit()
+        check()
+        expect(batches).toHaveLength(1)
+        expect(batches[0]!.sort((a, b) => a.id.localeCompare(b.id))).toEqual([
+          { type: `insert`, id: `one` },
+          { type: `delete`, id: `two` },
+        ])
+      }, [
+        () => unsubscribe?.(),
+        () => live.cleanup(),
+        () => rows.cleanup(),
+        () => groups.cleanup(),
+      ])
+    })
+
+    it(`a lazy joined source must deliver unrelated events to refresh inArray membership`, async () => {
+      type MemberRow = { id: string; groupId: string; v: number }
+      type GroupRow = { id: string; revision: number }
+      const membersSource = createCollection(
+        mockSyncCollectionOptions<MemberRow>({
+          id: `where-publication-lazy-join-main-${collectionSerial++}`,
+          getKey: (row) => row.id,
+          initialData: [
+            { id: `one`, groupId: `g`, v: 1 },
+            { id: `two`, groupId: `g`, v: 2 },
+          ],
+        }),
+      )
+      const requests: Array<boolean> = []
+      let begin!: () => void
+      let write!: (message: { type: `delete`; key: string }) => void
+      let commit!: () => unknown
+      const groups = createCollection<GroupRow>({
+        id: `where-publication-lazy-join-groups-${collectionSerial++}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            begin = params.begin
+            write = params.write
+            commit = params.commit
+            params.begin()
+            params.write({ type: `insert`, value: { id: `g`, revision: 0 } })
+            params.write({ type: `insert`, value: { id: `h`, revision: 0 } })
+            params.commit()
+            params.markReady()
+            return {
+              loadSubset: ({ where }) => {
+                requests.push(where !== undefined)
+                return true
+              },
+            }
+          },
+        },
+      })
+      const members = [1]
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ row: membersSource })
+          .leftJoin({ group: groups }, ({ row, group }) =>
+            eq(row.groupId, group.id),
+          )
+          .where(({ row }) => inArray(row.v, members)),
+      )
+      await withOracleCleanup(async () => {
+        await live.preload()
+        expect(requests[0]).toBe(false)
+        const expected = () =>
+          [
+            { id: `one`, v: 1 },
+            { id: `two`, v: 2 },
+          ]
+            .filter((row) => members.includes(row.v))
+            .map((row) => row.id)
+        const check = () =>
+          expect(live.toArray.map((result) => result.row.id)).toEqual(
+            expected(),
+          )
+        check()
+
+        members[0] = 2
+        begin()
+        write({ type: `delete`, key: `h` })
+        commit()
+        check()
+      }, [
+        () => live.cleanup(),
+        () => groups.cleanup(),
+        () => membersSource.cleanup(),
+      ])
+    })
+
+    it(`an outer QueryRef filter refreshes after an inner filter suppresses a source event`, async () => {
+      type MembershipRow = {
+        id: string
+        v: number
+        groupId: string
+        revision: number
+      }
+      const source = createCollection(
+        mockSyncCollectionOptions<MembershipRow>({
+          id: `where-publication-queryref-in-${collectionSerial++}`,
+          getKey: (row) => row.id,
+          initialData: [
+            { id: `one`, v: 1, groupId: `g`, revision: 0 },
+            { id: `two`, v: 2, groupId: `g`, revision: 0 },
+            { id: `trigger`, v: 3, groupId: `other`, revision: 0 },
+          ],
+        }),
+      )
+      const members = [1]
+      const live = createLiveQueryCollection((q) => {
+        const inner = q
+          .from({ item: source })
+          .where(({ item }) => eq(item.groupId, `g`))
+          .select(({ item }) => ({ id: item.id, v: item.v }))
+        return q
+          .from({ row: inner })
+          .where(({ row }) => inArray(row.v, members))
+          .select(({ row }) => ({ id: row.id }))
+      })
+      await withOracleCleanup(async () => {
+        await live.preload()
+        const expected = () =>
+          [
+            { id: `one`, v: 1 },
+            { id: `two`, v: 2 },
+          ]
+            .filter((row) => members.includes(row.v))
+            .map((row) => row.id)
+        const check = () =>
+          expect(live.toArray.map((row) => row.id).sort()).toEqual(expected())
+        check()
+        members[0] = 2
+        source.utils.begin()
+        source.utils.write({
+          type: `update`,
+          value: { id: `trigger`, v: 3, groupId: `other`, revision: 1 },
+        })
+        source.utils.commit()
+        check()
+      }, [() => live.cleanup(), () => source.cleanup()])
+    })
+
+    it(`a correlated include reads current inArray members after an unrelated child event`, async () => {
+      type ParentRow = { id: string; groupId: string }
+      type ChildRow = {
+        id: string
+        groupId: string
+        v: number
+        revision: number
+      }
+      const parents = createCollection(
+        mockSyncCollectionOptions<ParentRow>({
+          id: `where-publication-include-parents-${collectionSerial++}`,
+          getKey: (row) => row.id,
+          initialData: [{ id: `parent`, groupId: `g` }],
+        }),
+      )
+      const children = createCollection(
+        mockSyncCollectionOptions<ChildRow>({
+          id: `where-publication-include-children-${collectionSerial++}`,
+          getKey: (row) => row.id,
+          initialData: [
+            { id: `one`, groupId: `g`, v: 1, revision: 0 },
+            { id: `two`, groupId: `g`, v: 2, revision: 0 },
+            { id: `trigger`, groupId: `other`, v: 3, revision: 0 },
+          ],
+        }),
+      )
+      const members = [1]
+      const live = createLiveQueryCollection((q) =>
+        q.from({ parent: parents }).select(({ parent }) => ({
+          id: parent.id,
+          children: materialize(
+            q
+              .from({ child: children })
+              .where(({ child }) =>
+                and(
+                  eq(child.groupId, parent.groupId),
+                  inArray(child.v, members),
+                ),
+              )
+              .orderBy(({ child }) => child.id)
+              .select(({ child }) => ({ id: child.id })),
+          ),
+        })),
+      )
+      await withOracleCleanup(async () => {
+        await live.preload()
+        const expected = () =>
+          [
+            { id: `one`, v: 1 },
+            { id: `two`, v: 2 },
+          ]
+            .filter((row) => members.includes(row.v))
+            .map((row) => row.id)
+        const check = () =>
+          expect(live.toArray[0]?.children.map((child) => child.id)).toEqual(
+            expected(),
+          )
+        check()
+
+        members[0] = 2
+        children.utils.begin()
+        children.utils.write({
+          type: `update`,
+          value: { id: `trigger`, groupId: `other`, v: 3, revision: 1 },
+        })
+        children.utils.commit()
+        check()
+      }, [
+        () => live.cleanup(),
+        () => children.cleanup(),
+        () => parents.cleanup(),
+      ])
+    })
+
+    it(`an on-demand include acquires unfiltered children for mutable inArray membership`, async () => {
+      type ParentRow = { id: string; groupId: string }
+      type ChildRow = { id: string; groupId: string; v: number }
+      const parents = createCollection(
+        mockSyncCollectionOptions<ParentRow>({
+          id: `where-publication-demand-include-parents-${collectionSerial++}`,
+          getKey: (row) => row.id,
+          initialData: [{ id: `parent`, groupId: `g` }],
+        }),
+      )
+      const requests: Array<boolean> = []
+      let begin!: () => void
+      let write!: (message: { type: `delete`; key: string }) => void
+      let commit!: () => unknown
+      const children = createCollection<ChildRow>({
+        id: `where-publication-demand-include-children-${collectionSerial++}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            begin = params.begin
+            write = params.write
+            commit = params.commit
+            params.begin()
+            params.write({
+              type: `insert`,
+              value: { id: `one`, groupId: `g`, v: 1 },
+            })
+            params.write({
+              type: `insert`,
+              value: { id: `two`, groupId: `g`, v: 2 },
+            })
+            params.write({
+              type: `insert`,
+              value: { id: `spare`, groupId: `h`, v: 3 },
+            })
+            params.commit()
+            params.markReady()
+            return {
+              loadSubset: ({ where }) => {
+                requests.push(where !== undefined)
+                return true
+              },
+            }
+          },
+        },
+      })
+      const members = [1]
+      const live = createLiveQueryCollection((q) =>
+        q.from({ parent: parents }).select(({ parent }) => ({
+          id: parent.id,
+          children: materialize(
+            q
+              .from({ child: children })
+              .where(({ child }) =>
+                and(
+                  eq(child.groupId, parent.groupId),
+                  inArray(child.v, members),
+                ),
+              )
+              .orderBy(({ child }) => child.id)
+              .select(({ child }) => ({ id: child.id })),
+          ),
+        })),
+      )
+      await withOracleCleanup(async () => {
+        await live.preload()
+        expect(requests[0]).toBe(false)
+        const expected = () =>
+          [
+            { id: `one`, v: 1 },
+            { id: `two`, v: 2 },
+          ]
+            .filter((row) => members.includes(row.v))
+            .map((row) => row.id)
+        const check = () =>
+          expect(live.toArray[0]?.children.map((child) => child.id)).toEqual(
+            expected(),
+          )
+        check()
+
+        members[0] = 2
+        begin()
+        write({ type: `delete`, key: `spare` })
+        commit()
+        check()
+      }, [
+        () => live.cleanup(),
+        () => children.cleanup(),
+        () => parents.cleanup(),
+      ])
+    })
+
+    it(`checks only changed rows until captured inArray members change`, async () => {
+      type MembershipRow = { id: string; v: number; revision: number }
+      let listReads = 0
+      const row = (v: number, revision: number): MembershipRow => ({
+        id: String(v),
+        v,
+        revision,
+      })
+      const source = createCollection(
+        mockSyncCollectionOptions<MembershipRow>({
+          id: `where-publication-in-work-${collectionSerial++}`,
+          getKey: (item) => item.id,
+          autoIndex: `off`,
+          initialData: Array.from({ length: 40 }, (_, v) => row(v, 0)),
+        }),
+      )
+      const members = new Proxy([1], {
+        get(target, slotKey, receiver) {
+          if (slotKey === `0`) listReads++
+          return Reflect.get(target, slotKey, receiver)
+        },
+      })
+      const live = createLiveQueryCollection((q) =>
+        q.from({ item: source }).where(({ item }) => inArray(item.v, members)),
+      )
+      await withOracleCleanup(async () => {
+        await live.preload()
+        expect([...live.keys()]).toEqual([`1`])
+
+        listReads = 0
+        source.utils.begin()
+        source.utils.write({ type: `update`, value: row(39, 1) })
+        source.utils.commit()
+        expect([...live.keys()]).toEqual([`1`])
+        expect(listReads).toBeLessThan(10)
+
+        members[0] = 2
+        listReads = 0
+        source.utils.begin()
+        source.utils.write({ type: `update`, value: row(39, 2) })
+        source.utils.commit()
+        expect([...live.keys()]).toEqual([`2`])
+        expect(listReads).toBeGreaterThanOrEqual(40)
+      }, [() => live.cleanup(), () => source.cleanup()])
+    })
+
     it(`a pending optimistic delete hides a row from a prefiltered unindexed scan`, async () => {
       // The scan may read synced rows directly only when no optimistic state
       // changes visibility. A pending delete removes a synced row.
@@ -1482,6 +2393,8 @@ describe(`WHERE predicate publication oracle`, () => {
       let notDateCleanup: (() => unknown) | undefined
       let sameObjectCleanup: (() => unknown) | undefined
       let invalidDateCleanup: (() => unknown) | undefined
+      let zeroDateCleanup: (() => unknown) | undefined
+      let zeroNumberCleanup: (() => unknown) | undefined
       await withOracleCleanup(async () => {
         const collection = createCollection(
           mockSyncCollectionOptions<{ id: string; v: object }>({
@@ -1508,6 +2421,20 @@ describe(`WHERE predicate publication oracle`, () => {
             .where(({ row }) => eq(row.v, new Date(Number.NaN))),
         )
         invalidDateCleanup = () => invalidDate.cleanup()
+        const zeroDate = createLiveQueryCollection((q) =>
+          q
+            .from({ row: collection })
+            .where(({ row }) => eq(row.v, new Date(0))),
+        )
+        zeroDateCleanup = () => zeroDate.cleanup()
+        const zeroNumber = createLiveQueryCollection((q) =>
+          q
+            .from({ row: collection })
+            .where(
+              () => new Func(`eq`, [new PropRef([`row`, `v`]), new Value(0)]),
+            ),
+        )
+        zeroNumberCleanup = () => zeroNumber.cleanup()
         await notDate.preload()
         // A distinct Date is unequal to this object. The same object remains
         // equal by identity at the public query publication checkpoint. It
@@ -1517,10 +2444,16 @@ describe(`WHERE predicate publication oracle`, () => {
         expect([...sameObject.keys()]).toEqual([`forged`])
         await invalidDate.preload()
         expect([...invalidDate.keys()]).toEqual([])
+        await zeroDate.preload()
+        expect([...zeroDate.keys()]).toEqual([])
+        await zeroNumber.preload()
+        expect([...zeroNumber.keys()]).toEqual([])
       }, [
         () => notDateCleanup?.(),
         () => sameObjectCleanup?.(),
         () => invalidDateCleanup?.(),
+        () => zeroDateCleanup?.(),
+        () => zeroNumberCleanup?.(),
         () => collectionCleanup?.(),
       ])
     })

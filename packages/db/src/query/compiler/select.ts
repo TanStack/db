@@ -7,7 +7,9 @@ import {
 } from '../ir.js'
 import { UnsafeAliasPathError } from '../../errors.js'
 import { compileExpression, isCaseWhenConditionTrue } from './evaluators.js'
+import { refreshMap } from './mutable-list-refresh.js'
 import type { BasicExpression, Select, SelectValueExpression } from '../ir.js'
+import type { MutableListRevision } from './mutable-list-refresh.js'
 import type {
   KeyedStream,
   NamespacedAndKeyedStream,
@@ -146,14 +148,19 @@ export function processSelect(
   pipeline: NamespacedAndKeyedStream,
   select: Select,
   _allInputs: Record<string, KeyedStream>,
+  mutableRevision?: MutableListRevision,
 ): NamespacedAndKeyedStream {
   if (!isNestedSelectObject(select)) {
     const compiled = compileSelectValue(select as SelectValueExpression)
-    return pipeline.pipe(
-      map(([key, namespacedRow]) => [
-        key,
-        { ...namespacedRow, $selected: compiled(namespacedRow) },
-      ]),
+    const project = ([key, namespacedRow]: [unknown, NamespacedRow]) =>
+      [key, { ...namespacedRow, $selected: compiled(namespacedRow) }] as [
+        unknown,
+        NamespacedRow,
+      ]
+    return (
+      mutableRevision
+        ? refreshMap(pipeline, mutableRevision, project)
+        : pipeline.pipe(map(project))
     ) as NamespacedAndKeyedStream
   }
 
@@ -162,7 +169,12 @@ export function processSelect(
 
   addFromObject([], select, ops)
 
-  return pipeline.pipe(map((row) => processRow(row, ops)))
+  const project = (row: [unknown, NamespacedRow]) => processRow(row, ops)
+  return (
+    mutableRevision
+      ? refreshMap(pipeline, mutableRevision, project)
+      : pipeline.pipe(map(project))
+  ) as NamespacedAndKeyedStream
 }
 
 function compileSelectObject(

@@ -174,3 +174,17 @@ live-query key sets after each sync commit. The fixed Date matrix compares
 direct snapshots both before and after its commit. The prose now names those
 separate checkpoints. No behavior or product expectation changed in this
 clarification. Final exact-commit hostile review remains pending.
+
+## Zero timestamp false-green control at `0c236f448`
+
+A read-only hostile review found that the local borrowed-prototype object's
+existing checks could still pass if it erroneously joined the valid zero
+Date/number equality class. The owner now asks two additional public live
+queries for `eq(row.v, new Date(0))` and `eq(row.v, 0)` after preload. Both
+must return no rows for that ordinary object. These controls use public
+publication rather than a direct comparison helper and distinguish object
+identity from timestamp zero and numeric zero. The focused 81-test run
+including them passed with no type errors. The later working-tree focused and
+neighboring run passed 985 tests across 11 suites. This does not establish
+indexed publication for the forged object, other borrowed prototypes, or
+other host realms. Exact committed-head review of these controls is pending.

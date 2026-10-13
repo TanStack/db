@@ -27,9 +27,11 @@ import {
 } from '../equality-value-identity.js'
 import {
   compileExpression,
+  hasMutableInList,
   isCaseWhenConditionTrue,
   toBooleanPredicate,
 } from './evaluators.js'
+import { refreshMap } from './mutable-list-refresh.js'
 import {
   INCLUDES_PUBLIC_KEY,
   attachRouteMetadata,
@@ -37,6 +39,7 @@ import {
   stripInternalCallbackMetadata,
 } from './route-metadata.js'
 import type { ValueIdentity } from '../equality-value-identity.js'
+import type { MutableListRevision } from './mutable-list-refresh.js'
 import type { RouteMetadata } from './route-metadata.js'
 import type {
   Aggregate,
@@ -304,6 +307,9 @@ export function processGroupBy(
   aggregateCollectionId?: string,
   mainSource?: string,
   sanitizeCallbackRows = false,
+  mutableRevision?: MutableListRevision,
+  mutableSelect = false,
+  mutableAggregateInput = false,
 ): NamespacedAndKeyedStream {
   const fields = createInternalGroupFields(groupByClause.length, selectClause)
   const virtualAggregates: Record<string, any> = {
@@ -461,92 +467,105 @@ export function processGroupBy(
   }
 
   // Apply the groupBy operator
-  pipeline = pipeline.pipe(groupBy(keyExtractor, aggregates))
+  const refreshInputs =
+    mutableRevision !== undefined &&
+    (mutableAggregateInput ||
+      groupByClause.some((expr) => hasMutableInList(expr)))
+  pipeline = pipeline.pipe(
+    groupBy(
+      keyExtractor,
+      aggregates,
+      refreshInputs
+        ? (stream, project) => refreshMap(stream, mutableRevision, project)
+        : undefined,
+    ),
+  )
 
   // Update $selected to handle GROUP BY results
-  pipeline = pipeline.pipe(
-    map(([, aggregatedRow]) => {
-      const finalResults: Record<string, any> = {}
+  const projectGroup = ([, aggregatedRow]: [unknown, Record<string, any>]) => {
+    const finalResults: Record<string, any> = {}
 
-      if (selectClause) {
-        // Every field takes its place in select order. Plain aggregates are
-        // filled first; every other value reads them, the group keys, and
-        // the route's parent context.
-        for (const [alias, expr] of Object.entries(selectClause)) {
-          finalResults[alias] =
-            expr.type === `agg` ? aggregatedRow[alias] : undefined
-        }
-        evaluateWrappedAggregates(
-          finalResults,
-          aggregatedRow as Record<string, any>,
-          wrappedAggExprs,
-          fields,
-        )
-      } else {
-        // No SELECT clause - just use the group keys
-        for (let i = 0; i < groupByClause.length; i++) {
-          finalResults[`__key_${i}`] = aggregatedRow[fields.groupValues[i]!]
-        }
+    if (selectClause) {
+      // Every field takes its place in select order. Plain aggregates are
+      // filled first; every other value reads them, the group keys, and
+      // the route's parent context.
+      for (const [alias, expr] of Object.entries(selectClause)) {
+        finalResults[alias] =
+          expr.type === `agg` ? aggregatedRow[alias] : undefined
       }
-
-      // Generate a simple key for the live collection using group values.
-      // In includes mode, add the complete route so correlated groups do not
-      // collide.
-      const route = mainSource
-        ? getGroupRoute(aggregatedRow, fields)
-        : undefined
-      const correlationKey = route?.correlationKey
-      const correlationRoute = mainSource
-        ? getCorrelationRouteIdentity(aggregatedRow, fields)
-        : undefined
-      const keyParts: Array<unknown> = []
-      const publicKeyParts: Array<unknown> = []
+      evaluateWrappedAggregates(
+        finalResults,
+        aggregatedRow,
+        wrappedAggExprs,
+        fields,
+      )
+    } else {
+      // No SELECT clause - just use the group keys
       for (let i = 0; i < groupByClause.length; i++) {
-        keyParts.push(aggregatedRow[fields.groupKeys[i]!])
-        publicKeyParts.push(aggregatedRow[fields.groupValues[i]!])
+        finalResults[`__key_${i}`] = aggregatedRow[fields.groupValues[i]!]
       }
-      if (correlationRoute !== undefined) {
-        keyParts.push(correlationRoute)
-      }
-      const finalKey = singleGroup
-        ? correlationRoute !== undefined
-          ? `single_group_${serializeValue(correlationRoute)}`
-          : `single_group`
-        : keyParts.length === 1
-          ? keyParts[0]
-          : serializeValue(keyParts)
-      const publicKey = singleGroup
-        ? `single_group`
-        : createPublicGroupKey(publicKeyParts)
+    }
 
-      // When in includes mode, restore route metadata for output routing.
-      const resultRow: Record<string, any> = {
-        ...(aggregatedRow as Record<string, any>),
-        $selected: finalResults,
-      }
-      const virtual = (aggregatedRow as Record<string, any>)[fields.virtual] as
-        RowVirtualMetadata | undefined
-      resultRow.$synced = virtual?.synced ?? true
-      resultRow.$hasPendingWrites = !resultRow.$synced
-      resultRow.$origin = (
-        virtual?.hasLocal ? `local` : `remote`
-      ) satisfies VirtualOrigin
-      resultRow.$key = publicKey
-      resultRow.$collectionId = aggregateCollectionId ?? resultRow.$collectionId
-      if (mainSource && correlationKey !== undefined) {
-        attachPublicGroupKey(resultRow, publicKey)
-        attachRouteMetadata(
-          resultRow,
-          correlationKey,
-          route?.parentContext ?? null,
-        )
-      }
-      return [mainSource ? finalKey : publicKey, resultRow] as [
-        unknown,
-        Record<string, any>,
-      ]
-    }),
-  )
+    // Generate a simple key for the live collection using group values.
+    // In includes mode, add the complete route so correlated groups do not
+    // collide.
+    const route = mainSource ? getGroupRoute(aggregatedRow, fields) : undefined
+    const correlationKey = route?.correlationKey
+    const correlationRoute = mainSource
+      ? getCorrelationRouteIdentity(aggregatedRow, fields)
+      : undefined
+    const keyParts: Array<unknown> = []
+    const publicKeyParts: Array<unknown> = []
+    for (let i = 0; i < groupByClause.length; i++) {
+      keyParts.push(aggregatedRow[fields.groupKeys[i]!])
+      publicKeyParts.push(aggregatedRow[fields.groupValues[i]!])
+    }
+    if (correlationRoute !== undefined) {
+      keyParts.push(correlationRoute)
+    }
+    const finalKey = singleGroup
+      ? correlationRoute !== undefined
+        ? `single_group_${serializeValue(correlationRoute)}`
+        : `single_group`
+      : keyParts.length === 1
+        ? keyParts[0]
+        : serializeValue(keyParts)
+    const publicKey = singleGroup
+      ? `single_group`
+      : createPublicGroupKey(publicKeyParts)
+
+    // When in includes mode, restore route metadata for output routing.
+    const resultRow: Record<string, any> = {
+      ...aggregatedRow,
+      $selected: finalResults,
+    }
+    const virtual = aggregatedRow[fields.virtual] as
+      RowVirtualMetadata | undefined
+    resultRow.$synced = virtual?.synced ?? true
+    resultRow.$hasPendingWrites = !resultRow.$synced
+    resultRow.$origin = (
+      virtual?.hasLocal ? `local` : `remote`
+    ) satisfies VirtualOrigin
+    resultRow.$key = publicKey
+    resultRow.$collectionId = aggregateCollectionId ?? resultRow.$collectionId
+    if (mainSource && correlationKey !== undefined) {
+      attachPublicGroupKey(resultRow, publicKey)
+      attachRouteMetadata(
+        resultRow,
+        correlationKey,
+        route?.parentContext ?? null,
+      )
+    }
+    return [mainSource ? finalKey : publicKey, resultRow] as [
+      unknown,
+      Record<string, any>,
+    ]
+  }
+  pipeline = (
+    mutableRevision && mutableSelect
+      ? refreshMap(pipeline, mutableRevision, projectGroup)
+      : pipeline.pipe(map(projectGroup))
+  ) as NamespacedAndKeyedStream
 
   // Apply HAVING clauses if present
   if (havingClauses && havingClauses.length > 0) {
@@ -562,22 +581,26 @@ export function processGroupBy(
       )
       const compiledHaving = compileExpression(transformedHavingClause)
 
-      pipeline = pipeline.pipe(
-        filter(([, row]) => {
-          let selected = row.$selected as Record<string, unknown>
-          if (fields.groupKeyRefs.length > 0) {
-            const withKeys: Record<string, unknown> = { ...selected }
-            fields.groupKeyRefs.forEach((ref, i) => {
-              withKeys[ref] = row[fields.groupValues[i]!]
-            })
-            selected = withKeys
-          }
-          const namespacedRow = getGroupEvaluationRow(row, fields, selected)
-          const result = compiledHaving(namespacedRow)
-          // Preserve each path's coercion for unchecked nonboolean IR values.
-          return singleGroup ? toBooleanPredicate(result) : result
-        }),
-      )
+      const passesHaving = ([, row]: [unknown, Record<string, any>]) => {
+        let selected = row.$selected as Record<string, unknown>
+        if (fields.groupKeyRefs.length > 0) {
+          const withKeys: Record<string, unknown> = { ...selected }
+          fields.groupKeyRefs.forEach((ref, i) => {
+            withKeys[ref] = row[fields.groupValues[i]!]
+          })
+          selected = withKeys
+        }
+        const namespacedRow = getGroupEvaluationRow(row, fields, selected)
+        const result = compiledHaving(namespacedRow)
+        // Preserve each path's coercion for unchecked nonboolean IR values.
+        return singleGroup ? toBooleanPredicate(result) : result
+      }
+      pipeline =
+        mutableRevision && hasMutableInList(havingExpression)
+          ? (refreshMap(pipeline, mutableRevision, (entry) =>
+              passesHaving(entry) ? entry : undefined,
+            ) as NamespacedAndKeyedStream)
+          : pipeline.pipe(filter(passesHaving))
     }
   }
 

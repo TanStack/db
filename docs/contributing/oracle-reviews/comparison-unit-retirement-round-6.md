@@ -145,3 +145,13 @@ product defect, not a recovered assertion from the two retired ordinary-value
 blocks. Other subclasses, replaced methods, mixed implementations, and
 arbitrary prototype chains remain open. A fresh hostile review of the final
 committed follow-up is pending.
+
+Read-only hostile review of `0c236f448` ran 122 comparison tests and found
+no lost assertion from the two retired ordinary Temporal blocks. It corrected
+the coverage-map attribution for the tagged subclass: direct
+`ascComparator` and `compareValues` compare the subclass with a +05:30 peer
+at the same instant, while the alias owner separately checks native
+`.equals()` against a UTC peer and the borrowed-prototype control. Those
+observations support different boundaries; the direct comparison owner does
+not itself prove the public equality result. The final committed follow-up
+still needs a fresh hostile review.

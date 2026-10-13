@@ -40,7 +40,14 @@ export function groupBy<
   T,
   K extends GroupKey,
   A extends Record<string, AggregateFunction<T, any, any>>,
->(keyExtractor: (data: T) => K, aggregates: A = {} as A) {
+>(
+  keyExtractor: (data: T) => K,
+  aggregates: A = {} as A,
+  mapInput?: (
+    stream: IStreamBuilder<T>,
+    project: (data: T) => KeyValue<string, Record<PropertyKey, unknown>>,
+  ) => IStreamBuilder<KeyValue<string, Record<PropertyKey, unknown>>>,
+) {
   type ResultType = K & AggregatesReturnType<T, A>
 
   const basicAggregates = Object.fromEntries(
@@ -64,28 +71,29 @@ export function groupBy<
     const KEY_SENTINEL = Symbol(`original_group_key`)
 
     // First map to extract keys and pre-aggregate values
-    const withKeysAndValues = stream.pipe(
-      map((data) => {
-        const key = keyExtractor(data)
-        const keyString = serializeValue(key)
+    const project = (data: T) => {
+      const key = keyExtractor(data)
+      const keyString = serializeValue(key)
 
-        // Create values object with pre-aggregated values
-        const values: Record<string | symbol, unknown> = {}
+      // Create values object with pre-aggregated values
+      const values: Record<string | symbol, unknown> = {}
 
-        // Store the original key object
-        values[KEY_SENTINEL] = key
+      // Store the original key object
+      values[KEY_SENTINEL] = key
 
-        // Add pre-aggregated values
-        for (const [name, aggregate] of Object.entries(basicAggregates)) {
-          values[name] = aggregate.preMap(data)
-        }
+      // Add pre-aggregated values
+      for (const [name, aggregate] of Object.entries(basicAggregates)) {
+        values[name] = aggregate.preMap(data)
+      }
 
-        return [keyString, values] as KeyValue<
-          string,
-          Record<string | symbol, unknown>
-        >
-      }),
-    )
+      return [keyString, values] as KeyValue<
+        string,
+        Record<string | symbol, unknown>
+      >
+    }
+    const withKeysAndValues = mapInput
+      ? mapInput(stream, project)
+      : stream.pipe(map(project))
 
     // Then reduce to compute aggregates
     const reduced = withKeysAndValues.pipe(

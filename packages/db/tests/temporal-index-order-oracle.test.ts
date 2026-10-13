@@ -16,16 +16,16 @@ import { orderedEntriesArray, withOracleCleanup } from './utils.js'
  *
  * This bounded oracle covers one polyfill copy, two opposing offset zones,
  * one equal-instant pair, a one-nanosecond successor, and negative instants
- * around the epoch. Direct indexes order equal-instant peers by source key;
- * a public Collection snapshot may choose either peer at a limit boundary. It
+ * around the epoch. Direct indexes and public Collection snapshots order
+ * equal-instant peers by source key, including at a limit boundary. It
  * checks direct BasicIndex/BTreeIndex adds, builds, and value cursors, one
  * removal/insertion/update continuation, then the public ordered Collection
  * snapshot with limit 1. Direct custom-comparator witnesses preserve the
  * former display-string operands and let the callback order two rows whose
  * values share one query-equality class. An opposite callback distinguishes
- * callback-result order from plain display-text order. They check add/build, exact lookup,
- * range and cursor boundaries, representative removal, and an update that
- * changes callback order without changing query equality. Fixed add/build
+ * callback-result order from plain display-text order. They check add/build,
+ * exact lookup, range and cursor boundaries, representative removal, and
+ * updates that change callback order without changing query equality. Fixed add/build
  * histories also shadow a genuine value's display tag; the value cursor must
  * still cross its native instant position. These checks do not claim arbitrary
  * Temporal kinds, time-zone transitions, longer histories,
@@ -107,37 +107,29 @@ function rowsFromFixtures(
   })
 }
 
-// The order contract fixes instant order, but gives no public tie break for
-// different zones at the same instant. A prefix may choose any members at its
-// boundary, provided it includes every row at an earlier instant.
+// The model sorts supplied instant labels, then source keys at a tied instant.
+// It has no access to index normalization or production comparison. An exact
+// prefix comparison detects omissions, duplicates, order, and a wrong limit tie.
 function expectOrderedPrefix(
   actual: Array<string | number> | undefined,
   count: number,
   samples: ReadonlyArray<Fixture> = fixtures,
 ): void {
-  expect(actual).toHaveLength(count)
-  const byId = new Map(samples.map((sample) => [sample.id, sample]))
-  const instants = actual!.map((id) => {
-    if (typeof id !== `string`)
-      throw new Error(`index returned a non-string key`)
-    const sample = byId.get(id)
-    expect(sample).toBeDefined()
-    return sample!.epochNanoseconds
-  })
-  expect(new Set(actual).size).toBe(count)
-  const sortedInstants = samples
-    .map(({ epochNanoseconds }) => epochNanoseconds)
-    .sort((left, right) => (left < right ? -1 : left > right ? 1 : 0))
-  const boundary = sortedInstants[count - 1]!
-  for (const sample of samples) {
-    if (sample.epochNanoseconds < boundary) {
-      expect(actual).toContain(sample.id)
-    }
-  }
-  for (let index = 0; index < instants.length; index++) {
-    expect(instants[index]! <= boundary).toBe(true)
-    if (index > 0) expect(instants[index - 1]! <= instants[index]!).toBe(true)
-  }
+  const expected = [...samples]
+    .sort((left, right) =>
+      left.epochNanoseconds < right.epochNanoseconds
+        ? -1
+        : left.epochNanoseconds > right.epochNanoseconds
+          ? 1
+          : left.id < right.id
+            ? -1
+            : left.id > right.id
+              ? 1
+              : 0,
+    )
+    .slice(0, count)
+    .map(({ id }) => id)
+  expect(actual).toEqual(expected)
 }
 
 const indexTypes = [
@@ -145,11 +137,11 @@ const indexTypes = [
   [`BTreeIndex`, BTreeIndex],
 ] as const
 
-it(`accepts either equal-instant boundary row but rejects a later instant`, () => {
-  // A lexical index chose d-minus-five at the first-row checkpoint. The
-  // checker must reject that result while allowing either earliest zone.
+it(`rejects a later instant and the wrong equal-instant boundary key`, () => {
+  // A lexical index chose d-minus-five at the first-row checkpoint. A tie
+  // resolved by admission order can choose c-utc. Both violate the model.
   expect(() => expectOrderedPrefix([`b-plus-fourteen`], 1)).not.toThrow()
-  expect(() => expectOrderedPrefix([`c-utc`], 1)).not.toThrow()
+  expect(() => expectOrderedPrefix([`c-utc`], 1)).toThrow()
   expect(() => expectOrderedPrefix([`d-minus-five`], 1)).toThrow()
 })
 
@@ -194,7 +186,7 @@ describe.each(indexTypes)(
 
         // Returned key arrays preserve instant order and multiplicity at the
         // direct IndexInterface checkpoint. Limit 1 detects a later instant
-        // before the equal-instant first group, without imposing a tie break.
+        // or the wrong source-key tie inside the equal-instant first group.
         expectOrderedPrefix(index.takeFromStart(rows.length), rows.length)
         expectOrderedPrefix(index.takeFromStart(1), 1)
         // A cursor at the shared instant must skip both zones, while retaining
@@ -406,7 +398,7 @@ describe.each(indexTypes)(
     )
 
     it.each([`add`, `build`] as const)(
-      `follows an opposite callback for equal UTC aliases after %s`,
+      `follows an opposite callback for equal UTC aliases after %s and update`,
       (construction) => {
         const source = [
           {
@@ -441,8 +433,65 @@ describe.each(indexTypes)(
         expect(index.takeFromStart(2)).toEqual([`z-utc`, `a-alias`])
         expect(index.rangeQuery({ to: utc!.when })).toEqual(new Set([`z-utc`]))
         expect(index.take(1, utc!.when)).toEqual([`a-alias`])
+
+        // Updating Etc/UTC to UTC preserves query equality but makes the
+        // callback operands identical. Both rows must now occupy the same
+        // callback position and use the source-key tie rule. An index that
+        // retains the old per-row position would leak a stale row through a
+        // bound or cursor at UTC.
+        const moved = {
+          id: alias!.id,
+          when: Temporal.ZonedDateTime.from(utc!.when.toString()),
+        }
+        expect(moved.when.equals(alias!.when)).toBe(true)
+        index.update(alias!.id, alias, moved)
+        expect(index.equalityLookup(utc!.when)).toEqual(
+          new Set([`z-utc`, `a-alias`]),
+        )
+        expect(index.takeFromStart(2)).toEqual([`a-alias`, `z-utc`])
+        expect(index.rangeQuery({ to: utc!.when, toInclusive: true })).toEqual(
+          new Set([`a-alias`, `z-utc`]),
+        )
+        expect(
+          index.rangeQuery({ from: utc!.when, fromInclusive: true }),
+        ).toEqual(new Set([`a-alias`, `z-utc`]))
+        expect(index.take(2, utc!.when)).toEqual([])
+        expect(index.takeReversed(2, utc!.when)).toEqual([])
       },
     )
+
+    it(`reorders equal UTC aliases by the callback after a same-class update`, () => {
+      const alias = Temporal.ZonedDateTime.from(
+        `2024-01-15T09:00:00+00:00[Etc/UTC]`,
+      )
+      const utc = Temporal.ZonedDateTime.from(`2024-01-15T09:00:00+00:00[UTC]`)
+      expect(alias.equals(utc)).toBe(true)
+      expect(alias.toString().localeCompare(utc.toString())).toBeLessThan(0)
+      const first = { id: `z-utc`, when: alias }
+      const second = {
+        id: `a-alias`,
+        when: Temporal.ZonedDateTime.from(alias.toString()),
+      }
+      const index = new IndexType(1, new PropRef([`when`]), undefined, {
+        compareFn: (left: string, right: string) => right.localeCompare(left),
+      })
+
+      // The initial callback operands are identical, so source keys order
+      // the two rows. The update changes one callback operand to UTC while
+      // keeping its query-equality class. Reverse locale order then puts
+      // z-utc first even though display text and source keys put a-alias first.
+      index.add(first.id, first)
+      index.add(second.id, second)
+      expect(index.takeFromStart(2)).toEqual([`a-alias`, `z-utc`])
+      const moved = { id: first.id, when: utc }
+      index.update(first.id, first, moved)
+      expect(index.equalityLookup(utc)).toEqual(new Set([`z-utc`, `a-alias`]))
+      expect(index.takeFromStart(2)).toEqual([`z-utc`, `a-alias`])
+      expect(index.rangeQuery({ to: utc, toInclusive: true })).toEqual(
+        new Set([`z-utc`]),
+      )
+      expect(index.take(2, utc)).toEqual([`a-alias`])
+    })
 
     it(`moves one row within its exact class when its custom order changes`, () => {
       const utc = {
@@ -471,8 +520,12 @@ describe.each(indexTypes)(
       expect(index.take(2, alias.when)).toEqual([])
     })
 
-    it(`publishes the earliest instant from an indexed ordered Collection snapshot`, async () => {
+    it(`publishes the source-key first equal-instant row from an ordered Collection snapshot`, async () => {
       const rows = rowsFromFixtures()
+      // Admit the UTC peer before the smaller-key +14:00 peer. Changelog #958
+      // establishes key order for comparator ties; this reversal distinguishes
+      // that public limit-one result from admission order on both read paths.
+      const admission = [rows[1]!, rows[0]!, ...rows.slice(2)]
       const collection = createCollection<Row, string>({
         id: `temporal-index-order-${_name}`,
         getKey: (row) => row.id,
@@ -481,7 +534,7 @@ describe.each(indexTypes)(
         sync: {
           sync: ({ begin, write, commit, markReady }) => {
             begin()
-            for (const row of rows) write({ type: `insert`, value: row })
+            for (const row of admission) write({ type: `insert`, value: row })
             commit()
             markReady()
           },
@@ -507,7 +560,7 @@ describe.each(indexTypes)(
         expect(collection.indexes.size).toBe(0)
         // The unindexed public scan checks the same ordering law through a
         // separate production path before index creation.
-        expectOrderedPrefix(readFirst(false), 1)
+        expect(readFirst(false)).toEqual([`b-plus-fourteen`])
 
         const index = collection.createIndex((row) => row.when, {
           indexType: IndexType,
@@ -517,7 +570,7 @@ describe.each(indexTypes)(
         // index path supplied this public snapshot after the build.
         const indexed = readFirst(true)
         expect(take).toHaveBeenCalled()
-        expectOrderedPrefix(indexed, 1)
+        expect(indexed).toEqual([`b-plus-fourteen`])
       }, [() => collection.cleanup()])
     })
   },

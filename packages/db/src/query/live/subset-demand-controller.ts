@@ -237,7 +237,12 @@ function createSegment(
   plan: LazyDemandPlan,
   keys: Map<string, unknown>,
 ): DemandSegment {
-  const where = inArray(new PropRef(plan.path), [...keys.values()])
+  // This controller owns the request's array snapshot. Freezing it lets the
+  // evaluator index primitive demand keys once without freezing the values or
+  // changing the caller-owned array semantics of public inArray expressions.
+  const keyList = [...keys.values()]
+  Object.freeze(keyList)
+  const where = inArray(new PropRef(plan.path), keyList)
   return {
     keys,
     where,

@@ -300,3 +300,20 @@ covers one imported polyfill's subclass with inherited methods and one
 shadowed prototype tag. Replaced intrinsic methods, other implementations,
 arbitrary prototype chains, and provider paths remain open. A fresh hostile
 review of the final committed change is pending.
+
+## Read-only review of `0c236f448`
+
+The reviewer ran 28 alias tests and found no blocker in the then-declared
+subclass domain. It identified a neighboring sensitivity gap: the tagged
+subclass used an unrecognized tag, so a classifier that trusted a recognized
+but misleading `Temporal.PlainDate` tag could still put a genuine
+`ZonedDateTime` in the wrong equality kind. The fixture now gives another
+genuine subclass that tag while leaving its inherited native methods and
+slots intact. Native `ZonedDateTime.prototype.equals` confirms its UTC alias
+class. Both direct index types check add, build, exact lookup, and removal;
+unindexed and optimized-only public `eq` check the same class. An ordinary
+object borrowing that subclass prototype and a distinct copy remain
+reference-identity controls. The revised owner passes 28 tests. This adds
+one recognized wrong-kind tag to the fixed polyfill grammar; arbitrary
+prototype impersonation and mixed implementations remain open. Fresh hostile
+review of the next committed head is pending.

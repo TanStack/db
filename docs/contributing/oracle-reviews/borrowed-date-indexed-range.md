@@ -70,3 +70,23 @@ The focused owner passed 18 tests. This reaches the Date-bound compiler path;
 it does not establish arbitrary coercion methods, generated subclass
 histories, or other hosts. Fresh hostile review of the final committed
 follow-up is pending.
+
+## Read-only review of `0c236f448`
+
+The hostile reviewer ran 18 focused cases and found a false-green reference
+model. The earlier expected-key function called the native Date intrinsic on
+source objects after those objects had entered the Collection. A source Date
+changed after admission could therefore change the model's expected answer
+along with production. A read-only probe demonstrated that risk; it did not
+report a production range failure.
+
+The model now freezes each source row's native timestamp before Collection
+admission and derives every expected public key set from those numbers. A
+post-check Date mutation confirms the recorded expectation stays fixed. The
+subclass bound now reaches all four effective relations in both operand
+positions; source values include local and foreign subclasses whose
+`valueOf` disagrees with native `getTime`. Public scan and optimized indexed
+snapshots still compare against the same frozen model. The focused owner
+passes 18 tests after the change. This is a fixed in-memory matrix, not
+evidence for later publication, other realms, arbitrary coercion, or provider
+cursors. The new witnesses await hostile review at a committed head.

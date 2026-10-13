@@ -7,10 +7,10 @@ keeps zones distinct. The law comes from Temporal's `ZonedDateTime.compare` and
 `equals` semantics, changelog #1519, and the Collection's ordered-read and
 IndexInterface contracts. The live-query architecture also requires an
 ordered comparator group to keep a representative from a live exact-value
-bucket. The direct index's established source-key rule orders two rows at the
-same instant. The public ordered snapshot does not promise which
-equal-instant peer occupies a limit-one window, so that observation accepts
-either peer.
+bucket. Changelog #958 promises deterministic key-based tie breaking for
+Collection and index iteration, including live queries with `orderBy` and
+`limit`. Both direct indexes and the public ordered snapshot therefore use
+the source-key tie rule for two rows at the same instant.
 
 ## Original failure and repair
 
@@ -95,19 +95,19 @@ tag or mixed Temporal implementations.
 
 | Requirement | Evidence and limit |
 | --- | --- |
-| ORC-001 | The opening names instant order, zone-sensitive equality, live representatives, authority, and the bounded domain. Equal-instant tie order is deliberately unspecified. |
+| ORC-001 | Temporal comparison and changelog #1519 authorize instant order and zone-sensitive equality. Changelog #958 authorizes source-key ties in direct indexes and public ordered snapshots. The fixed domain remains bounded. |
 | ORC-002 | Supplied BigInt instants and zone classes determine expected order and exact matches independently of normalization and comparison code. |
 | ORC-003 | The oracle describes its law, fixture model, legal actions, direct and public drivers, observations, and checkpoints beside executable code. |
 | ORC-004 | Not triggered: the bounded fixture matrix and one continuation are fixed histories, not a generated-history claim. The nearby invalid mixed-kind domain is excluded. |
 | ORC-005 | Direct takes, ranges, cursors, and equality lookups observe both index implementations. An optimized-only Collection snapshot invokes the explicit index's `takeFromStart` after readiness. |
-| ORC-006 | The original normalized-string design failed at direct ordered takes and the public `limit: 1` snapshot. A stable wrong-result control rejects that later-instant first row while allowing both legitimate equal-instant ties. The first BTree repair failed the live-bucket representative check; a tuple-fed custom comparator failed the pre-epoch take check; the merged-exact-key design failed six alias/callback takes. Own-tag shadows failed all four value-cursor checks before the branded dispatch repair. |
+| ORC-006 | The original normalized-string design failed at direct ordered takes and the public `limit: 1` snapshot. A wrong-result control rejects both a later instant and the wrong source-key peer at the equal-instant limit. The first BTree repair failed the live-bucket representative check; a tuple-fed custom comparator failed the pre-epoch take check; the merged-exact-key design failed six alias/callback takes. Own-tag shadows failed all four value-cursor checks before the branded dispatch repair. |
 | ORC-007 | Not triggered: this is a bounded fixed oracle, not an important generated property. The existing index refinement property keeps its own campaigns. |
 | ORC-008 | Not triggered: the fixture's independent model has no mutable reference state. |
 | ORC-009 | The model's instant label represents default order only; its zone class represents exact equality. One comparator position can contain two exact values, and a custom callback can split one exact value into two positions. The callback-argument witness checks exact former input text. |
 | ORC-010 | `withOracleCleanup` preserves a primary public mismatch and releases the Collection. Direct indexes own no external resources. |
 | ORC-011 | The unindexed public scan is a second production formulation for the ordered result. The numeric BigInt model also distinguishes a shared display-string mistake. |
 | ORC-012 | This record contains RED/GREEN evidence, a hostile review, and scoped unresolved cells. An exact-commit verdict follows below. |
-| ORC-013 | The equal-instant zones and one-nanosecond neighbor distinguish collapse and truncation; the later instant with earlier display text distinguishes lexical order. |
+| ORC-013 | Equal-instant zones admitted in reverse key order distinguish source-key ties from admission order. A one-nanosecond neighbor distinguishes collapse and truncation; a later instant with earlier display text distinguishes lexical order. |
 | ORC-014 | Not triggered: the Collection has controlled sync and the claim ends at its in-memory ordered snapshot, with no real-provider claim. |
 
 ## Exact committed-head review
@@ -127,8 +127,9 @@ defect. The direct oracle had allowed either source-key order for two
 equal-instant peers. It now admits those peers in reverse key order through
 both `add` and `build` and requires the direct `takeFromStart(2)` result to
 follow the established source-key tie rule in BasicIndex and BTreeIndex. The
-public limit-one tie remains permissive. This addition covers only the
-named equal-instant fixture and direct index checkpoint.
+earlier public limit-one allowance was too broad under changelog #958. This
+addition initially covered only the named direct-index checkpoint; the public
+receiving cut is described below.
 
 The maintainer confirmed the custom comparator contract: when a callback
 distinguishes two `ZonedDateTime` rows that native `.equals()` groups
@@ -144,3 +145,27 @@ that comparator/value combination. The earlier 497-test focused campaign
 and 12,345-test DB campaign describe the committed baseline, before this
 opposite-callback witness. A fresh exact-commit hostile review of the
 follow-up remains pending.
+
+## Read-only review of `0c236f448`
+
+The reviewer ran 54 focused and neighboring tests and found two enforcement
+gaps, with no reported production mismatch. First, the public limit-one
+checker allowed either equal-instant peer even though changelog #958 promises
+source-key tie breaking for Collection and index iteration. The model now
+sorts supplied instant labels and then source keys. A wrong-tie control fails
+at the exact prefix comparison. The public witness admits the larger-key UTC
+row first, then compares unindexed and optimized indexed limit-one snapshots
+with the smaller-key +14:00 row; the index take spy confirms the optimized
+path ran.
+
+Second, the opposite custom callback had distinguished display order on
+add/build, but a later same-equality-class update could still leave a stale
+comparator position. The new continuation changes Etc/UTC to UTC and checks
+the resulting source-key tie, inclusive ranges, and empty cursors. A second
+history begins with a callback tie, updates one row to UTC, then requires
+the callback to put it first despite both display text and source keys
+preferring the other row. Both BasicIndex and BTreeIndex run these histories.
+The revised owner passes 35 tests. The law remains confined to this polyfill,
+the named UTC aliases, fixed histories, and direct/indexed Collection cuts;
+provider cursors and longer histories remain open. Fresh hostile review of
+the next committed head is pending.

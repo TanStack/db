@@ -286,14 +286,14 @@ describe(`Query Index Optimization`, () => {
       })
     })
 
-    it(`should use indexes for live queries with inArray conditions`, async () => {
+    it(`uses indexes for live queries with immutable inArray lists`, async () => {
       await withIndexTracking(collection, async (tracker) => {
         const liveQuery = createLiveQueryCollection({
           query: (q: any) =>
             q
               .from({ item: collection })
               .where(({ item }: any) =>
-                inArray(item.status, [`active`, `pending`]),
+                inArray(item.status, Object.freeze([`active`, `pending`])),
               )
               .select(({ item }: any) => ({
                 id: item.id,

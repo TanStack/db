@@ -9,7 +9,10 @@ import { oraclePropertyOptions, oracleRuns } from '../../oracle-config.js'
 /**
  * # Which values does `in` find in a list?
  *
- * Transfer law: The public `inArray` API describes array membership. The
+ * Transfer law: The public `inArray` API describes array membership. A
+ * compiled expression holding a caller-owned array reads that array's current
+ * members whenever it evaluates, even if the array or one of its items has
+ * changed since compilation. The
  * current evaluator returns UNKNOWN (`null`) for a null or undefined value
  * and FALSE for a list that is not an array.
  * Otherwise the result is TRUE when some list item equals the value under the
@@ -55,13 +58,15 @@ import { oraclePropertyOptions, oracleRuns } from '../../oracle-config.js'
  * display but distinct fields, one shared object and a structurally equal
  * copy, `null` and `undefined`. Lists have zero to six
  * items and may repeat. The list is a constant `Value`, the shape that join
- * demand builds, or a row field, so changing lists are also checked.
+ * demand builds, or a row field. Fixed histories also compile a caller-owned
+ * list, then replace a slot or mutate a Date or byte item before reevaluating.
  *
  * Production driver: compile `in` with the public IR and evaluate it for
  * each row, as a WHERE clause does.
  *
  * Refinement check: production and the model return the same value for every
- * case. Each property runs a fixed campaign and a random or replayed campaign.
+ * case at each evaluation checkpoint, including after a list edit. Each
+ * property runs a fixed campaign and a random or replayed campaign.
  * A calibration test feeds the checker an evaluator that compares raw values
  * without normalization and requires the checker to reject it.
  *
@@ -576,6 +581,54 @@ describe(`in evaluator`, () => {
 
   it(`agrees with the reference over a random or replayed campaign`, async () => {
     await fc.assert(property, oraclePropertyOptions(2000, PROPERTY))
+  })
+
+  it(`reads replaced scalar list members after compilation`, () => {
+    const list: Array<unknown> = [1]
+    const evaluate = compileExpression(
+      new Func(`in`, [new PropRef([`row`, `value`]), new Value(list)]),
+    )
+    const checkCurrent = (value: unknown) =>
+      expect(evaluate({ row: { value } })).toBe(referenceIn(value, list))
+
+    checkCurrent(1)
+    list[0] = 2
+    checkCurrent(1)
+    checkCurrent(2)
+    list.push(3)
+    checkCurrent(3)
+    list.splice(0, 1)
+    checkCurrent(2)
+  })
+
+  it(`reads a Date item's current timestamp after compilation`, () => {
+    const dateItem = new Date(1)
+    const list = [dateItem]
+    const evaluate = compileExpression(
+      new Func(`in`, [new PropRef([`row`, `value`]), new Value(list)]),
+    )
+    const checkCurrent = (value: unknown) =>
+      expect(evaluate({ row: { value } })).toBe(referenceIn(value, list))
+
+    checkCurrent(1)
+    dateItem.setTime(2)
+    checkCurrent(1)
+    checkCurrent(2)
+  })
+
+  it(`reads a byte item's current content after compilation`, () => {
+    const byteItem = new Uint8Array([1, 2])
+    const list = [byteItem]
+    const evaluate = compileExpression(
+      new Func(`in`, [new PropRef([`row`, `value`]), new Value(list)]),
+    )
+    const checkCurrent = (value: unknown) =>
+      expect(evaluate({ row: { value } })).toBe(referenceIn(value, list))
+
+    checkCurrent(new Uint8Array([1, 2]))
+    byteItem[1] = 3
+    checkCurrent(new Uint8Array([1, 2]))
+    checkCurrent(new Uint8Array([1, 3]))
   })
 
   it.each([

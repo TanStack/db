@@ -2449,3 +2449,13 @@ Development builds show this message, with `${...}` replaced by values:
 ```text
 LocalStorage sync belongs to its options Collection.
 ```
+
+<a id="error-243"></a>
+
+## Error 243: `query/compiler/mutable-list-refresh.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+An inner mutable-list revision lost its candidate
+```

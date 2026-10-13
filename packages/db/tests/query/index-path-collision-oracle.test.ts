@@ -26,12 +26,15 @@
  * A foreign Date subclass is the adjacent valid-domain control: its native
  * timestamp keeps the range eligible for index lookup across realms.
  * A further valid-Date history overrides `valueOf` in local and foreign
- * subclasses while retaining native `getTime`. Its four relational predicates
- * use intrinsic timestamps in the model, then compare public scan and indexed
- * snapshots. Both index types must remain eligible for optimized-only reads.
- * A subclass bound also reaches both operand positions. Date/number scan
- * comparisons in both operand orders use the same model; mixed-domain range
- * indexes make no eligibility claim here.
+ * subclasses while retaining native `getTime`. An ordinary Date bound and a
+ * subclass bound each reach all four effective relations; the subclass bound
+ * occupies both operand positions. The intrinsic-timestamp model compares
+ * public scan and indexed snapshots, and both index types must remain eligible
+ * for optimized-only reads. The reference captures each source timestamp
+ * before the rows enter the Collection, so later source-Date changes cannot
+ * change the expected answer. Date/number scan comparisons in both operand
+ * orders use the same model; mixed-domain range indexes make no eligibility
+ * claim here.
  *
  * Production driver: `currentStateAsChanges`, Collection subscriptions, and
  * live-query Collections run the real predicates and callback compilers.
@@ -382,6 +385,15 @@ it.each([
       const subclassBound = new LaterDate(1)
       const nativeGetTime = Date.prototype.getTime
       const boundTime = nativeGetTime.call(bound)
+      const subclassBoundTime = nativeGetTime.call(subclassBound)
+      // Capture the model before Collection admission. Neither the scan nor
+      // the indexed checkpoint may rederive its answer from mutable source
+      // Date objects handed to production.
+      const referenceRows = Object.freeze(
+        dateRows.map(({ id, v }) =>
+          Object.freeze({ id, time: nativeGetTime.call(v) }),
+        ),
+      )
       const field = new PropRef([`v`])
       const predicates = [
         {
@@ -407,22 +419,42 @@ it.each([
         {
           name: `gt with subclass bound`,
           where: gt(field, subclassBound),
-          accepts: (time: number) => time > boundTime,
+          accepts: (time: number) => time > subclassBoundTime,
+        },
+        {
+          name: `gte with subclass bound`,
+          where: gte(field, subclassBound),
+          accepts: (time: number) => time >= subclassBoundTime,
+        },
+        {
+          name: `lt with subclass bound`,
+          where: lt(field, subclassBound),
+          accepts: (time: number) => time < subclassBoundTime,
         },
         {
           name: `lte with subclass bound`,
           where: lte(field, subclassBound),
-          accepts: (time: number) => time <= boundTime,
+          accepts: (time: number) => time <= subclassBoundTime,
         },
         {
           name: `subclass bound less than field`,
           where: lt(subclassBound, field),
-          accepts: (time: number) => boundTime < time,
+          accepts: (time: number) => subclassBoundTime < time,
+        },
+        {
+          name: `subclass bound less than or equal to field`,
+          where: lte(subclassBound, field),
+          accepts: (time: number) => subclassBoundTime <= time,
+        },
+        {
+          name: `subclass bound greater than field`,
+          where: gt(subclassBound, field),
+          accepts: (time: number) => subclassBoundTime > time,
         },
         {
           name: `subclass bound greater than or equal to field`,
           where: gte(subclassBound, field),
-          accepts: (time: number) => boundTime >= time,
+          accepts: (time: number) => subclassBoundTime >= time,
         },
       ]
       const mixedPredicates = [
@@ -458,15 +490,15 @@ it.each([
       register(() => collection.cleanup())
       await collection.stateWhenReady()
 
-      // The model calls the native intrinsic, which ignores subclass valueOf.
+      // The model captured native timestamps, which ignore subclass valueOf.
       // The two overrides deliberately reverse their apparent native-operator
       // positions, while ordinary Dates control both sides and equality.
       expect(Number(earlierForeign)).toBe(100)
       expect(Number(dateRows[3]!.v)).toBe(-100)
       expect(Number(subclassBound)).toBe(-100)
       const expectedDateKeys = (accepts: (time: number) => boolean) =>
-        dateRows
-          .filter(({ v }) => accepts(nativeGetTime.call(v)))
+        referenceRows
+          .filter(({ time }) => accepts(time))
           .map(({ id }) => id)
           .sort()
       const snapshotKeys = (
@@ -516,6 +548,15 @@ it.each([
         ).toHaveBeenCalled()
         lookup.mockClear()
       }
+
+      // This hostile mutation crosses the bound after every public check.
+      // The expected keys stay fixed because the model recorded the original
+      // timestamps before production received the source rows.
+      const greaterKeys = expectedDateKeys((time) => time > boundTime)
+      expect(greaterKeys).toContain(`local-later`)
+      dateRows[3]!.v.setTime(-2)
+      expect(nativeGetTime.call(dateRows[3]!.v)).toBe(-2)
+      expect(expectedDateKeys((time) => time > boundTime)).toEqual(greaterKeys)
     })
   },
 )

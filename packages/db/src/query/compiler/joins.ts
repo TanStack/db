@@ -27,7 +27,8 @@ import {
   getPropRefSourceAlias,
   requireCollectionSource,
 } from '../ir.js'
-import { compileExpression } from './evaluators.js'
+import { compileExpression, hasMutableInList } from './evaluators.js'
+import { refreshMap } from './mutable-list-refresh.js'
 import { getLazyLoadTargets } from './lazy-targets.js'
 import { crossJoinParentRoutes } from './parent-routes.js'
 import { queriesMatchForCaching } from './query-equivalence.js'
@@ -43,6 +44,7 @@ import {
 import type { ValueIdentity } from '../equality-value-identity.js'
 import type { CompileQueryFn } from './index.js'
 import type { OrderByOptimizationInfo } from './order-by.js'
+import type { MutableListRevision } from './mutable-list-refresh.js'
 import type {
   BasicExpression,
   CollectionSourceRef,
@@ -235,6 +237,8 @@ export function processJoins(
   mainSourceIsParentFiltered: boolean,
   valueIdentity: ValueIdentity,
   parentKeyStream?: KeyedStream,
+  disableLazyDemand = false,
+  mutableRevision?: MutableListRevision,
 ): NamespacedAndKeyedStream {
   let resultPipeline = pipeline
   const localBindings = new Set(
@@ -266,6 +270,8 @@ export function processJoins(
       valueIdentity,
       localBindings,
       parentKeyStream,
+      disableLazyDemand,
+      mutableRevision,
     )
     localBindings.add(joinClause.from.bindingId)
   }
@@ -301,6 +307,8 @@ function processJoin(
   valueIdentity: ValueIdentity,
   localBindings: ReadonlySet<string>,
   parentKeyStream?: KeyedStream,
+  disableLazyDemand = false,
+  mutableRevision?: MutableListRevision,
 ): NamespacedAndKeyedStream {
   const isCollectionRef = joinClause.from.type === `collectionRef`
 
@@ -406,33 +414,34 @@ function processJoin(
   )
 
   // Prepare both sides with the same key and raw-demand rules.
-  let mainPipeline = pipeline.pipe(
-    map(([currentKey, namespacedRow]) =>
-      keyJoinInput(
-        currentKey,
-        namespacedRow,
-        mainSource,
-        `main`,
-        compiledMainExpressions,
-        routeJoinedSource,
-        valueIdentity,
-      ),
-    ),
-  )
-
-  let joinedPipeline = joinedInput.pipe(
-    map(([currentKey, row]) =>
-      keyJoinInput(
-        currentKey,
-        wrapJoinedInputRow(joinedSource, row),
-        joinedSource,
-        `joined`,
-        compiledJoinedExpressions,
-        routeJoinedSource,
-        valueIdentity,
-      ),
-    ),
-  )
+  const keyMain = ([currentKey, namespacedRow]: [unknown, NamespacedRow]) =>
+    keyJoinInput(
+      currentKey,
+      namespacedRow,
+      mainSource,
+      `main`,
+      compiledMainExpressions,
+      routeJoinedSource,
+      valueIdentity,
+    )
+  const keyJoined = ([currentKey, row]: [unknown, any]) =>
+    keyJoinInput(
+      currentKey,
+      wrapJoinedInputRow(joinedSource, row),
+      joinedSource,
+      `joined`,
+      compiledJoinedExpressions,
+      routeJoinedSource,
+      valueIdentity,
+    )
+  const refreshJoin =
+    mutableRevision !== undefined && hasMutableInList(joinClause.on)
+  let mainPipeline = refreshJoin
+    ? refreshMap(pipeline, mutableRevision, keyMain)
+    : pipeline.pipe(map(keyMain))
+  let joinedPipeline = refreshJoin
+    ? refreshMap(joinedInput, mutableRevision, keyJoined)
+    : joinedInput.pipe(map(keyJoined))
 
   // Apply the join operation
   if (![`inner`, `left`, `right`, `full`].includes(joinClause.type)) {
@@ -465,7 +474,7 @@ function processJoin(
           aliasRemapping,
         )
 
-    if (!limitedSubquery && lazyTargets.length > 0) {
+    if (!disableLazyDemand && !limitedSubquery && lazyTargets.length > 0) {
       // This join can be optimized by having the active collection
       // dynamically load keys into the lazy collection
       // based on the value of the joinKey and by looking up
