@@ -149,3 +149,25 @@ with no type errors, and changed-file ESLint passed. No production code changed.
 This correction strengthens ORC-003, ORC-005, ORC-006, and ORC-013 for the
 direct-write witness. It makes no claim about every later demand or about
 reuse after a direct write.
+
+## Retained ownership exception and companion handoff
+
+The guide's initial full-source reuse sentence omitted an accepted exception:
+a narrower scope with retained persisted ownership needs revalidation before
+its old row and owner can retire. The current adapter makes an exact-scope
+request for that case. This follow-up clarifies the guide and changeset; it
+does not change #2135 production code or the existing same-version retained
+subset oracle. That oracle already crosses omitted, unchanged, and moved rows
+after an applied full result and checks public rows, durable owners, and the
+retention marker at subset settlement.
+
+Companion #2134 code head `5239c25c2` adds a fixed historical-key handoff
+with an active applied full Query. Marker-present and markerless variants both
+pass on #2134 and in a scratch merge with #2135 head `d429e0dd8`. In that
+merge, removing historical pending revalidation from the reuse gate fails
+both variants at the immediate public-row assertion. Discovering old aliases
+from markers alone fails only the markerless variant; the marked control
+passes. The #2134 versioned review records the independent oracle challenge
+and full evidence. The test permits either an exact request or safe
+reconciliation from the applied full result, so the guide's current exact
+request behavior is not an oracle requirement.

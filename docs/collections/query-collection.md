@@ -1299,7 +1299,9 @@ When using `syncMode: 'on-demand'`, the collection automatically pushes down que
 With a static `queryKey`, an active, successfully applied request for the
 entire source can also serve later filtered or windowed live queries without
 another `queryFn` call. The full Query stays active until those queries release
-their demand. An unfinished full request does not provide this coverage, and
+their demand. A narrower scope with retained persisted ownership makes an
+exact-scope `queryFn` call to revalidate its rows and owners. An unfinished
+full request does not provide this coverage, and
 `refetch: true` still fetches the exact requested subset. Function-built
 `queryKey` values keep their own cache identity and do not use this reuse path.
 Your `queryFn` must return the complete requested result, including every row
