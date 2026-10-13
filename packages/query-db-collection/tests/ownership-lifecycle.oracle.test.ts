@@ -11375,9 +11375,11 @@ describe(`query collection ownership lifecycle`, () => {
    * a later fetch may replace it. The reference is the order of the authored
    * fetches and write, independent of the Query cache's chosen first key.
    *
-   * The legal history uses `id = x` and `id IN [x]`, which have equal row
-   * meaning but distinct demand keys. The real QueryClient coalesces them by
-   * a custom hash. The public row is compared after the write, after the held
+   * The legal history uses `id = x` and `id IN [x, NULL]`. The constant-list
+   * evaluator ignores the nullish candidate, so both select the same rows.
+   * The conservative demand identity still keeps their keys distinct. The
+   * real QueryClient coalesces them by a custom hash.
+   * The public row is compared after the write, after the held
    * older result applies, and after a post-write result applies. The provider
    * call count proves each requested fetch ran.
    */
@@ -11422,9 +11424,18 @@ describe(`query collection ownership lifecycle`, () => {
     })
     const a = { where: eq(new IR.PropRef([`id`]), `x`) }
     const b = {
-      where: new IR.Func(`in`, [new IR.PropRef([`id`]), new IR.Value([`x`])]),
+      where: new IR.Func(`in`, [
+        new IR.PropRef([`id`]),
+        new IR.Value([`x`, null]),
+      ]),
     }
     expect(getLoadSubsetDemandKey(a)).not.toBe(getLoadSubsetDemandKey(b))
+    for (const candidate of [`x`, `other`, null, undefined]) {
+      const row = { id: candidate }
+      expect(compileSingleRowExpression(a.where)(row)).toBe(
+        compileSingleRowExpression(b.where)(row),
+      )
+    }
 
     await collection._sync.loadSubset(a)
     await collection._sync.loadSubset({ ...b, refetch: true })
@@ -11492,7 +11503,10 @@ describe(`query collection ownership lifecycle`, () => {
     })
     const a = { where: eq(new IR.PropRef([`id`]), `x`) }
     const b = {
-      where: new IR.Func(`in`, [new IR.PropRef([`id`]), new IR.Value([`x`])]),
+      where: new IR.Func(`in`, [
+        new IR.PropRef([`id`]),
+        new IR.Value([`x`, null]),
+      ]),
     }
     expect(getLoadSubsetDemandKey(a)).not.toBe(getLoadSubsetDemandKey(b))
 
@@ -11567,7 +11581,10 @@ describe(`query collection ownership lifecycle`, () => {
     })
     const a = { where: eq(new IR.PropRef([`id`]), `x`) }
     const b = {
-      where: new IR.Func(`in`, [new IR.PropRef([`id`]), new IR.Value([`x`])]),
+      where: new IR.Func(`in`, [
+        new IR.PropRef([`id`]),
+        new IR.Value([`x`, null]),
+      ]),
     }
     expect(getLoadSubsetDemandKey(a)).not.toBe(getLoadSubsetDemandKey(b))
 

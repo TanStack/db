@@ -46,6 +46,7 @@ import {
 } from '../../src/query/ir.js'
 import {
   compileExpression,
+  compileSingleRowExpression,
   toBooleanPredicate,
 } from '../../src/query/compiler/evaluators.js'
 import {
@@ -676,8 +677,12 @@ describe(`loadSubset demand identity`, () => {
         [Symbol(`different`), false],
         [null, null],
       ] as const) {
-        expect(compileExpression(equal)({ value: rowValue })).toBe(expected)
-        expect(compileExpression(member)({ value: rowValue })).toBe(expected)
+        expect(compileSingleRowExpression(equal)({ value: rowValue })).toBe(
+          expected,
+        )
+        expect(compileSingleRowExpression(member)({ value: rowValue })).toBe(
+          expected,
+        )
       }
     }
 
@@ -688,12 +693,12 @@ describe(`loadSubset demand identity`, () => {
     for (const value of [null, undefined]) {
       expect(key(equality(value))).not.toBe(key(singleton(value)))
       const row = { value: 1 }
-      expect(compileExpression(new Func(`not`, [equality(value)]))(row)).toBe(
-        null,
-      )
-      expect(compileExpression(new Func(`not`, [singleton(value)]))(row)).toBe(
-        true,
-      )
+      expect(
+        compileSingleRowExpression(new Func(`not`, [equality(value)]))(row),
+      ).toBe(null)
+      expect(
+        compileSingleRowExpression(new Func(`not`, [singleton(value)]))(row),
+      ).toBe(true)
     }
 
     expect(key(equality(1))).not.toBe(
