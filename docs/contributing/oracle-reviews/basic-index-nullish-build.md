@@ -141,3 +141,12 @@ focused index, work, and Collection-index run passed 535 tests with no type
 errors. The recheck found no lost direct-index assertion after the grouping
 change. It did not rerun the original wrong-sort mutant or extend the law to
 raw duplicate source keys or custom callbacks within one normalized value.
+
+At exact code commit `24a61a8d5b6cef06d488c490e39f351b4d55fb68`, a
+fresh hostile reviewer rechecked the one-pass build against the seven retired
+index law families and the nullish fixed history. The source Map, wrapper
+sort, and direct observations remained intact after the commit hook. A
+focused index, work, and Collection-index run passed 535 tests with no type
+errors. The reviewer found no in-scope loss. This recheck did not rerun the
+original wrong-sort mutant; the earlier RED run remains the sensitivity
+evidence.

@@ -104,3 +104,13 @@ read the six retired Date/RegExp assertions, their source, the direct
 found no missing operand or expected result in the bounded transfer. This
 is a frozen-head no-loss verdict by inspection; it is not a new mutant kill
 or a fresh committed-head execution of subsequent working-tree changes.
+
+## Exact code-commit review of the narrowed transfer
+
+At `24a61a8d5b6cef06d488c490e39f351b4d55fb68`, a fresh hostile reviewer
+checked the committed six retired Date/RegExp assertions against their
+fixed witnesses, generated laws, and production `deepEquals` path. It found
+no loss at the direct-return checkpoint. The committed oracle and remaining
+unit file passed 208 tests with no type errors. The scoped files and commit
+check were clean. This verdict does not establish public change events or
+cross-realm behavior.

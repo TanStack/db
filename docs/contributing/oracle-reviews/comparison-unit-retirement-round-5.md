@@ -60,3 +60,13 @@ input labels, with no state transition or host provider (ORC-008, ORC-009,
 and ORC-014). This ledger records the loss audit, hostile challenge, and
 bounded result (ORC-011 and ORC-012); it makes no claim about other value
 domains.
+
+## Exact code-commit review
+
+At `24a61a8d5b6cef06d488c490e39f351b4d55fb68`, a fresh hostile reviewer
+compared all five retired blocks with the committed tagged model, direct
+comparator checks, and sorted row IDs. It found no lost assertion. The
+committed production and oracle blobs match the reviewed working tree; the
+commit hook did not change them. A focused comparison and evaluator run
+passed 236 tests with no type errors. This verdict does not extend to
+`compareValues` or public query and index paths.

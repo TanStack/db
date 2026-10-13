@@ -60,3 +60,13 @@ seed/path replay verifies the shared campaign harness (ORC-007 and ORC-010).
 The tuple and instant model has no mutable state or host provider (ORC-008,
 ORC-009, and ORC-014). This record preserves the loss audit, hostile review,
 and explicit limits (ORC-011 and ORC-012); it makes no cross-boundary claim.
+
+## Exact code-commit review
+
+At `24a61a8d5b6cef06d488c490e39f351b4d55fb68`, a fresh hostile reviewer
+reconstructed the three PlainDate assertions and equal-instant zoned
+assertion from the committed oracle. The comparator and oracle blobs match
+the versions reviewed before commit. Its focused comparison and evaluator
+run passed 236 tests with no type errors. It found no lost ordinary
+same-realm assertion. Modified Temporal inputs, `compareValues`, and public
+query or index paths remain outside this verdict.
