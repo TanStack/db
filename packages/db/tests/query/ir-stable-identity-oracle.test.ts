@@ -36,6 +36,7 @@ import {
   getStableQueryBuilderHash,
   getStableQueryIRHash,
   getStableValueHash,
+  normalizeLegacyLoadSubsetDemandKey,
 } from '../../src/query/ir-stable-identity.js'
 import {
   CollectionRef,
@@ -642,6 +643,45 @@ describe(`semantic expression identity`, () => {
  * does not claim general semantic matching or reuse for broader subsets.
  */
 describe(`loadSubset demand identity`, () => {
+  it(`normalizes fixed historical singleton keys, including nested duplicate clauses`, () => {
+    // These bytes are frozen from the previous encoder. The model says one
+    // non-null IN member equals EQ, and AND removes duplicate conditions.
+    // The migration parser must reach the same key as the current encoder.
+    const oldSingleton = `{"type":"loadSubsetDemand","query":{"type":"loadSubsetQuery","where":{"type":"func","name":"in","args":[{"type":"ref","path":[["string","category"]]},{"type":"val","value":["set",[["string","shared"]]]}]}}}`
+    const oldAndSingleton = `{"type":"loadSubsetDemand","query":{"type":"loadSubsetQuery","where":{"type":"func","name":"and","args":[{"type":"func","name":"in","args":[{"type":"ref","path":[["string","category"]]},{"type":"val","value":["set",[["string","shared"]]]}]}]}}}`
+    const oldAndSingletonWithEquality = `{"type":"loadSubsetDemand","query":{"type":"loadSubsetQuery","where":{"type":"func","name":"and","args":[{"type":"func","name":"eq","args":[{"type":"ref","path":[["string","category"]]},{"type":"val","value":["string","shared"]}]},{"type":"func","name":"in","args":[{"type":"ref","path":[["string","category"]]},{"type":"val","value":["set",[["string","shared"]]]}]}]}}}`
+    const currentEquality = `{"type":"loadSubsetDemand","query":{"type":"loadSubsetQuery","where":{"type":"func","name":"eq","args":[{"type":"ref","path":[["string","category"]]},{"type":"val","value":["string","shared"]}]}}}`
+    const currentAndEquality = `{"type":"loadSubsetDemand","query":{"type":"loadSubsetQuery","where":{"type":"func","name":"and","args":[{"type":"func","name":"eq","args":[{"type":"ref","path":[["string","category"]]},{"type":"val","value":["string","shared"]}]}]}}}`
+    const field = new PropRef<string>([`category`])
+    const equality = new Func<boolean>(`eq`, [field, new Value(`shared`)])
+    const singleton = new Func<boolean>(`in`, [field, new Value([`shared`])])
+
+    expect(normalizeLegacyLoadSubsetDemandKey(oldSingleton)).toBe(
+      currentEquality,
+    )
+    expect(getLoadSubsetDemandKey({ where: equality })).toBe(currentEquality)
+    expect(normalizeLegacyLoadSubsetDemandKey(oldAndSingleton)).toBe(
+      currentAndEquality,
+    )
+    expect(
+      normalizeLegacyLoadSubsetDemandKey(oldAndSingletonWithEquality),
+    ).toBe(currentAndEquality)
+    expect(
+      getLoadSubsetDemandKey({
+        where: new Func(`and`, [singleton, equality]),
+      }),
+    ).toBe(currentAndEquality)
+
+    const malformed = oldSingleton.replace(
+      `"name":"in"`,
+      `"name":"in","foreign":true`,
+    )
+    expect(normalizeLegacyLoadSubsetDemandKey(malformed)).toBeUndefined()
+    expect(
+      normalizeLegacyLoadSubsetDemandKey(`not a demand key`),
+    ).toBeUndefined()
+  })
+
   for (const operator of [`in`, `eq`] as const) {
     for (const path of [`value`, `other`] as const) {
       it(`keeps distinct literal reference proxies distinct for ${operator} on ${path}`, () => {

@@ -10,6 +10,7 @@ import {
   deepEquals,
   getLegacyLoadSubsetDemandKey,
   getLoadSubsetDemandKey,
+  normalizeLegacyLoadSubsetDemandKey,
   toBooleanPredicate,
   validateSyncPersistenceCapability,
   warnOnce,
@@ -1205,7 +1206,77 @@ export function queryCollectionOptions(
       string,
       ReturnType<typeof setTimeout>
     >()
-    const legacyPersistedOwnerHashes = new Map<string, string>()
+    const legacyPersistedOwnerHashes = new Map<string, Set<string>>()
+    const pendingRetainedRevalidations = new Map<string, Promise<void>>()
+    let persistedOwnerHashes: Set<string> | undefined
+    let persistedOwnerScan: Promise<void> | undefined
+
+    const scanPersistedOwnerHashes = (): Promise<void> => {
+      persistedOwnerScan ??= persistence!.scanPersistedRows({
+        metadataOnly: true,
+      })
+        .then((rows) => {
+          const hashes = new Set<string>()
+          for (const row of rows) {
+            const rowMetadata = row.metadata as
+              Record<string, unknown> | undefined
+            const queryMetadata = rowMetadata?.queryCollection
+            if (!queryMetadata || typeof queryMetadata !== `object`) continue
+            const owners = (queryMetadata as Record<string, unknown>).owners
+            if (!owners || typeof owners !== `object`) continue
+            Object.keys(owners).forEach((hash) => hashes.add(hash))
+          }
+          persistedOwnerHashes = hashes
+        })
+        .catch((error: unknown) => {
+          persistedOwnerScan = undefined
+          throw error
+        })
+      return persistedOwnerScan
+    }
+
+    const getLegacyOwnerHashes = (
+      demandKey: string,
+      currentHash: string,
+      options: LoadSubsetOptions,
+    ): Set<string> => {
+      const aliases = new Set<string>()
+      if (typeof queryKey === `function`) return aliases
+      const oldShapeKey = getLegacyLoadSubsetDemandKey(options)
+      const oldShapeIdentity =
+        oldShapeKey === undefined
+          ? undefined
+          : normalizeLegacyLoadSubsetDemandKey(oldShapeKey)
+      const candidateHashes = new Set(persistedOwnerHashes)
+      metadata?.collection
+        .list(QUERY_COLLECTION_GC_PREFIX)
+        .forEach(({ key, value }) => {
+          const hash = key.slice(QUERY_COLLECTION_GC_PREFIX.length)
+          if (parsePersistedQueryRetentionEntry(value, hash)) {
+            candidateHashes.add(hash)
+          }
+        })
+      for (const hash of candidateHashes) {
+        if (hash === currentHash) continue
+        try {
+          const parts: unknown = JSON.parse(hash)
+          if (!Array.isArray(parts) || typeof parts.at(-1) !== `string`)
+            continue
+          const oldKey = parts.at(-1) as string
+          const normalized = normalizeLegacyLoadSubsetDemandKey(oldKey)
+          if (
+            hashKey([...queryKey, oldKey]) === hash &&
+            normalized !== undefined &&
+            (normalized === demandKey || normalized === oldShapeIdentity)
+          ) {
+            aliases.add(hash)
+          }
+        } catch {
+          // Foreign or malformed ownership keys cannot certify an alias.
+        }
+      }
+      return aliases
+    }
     let persistedRetentionMaintenance = Promise.resolve()
 
     const invalidatePendingResultApplication = (hashedQueryKey: string) => {
@@ -1495,7 +1566,7 @@ export function queryCollectionOptions(
         return new Set(knownRows)
       }
 
-      const legacyOwnerHash = legacyPersistedOwnerHashes.get(hashedQueryKey)
+      const legacyOwnerHashes = legacyPersistedOwnerHashes.get(hashedQueryKey)
       const ownedRows = new Set<string | number>()
       for (const [rowKey] of collection._state.syncedData.entries()) {
         const owners = getPersistedOwners(rowKey)
@@ -1507,7 +1578,8 @@ export function queryCollectionOptions(
 
         if (
           owners.has(hashedQueryKey) ||
-          (legacyOwnerHash !== undefined && owners.has(legacyOwnerHash))
+          (legacyOwnerHashes !== undefined &&
+            [...legacyOwnerHashes].some((hash) => owners.has(hash)))
         ) {
           ownedRows.add(rowKey)
         }
@@ -1528,13 +1600,13 @@ export function queryCollectionOptions(
       >
     > => {
       const recoveryEpoch = scopedRecoveryEpoch
-      const legacyOwnerHash = legacyPersistedOwnerHashes.get(hashedQueryKey)
+      const legacyOwnerHashes = legacyPersistedOwnerHashes.get(hashedQueryKey)
       const knownRows = queryToRows.get(hashedQueryKey)
       // An empty result cannot collide with an unseen durable owner. A later
       // nonempty result can, so scan storage before assigning its row owners.
       if (
         knownRows &&
-        legacyOwnerHash === undefined &&
+        legacyOwnerHashes === undefined &&
         (knownRows.size > 0 || incomingItemsAreEmpty) &&
         Array.from(knownRows).every((rowKey) => collection.has(rowKey))
       ) {
@@ -1606,7 +1678,8 @@ export function queryCollectionOptions(
 
         if (
           ownerSet.has(hashedQueryKey) ||
-          (legacyOwnerHash !== undefined && ownerSet.has(legacyOwnerHash))
+          (legacyOwnerHashes !== undefined &&
+            [...legacyOwnerHashes].some((hash) => ownerSet.has(hash)))
         ) {
           baseline.set(row.key, {
             value: row.value,
@@ -1873,51 +1946,74 @@ export function queryCollectionOptions(
       })
     }
 
+    const shareRetainedRevalidation = (
+      hashedQueryKey: string,
+      start: () => Promise<void>,
+    ): Promise<void> => {
+      const pending = pendingRetainedRevalidations.get(hashedQueryKey)
+      if (pending) return pending
+      const revalidation = start()
+      pendingRetainedRevalidations.set(hashedQueryKey, revalidation)
+      const clear = () => {
+        if (pendingRetainedRevalidations.get(hashedQueryKey) === revalidation)
+          pendingRetainedRevalidations.delete(hashedQueryKey)
+      }
+      void revalidation.then(clear, clear)
+      return revalidation
+    }
+
     const createQueryFromOpts = (
       opts: LoadSubsetOptions = {},
       queryFunction: typeof queryFn = queryFn,
     ): true | Promise<void> => {
-      if (!startupRetentionSettled) {
-        // Immutable request data may be reused; ownership belongs to each call.
+      const deferUntil = (work: Promise<unknown>): Promise<void> => {
+        // Unload can revoke an acquisition while metadata work is pending.
         const acquisition = {}
         const pending = pendingStartupLoads.get(opts) ?? new Set<object>()
         pending.add(acquisition)
         pendingStartupLoads.set(opts, pending)
-        return startupRetentionMaintenancePromise.then(() => {
-          if (!pendingStartupLoads.get(opts)?.delete(acquisition)) {
-            throw new LoadSubsetOperationAbortedError()
-          }
-          if (pending.size === 0) pendingStartupLoads.delete(opts)
-          const resumed = createQueryFromOpts(opts, queryFunction)
-          return resumed === true ? undefined : resumed
-        })
+        return work.then(
+          () => {
+            if (!pendingStartupLoads.get(opts)?.delete(acquisition)) {
+              throw new LoadSubsetOperationAbortedError()
+            }
+            if (pending.size === 0) pendingStartupLoads.delete(opts)
+            const resumed = createQueryFromOpts(opts, queryFunction)
+            return resumed === true ? undefined : resumed
+          },
+          (error: unknown) => {
+            pending.delete(acquisition)
+            if (pending.size === 0) pendingStartupLoads.delete(opts)
+            throw error
+          },
+        )
+      }
+      if (!startupRetentionSettled) {
+        return deferUntil(startupRetentionMaintenancePromise)
       }
 
       // Generate key using common function
       const key = generateQueryKeyFromOptions(opts)
       const hashedQueryKey = hashKey(key)
-      let discoveredLegacyOwner = false
       if (
         metadata &&
         syncMode === `on-demand` &&
         typeof queryKey !== `function`
       ) {
-        const oldDemandKey = getLegacyLoadSubsetDemandKey(opts)
-        if (oldDemandKey !== undefined) {
-          const oldHash = hashKey([...queryKey, oldDemandKey])
-          if (oldHash !== hashedQueryKey) {
-            const oldEntry = metadata.collection.get(
-              `${QUERY_COLLECTION_GC_PREFIX}${oldHash}`,
-            )
-            if (
-              parsePersistedQueryRetentionEntry(oldEntry, oldHash) !== undefined
-            ) {
-              discoveredLegacyOwner =
-                !legacyPersistedOwnerHashes.has(hashedQueryKey)
-              legacyPersistedOwnerHashes.set(hashedQueryKey, oldHash)
-              retainedQueriesPendingRevalidation.add(hashedQueryKey)
-              cancelPersistedRetentionExpiry(oldHash)
-            }
+        const demandKey = getLoadSubsetDemandKey(opts)
+        if (
+          demandKey !== undefined &&
+          (getLegacyLoadSubsetDemandKey(opts) !== undefined ||
+            demandKey.includes(`"name":"eq"`))
+        ) {
+          if (persistence?.scanPersistedRows && !persistedOwnerHashes) {
+            return deferUntil(scanPersistedOwnerHashes())
+          }
+          const aliases = getLegacyOwnerHashes(demandKey, hashedQueryKey, opts)
+          if (aliases.size > 0) {
+            legacyPersistedOwnerHashes.set(hashedQueryKey, aliases)
+            retainedQueriesPendingRevalidation.add(hashedQueryKey)
+            aliases.forEach(cancelPersistedRetentionExpiry)
           }
         }
       }
@@ -1962,8 +2058,10 @@ export function queryCollectionOptions(
         if (opts.refetch) {
           return refetchAndWaitForApplication(observer, hashedQueryKey)
         }
-        if (discoveredLegacyOwner) {
-          return refetchOrWaitForEnabledQuery(observer, hashedQueryKey)
+        if (retainedQueriesPendingRevalidation.has(hashedQueryKey)) {
+          return shareRetainedRevalidation(hashedQueryKey, () =>
+            refetchOrWaitForEnabledQuery(observer, hashedQueryKey),
+          )
         }
 
         const query = observer.getCurrentQuery()
@@ -2117,7 +2215,8 @@ export function queryCollectionOptions(
             hashedQueryKey,
             foreignDirectPatch ||
               unverifiedCacheEdit ||
-              unknownPersistedRowOrder
+              unknownPersistedRowOrder ||
+              retainedQueriesPendingRevalidation.has(hashedQueryKey)
               ? {
                   data: localQuery.state.data,
                   version: localQuery.state.dataUpdateCount,
@@ -2132,11 +2231,16 @@ export function queryCollectionOptions(
           unpatchedCacheVersions.has(localQuery) ||
           foreignDirectPatch ||
           unverifiedCacheEdit ||
-          unknownPersistedRowOrder
+          unknownPersistedRowOrder ||
+          retainedQueriesPendingRevalidation.has(hashedQueryKey)
         ) {
           return opts.refetch
             ? refetchAndWaitForApplication(localObserver, hashedQueryKey)
-            : refetchOrWaitForEnabledQuery(localObserver, hashedQueryKey)
+            : retainedQueriesPendingRevalidation.has(hashedQueryKey)
+              ? shareRetainedRevalidation(hashedQueryKey, () =>
+                  refetchOrWaitForEnabledQuery(localObserver, hashedQueryKey),
+                )
+              : refetchOrWaitForEnabledQuery(localObserver, hashedQueryKey)
         }
         if (!hasCurrentCacheGenerationFetch(localObserver.getCurrentQuery())) {
           return refetchOrWaitForEnabledQuery(localObserver, hashedQueryKey)
@@ -2160,14 +2264,21 @@ export function queryCollectionOptions(
         if (syncStarted || collection.subscriberCount > 0) {
           subscribeToQuery(localObserver, hashedQueryKey)
         }
-        return refetchOrWaitForEnabledQuery(localObserver, hashedQueryKey)
+        return retainedQueriesPendingRevalidation.has(hashedQueryKey)
+          ? shareRetainedRevalidation(hashedQueryKey, () =>
+              refetchOrWaitForEnabledQuery(localObserver, hashedQueryKey),
+            )
+          : refetchOrWaitForEnabledQuery(localObserver, hashedQueryKey)
       }
 
       // Create a promise that resolves when the query result is first available
-      const readyPromise = waitForQueryReadyAndApplied(
-        localObserver,
+      const readyPromise = retainedQueriesPendingRevalidation.has(
         hashedQueryKey,
       )
+        ? shareRetainedRevalidation(hashedQueryKey, () =>
+            waitForQueryReadyAndApplied(localObserver, hashedQueryKey),
+          )
+        : waitForQueryReadyAndApplied(localObserver, hashedQueryKey)
 
       // If sync has started or there are subscribers to the collection, subscribe to the query straight away
       // This creates the main subscription that handles data updates
@@ -2294,7 +2405,7 @@ export function queryCollectionOptions(
         collection._state.acceptedSyncedEntries(),
       )
       const shouldUsePersistedBaseline = persistedBaseline !== undefined
-      const legacyOwnerHash = legacyPersistedOwnerHashes.get(hashedQueryKey)
+      const legacyOwnerHashes = legacyPersistedOwnerHashes.get(hashedQueryKey)
       const previouslyOwnedRows = shouldUsePersistedBaseline
         ? new Set(persistedBaseline.keys())
         : getHydratedOwnedRowsForQueryBaseline(hashedQueryKey)
@@ -2375,10 +2486,12 @@ export function queryCollectionOptions(
       const previousOwnedRows = queryToRows.has(hashedQueryKey)
         ? new Set(queryToRows.get(hashedQueryKey))
         : undefined
-      const previousLegacyOwnedRows =
-        legacyOwnerHash !== undefined && queryToRows.has(legacyOwnerHash)
-          ? new Set(queryToRows.get(legacyOwnerHash))
-          : undefined
+      const previousLegacyOwnedRows = new Map(
+        [...(legacyOwnerHashes ?? [])].map((hash) => [
+          hash,
+          queryToRows.has(hash) ? new Set(queryToRows.get(hash)) : undefined,
+        ]),
+      )
       const affectedRowKeys = new Set([
         ...previouslyOwnedRows,
         ...newItemsMap.keys(),
@@ -2430,13 +2543,10 @@ export function queryCollectionOptions(
         } else {
           queryToRows.set(hashedQueryKey, previousOwnedRows)
         }
-        if (legacyOwnerHash !== undefined) {
-          if (previousLegacyOwnedRows === undefined) {
-            queryToRows.delete(legacyOwnerHash)
-          } else {
-            queryToRows.set(legacyOwnerHash, previousLegacyOwnedRows)
-          }
-        }
+        previousLegacyOwnedRows.forEach((rows, hash) => {
+          if (rows === undefined) queryToRows.delete(hash)
+          else queryToRows.set(hash, rows)
+        })
         previousOwnersByRow.forEach((owners, key) => {
           if (owners === undefined) {
             rowToQueries.delete(key)
@@ -2476,11 +2586,9 @@ export function queryCollectionOptions(
           metadata.collection.delete(
             `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,
           )
-          if (legacyOwnerHash !== undefined) {
-            metadata.collection.delete(
-              `${QUERY_COLLECTION_GC_PREFIX}${legacyOwnerHash}`,
-            )
-          }
+          legacyOwnerHashes?.forEach((hash) => {
+            metadata.collection.delete(`${QUERY_COLLECTION_GC_PREFIX}${hash}`)
+          })
         }
 
         previouslyOwnedRows.forEach((key) => {
@@ -2488,16 +2596,14 @@ export function queryCollectionOptions(
             ? persistedBaseline.get(key)?.value
             : currentSyncedItems.get(key)
           const newItem = newItemsMap.get(key)
-          if (legacyOwnerHash !== undefined) {
-            removeRowOwner(key, legacyOwnerHash)
-          }
+          legacyOwnerHashes?.forEach((hash) => removeRowOwner(key, hash))
           if (!newItem) {
             const directPosition = unownedDirectWritePositions.get(key)
             if (directPosition !== undefined)
               settledDirectPositions.set(key, directPosition)
             const owners = getPersistedOwners(key)
             owners.delete(hashedQueryKey)
-            if (legacyOwnerHash !== undefined) owners.delete(legacyOwnerHash)
+            legacyOwnerHashes?.forEach((hash) => owners.delete(hash))
             setPersistedOwners(key, owners)
             const needToRemove = removeRowOwner(key, hashedQueryKey)
             // A superseded result's row can still be waiting for durable
@@ -2530,8 +2636,10 @@ export function queryCollectionOptions(
             settledDirectPositions.set(key, directPosition)
           }
           const owners = getPersistedOwners(key)
-          const retiredLegacyOwner =
-            legacyOwnerHash !== undefined && owners.delete(legacyOwnerHash)
+          let retiredLegacyOwner = false
+          for (const hash of legacyOwnerHashes ?? []) {
+            if (owners.delete(hash)) retiredLegacyOwner = true
+          }
           const addsOwner = !owners.has(hashedQueryKey)
           const insertsRow = !currentSyncedItems.has(key)
           if (addsOwner) {
@@ -2578,8 +2686,11 @@ export function queryCollectionOptions(
         // Readiness counts accepted rows; the application, which settles a
         // subset load, waits for them to be visible.
         const finishApplication = () => {
-          if (legacyOwnerHash !== undefined) {
-            queryToRows.delete(legacyOwnerHash)
+          if (legacyOwnerHashes !== undefined) {
+            legacyOwnerHashes.forEach((hash) => {
+              queryToRows.delete(hash)
+              persistedOwnerHashes?.delete(hash)
+            })
             legacyPersistedOwnerHashes.delete(hashedQueryKey)
           }
           removedRows.forEach((key) => {
@@ -3252,6 +3363,7 @@ export function queryCollectionOptions(
       unsubscribePendingReadyListeners(hashedQueryKey)
       cancelPersistedRetentionExpiry(hashedQueryKey)
       retainedQueriesPendingRevalidation.delete(hashedQueryKey)
+      pendingRetainedRevalidations.delete(hashedQueryKey)
       invalidatePendingResultApplication(hashedQueryKey)
 
       const nextOwnersByRow = removeQueryOwnership(hashedQueryKey)
@@ -3351,12 +3463,24 @@ export function queryCollectionOptions(
         return
       }
 
+      const legacyTtlEntries: Array<
+        Extract<PersistedQueryRetentionEntry, { mode: `ttl` }>
+      > = []
+      legacyPersistedOwnerHashes.get(hashedQueryKey)?.forEach((oldHash) => {
+        const oldEntry = parsePersistedQueryRetentionEntry(
+          metadata?.collection.get(`${QUERY_COLLECTION_GC_PREFIX}${oldHash}`),
+          oldHash,
+        )
+        if (oldEntry?.mode === `ttl`) legacyTtlEntries.push(oldEntry)
+      })
+
       if (
         effectivePersistedGcTime !== undefined &&
         metadata &&
         persistence?.scanPersistedRows
       ) {
         invalidatePendingResultApplication(hashedQueryKey)
+        const expiresAt = Date.now() + effectivePersistedGcTime
         begin()
         metadata.collection.set(
           `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,
@@ -3368,17 +3492,37 @@ export function queryCollectionOptions(
                 : `ttl`,
             ...(effectivePersistedGcTime === Number.POSITIVE_INFINITY
               ? {}
-              : { expiresAt: Date.now() + effectivePersistedGcTime }),
+              : { expiresAt }),
           },
         )
+        if (effectivePersistedGcTime !== Number.POSITIVE_INFINITY) {
+          legacyTtlEntries.forEach((entry) => {
+            metadata.collection.set(
+              `${QUERY_COLLECTION_GC_PREFIX}${entry.queryHash}`,
+              {
+                ...entry,
+                expiresAt,
+              },
+            )
+          })
+        }
         commit()
         if (effectivePersistedGcTime !== Number.POSITIVE_INFINITY) {
           schedulePersistedRetentionExpiry({
             queryHash: hashedQueryKey,
             mode: `ttl`,
-            expiresAt: Date.now() + effectivePersistedGcTime,
+            expiresAt,
           })
         }
+        legacyTtlEntries.forEach((entry) =>
+          schedulePersistedRetentionExpiry({
+            ...entry,
+            expiresAt:
+              effectivePersistedGcTime === Number.POSITIVE_INFINITY
+                ? entry.expiresAt
+                : expiresAt,
+          }),
+        )
         unsubscribes.get(hashedQueryKey)?.()
         unsubscribes.delete(hashedQueryKey)
         state.observers.delete(hashedQueryKey)
@@ -3391,6 +3535,7 @@ export function queryCollectionOptions(
         return
       }
 
+      legacyTtlEntries.forEach(schedulePersistedRetentionExpiry)
       cleanupQueryInternal(hashedQueryKey)
     }
 

@@ -100,7 +100,7 @@ export function getLoadSubsetDemandKey(
   return encodeLoadSubsetDemandKey(options, false)
 }
 
-/** @internal The key persisted for literal singleton IN before it shared EQ identity. */
+/** @internal The demand key persisted before singleton IN and literal proxy identity changed. */
 export function getLegacyLoadSubsetDemandKey(
   options: LoadSubsetOptions,
 ): DemandKey | undefined {
@@ -110,17 +110,110 @@ export function getLegacyLoadSubsetDemandKey(
       ...(options.orderBy ?? []).map(({ expression }) => expression),
       options.cursor?.whereFrom,
       options.cursor?.whereCurrent,
-    ].some((expression) => expression && containsMembership(expression))
+    ].some(
+      (expression) => expression && containsLegacyIdentityChange(expression),
+    )
   ) {
     return undefined
   }
   return encodeLoadSubsetDemandKey(options, true)
 }
 
-function containsMembership(expression: BasicExpression): boolean {
+/** @internal Map a persisted demand key from the previous encoder to its current identity. */
+export function normalizeLegacyLoadSubsetDemandKey(
+  key: string,
+): DemandKey | undefined {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(key)
+  } catch {
+    return undefined
+  }
+  if (
+    JSON.stringify(parsed) !== key ||
+    !isPlainObject(parsed) ||
+    parsed.type !== `loadSubsetDemand` ||
+    Object.keys(parsed).some(
+      (field) =>
+        ![`type`, `query`, `limit`, `offset`, `cursor`].includes(field),
+    ) ||
+    !isPlainObject(parsed.query) ||
+    parsed.query.type !== `loadSubsetQuery` ||
+    Object.keys(parsed.query).some(
+      (field) => ![`type`, `where`, `orderBy`].includes(field),
+    )
+  ) {
+    return undefined
+  }
+
+  const normalize = (value: StableIdentityValue): StableIdentityValue => {
+    if (Array.isArray(value)) return value.map(normalize)
+    if (value === null || typeof value !== `object`) return value
+
+    if (
+      value.type === `func` &&
+      typeof value.name === `string` &&
+      Array.isArray(value.args)
+    ) {
+      if (
+        Object.keys(value).length !== 3 ||
+        ![`type`, `name`, `args`].every((field) => field in value)
+      ) {
+        throw new Error(`Invalid persisted function identity`)
+      }
+      const args = value.args.map(normalize)
+      const memberOperand = args[1]
+      const candidateSet =
+        isPlainObject(memberOperand) && memberOperand.type === `val`
+          ? memberOperand.value
+          : undefined
+      const members =
+        value.name === `in` &&
+        args.length === 2 &&
+        isPlainObject(memberOperand) &&
+        Object.keys(memberOperand).length === 2 &&
+        Array.isArray(candidateSet) &&
+        candidateSet.length === 2 &&
+        candidateSet[0] === `set` &&
+        Array.isArray(candidateSet[1])
+          ? candidateSet[1]
+          : undefined
+      if (
+        members?.length === 1 &&
+        !(
+          Array.isArray(members[0]) &&
+          (members[0][0] === `null` || members[0][0] === `undefined`)
+        )
+      ) {
+        return canonicalizeFunction(`eq`, [
+          args[0]!,
+          { type: `val`, value: members[0]! },
+        ])
+      }
+      return canonicalizeFunction(value.name, args)
+    }
+
+    return Object.fromEntries(
+      Object.entries(value).map(([name, entry]) => [name, normalize(entry)]),
+    )
+  }
+
+  try {
+    return JSON.stringify(normalize(parsed as StableIdentityValue)) as DemandKey
+  } catch {
+    return undefined
+  }
+}
+
+function containsLegacyIdentityChange(expression: BasicExpression): boolean {
   return (
     expression.type === `func` &&
-    (expression.name === `in` || expression.args.some(containsMembership))
+    (expression.name === `in` ||
+      (expression.name === `eq` &&
+        expression.args.some(
+          (arg) => arg.type === `val` && isRefProxy(arg.value),
+        )) ||
+      expression.args.some(containsLegacyIdentityChange))
   )
 }
 
@@ -706,6 +799,8 @@ function canonicalizeExpression(
               expression.value,
               `${path}.value`,
               seen,
+              scope,
+              preserveSingletonIn,
             )
           : valueContext === `ordering-operand`
             ? canonicalizeOrderingRuntimeValue(
@@ -733,6 +828,8 @@ function canonicalizeExpression(
           value,
           `${path}.args[1].value[${index}]`,
           seen,
+          scope,
+          preserveSingletonIn,
         ),
       )
       // IN candidates form a set; their order and duplicates do not matter.
@@ -1108,7 +1205,20 @@ function canonicalizeEqualityRuntimeValue(
   value: unknown,
   path: string,
   seen: WeakSet<object>,
+  scope?: AliasScope,
+  legacyEncoding = false,
 ): StableIdentityValue {
+  if (legacyEncoding && isRefProxy(value)) {
+    return canonicalizeExpression(
+      toExpression(value),
+      path,
+      seen,
+      `equality-operand`,
+      scope,
+      legacyEncoding,
+    )
+  }
+
   if (typeof value === `number` && Object.is(value, -0)) {
     return canonicalizeRuntimeValue(0, path, seen)
   }

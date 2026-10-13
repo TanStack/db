@@ -100,6 +100,7 @@ export {
   canonicalizeQueryIR,
   getLegacyLoadSubsetDemandKey,
   getLoadSubsetDemandKey,
+  normalizeLegacyLoadSubsetDemandKey,
   getQueryIdentity,
   getStableQueryBuilderHash,
   getStableQueryIRHash,
