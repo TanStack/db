@@ -657,6 +657,10 @@ identity, live-query publication, and provider paths remain unproved. Direct
 D2 `groupBy` has its separately approved kind-and-string identity policy.
 The earlier spoofed-prototype finding is outside the valid Temporal input
 domain. It needs a separate product decision before it becomes a guarantee.
+The [PR #2116 exact-commit review](oracle-reviews/pr-2116-correctness-and-guarantees.md)
+records R16/R17/R25/R29 laws, hostile controls, remaining cells, and the
+production-weight cost of proposed guarantees at code commit
+`4ed5242dbef0e7dbf87b31ca97c2fd2bc7901cad`.
 
 The [custom index order selection oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/custom-index-order-selection-oracle.test.ts)
 and its [review record](oracle-reviews/custom-index-order-selection.md) check
