@@ -1,5 +1,5 @@
 ---
-'@tanstack/electric-db-collection': patch
+'@tanstack/electric-db-collection': minor
 ---
 
 A stream error that `onError` retries no longer fails the initial sync or the subset loads that are waiting for it. The collection stays `loading` while `onError` decides, and waiting loads settle when the retried stream delivers its snapshot. Before, the collection entered `error` and waiting loads rejected even when the retry succeeded, which could leave a joined or included live query in error for good. A stream error without `onError`, or one where `onError` gives up or throws, still fails the initial sync and its waiting loads. The initial sync also fails when the Electric client gives up by itself after `onError` asked for a retry, for example on a response without Electric headers or after its retry limit, and when the stream's external `signal` aborts before the first ready. Before, the collection stayed `loading` in both cases. When the initial sync fails, waiting loads and readiness waits such as `preload()` now reject with the same cause, including when `onError` throws. A status listener that cleans the Collection up while it enters `error` no longer makes a waiting load succeed without rows.
