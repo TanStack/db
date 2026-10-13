@@ -127,8 +127,16 @@ presence of a preferred heading, class, comment template, or helper.
   path and comparison ran. The recorder can represent the violations relevant
   to the law, including duplicates, omissions, order, or partial output when
   those are contractual.
+- **Conditional information sufficiency:** When a concrete missing-input
+  hypothesis concerns a public result owed at the named checkpoint, the
+  evidence MUST show whether the production path receives the needed source
+  facts by then. If it does not, mark the claim unresolved. A green comparison
+  after later delivery MUST NOT be cited as proof of that earlier result.
 - **Not required:** Observation of internal facts that the contract does not
-  expose.
+  expose, or an exhaustive search for indistinguishable histories without a
+  concrete information-gap hypothesis. For ORC-012, evidence may record that no
+  concrete missing-information hypothesis was identified; this does not claim
+  an exhaustive search.
 
 ### ORC-006: Checker calibration
 
@@ -920,6 +928,21 @@ Begin a portfolio audit with known product promises as well as existing test cla
 
 The historical React tie-group test illustrates precise credit. It exercised a real QueryClient/Query DB path with a finite test provider and checked visible prefixes and exhaustion. That could fill a portfolio-level gap without improving another test's weak assertion. It did not establish page-array contents, every framework or arbitrary server ordering. Preserve useful partial tests without lending them their neighbors' scope.
 
+### Borrow behavioral questions from another project
+
+A donor regression gives one case; a property gives a relation; a model and
+generator give a way to investigate further cases. None makes the donor's
+policy a TanStack DB contract. Before porting a test, record the donor's version
+or revision and motivating counterexample. Identify the recipient's contract
+authority and map the donor's actions and observations to its public boundary.
+State which donor assumptions still hold, which change, and which interaction
+with existing recipient laws needs a new witness. Try a nearby donor case that
+should **not** transfer, such as an automatic-reopen policy for an adapter whose
+approved contract requires a new descriptor. This checks whether the mapping
+selects behavior or indiscriminately copies a suite. The [IndexedDB donor
+survey](oracle-reviews/2026-10-06-indexeddb-donor-survey.md) records both
+receiving witnesses and rejected transfers.
+
 ### Simplify machinery without changing the question
 
 Before removing or combining tests, identify the valid history, expected outcome, production path and observation that will remain. Name the receiving test. “Retry the parent” becoming “delete the parent” changes the behavior, even if the replacement is shorter and green. The archive records exactly that kind of loss during reduction.
@@ -927,6 +950,16 @@ Before removing or combining tests, identify the valid history, expected outcome
 Other reductions are legitimate: an expectation can contradict the adapter contract, or two branches can enforce the same established law. Removing a redundant branch need not remove its law. Keep valuable fixtures and semantic assertions even when their old helper or duplicate implementation goes away.
 
 Share stable mechanics such as replay parsing or resource cleanup where they are genuinely interchangeable. Keep domain truth small and separately reviewable. Several independent models should not grow into a universal miniature implementation merely to reduce duplication.
+
+### Vary machinery and premises separately
+
+When comparing implementation candidates, hold the accepted behavioral law,
+legal histories, and observation cuts fixed. An index or cache may be removable
+without changing public results; measure its resource cost under a stated
+workload separately. If instead a premise changes—delivery may duplicate,
+ordering may tie, or the client may see only part of the source—derive which
+guarantees still follow. A failure under a changed premise may call for more
+provider data or a contract decision rather than another algorithm.
 
 ### Report evidence and open work separately
 
@@ -950,15 +983,19 @@ This card is an optional presentation for the ORC-012 evidence. For a new oracle
 or a claimed repair, ask:
 
 1. What exact promise authorizes this expected result?
-2. Which legal history distinguishes the proposed model from a weaker one?
-3. Does the fixture make production do the work being tested?
-4. Which concrete wrong answer can the comparison reject—and which can it miss?
-5. What proves the path and assertion ran? What did the mutant or fault injection actually show?
-6. Can capture, cleanup or shrinking turn this into a different failure?
-7. Which larger promises remain outside this test, and where are they tracked?
-8. If a reusable boundary law is claimed, which case rejects a nearby wrong
+2. If a concrete missing-input hypothesis arises, what source facts does the
+   production path receive by the promised checkpoint (ORC-005)?
+3. Which legal history distinguishes the proposed model from a weaker one?
+4. Does the fixture make production do the work being tested?
+5. Which concrete wrong answer can the comparison reject—and which can it miss?
+6. What proves the path and assertion ran? What did the mutant or fault injection actually show?
+7. Can capture, cleanup or shrinking turn this into a different failure?
+8. Which larger promises remain outside this test, and where are they tracked?
+9. If a reusable boundary law is claimed, which case rejects a nearby wrong
    boundary? If a controlled premise supports a real-provider claim, where is
    that exact premise received?
+10. If the result exposes a problem, which [repair location](instruments/adversarial-review.md#locate-the-repair)
+    does the evidence support?
 
 ### Reusable boundary-law checklist
 

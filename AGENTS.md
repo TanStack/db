@@ -13,8 +13,13 @@ it is not, by itself, authority for the promise.
 Use oracles as instruments: a small independent model enacts a law, legal
 histories exercise it, and public observations test production against it.
 Seek cases that distinguish plausible explanations. A mismatch can expose a
-production bug, a wrong model, an incomplete law, or an unsuitable observation
-checkpoint. Investigate which account failed before changing expectations.
+production bug, a wrong model or law, missing information at the production
+boundary, or an unsuitable observation checkpoint. A green oracle can still
+miss a violation when its histories, path, observation checkpoint, or
+comparison are insufficient.
+Correctly implemented behavior can also fail the user's need. Use the
+[repair-location table](docs/contributing/instruments/adversarial-review.md#locate-the-repair)
+after diagnosing which account failed, before changing expectations.
 
 Challenge the laws themselves when the task warrants it: their suitability,
 interactions, and underlying concepts can need revision. Keep proposed design

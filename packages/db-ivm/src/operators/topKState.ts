@@ -68,6 +68,13 @@ export class TopKState<K extends string | number, T> {
     return this.#topK.size
   }
 
+  countLeadingInWindow(predicate: (value: T) => boolean): number {
+    return (
+      this.#topK.countLeadingInWindow?.(([, value]) => predicate(value)) ??
+      this.#topK.size
+    )
+  }
+
   get isEmpty(): boolean {
     return this.#multiplicities.size === 0 && this.#topK.size === 0
   }
