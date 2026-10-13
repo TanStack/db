@@ -4402,9 +4402,18 @@ describe(`ordered source work oracle`, () => {
  * A refetch keeps every served ordered range whole, as the LoadSubset
  * contract requires: it sends every row from the start of the order through
  * the last order value a limited page returned, so a row that moves between
- * two pages still arrives, and rows in no range leave. Until then the Collection may lag the
- * rows, so the rows law applies only once no change is pending, and every
- * refetching history ends with a refetch. On either provider a step may
+ * two pages still arrives, and rows in no range leave. Until then the
+ * Collection may lag the rows, so the rows law over the model applies only
+ * once no change is pending, and every refetching history ends with a
+ * refetch. On either provider, after every step the Collection holds exactly
+ * the rows in the provider's ledger, and the query and the Effect show their
+ * window over those rows. A holding provider answers a load only at a
+ * `release` step, from the rows at that moment, so live changes and other
+ * loads can arrive while it is in flight; every holding history ends by
+ * answering all held loads. While a load is in flight, the Collection must
+ * still hold exactly the provider's ledger, and the window laws wait for the
+ * answer. A campaign fixed to that premise deletes a visible row first, so
+ * its refill is in flight during the later changes. On either provider a step may
  * publish one intermediate window per provider request it made, and only
  * its last publication must show the final window (#2131).
  * Joined filters can match a row through several markers, by `dup`, so a
@@ -4427,6 +4436,11 @@ type EagerCommand =
   // A refetching provider re-runs every request it served and sends the
   // results; any other path skips it.
   | { type: `refetch` }
+  // A holding provider answers its oldest held request; `drain` answers
+  // every held request, including the ones answers start, until none is
+  // left. Any other provider skips both.
+  | { type: `release` }
+  | { type: `drain` }
 
 type EagerCase = {
   // How rows reach the source: sync writes to an eager source, local-only
@@ -4440,6 +4454,11 @@ type EagerCase = {
   // in no range leave (query-db-collection, without its page gaps). Omitted
   // means `forward`.
   provider?: `forward` | `refetch`
+  // When an on-demand provider answers a load. `immediate` answers within
+  // the request. `held` answers only at a `release` command, from the rows
+  // at that moment, so live changes can arrive while a load is in flight.
+  // Initial loads answer immediately. Omitted means `immediate`.
+  latency?: `immediate` | `held`
   // Where eligibility is decided: a predicate on the ordered source itself,
   // a JavaScript function filter, or a filter on a LEFT-joined marker, where
   // a marker admits its row (`joined`) or excludes it (`anti-joined`). The
@@ -4528,6 +4547,7 @@ function eagerHistory(
       // Deletes the first visible row, so a repair runs on most histories.
       fc.constant({ type: `delete-visible` as const }),
       fc.constant({ type: `refetch` as const }),
+      fc.constant({ type: `release` as const }),
     ),
     { minLength: 1, maxLength: 12 },
   )
@@ -4540,6 +4560,7 @@ const eagerCase: fc.Arbitrary<EagerCase> = fc.record({
     `on-demand` as const,
   ),
   provider: fc.constantFrom(`forward` as const, `refetch` as const),
+  latency: fc.constantFrom(`immediate` as const, `held` as const),
   filter: fc.constantFrom(
     `source` as const,
     `function` as const,
@@ -4601,6 +4622,7 @@ const eagerJoinedHistory: fc.Arbitrary<Array<EagerCommand>> = fc.array(
     }),
     fc.constant({ type: `delete-visible` as const }),
     fc.constant({ type: `refetch` as const }),
+    fc.constant({ type: `release` as const }),
   ),
   { minLength: 1, maxLength: 8 },
 )
@@ -4695,6 +4717,32 @@ const eagerFullJoinCase: fc.Arbitrary<EagerCase> = fc
     initial,
     orphans,
     history,
+  }))
+
+// The in-flight premise: a holding on-demand provider, and a history that
+// first deletes a visible row, so the refill request is in flight while the
+// later commands change rows. Releases answer it from the rows at that
+// moment, between those changes.
+const eagerHeldCase: fc.Arbitrary<EagerCase> = fc
+  .tuple(
+    eagerCase,
+    fc.array(
+      fc.oneof(
+        { weight: 3, arbitrary: eagerHistory(1, 29).map(([first]) => first!) },
+        { weight: 2, arbitrary: fc.constant({ type: `release` as const }) },
+        {
+          weight: 1,
+          arbitrary: fc.constant({ type: `delete-visible` as const }),
+        },
+      ),
+      { minLength: 2, maxLength: 10 },
+    ),
+  )
+  .map(([testCase, rest]) => ({
+    ...testCase,
+    path: `on-demand` as const,
+    latency: `held` as const,
+    history: [{ type: `delete-visible` as const }, ...rest],
   }))
 
 function isJoinedFilter({ filter }: EagerCase): boolean {
@@ -4901,9 +4949,29 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
   // The last row of each full, limited, ordered page: where its served range
   // ends. A page shorter than its limit reached the end of the order.
   const rangeEnds = new Map<LoadSubsetOptions, Row>()
+  // Requests a holding provider has not answered yet, oldest first. Holding
+  // starts after the initial load.
+  const heldRequests: Array<{
+    options: LoadSubsetOptions
+    resolve: () => void
+  }> = []
+  let holding = false
+  const inFlight = () => heldRequests.length > 0
   function servePage(options: LoadSubsetOptions): true | Promise<void> {
     providerRequests++
     servedRequests.push(options)
+    if (!holding) return answer(options)
+    return new Promise((resolve) => heldRequests.push({ options, resolve }))
+  }
+  // Answers one held request from the current rows and settles its load
+  // once the rows apply.
+  async function releaseOldest(): Promise<void> {
+    const { options, resolve } = heldRequests.shift()!
+    const applied = answer(options)
+    if (applied !== true) await applied
+    resolve()
+  }
+  function answer(options: LoadSubsetOptions): true | Promise<void> {
     const page = pageFor(options)
     if (
       options.orderBy &&
@@ -5243,6 +5311,8 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
     expect(ledgerRows(source.values()), `${label}: Collection rows`).toEqual(
       ledgerRows(sent.values()),
     )
+    // While a load is in flight, a query may hold its last complete window.
+    if (inFlight()) return
     expectEagerWindow(
       visibleIds(),
       modelRows(sent),
@@ -5325,11 +5395,23 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
     }
     // A refetching provider ends with a refetch, so the last step shows
     // the rows.
-    const history: Array<EagerCommand> = refetching
-      ? [...testCase.history, { type: `refetch` }]
-      : testCase.history
+    // A holding provider ends by answering every held request.
+    const held = testCase.path === `on-demand` && testCase.latency === `held`
+    holding = held
+    const history: Array<EagerCommand> = [
+      ...testCase.history,
+      ...(refetching ? [{ type: `refetch` as const }] : []),
+      ...(held ? [{ type: `drain` as const }] : []),
+    ]
     for (const [step, generated] of history.entries()) {
       if (generated.type === `refetch` && !refetching) continue
+      if (
+        (generated.type === `release` || generated.type === `drain`) &&
+        !held
+      ) {
+        continue
+      }
+      if (generated.type === `release` && !inFlight()) continue
       // Resolve a visible-row delete against the model's current window.
       const visibleId = eagerWindow(rows, testCase)[0]
       if (generated.type === `delete-visible` && visibleId === undefined) {
@@ -5339,8 +5421,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
         generated.type === `delete-visible`
           ? { type: `delete`, id: visibleId! }
           : generated
-      const before =
-        command.type === `refetch` ? undefined : rows.get(command.id)
+      const before = `id` in command ? rows.get(command.id) : undefined
       const boundaryBefore = boundaryRanks(rows, testCase)
       const sizeBefore = rows.size
       read = 0
@@ -5353,6 +5434,15 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       const visibleBefore = JSON.stringify(visibleIds())
       if (command.type === `refetch`) {
         await refetch()
+      } else if (command.type === `release`) {
+        await releaseOldest()
+      } else if (command.type === `drain`) {
+        commits = 0
+        while (inFlight()) {
+          commits++
+          await releaseOldest()
+          await flushPromises()
+        }
       } else if (command.type === `delete`) {
         if (!before) continue
         rows.delete(command.id)
@@ -5424,7 +5514,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       // older state, so the window is checked over the provider's ledger
       // until the next refetch.
       expectProviderLedger(`after step ${step}`)
-      if (!lagging()) {
+      if (!lagging() && !inFlight()) {
         expectEagerWindow(
           visibleIds(),
           modelRows(),
@@ -5432,7 +5522,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
           `rows after step ${step}`,
         )
       }
-      if (effect && !lagging()) {
+      if (effect && !lagging() && !inFlight()) {
         expectEagerWindow(
           effectIds(),
           modelRows(),
@@ -5460,7 +5550,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
         published.length,
         `publications by step ${step}`,
       ).toBeLessThanOrEqual(commits + requests)
-      for (const window of lagging()
+      for (const window of lagging() || inFlight()
         ? []
         : commits === 1 && !onDemand
           ? published
@@ -5485,9 +5575,10 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       // full-source fallback; only the rows and scan laws apply then.
       // A refetching provider's loads follow the Collection's older state,
       // so the work law applies only to a forwarding provider.
-      const bound = refetching
-        ? undefined
-        : workBound([...boundaryBefore, ...boundaryRanks(rows, testCase)])
+      const bound =
+        refetching || held
+          ? undefined
+          : workBound([...boundaryBefore, ...boundaryRanks(rows, testCase)])
       if (bound !== undefined && testCase.path === `on-demand`) {
         expect(served, `rows served by step ${step}`).toBeLessThanOrEqual(bound)
       } else if (bound !== undefined) {
@@ -5883,6 +5974,19 @@ describe(`eager indexed ordered windows`, () => {
     oracleRandomParameters(runs, replay, `ordered-work.eager-full-join`),
   )(
     `keeps a full-join window to the first result rows for a random or replayed seed`,
+    checkEagerWindow,
+  )
+
+  fcTest.prop([eagerHeldCase], { numRuns: runs, seed: 2081 })(
+    `keeps a window whose loads answer between live changes for a fixed seed`,
+    checkEagerWindow,
+  )
+
+  fcTest.prop(
+    [eagerHeldCase],
+    oracleRandomParameters(runs, replay, `ordered-work.eager-held-load`),
+  )(
+    `keeps a window whose loads answer between live changes for a random or replayed seed`,
     checkEagerWindow,
   )
 
