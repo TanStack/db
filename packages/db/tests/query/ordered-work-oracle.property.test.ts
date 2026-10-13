@@ -4380,10 +4380,11 @@ describe(`ordered source work oracle`, () => {
  * term. Null ranks sort first or last, with a matching index. Joined filters
  * also run as anti-joins and change eligibility through the marker or the root
  * row's join key, and an Effect runs the same query beside the Collection.
- * A third campaign fixes the full-join premise: few or no filler rows, null
- * ranks among root rows, and orphan markers, so a window can reach the null
- * group where rootless rows and null-ranked root rows tie. A reconstruction
- * check samples that campaign and requires such windows. A joined step can
+ * A third campaign fixes the full-join premise: few or no filler rows, a
+ * matched root row with a null rank, and at least one orphan marker, so a
+ * window can reach the null group where rootless rows and null-ranked root
+ * rows tie. A reconstruction check samples the cases that campaign executes
+ * and requires such windows. A joined step can
  * change a row and its marker in two commits; each
  * commit publishes at most once, and the last publication shows the final
  * window. The observation point is after each change and a flush. Work is
@@ -4704,6 +4705,7 @@ const eagerFullJoinCase: fc.Arbitrary<EagerCase> = fc
       { minLength: 2, maxLength: 8, selector: (row) => row.id },
     ),
     orphans: fc.uniqueArray(fc.integer({ min: 20, max: 29 }), {
+      minLength: 1,
       maxLength: 3,
     }),
     history: eagerJoinedHistory,
@@ -4714,7 +4716,12 @@ const eagerFullJoinCase: fc.Arbitrary<EagerCase> = fc
     via: `marker` as const,
     indexed: true,
     fillers,
-    initial,
+    // Every case has a matched root row with a null rank and at least one
+    // orphan marker, so the null group holds both kinds of row.
+    initial: [
+      ...initial.filter(({ id }) => id !== 9),
+      { id: 9, rank: null as unknown as number, eligible: true },
+    ],
     orphans,
     history,
   }))
@@ -5959,9 +5966,9 @@ describe(`eager indexed ordered windows`, () => {
         mixedNullGroup++
       }
     }
-    // At one times the run count: 23 and 4 of 40 cases.
+    // At one times the run count: 19 and 7 of 40 cases.
     expect(rootless).toBeGreaterThanOrEqual(10)
-    expect(mixedNullGroup).toBeGreaterThanOrEqual(1)
+    expect(mixedNullGroup).toBeGreaterThanOrEqual(5)
   })
 
   fcTest.prop([eagerFullJoinCase], { numRuns: runs, seed: FULL_JOIN_SEED })(
