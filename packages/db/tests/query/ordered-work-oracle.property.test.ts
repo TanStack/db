@@ -5164,9 +5164,9 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       : undefined
   // Effect events carry no position; order its rows as the model orders all
   // rows, so a row that should not be visible still shows its rank.
-  const effectIds = () => {
+  const effectIds = (sourceRows: ReadonlyMap<number, Row> = rows) => {
     const everyRow = new Map(
-      [...modelRows()].map(([rowId, row]) => [
+      [...modelRows(sourceRows)].map(([rowId, row]) => [
         rowId,
         { ...row, eligible: true },
       ]),
@@ -5193,12 +5193,18 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
   // - an anti-join keeps each root row that no marker matches, once;
   // - a full join keeps every pair, each unmatched root row once, and each
   //   unmatched marker as a rootless row, which sorts with the null ranks.
-  const modelRows = (): ReadonlyMap<number, Row> => {
-    if (!(joined || fullJoin)) return rows
+  // The expected result rows over the given source rows: the rows the
+  // model holds by default, or the provider's ledger of what it sent.
+  const modelRows = (
+    sourceRows: ReadonlyMap<number, Row> = rows,
+  ): ReadonlyMap<number, Row> => {
+    if (!(joined || fullJoin)) return sourceRows
     const model = new Map<number, Row>()
     const matchedRoots = new Set<number>()
     for (const entry of markerModel.values()) {
-      const roots = [...rows.values()].filter((row) => row.link === entry.rowId)
+      const roots = [...sourceRows.values()].filter(
+        (row) => row.link === entry.rowId,
+      )
       for (const row of roots) {
         matchedRoots.add(row.id)
         if (testCase.filter === `anti-joined`) continue
@@ -5218,12 +5224,39 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       }
     }
     if (testCase.filter === `anti-joined` || fullJoin) {
-      for (const row of rows.values()) {
+      for (const row of sourceRows.values()) {
         if (!matchedRoots.has(row.id))
           model.set(row.id, { ...row, eligible: true })
       }
     }
     return model
+  }
+  // On demand, the Collection holds exactly the rows the provider sent, and
+  // a live query shows its window over those rows. This holds after every
+  // step, also while a refetching provider lags the model's rows.
+  const ledgerRows = (rowsToList: Iterable<Row>) =>
+    [...rowsToList]
+      .map((row) => [row.id, row.rank, row.eligible, row.label, row.link])
+      .sort(([left], [right]) => Number(left) - Number(right))
+  const expectProviderLedger = (label: string) => {
+    if (testCase.path !== `on-demand`) return
+    expect(ledgerRows(source.values()), `${label}: Collection rows`).toEqual(
+      ledgerRows(sent.values()),
+    )
+    expectEagerWindow(
+      visibleIds(),
+      modelRows(sent),
+      testCase,
+      `${label}: rows over the provider ledger`,
+    )
+    if (effect) {
+      expectEagerWindow(
+        effectIds(sent),
+        modelRows(sent),
+        testCase,
+        `${label}: Effect rows over the provider ledger`,
+      )
+    }
   }
   const window = testCase.offset + testCase.limit
   // The bound for one load: a prefix, the boundary ties, a refill, and the
@@ -5255,6 +5288,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
   try {
     await query.preload()
     expectEagerWindow(visibleIds(), modelRows(), testCase, `initial rows`)
+    expectProviderLedger(`initial`)
     if (effect) {
       await flushPromises()
       expectEagerWindow(
@@ -5387,8 +5421,9 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       }
       await flushPromises()
       // While a refetching provider lags the rows, the Collection holds an
-      // older state the model does not track, so only the publication count
-      // laws apply until the next refetch.
+      // older state, so the window is checked over the provider's ledger
+      // until the next refetch.
+      expectProviderLedger(`after step ${step}`)
       if (!lagging()) {
         expectEagerWindow(
           visibleIds(),
