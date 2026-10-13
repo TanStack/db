@@ -1023,10 +1023,13 @@ separate observation.
 
 Bounded repair is available only when a provider prefix is sufficient for the
 local plan. Core requires full-source recovery for an indirect order
-expression, a non-root ordered source, an inner or right join, a residual or
-cross-alias predicate, a functional predicate, grouping, `having`, functional
-`having`, or `distinct`. These cases can discard or reorder an otherwise valid
-provider prefix even when a cursor value itself is expressible. A single direct
+expression, a non-root ordered source, any join other than a LEFT join, a
+residual or cross-alias predicate, a functional predicate, grouping, `having`,
+functional `having`, or `distinct`. These cases can discard or reorder an
+otherwise valid provider prefix even when a cursor value itself is expressible.
+A right, full or outer join also adds joined rows whose root match may sit
+past the prefix; within it they would look unmatched and could take the
+window. A single direct
 LEFT join to a Collection is an exception for a cross-alias filter when every order
 term comes from the root source. Its joined filter can remove root rows, but
 cannot make a later root precede an earlier root. Before loading another root

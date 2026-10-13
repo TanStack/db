@@ -4391,8 +4391,10 @@ type EagerCase = {
   // Where eligibility is decided: a predicate on the ordered source itself,
   // a JavaScript function filter, or a filter on a LEFT-joined marker, where
   // a marker admits its row (`joined`) or excludes it (`anti-joined`). The
-  // last three drop rows only after the source's limit.
-  filter: `source` | `function` | `joined` | `anti-joined`
+  // last three drop rows only after the source's limit. `full-joined` keeps
+  // every root row and adds a rootless row for each marker no root row
+  // matches; deleting a matched root row leaves its marker behind.
+  filter: `source` | `function` | `joined` | `anti-joined` | `full-joined`
   // How a joined plan changes a row's eligibility: by inserting or deleting
   // its marker, or by pointing the row's join key at a marker or at none.
   // A join-key change leaves the row's order value as it was.
@@ -4470,6 +4472,7 @@ const eagerCase: fc.Arbitrary<EagerCase> = fc.record({
     `function` as const,
     `joined` as const,
     `anti-joined` as const,
+    `full-joined` as const,
   ),
   via: fc.constantFrom(`marker` as const, `link` as const),
   indexed: fc.boolean(),
@@ -4526,7 +4529,11 @@ const eagerJoinedHistory: fc.Arbitrary<Array<EagerCommand>> = fc.array(
 const eagerJoinedCase: fc.Arbitrary<EagerCase> = fc
   .tuple(
     eagerCase,
-    fc.constantFrom(`joined` as const, `anti-joined` as const),
+    fc.constantFrom(
+      `joined` as const,
+      `anti-joined` as const,
+      `full-joined` as const,
+    ),
     fc.uniqueArray(eagerRowOf(9), {
       selector: (row) => row.id,
       minLength: 4,
@@ -4547,14 +4554,23 @@ const eagerJoinedCase: fc.Arbitrary<EagerCase> = fc
 // prefix leaves rows unsent; a fresh row that may land past the prefix; then
 // an initial row changes eligibility alone, so it can leave the window only
 // through the join. Random commands may follow.
+const gapRank: fc.Arbitrary<number> = fc.oneof(
+  { weight: 6, arbitrary: fc.integer({ min: 0, max: 15 }) },
+  { weight: 1, arbitrary: fc.constant(Number.NaN) },
+  { weight: 1, arbitrary: fc.constant(null as unknown as number) },
+)
+
 const eagerJoinedGapCase: fc.Arbitrary<EagerCase> = fc
   .record({
     base: eagerJoinedCase,
-    ranks: fc.uniqueArray(fc.integer({ min: 0, max: 15 }), {
+    // A null or NaN rank can end the bounded prefix. Neither is an
+    // expressible cursor, so the loader takes its prefix fallback there.
+    ranks: fc.uniqueArray(gapRank, {
       minLength: 4,
       maxLength: 8,
+      selector: String,
     }),
-    insertRank: fc.integer({ min: 0, max: 15 }),
+    insertRank: gapRank,
     flipped: fc.nat(7),
     rest: eagerJoinedHistory,
   })
@@ -4618,7 +4634,7 @@ function expectEagerWindow(
   label: string,
 ): void {
   const expected = eagerWindow(rows, testCase)
-  if (!isJoinedFilter(testCase)) {
+  if (!isJoinedFilter(testCase) && testCase.filter !== `full-joined`) {
     expect(actual, label).toEqual(expected)
     return
   }
@@ -4644,11 +4660,12 @@ function boundaryRanks(
 
 async function checkEagerWindow(testCase: EagerCase): Promise<void> {
   const joined = isJoinedFilter(testCase)
+  const fullJoin = testCase.filter === `full-joined`
   const viaLink = joined && testCase.via === `link`
   // A marker admits its row in a joined plan and excludes it in an anti-joined
   // one. Under `link`, every row id has a marker and a row's join key points
   // at its own (matched) or at a negative key (unmatched).
-  const admitsWhenMatched = testCase.filter === `joined`
+  const admitsWhenMatched = testCase.filter !== `anti-joined`
   const linkFor = (id: number, eligible: boolean) =>
     !viaLink || eligible === admitsWhenMatched ? id : -1 - id
   const rows = new Map<number, Row>()
@@ -4704,7 +4721,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
     localOnlyCollectionOptions<{ rowId: number }, number>({
       id: `${id}-markers`,
       getKey: (marker) => marker.rowId,
-      initialData: !joined
+      initialData: !(joined || fullJoin)
         ? []
         : viaLink
           ? [
@@ -4721,7 +4738,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
   let commits = 0
   const setMarker = async (rowId: number, eligible: boolean) => {
     // Under `link`, the root write already moved the row's join key.
-    if (!joined || viaLink) return
+    if (!(joined || fullJoin) || viaLink) return
     const matched = eligible === admitsWhenMatched
     if (markers.has(rowId) === matched) return
     commits++
@@ -4760,13 +4777,20 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
         eq(row.link, marker.rowId),
       )
     const ordered = (
-      joined
-        ? admitsWhenMatched
-          ? joinedRows.where(({ marker }) => not(isUndefined(marker.rowId)))
-          : joinedRows.where(({ marker }) => isUndefined(marker.rowId))
-        : testCase.filter === `function`
-          ? q.from({ row: source }).fn.where(({ row }) => row.eligible)
-          : q.from({ row: source }).where(({ row }) => eq(row.eligible, true))
+      fullJoin
+        ? // Same aliases as the LEFT join; only the join kind differs.
+          (q
+            .from({ row: source })
+            .fullJoin({ marker: markers }, ({ row, marker }) =>
+              eq(row.link, marker.rowId),
+            ) as unknown as typeof joinedRows)
+        : joined
+          ? admitsWhenMatched
+            ? joinedRows.where(({ marker }) => not(isUndefined(marker.rowId)))
+            : joinedRows.where(({ marker }) => isUndefined(marker.rowId))
+          : testCase.filter === `function`
+            ? q.from({ row: source }).fn.where(({ row }) => row.eligible)
+            : q.from({ row: source }).where(({ row }) => eq(row.eligible, true))
     ).orderBy(({ row }) => row.rank, testCase.direction)
     return (
       testCase.terms === 2 ? ordered.orderBy(({ row }) => row.id) : ordered
@@ -4804,10 +4828,38 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
     )
   }
   // A joined query's rows nest the source row under its alias.
+  // A full join's rootless row stands for its marker, as id -1 - marker.
   const visibleIds = () =>
-    query.toArray.map((result) =>
-      joined ? (result as unknown as { row: Row }).row.id : (result as Row).id,
-    )
+    query.toArray.map((result) => {
+      if (fullJoin) {
+        const { row, marker } = result as unknown as {
+          row?: Row
+          marker: { rowId: number }
+        }
+        return row ? row.id : -1 - marker.rowId
+      }
+      return joined
+        ? (result as unknown as { row: Row }).row.id
+        : (result as Row).id
+    })
+  // What the query's rows are, from the fixture inputs: for a full join every
+  // root row, plus a null-ranked rootless row per marker no root row matches.
+  const modelRows = (): ReadonlyMap<number, Row> => {
+    if (!fullJoin) return rows
+    const model = new Map<number, Row>()
+    for (const [rowId, row] of rows)
+      model.set(rowId, { ...row, eligible: true })
+    for (const markerId of markers.keys()) {
+      if (rows.has(markerId)) continue
+      model.set(-1 - markerId, {
+        id: -1 - markerId,
+        rank: null as unknown as number,
+        eligible: true,
+        label: `marker`,
+      })
+    }
+    return model
+  }
   const window = testCase.offset + testCase.limit
   // The bound for one load: a prefix, the boundary ties, a refill, and the
   // changed row. Null when a boundary value cannot be expressed as a cursor.
@@ -4835,7 +4887,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
   let unsubscribe: (() => void) | undefined
   try {
     await query.preload()
-    expectEagerWindow(visibleIds(), rows, testCase, `initial rows`)
+    expectEagerWindow(visibleIds(), modelRows(), testCase, `initial rows`)
     if (effect) {
       await flushPromises()
       expectEagerWindow(effectIds(), rows, testCase, `initial Effect rows`)
@@ -4882,7 +4934,8 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
         } else {
           await source.delete(command.id).isPersisted.promise
         }
-        await setMarker(command.id, false)
+        // A full join keeps the marker, which becomes a rootless row.
+        if (!fullJoin) await setMarker(command.id, false)
       } else if (command.type === `flip`) {
         if (!before) continue
         const eligible = !before.eligible
@@ -4944,7 +4997,12 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
         await setMarker(command.id, next.eligible)
       }
       await flushPromises()
-      expectEagerWindow(visibleIds(), rows, testCase, `rows after step ${step}`)
+      expectEagerWindow(
+        visibleIds(),
+        modelRows(),
+        testCase,
+        `rows after step ${step}`,
+      )
       if (effect) {
         expectEagerWindow(
           effectIds(),
@@ -4963,7 +5021,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       for (const window of commits === 1 ? published : published.slice(-1)) {
         expectEagerWindow(
           window,
-          rows,
+          modelRows(),
           testCase,
           `published window at step ${step}`,
         )
@@ -5068,6 +5126,27 @@ describe(`eager indexed ordered windows`, () => {
           { type: `delete`, id: 3 },
           { type: `upsert`, id: 6, rank: Number.NaN, eligible: true },
         ],
+      })
+    },
+  )
+
+  it.each([`sync`, `local-only`] as const)(
+    `shows no rootless full-join row whose root row is past the prefix (%s)`,
+    async (path) => {
+      // Every filler row has a marker. A bounded root prefix would leave most
+      // markers unmatched in the graph, and their null-ranked rootless rows
+      // would take the window from the first root row.
+      await checkEagerWindow({
+        path,
+        filter: `full-joined`,
+        via: `marker`,
+        indexed: true,
+        direction: `asc`,
+        terms: 1,
+        limit: 1,
+        offset: 0,
+        initial: [],
+        history: [{ type: `delete-visible` }],
       })
     },
   )

@@ -292,10 +292,11 @@ export function processOrderBy(
           !sourceOrderIsDirect ||
           rawQuery.from.type !== `collectionRef` ||
           rawQuery.from.sourceId !== orderBySourceId ||
-          (rawQuery.join?.some(
-            ({ type }) => type === `inner` || type === `right`,
-          ) ??
-            false) ||
+          // Only a LEFT join keeps every root row of a bounded prefix and
+          // adds no row the prefix cannot place: inner and cross joins drop
+          // root rows, and right, full and outer joins add joined rows whose
+          // root match may sit past the prefix.
+          (rawQuery.join?.some(({ type }) => type !== `left`) ?? false) ||
           (rawQuery.where?.some(isResidualWhere) ?? false) ||
           (hasCrossAliasWhere && joinedFilterSourceId === undefined) ||
           (rawQuery.fnWhere?.length ?? 0) > 0 ||
@@ -321,16 +322,14 @@ export function processOrderBy(
             boundary,
           ) => {
             // Window rows at or before the boundary are a leading run of
-            // the window order. A row without a root row (an outer join)
-            // needs no root page, so it counts as proven.
+            // the window order.
             const size = getSize(
               boundary &&
-                ((row) => {
-                  const root = (row as NamespacedRow)[orderByAlias]
-                  return (
-                    root === undefined || compareSourceRows(root, boundary) <= 0
-                  )
-                }),
+                ((row) =>
+                  compareSourceRows(
+                    (row as NamespacedRow)[orderByAlias],
+                    boundary,
+                  ) <= 0),
             )
             return Math.max(0, info.limit - size)
           }
