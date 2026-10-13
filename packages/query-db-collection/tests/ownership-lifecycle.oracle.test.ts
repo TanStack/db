@@ -11872,18 +11872,16 @@ describe(`query collection ownership lifecycle`, () => {
   /**
    * A retained subset owner cannot be settled by acquiring a different Query
    * key. The independent source model has one `detail` row in durable storage;
-   * the current complete source either includes that row unchanged or omits it.
+   * the current complete source keeps, omits, or moves it out of that subset.
    * After a full-source result applies, acquiring the retained subset must
    * reconcile its old owner and remove its revalidation marker. Compare public
    * and durable rows at that acquisition's settlement, before any explicit
-   * refetch. The unchanged case guards against deleting a still-current row.
+   * refetch. The unchanged and moved cases guard against deleting a row still
+   * owned by the full source.
    */
-  it.each([
-    { name: `omitted`, current: false },
-    { name: `unchanged`, current: true },
-  ])(
+  it.each([{ name: `omitted` }, { name: `unchanged` }, { name: `moved` }])(
     `settles a retained $name subset after a complete full-source result`,
-    async ({ name, current }) => {
+    async ({ name }) => {
       const id = `retained-subset-after-full-${name}`
       const oldRow: Item = {
         id: `detail-row`,
@@ -11902,8 +11900,12 @@ describe(`query collection ownership lifecycle`, () => {
           [retentionKey, { queryHash: subsetHash, mode: `until-revalidated` }],
         ]),
       })
-      const currentSource = current ? [oldRow] : []
-      const expectedIds = currentSource.map((row) => row.id)
+      const currentSource: Array<Item> =
+        name === `omitted`
+          ? []
+          : name === `unchanged`
+            ? [oldRow]
+            : [{ ...oldRow, category: `list`, name: `Moved` }]
       const { collection } = createPersistedOwnershipFixture(
         id,
         storage,
@@ -11915,19 +11917,30 @@ describe(`query collection ownership lifecycle`, () => {
       await collection._sync.loadSubset(subset)
 
       expect({
-        publicRows: rows(collection),
-        durableRows: storedItems(storage).map((row) => row.id),
+        publicRows: collection.toArray.map(
+          ({ id: rowId, category, name: rowName }) => ({
+            id: rowId,
+            category,
+            name: rowName,
+          }),
+        ),
+        durableRows: storedItems(storage),
         retentionPending: storage
           .snapshot()
           .collectionMetadata.has(retentionKey),
       }).toEqual({
-        publicRows: expectedIds,
-        durableRows: expectedIds,
+        publicRows: currentSource,
+        durableRows: currentSource,
         retentionPending: false,
       })
-      if (current) {
+      if (name === `moved`) {
+        expect(
+          persistedOwners(storage.snapshot().rowMetadata, oldRow.id),
+        ).toEqual([hashKey([id])])
+      }
+      if (name === `unchanged`) {
         collection._sync.unloadSubset({})
-        expect(rows(collection)).toEqual(expectedIds)
+        expect(rows(collection)).toEqual([oldRow.id])
       }
     },
   )

@@ -2038,6 +2038,10 @@ export function queryCollectionOptions(
         queryKey: key,
         queryFn: (context: Parameters<typeof queryFunction>[0]) => {
           const logicalHash = hashKey(context.queryKey)
+          const physicalQuery = queryClient.getQueryCache().find({
+            queryKey: context.queryKey,
+            exact: true,
+          })
           fetchStartGenerations.set(
             logicalHash,
             Math.max(
@@ -2045,14 +2049,11 @@ export function queryCollectionOptions(
               directWriteGeneration,
             ),
           )
-          // An original full acquisition may release while another owner
-          // keeps this Query. Use the Query signal for later shared fetches,
-          // but preserve its lazy getter so an ignoring provider does not
-          // cause Query Core to cancel an unobserved fetch.
-          if (
-            hashedQueryKey === fullSourceHash &&
-            (fullSourceDependents.size || requestOptions.signal?.aborted)
-          ) {
+          // A shared Query can outlive the acquisition that installed this
+          // queryFn. Use the Query signal for shared fetches, but preserve its
+          // lazy getter so an ignoring provider does not cause Query Core to
+          // cancel an unobserved fetch.
+          const queryWithSharedSignal = () => {
             const sharedContext = Object.defineProperties(
               {} as typeof context,
               Object.getOwnPropertyDescriptors(context),
@@ -2068,7 +2069,47 @@ export function queryCollectionOptions(
             }
             return queryFunction(sharedContext)
           }
-          return queryFunction(context)
+          if (
+            (queryRefCounts.get(logicalHash) ?? 0) > 1 ||
+            (physicalQuery?.getObserversCount() ?? 0) > 1 ||
+            (hashedQueryKey === fullSourceHash && fullSourceDependents.size) ||
+            requestOptions.signal?.aborted
+          ) {
+            return queryWithSharedSignal()
+          }
+          const recoverReleasedSignal = (error: unknown) => {
+            // A peer can acquire the Query after this request starts with the
+            // first acquisition's signal. Retry only that signal's rejection
+            // or an AbortError while the same physical Query still has a live
+            // owner. A fresh AbortError has no provider provenance, so this
+            // bounded retry can also include an unrelated AbortError.
+            const isAbortError =
+              typeof error === `object` &&
+              error !== null &&
+              `name` in error &&
+              error.name === `AbortError`
+            if (
+              !requestOptions.signal?.aborted ||
+              (error !== requestOptions.signal.reason && !isAbortError) ||
+              !physicalQuery ||
+              physicalQuery.getObserversCount() === 0 ||
+              queryClient.getQueryCache().find({
+                queryKey: context.queryKey,
+                exact: true,
+              }) !== physicalQuery ||
+              physicalQuery.state.fetchStatus !== `fetching`
+            ) {
+              throw error
+            }
+            return queryWithSharedSignal()
+          }
+          try {
+            return Promise.resolve(queryFunction(context)).catch(
+              recoverReleasedSignal,
+            )
+          } catch (error) {
+            return recoverReleasedSignal(error)
+          }
         },
         meta: extendedMeta,
         structuralSharing: true,

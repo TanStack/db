@@ -477,23 +477,37 @@ Query-cache success reentry checks that initial and replacement full results
 cannot settle a filtered acquisition before Collection application; the
 replacement cut rejects a gate based only on previous full-row ownership. An
 applied direct cache patch permits exact filtered revalidation but cannot
-trigger a redundant full request. Signal witnesses cover a provider that
-ignores its signal and may finish into Query cache after final unload, equal
-full-source peers after the first releases, and two Collections sharing a
-Query whose later fetch runs the released Collection's queryFn. The last
-witness verifies the foreign closure path on the installed Query Core version.
+trigger a redundant full request. Signal witnesses cover providers that ignore
+their signal and may finish into Query cache after final unload for full-source
+and equal filtered sharing; equal full-source and filtered peers after the
+first releases; and two Collections sharing a Query whose later fetch runs the
+released Collection's queryFn. Held initial and refetch histories release an
+owner before or after an equal filtered peer joins the fetch. They distinguish
+exact and custom abort reasons, a fresh provider AbortError, no remaining
+peer, and an unrelated ordinary error at provider-call,
+acquisition-settlement, public-row, cache-row, and error checkpoints. A
+recovery-specific ignored-signal witness rejects a guard that consumes Query
+Core's lazy signal before the replacement provider runs. The foreign closure
+witnesses verify the installed Query Core's option-selection path both before
+and during a shared fetch. A synchronous provider throw caused by reentrant
+peer acquisition has no separate witness.
 The ownership owner seeds a persisted `until-revalidated` subset owner, then
-applies a complete full-source result and acquires that subset. Omitted and
-unchanged source rows must match public and durable rows at settlement, and
-the subset's retention marker must clear. Reusing the full Query while leaving
-the subset owner unvalidated fails all three observations in the omitted case;
-the unchanged control fails at the marker. Arbitrary predicate containment,
-function-built Query keys, TTL retention, multi-owner overlap, and other
-persisted startup replay histories with a shared full-source lease still need
-distinct witnesses.
+applies a complete full-source result and acquires that subset. An omitted,
+unchanged, or moved source row must match public and durable rows at settlement,
+and the subset's retention marker must clear. A moved row must retain its full
+Query owner after its old subset owner retires. Reusing the full Query while
+leaving the subset owner unvalidated fails the row and marker observations;
+unconditional row deletion fails the moved-row control. Arbitrary predicate
+containment, function-built Query keys, TTL retention, native SQLite replay,
+and other persisted startup histories with a shared full-source lease still
+need distinct witnesses.
 These tests do not prove every provider returns a complete full source,
-arbitrary observer-option selection, or the policy
-for a new equal demand after failed revalidation.
+arbitrary observer-option selection, or the policy for a new equal demand after
+failed revalidation. A fresh AbortError caused by the request signal and an
+unrelated fresh AbortError after that signal abort are indistinguishable to the
+adapter; the one-retry policy favors a surviving peer and may retry the latter.
+Real network providers and cross-Collection option selection beyond the
+installed Query Core version need receiving witnesses.
 Its real QueryClient witness loads ten disjoint on-demand subsets, then checks
 `writeUpsert`, `writeUpdate`, `writeDelete`, `writeInsert`, and a mixed
 `writeBatch`. After each accepted write it compares public live-query rows with

@@ -429,10 +429,14 @@ arrays. Build separate API parameters instead. Core retains request data without
 cloning it; changing submitted data can make the request disagree with its cache
 key. To change a query constant, supply a new value rather than mutating the old
 one. Cancellation through the request's `AbortSignal` remains supported.
-Use `ctx.signal` for the provider call. If a completed full-source Query serves
-later narrower demands, its later fetches expose that Query fetch signal as
-`loadSubsetOptions.signal` too. The original full demand may already have
-released its signal while the narrower demands still own the Query.
+Use `ctx.signal` for the provider call. A sole acquisition's first fetch keeps
+its supplied `loadSubsetOptions.signal`. Once acquisitions or Collections share
+a Query, later fetches expose the Query fetch signal there because the
+acquisition that installed the query function can release first. If a peer
+joins during a fetch and that original signal aborts, a provider rejection with
+its abort reason or an `AbortError` gets one retry with the live Query signal
+while the peer still owns the Query. An unrelated `AbortError` raised after the
+same abort has no distinguishable cause and can also get that one retry.
 
 ### Type-Safe Meta Access
 

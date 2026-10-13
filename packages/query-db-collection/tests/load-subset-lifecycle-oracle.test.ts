@@ -47,7 +47,11 @@ import type { LoadSubsetOptions, SyncMetadataApi } from '@tanstack/db'
  * after final observer removal and supports metadata request signals. A
  * shared Query's later fetch must use a live signal when its original
  * acquisition has released; reading that signal eagerly would change the
- * ignored-signal behavior.
+ * ignored-signal behavior. If a peer joins after a fetch starts, an abort from
+ * the original acquisition can end the provider call while the Query remains
+ * owned. One replacement call gives that peer a live transport. The controlled
+ * fixture covers exact abort reasons and fresh AbortErrors; a fresh unrelated
+ * AbortError after the same abort has no distinguishable provider provenance.
  * Each direct load below represents one acquisition lease; the small reference
  * history keeps a shared Query transport active while any lease remains. The
  * held provider checks the abort signal at each release checkpoint. The
@@ -527,14 +531,17 @@ async function expectFinalFullSourceDependentCancelsFetch(): Promise<void> {
 /**
  * The Query Collection cancellation contract says an on-demand unload only
  * removes its observer. Query Core may let a request finish when the provider
- * ignores its signal. The model keeps the in-flight full transport alive after
- * both logical owners release and expects its settled data in Query's cache.
- * This checks signal-consumption semantics at the real QueryClient boundary;
- * it does not require Collection rows to survive their final owner.
+ * ignores its signal. The model keeps the in-flight Query transport alive
+ * after both logical owners release and expects its settled data in Query's
+ * cache. Full-source/subset and equal filtered owners cross the distinct
+ * sharing branches. This checks signal-consumption semantics at the real
+ * QueryClient boundary; Collection rows need not survive their final owner.
  */
-async function expectIgnoredSignalLetsSharedFetchFinish(): Promise<void> {
+async function expectIgnoredSignalLetsSharedFetchFinish(
+  scope: `full-source` | `equal-filtered`,
+): Promise<void> {
   const queryClient = createQueryClient()
-  const id = `ignored-shared-signal-${collectionSequence++}`
+  const id = `ignored-${scope}-signal-${collectionSequence++}`
   const response = createDeferred<Array<Row>>()
   const initial: Array<Row> = [{ id: `a1`, group: `a` }]
   const replacement: Array<Row> = [
@@ -564,23 +571,26 @@ async function expectIgnoredSignalLetsSharedFetchFinish(): Promise<void> {
     new IR.Value(`a`),
   ])
   const filteredDemand: LoadSubsetOptions = { where: filter }
-  const fullDemand: LoadSubsetOptions = {}
+  const firstDemand: LoadSubsetOptions =
+    scope === `full-source` ? {} : { where: filter }
   let invalidation: Promise<void> | undefined
   try {
-    await collection._sync.loadSubset(fullDemand)
+    await collection._sync.loadSubset(firstDemand)
     await collection._sync.loadSubset(filteredDemand)
     expect(requests).toBe(1)
+    const ownedQueries = queryClient.getQueryCache().findAll({ queryKey: [id] })
+    expect(ownedQueries).toHaveLength(1)
+    const sharedKey = ownedQueries[0]!.queryKey
     invalidation = queryClient.invalidateQueries({
       queryKey: [id],
-      exact: true,
     })
     await vi.waitFor(() => expect(requests).toBe(2))
-    collection._sync.unloadSubset(fullDemand)
+    collection._sync.unloadSubset(firstDemand)
     collection._sync.unloadSubset(filteredDemand)
     response.resolve(replacement)
     await invalidation
     await vi.waitFor(() =>
-      expect(queryClient.getQueryData([id])).toEqual(replacement),
+      expect(queryClient.getQueryData(sharedKey)).toEqual(replacement),
     )
     expect(collection.size).toBe(0)
   } finally {
@@ -592,21 +602,118 @@ async function expectIgnoredSignalLetsSharedFetchFinish(): Promise<void> {
 }
 
 /**
- * Two equal full-source live queries share one Query transport but own separate
- * acquisition signals. After the first owner releases, its signal is stale.
- * The remaining owner may still invalidate and receive a new snapshot. The
- * provider reads the documented request metadata signal and rejects an
- * already-aborted signal. The public checkpoint is the peer's new row after
- * invalidation, not a particular signal object identity.
+ * A late peer can keep a physical Query alive after the first provider rejects
+ * on its acquisition signal. The replacement provider ignores all signals.
+ * Once the peer releases, Query Core may still finish that provider into its
+ * cache because no provider consumed the replacement transport signal. The
+ * model checks cached rows after the held replacement settles and expects no
+ * Collection rows after final release. This rejects a recovery guard that
+ * reads Query Core's lazy signal only to check whether it is aborted.
  */
-async function expectEqualFullSourcePeerGetsLiveSignal(): Promise<void> {
+async function expectRecoveredIgnoredSignalFetchFinishes(): Promise<void> {
   const queryClient = createQueryClient()
-  const id = `equal-full-source-signal-${collectionSequence++}`
+  const id = `recovered-ignored-signal-${collectionSequence++}`
+  const firstController = new AbortController()
+  const peerController = new AbortController()
+  const filter = new IR.Func<boolean>(`eq`, [
+    new IR.PropRef([`group`]),
+    new IR.Value(`a`),
+  ])
+  const firstDemand: LoadSubsetOptions = {
+    where: filter,
+    signal: firstController.signal,
+  }
+  const peerDemand: LoadSubsetOptions = {
+    where: filter,
+    signal: peerController.signal,
+  }
+  const firstResponse = createDeferred<Array<Row>>()
+  const replacementResponse = createDeferred<Array<Row>>()
+  const rows: Array<Row> = [{ id: `a1`, group: `a` }]
+  let calls = 0
+  const queryFn = vi.fn((context: QueryFunctionContext) => {
+    calls++
+    if (calls > 1) return replacementResponse.promise
+    const requestSignal = context.meta?.loadSubsetOptions?.signal
+    requestSignal?.addEventListener(
+      `abort`,
+      () => firstResponse.reject(requestSignal.reason),
+      { once: true },
+    )
+    return firstResponse.promise
+  })
+  const collection = createCollection(
+    queryCollectionOptions<Row>({
+      id,
+      queryClient,
+      queryKey: [id],
+      queryFn,
+      getKey: (row) => row.id,
+      startSync: true,
+      syncMode: `on-demand`,
+      staleTime: 5 * 60 * 1000,
+      retry: false,
+    }),
+  )
+  let firstLoad: true | Promise<void> | undefined
+  let peerLoad: true | Promise<void> | undefined
+  try {
+    firstLoad = collection._sync.loadSubset(firstDemand)
+    void Promise.resolve(firstLoad).catch(() => undefined)
+    await vi.waitFor(() => expect(calls).toBe(1))
+    const sharedKey = queryClient
+      .getQueryCache()
+      .find({ queryKey: [id], exact: false })?.queryKey
+    expect(sharedKey).toBeDefined()
+    peerLoad = collection._sync.loadSubset(peerDemand)
+    void Promise.resolve(peerLoad).catch(() => undefined)
+    firstController.abort()
+    collection._sync.unloadSubset(firstDemand)
+    await vi.waitFor(() => expect(calls).toBe(2))
+    peerController.abort()
+    collection._sync.unloadSubset(peerDemand)
+    replacementResponse.resolve(rows)
+    await Promise.allSettled([
+      Promise.resolve(firstLoad),
+      Promise.resolve(peerLoad),
+    ])
+    await vi.waitFor(() =>
+      expect(queryClient.getQueryData(sharedKey!)).toEqual(rows),
+    )
+    expect(collection.size).toBe(0)
+  } finally {
+    firstResponse.resolve(rows)
+    replacementResponse.resolve(rows)
+    await Promise.allSettled([
+      Promise.resolve(firstLoad),
+      Promise.resolve(peerLoad),
+    ])
+    await collection.cleanup()
+    queryClient.clear()
+  }
+}
+
+/**
+ * Two equal live queries share one Query transport but own separate acquisition
+ * signals. After the first owner releases, its signal is stale. The remaining
+ * owner may still invalidate and receive a new snapshot. This history crosses
+ * both full and filtered Query keys; the latter cannot rely on the full-source
+ * dependent map. The provider reads the documented request metadata signal
+ * and rejects an already-aborted signal. The public checkpoint is the peer's
+ * new row after invalidation, not a particular signal object identity.
+ */
+async function expectEqualQueryPeerGetsLiveSignal(
+  scope: `full` | `filtered`,
+): Promise<void> {
+  const queryClient = createQueryClient()
+  const id = `equal-${scope}-signal-${collectionSequence++}`
   let rows: Array<Row> = [{ id: `a1`, group: `a` }]
   let firstSignal: AbortSignal | undefined
+  const observedScopes: Array<boolean> = []
   const queryFn = vi.fn((context: QueryFunctionContext) => {
     const requestSignal = context.meta?.loadSubsetOptions?.signal
     firstSignal ??= requestSignal
+    observedScopes.push(context.meta?.loadSubsetOptions?.where !== undefined)
     requestSignal?.throwIfAborted()
     return Promise.resolve(rows)
   })
@@ -622,27 +729,273 @@ async function expectEqualFullSourcePeerGetsLiveSignal(): Promise<void> {
       staleTime: 5 * 60 * 1000,
     }),
   )
-  const full = createLiveQueryCollection((query) =>
-    query.from({ row: collection }).select(({ row }) => ({ id: row.id })),
-  )
-  const peer = createLiveQueryCollection((query) =>
-    query.from({ row: collection }).select(({ row }) => ({ id: row.id })),
-  )
+  const makeView = () =>
+    scope === `full`
+      ? createLiveQueryCollection((query) =>
+          query.from({ row: collection }).select(({ row }) => ({ id: row.id })),
+        )
+      : createLiveQueryCollection((query) =>
+          query
+            .from({ row: collection })
+            .where(({ row }) => eq(row.group, `a`))
+            .select(({ row }) => ({ id: row.id })),
+        )
+  const first = makeView()
+  const peer = makeView()
   try {
-    await full.preload()
+    await first.preload()
     await peer.preload()
     expect(queryFn).toHaveBeenCalledOnce()
-    await full.cleanup()
+    await first.cleanup()
     expect(firstSignal?.aborted).toBe(true)
     rows = [
       { id: `a1`, group: `a` },
       { id: `a2`, group: `a` },
     ]
-    await queryClient.invalidateQueries({ queryKey: [id], exact: true })
+    await queryClient.invalidateQueries({ queryKey: [id] })
+    await vi.waitFor(() => expect(peer.has(`a2`)).toBe(true))
+    expect(observedScopes.length).toBeGreaterThan(1)
+    expect(
+      observedScopes.every(
+        (isFiltered) => isFiltered === (scope === `filtered`),
+      ),
+    ).toBe(true)
+  } finally {
+    await first.cleanup()
+    await peer.cleanup()
+    await collection.cleanup()
+    queryClient.clear()
+  }
+}
+
+/**
+ * A second equal filtered owner can already exist when invalidation starts a
+ * new provider request. If the first owner releases during that request, its
+ * acquisition signal aborts, but the physical Query remains owned. The model
+ * keeps the pending provider result and adds `a2` after it resolves. The
+ * provider listens to the metadata signal, so this checkpoint distinguishes
+ * a request-scoped signal captured at fetch start from the live Query signal.
+ * It does not cover a peer that joins only after the fetch starts.
+ */
+async function expectEqualFilteredPeerKeepsInFlightSignal(): Promise<void> {
+  const queryClient = createQueryClient()
+  const id = `equal-filtered-in-flight-${collectionSequence++}`
+  const response = createDeferred<Array<Row>>()
+  const replacement: Array<Row> = [
+    { id: `a1`, group: `a` },
+    { id: `a2`, group: `a` },
+  ]
+  let requestSignal: AbortSignal | undefined
+  let transportSignal: AbortSignal | undefined
+  let calls = 0
+  const queryFn = vi.fn((context: QueryFunctionContext) => {
+    calls++
+    if (calls === 1) return Promise.resolve([{ id: `a1`, group: `a` }])
+    requestSignal = context.meta?.loadSubsetOptions?.signal
+    transportSignal = context.signal
+    requestSignal?.throwIfAborted()
+    requestSignal?.addEventListener(
+      `abort`,
+      () => response.reject(requestSignal?.reason),
+      { once: true },
+    )
+    return response.promise
+  })
+  const collection = createCollection(
+    queryCollectionOptions<Row>({
+      id,
+      queryClient,
+      queryKey: [id],
+      queryFn,
+      getKey: (row) => row.id,
+      startSync: true,
+      syncMode: `on-demand`,
+      staleTime: 5 * 60 * 1000,
+    }),
+  )
+  const makeView = () =>
+    createLiveQueryCollection((query) =>
+      query
+        .from({ row: collection })
+        .where(({ row }) => eq(row.group, `a`))
+        .select(({ row }) => ({ id: row.id })),
+    )
+  const first = makeView()
+  const peer = makeView()
+  let invalidation: Promise<void> | undefined
+  try {
+    await first.preload()
+    await peer.preload()
+    expect(queryFn).toHaveBeenCalledOnce()
+    invalidation = queryClient.invalidateQueries({ queryKey: [id] })
+    await vi.waitFor(() => expect(calls).toBe(2))
+    await first.cleanup()
+    expect({
+      requestAborted: requestSignal?.aborted,
+      transportAborted: transportSignal?.aborted,
+    }).toEqual({ requestAborted: false, transportAborted: false })
+    response.resolve(replacement)
+    await invalidation
     await vi.waitFor(() => expect(peer.has(`a2`)).toBe(true))
   } finally {
-    await full.cleanup()
+    response.resolve(replacement)
+    await invalidation?.catch(() => undefined)
+    await first.cleanup()
     await peer.cleanup()
+    await collection.cleanup()
+    queryClient.clear()
+  }
+}
+
+/**
+ * A peer may acquire an equal demand after a sole-owner fetch has started,
+ * during either the initial load or a later refetch.
+ * The provider already holds the first acquisition's exact signal, which
+ * aborts when that owner releases. With a peer, the physical Query remains
+ * live and its current source result must reach the peer; with no peer, release
+ * must not start another provider request. This controlled provider rejects
+ * with its signal's AbortError, then returns the current rows if retried.
+ * Compare provider calls, peer settlement, and public rows after the held
+ * request ends. A custom reason and a fresh AbortError caused by the signal
+ * must have the same result. An ordinary unrelated provider error after
+ * signal abort must not be retried; the no-peer history also rejects an
+ * unconditional retry design. A fresh unrelated AbortError after the same
+ * signal abort is indistinguishable without provider provenance and may get
+ * one retry.
+ */
+async function expectPeerJoiningHeldFetchRecovers(
+  phase: `initial` | `refetch`,
+  peerJoins: boolean,
+  failure: `signal` | `custom-signal` | `fresh-abort` | `unrelated` = `signal`,
+): Promise<void> {
+  const queryClient = createQueryClient()
+  const id = `join-held-filtered-${phase}-${peerJoins}-${collectionSequence++}`
+  const firstSignal = new AbortController()
+  const peerSignal = new AbortController()
+  const filter = new IR.Func<boolean>(`eq`, [
+    new IR.PropRef([`group`]),
+    new IR.Value(`a`),
+  ])
+  const firstDemand: LoadSubsetOptions = {
+    where: filter,
+    signal: firstSignal.signal,
+  }
+  const peerDemand: LoadSubsetOptions = {
+    where: filter,
+    signal: peerSignal.signal,
+  }
+  const replacement: Array<Row> = [
+    { id: `a1`, group: `a` },
+    { id: `a2`, group: `a` },
+  ]
+  const held = createDeferred<Array<Row>>()
+  const unrelatedError = new Error(`server failed independently`)
+  let heldStarted = false
+  let requestSignal: AbortSignal | undefined
+  let transportSignal: AbortSignal | undefined
+  let calls = 0
+  const heldCall = phase === `initial` ? 1 : 2
+  const queryFn = vi.fn((context: QueryFunctionContext) => {
+    calls++
+    if (calls < heldCall) return Promise.resolve([{ id: `a1`, group: `a` }])
+    if (calls > heldCall) return Promise.resolve(replacement)
+    heldStarted = true
+    requestSignal = context.meta?.loadSubsetOptions?.signal
+    transportSignal = context.signal
+    if (failure !== `unrelated`)
+      requestSignal?.addEventListener(
+        `abort`,
+        () =>
+          held.reject(
+            failure === `fresh-abort`
+              ? new DOMException(`provider aborted`, `AbortError`)
+              : requestSignal?.reason,
+          ),
+        { once: true },
+      )
+    return held.promise
+  })
+  const collection = createCollection(
+    queryCollectionOptions<Row>({
+      id,
+      queryClient,
+      queryKey: [id],
+      queryFn,
+      getKey: (row) => row.id,
+      startSync: true,
+      syncMode: `on-demand`,
+      staleTime: 5 * 60 * 1000,
+      retry: false,
+    }),
+  )
+  let invalidation: Promise<void> | undefined
+  let firstLoad: true | Promise<void> | undefined
+  let peerLoad: true | Promise<void> | undefined
+  let firstReleased = false
+  try {
+    firstLoad = collection._sync.loadSubset(firstDemand)
+    void Promise.resolve(firstLoad).catch(() => undefined)
+    if (phase === `refetch`) {
+      await firstLoad
+      invalidation = queryClient.invalidateQueries({ queryKey: [id] })
+    }
+    await vi.waitFor(() => expect(heldStarted).toBe(true))
+    if (peerJoins) {
+      peerLoad = collection._sync.loadSubset(peerDemand)
+      void Promise.resolve(peerLoad).catch(() => undefined)
+    }
+    firstSignal.abort(
+      failure === `custom-signal`
+        ? new Error(`custom cancellation`)
+        : undefined,
+    )
+    collection._sync.unloadSubset(firstDemand)
+    firstReleased = true
+    const signalState = {
+      requestAborted: requestSignal?.aborted,
+      transportAborted: transportSignal?.aborted,
+    }
+    if (failure === `unrelated`) held.reject(unrelatedError)
+    else held.resolve(replacement)
+    await invalidation
+    const peerOutcome = peerJoins
+      ? await Promise.resolve(peerLoad).then(
+          () => `fulfilled`,
+          () => `rejected`,
+        )
+      : `not-started`
+    const expectNewRow = peerJoins && failure !== `unrelated`
+    if (expectNewRow) {
+      await vi.waitFor(() => expect(collection.has(`a2`)).toBe(true))
+    }
+    expect({
+      ...signalState,
+      hasNew: collection.has(`a2`),
+    }).toEqual({
+      requestAborted: true,
+      transportAborted: !peerJoins,
+      hasNew: expectNewRow,
+    })
+    if (expectNewRow) expect(peerOutcome).toBe(`fulfilled`)
+    if (!peerJoins) expect(peerOutcome).toBe(`not-started`)
+    if (failure === `unrelated`) {
+      expect(collection.utils.lastError).toBe(unrelatedError)
+      expect(peerOutcome).toBe(phase === `initial` ? `rejected` : `fulfilled`)
+    }
+    if (!peerJoins || failure === `unrelated`) expect(calls).toBe(heldCall)
+  } finally {
+    held.resolve(replacement)
+    await invalidation?.catch(() => undefined)
+    await Promise.resolve(firstLoad).catch(() => undefined)
+    await Promise.resolve(peerLoad).catch(() => undefined)
+    if (!firstReleased) {
+      firstSignal.abort()
+      collection._sync.unloadSubset(firstDemand)
+    }
+    if (peerLoad !== undefined) {
+      peerSignal.abort()
+      collection._sync.unloadSubset(peerDemand)
+    }
     await collection.cleanup()
     queryClient.clear()
   }
@@ -713,6 +1066,91 @@ async function expectForeignQueryFnUsesLiveSharedSignal(): Promise<void> {
     await fullA.cleanup()
     await filteredA.cleanup()
     await fullB?.cleanup()
+    await sourceA.cleanup()
+    await sourceB?.cleanup()
+    queryClient.clear()
+  }
+}
+
+/**
+ * Two Collections can observe the same physical Query. Query Core runs the
+ * queryFn last installed by B while A still owns the Query. B then releases
+ * during the fetch. The independent ownership rule keeps the transport alive
+ * for A, so its public rows must include the held result. The provider listens
+ * to metadata signal and the driver records Query's transport signal; this
+ * distinguishes physical observer sharing from one Collection's refcount.
+ */
+async function expectForeignOwnerReleaseKeepsInFlightSignal(): Promise<void> {
+  const queryClient = createQueryClient()
+  const id = `foreign-in-flight-signal-${collectionSequence++}`
+  const firstSignal = new AbortController()
+  const secondSignal = new AbortController()
+  const initial: Array<Row> = [{ id: `a1`, group: `a` }]
+  const replacement: Array<Row> = [
+    { id: `a1`, group: `a` },
+    { id: `a2`, group: `a` },
+  ]
+  const response = createDeferred<Array<Row>>()
+  const providerCalls: Array<`A` | `B`> = []
+  let requestSignal: AbortSignal | undefined
+  let transportSignal: AbortSignal | undefined
+  const makeSource = (owner: `A` | `B`) =>
+    createCollection(
+      queryCollectionOptions<Row>({
+        id: `${id}-${owner}`,
+        queryClient,
+        queryKey: [id],
+        queryFn: (context) => {
+          providerCalls.push(owner)
+          if (owner === `A`) return Promise.resolve(initial)
+          requestSignal = context.meta?.loadSubsetOptions?.signal
+          transportSignal = context.signal
+          requestSignal?.throwIfAborted()
+          requestSignal?.addEventListener(
+            `abort`,
+            () => response.reject(requestSignal?.reason),
+            { once: true },
+          )
+          return response.promise
+        },
+        getKey: (row) => row.id,
+        startSync: true,
+        syncMode: `on-demand`,
+        staleTime: 5 * 60 * 1000,
+      }),
+    )
+  const sourceA = makeSource(`A`)
+  let sourceB: ReturnType<typeof makeSource> | undefined
+  let invalidation: Promise<void> | undefined
+  let releasedB = false
+  try {
+    await sourceA._sync.loadSubset({ signal: firstSignal.signal })
+    sourceB = makeSource(`B`)
+    await sourceB._sync.loadSubset({ signal: secondSignal.signal })
+    invalidation = queryClient.invalidateQueries({
+      queryKey: [id],
+      exact: true,
+    })
+    await vi.waitFor(() => expect(providerCalls.at(-1)).toBe(`B`))
+    secondSignal.abort()
+    sourceB._sync.unloadSubset({ signal: secondSignal.signal })
+    releasedB = true
+    expect({
+      requestAborted: requestSignal?.aborted,
+      transportAborted: transportSignal?.aborted,
+    }).toEqual({ requestAborted: false, transportAborted: false })
+    response.resolve(replacement)
+    await invalidation
+    await vi.waitFor(() => expect(sourceA.has(`a2`)).toBe(true))
+  } finally {
+    response.resolve(replacement)
+    await invalidation?.catch(() => undefined)
+    if (sourceB && !releasedB) {
+      secondSignal.abort()
+      sourceB._sync.unloadSubset({ signal: secondSignal.signal })
+    }
+    firstSignal.abort()
+    sourceA._sync.unloadSubset({ signal: firstSignal.signal })
     await sourceA.cleanup()
     await sourceB?.cleanup()
     queryClient.clear()
@@ -2037,16 +2475,51 @@ describe(`loadSubset lifecycle oracle`, () => {
     await expectFinalFullSourceDependentCancelsFetch()
   })
 
-  it(`lets a shared full-source fetch finish when the provider ignores its signal`, async () => {
-    await expectIgnoredSignalLetsSharedFetchFinish()
+  it.each([`full-source`, `equal-filtered`] as const)(
+    `lets a shared %s fetch finish when the provider ignores its signal`,
+    async (scope) => {
+      await expectIgnoredSignalLetsSharedFetchFinish(scope)
+    },
+  )
+
+  it(`lets an ignored-signal provider finish after late-peer recovery and final release`, async () => {
+    await expectRecoveredIgnoredSignalFetchFinishes()
   })
 
-  it(`keeps a live request signal for an equal full-source peer`, async () => {
-    await expectEqualFullSourcePeerGetsLiveSignal()
+  it.each([`full`, `filtered`] as const)(
+    `keeps a live request signal for an equal %s peer`,
+    async (scope) => {
+      await expectEqualQueryPeerGetsLiveSignal(scope)
+    },
+  )
+
+  it(`keeps a filtered peer's in-flight request alive after its first owner releases`, async () => {
+    await expectEqualFilteredPeerKeepsInFlightSignal()
   })
+
+  it.each([
+    { phase: `initial`, peerJoins: true, failure: `signal` },
+    { phase: `initial`, peerJoins: true, failure: `custom-signal` },
+    { phase: `initial`, peerJoins: true, failure: `fresh-abort` },
+    { phase: `initial`, peerJoins: true, failure: `unrelated` },
+    { phase: `initial`, peerJoins: false, failure: `signal` },
+    { phase: `refetch`, peerJoins: true, failure: `signal` },
+    { phase: `refetch`, peerJoins: true, failure: `fresh-abort` },
+    { phase: `refetch`, peerJoins: true, failure: `unrelated` },
+    { phase: `refetch`, peerJoins: false, failure: `signal` },
+  ] as const)(
+    `settles a held $phase filtered fetch after its first owner releases, peer joins=$peerJoins, failure=$failure`,
+    async ({ phase, peerJoins, failure }) => {
+      await expectPeerJoiningHeldFetchRecovers(phase, peerJoins, failure)
+    },
+  )
 
   it(`keeps a live request signal through another Collection's query function`, async () => {
     await expectForeignQueryFnUsesLiveSharedSignal()
+  })
+
+  it(`keeps another Collection's in-flight request alive after its owner releases`, async () => {
+    await expectForeignOwnerReleaseKeepsInFlightSignal()
   })
 
   it(`refetches an existing semantic demand without changing its query or unload identity`, async () => {
