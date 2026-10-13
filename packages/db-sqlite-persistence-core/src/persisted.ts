@@ -906,6 +906,7 @@ const REQUIRED_COORDINATOR_METHODS: ReadonlyArray<
     | `subscribe`
     | `publish`
     | `isLeader`
+    | `getLeaderId`
     | `ensureLeadership`
     | `requestEnsureRemoteSubset`
     | `requestReleaseRemoteSubset`
@@ -918,6 +919,7 @@ const REQUIRED_COORDINATOR_METHODS: ReadonlyArray<
   `subscribe`,
   `publish`,
   `isLeader`,
+  `getLeaderId`,
   `ensureLeadership`,
   `requestEnsureRemoteSubset`,
   `requestReleaseRemoteSubset`,

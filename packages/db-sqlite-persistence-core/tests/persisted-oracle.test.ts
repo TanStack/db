@@ -6351,6 +6351,51 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     ).toThrow(InvalidPersistedCollectionCoordinatorError)
   })
 
+  // Every coordinator method the runtime calls is part of the contract, so a
+  // coordinator missing any one of them fails at configuration, naming it,
+  // rather than later inside message dispatch.
+  it.each([
+    `getNodeId`,
+    `subscribe`,
+    `publish`,
+    `isLeader`,
+    `getLeaderId`,
+    `ensureLeadership`,
+    `requestEnsureRemoteSubset`,
+    `requestReleaseRemoteSubset`,
+    `registerRemoteSubsetOwner`,
+    `requestEnsurePersistedIndex`,
+    `requestApplyCommittedTx`,
+  ] as const)(`rejects a coordinator without %s`, (method) => {
+    const complete: Record<string, unknown> = {
+      getNodeId: () => `node-1`,
+      subscribe: () => () => {},
+      publish: () => {},
+      isLeader: () => true,
+      getLeaderId: () => `node-1`,
+      ensureLeadership: async () => {},
+      requestEnsureRemoteSubset: async () => {},
+      requestReleaseRemoteSubset: async () => {},
+      registerRemoteSubsetOwner: () => () => {},
+      requestEnsurePersistedIndex: async () => {},
+      requestApplyCommittedTx: async () => ({ term: 1, seq: 1 }),
+    }
+    delete complete[method]
+
+    expect(() =>
+      persistedCollectionOptions<Todo, string>({
+        id: `coordinator-without-${method}`,
+        getKey: (item) => item.id,
+        persistence: {
+          adapter: createNoopAdapter(),
+          coordinator: complete as unknown as PersistedCollectionCoordinator,
+        },
+      }),
+    ).toThrow(
+      `Invalid persisted collection coordinator: missing required "${method}" method`,
+    )
+  })
+
   it(`rejects an incomplete coordinator before starting a rich sync source`, async () => {
     type SourceParams = Parameters<SyncConfig<Todo, string>[`sync`]>[0]
 
@@ -6374,6 +6419,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       subscribe: () => () => {},
       publish: () => {},
       isLeader: () => false,
+      getLeaderId: () => null,
       ensureLeadership: () => Promise.resolve(),
       requestEnsurePersistedIndex: () => Promise.resolve(),
       // Remote subset routing is complete so this fixture isolates the
