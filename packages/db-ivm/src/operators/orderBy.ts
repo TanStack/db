@@ -4,6 +4,7 @@ import { map } from './map.js'
 import { innerJoin } from './join.js'
 import { consolidate } from './consolidate.js'
 import type { IStreamBuilder, KeyValue } from '../types.js'
+import type { SetSizeCallback } from './topKWithFractionalIndex.js'
 
 export interface OrderByOptions<Ve> {
   comparator?: (a: Ve, b: Ve) => number
@@ -12,7 +13,7 @@ export interface OrderByOptions<Ve> {
 }
 
 type OrderByWithFractionalIndexOptions<Ve> = OrderByOptions<Ve> & {
-  setSizeCallback?: (getSize: () => number) => void
+  setSizeCallback?: SetSizeCallback
   setWindowFn?: (
     windowFn: (options: { offset?: number; limit?: number }) => void,
   ) => void

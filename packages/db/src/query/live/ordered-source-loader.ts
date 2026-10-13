@@ -278,7 +278,7 @@ export class OrderedSourceLoader {
     // A recorded failure always carries repair debt, so it cannot reach this
     // finite path; only the first request needs the whole prefix here.
     let count = Math.max(
-      this.info.dataNeeded(),
+      this.info.dataNeeded(this.settledSourceBoundary),
       this.hasSettledSourceRequest ? 0 : this.info.offset + this.info.limit,
     )
     if (
@@ -350,7 +350,7 @@ export class OrderedSourceLoader {
   ): void {
     if (!this.active || this.pending || this.stagedContinuation) return
     if (this.lastPrefixCount === count) {
-      if ((this.info.dataNeeded?.() ?? 0) > 0) {
+      if ((this.info.dataNeeded?.(this.settledSourceBoundary) ?? 0) > 0) {
         if (continuesOrderedPrefixRepair) this.abandonOrderedPrefixRepair()
         this.loadFullSource(windowOperationGeneration)
       } else if (continuesOrderedPrefixRepair) {

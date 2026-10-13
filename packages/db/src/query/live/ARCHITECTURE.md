@@ -1023,17 +1023,28 @@ separate observation.
 
 Bounded repair is available only when a provider prefix is sufficient for the
 local plan. Core requires full-source recovery for an indirect order
-expression, a non-root ordered source, an inner or right join, a residual or
-cross-alias predicate, a functional predicate, grouping, `having`, functional
-`having`, or `distinct`. These cases can discard or reorder an otherwise valid
-provider prefix even when a cursor value itself is expressible. A single direct
+expression, a non-root ordered source, any join other than a LEFT join, a
+residual or cross-alias predicate, a functional predicate, grouping, `having`,
+functional `having`, or `distinct`. These cases can discard or reorder an
+otherwise valid provider prefix even when a cursor value itself is expressible.
+A right, full or outer join also adds joined rows whose root match may sit
+past the prefix; within it they would look unmatched and could take the
+window. A single direct
 LEFT join to a Collection is an exception for a cross-alias filter when every order
 term comes from the root source. Its joined filter can remove root rows, but
 cannot make a later root precede an earlier root. Before loading another root
 page, core waits for the current lazy join demand and any joined subset load to
 settle, then reruns the graph. Joined-side changes also recheck ordered demand
 so a removed match can refill a short window. An empty joined replay still
-releases held Effect callbacks. The adapter receives ordinary
+releases held Effect callbacks.
+
+A finite indexed window is proven only up to the loader's settled boundary.
+Live root rows past the bounded prefix still enter the graph, so a window row
+after that boundary does not count toward a full window: an earlier eligible
+row may be unsent. The window then asks for the next page from the boundary,
+as an underfilled window does, until every window row is at or before it.
+This holds however a row leaves the window: a joined-side delete or insert, a
+join-key update, or a root change, and for Collection and Effect consumers. The adapter receives ordinary
 finite root requests; this contract does not imply that it can evaluate the
 relation filter remotely.
 Finite continuation still requires an order index; an underfilled unindexed
