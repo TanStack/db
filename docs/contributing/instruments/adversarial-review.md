@@ -12,30 +12,18 @@ validation. Delegation remains subject to the task's authorization and tools.
 Start with a plausible way this account could be wrong. Select the relevant
 levels; they are different questions, not a mandatory sequence:
 
-| Level       | Attack                                                                     |
-| ----------- | -------------------------------------------------------------------------- |
-| Enforcement | Can a legal wrong result pass, or can the intended path go unexercised?    |
-| Formulation | Can the law require too much, too little, or the wrong public observation? |
-| Suitability | Does the law serve its intended use?                                       |
-| Composition | Do obligations conflict, duplicate, or need shared authority?              |
-| Concepts    | Are the identity, state, ownership, and boundary distinctions sound?       |
+| Level       | Attack                                                                                                                                                                                         |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Enforcement | Find a legal history or wrong output that the model, generator, driver, or recorder cannot distinguish. Can the intended production path remain unexercised while the test passes?             |
+| Formulation | Find an omitted precondition, excessive guarantee, wrong checkpoint, or ambiguous observation. Try a correct alternative implementation as well as a wrong one.                                |
+| Suitability | Question whether the promised behavior is desirable, safe, or conventional. Name the external contract, standard, user consequence, or engineering reason that makes the objection applicable. |
+| Composition | Find obligations that conflict, duplicate each other, or require a shared ordering or authority rule. Use the tension or restructuring card if that is the material uncertainty.               |
+| Concepts    | Question the chosen identity, state, ownership, or boundary distinctions. Describe the same case without relying on its current names and check what is lost or becomes visible.               |
 
-For enforcement, ask whether the reference model, history grammar and
-generator, production driver, recorder, or comparison could miss a legal wrong
-result. Can the test pass without exercising the intended production path?
-Identify its reach witness and a wrong-result control that reaches the
-comparison.
-
-For formulation, look for omitted preconditions, excessive guarantees, wrong
-checkpoints, ambiguous public observations, and missing information. For an
-information gap, seek two legal histories that give the same initial state and
-inputs to the same production path through the promised checkpoint but require
-incompatible public observations. Try a correct alternative implementation
-and a plausible wrong one. For suitability, name the external contract,
-standard, user consequence, or engineering reason that applies. For
-composition, use the tension or restructuring card when needed. For concepts,
-describe the case without its current names and check what becomes visible or
-gets lost.
+For an information-sufficiency formulation attack, seek two legal histories
+that give the same initial state and inputs to the same production path through
+the promised checkpoint but require incompatible public observations. Test a
+nearby path that receives the missing distinction before that checkpoint.
 
 ### Locate the repair
 
@@ -55,13 +43,10 @@ These locations can overlap. Name the evidence for each before choosing a
 repair; an assertion change cannot resolve a code defect or supply missing
 information.
 
-To test whether a path has enough information, keep its initial state and inputs
-identical through the claimed checkpoint. Test a nearby production path that
-receives the missing distinction before that checkpoint. An accepted contract
-remains an obligation even if the current path lacks the information needed to
-meet it. A repair might require additional provider data. Moving the promised
-checkpoint or narrowing the guarantee needs an authorized contract decision;
-changing an assertion supplies no data.
+An accepted contract remains an obligation even if the current path lacks the
+information needed to meet it. A repair might require additional provider
+data. Moving the promised checkpoint or narrowing the guarantee needs an
+authorized contract decision; changing an assertion supplies no data.
 
 For each material attack, name the broken claim and construct a small legal
 history or concrete failure scene. State the competing expected observations,
