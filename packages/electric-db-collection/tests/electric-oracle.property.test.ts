@@ -5268,109 +5268,6 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
   })
 
   /**
-   * A provider error ends current acquisition attempts, but does not end the
-   * sync run when the provider retries. The model has two obligations: the
-   * first demand rejects with its error; after a later source snapshot and
-   * up-to-date, a new demand succeeds with those applied rows. The controlled
-   * ShapeStream delivers that legal same-run history; this cut observes both
-   * demand settlements and the public Collection, not SDK retry policy. A
-   * held optimistic transaction varies whether the recovered commit is only
-   * accepted or already applied when the new demand begins.
-   */
-  it.each([false, true])(
-    `renews full recovery demand after a retried provider error, held=%s`,
-    async (held) => {
-      let subscriber!: (messages: Array<Message<OracleRow>>) => void
-      mockSubscribe.mockImplementationOnce((callback) => {
-        subscriber = callback
-        return vi.fn()
-      })
-      const metadata = createMetadata(
-        new Map([[`electric:resume`, { kind: `reset`, updatedAt: 1 }]]),
-      )
-      const options = electricCollectionOptions<OracleRow>({
-        id: `full-recovery-retry`,
-        shapeOptions: {
-          url: `http://test-url`,
-          params: { table: `test_table` },
-          onError: () => ({}),
-        },
-        syncMode: `on-demand`,
-        getKey: (row) => row.id,
-        startSync: true,
-      })
-      const originalSync = options.sync
-      const collection = createCollection({
-        ...options,
-        sync: {
-          sync: (params: Parameters<typeof originalSync.sync>[0]) =>
-            originalSync.sync({ ...params, metadata: metadata.api }),
-        },
-      })
-      const error = new Error(`transient provider error`)
-      const persistence = createDeferred<void>()
-      const transaction = createTransaction({
-        mutationFn: () => persistence.promise,
-      })
-
-      await withElectricCleanup(async () => {
-        if (held)
-          transaction.mutate(() =>
-            collection.insert({
-              id: 99,
-              name: `optimistic`,
-              stable: `stable-99`,
-            }),
-          )
-        const first = Promise.resolve(collection._sync.loadSubset({ limit: 1 }))
-        const streamOptions = vi.mocked(ShapeStream).mock.calls.at(-1)?.[0] as
-          { onError?: (error: unknown) => unknown } | undefined
-        expect(streamOptions?.onError).toBeTypeOf(`function`)
-        let firstOutcome = `pending`
-        const firstSettled = first.then(
-          () => {
-            firstOutcome = `fulfilled`
-          },
-          () => {
-            firstOutcome = `rejected`
-          },
-        )
-        streamOptions!.onError!(error)
-        await new Promise<void>((resolve) => setTimeout(resolve, 0))
-        // A retry that succeeds is a success: the pre-error demand waits for
-        // the retried snapshot instead of failing.
-        expect(firstOutcome).toBe(`pending`)
-
-        subscriber([change(`insert`, 1, `recovered`), upToDate])
-        await collection.stateWhenReady()
-        let outcome = `pending`
-        const second = Promise.resolve(
-          collection._sync.loadSubset({ limit: 2 }),
-        ).then(() => {
-          outcome = `fulfilled`
-        })
-        void second.catch(() => undefined)
-        if (held) {
-          await new Promise<void>((resolve) => setTimeout(resolve, 0))
-          expect(outcome).toBe(`pending`)
-          expect(collection.has(1)).toBe(false)
-          persistence.resolve()
-          await transaction.isPersisted.promise
-        }
-        await atCheckpoint(second, `retried full recovery demand`)
-        expect(outcome).toBe(`fulfilled`)
-        await atCheckpoint(firstSettled, `pre-error full recovery demand`)
-        expect(firstOutcome).toBe(`fulfilled`)
-        expect(collection.get(1)).toMatchObject({
-          id: 1,
-          name: `recovered`,
-          stable: `stable-1`,
-        })
-      }, [() => persistence.resolve(), () => collection.cleanup()])
-    },
-  )
-
-  /**
    * ## Does a source that still tries ever look failed?
    *
    * Law: an Electric source that is still trying is `loading`. While the
@@ -5382,19 +5279,32 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
    * `onError`, `onError` returns no retry or throws, the Electric client gives
    * up by itself, or the stream's external signal aborts. Then the Collection
    * enters `error` and every waiting demand rejects with that cause. After
-   * the first ready, a later failure does not change the status. Cleanup ends
-   * a waiting demand quietly.
+   * the first ready, a later failure does not change the status. A demand
+   * whose snapshot arrived before an external abort still settles when its
+   * rows apply. Cleanup ends a waiting demand quietly, except after an
+   * external abort: an aborted provider cannot fulfill a demand whose rows
+   * never became visible, so it rejects with `AbortError`.
    *
-   * The independent model keeps four facts: whether the first up-to-date was
-   * delivered, the final failure cause, the pending `onError` decision, and
-   * each demand's settlement. It does not read production state.
+   * A persisting optimistic transaction can hold the retried snapshot: the
+   * commit is accepted, so the Collection becomes `ready`, but its rows apply
+   * only when the transaction settles. Applied settlement means a waiting or
+   * new demand settles only when those rows are visible. Core applies a
+   * truncate at once, with every commit before it, so it is never held. A
+   * progressive history starts with a must-refetch, so its first up-to-date
+   * commits a truncate and applies while a transaction persists.
+   *
+   * The independent model keeps six facts: whether the first up-to-date was
+   * delivered, whether its rows are visible, whether a transaction holds
+   * them, the final failure cause, the pending `onError` decision, and each
+   * demand's settlement. It does not read production state.
    *
    * The history grammar crosses the full-log and progressive waits, with and
    * without `onError`, over errors whose decisions are a synchronous retry, a
    * synchronous give-up, a throw, an asynchronous retry, or an asynchronous
    * give-up; a later error after a retry; an Electric client give-up; an
    * external abort before or during a decision; new demands; the first
-   * up-to-date; and cleanup. It omits histories the client cannot produce:
+   * up-to-date; a persisting transaction that starts before it and later
+   * settles; and cleanup. It omits histories the client cannot produce:
    * a stream message or a second error while `onError` decides, because the
    * client awaits the decision; and stream steps after a final failure or an
    * abort, because the stream has stopped. A progressive history starts with
@@ -5416,6 +5326,8 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     | { kind: `up-to-date` }
     | { kind: `client-give-up` }
     | { kind: `abort` }
+    | { kind: `hold` }
+    | { kind: `release` }
   type RetryHistory = {
     wait: RetryWait
     hasOnError: boolean
@@ -5429,7 +5341,10 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
   }
 
   type RetryModel = {
+    truncates: boolean
     ready: boolean
+    visible: boolean
+    held: boolean
     failed: string | undefined
     aborted: boolean
     deciding: { decision: RetryDecision; cause: string } | undefined
@@ -5448,7 +5363,10 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
 
   function retryStepIsLegal(model: RetryModel, step: RetryStep): boolean {
     if (step.kind === `decide`) return model.deciding !== undefined
+    if (step.kind === `release`) return model.held
+    // A failed or aborted Collection refuses new optimistic writes.
     if (model.failed !== undefined || model.aborted) return false
+    if (step.kind === `hold`) return !model.held && !model.ready
     switch (step.kind) {
       case `demand`:
         return true
@@ -5462,6 +5380,14 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     }
   }
 
+  // The ready snapshot's rows become visible; every waiting demand settles.
+  function retryModelApply(model: RetryModel): void {
+    model.visible = true
+    model.demands = model.demands.map((settlement): RetrySettlement =>
+      settlement === `pending` ? `fulfilled` : settlement,
+    )
+  }
+
   // The model: what a source that still tries, or has given up, promises.
   function applyRetryModel(
     model: RetryModel,
@@ -5472,7 +5398,7 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     switch (step.kind) {
       case `demand`:
         model.demands.push(
-          model.ready
+          model.visible
             ? `fulfilled`
             : model.failed !== undefined
               ? `rejected:${model.failed}`
@@ -5501,15 +5427,23 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
       }
       case `up-to-date`:
         model.ready = true
-        model.demands = model.demands.map((settlement): RetrySettlement =>
-          settlement === `pending` ? `fulfilled` : settlement,
-        )
+        if (!model.held || model.truncates) retryModelApply(model)
+        return
+      case `hold`:
+        model.held = true
+        return
+      case `release`:
+        model.held = false
+        if (model.ready) retryModelApply(model)
         return
       case `client-give-up`:
         retryModelFail(model, tag)
         return
       case `abort`:
-        retryModelFail(model, `StreamAbortedError`)
+        // An external abort is a provider failure. Before the first ready it
+        // fails the initial sync. After it, the snapshot has already arrived,
+        // so a waiting demand still settles when its rows apply.
+        if (!model.ready) retryModelFail(model, `StreamAbortedError`)
         model.aborted = true
         return
     }
@@ -5527,10 +5461,17 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
           : model.ready
             ? `ready`
             : `loading`,
+      // Cleanup ends a waiting demand quietly, unless an earlier external
+      // abort already failed the provider: then rows that never became
+      // visible cannot fulfill it.
       demands: model.demands.map((settlement): RetrySettlement =>
-        cleanedUp && settlement === `pending` ? `fulfilled` : settlement,
+        cleanedUp && settlement === `pending`
+          ? model.aborted
+            ? `rejected:AbortError`
+            : `fulfilled`
+          : settlement,
       ),
-      rowVisible: !cleanedUp && model.ready,
+      rowVisible: !cleanedUp && model.visible,
     }
   }
 
@@ -5548,6 +5489,8 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     fc.constant({ kind: `up-to-date` as const }),
     fc.constant({ kind: `client-give-up` as const }),
     fc.constant({ kind: `abort` as const }),
+    fc.constant({ kind: `hold` as const }),
+    fc.constant({ kind: `release` as const }),
   )
   // Generated steps that the client cannot produce in the current model state
   // are dropped, so every history is legal.
@@ -5559,7 +5502,10 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     })
     .map(({ wait, hasOnError, steps }) => {
       const model: RetryModel = {
+        truncates: wait === `progressive`,
         ready: false,
+        visible: false,
+        held: false,
         failed: undefined,
         aborted: false,
         deciding: undefined,
@@ -5623,7 +5569,10 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     ).onError
     const settlements: Array<RetrySettlement> = []
     const model: RetryModel = {
+      truncates: history.wait === `progressive`,
       ready: false,
+      visible: false,
+      held: false,
       failed: undefined,
       aborted: false,
       deciding: undefined,
@@ -5636,6 +5585,8 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
       rowVisible: trace.collection.has(1),
     })
     const decisions: Array<Promise<unknown>> = []
+    const persistence = createDeferred<void>()
+    let transaction: ReturnType<typeof createTransaction> | undefined
 
     await withElectricCleanup(async () => {
       if (history.wait === `progressive`) {
@@ -5686,6 +5637,22 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
           case `abort`:
             controller.abort()
             break
+          case `hold`:
+            transaction = createTransaction({
+              mutationFn: () => persistence.promise,
+            })
+            transaction.mutate(() =>
+              trace.collection.insert({
+                id: 99,
+                name: `optimistic`,
+                stable: `stable-99`,
+              }),
+            )
+            break
+          case `release`:
+            persistence.resolve()
+            await transaction!.isPersisted.promise
+            break
         }
         applyRetryModel(model, step, history.hasOnError, tag)
         await turn()
@@ -5696,6 +5663,7 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
         ).toEqual(expectedRetryObservation(model, false))
       }
       await trace.collection.cleanup()
+      persistence.resolve()
       // A decision still pending at cleanup cannot change the stopped run.
       decide?.(undefined)
       await Promise.all(decisions)
@@ -5703,7 +5671,7 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
       expect(observe(), `after cleanup`).toEqual(
         expectedRetryObservation(model, true),
       )
-    }, [() => trace.collection.cleanup()])
+    }, [() => persistence.resolve(), () => trace.collection.cleanup()])
   }
 
   let retryHistoryRun = 0
@@ -5728,9 +5696,42 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     },
     60_000,
     [
-      // Named replays: an asynchronous retry decision with a waiting and a new
-      // demand; an asynchronous give-up; a retry, then a give-up; a throwing
-      // onError; an Electric client give-up; and an abort during a decision.
+      // Named replays: a retried provider error while a transaction holds the
+      // recovered snapshot, for each wait, with and without a hold (this
+      // replaces the former fixed "renews full recovery demand" case); a
+      // held snapshot whose stream aborts before the hold settles; an
+      // asynchronous retry decision with a waiting and a new demand; an
+      // asynchronous give-up; a retry, then a give-up; a throwing onError;
+      // an Electric client give-up; and an abort during a decision.
+      ...([`full-log`, `progressive`] as const).flatMap((wait) =>
+        [false, true].map((held): [RetryHistory] => [
+          {
+            wait,
+            hasOnError: true,
+            steps: [
+              ...(held ? [{ kind: `hold` as const }] : []),
+              { kind: `demand` },
+              { kind: `error`, decision: `sync-retry` },
+              { kind: `up-to-date` },
+              { kind: `demand` },
+              ...(held ? [{ kind: `release` as const }] : []),
+            ],
+          },
+        ]),
+      ),
+      [
+        {
+          wait: `full-log`,
+          hasOnError: false,
+          steps: [
+            { kind: `demand` },
+            { kind: `hold` },
+            { kind: `up-to-date` },
+            { kind: `abort` },
+            { kind: `release` },
+          ],
+        },
+      ],
       [
         {
           wait: `full-log`,
