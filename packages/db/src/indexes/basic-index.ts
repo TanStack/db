@@ -1,10 +1,15 @@
 import { compareKeys } from '@tanstack/db-ivm'
-import { areSameValueZeroEqual, normalizeValue } from '../utils/comparison.js'
+import {
+  areSameValueZeroEqual,
+  cacheBinaryKey,
+  isUint8Array,
+  normalizeValue,
+} from '../utils/comparison.js'
+import { codedMessage, devBuild } from '../error-message.js'
 import {
   compareKeysReversed,
   findInsertPositionInArray,
 } from '../utils/array-utils.js'
-import { codedMessage, devBuild } from '../error-message.js'
 import {
   BaseIndex,
   builtInIndexResolverNames,
@@ -19,6 +24,19 @@ export type { RangeQueryOptions } from './btree-index.js'
  * Options for Basic index
  */
 export type BasicIndexOptions = IndexComparisonOptions
+
+function orderValue(value: unknown): unknown {
+  return value instanceof Date ? value.getTime() : value
+}
+
+function storedOrderValue(value: unknown, exact: unknown): unknown {
+  if (isUint8Array(value)) {
+    const copy = new Uint8Array(value)
+    cacheBinaryKey(copy, exact as string)
+    return copy
+  }
+  return orderValue(value)
+}
 
 /**
  * Basic index using Map + sorted Array.
@@ -47,13 +65,17 @@ export class BasicIndex<
     const indexedValue = this.evaluateAddedValue(key, item)
     const normalizedValue = normalizeValue(indexedValue)
 
-    this.addToBucket(key, normalizedValue)
+    this.addToBucket(key, normalizedValue, indexedValue)
     this.addRangeValue(indexedValue)
 
     this.indexedKeys.add(key)
   }
 
-  private addToBucket(key: TKey, normalizedValue: unknown): void {
+  private addToBucket(
+    key: TKey,
+    normalizedValue: unknown,
+    value: unknown,
+  ): void {
     const keySet = this.valueMap.get(normalizedValue)
     if (keySet) {
       // Value already exists, just add the key to the set
@@ -61,13 +83,14 @@ export class BasicIndex<
     } else {
       // New value. Find its sorted position first: a comparator failure must
       // throw before the index changes.
+      const orderedValue = storedOrderValue(value, normalizedValue)
       const insertIdx = findInsertPositionInArray(
         this.sortedValues,
-        normalizedValue,
+        orderedValue,
         this.compareFn,
       )
       this.valueMap.set(normalizedValue, new Set([key]))
-      this.sortedValues.splice(insertIdx, 0, normalizedValue)
+      this.sortedValues.splice(insertIdx, 0, orderedValue)
     }
   }
 
@@ -86,31 +109,36 @@ export class BasicIndex<
 
     const normalizedValue = normalizeValue(indexedValue)
 
-    this.removeFromBucket(key, normalizedValue)
+    this.removeFromBucket(key, normalizedValue, indexedValue)
     this.removeRangeValue(indexedValue)
 
     this.indexedKeys.delete(key)
   }
 
-  private removeFromBucket(key: TKey, normalizedValue: unknown): void {
+  private removeFromBucket(
+    key: TKey,
+    normalizedValue: unknown,
+    value: unknown,
+  ): void {
     const keySet = this.valueMap.get(normalizedValue)
     if (keySet?.has(key)) {
       // The last key for this value leaves the sorted array too. Locate it
       // before any change, so a comparator failure leaves the index unchanged.
       if (keySet.size === 1) {
+        const orderedValue = orderValue(value)
         let sortedIndex = findInsertPositionInArray(
           this.sortedValues,
-          normalizedValue,
+          orderedValue,
           this.compareFn,
         )
         // Distinct equality keys may share one comparator position.
         while (
           sortedIndex < this.sortedValues.length &&
-          this.compareFn(this.sortedValues[sortedIndex], normalizedValue) === 0
+          this.compareFn(this.sortedValues[sortedIndex], orderedValue) === 0
         ) {
           if (
             areSameValueZeroEqual(
-              this.sortedValues[sortedIndex],
+              normalizeValue(this.sortedValues[sortedIndex]),
               normalizedValue,
             )
           ) {
@@ -152,9 +180,9 @@ export class BasicIndex<
       return
     }
 
-    this.removeFromBucket(key, oldValue)
+    this.removeFromBucket(key, oldValue, oldIndexedValue)
     this.removeRangeValue(oldIndexedValue)
-    this.addToBucket(key, newValue)
+    this.addToBucket(key, newValue, newIndexedValue)
     this.addRangeValue(newIndexedValue)
     this.indexedKeys.add(key)
   }
@@ -170,14 +198,17 @@ export class BasicIndex<
       const value = normalizeValue(indexedValue)
       const keys = this.valueMap.get(value)
       if (keys) keys.add(key)
-      else this.valueMap.set(value, new Set([key]))
+      else {
+        this.valueMap.set(value, new Set([key]))
+        this.sortedValues.push(storedOrderValue(indexedValue, value))
+      }
       this.addRangeValue(indexedValue)
       this.indexedKeys.add(key)
     }
 
     // Array.sort moves raw undefined values last without comparing them.
     // Wrap values so nulls-first comparison runs during a full build.
-    const sortable = Array.from(this.valueMap.keys(), (value) => ({ value }))
+    const sortable = this.sortedValues.map((value) => ({ value }))
     sortable.sort((left, right) => this.compareFn(left.value, right.value))
     this.sortedValues = sortable.map(({ value }) => value)
   }
@@ -192,9 +223,6 @@ export class BasicIndex<
     this.clearRangeValues()
   }
 
-  /**
-   * Performs a lookup operation
-   */
   lookup(operation: IndexOperation, value: any): Set<TKey> {
     const result = this.lookupSupportedOperation(operation, value)
     if (result !== undefined) return result
@@ -231,8 +259,8 @@ export class BasicIndex<
       return result
     }
 
-    const normalizedFrom = normalizeValue(from)
-    const normalizedTo = normalizeValue(to)
+    const orderedFrom = orderValue(from)
+    const orderedTo = orderValue(to)
     const hasFrom = `from` in options
     const hasTo = `to` in options
 
@@ -241,7 +269,7 @@ export class BasicIndex<
     if (hasFrom) {
       startIdx = findInsertPositionInArray(
         this.sortedValues,
-        normalizedFrom,
+        orderedFrom,
         this.compareFn,
       )
       // Comparator-equal values form one range boundary even when they are
@@ -249,7 +277,7 @@ export class BasicIndex<
       while (
         !fromInclusive &&
         startIdx < this.sortedValues.length &&
-        this.compareFn(this.sortedValues[startIdx], normalizedFrom) === 0
+        this.compareFn(this.sortedValues[startIdx], orderedFrom) === 0
       ) {
         startIdx++
       }
@@ -260,14 +288,14 @@ export class BasicIndex<
     if (hasTo) {
       endIdx = findInsertPositionInArray(
         this.sortedValues,
-        normalizedTo,
+        orderedTo,
         this.compareFn,
       )
       // Include the whole comparator group at an inclusive upper boundary.
       while (
         toInclusive &&
         endIdx < this.sortedValues.length &&
-        this.compareFn(this.sortedValues[endIdx], normalizedTo) === 0
+        this.compareFn(this.sortedValues[endIdx], orderedTo) === 0
       ) {
         endIdx++
       }
@@ -275,7 +303,7 @@ export class BasicIndex<
 
     // Collect all keys in range
     for (let i = startIdx; i < endIdx; i++) {
-      const keys = this.valueMap.get(this.sortedValues[i])
+      const keys = this.valueMap.get(normalizeValue(this.sortedValues[i]))
       if (keys) {
         keys.forEach((key) => result.add(key))
       }
@@ -288,16 +316,16 @@ export class BasicIndex<
    * Returns the next n items in sorted order
    */
   take(n: number, from: any, filterFn?: (key: TKey) => boolean): Array<TKey> {
-    const normalizedFrom = normalizeValue(from)
+    const orderedFrom = orderValue(from)
     let startIdx = findInsertPositionInArray(
       this.sortedValues,
-      normalizedFrom,
+      orderedFrom,
       this.compareFn,
     )
     // Skip past the 'from' value (exclusive)
     while (
       startIdx < this.sortedValues.length &&
-      this.compareFn(this.sortedValues[startIdx], normalizedFrom) <= 0
+      this.compareFn(this.sortedValues[startIdx], orderedFrom) <= 0
     ) {
       startIdx++
     }
@@ -313,17 +341,17 @@ export class BasicIndex<
     from: any,
     filterFn?: (key: TKey) => boolean,
   ): Array<TKey> {
-    const normalizedFrom = normalizeValue(from)
+    const orderedFrom = orderValue(from)
     let startIdx =
       findInsertPositionInArray(
         this.sortedValues,
-        normalizedFrom,
+        orderedFrom,
         this.compareFn,
       ) - 1
     // Skip past the 'from' value (exclusive)
     while (
       startIdx >= 0 &&
-      this.compareFn(this.sortedValues[startIdx], normalizedFrom) >= 0
+      this.compareFn(this.sortedValues[startIdx], orderedFrom) >= 0
     ) {
       startIdx--
     }
@@ -364,7 +392,9 @@ export class BasicIndex<
       const groupValue = this.sortedValues[index]
       const groupKeys: Array<TKey> = []
       do {
-        for (const key of this.valueMap.get(this.sortedValues[index]) ?? []) {
+        for (const key of this.valueMap.get(
+          normalizeValue(this.sortedValues[index]),
+        ) ?? []) {
           groupKeys.push(key)
         }
         index += step
@@ -380,10 +410,6 @@ export class BasicIndex<
       }
     }
     return result
-  }
-
-  protected exactBucketKeys(value: any): Set<TKey> | undefined {
-    return this.valueMap.get(normalizeValue(value))
   }
 }
 

@@ -484,9 +484,24 @@ the first bounded public row through a scan and each index when an ordinary
 string begins the internal encoding prefix. An `origin/main` probe failed the
 default-locale public prefix case. The pre-classifier PR comparator failed all
 four public prefix cases and both BTree Temporal-deletion histories. This owner
-does not prescribe mixed-kind order or cover arbitrary custom index callbacks,
-all JavaScript value kinds, or
-general Collection publication histories.
+also compares complete forward and reverse reads through `IndexInterface`,
+without prescribing index buckets or a BTree representative. A fixed churn
+witness holds one live row while 16, 64, or 256 earlier distinct values are
+added and removed; its public `takeFromStart(1)` result and comparator-call
+growth reject retained empty buckets that add comparator work. This is a bounded
+read-work check, not a memory bound or a general complexity proof. A deliberate
+empty-bucket mutant failed at the intended comparator-count comparison.
+The invalid-comparator owner checks rejection exactly when a comparison
+returns a non-number or `NaN` and checks rejected removal atomicity; it does
+not require a comparison merely because one comparator-equal row is removed.
+The binary lane checks fresh equal-content removal, re-addition, and
+replacement beside another byte value. It compares complete forward and
+reverse key reads to a source Map and exact membership for short and wide
+values that differ in their last byte. A pre-repair BTree lost a surviving key
+after one equal-content owner left; the expanded lane rejected that result.
+This owner does not prescribe mixed-kind order or cover arbitrary custom index
+callbacks, binary range ordering, all JavaScript value kinds, or general
+Collection publication histories.
 
 The [comparison oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/comparison-oracle.property.test.ts)
 owns the transferred same-realm NaN and invalid-Date default-order cases,

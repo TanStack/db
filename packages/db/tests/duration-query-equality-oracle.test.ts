@@ -6,8 +6,10 @@
  * The independent model reads the ten public fields rather than formatting a
  * Duration or importing query normalization. The fixed input grammar inserts
  * one ordinary Duration row, then probes an equal copy and a changed value
- * for every field. Three further probes distinguish a same-display unit
- * change, opposite signs, and a changed second nonzero field.
+ * for every field. A two-row calendar-unit history checks that equality
+ * indexing remains available when Duration has no intrinsic order without
+ * `relativeTo`. Three further probes distinguish a same-display unit change,
+ * opposite signs, and a changed second nonzero field.
  * Each direct BasicIndex/BTreeIndex exact lookup and each public Collection
  * `eq` read before and after indexing must return the model's exact key set at
  * that read. An index spy confirms the indexed public route ran. These checks
@@ -168,6 +170,50 @@ it.each(indexTypes)(
       } finally {
         await source.cleanup()
       }
+    }
+  },
+)
+
+// The model distinguishes year counts by their public fields. Both rows are
+// legal equality inputs even though comparing their duration requires a
+// relative date. The scan, direct index, and indexed Collection read observe
+// exact key sets; this test makes no claim about their relative order.
+it.each(indexTypes)(
+  `%s preserves equality indexing for multiple calendar Durations`,
+  async (_name, IndexType) => {
+    const rows = [
+      { id: `one`, value: Temporal.Duration.from({ years: 1 }) },
+      { id: `two`, value: Temporal.Duration.from({ years: 2 }) },
+    ]
+    const probe = Temporal.Duration.from({ years: 2 })
+    const expected = new Set(
+      rows.filter((row) => modelEqual(row.value, probe)).map((row) => row.id),
+    )
+    const index = new IndexType(1, new PropRef([`value`]))
+    for (const row of rows) index.add(row.id, row)
+    expect(index.lookup(`eq`, probe)).toEqual(expected)
+
+    const source = createCollection(
+      mockSyncCollectionOptions({
+        id: `calendar-duration-equality-${IndexType.name}`,
+        getKey: (row: (typeof rows)[number]) => row.id,
+        initialData: rows,
+        autoIndex: `off`,
+        defaultIndexType: IndexType,
+      }),
+    )
+    try {
+      await source.stateWhenReady()
+      const where = eq(new PropRef([`value`]), probe)
+      const read = () =>
+        new Set(source.currentStateAsChanges({ where })!.map((row) => row.key))
+      expect(read()).toEqual(expected)
+      const publicIndex = source.createIndex((row) => row.value)
+      const lookup = vi.spyOn(publicIndex, `lookup`)
+      expect(read()).toEqual(expected)
+      expect(lookup).toHaveBeenCalled()
+    } finally {
+      await source.cleanup()
     }
   },
 )

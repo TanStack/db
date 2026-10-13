@@ -123,51 +123,55 @@ export const descComparator = (
     : ascComparator(b, a, opts)
 }
 
+function indexObjectKind(value: any): string {
+  if (isUint8Array(value)) return `Binary`
+  if (isTemporal(value)) {
+    const tag = value[Symbol.toStringTag]
+    const fields = value as unknown as DurationFields
+    return tag === `Temporal.Duration` &&
+      (fields.years || fields.months || fields.weeks)
+      ? `Temporal.Duration.calendar`
+      : tag
+  }
+  if (Array.isArray(value)) return `Array`
+  return `Object`
+}
+
 export function makeComparator(
   opts: CompareOptions,
   scope: `values` | `index` = `values`,
 ): (a: any, b: any) => number {
+  const compare = opts.direction === `asc` ? ascComparator : descComparator
+  if (scope !== `index`) return (a, b) => compare(a, b, opts)
+
   const direction = opts.direction === `asc` ? 1 : -1
   return (a, b) => {
-    // Index storage needs a transitive order across primitive kinds. Native
-    // coercion can make 2 tie "2", yet put them on opposite sides of "10".
-    if (scope === `index` && a != null && b != null && typeof a !== typeof b) {
-      const order = typeof a < typeof b ? -1 : 1
-      return order * direction
-    }
-    if (scope === `index` && typeof a === `string` && typeof b === `string`) {
-      const aKind = indexStringKind(a)
-      const bKind = indexStringKind(b)
-      if (aKind !== bKind) {
-        const order = aKind < bKind ? -1 : 1
-        return order * direction
-      }
-      if (aKind === `string`) {
-        a = a.startsWith(ESCAPED_STRING_PREFIX)
-          ? a.slice(ESCAPED_STRING_PREFIX.length)
-          : a
-        b = b.startsWith(ESCAPED_STRING_PREFIX)
-          ? b.slice(ESCAPED_STRING_PREFIX.length)
-          : b
-      } else {
-        if (aKind === ZONED_EPOCH_PREFIX || aKind === DURATION_TIME_PREFIX) {
-          // Exact index keys retain identity; these ordinals define order ties.
-          const aOrdinal = BigInt(
-            a.slice(aKind.length, a.indexOf(`:`, aKind.length)),
-          )
-          const bOrdinal = BigInt(
-            b.slice(aKind.length, b.indexOf(`:`, aKind.length)),
-          )
-          const order = aOrdinal < bOrdinal ? -1 : aOrdinal > bOrdinal ? 1 : 0
-          return order * direction
+    // An index needs one stable domain for each native comparison law. In
+    // particular, Date order cannot be mixed with reference-object order.
+    if (a != null && b != null) {
+      if (a instanceof Date) a = a.getTime()
+      if (b instanceof Date) b = b.getTime()
+      const aType = typeof a
+      const bType = typeof b
+      if (aType !== bType) return (aType < bType ? -1 : 1) * direction
+      if (aType === `object`) {
+        const aKind = indexObjectKind(a)
+        const bKind = indexObjectKind(b)
+        if (aKind !== bKind) return (aKind < bKind ? -1 : 1) * direction
+        // Binary content and unordered Temporal values use their exact keys
+        // for stable storage order.
+        if (
+          aKind === `Binary` ||
+          aKind === `Temporal.Duration.calendar` ||
+          aKind === `Temporal.PlainMonthDay`
+        ) {
+          const left = normalizeValue(a)
+          const right = normalizeValue(b)
+          return (left < right ? -1 : left > right ? 1 : 0) * direction
         }
       }
     }
-    if (opts.direction === `asc`) {
-      return ascComparator(a, b, opts)
-    } else {
-      return descComparator(a, b, opts)
-    }
+    return compare(a, b, opts)
   }
 }
 
@@ -219,65 +223,45 @@ function areUint8ArraysEqual(a: Uint8Array, b: Uint8Array): boolean {
 }
 
 const NORMALIZED_KEY_PREFIX = `\u0000tanstack-db:`
-const ESCAPED_STRING_PREFIX = `${NORMALIZED_KEY_PREFIX}string:`
-const TEMPORAL_PREFIX = `${NORMALIZED_KEY_PREFIX}temporal:`
-const ZONED_EPOCH_PREFIX = `${NORMALIZED_KEY_PREFIX}temporal:Temporal.ZonedDateTime:`
-const DURATION_TIME_PREFIX = `${NORMALIZED_KEY_PREFIX}temporal:Temporal.Duration:time:`
-
-function indexStringKind(value: string): string {
-  if (
-    !value.startsWith(NORMALIZED_KEY_PREFIX) ||
-    value.startsWith(ESCAPED_STRING_PREFIX)
-  ) {
-    return `string`
-  }
-  if (value.startsWith(DURATION_TIME_PREFIX)) return DURATION_TIME_PREFIX
-  const afterKind = value.startsWith(TEMPORAL_PREFIX)
-    ? TEMPORAL_PREFIX.length
-    : NORMALIZED_KEY_PREFIX.length
-  return value.slice(0, value.indexOf(`:`, afterKind) + 1)
-}
-
 function normalizedKey(kind: string, value: string): string {
   return `${NORMALIZED_KEY_PREFIX}${kind}:${value}`
 }
 
+const binaryKeys = new WeakMap<Uint8Array, string>()
+
+export function cacheBinaryKey(value: Uint8Array, key: string): void {
+  binaryKeys.set(value, key)
+}
+
 function normalizeBinary(value: Uint8Array): string {
-  let bytes = ``
-  for (let index = 0; index < value.byteLength; index++) {
-    bytes += String.fromCharCode(value[index]!)
+  const cached = binaryKeys.get(value)
+  if (cached) return cached
+  let bytes: string
+  if (value.byteLength <= 8192) {
+    bytes = String.fromCharCode.apply(null, value as unknown as Array<number>)
+  } else {
+    const chunks: Array<string> = []
+    for (let index = 0; index < value.byteLength; index += 8192) {
+      chunks.push(
+        String.fromCharCode.apply(
+          null,
+          value.subarray(index, index + 8192) as unknown as Array<number>,
+        ),
+      )
+    }
+    bytes = chunks.join(``)
   }
-  return normalizedKey(`binary`, bytes)
+  const key = normalizedKey(`binary`, bytes)
+  binaryKeys.set(value, key)
+  return key
 }
 
 type DurationFields = Record<(typeof durationFields)[number], number>
-
-function durationTimeNanoseconds(value: DurationFields): bigint {
-  return (
-    BigInt(value.days) * 86_400_000_000_000n +
-    BigInt(value.hours) * 3_600_000_000_000n +
-    BigInt(value.minutes) * 60_000_000_000n +
-    BigInt(value.seconds) * 1_000_000_000n +
-    BigInt(value.milliseconds) * 1_000_000n +
-    BigInt(value.microseconds) * 1_000n +
-    BigInt(value.nanoseconds)
-  )
-}
-
-/**
- * Sentinel value representing undefined in normalized form.
- * This allows distinguishing between "start from beginning" (undefined parameter)
- * and "start from the key undefined" (actual undefined value in the tree).
- */
-export const UNDEFINED_SENTINEL = normalizedKey(`undefined`, ``)
 
 /**
  * Normalize a value for comparison and Map key usage
  * Converts values that can't be directly compared or used as Map keys
  * into comparable primitive representations
- *
- * Note: This does NOT convert undefined to a sentinel. Use normalizeForBTree
- * for BTree index operations that need to distinguish undefined values.
  */
 export function normalizeValue(value: any): any {
   if (typeof value === `string`) {
@@ -296,21 +280,14 @@ export function normalizeValue(value: any): any {
 
   if (isTemporal(value)) {
     const tag = value[Symbol.toStringTag]
-    if (tag === `Temporal.Duration`) {
+    if (tag === 'Temporal.Duration') {
       const fields = value as unknown as DurationFields
-      const exact = durationFields.map((field) => fields[field]).join(`,`)
-      const order =
-        fields.years || fields.months || fields.weeks
-          ? ``
-          : `time:${durationTimeNanoseconds(fields)}:`
-      return normalizedKey(`temporal`, `${tag}:${order}${exact}`)
+      return normalizedKey(
+        tag,
+        durationFields.map((field) => fields[field]).join(','),
+      )
     }
-    if (tag === `Temporal.ZonedDateTime`) {
-      const epoch = (value as unknown as { epochNanoseconds: bigint })
-        .epochNanoseconds
-      return normalizedKey(`temporal`, `${tag}:${epoch}:${value.toString()}`)
-    }
-    return normalizedKey(`temporal`, `${tag}:${value.toString()}`)
+    return normalizedKey(tag, value.toString())
   }
 
   // Normalize Uint8Arrays/Buffers to a string representation for Map key usage
@@ -323,34 +300,10 @@ export function normalizeValue(value: any): any {
 }
 
 /**
- * Normalize a value for BTree index usage.
- * Extends normalizeValue to also convert undefined to a sentinel value.
- * This is needed because the BTree does not properly support `undefined` as a key
- * (it interprets undefined as "start from beginning" in nextHigherPair/nextLowerPair).
- */
-export function normalizeForBTree(value: any): any {
-  if (value === undefined) {
-    return UNDEFINED_SENTINEL
-  }
-  return normalizeValue(value)
-}
-
-/**
  * Compare values using the equality semantics used by Map keys.
  */
 export function areSameValueZeroEqual(a: unknown, b: unknown): boolean {
   return a === b || (Number.isNaN(a) && Number.isNaN(b))
-}
-
-/**
- * Converts the `UNDEFINED_SENTINEL` back to `undefined`.
- * Needed such that the sentinel is converted back to `undefined` before comparison.
- */
-export function denormalizeUndefined(value: any): any {
-  if (value === UNDEFINED_SENTINEL) {
-    return undefined
-  }
-  return value
 }
 
 /**

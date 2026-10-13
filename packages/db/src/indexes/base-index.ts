@@ -1,5 +1,8 @@
 import { compileSingleRowExpression } from '../query/compiler/evaluators.js'
-import { comparisonFunctions } from '../query/builder/functions.js'
+import {
+  comparisonFunctions,
+  indexableOperations,
+} from '../query/builder/functions.js'
 import { DEFAULT_COMPARE_OPTIONS, deepEquals } from '../utils.js'
 import { makeCheckedComparator, makeComparator } from '../utils/comparison.js'
 import { codedMessage, codedWarning, devBuild } from '../error-message.js'
@@ -34,6 +37,8 @@ function resolveStringSort(
  * Operations that indexes can support, imported from available comparison functions
  */
 export const IndexOperation = comparisonFunctions
+
+export { indexableOperations } from '../query/builder/functions.js'
 
 export const builtInIndexResolverNames = new WeakMap<object, string>()
 
@@ -156,14 +161,7 @@ export abstract class BaseIndex<
       options?.compareFn ?? makeComparator(this.compareOptions, `index`),
     )
     this.name = name
-    this.supportedOperations = new Set<IndexOperation>([
-      `eq`,
-      `gt`,
-      `gte`,
-      `lt`,
-      `lte`,
-      `in`,
-    ])
+    this.supportedOperations = new Set<IndexOperation>(indexableOperations)
     this.initialize(options)
   }
 
@@ -194,7 +192,7 @@ export abstract class BaseIndex<
   ): Array<TKey>
   abstract get keyCount(): number
   abstract equalityLookup(value: any): Set<TKey>
-  protected exactBucketKeys(value: any): Set<TKey> | undefined {
+  protected exactBucketKeys(value: any): Iterable<TKey> | undefined {
     return this.equalityLookup(value)
   }
   abstract rangeQuery(options: RangeQueryOptions): Set<TKey>
@@ -221,7 +219,7 @@ export abstract class BaseIndex<
     const result = new Set<TKey>()
     for (const value of values) {
       const keys = this.exactBucketKeys(value)
-      if (keys) keys.forEach((key) => result.add(key))
+      if (keys) for (const key of keys) result.add(key)
     }
     return result
   }
@@ -304,12 +302,17 @@ export abstract class BaseIndex<
       return false
     }
 
-    if (indexCompareOptions.stringSort === `custom`)
+    if (indexStringSort === `custom` && requestedStringSort === `custom`) {
       return (
+        indexCompareOptions.stringSort === `custom` &&
         compareOptions.stringSort === `custom` &&
         indexCompareOptions.compare === compareOptions.compare
       )
-    if (indexStringSort !== `locale`) return true
+    }
+
+    if (indexStringSort !== `locale` || requestedStringSort !== `locale`) {
+      return true
+    }
 
     const indexLocaleOptions = indexCompareOptions as LocaleCompareOptions
     const requestedLocaleOptions = compareOptions as LocaleCompareOptions

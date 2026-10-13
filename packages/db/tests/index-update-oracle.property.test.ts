@@ -5,17 +5,14 @@ import { createCollection } from '../src/collection/index.js'
 import { CollectionInErrorStateError } from '../src/errors.js'
 import { BasicIndex } from '../src/indexes/basic-index.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
+import { eq } from '../src/query/builder/functions.js'
 import { PropRef } from '../src/query/ir.js'
 import { DEFAULT_COMPARE_OPTIONS } from '../src/utils.js'
-import {
-  indexedKeysSet,
-  mockSyncCollectionOptions,
-  orderedEntriesArray,
-  valueMapData,
-} from './utils'
+import { mockSyncCollectionOptions } from './utils'
 import { oraclePropertyOptions, oracleRuns } from './oracle-config'
 import type { BaseIndex, IndexInterface } from '../src/indexes/base-index.js'
 import type { CompareOptions } from '../src/query/builder/types.js'
+import type { BasicExpression } from '../src/query/ir.js'
 import type { StringCollationConfig } from '../src/types.js'
 
 /**
@@ -30,7 +27,7 @@ import type { StringCollationConfig } from '../src/types.js'
  * A native Map is the sole ownership model. After put, delete, or full build,
  * the oracle groups that Map by value and freshly sorts the groups. BasicIndex
  * and BTreeIndex must agree on key count, key membership, equality/range lookup,
- * ordered entries, and rebuild behavior. Small duplicate values and signed zero
+ * full ordered reads, and rebuild behavior. Small duplicate values and signed zero
  * force collisions in the value groups without copying either index structure.
  * The comparison runs after every direct index action, after fresh build, and
  * after each named Collection read. Collection rows and their order are public;
@@ -56,7 +53,7 @@ type IndexValue = number
 
 type IndexConstructor = new (
   id: number,
-  expression: PropRef,
+  expression: BasicExpression,
   name?: string,
   options?: {
     compareFn?: (left: unknown, right: unknown) => number
@@ -142,21 +139,22 @@ function expectIndexMatchesModel(
   rows: Map<string, IndexValue>,
 ): void {
   const groups = groupKeysByValue(rows)
+  const orderedKeys = [...groups]
+    .sort(([left], [right]) => left - right)
+    .flatMap(([, keys]) => [...keys].sort())
 
   expect(index.keyCount).toBe(rows.size)
-  expect(indexedKeysSet(index)).toEqual(new Set(rows.keys()))
-  expect(valueMapData(index)).toEqual(groups)
-  // The index may retain either zero sign as a bucket representative. Its
-  // comparator and the source Map place both signs in the same value group.
-  expect(
-    orderedEntriesArray(index).map(([value, keys]) => [
-      value === 0 ? 0 : value,
-      keys,
-    ]),
-  ).toEqual([...groups].sort(([left], [right]) => left - right))
+  // Complete returned arrays preserve key multiplicity and comparator order
+  // without requiring a particular bucket or ordered-storage representation.
+  expect(index.takeFromStart(rows.size + 1)).toEqual(orderedKeys)
+  expect(index.takeReversedFromEnd(rows.size + 1)).toEqual(
+    [...orderedKeys].reverse(),
+  )
 
   for (const value of probeValues) {
-    expect(index.lookup(`eq`, value)).toEqual(groups.get(value) ?? new Set())
+    const expected = groups.get(value) ?? new Set()
+    expect(index.equalityLookup(value)).toEqual(expected)
+    expect(index.lookup(`eq`, value)).toEqual(expected)
   }
 
   for (const boundary of rangeBoundaries) {
@@ -346,6 +344,30 @@ describe.each(indexTypes)(`%s update properties`, (_indexName, IndexType) => {
       [`other`, { value: [20] }],
     ])
     expect(index.canOptimizeRangeFor(100)).toBe(false)
+  })
+
+  test.each([
+    [`duplicate key`, `takeFromStart`, [`a`, `a`]],
+    [`wrong reverse order`, `takeReversedFromEnd`, [`a`, `b`]],
+  ] as const)(`full traversal rejects a %s`, (_name, method, wrongKeys) => {
+    const index = new IndexType(1, new PropRef([`value`]))
+    index.add(`a`, { value: 1 })
+    index.add(`b`, { value: 2 })
+    const wrongOutput = vi.spyOn(index, method).mockReturnValue([...wrongKeys])
+    try {
+      expect(() =>
+        expectIndexMatchesModel(
+          index,
+          new Map([
+            [`a`, 1],
+            [`b`, 2],
+          ]),
+        ),
+      ).toThrowError(/expected/)
+      expect(wrongOutput).toHaveBeenCalled()
+    } finally {
+      wrongOutput.mockRestore()
+    }
   })
 
   test(`inclusive lower bound rejects an exclusive-boundary result`, () => {
@@ -585,7 +607,9 @@ function expectExactMembership<T>(
   // from source-value membership in the operand list, including an empty list.
   const groups = groupKeysByValue(rows)
   expect(index.keyCount).toBe(rows.size)
-  expect(indexedKeysSet(index)).toEqual(new Set(rows.keys()))
+  const traversedKeys = index.takeFromStart(rows.size + 1)
+  expect(traversedKeys).toHaveLength(rows.size)
+  expect(new Set(traversedKeys)).toEqual(new Set(rows.keys()))
   for (const value of exactProbes) {
     const expected = groups.get(value) ?? new Set<string>()
     expect(index.equalityLookup(value)).toEqual(expected)
@@ -1307,7 +1331,10 @@ describe.each(indexTypes)(
  * operation. The probe inserts or reads the non-numeric value `ann`. An
  * empty prefix is included: its first write compares nothing, so it must
  * succeed, and the next comparing operation must throw. Comparator
- * transitivity is outside this owner.
+ * transitivity is outside this owner. A removal need not compare a surviving
+ * value with its neighbors: the former representative-promotion example
+ * prescribed one storage layout, while the rejected-removal witness above
+ * retains the atomicity law for comparisons that actually occur.
  */
 describe.each(indexTypes)(
   `%s invalid comparator results`,
@@ -1445,25 +1472,19 @@ describe.each(indexTypes)(
       expect(index.lookup(`eq`, `x`)).toEqual(new Set([`x`]))
     })
 
-    // `A` and `a` share one comparator position. Removing the representative
-    // `A` promotes `a`, whose comparison with `z` is the only invalid pair.
-    test(`a rejected representative replacement leaves the index unchanged`, () => {
-      const { index, step } = createRecordedIndex((left, right) => {
-        if ([left, right].includes(`a`) && [left, right].includes(`z`))
-          return NaN
-        const l = String(left).toLowerCase()
-        const r = String(right).toLowerCase()
-        return l === r ? 0 : l < r ? -1 : 1
-      })
-      expect(step(() => index.add(`upper`, { value: `A` }))).toBe(false)
-      expect(step(() => index.add(`lower`, { value: `a` }))).toBe(false)
-      expect(step(() => index.add(`zed`, { value: `z` }))).toBe(false)
-      // Equality lookups and key count read the index without comparing.
-      if (step(() => index.remove(`upper`, { value: `A` }))) {
-        expect(index.keyCount).toBe(3)
-        expect(index.lookup(`eq`, `A`)).toEqual(new Set([`upper`]))
-        expect(index.lookup(`eq`, `a`)).toEqual(new Set([`lower`]))
-        expect(index.lookup(`eq`, `z`)).toEqual(new Set([`zed`]))
+    test(`a rejected remove preserves other exact values`, () => {
+      const { index, step } = createRecordedIndex((left, right) =>
+        left === `x` && right === `x`
+          ? NaN
+          : String(left).localeCompare(String(right)),
+      )
+      for (const value of [`a`, `x`, `z`]) {
+        expect(step(() => index.add(value, { value }))).toBe(false)
+      }
+      expect(step(() => index.remove(`x`, { value: `x` }))).toBe(true)
+      expect(index.keyCount).toBe(3)
+      for (const value of [`a`, `x`, `z`]) {
+        expect(index.lookup(`eq`, value)).toEqual(new Set([value]))
       }
     })
 
@@ -1884,15 +1905,6 @@ describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
               expect(
                 subject.takeReversedFromEnd(currentRows.length + 1),
               ).toEqual(reversed)
-              for (const [representative, keys] of orderedEntriesArray(
-                subject,
-              )) {
-                expect(
-                  currentRows.some(
-                    (row) => row.value === representative && keys.has(row.key),
-                  ),
-                ).toBe(true)
-              }
               for (const row of currentRows) {
                 expect(subject.equalityLookup(row.value)).toEqual(
                   new Set([row.key]),
@@ -2538,4 +2550,187 @@ describe.each([
       expect(new Set(keys)).toEqual(new Set(rows.keys()))
     })
   })
+})
+
+/**
+ * Binary equality is by byte content, so a fresh byte array can remove an
+ * earlier equal value. The source Map predicts exact membership after removal,
+ * re-addition, and replacement while another byte value remains. Complete
+ * index reads must contain each live key once; byte ordering is unspecified.
+ */
+describe.each(indexTypes)(`%s binary-value ownership`, (_name, IndexType) => {
+  test(`does not retain an ordered entry after equal-content removal`, () => {
+    const index = new IndexType(1, new PropRef([`value`]))
+    const rows = new Map<string, Uint8Array>()
+    const bytes = (value = 1) => new Uint8Array([value])
+    const check = () => {
+      const expected = new Set(rows.keys())
+      expect(index.keyCount).toBe(rows.size)
+      expect(index.equalityLookup(bytes())).toEqual(
+        new Set(
+          [...rows].filter(([, value]) => value[0] === 1).map(([key]) => key),
+        ),
+      )
+      for (const read of [
+        index.takeFromStart(rows.size + 1),
+        index.takeReversedFromEnd(rows.size + 1),
+      ]) {
+        expect(read).toHaveLength(rows.size)
+        expect(new Set(read)).toEqual(expected)
+      }
+    }
+
+    index.add(`a`, { value: bytes() })
+    rows.set(`a`, bytes())
+    check()
+    index.remove(`a`, { value: bytes() })
+    rows.delete(`a`)
+    check()
+    index.add(`b`, { value: bytes() })
+    rows.set(`b`, bytes())
+    check()
+
+    const oldBytes = bytes()
+    index.add(`c`, { value: bytes(2) })
+    rows.set(`c`, bytes(2))
+    index.add(`d`, { value: oldBytes })
+    rows.set(`d`, oldBytes)
+    check()
+    index.remove(`b`, { value: bytes() })
+    rows.delete(`b`)
+    check()
+    index.update(`d`, { value: oldBytes }, { value: bytes() })
+    rows.set(`d`, bytes())
+    check()
+  })
+
+  test.each([2, 8193])(
+    `compares every byte for exact membership (%i bytes)`,
+    (length) => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      const left = new Uint8Array(length)
+      left[0] = 1
+      const right = left.slice()
+      right[length - 1] = 1
+      index.add(`left`, { value: left })
+      index.add(`right`, { value: right })
+      expect(index.equalityLookup(left.slice())).toEqual(new Set([`left`]))
+      expect(index.equalityLookup(right.slice())).toEqual(new Set([`right`]))
+    },
+  )
+})
+
+/**
+ * PlainMonthDay has exact equality but no intrinsic order. The two-row source
+ * Map predicts one key for a copy of February 1, both before and after index
+ * creation. The index may choose any storage order; a public equality read
+ * must not fail merely because both values are present.
+ */
+describe.each(indexTypes)(
+  `%s unordered Temporal equality`,
+  (_name, IndexType) => {
+    test(`accepts distinct PlainMonthDay values for exact lookup`, async () => {
+      const rows = [
+        { id: `jan`, value: Temporal.PlainMonthDay.from(`--01-01`) },
+        { id: `feb`, value: Temporal.PlainMonthDay.from(`--02-01`) },
+      ]
+      const probe = Temporal.PlainMonthDay.from(`--02-01`)
+      const expected = new Set(
+        rows
+          .filter(
+            (row) =>
+              row.value.monthCode === probe.monthCode &&
+              row.value.day === probe.day,
+          )
+          .map((row) => row.id),
+      )
+      const index = new IndexType(1, new PropRef([`value`]))
+      for (const row of rows) index.add(row.id, row)
+      expect(index.lookup(`eq`, probe)).toEqual(expected)
+
+      const collection = createCollection(
+        mockSyncCollectionOptions({
+          id: `month-day-equality-${IndexType.name}`,
+          getKey: (row: (typeof rows)[number]) => row.id,
+          initialData: rows,
+          autoIndex: `off`,
+          defaultIndexType: IndexType,
+        }),
+      )
+      await withCollectionCleanup(collection, async () => {
+        await collection.stateWhenReady()
+        const where = eq(new PropRef([`value`]), probe)
+        const read = () =>
+          collection
+            .currentStateAsChanges({ where })!
+            .map((row) => row.key)
+            .sort()
+        expect(read()).toEqual([...expected].sort())
+        const publicIndex = collection.createIndex((row) => row.value)
+        const lookup = vi.spyOn(publicIndex, `lookup`)
+        expect(read()).toEqual([...expected].sort())
+        expect(lookup).toHaveBeenCalled()
+      })
+    })
+  },
+)
+
+/**
+ * A bounded read should not make more comparator calls as retired values
+ * accumulate. A fixed history retains one row while adding and removing 16,
+ * 64, or 256 earlier values. A user comparator records calls made by the
+ * public takeFromStart method after each history. This witnesses comparator
+ * work only: a traversal over tombstones that avoids the comparator could
+ * pass, and retained memory is measured separately.
+ */
+describe.each(indexTypes)(`%s retired-value read work`, (_name, IndexType) => {
+  test(`takeFromStart comparator work does not grow with retired values`, () => {
+    const comparisons = [16, 64, 256].map((retiredCount) => {
+      let calls = 0
+      const index = new IndexType(1, new PropRef([`value`]), undefined, {
+        compareFn: (left: unknown, right: unknown) => {
+          calls++
+          return (left as number) - (right as number)
+        },
+      })
+      index.add(`live`, { value: 1000 })
+      for (let value = 0; value < retiredCount; value++) {
+        const key = String(value)
+        index.add(key, { value })
+        index.remove(key, { value })
+      }
+      expect(index.keyCount).toBe(1)
+      calls = 0
+      expect(index.takeFromStart(1)).toEqual([`live`])
+      return calls
+    })
+
+    expect(comparisons[2]).toBeLessThanOrEqual(comparisons[0]! + 4)
+  })
+})
+
+/**
+ * Distinct exact values can share one comparator position. An ordered first
+ * row still requires sorting that group's keys, but it need not recompare
+ * every value in the group. The fixed 16/64/256 sizes distinguish a grouped
+ * read from one tree search per tied exact value. This bounds comparator work
+ * at the direct read checkpoint, not elapsed time or retained memory.
+ */
+test(`BTreeIndex bounded reads do not recompare every live tie`, () => {
+  const comparisons = [16, 64, 256].map((count) => {
+    let calls = 0
+    const index = new BTreeIndex<string>(1, new PropRef([`value`]), undefined, {
+      compareFn: () => {
+        calls++
+        return 0
+      },
+    })
+    for (let value = 0; value < count; value++) {
+      index.add(String(value), { value })
+    }
+    calls = 0
+    expect(index.takeFromStart(1)).toEqual([`0`])
+    return calls
+  })
+  expect(comparisons[2]).toBeLessThanOrEqual(comparisons[0]! + 4)
 })
