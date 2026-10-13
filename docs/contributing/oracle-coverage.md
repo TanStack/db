@@ -481,10 +481,10 @@ trigger a redundant full request. Signal witnesses cover providers that ignore
 their signal and may finish into Query cache after final unload for full-source
 and equal filtered sharing; equal full-source and filtered peers after the
 first releases; and two Collections sharing a Query whose later fetch runs the
-released Collection's queryFn. Held initial and refetch histories release an
-owner before or after an equal filtered peer joins the fetch. They distinguish
-exact and custom abort reasons, a fresh provider AbortError, no remaining
-peer, and an unrelated ordinary error at provider-call,
+released Collection's queryFn. Held initial and refetch histories acquire an
+equal filtered peer before or after fetch start, then release the first owner.
+They distinguish exact and custom abort reasons, a fresh provider AbortError,
+no remaining peer, and an unrelated ordinary error at provider-call,
 acquisition-settlement, public-row, cache-row, and error checkpoints. A
 recovery-specific ignored-signal witness rejects a guard that consumes Query
 Core's lazy signal before the replacement provider runs. The foreign closure
@@ -507,7 +507,17 @@ failed revalidation. A fresh AbortError caused by the request signal and an
 unrelated fresh AbortError after that signal abort are indistinguishable to the
 adapter; the one-retry policy favors a surviving peer and may retry the latter.
 Real network providers and cross-Collection option selection beyond the
-installed Query Core version need receiving witnesses.
+installed Query Core version need receiving witnesses. The load-lifecycle owner
+also needs an external `queryClient.cancelQueries` history with a pending
+on-demand acquisition and a surviving peer; compare the public acquisition
+promise and status at cancellation and after release. A late-peer release
+history also needs a public live-query preload checkpoint for the retired
+creator, separate from the surviving peer's load. The raw internal
+`_sync.loadSubset` creator promise can fulfill in the current fixture; its
+settlement policy is unresolved at that boundary. Neither observation alone
+establishes a public cancellation bug. The load-lifecycle owner also needs a
+cleanup-fault calibration that preserves a primary row mismatch and reports
+secondary cleanup failure separately.
 Its real QueryClient witness loads ten disjoint on-demand subsets, then checks
 `writeUpsert`, `writeUpdate`, `writeDelete`, `writeInsert`, and a mixed
 `writeBatch`. After each accepted write it compares public live-query rows with
