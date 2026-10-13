@@ -5430,6 +5430,26 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     ])
   })
 
+  // Record a demand's settlement at an explicit checkpoint, so a demand that
+  // never settles fails an assertion rather than timing out.
+  function settlement(result: unknown) {
+    const record: {
+      outcome:
+        | { state: `pending` }
+        | { state: `fulfilled` }
+        | { state: `rejected`; reason: unknown }
+    } = { outcome: { state: `pending` } }
+    void Promise.resolve(result).then(
+      () => {
+        record.outcome = { state: `fulfilled` }
+      },
+      (reason: unknown) => {
+        record.outcome = { state: `rejected`, reason }
+      },
+    )
+    return record
+  }
+
   it(`fails every waiting full recovery demand when an async retry decision gives up`, async () => {
     const retryDecision = createDeferred<Record<string, never> | undefined>()
     const metadata = createMetadata(
@@ -5444,21 +5464,81 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     const error = new Error(`permanent provider error`)
 
     await withElectricCleanup(async () => {
-      const first = Promise.resolve(
-        trace.collection._sync.loadSubset({ limit: 1 }),
-      )
-      void first.catch(() => undefined)
+      const first = settlement(trace.collection._sync.loadSubset({ limit: 1 }))
       const streamOptions = vi.mocked(ShapeStream).mock.calls.at(-1)?.[0] as
         { onError?: (error: unknown) => unknown } | undefined
       const decision = Promise.resolve(streamOptions!.onError!(error))
-      const second = Promise.resolve(
-        trace.collection._sync.loadSubset({ limit: 2 }),
-      )
-      void second.catch(() => undefined)
+      const second = settlement(trace.collection._sync.loadSubset({ limit: 2 }))
+      // The source is still deciding, so nothing has failed yet.
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect(trace.collection.status).toBe(`loading`)
       retryDecision.resolve(undefined)
       await decision
-      await expect(first).rejects.toBe(error)
-      await expect(second).rejects.toBe(error)
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect(first.outcome).toEqual({ state: `rejected`, reason: error })
+      expect(second.outcome).toEqual({ state: `rejected`, reason: error })
+      expect(trace.collection.status).toBe(`error`)
+    }, [() => trace.collection.cleanup()])
+  })
+
+  // An onError handler that throws gives up too: the waiting demand rejects
+  // with what it threw, and the initial sync fails.
+  it(`fails a waiting full recovery demand when onError throws`, async () => {
+    const thrown = new Error(`onError failed`)
+    const metadata = createMetadata(
+      new Map([[`electric:resume`, { kind: `reset`, updatedAt: 1 }]]),
+    )
+    const trace = createOracleCollection(
+      `full-recovery-throwing-on-error`,
+      `on-demand`,
+      metadata.api,
+      {
+        onError: () => {
+          throw thrown
+        },
+      },
+    )
+
+    await withElectricCleanup(async () => {
+      const first = settlement(trace.collection._sync.loadSubset({ limit: 1 }))
+      const streamOptions = vi.mocked(ShapeStream).mock.calls.at(-1)?.[0] as
+        { onError?: (error: unknown) => unknown } | undefined
+      await expect(
+        Promise.resolve(streamOptions!.onError!(new Error(`provider error`))),
+      ).rejects.toBe(thrown)
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect(first.outcome).toEqual({ state: `rejected`, reason: thrown })
+      expect(trace.collection.status).toBe(`error`)
+    }, [() => trace.collection.cleanup()])
+  })
+
+  // A retry keeps the source trying; a later error that gives up is still a
+  // final failure for the demand that waited through both.
+  it(`fails a waiting full recovery demand when a later error gives up after a retry`, async () => {
+    const decisions: Array<Record<string, never> | undefined> = [{}, undefined]
+    const metadata = createMetadata(
+      new Map([[`electric:resume`, { kind: `reset`, updatedAt: 1 }]]),
+    )
+    const trace = createOracleCollection(
+      `full-recovery-retry-then-give-up`,
+      `on-demand`,
+      metadata.api,
+      { onError: () => Promise.resolve(decisions.shift()) },
+    )
+    const second = new Error(`second provider error`)
+
+    await withElectricCleanup(async () => {
+      const first = settlement(trace.collection._sync.loadSubset({ limit: 1 }))
+      const streamOptions = vi.mocked(ShapeStream).mock.calls.at(-1)?.[0] as
+        { onError?: (error: unknown) => unknown } | undefined
+      await streamOptions!.onError!(new Error(`first provider error`))
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect(first.outcome).toEqual({ state: `pending` })
+      expect(trace.collection.status).toBe(`loading`)
+
+      await streamOptions!.onError!(second)
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect(first.outcome).toEqual({ state: `rejected`, reason: second })
       expect(trace.collection.status).toBe(`error`)
     }, [() => trace.collection.cleanup()])
   })
