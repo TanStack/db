@@ -4420,6 +4420,10 @@ describe(`ordered source work oracle`, () => {
  * its refill is in flight during the later changes. On either provider a step may
  * publish one intermediate window per provider request it made, and only
  * its last publication must show the final window (#2131).
+ * One case in four adds a peer: a second live query over the same sources
+ * with its own window, the first `offset + limit + 1` rows. Its rows law
+ * holds beside the first query's at every checkpoint; the work laws count one
+ * consumer, so they do not apply to those cases.
  * Joined filters can match a row through several markers, by `dup`, so a
  * LEFT-joined filter and a full join keep one result row per matched
  * (row, marker) pair, and an anti-join keeps a row once.
@@ -4463,6 +4467,10 @@ type EagerCase = {
   // at that moment, so live changes can arrive while a load is in flight.
   // Initial loads answer immediately. Omitted means `immediate`.
   latency?: `immediate` | `held`
+  // A second live query over the same sources, with its own window: the
+  // first `offset + limit + 1` rows. Its window law holds beside the first
+  // query's, and the work laws, which count one consumer, do not apply.
+  peer?: boolean
   // Where eligibility is decided: a predicate on the ordered source itself,
   // a JavaScript function filter, or a filter on a LEFT-joined marker, where
   // a marker admits its row (`joined`) or excludes it (`anti-joined`). The
@@ -4565,6 +4573,11 @@ const eagerCase: fc.Arbitrary<EagerCase> = fc.record({
   ),
   provider: fc.constantFrom(`forward` as const, `refetch` as const),
   latency: fc.constantFrom(`immediate` as const, `held` as const),
+  // One case in four has a peer, so most cases keep the work laws.
+  peer: fc.oneof(
+    { weight: 3, arbitrary: fc.constant(false) },
+    { weight: 1, arbitrary: fc.constant(true) },
+  ),
   filter: fc.constantFrom(
     `source` as const,
     `function` as const,
@@ -5188,7 +5201,10 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       yield entry
     }
   } as typeof source.entries
-  const buildQuery = (q: InitialQueryBuilder) => {
+  const buildQuery = (
+    q: InitialQueryBuilder,
+    { offset, limit }: { offset: number; limit: number } = testCase,
+  ) => {
     const joinedRows = q
       .from({ row: source })
       .leftJoin({ marker: markers }, ({ row, marker }) =>
@@ -5216,20 +5232,31 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
     return (
       testCase.terms === 2 ? ordered.orderBy(({ row }) => row.id) : ordered
     )
-      .offset(testCase.offset)
-      .limit(testCase.limit)
+      .offset(offset)
+      .limit(limit)
   }
   const query = createLiveQueryCollection({
     startSync: true,
-    query: buildQuery,
+    query: (q) => buildQuery(q),
   })
+  const peerCase: EagerCase = {
+    ...testCase,
+    offset: 0,
+    limit: testCase.offset + testCase.limit + 1,
+  }
+  const peer = testCase.peer
+    ? createLiveQueryCollection({
+        startSync: true,
+        query: (q) => buildQuery(q, peerCase),
+      })
+    : undefined
   // An Effect runs the same joined query through its own graph loop, so the
   // window law must hold for both consumers. It holds its rows by result key.
   const effectRows = new Map<string | number, number>()
   const effect =
     joined || fullJoin
       ? createEffect({
-          query: buildQuery,
+          query: (q) => buildQuery(q),
           onBatch: (events) => {
             for (const event of events) {
               if (event.type === `exit`) {
@@ -5261,8 +5288,8 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
   }
   // A joined query's rows nest the source row and its marker under their
   // aliases; resultId names each one.
-  const visibleIds = () =>
-    query.toArray.map((result) => {
+  const visibleIds = (collection: typeof query = query) =>
+    collection.toArray.map((result) => {
       if (!(joined || fullJoin)) return (result as Row).id
       const { row, marker: match } = result as unknown as {
         row?: Row
@@ -5334,6 +5361,14 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       testCase,
       `${label}: rows over the provider ledger`,
     )
+    if (peer) {
+      expectEagerWindow(
+        visibleIds(peer),
+        modelRows(sent),
+        peerCase,
+        `${label}: peer rows over the provider ledger`,
+      )
+    }
     if (effect) {
       expectEagerWindow(
         effectIds(sent),
@@ -5372,7 +5407,16 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
   let unsubscribe: (() => void) | undefined
   try {
     await query.preload()
+    await peer?.preload()
     expectEagerWindow(visibleIds(), modelRows(), testCase, `initial rows`)
+    if (peer) {
+      expectEagerWindow(
+        visibleIds(peer),
+        modelRows(),
+        peerCase,
+        `initial peer rows`,
+      )
+    }
     expectProviderLedger(`initial`)
     if (effect) {
       await flushPromises()
@@ -5397,7 +5441,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
     // window: one fails the join, or a boundary value is null or NaN and
     // cannot be a cursor. When every such row passes, the initial load
     // must not request the whole source.
-    if (testCase.path === `on-demand` && joined) {
+    if (testCase.path === `on-demand` && joined && !peer) {
       const sourceOrder = eagerOrder(
         new Map(
           [...rows].map(([rowId, row]) => [rowId, { ...row, eligible: true }]),
@@ -5421,7 +5465,10 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
         ).toBe(0)
       }
     }
-    const initialBound = workBound(boundaryRanks(rows, testCase))
+    // The work laws count one consumer, so a peer query turns them off.
+    const initialBound = peer
+      ? undefined
+      : workBound(boundaryRanks(rows, testCase))
     // On demand, the provider's transfer is bounded; the local snapshot
     // delivers every installed row, so read and delivered counts are not.
     if (initialBound !== undefined && testCase.path === `on-demand`) {
@@ -5565,6 +5612,14 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
           testCase,
           `rows after step ${step}`,
         )
+        if (peer) {
+          expectEagerWindow(
+            visibleIds(peer),
+            modelRows(),
+            peerCase,
+            `peer rows after step ${step}`,
+          )
+        }
       }
       if (effect && !lagging() && !inFlight()) {
         expectEagerWindow(
@@ -5609,7 +5664,11 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       // A post-limit filter plan reads its full source more than once per
       // change on main too (402 of 201 rows here), so the scan law covers
       // source-filter plans, whose bounded read could add a second pass.
-      if (testCase.filter === `source` && testCase.path !== `on-demand`) {
+      if (
+        testCase.filter === `source` &&
+        testCase.path !== `on-demand` &&
+        !peer
+      ) {
         expect(scanned, `rows scanned by step ${step}`).toBeLessThanOrEqual(
           Math.max(sizeBefore, rows.size),
         )
@@ -5620,7 +5679,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       // A refetching provider's loads follow the Collection's older state,
       // so the work law applies only to a forwarding provider.
       const bound =
-        refetching || held
+        refetching || held || peer
           ? undefined
           : workBound([...boundaryBefore, ...boundaryRanks(rows, testCase)])
       if (bound !== undefined && testCase.path === `on-demand`) {
@@ -5641,6 +5700,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
     unsubscribe?.()
     await effect?.dispose()
     await query.cleanup()
+    await peer?.cleanup()
     await source.cleanup()
     await markers.cleanup()
   }
