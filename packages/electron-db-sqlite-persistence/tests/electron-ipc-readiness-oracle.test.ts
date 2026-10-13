@@ -4,13 +4,20 @@ import { join } from 'node:path'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { persistedCollectionOptions } from '@tanstack/db-sqlite-persistence-core'
 import { createNodeSQLitePersistence } from '@tanstack/node-db-sqlite-persistence'
-import { createCollection, createLiveQueryCollection, eq } from '../../db/src'
+import {
+  IR,
+  createCollection,
+  createLiveQueryCollection,
+  eq,
+  whenSyncAccepted,
+} from '../../db/src'
 import { createDeferred } from '../../db/src/deferred'
 import { BetterSqlite3SQLiteDriver } from '../../node-db-sqlite-persistence/src/node-driver'
 import {
   createElectronSQLitePersistence,
   exposeElectronSQLitePersistence,
 } from '../src'
+import { ElectronCollectionCoordinator } from '../src/electron-coordinator'
 import {
   createElectronRuntimeBridgeInvoke,
   isElectronFullE2EEnabled,
@@ -51,9 +58,8 @@ import type {
  * reply, which is the only part of the IPC transport that this law depends
  * on. With `TANSTACK_DB_ELECTRON_E2E_ALL=1`, each envelope instead crosses a
  * real Electron main process through the runtime bridge. The histories cover
- * a renderer without a coordinator; a follower renderer routes upstream
- * demand through the shared broadcast coordinator, which the persisted
- * oracle's follower remote-demand lane owns.
+ * a renderer without a coordinator. A second lane below runs a follower and
+ * an owner renderer with coordinators.
  */
 
 type Row = { id: string; group: string }
@@ -389,5 +395,214 @@ describe(`Electron renderer initial readiness follows the composed load`, () => 
       )
     },
     historyTimeout,
+  )
+})
+
+/**
+ * # Does a follower renderer settle with its owner's rows?
+ *
+ * Two renderers share one main process and SQLite file, each with its own
+ * ElectronCollectionCoordinator over Node's BroadcastChannel and Web Locks.
+ * The first renderer owns the Collection and runs the source; the second is a
+ * follower and routes its demand to the owner. Law 7 owes the follower: its
+ * load, and its query's first ready, settle only once the owner's rows are
+ * visible in the follower, and they reject, with the follower source in
+ * error, if applying the owner's commit fails here.
+ *
+ * The model knows only whether the owner's commit applies in the follower.
+ * The grammar crosses that outcome with the consumer: a live query over the
+ * demanded row, or the follower's load. The driver holds the follower's IPC
+ * `loadSubset` reply that carries the owner's row, which is the follower's
+ * read of the owner's commit, and fails it for the `fails` histories. The
+ * checkpoint is after the owner's reply reached the follower while that read
+ * is held: the consumer has not settled. The browser per-collection oracle
+ * owns the queued placement and the Query Collection source across real tabs.
+ */
+type CoordinatedRendererHistory = {
+  apply: `ok` | `fails`
+  consumer: `live-query` | `load`
+}
+
+function expectedCoordinatedRenderer(history: CoordinatedRendererHistory) {
+  const applied = history.apply === `ok`
+  return {
+    settledWhileApplyHeld: false,
+    outcome: applied ? `fulfilled` : `rejected`,
+    rows: applied ? [`remote`] : undefined,
+    source: applied ? `ready` : `error`,
+  }
+}
+
+function coordinatedRenderer(options: {
+  invoke: ElectronPersistenceInvoke
+  dbName: string
+  collectionId: string
+  gateRead?: (response: unknown) => Promise<void>
+}) {
+  const coordinator = new ElectronCollectionCoordinator({
+    dbName: options.dbName,
+  })
+  onTestFinished(() => coordinator.dispose())
+  const trace: Array<string> = []
+  const ensure = coordinator.requestEnsureRemoteSubset.bind(coordinator)
+  coordinator.requestEnsureRemoteSubset = (collectionId, subset) => {
+    trace.push(`ensure`)
+    return ensure(collectionId, subset).finally(() =>
+      trace.push(`ensure-settled`),
+    )
+  }
+  const persistence = createElectronSQLitePersistence({
+    timeoutMs: isElectronFullE2EEnabled() ? 90_000 : undefined,
+    coordinator,
+    invoke: async (channel, request) => {
+      const response = await options.invoke(channel, request)
+      if (request.method === `loadSubset`) await options.gateRead?.(response)
+      return response
+    },
+  })
+  const delivered = new Set<string>()
+  const collection = createCollection(
+    persistedCollectionOptions<Row, string>({
+      id: options.collectionId,
+      getKey: (row) => row.id,
+      persistence,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          markReady()
+          return {
+            loadSubset: async () => {
+              // Deliver the owner's upstream row once, as a real source does.
+              if (delivered.has(`remote`)) return
+              delivered.add(`remote`)
+              trace.push(`upstream`)
+              begin()
+              write({ type: `insert`, value: { id: `remote`, group: `a` } })
+              await whenSyncAccepted(commit())
+            },
+          }
+        },
+      },
+    }),
+  )
+  onTestFinished(() => collection.cleanup())
+  return { coordinator, collection, trace }
+}
+
+async function observeCoordinatedRendererHistory(
+  history: CoordinatedRendererHistory,
+) {
+  quietLogs()
+  const directory = mkdtempSync(join(tmpdir(), `electron-follower-`))
+  onTestFinished(() => rmSync(directory, { recursive: true, force: true }))
+  const invoke = mainProcessInvoke(join(directory, `state.sqlite`))
+  const dbName = `electron-follower-${Math.random().toString(36).slice(2)}`
+  const collectionId = `electron-follower-items`
+  const owner = coordinatedRenderer({ invoke, dbName, collectionId })
+  owner.collection.startSyncImmediate()
+  await owner.collection.stateWhenReady()
+
+  const applyHeld = createDeferred<void>()
+  let applyReached = false
+  let gate = false
+  const follower = coordinatedRenderer({
+    invoke,
+    dbName,
+    collectionId,
+    gateRead: async (response) => {
+      if (!gate || !JSON.stringify(response).includes(`remote`)) return
+      gate = false
+      applyReached = true
+      await applyHeld.promise
+      if (history.apply === `fails`) throw new Error(`follower read failed`)
+    },
+  })
+  onTestFinished(() => applyHeld.resolve())
+  follower.collection.startSyncImmediate()
+  await follower.collection.stateWhenReady()
+  gate = true
+
+  let settledAt: { rows: Array<string> } | undefined
+  let outcome: Promise<`fulfilled` | `rejected`>
+  if (history.consumer === `live-query`) {
+    const query = createLiveQueryCollection((q) =>
+      q
+        .from({ row: follower.collection })
+        .where(({ row }) => eq(row.id, `remote`)),
+    )
+    onTestFinished(() => query.cleanup())
+    query.onFirstReady(() => {
+      settledAt = { rows: query.toArray.map((row: Row) => row.id).sort() }
+    })
+    outcome = query.preload().then(
+      () => `fulfilled` as const,
+      () => `rejected` as const,
+    )
+  } else {
+    outcome = Promise.resolve(
+      follower.collection._sync.loadSubset({
+        where: new IR.Func(`eq`, [
+          new IR.PropRef([`id`]),
+          new IR.Value(`remote`),
+        ]),
+      }),
+    ).then(
+      () => {
+        settledAt = {
+          rows: follower.collection.has(`remote`) ? [`remote`] : [],
+        }
+        return `fulfilled` as const
+      },
+      () => `rejected` as const,
+    )
+  }
+
+  await vi.waitFor(
+    () => {
+      expect(applyReached).toBe(true)
+      expect(follower.trace).toContain(`ensure-settled`)
+    },
+    { timeout: isElectronFullE2EEnabled() ? 60_000 : 8_000 },
+  )
+  for (let turn = 0; turn < 20; turn++)
+    await new Promise((resolve) => setImmediate(resolve))
+  const settledWhileApplyHeld = settledAt !== undefined
+  // The topology this lane claims: the owner loads upstream, and the
+  // follower routes its demand instead of running its own source.
+  expect(owner.trace).toContain(`upstream`)
+  expect(follower.trace).not.toContain(`upstream`)
+  applyHeld.resolve()
+  const settled = await outcome
+  await vi.waitFor(
+    () =>
+      expect(follower.collection.status).toBe(
+        expectedCoordinatedRenderer(history).source,
+      ),
+    settleTimeout,
+  )
+  return {
+    settledWhileApplyHeld,
+    outcome: settled,
+    rows: settledAt?.rows,
+    source: follower.collection.status,
+  }
+}
+
+describe(`Electron follower renderer settles with its owner's rows`, () => {
+  it.each(
+    ([`ok`, `fails`] as const).flatMap((apply) =>
+      ([`live-query`, `load`] as const).map((consumer) => ({
+        apply,
+        consumer,
+      })),
+    ),
+  )(
+    `matches the model: apply $apply, consumer $consumer`,
+    async (history) => {
+      expect(await observeCoordinatedRendererHistory(history)).toEqual(
+        expectedCoordinatedRenderer(history),
+      )
+    },
+    isElectronFullE2EEnabled() ? 180_000 : 20_000,
   )
 })
