@@ -17,22 +17,7 @@ export function refreshMap<K, V, O>(
   input: IStreamBuilder<KeyValue<K, V>>,
   revision: MutableListRevision,
   project: (entry: KeyValue<K, V>) => O | undefined,
-  equivalent?: (previous: O, next: O) => boolean,
 ): IStreamBuilder<O> {
-  const priorOutput = new WeakMap<object, O>()
-  const projectRetained = (entry: KeyValue<K, V>): O | undefined => {
-    const next = project(entry)
-    if (next === undefined) {
-      priorOutput.delete(entry)
-      return undefined
-    }
-    const previous = priorOutput.get(entry)
-    if (previous !== undefined && equivalent?.(previous, next)) {
-      return previous
-    }
-    priorOutput.set(entry, next)
-    return next
-  }
   const candidates = input.pipe(
     map((entry) => [0, entry] as KeyValue<number, KeyValue<K, V>>),
   )
@@ -51,7 +36,7 @@ export function refreshMap<K, V, O>(
     reduce((values) =>
       values.flatMap(([entry, multiplicity]) => {
         if (multiplicity <= 0) return []
-        const output = projectRetained(entry)
+        const output = project(entry)
         return output === undefined
           ? []
           : [[output, multiplicity] as [O, number]]

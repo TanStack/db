@@ -373,7 +373,6 @@ export interface CompilationResult {
 }
 
 const valueIdentitiesByCache = new WeakMap<QueryCache, ValueIdentity>()
-const unfilteredQueryCaches = new WeakSet<QueryCache>()
 const mutableListRevisions = new WeakMap<QueryCache, MutableListRevision>()
 
 function getCompilationValueIdentity(cache: QueryCache): ValueIdentity {
@@ -547,7 +546,6 @@ export function compileQuery(...args: CompileQueryArgs): CompilationResult {
   const cache = dynamic ? new WeakMap() : (args[8] ?? new WeakMap())
   args[8] = cache
   if (dynamic) {
-    unfilteredQueryCaches.add(cache)
     const lists = [...mutableLists]
     let snapshots = lists.map(snapshotList)
     let revision = 0
@@ -579,11 +577,7 @@ export function compileQuery(...args: CompileQueryArgs): CompilationResult {
       ),
     )
   }
-  try {
-    return compileQueryInternal(args, false)
-  } finally {
-    unfilteredQueryCaches.delete(cache)
-  }
+  return compileQueryInternal(args, false)
 }
 
 function compileQueryInternal(
@@ -628,7 +622,7 @@ function compileQueryInternal(
 
   // Optimize the query before compilation
   const { optimizedQuery, sourceWhereClauses: aliasWhereClauses } =
-    unfilteredQueryCaches.has(cache)
+    mutableListRevisions.has(cache)
       ? {
           optimizedQuery: rawQuery,
           sourceWhereClauses: new Map<string, BasicExpression<boolean>>(),
@@ -808,7 +802,7 @@ function compileQueryInternal(
       joinsParentDirectly,
       valueIdentity,
       parentKeyStream,
-      unfilteredQueryCaches.has(cache),
+      mutableListRevisions.has(cache),
       mutableRevision,
     )
   }
@@ -1037,7 +1031,7 @@ function compileQueryInternal(
 
       // Every child source event can refresh a mutable membership list, even
       // when the child does not match the current parent route.
-      if (!unfilteredQueryCaches.has(cache) && lazyTargets.length > 0) {
+      if (!mutableListRevisions.has(cache) && lazyTargets.length > 0) {
         // 1. Mark child source as lazy so CollectionSubscriber skips initial full load
         for (const target of lazyTargets) {
           lazySources.add(target.sourceId)
@@ -1216,7 +1210,7 @@ function compileQueryInternal(
       valueIdentity,
       collectionId: mainCollectionId,
       sourceWhereClauses,
-      hasCapturedMutableList: unfilteredQueryCaches.has(cache),
+      hasCapturedMutableList: mutableListRevisions.has(cache),
       aliasToCollectionId,
       aliasRemapping,
     })
@@ -1495,7 +1489,7 @@ function compileQueryInternal(
       resultLimit,
       query.offset,
       includesGroupKeyFn,
-      unfilteredQueryCaches.has(cache),
+      mutableListRevisions.has(cache),
       query.orderBy?.some(({ expression }) => hasMutableInList(expression))
         ? mutableRevision
         : undefined,
@@ -1514,7 +1508,7 @@ function compileQueryInternal(
     pipeline: resultPipeline,
     valueIdentity,
     sourceWhereClauses,
-    hasCapturedMutableList: unfilteredQueryCaches.has(cache),
+    hasCapturedMutableList: mutableListRevisions.has(cache),
     aliasToCollectionId,
     aliasRemapping,
     includes: includesResults.length > 0 ? includesResults : undefined,

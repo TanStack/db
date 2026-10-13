@@ -13,13 +13,6 @@ import {
 import type { CompareOptions } from '../query/builder/types.js'
 import type { IndexOperation } from './base-index.js'
 
-// Map collapses signed zero, while a user comparator may order them apart.
-const NEGATIVE_ZERO_ORDER_KEY = Symbol(`negative zero order key`)
-
-function orderedBucketKey(value: unknown): unknown {
-  return Object.is(value, -0) ? NEGATIVE_ZERO_ORDER_KEY : value
-}
-
 /**
  * Options for range queries
  */
@@ -65,7 +58,8 @@ export class BasicIndex<
   // Equality and comparator positions are independent: a custom comparator
   // may distinguish values that have one exact query-equality key.
   private sortedValues: Array<any> = []
-  private orderedBuckets = new Map<unknown, Map<TKey, unknown>>()
+  // Each bucket stays at the same array position as its order representative.
+  private orderedBuckets: Array<Map<TKey, unknown>> = []
   // Set of all indexed PKs
   private indexedKeys = new Set<TKey>()
 
@@ -112,15 +106,10 @@ export class BasicIndex<
       insertIdx < this.sortedValues.length &&
       this.compareFn(this.sortedValues[insertIdx], orderValue) === 0
     ) {
-      this.orderedBuckets
-        .get(orderedBucketKey(this.sortedValues[insertIdx]))!
-        .set(key, orderValue)
+      this.orderedBuckets[insertIdx]!.set(key, orderValue)
     } else {
       this.sortedValues.splice(insertIdx, 0, orderValue)
-      this.orderedBuckets.set(
-        orderedBucketKey(orderValue),
-        new Map([[key, orderValue]]),
-      )
+      this.orderedBuckets.splice(insertIdx, 0, new Map([[key, orderValue]]))
     }
   }
 
@@ -170,11 +159,11 @@ export class BasicIndex<
     if (index >= this.sortedValues.length) return
     const representative = this.sortedValues[index]
     if (this.compareFn(representative, orderValue) !== 0) return
-    const members = this.orderedBuckets.get(orderedBucketKey(representative))
-    if (!members?.has(key)) return
+    const members = this.orderedBuckets[index]!
+    if (!members.has(key)) return
     if (members.size === 1) {
       this.sortedValues.splice(index, 1)
-      this.orderedBuckets.delete(orderedBucketKey(representative))
+      this.orderedBuckets.splice(index, 1)
       return
     }
     // Keep a live representative when its row leaves the comparator group.
@@ -188,8 +177,6 @@ export class BasicIndex<
       if (index + 1 < this.sortedValues.length)
         this.compareFn(successor, this.sortedValues[index + 1])
       this.sortedValues[index] = successor
-      this.orderedBuckets.delete(orderedBucketKey(representative))
-      this.orderedBuckets.set(orderedBucketKey(successor), members)
     }
     members.delete(key)
   }
@@ -270,15 +257,10 @@ export class BasicIndex<
         this.sortedValues.length > 0 &&
         this.compareFn(representative, entry.orderValue) === 0
       ) {
-        this.orderedBuckets
-          .get(orderedBucketKey(representative))!
-          .set(entry.key, entry.orderValue)
+        this.orderedBuckets.at(-1)!.set(entry.key, entry.orderValue)
       } else {
         this.sortedValues.push(entry.orderValue)
-        this.orderedBuckets.set(
-          orderedBucketKey(entry.orderValue),
-          new Map([[entry.key, entry.orderValue]]),
-        )
+        this.orderedBuckets.push(new Map([[entry.key, entry.orderValue]]))
       }
     }
   }
@@ -289,7 +271,7 @@ export class BasicIndex<
   clear(): void {
     this.valueMap.clear()
     this.sortedValues = []
-    this.orderedBuckets.clear()
+    this.orderedBuckets = []
     this.indexedKeys.clear()
     this.clearRangeValues()
   }
@@ -401,9 +383,7 @@ export class BasicIndex<
 
     // Collect all keys in range
     for (let i = startIdx; i < endIdx; i++) {
-      for (const key of this.orderedBuckets
-        .get(orderedBucketKey(this.sortedValues[i]))!
-        .keys()) {
+      for (const key of this.orderedBuckets[i]!.keys()) {
         result.add(key)
       }
     }
@@ -490,9 +470,7 @@ export class BasicIndex<
       const groupValue = this.sortedValues[index]
       const groupKeys: Array<TKey> = []
       do {
-        for (const key of this.orderedBuckets
-          .get(orderedBucketKey(this.sortedValues[index]))
-          ?.keys() ?? []) {
+        for (const key of this.orderedBuckets[index]!.keys()) {
           groupKeys.push(key)
         }
         index += step

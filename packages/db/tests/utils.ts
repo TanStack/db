@@ -599,9 +599,13 @@ export function withExpectedRejection<T>(
 }
 
 type IndexInternals<TKey> = { indexedKeys: Set<TKey> } & (
-  | { sortedValues: Array<unknown>; valueMap: Map<unknown, Set<TKey>> }
   | {
-      valueMap: Map<unknown, { keys: Set<TKey> }>
+      sortedValues: Array<unknown>
+      valueMap: Map<unknown, Set<TKey>>
+      orderedBuckets: Array<Map<TKey, unknown>>
+    }
+  | {
+      valueMap: Map<unknown, Set<TKey>>
       orderedEntries: {
         size: number
         minKey: () => unknown
@@ -610,7 +614,10 @@ type IndexInternals<TKey> = { indexedKeys: Set<TKey> } & (
           low: unknown,
           high: unknown,
           includeHigh: boolean,
-          onFound: (key: unknown, bucket: { keys: Set<TKey> }) => void,
+          onFound: (
+            key: unknown,
+            bucket: { values: Map<TKey, unknown> },
+          ) => void,
         ) => void
       }
     }
@@ -636,8 +643,8 @@ export function valueMapData<TKey>(index: object): Map<unknown, Set<TKey>> {
   const [internals] = indexInternals<TKey>(index)
   if (`sortedValues` in internals) return internals.valueMap
   const result = new Map<unknown, Set<TKey>>()
-  for (const [key, bucket] of internals.valueMap) {
-    result.set(denormalizeUndefined(key), bucket.keys)
+  for (const [key, keys] of internals.valueMap) {
+    result.set(denormalizeUndefined(key), keys)
   }
   return result
 }
@@ -649,16 +656,18 @@ export function orderedEntriesArray<TKey>(
   const [internals, reversed] = indexInternals<TKey>(index)
   let entries: Array<[unknown, Set<TKey>]>
   if (`sortedValues` in internals) {
-    entries = internals.sortedValues.map((value) => [
+    if (internals.sortedValues.length !== internals.orderedBuckets.length)
+      throw new Error(`BasicIndex order buckets are misaligned`)
+    entries = internals.sortedValues.map((value, position) => [
       value,
-      internals.valueMap.get(value) ?? new Set(),
+      new Set(internals.orderedBuckets[position]!.keys()),
     ])
   } else {
     const tree = internals.orderedEntries
     entries = []
     if (tree.size > 0) {
       tree.forRange(tree.minKey(), tree.maxKey(), true, (key, bucket) => {
-        entries.push([denormalizeUndefined(key), bucket.keys])
+        entries.push([denormalizeUndefined(key), new Set(bucket.values.keys())])
       })
     }
   }
