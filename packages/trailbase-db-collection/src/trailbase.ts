@@ -264,7 +264,7 @@ export function trailBaseCollectionOptions<
           for (let i = 0; i < Math.min(length, remaining); ++i) {
             write({
               type: `insert`,
-              value: parse(response.records[i]),
+              value: parse(response.records[i]!),
             })
           }
 
@@ -287,7 +287,7 @@ export function trailBaseCollectionOptions<
               (opts.subscription === undefined || lastKey !== undefined)
             ) {
               cursors.set(
-                getKey(parse(response.records.at(-1))),
+                getKey(parse(response.records.at(-1)!)),
                 response.cursor,
               )
             }
