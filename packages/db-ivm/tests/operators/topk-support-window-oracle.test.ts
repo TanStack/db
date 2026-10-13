@@ -19,8 +19,8 @@ import { TopKRelation } from './topk-relation-oracle.js'
  * calibrate that checker without exercising production.
  *
  * The grammar covers five finite scalar keys, one fixed payload per key,
- * support 0..3, and offset/limit 0..6. Every input turn and supported window
- * move has a graph-run checkpoint for output rows and reported window size.
+ * support 0..3, and offset/limit 0..6. Every input turn and window move has
+ * a graph-run checkpoint for output rows and reported window size.
  * The pinned 0/1/2 support crossing and boundary history distinguish presence
  * from raw multiplicity and inclusive from displaced window cuts. Row replacements,
  * multiple groups, negative net support, and downstream lazy acquisition are
@@ -121,7 +121,7 @@ describe.each([
           (steps) => {
             const graph = new D2()
             const input = graph.newInput<[Key, Row]>()
-            const relation = new TopKRelation<Key, string>()
+            const relation = new TopKRelation<Key>()
             const counts = new Map<Key, number>()
             let window = { offset: 0, limit: 3 }
             let size!: () => number
@@ -229,7 +229,7 @@ it.each([-2, 2])(
   `rejects excess signed weight %s across a moved window`,
   (weight) => {
     const check = (corrupt: boolean) => {
-      const relation = new TopKRelation<Key, string>()
+      const relation = new TopKRelation<Key>()
       relation.add([[[1, [{ id: 9, value: `tie` }, `a0`]], 1]])
       relation.expectRows([[1, 9, `tie`]])
       relation.add([

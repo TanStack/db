@@ -52,7 +52,6 @@ input.sendData(
 // Process the data
 graph.run()
 
-// Output will show:
-// 6 (from 1 + 5)
-// 8 (from 3 + 5)
+// Output will show [[6, 1], [8, 1]]: 6 (from 1 + 5) and 8 (from 3 + 5),
+// each with a multiplicity of 1
 ```

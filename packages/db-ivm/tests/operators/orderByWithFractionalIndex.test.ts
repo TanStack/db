@@ -476,7 +476,7 @@ describe(`Operators`, () => {
     })
   })
 
-  describe(`OrderByWithFractionalIndex operator with array`, () => {
+  describe(`OrderByWithFractionalIndex window moves`, () => {
     test(`should support moving orderBy window past current window using setWindowFn callback`, () => {
       const graph = new D2()
       const input = graph.newInput<

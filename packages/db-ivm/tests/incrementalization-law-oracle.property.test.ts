@@ -435,7 +435,7 @@ function firstTwoPerParity(input: Weighted<Keyed>): Weighted<Keyed> {
 
 describe(`DBSP incrementalization laws`, () => {
   it.each(generatedCampaigns)(
-    `checks consolidate and reduce against full recomputation ($name campaign)`,
+    `checks consolidate, reduce, and groupBy against full recomputation ($name campaign)`,
     async (campaign) => {
       await fc.assert(
         fc.asyncProperty(
@@ -878,7 +878,12 @@ describe(`DBSP incrementalization laws`, () => {
         ),
       evaluate: (input) => firstThree(input).slice(0, 2),
     })
-    expect(promotion.atomicCheckpoints).toBe(3)
+    expect(promotion).toEqual({
+      atomicCheckpoints: 3,
+      atomicDeliveries: 3,
+      splitCheckpoints: 3,
+      splitDeliveries: 4,
+    })
   })
 
   it(`rejects invalid negative and duplicate-key input states`, () => {
@@ -994,6 +999,26 @@ describe(`DBSP incrementalization laws`, () => {
         evaluate: (input) => firstThree(input).slice(0, 2),
       }),
     ).toThrow(/output delta diverged at checkpoint 0/)
+    // On the promotion history, the same wrong limit agrees with the model
+    // until the third value arrives past the boundary.
+    expect(() =>
+      assertUnaryIncrementalization({
+        name: `wrong promotion limit fault`,
+        initial: [
+          [[0, 1] as Keyed, 1],
+          [[1, 2] as Keyed, 1],
+        ],
+        batches: [[[[2, 3] as Keyed, 1]], [[[0, 1] as Keyed, -1]]],
+        inputPolicy: keyedPolicy,
+        outputPolicy: keyedPolicy,
+        build: (input) =>
+          input.pipe(
+            orderByWithFractionalIndex((rank) => rank, { limit: 3 }),
+            withoutIndex(),
+          ),
+        evaluate: (input) => firstThree(input).slice(0, 2),
+      }),
+    ).toThrow(/output delta diverged at checkpoint 1/)
 
     const truthinessMinimum = {
       preMap: ([, value]: Keyed): number | undefined => value,

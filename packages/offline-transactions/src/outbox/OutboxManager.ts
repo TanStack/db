@@ -80,42 +80,40 @@ export class OutboxManager {
     const read = { revision: this.removalRevision }
     this.activeReads.add(read)
     try {
-      {
-        const keys = await this.storage.keys()
-        const transactionKeys = keys.filter((key) =>
-          key.startsWith(this.keyPrefix),
-        )
+      const keys = await this.storage.keys()
+      const transactionKeys = keys.filter((key) =>
+        key.startsWith(this.keyPrefix),
+      )
 
-        const transactions: Array<OfflineTransaction> = []
+      const transactions: Array<OfflineTransaction> = []
 
-        for (const key of transactionKeys) {
-          const data = await this.storage.get(key)
-          if (data) {
-            try {
-              const transaction = this.serializer.deserialize(data)
-              transactions.push(transaction)
-            } catch (error) {
-              if (error instanceof MissingTemporalConstructorError) {
-                error.message = `transaction ${key.slice(this.keyPrefix.length)}: ${error.message}`
-                throw error
-              }
-              console.warn(
-                `Failed to deserialize transaction from key ${key}:`,
-                error,
-              )
+      for (const key of transactionKeys) {
+        const data = await this.storage.get(key)
+        if (data) {
+          try {
+            const transaction = this.serializer.deserialize(data)
+            transactions.push(transaction)
+          } catch (error) {
+            if (error instanceof MissingTemporalConstructorError) {
+              error.message = `transaction ${key.slice(this.keyPrefix.length)}: ${error.message}`
+              throw error
             }
+            console.warn(
+              `Failed to deserialize transaction from key ${key}:`,
+              error,
+            )
           }
         }
-
-        const currentTransactions = transactions
-          .filter(
-            ({ id }) => (this.removedAtRevision.get(id) ?? 0) <= read.revision,
-          )
-          .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
-        // Keep the read registered until replay admission completes. A durable
-        // removal cannot land between filtering and this synchronous consumer.
-        return consume(currentTransactions)
       }
+
+      const currentTransactions = transactions
+        .filter(
+          ({ id }) => (this.removedAtRevision.get(id) ?? 0) <= read.revision,
+        )
+        .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+      // Keep the read registered until replay admission completes. A durable
+      // removal cannot land between filtering and this synchronous consumer.
+      return await consume(currentTransactions)
     } finally {
       this.activeReads.delete(read)
       this.pruneRemovalHistory()
