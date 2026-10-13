@@ -24,8 +24,8 @@ were proposed extensions, then withdrawn by the maintainer. This PR does not
 promise behavior after callers modify standard data objects in place, unsigned
 byte ordering, or special handling for malformed Temporal lookalikes. The
 [deferred record](pr-2116-deferred-findings.md) keeps valid Temporal admission,
-mixed-kind query order, and earlier-branch observations separate from the
-confirmed fixes above.
+mixed-kind query order, the confirmed pre-existing indexed Temporal exception
+gap, and earlier-branch observations separate from the confirmed fixes above.
 
 The repeatable workflow is: freeze source assertions in a loss ledger; name
 the receiving law and its limits; obtain a baseline failure before production
@@ -38,12 +38,74 @@ supports only its legal histories, paths, and observations.
 ## Production-code weight
 
 Against the recorded `origin/main` baseline, the source diff under
-`packages/db/src` adds 205 lines and removes 222, for **17 fewer production
+`packages/db/src` adds 360 lines and removes 536, for **176 fewer production
 lines**. The built DB ESM entry bundled with esbuild (`bundle`, `minify`,
-`format: esm`, `platform: neutral`, `NODE_ENV=production`; DB IVM, pacer-lite,
-and standard-schema external) is 334,795 bytes / 100,227 gzip at baseline and
-335,754 bytes / 100,551 gzip for this change. That is **959 more minified
-bytes / 324 more gzip bytes**. The source-line budget is negative; the bundle
-budget is still positive. The remaining runtime addition is concentrated in
-distinct index-storage comparison and exact Temporal keys, which the bounded
-fixes above require. Do not treat source-line reduction as a bundle-size win.
+`format: esm`, `platform: neutral`, `target: es2020`,
+`NODE_ENV=production`; DB IVM, pacer-lite, and standard-schema external) is
+335,613 bytes / 100,492 gzip at baseline and 336,504 bytes / 100,889 gzip at
+executable head `905b93323`. That is **891 more minified bytes / 397 more gzip
+bytes**. Both outputs use Node's `zlib.gzipSync`. The source-line budget is
+negative; the consumer-bundle budget remains positive.
+
+## Exact-head hostile review of the index rewrite
+
+The executable revision is `905b93323` (following `2f852dcd1`); the baseline
+is `origin/main` `bbbf017ef5b3884515295a4225faacdfd814499e`. The rewrite
+replaces BTree's per-exact ordered entries with comparator groups while keeping
+exact membership separate. Its binary ownership history compares a source Map
+with complete forward and reverse index reads. An intermediate PR rewrite lost
+a surviving byte owner after a fresh equal-content removal. The published
+parent `78bd4946b` passes the six final binary cases, so that particular RED
+is **not** evidence of a pre-existing defect.
+
+The hostile reviewer ran two wrong-output controls against the rewritten
+BTree. One suppressed a surviving short-byte key after equal-content removal;
+the oracle failed at the ordered-read length comparison. A second suppressed
+one key after inserting two 8193-byte values that differ only in their last
+byte. That mutant survived the first version of the binary lane because the
+wide-byte case checked exact lookup only. The final oracle adds full forward
+and reverse key conservation there; the same mutant then failed at that
+comparison. The unmodified six cases passed. These controls are output
+mutants, not claims that `origin/main` failed.
+
+The final BasicIndex retains the original stable byte value in its sorted
+array and reuses the normalization cache populated at admission. A direct
+offset-view and Buffer probe preserved exact membership and ordered keys after
+fresh equal-content removal. Callers who edit the retained byte array in
+place have no promise. This removes a redundant byte copy without changing
+the accepted immutable-value law. Duplicate-heavy insert and removal timings
+were near parity in the bounded A/B probe. An attempted merge of Array and
+ordinary-object index kinds was discarded: it produced a strict three-value
+comparator cycle, so the separate kind remains.
+
+The fresh review also reconstructed a public scan/index mismatch for mixed
+`PlainDate`/`PlainDateTime` and for two `PlainMonthDay` values. The scan throws
+as changelog #1519 requires, while either index returns rows. It reproduces
+on clean `origin/main` and this head. The [deferred record](pr-2116-deferred-findings.md)
+assigns the exception witness and ordered-query repair to the Temporal owner;
+the bounded ZonedDateTime and time-only Duration claims above do not include
+this case.
+
+| Guide requirement | Exact-head result |
+| --- | --- |
+| ORC-001 contract and limits | Transfer ledgers trace the retired assertions; changelog #1519 and the surviving index interface give the separate Temporal and key-conservation laws. The coverage map names excluded mixed-kind order, mutation of standard values, and wider histories. |
+| ORC-002 independent judgment | Source Maps, supplied Duration fields, and supplied Temporal instants predict results without importing index grouping, normalization, or comparator classifications. |
+| ORC-003 literate responsibilities | The owners state each law before mechanics and explain the model, legal actions, direct or public production path, observation, and checkpoint beside the code. |
+| ORC-004 generated grammar | The transfer ledgers account for reconstruction, ablation, bounded ranges, and excluded histories of the existing generated index lanes. The new binary lane is a fixed history, so the generated-grammar trigger does not apply to that lane. |
+| ORC-005 path and observation | Complete returned arrays expose missing or duplicate keys in both directions; exact lookups expose byte-content errors. Collection reads and index spies establish the named public routes. No earlier-publication information claim is made. |
+| ORC-006 checker calibration | Short-byte and 8193-byte wrong-output mutants failed at ordered-read assertions; the wide mutant first survived, motivating the final assertion. Existing transfer ledgers retain the other hostile controls. |
+| ORC-007 fixed and random replay | The important generated index properties retain their documented fixed and seedless campaigns and direct seed/path replay. The fixed binary examples do not trigger this requirement. |
+| ORC-008 model state | The source Map retains key ownership because a later delete or replacement can distinguish live rows; the binary fixed history adds no production-shaped index state. |
+| ORC-009 vocabulary | Model puts, deletes, source keys, and ordered reads map to direct index actions and public observations. Comparator groups remain production storage, not reference-model state. |
+| ORC-010 failure and cleanup | Existing generated drivers retain their replay context and failure cause; public Collection witnesses clean up in `finally`. The fixed direct binary cases acquire no external resource. |
+| ORC-011 second formulation | No plausible fault shared by the source Map and index ownership model was identified inside the bounded transfer. The separately confirmed mixed-Temporal public error is recorded as an unresolved neighboring law, rather than inferred from direct index equality. |
+| ORC-012 review record | This versioned record identifies the executable head, baseline, mutant outcomes, tests, size, and unresolved public path. |
+| ORC-013 boundary witness | Nullish boundary controls, opposing 9ns/10ns display and instant order, adjacent large-epoch nanoseconds, and Duration display ties reject nearby wrong rules at their named checkpoints. |
+| ORC-014 controlled premise | The controlled Collection fixtures support only their named Collection observations; no real-provider behavior is claimed, so the cross-provider handoff trigger does not apply. |
+
+The DB source suite passed 13,192 tests in 282 files before the no-copy
+follow-up. After that follow-up, the affected index and comparison files passed
+623 tests, the built-package lane passed 291 tests, the minified DB check
+passed, and the DB source TypeScript and affected-file lint checks passed.
+Those runs cover the changed immutable-value paths; they do not establish
+arbitrary later Collection histories or the deferred mixed-Temporal error.
