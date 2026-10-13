@@ -296,9 +296,9 @@ type OwnershipFixtureOptions = {
   persistedGcTime?: number
   metadataRecorder?: MetadataRecorder
   setupMetadata?: (metadata: SyncMetadataApi<string | number>) => void
-  scanPersistedRows?: (options?: SyncPersistenceScanOptions) => Promise<
-    Array<{ key: string | number; value: Item; metadata?: unknown }>
-  >
+  scanPersistedRows?: (
+    options?: SyncPersistenceScanOptions,
+  ) => Promise<Array<{ key: string | number; value: Item; metadata?: unknown }>>
 }
 
 type OwnershipFixture = {
@@ -2381,9 +2381,8 @@ describe(`query collection ownership lifecycle`, () => {
       options?.metadataOnly ? Promise.resolve([]) : pendingListScan.promise,
     )
     const fullScanCount = () =>
-      scanPersistedRows.mock.calls.filter(
-        ([options]) => !options?.metadataOnly,
-      ).length
+      scanPersistedRows.mock.calls.filter(([options]) => !options?.metadataOnly)
+        .length
     const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
     const { collection } = createOwnershipFixture({
       id,

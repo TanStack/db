@@ -1212,9 +1212,10 @@ export function queryCollectionOptions(
     let persistedOwnerScan: Promise<void> | undefined
 
     const scanPersistedOwnerHashes = (): Promise<void> => {
-      persistedOwnerScan ??= persistence!.scanPersistedRows({
-        metadataOnly: true,
-      })
+      persistedOwnerScan ??= persistence!
+        .scanPersistedRows({
+          metadataOnly: true,
+        })
         .then((rows) => {
           const hashes = new Set<string>()
           for (const row of rows) {
