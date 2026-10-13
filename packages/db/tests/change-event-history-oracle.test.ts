@@ -1,3 +1,4 @@
+import { runInNewContext } from 'node:vm'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it, vi } from 'vitest'
 import {
@@ -928,16 +929,18 @@ describe(`native-byte change publication`, () => {
         const index = collection.createIndex((row) => row.value, {
           indexType: IndexType,
         })
-        const messages: Array<{
-          type: string
-          key: string
-          previous: Array<number> | undefined
-          value: Array<number>
-        }> = []
+        const batches: Array<
+          Array<{
+            type: string
+            key: string
+            previous: Array<number> | undefined
+            value: Array<number>
+          }>
+        > = []
         const subscription = collection.subscribeChanges(
           (changes) => {
-            for (const change of changes) {
-              messages.push({
+            batches.push(
+              changes.map((change) => ({
                 type: change.type,
                 key: change.key,
                 previous:
@@ -945,13 +948,13 @@ describe(`native-byte change publication`, () => {
                     ? bytes(change.previousValue!.value)
                     : undefined,
                 value: bytes(change.value.value),
-              })
-            }
+              })),
+            )
           },
           { includeInitialState: false },
         )
         unsubscribe = () => subscription.unsubscribe()
-        expect(messages).toEqual([])
+        expect(batches).toEqual([])
 
         sync.begin()
         sync.write({ type: `update`, value: { id: `a`, value: after } })
@@ -959,8 +962,8 @@ describe(`native-byte change publication`, () => {
         expect(bytes(collection.get(`a`)!.value)).toEqual([2])
         expect(index.equalityLookup(Uint8Array.of(1))).toEqual(new Set())
         expect(index.equalityLookup(Uint8Array.of(2))).toEqual(new Set([`a`]))
-        expect(messages).toEqual([
-          { type: `update`, key: `a`, previous: [1], value: [2] },
+        expect(batches).toEqual([
+          [{ type: `update`, key: `a`, previous: [1], value: [2] }],
         ])
 
         sync.begin()
@@ -968,7 +971,116 @@ describe(`native-byte change publication`, () => {
         await sync.commit()
         expect(bytes(collection.get(`a`)!.value)).toEqual([2])
         expect(index.equalityLookup(Uint8Array.of(2))).toEqual(new Set([`a`]))
-        expect(messages).toHaveLength(1)
+        expect(batches).toEqual([
+          [{ type: `update`, key: `a`, previous: [1], value: [2] }],
+        ])
+      }, [() => unsubscribe?.(), () => cleanup?.()])
+    },
+  )
+})
+
+describe(`opaque DataView change publication`, () => {
+  /**
+   * A keyless DataView's bytes live outside enumerable row properties, so two
+   * distinct keyless DataViews remain distinct even when their bytes match.
+   * One sync history crosses from a typed array to a foreign DataView, then
+   * replaces that DataView with a fresh foreign one. The independent expected
+   * sequence is two updates. After each commit, public rows, exact index
+   * lookup, and each complete subscriber callback must agree on that step.
+   */
+  it.each([
+    [`BasicIndex`, BasicIndex],
+    [`BTreeIndex`, BTreeIndex],
+  ] as const)(
+    `publishes foreign DataView replacements with %s`,
+    async (name, IndexType) => {
+      type ViewRow = { id: string; value: Uint8Array | DataView }
+      type ViewSync = Parameters<SyncConfig<ViewRow, string>[`sync`]>[0]
+      const before = Uint8Array.of(1)
+      const [first, second] = runInNewContext(
+        `[new DataView(new Uint8Array([1]).buffer),
+        new DataView(new Uint8Array([1]).buffer)]`,
+      ) as [DataView, DataView]
+      const labels = new Map<unknown, string>([
+        [before, `bytes`],
+        [first, `first`],
+        [second, `second`],
+      ])
+      let sync!: ViewSync
+      let unsubscribe: (() => unknown) | undefined
+      let cleanup: (() => unknown) | undefined
+
+      await withOracleCleanup(async () => {
+        const collection = createCollection<ViewRow, string>({
+          id: `foreign-dataview-publication-${name}`,
+          getKey: ({ id }) => id,
+          autoIndex: `off`,
+          startSync: true,
+          sync: {
+            sync: (actions) => {
+              sync = actions
+              actions.begin()
+              actions.write({
+                type: `insert`,
+                value: { id: `a`, value: before },
+              })
+              actions.commit()
+              actions.markReady()
+            },
+          },
+        })
+        cleanup = () => collection.cleanup()
+        await collection.stateWhenReady()
+        const index = collection.createIndex((row) => row.value, {
+          indexType: IndexType,
+        })
+        const batches: Array<
+          Array<{
+            type: string
+            key: string
+            previous: string | undefined
+            value: string | undefined
+          }>
+        > = []
+        const subscription = collection.subscribeChanges(
+          (changes) => {
+            batches.push(
+              changes.map((change) => ({
+                type: change.type,
+                key: String(change.key),
+                previous:
+                  change.type === `update`
+                    ? labels.get(change.previousValue!.value)
+                    : undefined,
+                value: labels.get(change.value.value),
+              })),
+            )
+          },
+          { includeInitialState: false },
+        )
+        unsubscribe = () => subscription.unsubscribe()
+        expect(batches).toEqual([])
+
+        sync.begin()
+        sync.write({ type: `update`, value: { id: `a`, value: first } })
+        await sync.commit()
+        expect(collection.get(`a`)!.value).toBe(first)
+        expect(index.equalityLookup(before)).toEqual(new Set())
+        expect(index.equalityLookup(first)).toEqual(new Set([`a`]))
+        expect(batches).toEqual([
+          [{ type: `update`, key: `a`, previous: `bytes`, value: `first` }],
+        ])
+
+        sync.begin()
+        sync.write({ type: `update`, value: { id: `a`, value: second } })
+        await sync.commit()
+        expect(collection.get(`a`)!.value).toBe(second)
+        expect(index.equalityLookup(first)).toEqual(new Set())
+        expect(index.equalityLookup(second)).toEqual(new Set([`a`]))
+        expect(batches).toEqual([
+          [{ type: `update`, key: `a`, previous: `bytes`, value: `first` }],
+          [{ type: `update`, key: `a`, previous: `first`, value: `second` }],
+        ])
       }, [() => unsubscribe?.(), () => cleanup?.()])
     },
   )

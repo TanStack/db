@@ -1076,6 +1076,14 @@ describe.each(indexTypes)(`%s public key ties`, (name, IndexType) => {
       expected: [`low`, `high`],
     },
     {
+      caseId: `later-differing-byte`,
+      makeRows: () => [
+        { id: `a`, value: Uint8Array.of(1, 3) },
+        { id: `z`, value: Uint8Array.of(1, 2) },
+      ],
+      expected: [`z`, `a`],
+    },
+    {
       caseId: `unsigned-127-128-boundary`,
       makeRows: () => {
         const low = Uint8Array.of(127)
@@ -1111,6 +1119,19 @@ describe.each(indexTypes)(`%s public key ties`, (name, IndexType) => {
           { id: `high`, value: high },
         ]
       },
+      expected: [`low`, `high`],
+    },
+    {
+      caseId: `own-byte-length-shadow`,
+      makeRows: () => [
+        { id: `low`, value: Uint8Array.of(1) },
+        {
+          id: `high`,
+          value: Object.defineProperty(Uint8Array.of(2), `byteLength`, {
+            value: 0,
+          }),
+        },
+      ],
       expected: [`low`, `high`],
     },
     {

@@ -375,8 +375,7 @@ deep-equality/query-equality tension. Existing general equality deliberately
 ignores typed-array class, so that contract needs separate review before
 changing publication for that transition.
 
-These review results are for the working tree. Exact-commit hostile review and
-the final full-suite run remain pending.
+These results preceded the exact-commit review recorded below.
 
 ## Exact-commit window review of `5c97f18dc`
 
@@ -386,3 +385,48 @@ fails the finite-request guard; without that guard, it fails the initial
 public snapshot. All eight fixed window cases passed with no type errors.
 This controlled provider does not prove real-provider collation, index-use
 efficiency, ties, mutation, or replay.
+
+## Exact-commit hostile review of `ea569cc2a`
+
+Three read-only agents reviewed the committed byte/order and Collection
+publication changes against the source and retirement ledgers. One found a
+foreign-realm DataView regression: `ArrayBuffer.isView` accepted it, a local
+`instanceof DataView` failed to exclude it, and the new native typed-array
+length getter threw. A public sync commit had already changed the row, but
+left BasicIndex and BTreeIndex on the old value and emitted no update. Direct
+foreign-DataView equality and public typed-array-to-DataView then
+DataView-to-DataView histories failed before the repair at the getter. The
+native typed-array brand check now excludes DataViews across realms. Both
+commits settle, with exact index lookup and subscriber batches matching the
+public row. Distinct DataViews from one foreign realm have equal prototypes
+but remain unequal by the established opaque-instance law.
+
+The publication reviewer also found an enforcement gap: flattening messages
+would miss an extra empty callback after an equal-byte replacement. The
+native-byte sync witness now records whole callback batches and rejects that
+callback. Current production already suppresses it. This is a test repair,
+not an observed product failure.
+
+The order reviewer put a first-byte/length comparator mutant in an isolated
+test copy. All 172 prior comparison and custom-index tests passed, although
+the mutant ignored every later byte. New `[1, 2]` versus `[1, 3]` direct
+signs and a ready public `a:[1,3], z:[1,2]` order fail that mutant at both
+unindexed and indexed comparisons for BasicIndex and BTreeIndex. The same
+witnesses pass against production. A second mutant read an own `byteLength`
+shadow instead of the native element count and passed those revised tests.
+Direct and public byte-length-shadow fixtures now distinguish it. These
+fixtures close the named finite sensitivity gaps; they do not prove arbitrary
+byte lengths or live-query publication.
+
+Content equality and source-key tie behavior predate this PR; unsigned native
+byte order is a proposed policy. It makes equal-content replacement stable
+under default ordering, but byte relational `WHERE` comparisons remain a
+separate rule. The current direct and ready-snapshot checks do not establish
+how all byte range predicates, providers, or live queries should interact with
+that ordering.
+
+The index reviewer found no additional mismatch in bounded 250-action sweeps
+per built-in index for native-byte order, key conservation, and custom
+callback positions. These sweeps are diagnostic evidence, not a replacement
+for the committed oracle. A fresh review of the follow-up committed head is
+still required.

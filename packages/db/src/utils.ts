@@ -13,6 +13,16 @@ const typedArrayLength = Object.getOwnPropertyDescriptor(
   Object.getPrototypeOf(Uint8Array.prototype),
   `length`,
 )!.get!
+const typedArrayTag = Object.getOwnPropertyDescriptor(
+  Object.getPrototypeOf(Uint8Array.prototype),
+  Symbol.toStringTag,
+)!.get!
+
+/** Read a native typed-array class across realms without trusting display tags. */
+export function nativeTypedArrayTag(value: unknown): string | undefined {
+  if (!ArrayBuffer.isView(value)) return undefined
+  return Reflect.apply(typedArrayTag, value, []) as string | undefined
+}
 
 /** Read the native element count even when a view shadows its length property. */
 export function nativeTypedArrayLength(value: ArrayBufferView): number {
@@ -231,12 +241,9 @@ export function deepEqualsInternal(
   if (b instanceof Set) return false
 
   // Handle TypedArrays
-  if (
-    ArrayBuffer.isView(a) &&
-    ArrayBuffer.isView(b) &&
-    !(a instanceof DataView) &&
-    !(b instanceof DataView)
-  ) {
+  const typedArrayTagA = nativeTypedArrayTag(a)
+  const typedArrayTagB = nativeTypedArrayTag(b)
+  if (typedArrayTagA !== undefined && typedArrayTagB !== undefined) {
     const typedA = a as unknown as TypedArray
     const typedB = b as unknown as TypedArray
     const lengthA = nativeTypedArrayLength(a)
@@ -258,11 +265,7 @@ export function deepEqualsInternal(
     return true
   }
   // Symmetric check: if b is TypedArray but a is not, they're not equal
-  if (
-    ArrayBuffer.isView(b) &&
-    !(b instanceof DataView) &&
-    !ArrayBuffer.isView(a)
-  ) {
+  if (typedArrayTagB !== undefined && !ArrayBuffer.isView(a)) {
     return false
   }
 

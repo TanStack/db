@@ -482,7 +482,11 @@ comparator.
 The proposed default native-byte order is unsigned lexicographic content,
 with shorter prefixes first and equal contents at one comparator position.
 Direct signs cover fresh equal views, the 127/128 boundary, prefixes,
-Buffer/Uint8Array pairs, a foreign native view, and an own `length` shadow.
+an equal first byte followed by different second bytes, Buffer/Uint8Array
+pairs, a foreign native view, and own `length` and `byteLength` shadows. The
+later-byte case and its ready public scan/index counterpart reject a
+first-byte-only order
+mutant at their direct comparison and exact ordered-array checkpoints.
 A byte/object/byte triple checks transitivity without prescribing which kind
 comes first. These are immediate comparator observations, not relational
 `WHERE` comparisons or live-query publication. The deep-equality owner also
@@ -491,6 +495,15 @@ direct equality, including a nested row field, over fixed and random 1–20
 byte inputs. Other typed-array class transitions remain under its existing
 class-agnostic equality law; whether such transitions must publish a source
 change needs a separate contract witness.
+The same deep-equality owner checks two distinct keyless DataViews from one
+foreign realm against the keyless-instance rule, including a forged display
+tag, plus a mixed typed-array/DataView
+pair. The Collection change-event owner receives that boundary through a
+typed-array-to-foreign-DataView update and a same-realm foreign-DataView
+replacement. Both commits must settle with public state, BasicIndex or
+BTreeIndex exact lookup, and whole subscriber batches aligned. This rejects
+the getter failure that changed the row while leaving its index and subscriber
+behind. It does not assert content equality for DataViews.
 Exact `normalizeValue` results are direct utility observations. Indexed
 order, public Date range predicates, cursor continuation, proxies, deeper
 subclass chains, replaced Date prototypes or `getTime` methods, and other
@@ -1480,8 +1493,9 @@ the previous and current intrinsic bytes must reach the subscriber while
 public state and BasicIndex or BTreeIndex exact lookup agree with `[2]`. A
 fresh equal-content view then remains silent. The pre-fix implementation
 updated state and indexes but emitted no message for the changed bytes. This
-bounded sync cut does not cover optimistic draft admission, other typed-array
-classes, or live-query notification.
+bounded sync cut records whole callback batches, so even an empty callback
+after the equal copy fails the silence check. It does not cover optimistic
+draft admission, other typed-array classes, or live-query notification.
 The [issue #1912 review record](oracle-reviews/issue-1912-eager-index-history.md)
 records the grammar controls, exact reviewed commit, and ORC audit.
 

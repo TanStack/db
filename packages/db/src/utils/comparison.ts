@@ -1,4 +1,8 @@
-import { isTemporal, nativeTypedArrayLength } from '../utils'
+import {
+  isTemporal,
+  nativeTypedArrayLength,
+  nativeTypedArrayTag,
+} from '../utils'
 import { getRuntimeReferenceIdentity } from '../query/runtime-reference-identity'
 import { codedMessage, devBuild } from '../error-message'
 import type { CompareOptions } from '../query/builder/types'
@@ -261,19 +265,9 @@ export const defaultComparator = makeComparator({
   stringSort: `locale`,
 })
 
-// The native getter reads a view's typed-array class across realms even when
-// its own display tag shadows Symbol.toStringTag. Buffer has the same native
-// byte class as Uint8Array.
-const typedArrayTag = Object.getOwnPropertyDescriptor(
-  Object.getPrototypeOf(Uint8Array.prototype),
-  Symbol.toStringTag,
-)!.get!
 /** Recognize native Uint8Array values, including Buffers and foreign realms. */
 export function isUint8Array(value: unknown): value is Uint8Array {
-  return (
-    ArrayBuffer.isView(value) &&
-    Reflect.apply(typedArrayTag, value, []) === `Uint8Array`
-  )
+  return nativeTypedArrayTag(value) === `Uint8Array`
 }
 
 /** Compare two Uint8Arrays for content equality. */

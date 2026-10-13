@@ -2008,6 +2008,11 @@ describe(`native byte content order`, () => {
       expectedSign: -1,
     },
     {
+      caseId: `later differing byte with equal first byte`,
+      makePair: () => [Uint8Array.of(1, 2), Uint8Array.of(1, 3)] as const,
+      expectedSign: -1,
+    },
+    {
       caseId: `unsigned 127/128 boundary`,
       makePair: () => [Uint8Array.of(127), Uint8Array.of(128)] as const,
       expectedSign: -1,
@@ -2027,6 +2032,15 @@ describe(`native byte content order`, () => {
         [
           Uint8Array.of(1),
           Object.defineProperty(Uint8Array.of(2), `length`, { value: 0 }),
+        ] as const,
+      expectedSign: -1,
+    },
+    {
+      caseId: `own byteLength shadow`,
+      makePair: () =>
+        [
+          Uint8Array.of(1),
+          Object.defineProperty(Uint8Array.of(2), `byteLength`, { value: 0 }),
         ] as const,
       expectedSign: -1,
     },

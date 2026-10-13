@@ -1,3 +1,4 @@
+import { runInNewContext } from 'node:vm'
 import { describe, expect, it } from 'vitest'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { Temporal } from 'temporal-polyfill'
@@ -18,6 +19,10 @@ import { deepEquals, equalPersistedSnapshotValues } from '../src/utils'
  * A native typed-array length shadow cannot change how many intrinsic
  * elements participate in change-event equality. A supplied changed byte
  * must remain unequal even when both views report an own `length` of zero.
+ * Keyless DataViews have hidden state but no typed-array elements. Distinct
+ * views from one foreign realm remain unequal by the keyless-instance law;
+ * pairing one with a typed array must return false without reading a typed-
+ * array length from the DataView, even if it spoofs a display tag.
  *
  * Arbitrary different cycle topologies are outside this model. Naming that
  * exclusion matters: more random examples cannot establish semantics the
@@ -1153,6 +1158,24 @@ describe(`deepEquals property-based tests`, () => {
         expectEqualityPair({ value: original }, { value: different }, false)
       },
     )
+
+    it(`keeps foreign DataViews opaque and distinct from typed arrays`, () => {
+      const [first, second] = runInNewContext(
+        `[new DataView(new Uint8Array([1]).buffer),
+          new DataView(new Uint8Array([1]).buffer)]`,
+      ) as [DataView, DataView]
+      const local = new DataView(Uint8Array.of(1).buffer)
+      const bytes = Uint8Array.of(1)
+      Object.defineProperty(first, Symbol.toStringTag, {
+        value: `Uint8Array`,
+      })
+
+      // Neither equal bytes nor a display tag supplies typed-array elements.
+      expectEqualityPair(first, first, true)
+      expectEqualityPair(first, second, false)
+      expectEqualityPair(local, first, false)
+      expectEqualityPair(bytes, first, false)
+    })
 
     utilsProperty([
       fc.array(fc.oneof(fc.integer(), fc.constant(`hole`)), {
