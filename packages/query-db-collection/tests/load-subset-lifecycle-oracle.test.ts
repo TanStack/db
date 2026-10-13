@@ -17,8 +17,10 @@ import type { LoadSubsetOptions, SyncMetadataApi } from '@tanstack/db'
 /**
  * # Does Query-backed loadSubset preserve identity and lifecycle?
  *
- * Canonically equal demands share one Query transport. Distinct predicates,
- * values, order, cursor, and scope remain distinct. The final live-query owner
+ * Canonically equal demands share one Query transport. A completed full-source
+ * demand can also serve a later narrower demand while the full Query stays
+ * active. Otherwise distinct predicates, values, order, cursor, and scope
+ * remain distinct. The final live-query owner
  * controls cancellation, and a replacement owner starts fresh after abort.
  * Initial failure reaches existing and late dependents; recovery becomes public
  * only after every failed source recovers. A refetch stays pending while result
@@ -36,6 +38,9 @@ import type { LoadSubsetOptions, SyncMetadataApi } from '@tanstack/db'
  * The exact demand-identity API in docs/reference/functions/getLoadSubsetDemandKey.md
  * and the Collection sync-adapter contract in docs/guides/collection-options-creator.md
  * authorize the identity, request-scoped release, and applied-settlement laws.
+ * The 0.5 query-driven-sync post's subset-reuse promise authorizes the bounded
+ * full-source refinement below; it does not make an incomplete or failed
+ * request authoritative for a broader scope.
  * Each direct load below represents one acquisition lease; the small reference
  * history keeps a shared Query transport active while any lease remains. The
  * held provider checks the abort signal at each release checkpoint. These
@@ -60,6 +65,206 @@ function createQueryClient(): QueryClient {
       },
     },
   })
+}
+
+/**
+ * The model has two provider categories. The full response proves both; a
+ * filtered demand adds no source need while that completed full Query stays
+ * owned. The fixed history keeps that Query alive after its first logical
+ * owner leaves, then invalidates it to prove the dependent still receives new
+ * rows with a live provider signal. A late equal demand inherits a failed
+ * full Query revalidation; an explicit refetch is a fresh exact request and
+ * must call the provider with the filter. The production path uses real live-query
+ * subscriptions, Query observers, and Collection acquisition leases; the
+ * public checks are fetch arguments and filtered rows after each settled
+ * action. This does not claim arbitrary
+ * predicate implication or provider freshness without invalidation.
+ */
+async function expectActiveFullSourceServesFilteredDemand(): Promise<void> {
+  const queryClient = createQueryClient()
+  const id = `full-source-subset-reuse-${collectionSequence++}`
+  const filter = new IR.Func<boolean>(`eq`, [
+    new IR.PropRef([`group`]),
+    new IR.Value(`a`),
+  ])
+  const refetchRequest: LoadSubsetOptions = { where: filter, refetch: true }
+  let providerRows: Array<Row> = [
+    { id: `a1`, group: `a` },
+    { id: `b1`, group: `b` },
+  ]
+  const fullRefetchError = new Error(`full-source refetch failed`)
+  let failFullRefetch = false
+  const requests: Array<`full` | `filtered`> = []
+  let originalFullSignal: AbortSignal | undefined
+  const queryFn = vi.fn((context: QueryFunctionContext) => {
+    const requestSignal = context.meta?.loadSubsetOptions?.signal
+    requestSignal?.throwIfAborted()
+    const where = context.meta?.loadSubsetOptions?.where
+    const scope = where === undefined ? `full` : `filtered`
+    if (scope === `full` && originalFullSignal === undefined)
+      originalFullSignal = requestSignal
+    requests.push(scope)
+    if (scope === `full` && failFullRefetch)
+      return Promise.reject(fullRefetchError)
+    return Promise.resolve(
+      providerRows.filter((row) => scope === `full` || row.group === `a`),
+    )
+  })
+  const collection = createCollection(
+    queryCollectionOptions<Row>({
+      id,
+      queryClient,
+      queryKey: [id],
+      queryFn,
+      getKey: (row) => row.id,
+      startSync: true,
+      syncMode: `on-demand`,
+      staleTime: 5 * 60 * 1000,
+    }),
+  )
+  const full = createLiveQueryCollection((query) =>
+    query.from({ row: collection }).select(({ row }) => ({ id: row.id })),
+  )
+  const filtered = createLiveQueryCollection((query) =>
+    query
+      .from({ row: collection })
+      .where(({ row }) => eq(row.group, `a`))
+      .select(({ row }) => ({ id: row.id })),
+  )
+  const filteredPeer = createLiveQueryCollection((query) =>
+    query
+      .from({ row: collection })
+      .where(({ row }) => eq(row.group, `a`))
+      .select(({ row }) => ({ id: row.id })),
+  )
+  try {
+    await full.preload()
+    expect(collection.toArray.map(({ id: rowId }) => rowId).sort()).toEqual([
+      `a1`,
+      `b1`,
+    ])
+    expect(requests).toEqual([`full`])
+
+    await filtered.preload()
+    await filteredPeer.preload()
+    expect(requests).toEqual([`full`])
+    expect(filtered.toArray.map(({ id: rowId }) => rowId)).toEqual([`a1`])
+    // The dependent retains the full Query's observer lease. Releasing the
+    // original owner cannot make its rows or freshness disappear.
+    await full.cleanup()
+    await filtered.cleanup()
+    expect(originalFullSignal?.aborted).toBe(true)
+    expect(collection.has(`a1`)).toBe(true)
+    expect(collection.has(`b1`)).toBe(true)
+
+    providerRows = [
+      { id: `a1`, group: `a` },
+      { id: `a2`, group: `a` },
+      { id: `b1`, group: `b` },
+    ]
+    await queryClient.invalidateQueries({ queryKey: [id], exact: true })
+    await vi.waitFor(() => expect(collection.has(`a2`)).toBe(true))
+    expect(requests).toEqual([`full`, `full`])
+    expect(filteredPeer.toArray.map(({ id: rowId }) => rowId).sort()).toEqual([
+      `a1`,
+      `a2`,
+    ])
+
+    // An equivalent later demand stays with its pinned Query and receives
+    // that Query's failed background refetch, rather than switching sources.
+    failFullRefetch = true
+    await queryClient.invalidateQueries({ queryKey: [id], exact: true })
+    const lateDemand: LoadSubsetOptions = { where: filter }
+    await expect(collection._sync.loadSubset(lateDemand)).rejects.toBe(
+      fullRefetchError,
+    )
+    collection._sync.unloadSubset(lateDemand)
+    failFullRefetch = false
+    await queryClient.invalidateQueries({ queryKey: [id], exact: true })
+    expect(requests).toEqual([`full`, `full`, `full`, `full`])
+
+    await collection._sync.loadSubset(refetchRequest)
+    expect(requests).toEqual([`full`, `full`, `full`, `full`, `filtered`])
+    await filteredPeer.cleanup()
+    expect(collection.toArray.map(({ id: rowId }) => rowId).sort()).toEqual([
+      `a1`,
+      `a2`,
+    ])
+    collection._sync.unloadSubset(refetchRequest)
+    await vi.waitFor(() => expect(collection.size).toBe(0))
+  } finally {
+    await full.cleanup()
+    await filtered.cleanup()
+    await filteredPeer.cleanup()
+    await collection.cleanup()
+    queryClient.clear()
+  }
+}
+
+/**
+ * An in-flight full request has not established complete source coverage.
+ * The filtered view therefore needs its own provider request and can settle
+ * before the full request. This is the negative case for the reuse law above.
+ */
+async function expectPendingFullSourceDoesNotServeFilteredDemand(): Promise<void> {
+  const queryClient = createQueryClient()
+  const id = `pending-full-source-${collectionSequence++}`
+  const fullRows: Array<Row> = [
+    { id: `a1`, group: `a` },
+    { id: `b1`, group: `b` },
+  ]
+  let resolveFull: ((rows: Array<Row>) => void) | undefined
+  const requests: Array<`full` | `filtered`> = []
+  const queryFn = vi.fn((context: QueryFunctionContext) => {
+    if (context.meta?.loadSubsetOptions?.where !== undefined) {
+      requests.push(`filtered`)
+      return Promise.resolve(fullRows.filter((row) => row.group === `a`))
+    }
+    requests.push(`full`)
+    return new Promise<Array<Row>>((resolve) => {
+      resolveFull = resolve
+    })
+  })
+  const collection = createCollection(
+    queryCollectionOptions<Row>({
+      id,
+      queryClient,
+      queryKey: [id],
+      queryFn,
+      getKey: (row) => row.id,
+      startSync: true,
+      syncMode: `on-demand`,
+      staleTime: 5 * 60 * 1000,
+    }),
+  )
+  const full = createLiveQueryCollection((query) =>
+    query.from({ row: collection }).select(({ row }) => ({ id: row.id })),
+  )
+  const filtered = createLiveQueryCollection((query) =>
+    query
+      .from({ row: collection })
+      .where(({ row }) => eq(row.group, `a`))
+      .select(({ row }) => ({ id: row.id })),
+  )
+  try {
+    const fullPreload = full.preload()
+    await vi.waitFor(() => expect(requests).toEqual([`full`]))
+    await filtered.preload()
+    expect(requests).toEqual([`full`, `filtered`])
+    expect(filtered.toArray.map(({ id: rowId }) => rowId)).toEqual([`a1`])
+    resolveFull?.(fullRows)
+    await fullPreload
+    expect(collection.toArray.map(({ id: rowId }) => rowId).sort()).toEqual([
+      `a1`,
+      `b1`,
+    ])
+  } finally {
+    resolveFull?.(fullRows)
+    await full.cleanup()
+    await filtered.cleanup()
+    await collection.cleanup()
+    queryClient.clear()
+  }
 }
 
 async function expectInitialQueryFailureStatus(): Promise<void> {
@@ -1354,6 +1559,14 @@ function expectLateRetiredQuery(observation: RetiredQueryObservation): void {
 }
 
 describe(`loadSubset lifecycle oracle`, () => {
+  it(`reuses an active complete full-source Query for a filtered demand`, async () => {
+    await expectActiveFullSourceServesFilteredDemand()
+  })
+
+  it(`loads a filtered demand while the full-source Query remains incomplete`, async () => {
+    await expectPendingFullSourceDoesNotServeFilteredDemand()
+  })
+
   it(`refetches an existing semantic demand without changing its query or unload identity`, async () => {
     await expectRefetchRevalidatesExistingDemand()
   })

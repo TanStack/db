@@ -461,6 +461,18 @@ generic visitor behavior outside the named collectors.
 
 The Query DB ownership oracle owns the direct-write no-automatic-refetch law
 ([review](oracle-reviews/issue-1935-direct-write-refetch.md)).
+The load-lifecycle owner checks the bounded static-key full-source reuse law
+through live-query subscriptions: a settled full request serves a later
+filtered demand with no second provider call; after the full view releases,
+invalidation still updates the filtered view; an overlapping exact refetch
+keeps its own rows and owner; and final release removes them. A pending full
+request still requires a filtered provider call. The settled-full witness
+fails on the original implementation at the provider-call checkpoint.
+It checks that the initial full acquisition signal may abort while a later
+shared full fetch receives a live signal, and that a later equal demand sees
+a failed full revalidation rather than switching Query owners.
+Arbitrary predicate containment, function-built Query keys, and persisted
+startup replay with a shared full-source lease still need distinct witnesses.
 Its real QueryClient witness loads ten disjoint on-demand subsets, then checks
 `writeUpsert`, `writeUpdate`, `writeDelete`, `writeInsert`, and a mixed
 `writeBatch`. After each accepted write it compares public live-query rows with

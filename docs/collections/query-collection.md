@@ -429,6 +429,10 @@ arrays. Build separate API parameters instead. Core retains request data without
 cloning it; changing submitted data can make the request disagree with its cache
 key. To change a query constant, supply a new value rather than mutating the old
 one. Cancellation through the request's `AbortSignal` remains supported.
+Use `ctx.signal` for the provider call. If a completed full-source Query serves
+later narrower demands, its later fetches expose that Query fetch signal as
+`loadSubsetOptions.signal` too. The original full demand may already have
+released its signal while the narrower demands still own the Query.
 
 ### Type-Safe Meta Access
 
@@ -1287,6 +1291,17 @@ All direct write methods are available on `collection.utils`:
 ## QueryFn and Predicate Push-Down
 
 When using `syncMode: 'on-demand'`, the collection automatically pushes down query predicates (where clauses, orderBy, limit, and offset) to your `queryFn`. This allows you to fetch only the data needed for each specific query, rather than fetching the entire dataset.
+
+With a static `queryKey`, an active, successfully applied request for the
+entire source can also serve later filtered or windowed live queries without
+another `queryFn` call. The full Query stays active until those queries release
+their demand. An unfinished full request does not provide this coverage, and
+`refetch: true` still fetches the exact requested subset. Function-built
+`queryKey` values keep their own cache identity and do not use this reuse path.
+Your `queryFn` must return the complete requested result, including every row
+for an unbounded request.
+Refetching a narrower subset does not invalidate a still-active full Query;
+refresh the full Query when you need a new source-wide snapshot.
 
 ### How LoadSubsetOptions Are Passed
 
