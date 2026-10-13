@@ -1928,17 +1928,24 @@ function createElectricSync<T extends Row<unknown>>(
     // A final initial failure decides its waiting loads. A cleanup that a
     // status listener runs inside that failure must not relabel it.
     let initialSyncFailedFinally = false
-    // Once the first up-to-date is committed, a final failure is a post-ready
-    // failure: the Collection becomes ready when that snapshot is accepted.
+    // Once the first up-to-date is committed, its acceptance alone decides
+    // the initial sync: the Collection becomes ready when the snapshot is
+    // accepted, whatever errors, retries, or give-ups arrive meanwhile, and
+    // fails if the acceptance fails.
     let firstSnapshotCommitted = false
-    let stoppedAfterFirstSnapshot = false
     const failInitialSync = (cause: unknown) => {
-      if (firstSnapshotCommitted) {
-        stoppedAfterFirstSnapshot = true
-        return
-      }
+      if (firstSnapshotCommitted) return
       initialSyncFailedFinally = true
       markError(cause)
+    }
+    const settleFirstSnapshot = (isBuffering: boolean, failure?: unknown) => {
+      if (collection.status !== `loading`) return
+      if (failure !== undefined) {
+        initialSyncFailedFinally = true
+        markError(failure)
+      } else if (isActiveLifecycle()) {
+        wrappedMarkReady(isBuffering, streamErrorVersion)
+      } else markReady()
     }
     // An external abort stops the source for good. Before the first ready,
     // that is the final initial failure; cleanup aborts internally instead.
@@ -2615,21 +2622,21 @@ function createElectricSync<T extends Row<unknown>>(
         const readyErrorVersion = streamErrorVersion
         // Readiness counts accepted rows.
         const accepted = whenSyncAccepted(applied)
-        if (commitPoint === `up-to-date`) {
-          resolveFullSnapshot(applied)
-          if (collection.status === `loading`) firstSnapshotCommitted = true
-        }
+        const firstSnapshot =
+          commitPoint === `up-to-date` && collection.status === `loading`
+        if (commitPoint === `up-to-date`) resolveFullSnapshot(applied)
         if (accepted === true) {
           wrappedMarkReady(wasBufferingInitialSync, readyErrorVersion)
+        } else if (firstSnapshot) {
+          firstSnapshotCommitted = true
+          void accepted.then(
+            () => settleFirstSnapshot(wasBufferingInitialSync),
+            (error: unknown) =>
+              settleFirstSnapshot(wasBufferingInitialSync, error),
+          )
         } else {
           void accepted.then(
-            () => {
-              // A stream that stopped for good still delivered this snapshot.
-              if (stoppedAfterFirstSnapshot) {
-                if (collection.status === `loading`) markReady()
-              } else
-                wrappedMarkReady(wasBufferingInitialSync, readyErrorVersion)
-            },
+            () => wrappedMarkReady(wasBufferingInitialSync, readyErrorVersion),
             () => undefined,
           )
         }

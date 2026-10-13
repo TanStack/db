@@ -25,6 +25,8 @@ export type RetryStep =
   // accepts after its durable step; `accept` settles that acceptance.
   | { kind: `hold-acceptance` }
   | { kind: `accept` }
+  // The held acceptance rejects: the persistence step failed.
+  | { kind: `accept-fails` }
 export type RetryHistory = {
   wait: RetryWait
   hasOnError: boolean
@@ -87,21 +89,15 @@ export function retryModelFail(model: RetryModel, cause: string): void {
 
 export function retryStepIsLegal(model: RetryModel, step: RetryStep): boolean {
   if (model.cleanedUp) return false
-  if (step.kind === `accept`) return model.committed && !model.ready
+  if (step.kind === `accept` || step.kind === `accept-fails`)
+    return model.committed && !model.ready && model.failed === undefined
   if (step.kind === `hold-acceptance`)
     return !model.acceptanceArmed && !model.ready && !model.committed
   if (step.kind === `decide`) return model.deciding !== undefined
-  // A stopped stream delivers nothing more. A retry while the first
-  // snapshot's acceptance is pending is outside this grammar.
+  // A stopped stream delivers nothing more. A second up-to-date while the
+  // first snapshot's acceptance is pending is outside this grammar.
   if (model.stopped)
     return step.kind === `release` || (step.kind === `demand` && !model.aborted)
-  if (
-    model.committed &&
-    !model.ready &&
-    step.kind === `error` &&
-    (step.decision === `sync-retry` || step.decision === `async-retry`)
-  )
-    return false
   if (step.kind === `release`) return model.held
   // A failed or aborted Collection refuses new optimistic writes.
   if (model.failed !== undefined || model.aborted) return false
@@ -177,8 +173,21 @@ export function applyRetryModel(
       model.acceptanceArmed = true
       return
     case `accept`:
+      // The committed snapshot is usable: the Collection is ready, whatever
+      // errors, retries, or give-ups arrived while it waited.
       model.ready = true
       return
+    case `accept-fails`: {
+      // The snapshot never became usable, so this is an initial failure with
+      // the acceptance failure's cause.
+      const cause = `accept-failed-${tag}`
+      model.failed = cause
+      model.demands = model.demands.map((settlement): RetrySettlement =>
+        settlement === `pending` ? `rejected:${cause}` : settlement,
+      )
+      if (model.cleanupOnError) model.cleanedUp = true
+      return
+    }
     case `hold`:
       model.held = true
       return

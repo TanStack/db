@@ -5301,10 +5301,12 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
    * enters `error`, and every waiting demand and readiness wait rejects with
    * that same cause. A status listener that cleans the Collection up inside
    * that failure does not turn a rejected demand into a quiet one. Once the
-   * first up-to-date is committed, a final give-up is a post-ready failure,
-   * even while a persistence wrapper still holds that commit's acceptance:
-   * the Collection becomes `ready` when the snapshot is accepted, and the
-   * demands it covers settle with its rows. Core marks a Collection ready
+   * first up-to-date is committed, its acceptance alone decides the initial
+   * sync, even while a persistence wrapper still holds it: when it is
+   * accepted, the Collection becomes `ready`, whatever errors, retries, or
+   * give-ups arrived meanwhile, and the demands it covers settle with its
+   * rows; when its acceptance fails, no usable snapshot exists, so the
+   * initial sync fails with that cause. Core marks a Collection ready
    * when a commit carries a truncate, so a progressive history's first
    * up-to-date is ready at its commit. After
    * the first ready, a later failure does not change the status. A demand
@@ -5335,14 +5337,15 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
    * synchronous give-up, a throw, an asynchronous retry, or an asynchronous
    * give-up; a later error after a retry; an Electric client give-up; an
    * external abort before or during a decision; a held acceptance of the
-   * first up-to-date commit, followed by a give-up and its later acceptance;
+   * first up-to-date commit, crossed with later errors, retries, give-ups,
+   * and aborts, which then succeeds or fails;
    * new demands; the first
    * up-to-date; a persisting transaction that starts before it and later
    * settles; and cleanup. It omits histories the client cannot produce:
    * a stream message or a second error while `onError` decides, because the
    * client awaits the decision; and stream steps after a final failure or an
-   * abort, because the stream has stopped. It also omits a retry, or a
-   * second up-to-date, while the first snapshot's acceptance is pending. The
+   * abort, because the stream has stopped. It also omits a second
+   * up-to-date while the first snapshot's acceptance is pending. The
    * installed-client lane cannot hold an acceptance, so this dimension runs
    * only here. A progressive history starts with
    * a must-refetch, so its demands wait on the established snapshot.
@@ -5372,6 +5375,7 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     fc.constant({ kind: `release` as const }),
     fc.constant({ kind: `hold-acceptance` as const }),
     fc.constant({ kind: `accept` as const }),
+    fc.constant({ kind: `accept-fails` as const }),
   )
   // Generated steps that the client cannot produce in the current model state
   // are dropped, so every history is legal.
@@ -5590,6 +5594,13 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
             armAcceptance = false
             heldAcceptance.resolve()
             break
+          case `accept-fails`: {
+            armAcceptance = false
+            const error = new Error(`persistence failed ${tag}`)
+            tags.set(error, `accept-failed-${tag}`)
+            heldAcceptance.reject(error)
+            break
+          }
         }
         applyRetryModel(model, step, history.hasOnError, tag)
         await turn()
@@ -5602,6 +5613,7 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
       await trace.collection.cleanup()
       persistence.resolve()
       heldAcceptance.resolve()
+      void heldAcceptance.promise.catch(() => undefined)
       // A decision still pending at cleanup cannot change the stopped run.
       decide?.(undefined)
       await Promise.all(decisions)
@@ -5831,6 +5843,52 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
           ],
         },
       ],
+      // While the first snapshot's acceptance is pending: a retry, then the
+      // acceptance, then a final give-up; a retry, then a give-up, then the
+      // acceptance; and an acceptance that fails, with and without an earlier
+      // external abort.
+      [
+        {
+          wait: `full-log`,
+          hasOnError: true,
+          steps: [
+            { kind: `demand` },
+            { kind: `hold-acceptance` },
+            { kind: `up-to-date` },
+            { kind: `error`, decision: `sync-retry` },
+            { kind: `accept` },
+            { kind: `error`, decision: `sync-give-up` },
+          ],
+        },
+      ],
+      [
+        {
+          wait: `full-log`,
+          hasOnError: true,
+          steps: [
+            { kind: `demand` },
+            { kind: `hold-acceptance` },
+            { kind: `up-to-date` },
+            { kind: `error`, decision: `async-retry` },
+            { kind: `decide` },
+            { kind: `client-give-up` },
+            { kind: `accept` },
+          ],
+        },
+      ],
+      ...[false, true].map((aborted): [RetryHistory] => [
+        {
+          wait: `full-log`,
+          hasOnError: true,
+          steps: [
+            { kind: `demand` },
+            { kind: `hold-acceptance` },
+            { kind: `up-to-date` },
+            ...(aborted ? [{ kind: `abort` as const }] : []),
+            { kind: `accept-fails` },
+          ],
+        },
+      ]),
     ] satisfies Array<[RetryHistory]> as Array<[RetryHistory]>,
   )
 
