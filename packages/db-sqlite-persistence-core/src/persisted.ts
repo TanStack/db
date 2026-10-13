@@ -1915,9 +1915,10 @@ class PersistedCollectionRuntime<
     )
   }
 
-  // An ensure reply settles a follower's load (law 7). The leader broadcasts
-  // its commits before it replies on the same channel, so they are already
-  // queued on the apply mutex. Settle only after they show here.
+  // An ensure reply settles a follower's load (law 7). A source's loadSubset
+  // must await every commit receipt that establishes its result, so the
+  // leader broadcasts those commits before it replies on the same channel.
+  // They are already queued on the apply mutex; settle after they show here.
   private async applyLeaderCommitsBeforeReply(): Promise<void> {
     await this.applyMutex.run(() => this.flushQueuedTxCommittedUnsafe())
     // A broadcast that failed to apply made the runtime terminal; its rows
