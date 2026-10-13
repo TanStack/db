@@ -25573,39 +25573,39 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
    * A follower has no local source. It routes demand to the elected owner,
    * and the owner's commits reach it only as durable rows plus a commit
    * notice. After a cache rotation the follower is in scoped recovery, where
-   * durable rows cannot replace source rows. For a follower, a
-   * current-generation commit notice from the elected owner is that source
-   * evidence: the owner wrote those durable rows for this generation. The
-   * law is therefore that an owner notice publishes the follower's demanded
-   * durable rows, while a notice from any other sender is not source
-   * evidence. It keeps scoped recovery's refetch: the follower asks the
-   * owner for source evidence and keeps its public rows until that evidence
-   * arrives.
+   * durable rows cannot replace source rows. Rotation gives the follower a
+   * fresh cache generation, and the follower asks the owner to reacquire
+   * every active demand into it. Once those reacquisitions settle, the new
+   * generation holds exactly the owner's rows for that demand, so durable
+   * rows are authoritative again. The law is therefore: while the
+   * reacquisitions are in flight, the follower holds the generation's commit
+   * notices; when they settle, scoped recovery ends for that generation and
+   * the held notices, and every later one, apply through the normal path.
+   * No sender is special: a peer's notice after recovery is an ordinary
+   * invalidation that rereads durable rows.
    *
    * The independent model is `expectedScopedSnapshot` with complete demand
    * over the authored durable rows of the current generation. It knows
    * nothing about notices or scoped recovery; the driver applies it only at
    * checkpoints where the owner's evidence has arrived. The ensure log is a
-   * separate observation: one acquisition, one reacquisition after
-   * rotation, and one refetch per peer notice. A bounded leader that
-   * re-commits on every ensure makes the alternative design (answer every
-   * notice with a refetch) loop, and the bound turns that loop into an
+   * separate observation: one acquisition and one reacquisition after
+   * rotation, and no other ensure. A bounded leader that re-commits on every
+   * ensure makes the alternative design (answer every notice during scoped
+   * recovery with a refetch) loop, and the bound turns that loop into an
    * assertion failure.
    *
    * The grammar crosses when the owner first commits the row (before or
    * after the rotation) with a later broadcast for the same key: none, an
    * owner update, or a peer notice that claims a different value. An owner
-   * update's durable read either succeeds or fails. The owner's notice is
-   * source evidence, so a failed read of it is a real failure: the follower
-   * becomes terminal and keeps the rows it showed, instead of silently
-   * ignoring the failure as if a new recovery had started during the read.
+   * update's durable read either succeeds or fails. Recovery has ended, so a
+   * failed read of it is a real failure: the follower becomes terminal and
+   * keeps the rows it showed, instead of silently ignoring the failure as if
+   * a new recovery had started during the read.
    * The
    * observations are the follower's rows when its first load settles, after
    * the rotation's reacquisition, and after the later broadcast, plus the
    * ensure log at quiescence. The coordinator is a controlled double of an
-   * elected owner; it does not prove the browser transport. Every
-   * coordinator reports the elected owner (`getLeaderId` is required), so a
-   * follower can always tell the owner's notice from a peer's.
+   * elected owner; it does not prove the browser transport.
    */
   type FollowerGenerationNoticeHistory = {
     ownerCommit: `before-rotation` | `after-rotation`
@@ -25615,12 +25615,18 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     // Control: an owner notice's read is in flight when rotation starts, and
     // then fails. Recovery owns that read, so its failure is ignored.
     readFailsAsRotationStarts?: boolean
+    // How the owner's notices in the rotated generation reach the follower:
+    // in order, after a gap in the stream position (the follower's position
+    // restarts at zero when it rotates), or as an exact-ID reconciliation
+    // reload. Each must publish the same rows once recovery ends.
+    noticeShape?: `plain` | `gap` | `reconciliation`
   }
   const assertFollowerGenerationNoticeHistory = async ({
     ownerCommit,
     later,
     ownerRead,
     readFailsAsRotationStarts = false,
+    noticeShape = `plain`,
   }: FollowerGenerationNoticeHistory): Promise<void> => {
     const readFailure = new Error(`owner update read failed`)
     let failNextRead = false
@@ -25650,8 +25656,15 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     const commitBudget = 8
     let commits = 0
     const notify = (id: string, row: Todo, senderId: string) => {
-      const version = (versions.get(id) ?? 0) + 1
+      // A gap skips one stream position in the rotated generation.
+      const skip =
+        noticeShape === `gap` && id === newStorageId && !versions.has(id)
+          ? 1
+          : 0
+      const version = (versions.get(id) ?? 0) + 1 + skip
       versions.set(id, version)
+      const reconciliation =
+        noticeShape === `reconciliation` && id === newStorageId
       subscribers.get(id)?.({
         v: 1,
         dbName: `test-db`,
@@ -25664,7 +25677,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           seq: version,
           txId: `${senderId}-${id}-${version}`,
           latestRowVersion: version,
-          requiresFullReload: false,
+          requiresFullReload: reconciliation,
+          ...(reconciliation ? { reconciliationReload: true } : {}),
           changedRows: [{ key: row.id, value: { ...row } }],
           deletedKeys: [],
         } satisfies TxCommitted,
@@ -25877,8 +25891,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           expectOwnerEvidence(visible)
         }
       } else if (later === `peer`) {
-        // A non-owner claims a change. It is not source evidence: the rows
-        // stay as they were, and the follower asks the owner again.
+        // A peer's notice after recovery is an ordinary invalidation: the
+        // follower rereads durable rows, which the peer did not change, so
+        // its rows stay as they were and it sends no other ensure.
         notify(newStorageId, { id: `remote`, title: `Peer claim` }, `peer-node`)
         await settled(`peer notice processed`)
         expectOwnerEvidence(visible)
@@ -25887,7 +25902,6 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       expect(ensures).toEqual([
         { id: oldStorageId, refetch: false },
         { id: newStorageId, refetch: true },
-        ...(later === `peer` ? [{ id: newStorageId, refetch: true }] : []),
       ])
     } catch (error) {
       hasPrimaryFailure = true
@@ -25907,6 +25921,22 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     { ownerCommit: `before-rotation`, later: `peer` },
   ] as const)(
     `publishes an elected owner's rows to a follower after rotation: commit $ownerCommit, later $later`,
+    (history) =>
+      assertFollowerGenerationNoticeHistory({ ...history, ownerRead: `ok` }),
+  )
+
+  it.each(
+    ([`gap`, `reconciliation`] as const).flatMap((noticeShape) =>
+      ([`before-rotation`, `after-rotation`] as const).flatMap((ownerCommit) =>
+        ([`none`, `owner`] as const).map((later) => ({
+          ownerCommit,
+          later,
+          noticeShape,
+        })),
+      ),
+    ),
+  )(
+    `publishes an elected owner's rows after rotation when its notice is a $noticeShape: commit $ownerCommit, later $later`,
     (history) =>
       assertFollowerGenerationNoticeHistory({ ...history, ownerRead: `ok` }),
   )
