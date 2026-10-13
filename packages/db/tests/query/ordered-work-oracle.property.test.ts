@@ -4392,12 +4392,13 @@ describe(`ordered source work oracle`, () => {
  * to the query's subscription, which include index refills. Scan is counted
  * as the rows the Collection's `entries()` yields.
  * The sync path also runs against an on-demand source. Its provider serves
- * each request from the rows, filtered with the reference evaluator, sorted
- * by the model's order, with the offset only when there is no cursor, up to
- * the limit; it returns the commit's applied receipt. On that path the rows
- * law holds after each step, but only the last publication of a step must
- * show the final window (#2131), and the work and scan laws do not apply:
- * the on-demand work laws above own them.
+ * each request from the rows: filtered with the reference evaluator, sorted
+ * by the requested order, with the offset only when there is no cursor, up
+ * to the limit. It returns the commit's applied receipt, and forwards live
+ * changes only for rows it sent or rows that match a subset it served. On
+ * that path the rows law holds after each step, the work law bounds the rows
+ * the provider serves, and a step that made a provider request only needs
+ * its last publication to show the final window (#2131).
  * Joined filters can match a row through several markers, by `dup`, so a
  * LEFT-joined filter and a full join keep one result row per matched
  * (row, marker) pair, and an anti-join keeps a row once.
@@ -4551,7 +4552,9 @@ const eagerJoinedHistory: fc.Arbitrary<Array<EagerCommand>> = fc.array(
   fc.oneof(
     {
       weight: 2,
-      arbitrary: eagerRowOf(9).map((row) => ({
+      // Ids 10 to 29: fresh rows, and the root rows of a full join's orphan
+      // markers (20 to 29), so an orphan can become matched.
+      arbitrary: eagerRowOf(19).map((row) => ({
         type: `upsert` as const,
         ...row,
         id: row.id + 10,
@@ -4819,6 +4822,21 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
   // up to the limit. It
   // installs each returned row that the source does not hold yet. It
   // evaluates predicates with the reference evaluator, not production's.
+  const providerRequests: Array<{ unbounded: boolean }> = []
+  // Rows the provider returns, the on-demand transfer the work law bounds.
+  let served = 0
+  // Predicates of the subsets the provider has served; `undefined` is a
+  // request without one, which covers every row.
+  const servedWheres: Array<LoadSubsetOptions[`where`]> = []
+  const matchesServedSubset = (row: Row) =>
+    servedWheres.some(
+      (where) =>
+        where === undefined ||
+        evaluateReferenceExpression(
+          where as Parameters<typeof evaluateReferenceExpression>[0],
+          row,
+        ) === true,
+    )
   function servePage(options: LoadSubsetOptions): true | Promise<void> {
     const matches = (expression: unknown, row: Row) =>
       evaluateReferenceExpression(
@@ -4830,10 +4848,15 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
         (!options.where || matches(options.where, row)) &&
         (!options.cursor || matches(options.cursor.whereFrom, row)),
     )
+    providerRequests.push({ unbounded: options.limit === undefined })
+    servedWheres.push(options.where)
     if (options.orderBy) {
+      // Serve the order the request names, not the query's: a loader that
+      // asks for the wrong direction or null placement gets the wrong rows.
+      const { direction, nulls } = options.orderBy[0]!.compareOptions
       const order = eagerOrder(
         new Map(page.map((row) => [row.id, { ...row, eligible: true }])),
-        testCase,
+        { ...testCase, direction, nulls },
       ).map((row) => row.id)
       page = order.map((rowId) => page.find((row) => row.id === rowId)!)
       // `offset` is the alternative to `cursor` (LoadSubsetOptions), so a
@@ -4841,6 +4864,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       if (!options.cursor) page = page.slice(options.offset ?? 0)
       if (options.limit !== undefined) page = page.slice(0, options.limit)
     }
+    served += page.length
     const fresh = page.filter((row) => !source.has(row.id))
     if (fresh.length === 0) return true
     syncControls!.begin()
@@ -4852,12 +4876,18 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
     const applied = syncControls!.commit()
     return applied === true ? true : applied.then(() => undefined)
   }
-  // A live source write. An on-demand source holds only the rows it has
-  // received, so a change to a row it lacks inserts it, and a delete of
-  // such a row writes nothing.
+  // A live source write. An on-demand provider forwards changes for rows it
+  // has sent, and for rows that now match a subset it has served (inserted);
+  // it writes nothing for any other row.
   const sourceWrite = (type: `insert` | `update` | `delete`, value: Row) => {
     const installed = source.has(value.id)
-    if (testCase.path === `on-demand` && type === `delete` && !installed) return
+    if (
+      testCase.path === `on-demand` &&
+      !installed &&
+      (type === `delete` || !matchesServedSubset(value))
+    ) {
+      return
+    }
     syncControls!.begin()
     syncControls!.write({
       type:
@@ -4886,11 +4916,15 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
   }
   // A joined filter keeps eligibility on markers. A marker has its own key;
   // its `rowId` is the join key, so several markers can match one row.
+  // The model keeps its own copy of every marker it writes, so the expected
+  // rows never come from the Collection under test.
   let nextMarkerKey = 100_000
-  const marker = (rowId: number): JoinMarker => ({
-    key: nextMarkerKey++,
-    rowId,
-  })
+  const markerModel = new Map<number, JoinMarker>()
+  const marker = (rowId: number): JoinMarker => {
+    const entry = { key: nextMarkerKey++, rowId }
+    markerModel.set(entry.key, entry)
+    return { ...entry }
+  }
   const markers = createCollection(
     localOnlyCollectionOptions<JoinMarker, number>({
       id: `${id}-markers`,
@@ -4924,6 +4958,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
     const current = markersOf(rowId)
     if (matched === current.length > 0) return
     commits++
+    if (!matched) for (const { key } of current) markerModel.delete(key)
     await (
       matched
         ? markers.insert(marker(rowId))
@@ -4931,7 +4966,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
     ).isPersisted.promise
   }
   const markersOf = (rowId: number) =>
-    [...markers.values()].filter((entry) => entry.rowId === rowId)
+    [...markerModel.values()].filter((entry) => entry.rowId === rowId)
   // One result row's identity: a matched pair is its marker, a root row
   // without a marker is the row, and a rootless row is -1 - its marker.
   const resultId = (row: Row | undefined, match: JoinMarker | undefined) =>
@@ -5053,7 +5088,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
     if (!(joined || fullJoin)) return rows
     const model = new Map<number, Row>()
     const matchedRoots = new Set<number>()
-    for (const entry of markers.values()) {
+    for (const entry of markerModel.values()) {
       const roots = [...rows.values()].filter((row) => row.link === entry.rowId)
       for (const row of roots) {
         matchedRoots.add(row.id)
@@ -5081,6 +5116,13 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
     }
     return model
   }
+  // The model window's order values, to tell whether a step changed it.
+  const windowRanks = () =>
+    JSON.stringify(
+      eagerWindow(modelRows(), testCase).map((rowId) =>
+        String(modelRows().get(rowId)?.rank),
+      ),
+    )
   const window = testCase.offset + testCase.limit
   // The bound for one load: a prefix, the boundary ties, a refill, and the
   // changed row. Null when a boundary value cannot be expressed as a cursor.
@@ -5089,9 +5131,6 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
     // bounded prefix cannot prove the window is the first eligible rows; the
     // loader reads the full source and only the rows law applies.
     if (!testCase.indexed || testCase.terms !== 1) return undefined
-    // An on-demand source holds only what it received; its provider work
-    // laws are the on-demand ones above, so only the rows law applies here.
-    if (testCase.path === `on-demand`) return undefined
     // A full join reads its full source too: a rootless row cannot be shown
     // unmatched until every root row has loaded.
     if (testCase.filter !== `source`) return undefined
@@ -5128,7 +5167,13 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
     })
     unsubscribe = () => subscription.unsubscribe()
     const initialBound = workBound(boundaryRanks(rows, testCase))
-    if (initialBound !== undefined) {
+    // On demand, the provider's transfer is bounded; the local snapshot
+    // delivers every installed row, so read and delivered counts are not.
+    if (initialBound !== undefined && testCase.path === `on-demand`) {
+      expect(served, `rows served by the initial load`).toBeLessThanOrEqual(
+        initialBound,
+      )
+    } else if (initialBound !== undefined) {
       expect(read, `rows read by the initial load`).toBeLessThanOrEqual(
         initialBound,
       )
@@ -5153,8 +5198,11 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       read = 0
       delivered = 0
       scanned = 0
+      served = 0
       published.length = 0
       commits = 1
+      const requestsBefore = providerRequests.length
+      const ranksBefore = windowRanks()
       if (command.type === `delete`) {
         if (!before) continue
         rows.delete(command.id)
@@ -5238,10 +5286,17 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       }
       // Each commit publishes at most once, and the commit that completes
       // the step publishes the final window. With one commit, every batch
-      // shows it. An on-demand repair or refill can publish an intermediate
-      // window first (#2131), so on that path only the last publication must
-      // show the final window.
-      const onDemand = testCase.path === `on-demand`
+      // shows it. A step whose window changes publishes at least once. An
+      // on-demand repair or refill can publish an intermediate window first
+      // (#2131), so a step that made a provider request only needs its last
+      // publication to show the final window.
+      if (windowRanks() !== ranksBefore) {
+        expect(
+          published.length,
+          `publications by step ${step}`,
+        ).toBeGreaterThan(0)
+      }
+      const onDemand = providerRequests.length > requestsBefore
       if (!onDemand) {
         expect(
           published.length,
@@ -5273,7 +5328,9 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
         ...boundaryBefore,
         ...boundaryRanks(rows, testCase),
       ])
-      if (bound !== undefined) {
+      if (bound !== undefined && testCase.path === `on-demand`) {
+        expect(served, `rows served by step ${step}`).toBeLessThanOrEqual(bound)
+      } else if (bound !== undefined) {
         expect(read, `rows read by step ${step}`).toBeLessThanOrEqual(bound)
         expect(delivered, `rows delivered by step ${step}`).toBeLessThanOrEqual(
           bound,
@@ -5362,6 +5419,30 @@ describe(`eager indexed ordered windows`, () => {
     },
   )
 
+  it(`refills an unindexed on-demand anti-join window after a visible delete`, async () => {
+    // The plan pages without an index; the anti-join drops row 0 after the
+    // provider's limit. Before the compiler counted the rows this window
+    // needs, the window stayed empty after the delete instead of reading the
+    // full source.
+    await checkEagerWindow({
+      path: `on-demand`,
+      filter: `anti-joined`,
+      via: `marker`,
+      indexed: false,
+      direction: `asc`,
+      nulls: `first`,
+      terms: 1,
+      limit: 1,
+      offset: 0,
+      initial: [],
+      history: [
+        { type: `upsert`, id: 0, rank: 0, eligible: false },
+        { type: `delete-visible` },
+        { type: `dup`, id: 0 },
+      ],
+    })
+  })
+
   it.each([
     [`sync`, 1],
     [`local-only`, 1],
@@ -5370,11 +5451,11 @@ describe(`eager indexed ordered windows`, () => {
   ] as const)(
     `shows no rootless full-join row for a null-ranked root past the prefix (%s, %s terms)`,
     async (path, terms) => {
-      // Nulls last. The prefix ends inside the null group, where row 2 and the
-      // marker of unloaded row 3 tie on rank. A null boundary is not an
-      // expressible cursor, so the loader reads the full source and row 3's
-      // marker is matched; a loader that paged from a null boundary could
-      // show that marker as a rootless row.
+      // Nulls last. Row 2 and the marker of row 3 tie on rank in the null
+      // group. A full join reads its full source, so row 3's marker is
+      // matched. A loader that paged this plan and ended its prefix inside
+      // the null group would leave row 3 unloaded and could show its marker
+      // as a rootless row; restoring the old join rule fails this case.
       await checkEagerWindow({
         path,
         filter: `full-joined`,
