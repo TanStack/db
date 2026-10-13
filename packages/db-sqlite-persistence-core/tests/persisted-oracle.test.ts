@@ -25977,7 +25977,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
    * broadcast arrives while another subset's hydration holds the apply mutex,
    * so it waits in the queue. A rotated history loses the cache claim after
    * the first hydration read, so the demand reacquires through the owner
-   * under a new generation. The read that applies the owner's row is the one
+   * under a new generation. An expired history lets the follower's cache
+   * claim lapse while its ensure is in flight, so the owner's notice arrives
+   * while the claim is expired; renewal keeps the same generation. The read
+   * that applies the owner's row is the one
    * whose durable snapshot contains it; the driver holds that read to observe
    * the not-ready checkpoint, or fails it. The consumer is a live query
    * over the demanded rows or the follower's load itself. Observations, while
@@ -25993,7 +25996,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
    * receiving witness for the browser transport.
    */
   type FollowerRemoteDemandHistory = {
-    placement: `direct` | `queued` | `rotated`
+    placement: `direct` | `queued` | `rotated` | `expired`
     apply: `ok` | `fails`
     // A live query over the demand, or the follower's load itself.
     consumer: `live-query` | `load`
@@ -26043,6 +26046,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       expiresAtMs: Date.now() + 10_000,
     })
     const rotated = history.placement === `rotated`
+    const expiring = history.placement === `expired`
+    let now = 1_000_000
     const adapter: PersistenceAdapter = {
       loadSubset: async () => {
         const read = ++reads
@@ -26058,6 +26063,22 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         if (rotated && read === 1) loseClaim = true
         return snapshot.map((value) => ({ key: value.id, value }))
       },
+      ...(expiring
+        ? {
+            getCacheGenerationNow: () => now,
+            claimCacheGeneration: async () => ({
+              storageCollectionId: storageId,
+              claimId: `follower-demand-claim`,
+              expiresAtMs: now + 10_000,
+            }),
+            // The claim is still held, so renewal keeps this generation.
+            renewCacheGenerationClaim: async () => now + 10_000,
+            rotateCacheGeneration: async () => {
+              throw new Error(`an expired history must not rotate`)
+            },
+            releaseCacheGenerationClaim: async () => {},
+          }
+        : {}),
       ...(rotated
         ? {
             claimCacheGeneration: async () => claim(),
@@ -26105,6 +26126,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       requestEnsureRemoteSubset: async (collectionId) => {
         if (++ensures > 1) return
         if (history.placement === `queued`) await otherHydrationStarted.promise
+        // The follower's claim lapses before the owner's notice reaches it.
+        if (expiring) now += 20_000
         const value = { id: `remote`, group: `a` }
         durable.push(value)
         const payload: TxCommitted = {
@@ -26299,7 +26322,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   }
 
   const followerRemoteDemandHistories: Array<FollowerRemoteDemandHistory> = (
-    [`direct`, `queued`, `rotated`] as const
+    [`direct`, `queued`, `rotated`, `expired`] as const
   ).flatMap((placement) =>
     ([`ok`, `fails`] as const).flatMap((apply) =>
       ([`live-query`, `load`] as const).map((consumer) => ({
@@ -26318,6 +26341,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       `direct`,
       `queued`,
       `rotated`,
+      `expired`,
     ),
     apply: fc.constantFrom<FollowerRemoteDemandHistory[`apply`]>(`ok`, `fails`),
     consumer: fc.constantFrom<FollowerRemoteDemandHistory[`consumer`]>(

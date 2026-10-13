@@ -1757,9 +1757,13 @@ class PersistedCollectionRuntime<
     // release its turn before checking the claim and rotating the cache.
     queueMicrotask(() => {
       if (lifecycleGeneration !== this.lifecycleGeneration) return
-      void this.ensureCacheClaimActive().catch((error) => {
-        this.markTerminalFailure(error, lifecycleGeneration)
-      })
+      void this.ensureCacheClaimActive()
+        .then(() =>
+          this.applyMutex.run(() => this.flushQueuedTxCommittedUnsafe()),
+        )
+        .catch((error) => {
+          this.markTerminalFailure(error, lifecycleGeneration)
+        })
     })
   }
 
@@ -1933,6 +1937,10 @@ class PersistedCollectionRuntime<
     options: LoadSubsetOptions,
   ): Promise<void> {
     try {
+      // Commits kept while the claim was expired apply after it is active.
+      if (this.hasExpiredCacheClaim() || this.cacheClaimRecovery) {
+        await this.ensureCacheClaimActive()
+      }
       await this.applyMutex.run(() => this.flushQueuedTxCommittedUnsafe())
       // A broadcast that failed to apply made the runtime terminal; its rows
       // are not visible, so the load must not settle successfully.
@@ -4574,16 +4582,14 @@ class PersistedCollectionRuntime<
     if (this.getCurrentTerminalFailure()) {
       return
     }
-    if (this.hasExpiredCacheClaim()) {
-      void this.ensureCacheClaimActive().catch((error) => {
-        this.markTerminalFailure(error)
-      })
-      return
-    }
-
     const { payload } = message
     const lifecycleGeneration = this.lifecycleGeneration
     const isSelf = message.senderId === this.persistence.coordinator.getNodeId()
+    const claimExpired = this.hasExpiredCacheClaim()
+    if (claimExpired && !isTxCommittedPayload(payload)) {
+      this.scheduleCacheClaimRecovery(lifecycleGeneration)
+      return
+    }
 
     // Allow tx:committed from self — the coordinator produces these on behalf
     // of both local and remote mutations. The seq dedup in
@@ -4595,13 +4601,16 @@ class PersistedCollectionRuntime<
         !isSelf &&
         message.senderId ===
           this.persistence.coordinator.getLeaderId(message.collectionId)
-      if (this.isHydratingNow()) {
+      // While the claim is expired, keep the commit until renewal or rotation
+      // decides this generation; a renewed generation still owes its rows.
+      if (claimExpired || this.isHydratingNow()) {
         this.queuedTxCommitted.push({
           txCommitted: payload,
           lifecycleGeneration,
           storageCollectionId: message.collectionId,
           fromElectedOwner,
         })
+        if (claimExpired) this.scheduleCacheClaimRecovery(lifecycleGeneration)
         return
       }
 
@@ -4654,6 +4663,11 @@ class PersistedCollectionRuntime<
 
   private async flushQueuedTxCommittedUnsafe(): Promise<void> {
     while (this.queuedTxCommitted.length > 0) {
+      // Claim recovery flushes the queue once the generation is decided.
+      if (this.hasExpiredCacheClaim()) {
+        this.scheduleCacheClaimRecovery(this.lifecycleGeneration)
+        return
+      }
       const queued = this.queuedTxCommitted.shift()
       if (!queued) {
         continue
@@ -4680,6 +4694,13 @@ class PersistedCollectionRuntime<
   ): Promise<void> {
     if (lifecycleGeneration !== this.lifecycleGeneration) return
     if (this.hasExpiredCacheClaim()) {
+      // Keep the commit for the generation that claim recovery decides.
+      this.queuedTxCommitted.unshift({
+        txCommitted,
+        lifecycleGeneration,
+        storageCollectionId: this.storageCollectionId,
+        fromElectedOwner,
+      })
       this.scheduleCacheClaimRecovery(lifecycleGeneration)
       return
     }
