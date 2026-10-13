@@ -829,3 +829,222 @@ it.each(earlyDemandPlans)(
   `waits for the listener before an early on-demand fetch: $outcome / change=$serviceChange / $consumer`,
   (plan) => checkEarlyDemand(plan),
 )
+
+/**
+ * ## Does a fetched page keep a newer change that the listener applied?
+ *
+ * Law: once a page and every change event for its rows have arrived, the
+ * Collection's rows equal the service's rows. The listener runs before every
+ * fetch, so a change that commits while a page is in flight reaches the
+ * Collection as an event. The page was read before that change, so applying it
+ * afterward must not return a changed row to its old value or bring a deleted
+ * row back.
+ *
+ * Reference: a service holds rows by key. `list` captures a snapshot when it is
+ * called and answers later, when the history releases it; a change commits to
+ * the service and is delivered at once to the established listener. The model
+ * predicts the Collection's rows from the service alone: after the page
+ * settles they equal the service at that moment, and after every step they
+ * equal it again. It never reads adapter state.
+ *
+ * Grammar (exhaustive, 15 histories): the mode is eager startup or an
+ * on-demand load; the change updates an existing row, deletes it, or inserts a
+ * new row; the change commits before the list call (on-demand only, since an
+ * eager list starts as soon as the listener runs), while the page is in flight,
+ * or after the page applies.
+ *
+ * Checkpoints: after the page settles, and after the change when it comes
+ * last. Each compares the Collection's rows with the service.
+ */
+type RaceRow = { id: number; data: string }
+type RacePlan = {
+  mode: `eager` | `on-demand`
+  change: `update` | `delete` | `insert`
+  timing: `before-list` | `during-fetch` | `after-page`
+}
+
+const raceServiceRows: Array<RaceRow> = [
+  { id: 1, data: `v1` },
+  { id: 2, data: `v1` },
+]
+
+function raceChange(change: RacePlan[`change`]): {
+  event: Event
+  apply: (rows: Map<number, RaceRow>) => void
+} {
+  if (change === `update`) {
+    const row = { id: 1, data: `v2` }
+    return { event: { Update: row }, apply: (rows) => rows.set(1, row) }
+  }
+  if (change === `delete`) {
+    const row = { id: 1, data: `v1` }
+    return { event: { Delete: row }, apply: (rows) => rows.delete(1) }
+  }
+  const row = { id: 3, data: `v1` }
+  return { event: { Insert: row }, apply: (rows) => rows.set(3, row) }
+}
+
+// Compare only the row fields; the Collection adds virtual properties.
+const sortedRows = (rows: Iterable<RaceRow>) =>
+  [...rows].map(({ id, data }) => ({ id, data })).sort((a, b) => a.id - b.id)
+
+async function checkPageEventRace(plan: RacePlan) {
+  const service = new Map(raceServiceRows.map((row) => [row.id, row]))
+  const { event, apply } = raceChange(plan.change)
+  const stream = new TransformStream<Event>()
+  const listener = stream.writable.getWriter()
+  const page = deferred<ListResponse<RaceRow>>()
+  let snapshot: Array<RaceRow> | undefined
+  const api = new MockRecordApi<RaceRow>()
+  api.subscribe.mockImplementation(() => Promise.resolve(stream.readable))
+  api.list.mockImplementation(() => {
+    snapshot = [...service.values()]
+    return page.promise
+  })
+  const commitChange = async () => {
+    apply(service)
+    await listener.write(event)
+    await turn()
+  }
+  const collection = createCollection(
+    trailBaseCollectionOptions({
+      recordApi: api,
+      getKey: (row: RaceRow) => row.id,
+      syncMode: plan.mode,
+      startSync: true,
+      parse: {},
+      serialize: {},
+    }),
+  )
+  const rows = () => sortedRows(collection.toArray)
+  const trace = JSON.stringify(plan)
+
+  try {
+    await turn()
+    if (plan.timing === `before-list`) await commitChange()
+    const settled = observe(
+      plan.mode === `eager`
+        ? collection.preload()
+        : Promise.resolve(collection._sync.loadSubset({})),
+    )
+    await turn()
+    expect(snapshot, `${trace} list called`).toBeDefined()
+    if (plan.timing === `during-fetch`) await commitChange()
+    page.resolve({ records: snapshot! })
+    await turn()
+    await turn()
+    expect(settled.result, `${trace} page settled`).toBe(`fulfilled`)
+    expect(rows(), `${trace} rows after the page`).toEqual(
+      sortedRows(service.values()),
+    )
+
+    if (plan.timing === `after-page`) {
+      await commitChange()
+      expect(rows(), `${trace} rows after the change`).toEqual(
+        sortedRows(service.values()),
+      )
+    }
+  } finally {
+    page.resolve({ records: [] })
+    await collection.cleanup()
+    void listener.close().catch(() => undefined)
+    await turn()
+  }
+}
+
+const racePlans: Array<RacePlan> = ([`eager`, `on-demand`] as const).flatMap(
+  (mode) =>
+    ([`update`, `delete`, `insert`] as const).flatMap((change) =>
+      (mode === `eager`
+        ? ([`during-fetch`, `after-page`] as const)
+        : ([`before-list`, `during-fetch`, `after-page`] as const)
+      ).map((timing) => ({ mode, change, timing })),
+    ),
+)
+
+it.each(racePlans)(
+  `keeps a newer change over an older page: $mode / $change / $timing`,
+  (plan) => checkPageEventRace(plan),
+)
+
+/**
+ * ## What happens after the change stream ends?
+ *
+ * Law (the adapter's current contract, `ORACLE.md`): the adapter subscribes
+ * once per sync run and does not resubscribe. After the stream ends, the
+ * Collection keeps its rows and stays ready, a later service change does not
+ * reach it, and a later on-demand load does not wait for a new subscription.
+ * The load lists the service's current rows. This lane makes that limit
+ * executable; it does not claim that the limit is the right product behavior.
+ *
+ * Reference: the same service model. The prediction after the stream ends is
+ * the rows that the last delivered event or page established.
+ *
+ * Grammar (exhaustive, 2 histories): the stream closes gracefully or fails
+ * with a read error after the first page applies; then the service changes a
+ * row, and an on-demand load runs.
+ *
+ * Checkpoints: after the stream ends, after the service change, and after the
+ * later load. Each compares rows, status, and subscribe calls.
+ */
+it.each([`close`, `read-error`] as const)(
+  `keeps rows and does not resubscribe after the stream ends: %s`,
+  async (ending) => {
+    const service = new Map(raceServiceRows.map((row) => [row.id, row]))
+    let controller!: ReadableStreamDefaultController<Event>
+    const stream = new ReadableStream<Event>({
+      start(value) {
+        controller = value
+      },
+    })
+    const api = new MockRecordApi<RaceRow>()
+    api.subscribe.mockImplementation(() => Promise.resolve(stream))
+    api.list.mockImplementation(() =>
+      Promise.resolve({ records: [...service.values()] }),
+    )
+    const reported = vi.spyOn(console, `error`).mockImplementation(() => {})
+    const collection = createCollection(
+      trailBaseCollectionOptions({
+        recordApi: api,
+        getKey: (row: RaceRow) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        parse: {},
+        serialize: {},
+      }),
+    )
+    const rows = () => sortedRows(collection.toArray)
+
+    try {
+      await turn()
+      await collection._sync.loadSubset({})
+      await turn()
+      const established = sortedRows(service.values())
+      expect(rows(), `${ending} first page`).toEqual(established)
+
+      if (ending === `close`) controller.close()
+      else controller.error(failure)
+      await turn()
+      expect(collection.status, `${ending} status after the end`).toBe(`ready`)
+      expect(rows(), `${ending} rows after the end`).toEqual(established)
+
+      service.set(1, { id: 1, data: `v2` })
+      await turn()
+      expect(rows(), `${ending} a later change is not delivered`).toEqual(
+        established,
+      )
+
+      await collection._sync.loadSubset({ limit: 10 } as never)
+      await turn()
+      expect(api.subscribe, `${ending} subscribe calls`).toHaveBeenCalledTimes(
+        1,
+      )
+      expect(rows(), `${ending} a later load lists current rows`).toEqual(
+        sortedRows(service.values()),
+      )
+    } finally {
+      await collection.cleanup()
+      reported.mockRestore()
+    }
+  },
+)

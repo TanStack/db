@@ -268,6 +268,8 @@ export function trailBaseCollectionOptions<
         while (true) {
           const limit = Math.min(remaining, 256)
           let response
+          // A change event after this point is newer than the page.
+          const listedAt = Date.now()
           try {
             response = await config.recordApi.list({
               pagination: {
@@ -296,10 +298,12 @@ export function trailBaseCollectionOptions<
           begin()
 
           for (let i = 0; i < Math.min(length, remaining); ++i) {
-            write({
-              type: `insert`,
-              value: parse(response.records[i]!),
-            })
+            const value = parse(response.records[i]!)
+            const key = getKey(value)
+            // The listener already applied a newer change for this row.
+            if ((seenIds.state.get(String(key)) ?? -Infinity) >= listedAt)
+              continue
+            write({ type: collection.has(key) ? `update` : `insert`, value })
           }
 
           // An accepted page always applies.

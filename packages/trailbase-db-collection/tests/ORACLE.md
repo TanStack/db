@@ -35,6 +35,20 @@ The same interpreter runs a fixed corpus and generated histories.
   first-ready rows, and current rows.
   Required startup failures reject. Later stream failures retain rows and report
   the error, matching the adapter's current policy.
+- Once a page and every change event for its rows have arrived, the
+  Collection's rows equal the service's rows. A page was read before any
+  change that the listener applies while the page is in flight, so the page
+  skips rows that such an event touched, and it updates a row that the
+  Collection already holds instead of inserting it again. The page-event lane
+  enumerates 15 histories: eager startup or an on-demand load; an update,
+  delete, or insert; committed before the list call (on-demand only), while
+  the page is in flight, or after it applies. It compares the Collection's
+  rows with the service after the page settles and after a later change.
+- The adapter subscribes once per sync run and does not resubscribe. After the
+  stream closes or fails, the Collection keeps its rows and stays ready, a
+  later service change does not reach it, and a later on-demand load lists
+  the service's current rows without waiting. Two histories make this limit
+  executable; they do not claim it is the right product behavior.
 - Graceful closure drains buffered events before releasing the reader.
 - Processing failures cancel an open source. Terminal paths release readers and
   timers without detached rejections, including same-turn cleanup.
@@ -62,11 +76,12 @@ provider-owned list, event, and buffered rows before parsing. Model rows derive
 separately from command scalars, so provider mutation cannot change the answer.
 
 This is not a model of pagination, filtered subsets, optimistic mutation
-acknowledgements, service reconnects, or arbitrary event/list interleavings.
-In particular, a change event that applies before a concurrent fetch's page
-for the same row can be overwritten by that older page. No witness or model
-covers that ordering yet. Loads after the stream ends do not wait for a new
-subscription.
+acknowledgements, or service reconnects. The page-event lane covers one page
+and one change per history; several pages of one load, several changes, and
+two concurrent loads for the same key remain outside it. The page fence uses
+the adapter's per-key event timestamps, so a change event in the same
+millisecond as the list call also makes the page skip that row; the listener
+still holds the newer or equal value.
 The generated event phase starts after loading; existing loading-time unit
 matrices and the two held-cancellation startup controls remain valuable. Those
 controls were both RED when listener failure awaited cancellation, and GREEN
@@ -106,6 +121,18 @@ runs. Four mutants of the wait fail it at assertions:
 | A start failure never settles the wait |                 4 |
 | The wait ignores the caller's abort    |                 2 |
 | Cleanup does not settle the wait       |                 2 |
+
+The page-event and stream-end lanes fail on the adapter before this change:
+an update during the fetch makes the page's insert collide with the row the
+event wrote (`DuplicateKeySyncError`, so the load rejects), a delete during
+the fetch brings the row back, and a later load that lists a changed row
+collides the same way.
+
+| Variant                              | Failing histories |
+| ------------------------------------ | ----------------: |
+| Adapter before this change           |                 6 |
+| Pages ignore change events in flight |                 4 |
+| Pages always insert                  |                 2 |
 
 Before the stale-startup fix, both campaigns independently shrank to: cancel a
 pending subscription, restart and load a healthy stream, reject the old subscribe.
