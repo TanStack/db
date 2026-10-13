@@ -466,15 +466,34 @@ through live-query subscriptions: a settled full request serves a later
 filtered demand with no second provider call; after the full view releases,
 invalidation still updates the filtered view; an overlapping exact refetch
 keeps its own rows and owner; and final release removes them. A pending full
-request still requires a filtered provider call. The settled-full witness
+request does not establish filtered coverage; the filtered demand may wait for
+its application or request its exact scope. The settled-full witness
 fails on the original implementation at the provider-call checkpoint.
 It checks that the initial full acquisition signal may abort while a later
-shared full fetch receives a live signal, and that a later equal demand sees
-a failed full revalidation rather than switching Query owners.
+shared full fetch receives a live signal.
 Another held-fetch cut releases the final filtered owner during full Query
 revalidation, then checks transport abort and no late row publication.
-Arbitrary predicate containment, function-built Query keys, and persisted
-startup replay with a shared full-source lease still need distinct witnesses.
+Query-cache success reentry checks that initial and replacement full results
+cannot settle a filtered acquisition before Collection application; the
+replacement cut rejects a gate based only on previous full-row ownership. An
+applied direct cache patch permits exact filtered revalidation but cannot
+trigger a redundant full request. Signal witnesses cover a provider that
+ignores its signal and may finish into Query cache after final unload, equal
+full-source peers after the first releases, and two Collections sharing a
+Query whose later fetch runs the released Collection's queryFn. The last
+witness verifies the foreign closure path on the installed Query Core version.
+The ownership owner seeds a persisted `until-revalidated` subset owner, then
+applies a complete full-source result and acquires that subset. Omitted and
+unchanged source rows must match public and durable rows at settlement, and
+the subset's retention marker must clear. Reusing the full Query while leaving
+the subset owner unvalidated fails all three observations in the omitted case;
+the unchanged control fails at the marker. Arbitrary predicate containment,
+function-built Query keys, TTL retention, multi-owner overlap, and other
+persisted startup replay histories with a shared full-source lease still need
+distinct witnesses.
+These tests do not prove every provider returns a complete full source,
+arbitrary observer-option selection, or the policy
+for a new equal demand after failed revalidation.
 Its real QueryClient witness loads ten disjoint on-demand subsets, then checks
 `writeUpsert`, `writeUpdate`, `writeDelete`, `writeInsert`, and a mixed
 `writeBatch`. After each accepted write it compares public live-query rows with

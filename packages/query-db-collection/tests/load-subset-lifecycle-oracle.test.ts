@@ -17,11 +17,13 @@ import type { LoadSubsetOptions, SyncMetadataApi } from '@tanstack/db'
 /**
  * # Does Query-backed loadSubset preserve identity and lifecycle?
  *
- * Canonically equal demands share one Query transport. A completed full-source
- * demand can also serve a later narrower demand while the full Query stays
- * active. Otherwise distinct predicates, values, order, cursor, and scope
- * remain distinct. The final live-query owner
- * controls cancellation, and a replacement owner starts fresh after abort.
+ * Canonically equal demands share one Query transport. An applied full-source
+ * result can also serve a later narrower demand while the full Query stays
+ * active. Query Core success before Collection application is insufficient,
+ * including when an older full result was applied. Otherwise distinct
+ * predicates, values, order, cursor, and scope remain distinct. The final
+ * live-query owner controls cancellation, and a replacement owner starts fresh
+ * after abort.
  * Initial failure reaches existing and late dependents; recovery becomes public
  * only after every failed source recovers. A refetch stays pending while result
  * application is deferred, including for existing and cached demands. After a
@@ -38,14 +40,20 @@ import type { LoadSubsetOptions, SyncMetadataApi } from '@tanstack/db'
  * The exact demand-identity API in docs/reference/functions/getLoadSubsetDemandKey.md
  * and the Collection sync-adapter contract in docs/guides/collection-options-creator.md
  * authorize the identity, request-scoped release, and applied-settlement laws.
- * The 0.5 query-driven-sync post's subset-reuse promise authorizes the bounded
- * full-source refinement below; it does not make an incomplete or failed
- * request authoritative for a broader scope.
+ * The query-collection guide's on-demand reuse and cancellation sections and
+ * the 0.5 query-driven-sync post authorize the bounded full-source refinement
+ * below. They do not make an incomplete or failed request authoritative for a
+ * broader scope. The guide also permits an ignored-signal provider to finish
+ * after final observer removal and supports metadata request signals. A
+ * shared Query's later fetch must use a live signal when its original
+ * acquisition has released; reading that signal eagerly would change the
+ * ignored-signal behavior.
  * Each direct load below represents one acquisition lease; the small reference
  * history keeps a shared Query transport active while any lease remains. The
- * held provider checks the abort signal at each release checkpoint. These
- * controlled histories do not establish real network cancellation, arbitrary
- * Query scheduling, or native persistence behavior.
+ * held provider checks the abort signal at each release checkpoint. The
+ * two-Collection witness reaches Query Core's last-set queryFn path at the
+ * installed version. These controlled histories do not establish real network
+ * cancellation, arbitrary Query scheduling, or native persistence behavior.
  */
 
 type Row = {
@@ -72,13 +80,12 @@ function createQueryClient(): QueryClient {
  * filtered demand adds no source need while that completed full Query stays
  * owned. The fixed history keeps that Query alive after its first logical
  * owner leaves, then invalidates it to prove the dependent still receives new
- * rows with a live provider signal. A late equal demand inherits a failed
- * full Query revalidation; an explicit refetch is a fresh exact request and
- * must call the provider with the filter. The production path uses real live-query
- * subscriptions, Query observers, and Collection acquisition leases; the
- * public checks are fetch arguments and filtered rows after each settled
- * action. This does not claim arbitrary
- * predicate implication or provider freshness without invalidation.
+ * rows with a live provider signal. An explicit refetch is a fresh exact
+ * request and must call the provider with the filter. The production path
+ * uses real live-query subscriptions, Query observers, and Collection
+ * acquisition leases; the public checks are fetch arguments and filtered
+ * rows after each settled action. This does not claim arbitrary predicate
+ * implication or provider freshness without invalidation.
  */
 async function expectActiveFullSourceServesFilteredDemand(): Promise<void> {
   const queryClient = createQueryClient()
@@ -92,8 +99,6 @@ async function expectActiveFullSourceServesFilteredDemand(): Promise<void> {
     { id: `a1`, group: `a` },
     { id: `b1`, group: `b` },
   ]
-  const fullRefetchError = new Error(`full-source refetch failed`)
-  let failFullRefetch = false
   const requests: Array<`full` | `filtered`> = []
   let originalFullSignal: AbortSignal | undefined
   const queryFn = vi.fn((context: QueryFunctionContext) => {
@@ -104,8 +109,6 @@ async function expectActiveFullSourceServesFilteredDemand(): Promise<void> {
     if (scope === `full` && originalFullSignal === undefined)
       originalFullSignal = requestSignal
     requests.push(scope)
-    if (scope === `full` && failFullRefetch)
-      return Promise.reject(fullRefetchError)
     return Promise.resolve(
       providerRows.filter((row) => scope === `full` || row.group === `a`),
     )
@@ -170,21 +173,8 @@ async function expectActiveFullSourceServesFilteredDemand(): Promise<void> {
       `a2`,
     ])
 
-    // An equivalent later demand stays with its pinned Query and receives
-    // that Query's failed background refetch, rather than switching sources.
-    failFullRefetch = true
-    await queryClient.invalidateQueries({ queryKey: [id], exact: true })
-    const lateDemand: LoadSubsetOptions = { where: filter }
-    await expect(collection._sync.loadSubset(lateDemand)).rejects.toBe(
-      fullRefetchError,
-    )
-    collection._sync.unloadSubset(lateDemand)
-    failFullRefetch = false
-    await queryClient.invalidateQueries({ queryKey: [id], exact: true })
-    expect(requests).toEqual([`full`, `full`, `full`, `full`])
-
     await collection._sync.loadSubset(refetchRequest)
-    expect(requests).toEqual([`full`, `full`, `full`, `full`, `filtered`])
+    expect(requests).toEqual([`full`, `full`, `filtered`])
     await filteredPeer.cleanup()
     expect(collection.toArray.map(({ id: rowId }) => rowId).sort()).toEqual([
       `a1`,
@@ -203,10 +193,11 @@ async function expectActiveFullSourceServesFilteredDemand(): Promise<void> {
 
 /**
  * An in-flight full request has not established complete source coverage.
- * The filtered view therefore needs its own provider request and can settle
- * before the full request. This is the negative case for the reuse law above.
+ * The filtered view may request its exact scope or wait for the full result;
+ * without its own result it cannot settle before the full rows apply. This is
+ * the negative case for the reuse law above.
  */
-async function expectPendingFullSourceDoesNotServeFilteredDemand(): Promise<void> {
+async function expectPendingFullSourceNeedsAppliedEvidence(): Promise<void> {
   const queryClient = createQueryClient()
   const id = `pending-full-source-${collectionSequence++}`
   const fullRows: Array<Row> = [
@@ -249,17 +240,210 @@ async function expectPendingFullSourceDoesNotServeFilteredDemand(): Promise<void
   try {
     const fullPreload = full.preload()
     await vi.waitFor(() => expect(requests).toEqual([`full`]))
-    await filtered.preload()
-    expect(requests).toEqual([`full`, `filtered`])
-    expect(filtered.toArray.map(({ id: rowId }) => rowId)).toEqual([`a1`])
+    let filteredSettled = false
+    const filteredPreload = filtered.preload()
+    void filteredPreload.then(() => {
+      filteredSettled = true
+    })
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    if (!requests.includes(`filtered`)) {
+      expect(filteredSettled).toBe(false)
+      expect(filtered.has(`a1`)).toBe(false)
+    }
     resolveFull?.(fullRows)
-    await fullPreload
+    await Promise.all([fullPreload, filteredPreload])
+    expect(filtered.toArray.map(({ id: rowId }) => rowId)).toEqual([`a1`])
     expect(collection.toArray.map(({ id: rowId }) => rowId).sort()).toEqual([
       `a1`,
       `b1`,
     ])
   } finally {
     resolveFull?.(fullRows)
+    await full.cleanup()
+    await filtered.cleanup()
+    await collection.cleanup()
+    queryClient.clear()
+  }
+}
+
+/**
+ * Query Core can publish a successful full result before the Collection has
+ * applied its rows. The model's full-source coverage begins at applied
+ * settlement, not at Query success. A filtered acquisition made in that gap
+ * may start its own request or wait for the full application; it cannot report
+ * success while the promised new filtered row is absent. The history varies
+ * whether an older full result was already applied; that distinction rejects
+ * a gate based only on previous ownership. A prior direct write causes the
+ * result handler to wait for Query's physical-success notification, making
+ * this legal interleaving deterministic with a real QueryClient.
+ */
+async function expectFullSourceReuseWaitsForApplication(
+  previousFullResult: boolean,
+): Promise<void> {
+  const queryClient = createQueryClient()
+  const id = `full-source-application-${collectionSequence++}`
+  const fullRows: Array<Row> = [
+    { id: `a2`, group: `a` },
+    { id: `b1`, group: `b` },
+  ]
+  const filter = new IR.Func<boolean>(`eq`, [
+    new IR.PropRef([`group`]),
+    new IR.Value(`a`),
+  ])
+  const filteredDemand: LoadSubsetOptions = { where: filter }
+  const response = createDeferred<Array<Row>>()
+  const requests: Array<`full` | `filtered`> = []
+  const collection = createCollection(
+    queryCollectionOptions<Row>({
+      id,
+      queryClient,
+      queryKey: [id],
+      queryFn: (context) => {
+        if (context.meta?.loadSubsetOptions?.where === undefined) {
+          requests.push(`full`)
+          if (previousFullResult && requests.length === 1)
+            return Promise.resolve([
+              { id: `a1`, group: `a` },
+              { id: `b1`, group: `b` },
+            ] satisfies Array<Row>)
+          return response.promise
+        }
+        requests.push(`filtered`)
+        return Promise.resolve(fullRows.filter((row) => row.group === `a`))
+      },
+      getKey: (row) => row.id,
+      startSync: true,
+      syncMode: `on-demand`,
+      staleTime: 5 * 60 * 1000,
+    }),
+  )
+  let observed:
+    | {
+        acquisition: true | Promise<void>
+        rowApplied: boolean
+      }
+    | undefined
+  let unsubscribe = () => {}
+  let fullAcquisition: true | Promise<void> | undefined
+  let revalidation: Promise<void> | undefined
+  try {
+    if (previousFullResult) {
+      fullAcquisition = collection._sync.loadSubset({})
+      if (fullAcquisition !== true) await fullAcquisition
+      expect(collection.has(`a1`)).toBe(true)
+      await collection.utils.writeUpdate({ id: `b1`, group: `b` })
+    } else {
+      await collection.utils.writeUpsert({ id: `local`, group: `b` })
+    }
+    unsubscribe = queryClient.getQueryCache().subscribe((event) => {
+      if (
+        event.type === `updated` &&
+        event.action.type === `success` &&
+        !event.action.manual &&
+        event.query.queryHash === JSON.stringify([id])
+      ) {
+        observed = {
+          acquisition: collection._sync.loadSubset(filteredDemand),
+          rowApplied: collection.has(`a2`),
+        }
+      }
+    })
+    if (previousFullResult) {
+      revalidation = queryClient.invalidateQueries({
+        queryKey: [id],
+        exact: true,
+      })
+    } else {
+      fullAcquisition = collection._sync.loadSubset({})
+    }
+    await vi.waitFor(() =>
+      expect(requests.filter((request) => request === `full`).length).toBe(
+        previousFullResult ? 2 : 1,
+      ),
+    )
+    response.resolve(fullRows)
+    await vi.waitFor(() => expect(observed).toBeDefined())
+    expect(observed?.rowApplied).toBe(false)
+    expect(observed?.acquisition).not.toBe(true)
+    if (observed?.acquisition !== true) await observed?.acquisition
+    if (fullAcquisition !== true) await fullAcquisition
+    await revalidation
+    expect(collection.has(`a2`)).toBe(true)
+  } finally {
+    response.resolve(fullRows)
+    unsubscribe()
+    collection._sync.unloadSubset(filteredDemand)
+    collection._sync.unloadSubset({})
+    await collection.cleanup()
+    queryClient.clear()
+  }
+}
+
+/**
+ * An accepted direct write changes the Collection's full-source rows. The
+ * independent reference changes only that row, then filters the resulting
+ * two rows. A later filtered acquisition may reuse those rows or fetch its
+ * exact scope; it must not cause a redundant full-source request. The
+ * observation is provider scope and public rows after filtered preload, with
+ * the full view still owning its Query. This bounded witness does not promise
+ * that every newly acquired on-demand scope avoids provider work.
+ */
+async function expectDirectWriteFullSourceServesFilteredDemand(): Promise<void> {
+  const queryClient = createQueryClient()
+  const id = `direct-write-full-source-${collectionSequence++}`
+  const requests: Array<`full` | `filtered`> = []
+  const queryFn = vi.fn((context: QueryFunctionContext) => {
+    const scope =
+      context.meta?.loadSubsetOptions?.where === undefined ? `full` : `filtered`
+    requests.push(scope)
+    const rows: Array<Row> = [
+      { id: `a1`, group: `a` },
+      { id: `b1`, group: `b` },
+    ]
+    return Promise.resolve(
+      scope === `full` ? rows : rows.filter((row) => row.group === `b`),
+    )
+  })
+  const collection = createCollection(
+    queryCollectionOptions<Row>({
+      id,
+      queryClient,
+      queryKey: [id],
+      queryFn,
+      getKey: (row) => row.id,
+      startSync: true,
+      syncMode: `on-demand`,
+      staleTime: 5 * 60 * 1000,
+    }),
+  )
+  const full = createLiveQueryCollection((query) =>
+    query.from({ row: collection }).select(({ row }) => ({ id: row.id })),
+  )
+  const filtered = createLiveQueryCollection((query) =>
+    query
+      .from({ row: collection })
+      .where(({ row }) => eq(row.group, `b`))
+      .select(({ row }) => ({ id: row.id })),
+  )
+  try {
+    await full.preload()
+    expect(requests).toEqual([`full`])
+    const fullQuery = queryClient.getQueryCache().find({
+      queryKey: [id],
+      exact: true,
+    })!
+    await collection.utils.writeUpdate({ id: `a1`, group: `b` })
+    expect(
+      (fullQuery.state.data as Array<Row>).find((row) => row.id === `a1`)
+        ?.group,
+    ).toBe(`b`)
+    await filtered.preload()
+    expect(requests.filter((request) => request === `full`)).toEqual([`full`])
+    expect(filtered.toArray.map(({ id: rowId }) => rowId).sort()).toEqual([
+      `a1`,
+      `b1`,
+    ])
+  } finally {
     await full.cleanup()
     await filtered.cleanup()
     await collection.cleanup()
@@ -336,6 +520,201 @@ async function expectFinalFullSourceDependentCancelsFetch(): Promise<void> {
     await full.cleanup()
     await filtered.cleanup()
     await collection.cleanup()
+    queryClient.clear()
+  }
+}
+
+/**
+ * The Query Collection cancellation contract says an on-demand unload only
+ * removes its observer. Query Core may let a request finish when the provider
+ * ignores its signal. The model keeps the in-flight full transport alive after
+ * both logical owners release and expects its settled data in Query's cache.
+ * This checks signal-consumption semantics at the real QueryClient boundary;
+ * it does not require Collection rows to survive their final owner.
+ */
+async function expectIgnoredSignalLetsSharedFetchFinish(): Promise<void> {
+  const queryClient = createQueryClient()
+  const id = `ignored-shared-signal-${collectionSequence++}`
+  const response = createDeferred<Array<Row>>()
+  const initial: Array<Row> = [{ id: `a1`, group: `a` }]
+  const replacement: Array<Row> = [
+    { id: `a1`, group: `a` },
+    { id: `a2`, group: `a` },
+  ]
+  let requests = 0
+  // This provider never reads either the Query or request metadata signal.
+  const queryFn = vi.fn(() => {
+    requests++
+    return requests === 1 ? Promise.resolve(initial) : response.promise
+  })
+  const collection = createCollection(
+    queryCollectionOptions<Row>({
+      id,
+      queryClient,
+      queryKey: [id],
+      queryFn,
+      getKey: (row) => row.id,
+      startSync: true,
+      syncMode: `on-demand`,
+      staleTime: 5 * 60 * 1000,
+    }),
+  )
+  const filter = new IR.Func<boolean>(`eq`, [
+    new IR.PropRef([`group`]),
+    new IR.Value(`a`),
+  ])
+  const filteredDemand: LoadSubsetOptions = { where: filter }
+  const fullDemand: LoadSubsetOptions = {}
+  let invalidation: Promise<void> | undefined
+  try {
+    await collection._sync.loadSubset(fullDemand)
+    await collection._sync.loadSubset(filteredDemand)
+    expect(requests).toBe(1)
+    invalidation = queryClient.invalidateQueries({
+      queryKey: [id],
+      exact: true,
+    })
+    await vi.waitFor(() => expect(requests).toBe(2))
+    collection._sync.unloadSubset(fullDemand)
+    collection._sync.unloadSubset(filteredDemand)
+    response.resolve(replacement)
+    await invalidation
+    await vi.waitFor(() =>
+      expect(queryClient.getQueryData([id])).toEqual(replacement),
+    )
+    expect(collection.size).toBe(0)
+  } finally {
+    response.resolve(replacement)
+    await invalidation?.catch(() => undefined)
+    await collection.cleanup()
+    queryClient.clear()
+  }
+}
+
+/**
+ * Two equal full-source live queries share one Query transport but own separate
+ * acquisition signals. After the first owner releases, its signal is stale.
+ * The remaining owner may still invalidate and receive a new snapshot. The
+ * provider reads the documented request metadata signal and rejects an
+ * already-aborted signal. The public checkpoint is the peer's new row after
+ * invalidation, not a particular signal object identity.
+ */
+async function expectEqualFullSourcePeerGetsLiveSignal(): Promise<void> {
+  const queryClient = createQueryClient()
+  const id = `equal-full-source-signal-${collectionSequence++}`
+  let rows: Array<Row> = [{ id: `a1`, group: `a` }]
+  let firstSignal: AbortSignal | undefined
+  const queryFn = vi.fn((context: QueryFunctionContext) => {
+    const requestSignal = context.meta?.loadSubsetOptions?.signal
+    firstSignal ??= requestSignal
+    requestSignal?.throwIfAborted()
+    return Promise.resolve(rows)
+  })
+  const collection = createCollection(
+    queryCollectionOptions<Row>({
+      id,
+      queryClient,
+      queryKey: [id],
+      queryFn,
+      getKey: (row) => row.id,
+      startSync: true,
+      syncMode: `on-demand`,
+      staleTime: 5 * 60 * 1000,
+    }),
+  )
+  const full = createLiveQueryCollection((query) =>
+    query.from({ row: collection }).select(({ row }) => ({ id: row.id })),
+  )
+  const peer = createLiveQueryCollection((query) =>
+    query.from({ row: collection }).select(({ row }) => ({ id: row.id })),
+  )
+  try {
+    await full.preload()
+    await peer.preload()
+    expect(queryFn).toHaveBeenCalledOnce()
+    await full.cleanup()
+    expect(firstSignal?.aborted).toBe(true)
+    rows = [
+      { id: `a1`, group: `a` },
+      { id: `a2`, group: `a` },
+    ]
+    await queryClient.invalidateQueries({ queryKey: [id], exact: true })
+    await vi.waitFor(() => expect(peer.has(`a2`)).toBe(true))
+  } finally {
+    await full.cleanup()
+    await peer.cleanup()
+    await collection.cleanup()
+    queryClient.clear()
+  }
+}
+
+/**
+ * Query Core may run a shared Query using the queryFn installed by another
+ * Collection's observer. The model has one full snapshot and one remaining
+ * filtered owner, regardless of which Collection's queryFn handles the later
+ * fetch. The foreign full acquisition has released its request signal. With
+ * both providers returning the same rows, the filtered owner's public view
+ * must receive the new row after invalidation. The provider log confirms the
+ * foreign closure was the actual production path at this checkpoint.
+ */
+async function expectForeignQueryFnUsesLiveSharedSignal(): Promise<void> {
+  const queryClient = createQueryClient()
+  const id = `foreign-full-signal-${collectionSequence++}`
+  let rows: Array<Row> = [{ id: `a1`, group: `a` }]
+  const providerCalls: Array<{ owner: `A` | `B`; aborted: boolean }> = []
+  const createSource = (owner: `A` | `B`) =>
+    createCollection(
+      queryCollectionOptions<Row>({
+        id: `${id}-${owner}`,
+        queryClient,
+        queryKey: [id],
+        queryFn: (context) => {
+          const signal = context.meta?.loadSubsetOptions?.signal
+          providerCalls.push({ owner, aborted: signal?.aborted ?? false })
+          signal?.throwIfAborted()
+          return Promise.resolve(rows)
+        },
+        getKey: (row) => row.id,
+        startSync: true,
+        syncMode: `on-demand`,
+        staleTime: 5 * 60 * 1000,
+      }),
+    )
+  const sourceA = createSource(`A`)
+  const fullA = createLiveQueryCollection((query) =>
+    query.from({ row: sourceA }).select(({ row }) => ({ id: row.id })),
+  )
+  const filteredA = createLiveQueryCollection((query) =>
+    query
+      .from({ row: sourceA })
+      .where(({ row }) => eq(row.group, `a`))
+      .select(({ row }) => ({ id: row.id })),
+  )
+  let sourceB: ReturnType<typeof createSource> | undefined
+  let fullB: ReturnType<typeof createLiveQueryCollection> | undefined
+  try {
+    await fullA.preload()
+    await filteredA.preload()
+    sourceB = createSource(`B`)
+    fullB = createLiveQueryCollection((query) =>
+      query.from({ row: sourceB! }).select(({ row }) => ({ id: row.id })),
+    )
+    await fullB.preload()
+    await fullA.cleanup()
+    await fullB.cleanup()
+    rows = [
+      { id: `a1`, group: `a` },
+      { id: `a2`, group: `a` },
+    ]
+    await queryClient.invalidateQueries({ queryKey: [id], exact: true })
+    expect(providerCalls.at(-1)).toEqual({ owner: `B`, aborted: false })
+    await vi.waitFor(() => expect(filteredA.has(`a2`)).toBe(true))
+  } finally {
+    await fullA.cleanup()
+    await filteredA.cleanup()
+    await fullB?.cleanup()
+    await sourceA.cleanup()
+    await sourceB?.cleanup()
     queryClient.clear()
   }
 }
@@ -1636,12 +2015,38 @@ describe(`loadSubset lifecycle oracle`, () => {
     await expectActiveFullSourceServesFilteredDemand()
   })
 
-  it(`loads a filtered demand while the full-source Query remains incomplete`, async () => {
-    await expectPendingFullSourceDoesNotServeFilteredDemand()
+  it(`does not treat an unfinished full-source Query as filtered coverage`, async () => {
+    await expectPendingFullSourceNeedsAppliedEvidence()
+  })
+
+  it.each([
+    { previousFullResult: false, description: `initial full result` },
+    { previousFullResult: true, description: `replacement full result` },
+  ])(
+    `waits for $description application before settling a filtered demand`,
+    async ({ previousFullResult }) => {
+      await expectFullSourceReuseWaitsForApplication(previousFullResult)
+    },
+  )
+
+  it(`serves a filtered demand from an applied full source after a direct write`, async () => {
+    await expectDirectWriteFullSourceServesFilteredDemand()
   })
 
   it(`cancels a shared full-source fetch after its final filtered owner releases`, async () => {
     await expectFinalFullSourceDependentCancelsFetch()
+  })
+
+  it(`lets a shared full-source fetch finish when the provider ignores its signal`, async () => {
+    await expectIgnoredSignalLetsSharedFetchFinish()
+  })
+
+  it(`keeps a live request signal for an equal full-source peer`, async () => {
+    await expectEqualFullSourcePeerGetsLiveSignal()
+  })
+
+  it(`keeps a live request signal through another Collection's query function`, async () => {
+    await expectForeignQueryFnUsesLiveSharedSignal()
   })
 
   it(`refetches an existing semantic demand without changing its query or unload identity`, async () => {

@@ -1901,6 +1901,19 @@ export function queryCollectionOptions(
         throw new Error(`A full-source dependent lost its Query observer`)
       }
       const fullQuery = fullObserver?.getCurrentQuery()
+      const fullResult = fullObserver?.getCurrentResult()
+      const appliedFullResult =
+        fullResult !== undefined &&
+        getRecordedResultApplicationSettlement(fullSourceHash!, fullResult) !==
+          undefined
+      const retainedRequestedEntry = metadata?.collection.get(
+        `${QUERY_COLLECTION_GC_PREFIX}${requestedHash}`,
+      )
+      const requestedScopeNeedsRevalidation =
+        parsePersistedQueryRetentionEntry(
+          retainedRequestedEntry,
+          requestedHash,
+        ) !== undefined
       // Existing dependents keep their original observer lease even if an
       // explicit refetch creates an exact Query for the same requested scope.
       const sharesFullSource =
@@ -1908,13 +1921,15 @@ export function queryCollectionOptions(
         fullSourceKey !== undefined &&
         fullSourceHash !== requestedHash &&
         (hasFullSourceDependent ||
-          (!state.observers.has(requestedHash) &&
+          (!requestedScopeNeedsRevalidation &&
+            !state.observers.has(requestedHash) &&
             (queryRefCounts.get(fullSourceHash!) ?? 0) > 0 &&
-            fullObserver?.getCurrentResult().isSuccess === true &&
+            fullResult?.isSuccess === true &&
             fullQuery?.state.fetchStatus === `idle` &&
             hasCurrentCacheGenerationFetch(fullQuery) &&
             !pendingResultApplications.has(fullSourceHash!) &&
-            !failedResultApplications.has(fullSourceHash!)))
+            !failedResultApplications.has(fullSourceHash!) &&
+            appliedFullResult))
       const key = sharesFullSource ? fullSourceKey : requestedKey
       const hashedQueryKey = sharesFullSource ? fullSourceHash! : requestedHash
       const {
@@ -1930,9 +1945,12 @@ export function queryCollectionOptions(
         configurable: true,
         writable: true,
       })
-      const retainedEntry = metadata?.collection.get(
-        `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,
-      )
+      const retainedEntry =
+        hashedQueryKey === requestedHash
+          ? retainedRequestedEntry
+          : metadata?.collection.get(
+              `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,
+            )
       if (
         parsePersistedQueryRetentionEntry(retainedEntry, hashedQueryKey) !==
         undefined
@@ -2027,21 +2045,28 @@ export function queryCollectionOptions(
               directWriteGeneration,
             ),
           )
-          // Once narrower owners share this full Query, the original full
-          // acquisition may release while they still need later fetches.
-          // Its request signal then aborts, so give shared fetches the Query
-          // transport signal without changing the original request metadata.
-          if (hashedQueryKey === fullSourceHash && fullSourceDependents.size) {
-            return queryFunction({
-              ...context,
-              meta: {
-                ...context.meta,
-                loadSubsetOptions: {
-                  ...requestOptions,
-                  signal: context.signal,
+          // An original full acquisition may release while another owner
+          // keeps this Query. Use the Query signal for later shared fetches,
+          // but preserve its lazy getter so an ignoring provider does not
+          // cause Query Core to cancel an unobserved fetch.
+          if (
+            hashedQueryKey === fullSourceHash &&
+            (fullSourceDependents.size || requestOptions.signal?.aborted)
+          ) {
+            const sharedContext = Object.defineProperties(
+              {} as typeof context,
+              Object.getOwnPropertyDescriptors(context),
+            )
+            sharedContext.meta = {
+              ...context.meta,
+              loadSubsetOptions: {
+                ...requestOptions,
+                get signal() {
+                  return context.signal
                 },
               },
-            })
+            }
+            return queryFunction(sharedContext)
           }
           return queryFunction(context)
         },

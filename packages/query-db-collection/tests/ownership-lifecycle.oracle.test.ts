@@ -11869,6 +11869,69 @@ describe(`query collection ownership lifecycle`, () => {
     )
   })
 
+  /**
+   * A retained subset owner cannot be settled by acquiring a different Query
+   * key. The independent source model has one `detail` row in durable storage;
+   * the current complete source either includes that row unchanged or omits it.
+   * After a full-source result applies, acquiring the retained subset must
+   * reconcile its old owner and remove its revalidation marker. Compare public
+   * and durable rows at that acquisition's settlement, before any explicit
+   * refetch. The unchanged case guards against deleting a still-current row.
+   */
+  it.each([
+    { name: `omitted`, current: false },
+    { name: `unchanged`, current: true },
+  ])(
+    `settles a retained $name subset after a complete full-source result`,
+    async ({ name, current }) => {
+      const id = `retained-subset-after-full-${name}`
+      const oldRow: Item = {
+        id: `detail-row`,
+        category: `detail`,
+        name: `Original`,
+      }
+      const subset = categorySubset(`detail`)
+      const subsetHash = hashKey([id, getLoadSubsetDemandKey(subset)])
+      const retentionKey = `queryCollection:gc:${subsetHash}`
+      const storage = createOwnershipStorage({
+        rows: new Map([[oldRow.id, oldRow]]),
+        rowMetadata: new Map([
+          [oldRow.id, { queryCollection: { owners: { [subsetHash]: true } } }],
+        ]),
+        collectionMetadata: new Map([
+          [retentionKey, { queryHash: subsetHash, mode: `until-revalidated` }],
+        ]),
+      })
+      const currentSource = current ? [oldRow] : []
+      const expectedIds = currentSource.map((row) => row.id)
+      const { collection } = createPersistedOwnershipFixture(
+        id,
+        storage,
+        currentSource,
+      )
+
+      await collection.stateWhenReady()
+      await collection._sync.loadSubset({})
+      await collection._sync.loadSubset(subset)
+
+      expect({
+        publicRows: rows(collection),
+        durableRows: storedItems(storage).map((row) => row.id),
+        retentionPending: storage
+          .snapshot()
+          .collectionMetadata.has(retentionKey),
+      }).toEqual({
+        publicRows: expectedIds,
+        durableRows: expectedIds,
+        retentionPending: false,
+      })
+      if (current) {
+        collection._sync.unloadSubset({})
+        expect(rows(collection)).toEqual(expectedIds)
+      }
+    },
+  )
+
   it(`emits metadata for every owner of rows shared by overlapping queries`, async () => {
     const metadata: MetadataRecorder = { rows: new Map(), writes: [] }
     const { collection } = createOwnershipFixture({
