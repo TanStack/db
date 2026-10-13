@@ -320,13 +320,17 @@ export function processOrderBy(
           optimizableOrderByCollections[orderBySourceId]![`dataNeeded`] = (
             boundary,
           ) => {
+            // Window rows at or before the boundary are a leading run of
+            // the window order. A row without a root row (an outer join)
+            // needs no root page, so it counts as proven.
             const size = getSize(
               boundary &&
-                ((row) =>
-                  compareSourceRows(
-                    (row as NamespacedRow)[orderByAlias],
-                    boundary,
-                  ) <= 0),
+                ((row) => {
+                  const root = (row as NamespacedRow)[orderByAlias]
+                  return (
+                    root === undefined || compareSourceRows(root, boundary) <= 0
+                  )
+                }),
             )
             return Math.max(0, info.limit - size)
           }

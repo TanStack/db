@@ -11,12 +11,11 @@ import { TopKArray, createKeyedComparator } from './topKArray.js'
 import type { IndexedValue, TopK } from './topKArray.js'
 import type { DifferenceStreamReader } from '../graph.js'
 import type { IStreamBuilder, PipedOperator } from '../types.js'
-import type { SetSizeCallback } from './topKWithFractionalIndex.js'
 
 export interface GroupedTopKWithFractionalIndexOptions<K, T> {
   limit?: number
   offset?: number
-  setSizeCallback?: SetSizeCallback
+  setSizeCallback?: (getSize: () => number) => void
   setWindowFn?: (
     windowFn: (options: { offset?: number; limit?: number }) => void,
   ) => void
@@ -58,7 +57,7 @@ export class GroupedTopKWithFractionalIndexOperator<
     this.#limit = options.limit ?? Infinity
     this.#offset = options.offset ?? 0
     this.#comparator = createKeyedComparator(comparator)
-    options.setSizeCallback?.((counts) => this.#getTotalSize(counts))
+    options.setSizeCallback?.(() => this.#getTotalSize())
     options.setWindowFn?.(this.#moveTopK.bind(this))
   }
 
@@ -74,10 +73,10 @@ export class GroupedTopKWithFractionalIndexOperator<
     return new TopKArray(offset, limit, comparator)
   }
 
-  #getTotalSize(counts?: (value: unknown) => boolean): number {
+  #getTotalSize(): number {
     let size = 0
     for (const state of this.#groupStates.values()) {
-      size += counts ? state.countInWindow(counts) : state.size
+      size += state.size
     }
     return size
   }

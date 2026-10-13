@@ -22,8 +22,8 @@ export interface TopKWithFractionalIndexOptions {
 }
 
 /**
- * Receives the window size. Given a predicate, the getter counts only the
- * window values that satisfy it.
+ * Receives the window size. Given a predicate that holds for a prefix of the
+ * window order, the getter counts only the leading values that satisfy it.
  */
 export type SetSizeCallback = (
   getSize: (counts?: (value: unknown) => boolean) => number,
@@ -57,7 +57,7 @@ export class TopKWithFractionalIndexOperator<
     )
     this.#state = new TopKState(topK)
     options.setSizeCallback?.((counts) =>
-      counts ? this.#state.countInWindow(counts) : this.#state.size,
+      counts ? this.#state.countLeadingInWindow(counts) : this.#state.size,
     )
     options.setWindowFn?.(this.moveTopK.bind(this))
   }
