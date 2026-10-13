@@ -39,7 +39,9 @@ import type { CompareOptions } from '../src/query/builder/types'
  * input tags and finite epoch-day values, rather than the production
  * unorderable classifier. It covers number-only and Date-only sorts with
  * optional null. A separate realm-tagged Date model below checks native Date
- * timestamps and invalidity across realms, plus one public ordered scan.
+ * timestamps and invalidity across realms, plus one public ordered scan. A
+ * fixed Date-subclass witness covers an inherited native `getTime` beyond the
+ * generated plain-Date grammar.
  * Neither lane claims mixed-type order or every query/index path. Equality laws separately
  * cover the normalized value classes and changed-byte controls. Comparator
  * signs reject NaN and non-number results before reduction. Signed infinity
@@ -399,7 +401,8 @@ function assertRealmDateOrder(sample: RealmDateSample): void {
 // foreign-valid and foreign-invalid paths; generated pairs add equal times,
 // both operand orders, both invalid values, and Dates with an own display tag.
 // A display tag cannot change native Date identity. Proxies, non-Date objects,
-// and user-defined Date subclasses are outside this generated grammar.
+// and user-defined Date subclasses are outside this generated grammar. The
+// fixed witness below covers local and foreign subclasses with an own tag.
 const arbitraryDateTime = fc.oneof(
   fc.integer({ min: -1_000_000_000_000, max: 1_000_000_000_000 }),
   fc.constant(null),
@@ -1063,6 +1066,63 @@ describe(`native Date order across JavaScript realms`, () => {
     expect(
       sign(ascComparator(foreignInvalid, localValid, DEFAULT_COMPARE_OPTIONS)),
     ).toBe(1)
+  })
+
+  it(`uses the native timestamp of a tagged foreign Date subclass`, () => {
+    class LocalDate extends Date {}
+    const timestamp = 123
+    const localSubclass = new LocalDate(timestamp)
+    const foreignSubclass = runInNewContext(
+      `class D extends Date {}; new D(timestamp)`,
+      { timestamp },
+    ) as Date
+    const foreignInvalid = runInNewContext(
+      `class D extends Date {}; new D(Number.NaN)`,
+    ) as Date
+    for (const value of [localSubclass, foreignSubclass, foreignInvalid]) {
+      Object.defineProperty(value, Symbol.toStringTag, { value: `Other` })
+    }
+    // The supplied time and native slot establish the Date premise. The
+    // foreign subclass's immediate prototype inherits native getTime.
+    expect(Date.prototype.getTime.call(foreignSubclass)).toBe(timestamp)
+    expect(foreignSubclass instanceof Date).toBe(false)
+    expect(
+      Object.getOwnPropertyDescriptor(
+        Object.getPrototypeOf(foreignSubclass),
+        `getTime`,
+      ),
+    ).toBeUndefined()
+
+    for (const value of [localSubclass, foreignSubclass]) {
+      expect(normalizeValue(value)).toBe(timestamp)
+      expect(
+        ascComparator(value, new Date(timestamp), DEFAULT_COMPARE_OPTIONS),
+      ).toBe(0)
+      expect(
+        sign(
+          ascComparator(
+            value,
+            new Date(timestamp + 1),
+            DEFAULT_COMPARE_OPTIONS,
+          ),
+        ),
+      ).toBe(-1)
+    }
+    expect(normalizeValue(foreignInvalid)).toBeNaN()
+    expect(isUnorderable(foreignInvalid)).toBe(true)
+    expect(
+      ascComparator(foreignInvalid, Number.NaN, DEFAULT_COMPARE_OPTIONS),
+    ).toBe(0)
+
+    // Borrowing that prototype and display tag cannot forge native Date
+    // slots. The intrinsic rejects this adjacent non-Date control.
+    const forged = Object.create(Object.getPrototypeOf(foreignSubclass)) as Date
+    Object.defineProperty(forged, Symbol.toStringTag, { value: `Other` })
+    expect(() => Date.prototype.getTime.call(forged)).toThrow(TypeError)
+    expect(normalizeValue(forged)).toBe(forged)
+    expect(
+      ascComparator(forged, foreignSubclass, DEFAULT_COMPARE_OPTIONS),
+    ).not.toBe(0)
   })
 
   it(`treats numeric NaN and invalid Dates as one non-finite order position`, () => {

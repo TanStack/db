@@ -141,3 +141,22 @@ the rejected exception-heavy path for Temporal values. The public scan cleanup
 preserves a primary mismatch if cleanup also fails. This verdict does not
 extend to replaced Date prototypes or `getTime` methods, proxies, subclasses,
 indexed order, range queries, or cursor continuation.
+
+## Tagged Date subclass follow-up
+
+At `ae0b67fd2`, a new hostile review found a native `node:vm` Date subclass
+with an own display tag that the immediate-prototype `getTime` descriptor gate
+rejected. The native intrinsic returned timestamp 123, yet normalization left
+the object unchanged and a public `eq` query missed its row. This is a separate
+product bug under the guide's native-Date timestamp law, not a lost assertion
+from the five retired same-realm blocks. The comparison owner now fixes local
+and foreign subclasses with an inherited Date method, valid and invalid
+timestamps, direct normalization and order, and an ordinary object borrowing
+the foreign subclass prototype. On the original code the direct witness failed
+at `normalizeValue(foreignSubclass)`, returning the object instead of 123. The
+repair walks prototype descriptors without reading user getters, then calls
+the native `Date.prototype.getTime` as the final brand check. Both receiving
+oracles passed 127 focused tests after the repair. The separate WHERE owner
+records the public RED and GREEN observations. Proxies, deeper subclass chains,
+replaced methods or prototypes, indexed order, ranges, and cursor continuation
+remain unproved. Fresh exact-commit review of this follow-up remains pending.

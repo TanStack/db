@@ -467,11 +467,13 @@ records the five retired same-realm examples. A separate
 [cross-realm Date witness](oracle-reviews/cross-realm-date-order.md) compares
 native `node:vm` Dates by supplied timestamps and invalidity, including equal
 times, numeric NaN with an invalid Date, and Dates with an own display tag.
-It also checks an unindexed public ordered scan with a tagged foreign invalid
+A fixed local/foreign subclass witness checks native timestamps inherited
+through a Date prototype and rejects a borrowed-prototype impostor. The owner
+also checks an unindexed public ordered scan with a tagged foreign invalid
 Date. Exact `normalizeValue` results are direct utility observations. Indexed
-order, public Date range predicates, cursor continuation, proxies, subclasses,
-replaced Date prototypes or `getTime` methods, and other Date-consuming paths
-remain outside that witness.
+order, public Date range predicates, cursor continuation, proxies, deeper
+subclass chains, replaced Date prototypes or `getTime` methods, and other
+Date-consuming paths remain outside that witness.
 
 The comparison oracle also owns a bounded [Temporal order transfer](oracle-reviews/comparison-unit-retirement-round-6.md). Supplied ISO calendar fields and epoch-nanosecond offsets predict direct `ascComparator` signs and exact zeros for ordinary `PlainDate` and `ZonedDateTime` values from one polyfill copy. Fixed cases preserve the two retired unit blocks; generated cases vary calendar fields, offset zones, equal instants, and adjacent nanoseconds. Fresh-module histories reject a first-input constructor cache poisoned by a genuine instance or forged tag, including the direct `compareValues` path. Both direct helpers also receive a right-hand PlainDate with a constructor shadow. A genuine ZonedDateTime with an own shadowed display tag retains its instant position through both direct helpers. This lane does not establish public query or index behavior. Custom Temporal subclasses, spoofed or replaced instance prototypes, mixed native/polyfill implementations, other Temporal kinds, and public ordering/filter publication need separate witnesses. Spoofed Temporal prototypes can still cause asymmetric comparisons; the comparison owner needs a dedicated brand and mixed-value witness before that class can be called closed.
 
@@ -500,6 +502,9 @@ fixture-assigned classes. Unindexed and optimized-only indexed Collection
 snapshots check public `eq`; the `in` evaluator oracle checks constant and
 row-supplied alias lists. A plain object with a forged Temporal tag and a
 genuine value with a shadowed zone accessor must stay outside the UTC class.
+Forged and borrowed ordinary objects also retain reference self-identity in
+direct lookup and unindexed public `eq`; distinct structural copies do not
+match them.
 The neighboring PlainDate lane checks forged tags, borrowed prototypes, and
 genuine own-tag or display shadows at direct lookup and unindexed public `eq`.
 The ZonedDateTime fixture also contains genuine UTC rows with own display-tag,
@@ -546,21 +551,32 @@ field-left and value-left single or paired relational predicates. A
 custom-only index cannot serve an optimized range read. The fixed ready-state
 fixture covers BasicIndex and BTreeIndex, one numeric field, and limit one.
 Mutation histories, arbitrary callbacks, and provider publication remain
-outside this owner. Live-query compiler admission remains a separate
-receiving-path risk.
+outside this direct snapshot owner. The separate
+[custom-index window selection oracle](../../packages/db/tests/query/custom-index-window-selection-oracle.test.ts)
+checks the live-query compiler's receiving path. A controlled on-demand source
+starts with ranks 20 and 40 cached, then serves exact ordered requests from
+ranks 10, 20, 30, and 40. Moving a public window from offset 0/limit 1 to
+offset 1/limit 2 must publish ranks 20 and 30 once, even though the provider
+does not rewrite cached rank 20. Custom-first, ordinary-first, no-index, and
+eager-custom-only layouts cross BasicIndex and BTreeIndex. Provider reply and
+write observations prove that the cached row reaches the local ordered path.
+The owner does not establish ties, nullish or nonnumeric orders, mutations,
+replays, multiple order terms, arbitrary callbacks, real providers, or other
+window schedules.
 
 The [WHERE predicate publication oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/where-predicate-publication-oracle.property.test.ts)
 also has a [cross-realm Date equality matrix](oracle-reviews/cross-realm-date-where-publication.md).
 For local and `node:vm` Dates with timestamps 1 and 2 or invalid timestamps,
-including foreign Dates with an own display tag, plus number 1 and NaN, it
+including tagged foreign Dates and fixed local/foreign subclasses with an own
+display tag, plus number 1, NaN, and a borrowed-prototype impostor, it
 compares public live-query keys, filtered subscriber keys, and direct snapshot
 keys after preload and a three-row sync transaction.
 Auto-indexing is off in both modes; one mode adds BasicIndex explicitly and
 also checks its equality lookup and an optimized-only public snapshot. This
 proves a public indexed snapshot result but does not prove that the live-query
-planner chose the index. Other realm hosts, proxies, subclasses, Date prototype
-swaps or method replacement, public range predicates, and arbitrary histories
-need separate witnesses.
+planner chose the index. Other realm hosts, proxies, deeper subclass chains,
+Date prototype swaps or method replacement, public range predicates, and
+generated subclass histories need separate witnesses.
 
 The direct [index refinement oracle](../../packages/db/tests/index-update-oracle.property.test.ts)
 also owns exact nullish membership and direct `IN` set selection for BasicIndex
@@ -598,8 +614,9 @@ in the index refinement oracle separates `-0` and `+0` into two ordered
 positions while exact lookup retains one SameValueZero class. Fixed add/build
 and removal histories check BasicIndex and BTreeIndex takes, cursors, ranges,
 and exact membership. Sign-changing updates and removal/re-addition must move
-or release the ordered position; mixed-sign inclusive/exclusive and reversed
-ranges are checked at a BTree leaf and across a 33-row split. It does not
+or release the ordered position; mixed-sign inclusive/exclusive ranges with
+reversed bounds are checked at a BTree leaf and across a 33-row split. The
+signed-zero checker does not directly call `rangeQueryReversed`. It does not
 establish arbitrary custom callbacks or public planner selection; the custom
 index order selection owner above checks that separate boundary.
 

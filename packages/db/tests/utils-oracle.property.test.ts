@@ -1174,19 +1174,6 @@ describe(`deepEquals property-based tests`, () => {
   // Keep newly added generated laws after the original registration order:
   // UTILS_ORACLE_PROPERTY uses ordinal selectors for saved seed/path replays.
   describe(`additional non-ring value boundaries`, () => {
-    utilsProperty([arbitraryFiniteDate])(
-      `Date differs from its ISO text and epoch number in both directions`,
-      (date) => {
-        assertDistinctTypes(date, date.toISOString(), deepEquals)
-        assertDistinctTypes(date, date.getTime(), deepEquals)
-      },
-    )
-
-    utilsProperty([arbitraryRegExp])(
-      `RegExp differs from its source text in both directions`,
-      (regex) => assertDistinctTypes(regex, regex.source, deepEquals),
-    )
-
     utilsProperty([arbitraryRegExp])(
       `RegExp source and flags determine equality`,
       (regex) => {
@@ -1232,6 +1219,19 @@ describe(`deepEquals property-based tests`, () => {
         })
         expectCopyAndChanged(duration, copy, changed)
       },
+    )
+
+    utilsProperty([arbitraryFiniteDate])(
+      `Date differs from its ISO text and epoch number in both directions`,
+      (date) => {
+        assertDistinctTypes(date, date.toISOString(), deepEquals)
+        assertDistinctTypes(date, date.getTime(), deepEquals)
+      },
+    )
+
+    utilsProperty([arbitraryRegExp])(
+      `RegExp differs from its source text in both directions`,
+      (regex) => assertDistinctTypes(regex, regex.source, deepEquals),
     )
   })
 })

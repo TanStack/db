@@ -592,6 +592,7 @@ it(`keeps a forged tag and shadowed zone outside genuine UTC equality`, async ()
     { id: `forged`, when: fake },
     { id: `shadowed`, when: shadowed },
   ]
+  const fakeCopy = { ...fake }
   for (const [, IndexType] of indexTypes) {
     for (const row of source) {
       // One row avoids asking the default ordering comparator to order a
@@ -599,6 +600,12 @@ it(`keeps a forged tag and shadowed zone outside genuine UTC equality`, async ()
       const index = new IndexType(1, new PropRef([`when`]))
       index.add(row.id, row)
       expect(index.equalityLookup(aliasProbe)).toEqual(new Set())
+      // Rejecting the forged brand must not discard the ordinary object's
+      // exact self-identity. A distinct structural copy stays outside it.
+      expect(index.equalityLookup(row.when)).toEqual(new Set([row.id]))
+      if (row.id === `forged`) {
+        expect(index.equalityLookup(fakeCopy)).toEqual(new Set())
+      }
     }
   }
 
@@ -618,16 +625,20 @@ it(`keeps a forged tag and shadowed zone outside genuine UTC equality`, async ()
   })
   await withOracleCleanup(async () => {
     await collection.stateWhenReady()
-    const predicate = new Func(`eq`, [
-      new PropRef([`when`]),
-      new Value(aliasProbe),
-    ])
-    const keys = new Set(
-      collection
-        .currentStateAsChanges({ where: predicate })
-        ?.map(({ value }) => value.id),
-    )
-    expect(keys).toEqual(new Set())
+    const keysFor = (probe: unknown) => {
+      const predicate = new Func(`eq`, [
+        new PropRef([`when`]),
+        new Value(probe),
+      ])
+      return new Set(
+        collection
+          .currentStateAsChanges({ where: predicate })
+          ?.map(({ value }) => value.id),
+      )
+    }
+    expect(keysFor(aliasProbe)).toEqual(new Set())
+    expect(keysFor(fake)).toEqual(new Set([`forged`]))
+    expect(keysFor(fakeCopy)).toEqual(new Set())
   }, [() => collection.cleanup()])
 })
 
@@ -684,6 +695,7 @@ it(`uses the PlainDate brand for direct lookups and a public unindexed snapshot`
       expect(index.equalityLookup(probe)).toEqual(
         sample.matches ? new Set([sample.id]) : new Set(),
       )
+      expect(index.equalityLookup(sample.when)).toEqual(new Set([sample.id]))
     }
     // Both insertion orders must retain the same equality class when a live
     // representative is removed. The forged objects are intentionally kept
@@ -718,12 +730,32 @@ it(`uses the PlainDate brand for direct lookups and a public unindexed snapshot`
   })
   await withOracleCleanup(async () => {
     await collection.stateWhenReady()
-    const predicate = new Func(`eq`, [new PropRef([`when`]), new Value(probe)])
-    const keys = new Set(
-      collection
-        .currentStateAsChanges({ where: predicate })
-        ?.map(({ value }) => value.id),
+    const keysFor = (probeValue: unknown) => {
+      const predicate = new Func(`eq`, [
+        new PropRef([`when`]),
+        new Value(probeValue),
+      ])
+      return new Set(
+        collection
+          .currentStateAsChanges({ where: predicate })
+          ?.map(({ value }) => value.id),
+      )
+    }
+    expect(keysFor(probe)).toEqual(
+      new Set([`genuine`, `shadowed-tag`, `shadowed-text`]),
     )
-    expect(keys).toEqual(new Set([`genuine`, `shadowed-tag`, `shadowed-text`]))
+    // An impostor remains an ordinary object: querying by its own reference
+    // finds it, while a distinct object with the same display cannot.
+    const borrowedCopy = Object.assign(
+      Object.create(Temporal.PlainDate.prototype) as object,
+      { toString: () => `2024-01-01` },
+    )
+    for (const [impostor, id, copy] of [
+      [fake, `forged-tag`, { ...fake }],
+      [borrowed, `borrowed-prototype`, borrowedCopy],
+    ] as const) {
+      expect(keysFor(impostor)).toEqual(new Set([id]))
+      expect(keysFor(copy)).toEqual(new Set())
+    }
   }, [() => collection.cleanup()])
 })

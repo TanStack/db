@@ -170,3 +170,24 @@ description states array membership without defining null-list behavior. The
 compiled `in` owner records the discrepancy; changing the law requires a
 product decision and separate public WHERE/negation witnesses. No SQL-style
 null-list claim is made for this transfer.
+
+## Review of committed head `ae0b67fd2`
+
+Fresh hostile review found no lost retired comparison assertion in the alias
+owner. It found one sensitivity gap: forged and borrowed ordinary objects were
+checked only for inequality with genuine Temporal values, so an index could
+drop their own entries and still pass. Direct BasicIndex/BTreeIndex lookups now
+require each impostor to find itself, while a distinct copy must not match.
+Unindexed public `eq` makes the same self-identity and distinct-copy checks.
+The focused alias owner passed 28 tests after the extension. This guards the
+ordinary-object side of brand rejection without treating a spoofed display
+tag as Temporal identity. Fresh exact-commit review of these new controls is
+pending. Indexed PlainMonthDay equality across multiple classes remains open.
+
+The same committed-head review found no blocker in the compiled `in` owner's
+stated grammar: 33 tests and guarded replay passed. It confirmed the
+null-only-list authority question above and identified the older
+`perf-in-constant-set.md` review's SQL-equivalence sentence as too broad. That
+record now explicitly supersedes the sentence for null-containing lists.
+Two lint-only edits to the compiled `in` owner follow this review and require
+a fresh exact-commit check.

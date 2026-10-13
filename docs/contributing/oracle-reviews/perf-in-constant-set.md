@@ -5,8 +5,17 @@ production change is `18ea072b5`. This record adds the audit only.
 
 ## Contract and evidence
 
-`inArray(value, list)` is SQL `IN` under three-valued logic. A null or
-undefined value is UNKNOWN (`null`). A list that is not an array is FALSE. The
+The original review called `inArray(value, list)` SQL `IN` under three-valued
+logic. That wording is superseded for null-containing lists by the
+[compiled `in` contract review](temporal-equality-alias.md#review-of-committed-head-5df06de2e)
+and its coverage-map entry. The current evaluator treats a non-null value
+against a null-only list as FALSE; SQL would yield UNKNOWN. This is an open
+product-law decision, not a claim that the current rule is SQL-equivalent.
+The normalization details below describe the reviewed `perf-in-set` head;
+the linked review records later Temporal equality changes.
+
+Under the reviewed evaluator rule, a null or undefined value is UNKNOWN
+(`null`). A list that is not an array is FALSE. The
 result is TRUE when some non-null list item equals the value under the
 evaluator's equality, and FALSE otherwise.
 

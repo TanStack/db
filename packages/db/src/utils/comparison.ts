@@ -27,15 +27,19 @@ function dateTimestamp(value: unknown): number | undefined {
   if (value instanceof Date) return Date.prototype.getTime.call(value)
   try {
     if (Symbol.toStringTag in value) {
-      // A normal Date prototype owns getTime. Inspect its descriptor without
-      // reading a user display-tag getter or trusting a claimed tag value.
-      const prototype = Object.getPrototypeOf(value)
-      if (
-        typeof Object.getOwnPropertyDescriptor(prototype, `getTime`)?.value !==
-        `function`
-      ) {
-        return undefined
+      // A Date subclass can inherit getTime from its Date prototype. Walk
+      // descriptors without reading a user display-tag or getTime getter;
+      // the intrinsic below still checks for the native Date slot.
+      let prototype = Object.getPrototypeOf(value)
+      while (prototype !== null) {
+        const descriptor = Object.getOwnPropertyDescriptor(prototype, `getTime`)
+        if (descriptor) {
+          if (typeof descriptor.value !== `function`) return undefined
+          break
+        }
+        prototype = Object.getPrototypeOf(prototype)
       }
+      if (prototype === null) return undefined
     } else if (Object.prototype.toString.call(value) !== `[object Date]`) {
       return undefined
     }

@@ -438,7 +438,7 @@ function evaluateWithKindOnlyTemporalKey(testCase: InCase): boolean | null {
   if (
     kind !== undefined &&
     Array.isArray(testCase.list) &&
-    testCase.list.some((item) => temporalBrand(item)?.kind === kind)
+    testCase.list.some((candidate) => temporalBrand(candidate)?.kind === kind)
   ) {
     return true
   }
@@ -482,8 +482,8 @@ function describeCase(testCase: InCase): string {
 }
 
 describe(`in evaluator`, () => {
-  const property = fc.asyncProperty(inCase, async (testCase) =>
-    check(evaluateWithProduction, testCase),
+  const property = fc.asyncProperty(inCase, (testCase) =>
+    Promise.resolve().then(() => check(evaluateWithProduction, testCase)),
   )
 
   it(`agrees with the reference over a fixed campaign`, async () => {

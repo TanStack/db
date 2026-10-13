@@ -89,3 +89,49 @@ This establishes neither arbitrary value domains nor mutation histories.
 The live-query compiler has a separate index-admission path; simple public
 probes were correct, but the comparable coexisting-index schedule remains
 unproved there.
+
+## Live-query receiving path after `ae0b67fd2`
+
+A fresh hostile review found a public counterexample to the compiler's ordered
+index admission. An on-demand source had rank-20 and rank-40 rows cached.
+It held four authoritative rows at ranks 10, 20, 30, and 40. With a reverse
+custom index declared before an ordinary index, an ascending live query
+preloaded its first row correctly. Moving to offset one and limit two then
+published ranks 30 and 40, instead of 20 and 30. The provider fulfilled its
+exact ordered request for ranks 10, 20, and 30. It did not rewrite cached
+rank 20, which the wrong local index traversal had failed to send into the
+graph. Ordinary-first, ordinary-only, and no-index controls returned the
+correct rows. The reviewer reproduced both index types and found 16 public
+mismatches in a separate 64-scenario cache/window sweep.
+
+The new [window oracle](../../../packages/db/tests/query/custom-index-window-selection-oracle.test.ts)
+assigns numeric ranks in its source model and sorts and slices those four
+facts independently of index selection. Its controlled adapter evaluates
+each request's predicate and cursor against the source facts, records the
+selected provider rows, and writes only uncached rows. It checks the live
+query's rows after preload and after `setWindow()` settles, plus the sole
+publication batch. A reply `[1,2,3]` with writes `[1,3]` proves that row 2
+was already cached and still belonged to the requested result. The fixed
+history crosses custom-first, ordinary-first, no-index, and eager-custom-only
+layouts with BasicIndex and BTreeIndex. On the original compiler, four cases
+failed at the moved public window: `[3,4]` instead of `[2,3]`. Controls
+passed. All eight cases passed after the repair; 677 related tests and the
+explicit test TypeScript check passed.
+
+The compiler now requires an ordinary ordered-traversal index when it creates
+or selects the first order term's source index. Eager creation lets BaseIndex
+derive the comparator from `compareOptions`; passing an explicit `compareFn`
+would mark that index custom and make it ineligible. This changes only source
+index admission. Direct custom callbacks still order each row according to
+the maintainer's decision. The production edit removes two net lines.
+
+The oracle states the ordered window law and its source limits beside its
+model, request grammar, driver, and two public cuts (ORC-001–005). The
+original compiler fails at the promised post-window comparison, while
+ordinary-first and no-index controls reach the same public boundary
+(ORC-006, -011, -013). This is a fixed finite matrix, so generated replay
+does not apply (ORC-004, -007). The provider is controlled and awaits applied
+receipts; the claim does not extend to remote hosts (ORC-014). Ties, nullish
+or nonnumeric orders, mutations, replay, multiple order terms, arbitrary
+callbacks, and other window schedules remain open. Fresh hostile review of
+the final committed oracle is pending.

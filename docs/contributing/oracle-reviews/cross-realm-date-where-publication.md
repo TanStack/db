@@ -118,3 +118,20 @@ The archived `9a145fba1` run failed at the intended unindexed public equality
 comparison by omitting `foreign-tagged-one`; its unmodified controls passed.
 The verdict does not cover other hosts, public ranges, indexed order,
 arbitrary histories, or Date objects with replaced prototypes or methods.
+
+## Tagged Date subclass follow-up
+
+The hostile review at `ae0b67fd2` found that a native foreign Date subclass
+with an own display tag missed `eq(Date(1))` in a public live query. The matrix
+now assigns fixed local and foreign subclass rows and literals to timestamp
+classes independently of production classification. It also includes an
+invalid foreign subclass and an ordinary object borrowing a foreign subclass
+prototype as a negative control. Initial and post-commit observations compare
+the complete public live-query rows, filtered subscriber keys, direct snapshot
+keys, explicit BasicIndex lookup, and an optimized-only snapshot. The original
+implementation failed first at the unindexed live-query key set by omitting
+`foreign-subclass-one`. The descriptor-chain repair passed both receiving
+oracles, 127 tests, with no type errors. Live-query planner index use, generated
+subclass histories, deeper subclass chains, other hosts, public ranges, and
+prototype/method replacement remain outside this witness. Fresh exact-commit
+review is pending.

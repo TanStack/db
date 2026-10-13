@@ -110,4 +110,9 @@ tag or mixed Temporal implementations.
 
 ## Exact committed-head review
 
-Pending fresh hostile review of the final committed repair.
+At `ae0b67fd2`, a fresh hostile reviewer found no blocker in the stated
+default and custom ordered-index domain. All 25 focused tests passed. Its
+independent bounded histories exercised both index types under both order
+rules, and a wrong-result probe confirmed that the optimized public snapshot
+uses the index result. Provider cursors, arbitrary callbacks, and live-query
+publication remain outside this verdict.

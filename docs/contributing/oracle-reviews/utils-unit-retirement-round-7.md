@@ -68,10 +68,20 @@ tests with no type errors.
 For ORC-007 calibration, a temporary wrong model rule expected an arbitrary
 RegExp to equal its changed-source neighbor. The fixed campaign failed at the
 `deepEquals` return comparison after one test with seed `20260911` and shrink
-path `0:0`. Direct replay through `UTILS_ORACLE_PROPERTY=36`,
+path `0:0`. Direct replay through `UTILS_ORACLE_PROPERTY=34`,
 `UTILS_ORACLE_SEED=20260911`, and `UTILS_ORACLE_PATH=0:0` reproduced that
 same assertion failure. Restoring the model rule made the direct replay pass.
 The temporary rule is absent from the final oracle. This demonstrates replay
 fidelity for the changed-source property, not every property in the file.
 
-Fresh review of the final committed head remains pending.
+At `ae0b67fd2`, a fresh hostile reviewer confirmed all six retired assertions
+and found no production mismatch in this transfer. It caught a replay defect:
+the two new cross-type registrations preceded the existing RegExp, Float32Array,
+and Duration registrations, shifting saved selectors 34–36. Moving the new
+registrations after them restored 34 to RegExp source and flags, 35 to
+Float32Array, and 36 to Duration; the new properties are 37 and 38. A temporary
+wrong expected result for the RegExp changed-source neighbor failed on direct
+replay of selector 34, seed `20260911`, path `0:0`, after one test at the
+forward `deepEquals` return. Removing the temporary rule made that replay pass
+with only the selected generated property active. Fresh review of the next
+committed head remains pending.

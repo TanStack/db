@@ -32,7 +32,7 @@ fixture reached the split-tree case.
 The extended direct oracle uses an independent source Map and a supplied
 numeric rank to predict membership and order after sign-changing updates,
 removal, and re-addition. It checks exact SameValueZero lookup, ordered takes,
-cursors, and inclusive, exclusive, reversed, and point ranges on both index
+cursors, and inclusive, exclusive, reversed-bound, and point ranges on both index
 types; the split case crosses BTree children. Four focused cases failed on
 the old production at the intended ordered or range comparison. Changing
 only the BTree point-range shortcuts left the two update cases red. Ordered
@@ -56,7 +56,13 @@ with no type errors after repair. The five lint warnings were preexisting.
 | ORC-010 | Direct indexes own no external resources or cleanup action; an assertion is the failure checkpoint. |
 | ORC-011 | The source Map and fresh rank sort differ from the incremental indexes. No plausible shared semantic fault within this bounded callback remains identified; arbitrary callback laws remain open. |
 | ORC-012 | This record names the counterexamples, RED/GREEN sequence, scoped claim, and pending final review. |
-| ORC-013 | `-0` and `+0` share exact lookup but have distinct callback positions; inclusive versus exclusive and reversed mixed-sign bounds reject a SameValueZero range rule. |
+| ORC-013 | `-0` and `+0` share exact lookup but have distinct callback positions; inclusive versus exclusive and reversed mixed-sign bounds reject a SameValueZero range rule. The signed-zero checker does not directly call `rangeQueryReversed`. |
 | ORC-014 | No provider or host handoff is claimed. |
 
-Fresh review of the final committed head remains pending.
+At `ae0b67fd2`, a fresh hostile reviewer found no blocker in the declared
+direct-index scope. The 420-test focused oracle and targeted generated replays
+passed. Independent bounded histories matched BasicIndex and BTreeIndex for
+signed-zero exact lookup, order, cursors, and forward range queries. The
+reviewer also noted that part of the broader numeric property inspects private
+layout, while separate public method checks protect the transferred behavior.
+Arbitrary callbacks and public planner selection remain outside this verdict.

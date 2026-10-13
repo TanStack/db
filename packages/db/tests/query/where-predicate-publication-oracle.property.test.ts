@@ -67,7 +67,10 @@
  * A focused tagged-Date matrix checks native Dates from this and another
  * JavaScript realm. It compares direct snapshot, filtered subscriber, and live
  * query keys after preload and one sync transaction; an explicit BasicIndex
- * lookup checks the indexed equality key when an index is present.
+ * lookup checks the indexed equality key when an index is present. Fixed local
+ * and foreign Date subclasses with inherited `getTime` join the same
+ * timestamp classes. A forged object with a borrowed subclass prototype does
+ * not join a Date class.
  *
  * Calibration: pinned histories separate Kleene from two-valued logic, and a
  * checker test requires the two-valued answer to fail. Hostile production
@@ -87,8 +90,9 @@
  * them. The mock sync source is a controlled provider; this oracle claims only
  * how the Collection filters and routes the sync transactions it supplies.
  * The tagged-Date matrix covers native `node:vm` Dates with ordinary Date
- * prototypes, including own display tags. It excludes proxies, subclasses,
- * prototype swaps, ordinary objects with spoofed Date tags, and other hosts.
+ * prototypes, including own display tags, and fixed local and foreign Date
+ * subclasses with inherited `getTime`. It excludes proxies, prototype swaps,
+ * replaced `getTime` methods, other hosts, and generated subclass histories.
  */
 import { runInNewContext } from 'node:vm'
 import { fc, test as fcTest } from '@fast-check/vitest'
@@ -264,17 +268,22 @@ function syncedModelRow(id: string, v: FieldValue): ModelRow {
 // This focused model starts from tags, not runtime Date classification. A
 // native Date and a number with the same finite timestamp are equal. Invalid
 // Dates and NaN occupy one equality class under the documented float rule.
-// An own display tag does not change a native Date's equality class.
+// An own display tag or a subclass does not change a native Date's equality
+// class. A borrowed prototype without the native Date slot matches no Date.
 type DateEqualityTag =
   | {
       kind: `date`
       realm: `local` | `foreign`
       timestamp: number | `invalid`
       ownTag?: boolean
+      subclass?: boolean
     }
   | { kind: `number`; value: number | `NaN` }
 
-type TaggedDateRow = { id: string; tag: DateEqualityTag }
+type TaggedDateRow = {
+  id: string
+  tag: DateEqualityTag | { kind: `forged` }
+}
 
 function dateEqualityClass(tag: DateEqualityTag): number | `unordered` {
   if (tag.kind === `date`) {
@@ -289,7 +298,11 @@ function expectedTaggedDateKeys(
 ): Array<string> {
   const expectedClass = dateEqualityClass(literal)
   return rows
-    .filter((row) => dateEqualityClass(row.tag) === expectedClass)
+    .filter(
+      (row) =>
+        row.tag.kind !== `forged` &&
+        dateEqualityClass(row.tag) === expectedClass,
+    )
     .map((row) => row.id)
     .sort()
 }
@@ -565,6 +578,8 @@ const pinnedChangeHistories: ReadonlyArray<History> = [
 
 // The fixed realm grammar crosses the Date constructor's realm with equal,
 // unequal, and invalid timestamps, plus foreign Dates with an own display tag.
+// Fixed subclass rows and literals exercise inherited getTime on both sides of
+// eq; the forged row controls against trusting only the borrowed prototype.
 // Number literals test the Date/number and invalid-Date/NaN equality classes.
 // A later sync transaction moves three rows between those classes.
 const taggedDateRows: ReadonlyArray<TaggedDateRow> = [
@@ -589,6 +604,47 @@ const taggedDateRows: ReadonlyArray<TaggedDateRow> = [
   },
   { id: `number-one`, tag: { kind: `number`, value: 1 } },
   { id: `number-nan`, tag: { kind: `number`, value: `NaN` } },
+  {
+    id: `local-subclass-one`,
+    tag: {
+      kind: `date`,
+      realm: `local`,
+      timestamp: 1,
+      subclass: true,
+      ownTag: true,
+    },
+  },
+  {
+    id: `foreign-subclass-one`,
+    tag: {
+      kind: `date`,
+      realm: `foreign`,
+      timestamp: 1,
+      subclass: true,
+      ownTag: true,
+    },
+  },
+  {
+    id: `foreign-subclass-two`,
+    tag: {
+      kind: `date`,
+      realm: `foreign`,
+      timestamp: 2,
+      subclass: true,
+      ownTag: true,
+    },
+  },
+  {
+    id: `foreign-subclass-invalid`,
+    tag: {
+      kind: `date`,
+      realm: `foreign`,
+      timestamp: `invalid`,
+      subclass: true,
+      ownTag: true,
+    },
+  },
+  { id: `borrowed-prototype-object`, tag: { kind: `forged` } },
 ]
 
 const taggedDateLiterals: ReadonlyArray<DateEqualityTag> = [
@@ -601,6 +657,27 @@ const taggedDateLiterals: ReadonlyArray<DateEqualityTag> = [
   { kind: `date`, realm: `foreign`, timestamp: `invalid`, ownTag: true },
   { kind: `number`, value: 1 },
   { kind: `number`, value: `NaN` },
+  {
+    kind: `date`,
+    realm: `local`,
+    timestamp: 1,
+    subclass: true,
+    ownTag: true,
+  },
+  {
+    kind: `date`,
+    realm: `foreign`,
+    timestamp: 1,
+    subclass: true,
+    ownTag: true,
+  },
+  {
+    kind: `date`,
+    realm: `foreign`,
+    timestamp: `invalid`,
+    subclass: true,
+    ownTag: true,
+  },
 ]
 
 // ---------------------------------------------------------------------------
@@ -675,22 +752,42 @@ function sourceRow(id: string, v: FieldValue): Row {
   return v === MISSING ? { id } : { id, v }
 }
 
-function runtimeTaggedDateValue(tag: DateEqualityTag): Date | number {
+function runtimeTaggedDateValue(
+  tag: TaggedDateRow[`tag`],
+): Date | number | object {
+  if (tag.kind === `forged`) {
+    const foreignSubclass = runInNewContext(
+      `class D extends Date {}; new D(1)`,
+    ) as Date
+    const forged = Object.create(
+      Object.getPrototypeOf(foreignSubclass),
+    ) as object
+    Object.defineProperty(forged, Symbol.toStringTag, { value: `Other` })
+    return forged
+  }
   if (tag.kind === `number`) {
     return tag.value === `NaN` ? Number.NaN : tag.value
   }
   const timestamp = tag.timestamp === `invalid` ? Number.NaN : tag.timestamp
+  class LocalDate extends Date {}
   const date =
     tag.realm === `foreign`
-      ? (runInNewContext(`new Date(timestamp)`, { timestamp }) as Date)
-      : new Date(timestamp)
+      ? (runInNewContext(
+          tag.subclass
+            ? `class D extends Date {}; new D(timestamp)`
+            : `new Date(timestamp)`,
+          { timestamp },
+        ) as Date)
+      : tag.subclass
+        ? new LocalDate(timestamp)
+        : new Date(timestamp)
   if (tag.ownTag) {
     Object.defineProperty(date, Symbol.toStringTag, { value: `Other` })
   }
   return date
 }
 
-type TaggedValueRow = { id: string; v: Date | number }
+type TaggedValueRow = { id: string; v: Date | number | object }
 
 // The tag model predicts keys before the runtime values are constructed. The
 // driver observes the public live query, filtered subscription, and direct
@@ -783,6 +880,16 @@ async function observeTaggedDateEquality(
           tag: { kind: `date`, realm: `foreign`, timestamp: 1, ownTag: true },
         },
         { index: 4, tag: { kind: `date`, realm: `foreign`, timestamp: 2 } },
+        {
+          index: 10,
+          tag: {
+            kind: `date`,
+            realm: `foreign`,
+            timestamp: 2,
+            subclass: true,
+            ownTag: true,
+          },
+        },
       ]
     collection.utils.begin()
     for (const transition of transitions) {
@@ -1318,7 +1425,7 @@ describe(`WHERE predicate publication oracle`, () => {
       }, [() => subscription.unsubscribe(), () => collection.cleanup()])
     })
 
-    it(`native Dates from another realm publish by timestamp and invalid-Date equality`, async () => {
+    it(`native Dates and subclasses publish by timestamp and invalid-Date equality`, async () => {
       const foreign = runtimeTaggedDateValue({
         kind: `date`,
         realm: `foreign`,
@@ -1327,6 +1434,15 @@ describe(`WHERE predicate publication oracle`, () => {
       // This checks the host premise: a native Date can fail local instanceof.
       expect(foreign instanceof Date).toBe(false)
       expect(Date.prototype.getTime.call(foreign)).toBe(1)
+      const foreignSubclass = runtimeTaggedDateValue({
+        kind: `date`,
+        realm: `foreign`,
+        timestamp: 1,
+        subclass: true,
+        ownTag: true,
+      })
+      expect(Date.prototype.getTime.call(foreignSubclass)).toBe(1)
+      expect(foreignSubclass instanceof Date).toBe(false)
 
       for (const indexed of [false, true]) {
         for (const literal of taggedDateLiterals) {
