@@ -127,3 +127,46 @@ later distinct reference-year row then threw during a valid sync commit. The
 bypass was removed. Direct and public indexed PlainMonthDay equality across
 multiple classes remains open. An exact-only index path needs a separate
 oracle for add, build, remove, update, and the orderBy rejection.
+
+## Review of committed head `5df06de2e`
+
+Fresh review found no mismatch in the exercised alias cases. It identified
+one remaining sensitivity gap in the own-property controls: genuine
+ZonedDateTimes with own `epochNanoseconds` or `calendarId` shadows were not
+present. The fixture now gives both values an independently assigned UTC
+identity class. Native `ZonedDateTime.prototype.equals` confirms each equals
+the alias probe, and direct add/build/removal plus unindexed and optimized-only
+public `eq` must return them. The focused alias owner passed 28 tests.
+
+The separate compiled `in` review found a false-green kind-only possibility:
+its pool contained only one intrinsic value of several Temporal kinds.
+Equal and unequal Instant, PlainDate, PlainDateTime, and PlainTime values now
+reach compiled `eq`, constant `in`, and row-supplied `in` in both directions.
+A kind-only membership mutant reaches the shared comparison and is rejected
+as an expected-false/actual-true mismatch. The review also found that the
+byte reference classifier trusted an instance's display tag. Captured
+typed-array intrinsic classification now admits a genuine Uint8Array with an
+own tag shadow and rejects spoof-tagged Uint16Arrays; fixed controls reach all
+three compiled paths. The focused `in` owner passed 33 tests.
+
+`evaluators.in` previously had no guarded replay owner. Its replay manifest
+now names this oracle and selects only the random/replay campaign. The
+property uses an async fast-check runner so the guarded witness reporter
+records the completed run; a targeted replay test passed with one selected
+property and the fixed campaign skipped.
+For failure calibration, a temporary kind-only driver substitution failed the
+random campaign after 11 tests at seed `42`, path `10:2:3`. Guarded replay of
+that coordinate ran only this property, reproduced the same unequal PlainDate
+membership mismatch in one test, recorded `failed: true`, and exited nonzero.
+The substitution was removed; the production driver again evaluates compiled
+`in`.
+
+One contract-authority question stays open. For a non-null value and a
+null-only list, the current model and evaluator return FALSE, so a compiled
+`not(inArray(...))` returns TRUE. PostgreSQL would return UNKNOWN. The
+[live-query guide](../../guides/live-queries.md#comparison-semantics) broadly
+says comparisons follow SQL/PostgreSQL null conventions, while its `inArray`
+description states array membership without defining null-list behavior. The
+compiled `in` owner records the discrepancy; changing the law requires a
+product decision and separate public WHERE/negation witnesses. No SQL-style
+null-list claim is made for this transfer.

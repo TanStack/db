@@ -8,11 +8,14 @@ import { oraclePropertyOptions, oracleRuns } from '../../oracle-config.js'
 /**
  * # Which values does `in` find in a list?
  *
- * Contract: TanStack DB's `inArray(value, list)` returns UNKNOWN (`null`) for a
- * null or undefined value. A list that is not an array is FALSE.
+ * Transfer law: The public `inArray` API describes array membership. The
+ * current evaluator returns UNKNOWN (`null`) for a null or undefined value
+ * and FALSE for a list that is not an array.
  * Otherwise the result is TRUE when some list item equals the value under the
  * evaluator's equality, and FALSE when none does. A null or undefined item
- * never equals a value. The equality is the one `eq` documents in
+ * never equals a value under that membership interpretation. The public
+ * guide's broad SQL null statement leaves this last rule open for a separate
+ * product decision. The equality is the one `eq` documents in
  * `src/query/compiler/evaluators.ts`:
  *
  * - `NaN` and an invalid Date equal each other and nothing else.
@@ -37,11 +40,14 @@ import { oraclePropertyOptions, oracleRuns } from '../../oracle-config.js'
  * of each rule: equal and unequal strings, a string that begins with the
  * internal normalization prefix, booleans, `0`, `-0`, `1`, `NaN`, `1n`, a
  * valid Date and its timestamp, an invalid Date, equal and unequal byte
- * arrays, a Buffer, Temporal values including ZonedDateTime zone aliases,
- * a forged tag, a borrowed prototype, shadowed display and field members,
- * reference ISO year/day differences hidden by default display, and Duration carry
- * forms with equal display but distinct fields, one shared object and a
- * structurally equal copy, `null` and `undefined`. Lists have zero to six
+ * arrays, a Buffer, genuine bytes with an own display-tag shadow, a wide
+ * typed array with a spoofed byte tag, Temporal values including ZonedDateTime
+ * zone aliases, a forged tag, a borrowed prototype, shadowed display and
+ * field members,
+ * unequal values within each modeled Temporal kind, reference ISO year/day
+ * differences hidden by default display, and Duration carry forms with equal
+ * display but distinct fields, one shared object and a structurally equal
+ * copy, `null` and `undefined`. Lists have zero to six
  * items and may repeat. The list is a constant `Value`, the shape that join
  * demand builds, or a row field, so changing lists are also checked.
  *
@@ -56,9 +62,7 @@ import { oraclePropertyOptions, oracleRuns } from '../../oracle-config.js'
  * Limits: this owner checks the boolean result of `in` for ordinary values
  * from one Temporal polyfill copy and the listed display shadows. It does not
  * claim mixed Temporal implementations, replaced genuine prototypes, or
- * arbitrary custom prototypes that imitate Temporal intrinsics. The byte
- * classifier also excludes genuine Uint8Arrays with an own display-tag
- * shadow. WHERE
+ * arbitrary custom prototypes that imitate Temporal intrinsics. WHERE
  * publication, indexes, and subset loading have other owners.
  */
 
@@ -66,6 +70,28 @@ const PROPERTY = `evaluators.in`
 const PREFIX = `\u0000tanstack-db:binary:`
 const shared = { id: 1 }
 const plainDate = Temporal.PlainDate.from(`2024-01-01`)
+const otherPlainDate = Temporal.PlainDate.from(`2024-01-02`)
+const instant = Temporal.Instant.from(`2024-01-01T00:00:00Z`)
+const sameInstant = Temporal.Instant.from(`2024-01-01T00:00:00Z`)
+const otherInstant = Temporal.Instant.from(`2024-01-02T00:00:00Z`)
+const plainDateTime = Temporal.PlainDateTime.from(`2024-01-01T10:00`)
+const samePlainDateTime = Temporal.PlainDateTime.from(`2024-01-01T10:00`)
+const otherPlainDateTime = Temporal.PlainDateTime.from(`2024-01-01T11:00`)
+const plainTime = Temporal.PlainTime.from(`10:00`)
+const samePlainTime = Temporal.PlainTime.from(`10:00`)
+const otherPlainTime = Temporal.PlainTime.from(`11:00`)
+const shadowedTagBytes = new Uint8Array([1, 2])
+Object.defineProperty(shadowedTagBytes, Symbol.toStringTag, {
+  value: `ordinary`,
+})
+const spoofedWideBytes = new Uint16Array([1, 2])
+Object.defineProperty(spoofedWideBytes, Symbol.toStringTag, {
+  value: `Uint8Array`,
+})
+const otherSpoofedWideBytes = new Uint16Array([1, 2])
+Object.defineProperty(otherSpoofedWideBytes, Symbol.toStringTag, {
+  value: `Uint8Array`,
+})
 const forgedPlainDate = {
   [Symbol.toStringTag]: `Temporal.PlainDate`,
   toString: () => `2024-01-01`,
@@ -159,9 +185,21 @@ const pool: ReadonlyArray<unknown> = [
   new Uint8Array([1, 2]),
   new Uint8Array([1, 3]),
   Buffer.from([1, 2]),
+  shadowedTagBytes,
+  spoofedWideBytes,
+  otherSpoofedWideBytes,
   plainDate,
   Temporal.PlainDate.from(`2024-01-01`),
-  Temporal.PlainTime.from(`10:00`),
+  otherPlainDate,
+  instant,
+  sameInstant,
+  otherInstant,
+  plainDateTime,
+  samePlainDateTime,
+  otherPlainDateTime,
+  plainTime,
+  samePlainTime,
+  otherPlainTime,
   forgedPlainDate,
   borrowedPlainDate,
   shadowedTagPlainDate,
@@ -194,12 +232,17 @@ const pool: ReadonlyArray<unknown> = [
   undefined,
 ]
 
-// A Buffer from another realm, such as Node's under jsdom, is not an
-// `instanceof Uint8Array` here, so check the view's tag instead.
+// The intrinsic typed-array tag reads the internal class across realms. An
+// instance's own display tag cannot hide genuine bytes or forge wide bytes.
+const typedArrayTag = Object.getOwnPropertyDescriptor(
+  Object.getPrototypeOf(Uint8Array.prototype),
+  Symbol.toStringTag,
+)!.get!
+
 function isBytes(value: unknown): value is Uint8Array {
   return (
     ArrayBuffer.isView(value) &&
-    Object.prototype.toString.call(value) === `[object Uint8Array]`
+    Reflect.apply(typedArrayTag, value, []) === `Uint8Array`
   )
 }
 
@@ -387,6 +430,21 @@ function check(evaluate: Evaluate, testCase: InCase): void {
   }
 }
 
+// A kind-only Temporal list key is a plausible wrong normalization: it finds
+// an equal copy, but also finds a different value of the same kind. Feed that
+// answer through the same comparison used by the generated campaigns.
+function evaluateWithKindOnlyTemporalKey(testCase: InCase): boolean | null {
+  const kind = temporalBrand(testCase.value)?.kind
+  if (
+    kind !== undefined &&
+    Array.isArray(testCase.list) &&
+    testCase.list.some((item) => temporalBrand(item)?.kind === kind)
+  ) {
+    return true
+  }
+  return referenceIn(testCase.value, testCase.list)
+}
+
 function describeCase(testCase: InCase): string {
   const show = (value: unknown): string => {
     if (value === forgedPlainDate) return `forged PlainDate tag`
@@ -424,16 +482,16 @@ function describeCase(testCase: InCase): string {
 }
 
 describe(`in evaluator`, () => {
-  const property = fc.property(inCase, (testCase) =>
+  const property = fc.asyncProperty(inCase, async (testCase) =>
     check(evaluateWithProduction, testCase),
   )
 
-  it(`agrees with the reference over a fixed campaign`, () => {
-    fc.assert(property, { numRuns: oracleRuns(2000), seed: 0x2029 })
+  it(`agrees with the reference over a fixed campaign`, async () => {
+    await fc.assert(property, { numRuns: oracleRuns(2000), seed: 0x2029 })
   })
 
-  it(`agrees with the reference over a random or replayed campaign`, () => {
-    fc.assert(property, oraclePropertyOptions(2000, PROPERTY))
+  it(`agrees with the reference over a random or replayed campaign`, async () => {
+    await fc.assert(property, oraclePropertyOptions(2000, PROPERTY))
   })
 
   it.each([
@@ -449,6 +507,69 @@ describe(`in evaluator`, () => {
     const testCase = { value, list: [...list], listFromRow: false }
     expect(referenceIn(value, testCase.list)).toBe(expected)
     check(evaluateWithProduction, testCase)
+  })
+
+  it(`uses intrinsic byte class when a typed array shadows its display tag`, () => {
+    expect(Object.prototype.toString.call(shadowedTagBytes)).toBe(
+      `[object ordinary]`,
+    )
+    expect(Object.prototype.toString.call(spoofedWideBytes)).toBe(
+      `[object Uint8Array]`,
+    )
+    expect(isBytes(shadowedTagBytes)).toBe(true)
+    expect(isBytes(spoofedWideBytes)).toBe(false)
+    checkEqualityPaths(shadowedTagBytes, new Uint8Array([1, 2]), true)
+    checkEqualityPaths(spoofedWideBytes, otherSpoofedWideBytes, false)
+  })
+
+  it(`distinguishes unequal intrinsic values within each Temporal kind`, () => {
+    // Native equals supplies each kind's expected identity relation. The
+    // public compiler must reject a kind-only equality key in all three paths.
+    expect(plainDate.equals(otherPlainDate)).toBe(false)
+    expect(instant.equals(sameInstant)).toBe(true)
+    expect(instant.equals(otherInstant)).toBe(false)
+    expect(plainDateTime.equals(samePlainDateTime)).toBe(true)
+    expect(plainDateTime.equals(otherPlainDateTime)).toBe(false)
+    expect(plainTime.equals(samePlainTime)).toBe(true)
+    expect(plainTime.equals(otherPlainTime)).toBe(false)
+    for (const [left, equal, other] of [
+      [plainDate, shadowedTagPlainDate, otherPlainDate],
+      [instant, sameInstant, otherInstant],
+      [plainDateTime, samePlainDateTime, otherPlainDateTime],
+      [plainTime, samePlainTime, otherPlainTime],
+    ] as const) {
+      expect(pool).toContain(left)
+      expect(pool).toContain(equal)
+      expect(pool).toContain(other)
+      checkEqualityPaths(left, equal, true)
+      checkEqualityPaths(left, other, false)
+    }
+  })
+
+  it(`rejects a kind-only Temporal list key at the membership comparison`, () => {
+    for (const [value, equal, unequal] of [
+      [plainDate, shadowedTagPlainDate, otherPlainDate],
+      [instant, sameInstant, otherInstant],
+      [plainDateTime, samePlainDateTime, otherPlainDateTime],
+      [plainTime, samePlainTime, otherPlainTime],
+    ] as const) {
+      for (const listFromRow of [false, true]) {
+        expect(
+          evaluateWithKindOnlyTemporalKey({
+            value,
+            list: [equal],
+            listFromRow,
+          }),
+        ).toBe(true)
+        expect(() =>
+          check(evaluateWithKindOnlyTemporalKey, {
+            value,
+            list: [unequal],
+            listFromRow,
+          }),
+        ).toThrow(/in mismatch: expected false, got true/)
+      }
+    }
   })
 
   it.each([false, true])(

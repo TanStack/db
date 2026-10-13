@@ -96,6 +96,11 @@ describe(`guarded oracle replay`, () => {
 
   it.each([
     [
+      `evaluators.in`,
+      `tests/query/compiler/in-evaluator-oracle.property.test.ts`,
+      1,
+    ],
+    [
       `index-update.reference-model`,
       `tests/index-update-oracle.property.test.ts`,
       2,

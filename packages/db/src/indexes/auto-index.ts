@@ -3,7 +3,7 @@ import { hasVirtualPropPath } from '../virtual-props'
 import { codedWarning, devBuild } from '../error-message.js'
 import { checkCollectionSizeForIndex, isDevModeEnabled } from './index-registry'
 import type { CompareOptions } from '../query/builder/types'
-import type { BasicExpression } from '../query/ir'
+import type { BasicExpression, PropRef } from '../query/ir'
 import type { CollectionImpl } from '../collection/index.js'
 
 function shouldAutoIndex(collection: CollectionImpl<any, any, any, any, any>) {
@@ -131,11 +131,9 @@ function extractIndexableExpressions(
       return
     }
 
-    const func = expr as any
-
     // Handle 'and' expressions by recursively processing all arguments
-    if (func.name === `and`) {
-      for (const arg of func.args) {
+    if (expr.name === `and`) {
+      for (const arg of expr.args) {
         extractFromExpression(arg)
       }
       return
@@ -143,16 +141,26 @@ function extractIndexableExpressions(
 
     // Check if this is a supported operation
     const supportedOperations = [`eq`, `gt`, `gte`, `lt`, `lte`, `in`]
-    if (!supportedOperations.includes(func.name)) {
+    if (!supportedOperations.includes(expr.name)) {
       return
     }
 
-    // Check if the first argument is a property reference
-    if (func.args.length < 1 || func.args[0].type !== `ref`) {
+    // Preserve field-first admission for existing expressions. A scalar on
+    // the left of a comparison can also put the indexable field on the right.
+    // IN keeps its field-first shape.
+    let fieldRef: PropRef | undefined
+    if (expr.args[0]?.type === `ref`) {
+      fieldRef = expr.args[0]
+    } else if (expr.name !== `in` && expr.args.length === 2) {
+      const [left, right] = expr.args
+      if (left?.type === `val` && right?.type === `ref`) {
+        fieldRef = right
+      }
+    }
+    if (!fieldRef) {
       return
     }
 
-    const fieldRef = func.args[0]
     const fieldPath = fieldRef.path
 
     // Skip if the path is empty
@@ -166,7 +174,7 @@ function extractIndexableExpressions(
     results.push({
       fieldName,
       fieldPath,
-      requireOrderedTraversal: func.name !== `eq` && func.name !== `in`,
+      requireOrderedTraversal: expr.name !== `eq` && expr.name !== `in`,
     })
   }
 

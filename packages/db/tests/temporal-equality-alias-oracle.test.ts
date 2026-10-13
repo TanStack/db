@@ -13,7 +13,7 @@ import { withOracleCleanup } from './utils.js'
  * the fixed-offset +00:00 zone remains a different identity.
  *
  * The ZonedDateTime lane covers values from one polyfill copy and one instant,
- * including genuine instances with own display shadows. A neighboring
+ * including genuine instances with own display and intrinsic-getter shadows. A neighboring
  * PlainDate lane checks that native brand and equality survive those shadows
  * while forged tags retain ordinary object identity. Fixture-assigned classes,
  * independent of production normalization, predict exact key sets. Direct
@@ -42,7 +42,7 @@ type Sample = {
   id: string
   text: string
   identity: `utc` | `offset` | `later` | `calendar`
-  ownDisplay?: `tag` | `text`
+  ownShadow?: `tag` | `text` | `epoch` | `calendar`
 }
 
 const samples: ReadonlyArray<Sample> = [
@@ -75,25 +75,41 @@ const samples: ReadonlyArray<Sample> = [
     id: `utc-shadowed-tag`,
     text: `2024-01-15T09:00:00+00:00[UTC]`,
     identity: `utc`,
-    ownDisplay: `tag`,
+    ownShadow: `tag`,
   },
   {
     id: `utc-shadowed-text`,
     text: `2024-01-15T09:00:00+00:00[UTC]`,
     identity: `utc`,
-    ownDisplay: `text`,
+    ownShadow: `text`,
+  },
+  {
+    id: `utc-shadowed-epoch`,
+    text: `2024-01-15T09:00:00+00:00[UTC]`,
+    identity: `utc`,
+    ownShadow: `epoch`,
+  },
+  {
+    id: `utc-shadowed-calendar`,
+    text: `2024-01-15T09:00:00+00:00[UTC]`,
+    identity: `utc`,
+    ownShadow: `calendar`,
   },
 ]
 
 function rows(): Array<Row> {
-  return samples.map(({ id, text, ownDisplay }) => {
+  return samples.map(({ id, text, ownShadow }) => {
     const when = Temporal.ZonedDateTime.from(text)
-    if (ownDisplay === `tag`) {
+    if (ownShadow === `tag`) {
       Object.defineProperty(when, Symbol.toStringTag, { value: `ordinary` })
-    } else if (ownDisplay === `text`) {
+    } else if (ownShadow === `text`) {
       Object.defineProperty(when, `toString`, {
         value: () => `unrelated text`,
       })
+    } else if (ownShadow === `epoch`) {
+      Object.defineProperty(when, `epochNanoseconds`, { value: 0n })
+    } else if (ownShadow === `calendar`) {
+      Object.defineProperty(when, `calendarId`, { value: `gregory` })
     }
     return { id, when }
   })
@@ -238,8 +254,18 @@ function intrinsicExpectedKeys(
   )
 }
 
-it(`distinguishes equivalent aliases and own display shadows from a fixed-offset zone`, () => {
-  const [utc, alias, fixed, later, gregory, shadowedTag, shadowedText] = rows()
+it(`distinguishes equivalent aliases and own property shadows from a fixed-offset zone`, () => {
+  const [
+    utc,
+    alias,
+    fixed,
+    later,
+    gregory,
+    shadowedTag,
+    shadowedText,
+    shadowedEpoch,
+    shadowedCalendar,
+  ] = rows()
   // This checks the fixture against the external Temporal relation. Expected
   // index and query sets still come from the assigned identity classes.
   expect(utc!.when.equals(alias!.when)).toBe(true)
@@ -258,9 +284,28 @@ it(`distinguishes equivalent aliases and own display shadows from a fixed-offset
       alias!.when,
     ),
   ).toBe(true)
+  expect(
+    Temporal.ZonedDateTime.prototype.equals.call(
+      shadowedEpoch!.when,
+      alias!.when,
+    ),
+  ).toBe(true)
+  expect(
+    Temporal.ZonedDateTime.prototype.equals.call(
+      shadowedCalendar!.when,
+      alias!.when,
+    ),
+  ).toBe(true)
   expect(utc!.when.toString()).not.toBe(alias!.when.toString())
   expect(expectedKeys(`utc`)).toEqual(
-    new Set([`utc`, `utc-alias`, `utc-shadowed-tag`, `utc-shadowed-text`]),
+    new Set([
+      `utc`,
+      `utc-alias`,
+      `utc-shadowed-tag`,
+      `utc-shadowed-text`,
+      `utc-shadowed-epoch`,
+      `utc-shadowed-calendar`,
+    ]),
   )
   expect(expectedKeys(`offset`)).toEqual(new Set([`fixed-offset`]))
 })
@@ -299,7 +344,13 @@ describe.each(indexTypes)(`%s Temporal alias equality`, (_name, IndexType) => {
 
       index.remove(source[0]!.id, source[0]!)
       expect(index.equalityLookup(aliasProbe)).toEqual(
-        new Set([`utc-alias`, `utc-shadowed-tag`, `utc-shadowed-text`]),
+        new Set([
+          `utc-alias`,
+          `utc-shadowed-tag`,
+          `utc-shadowed-text`,
+          `utc-shadowed-epoch`,
+          `utc-shadowed-calendar`,
+        ]),
       )
       expect(index.equalityLookup(offsetProbe)).toEqual(expectedKeys(`offset`))
     },

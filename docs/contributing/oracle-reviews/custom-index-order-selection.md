@@ -74,3 +74,18 @@ six-file related campaign passed 145 tests with no type errors. Lint and
 diff checks passed.
 
 Fresh review of the final committed head remains pending.
+
+At `5df06de2e`, another reviewer found that eager admission recognized
+`gt(rank, 10)` but not its equivalent value-left form `lt(10, rank)` after a
+custom index. Initial subscription rows were correct, but the value-left
+history failed its optimized-only snapshot because no compatible index was
+created. The author added single and paired value-left RED witnesses for
+BasicIndex and BTreeIndex before extending eager expression extraction to
+identify the field on either side. The repaired tests compare initial rows,
+optimized rows, and index count against independent numeric row filters. A
+custom-only optimized range refusal is an adjacent control. The focused
+oracle passed eight tests and the neighboring index campaign passed 547.
+This establishes neither arbitrary value domains nor mutation histories.
+The live-query compiler has a separate index-admission path; simple public
+probes were correct, but the comparable coexisting-index schedule remains
+unproved there.

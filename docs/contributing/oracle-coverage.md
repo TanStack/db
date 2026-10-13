@@ -502,12 +502,18 @@ row-supplied alias lists. A plain object with a forged Temporal tag and a
 genuine value with a shadowed zone accessor must stay outside the UTC class.
 The neighboring PlainDate lane checks forged tags, borrowed prototypes, and
 genuine own-tag or display shadows at direct lookup and unindexed public `eq`.
-The ZonedDateTime fixture also contains genuine UTC rows with own display-tag
-and `toString` shadows; direct indexes and both public `eq` snapshot paths
-retain their alias equality. The `in` evaluator owner distinguishes
+The ZonedDateTime fixture also contains genuine UTC rows with own display-tag,
+`toString`, `epochNanoseconds`, and `calendarId` shadows; direct indexes and
+both public `eq` snapshot paths retain their alias equality. The `in`
+evaluator owner distinguishes
 PlainMonthDay reference years, PlainYearMonth reference days, and Duration
 field vectors that share default display text. Fixed controls reach compiled
 `eq`, constant-list `in`, and row-supplied `in` in both operand directions.
+Equal and unequal values within Instant, PlainDate, PlainDateTime, and
+PlainTime reject a kind-only Temporal equality key at those same paths. A
+genuine Uint8Array with a shadowed display tag and a spoof-tagged Uint16Array
+check the intrinsic byte-class boundary. The `in` property has a guarded
+direct replay selector that runs only its random/replay campaign.
 The alias owner also checks a public unindexed `eq` scan with two native-equal
 PlainMonthDay rows and a distinct reference year. Direct BasicIndex/BTreeIndex
 add, build, removal, re-add, and public indexed `eq` cover the orderable
@@ -515,8 +521,11 @@ PlainYearMonth and Duration cases. Indexed PlainMonthDay equality with multiple
 classes remains open: the ordered indexes cannot compare those classes. A
 future exact-only path must preserve equality while making public `orderBy`
 throw for PlainMonthDay, as changelog #1519 requires. A one-class index bypass
-failed that order law and was not retained.
-Its byte model excludes a genuine Uint8Array with an own display-tag shadow.
+failed that order law and was not retained. The `in` model treats a non-null
+value tested against a null-only list as FALSE, while the live-query guide's
+broad SQL/PostgreSQL comparison statement suggests UNKNOWN. The compiled `in`
+owner tracks this contract-authority question; a product decision is needed
+before changing its expected result or claiming SQL-style null-list behavior.
 Other zone aliases, custom spoofed prototypes, mixed Temporal implementations,
 mixed ordinary-object/Temporal ordered indexes, joins, grouping, query
 identity, live-query publication, and provider paths remain unproved. Direct
@@ -532,10 +541,13 @@ With a custom index created before a compatible ordinary index, ordered reads
 select the latter in both directions. Eager indexing adds one compatible
 index when the custom index alone is present and does not add a duplicate on
 repeated reads. Single and compound numeric range predicates also select
-the compatible index; an eager range subscriber creates one when needed.
-The fixed ready-state fixture covers BasicIndex and
-BTreeIndex, one numeric field, and limit one. Mutation histories, arbitrary
-callbacks, and provider or live-query publication remain outside this owner.
+the compatible index; an eager range subscriber creates one when needed for
+field-left and value-left single or paired relational predicates. A
+custom-only index cannot serve an optimized range read. The fixed ready-state
+fixture covers BasicIndex and BTreeIndex, one numeric field, and limit one.
+Mutation histories, arbitrary callbacks, and provider publication remain
+outside this owner. Live-query compiler admission remains a separate
+receiving-path risk.
 
 The [WHERE predicate publication oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/where-predicate-publication-oracle.property.test.ts)
 also has a [cross-realm Date equality matrix](oracle-reviews/cross-realm-date-where-publication.md).

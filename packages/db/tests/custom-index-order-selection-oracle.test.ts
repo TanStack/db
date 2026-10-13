@@ -19,7 +19,8 @@ import { withOracleCleanup } from './utils.js'
  * It also checks a custom index followed by a compatible ordinary index, and
  * eager index creation when the custom index is present first. Numeric range
  * predicates must likewise find a later compatible index; a range subscriber
- * must trigger eager creation when only a custom index exists. It covers
+ * must trigger eager creation when only a custom index exists, whichever side
+ * of a single or paired relational predicate holds the field. It covers
  * BasicIndex and BTreeIndex at the ready checkpoint, with one order term and
  * limit one. It does not claim arbitrary custom comparator laws, mutation
  * histories, provider ordering, or live-query publication.
@@ -36,6 +37,19 @@ const rows: ReadonlyArray<Row> = [
 // nor the index-selection code; the first public key must be `first`.
 const expectedFirstKey = [...rows].sort((a, b) => a.rank - b.rank)[0]!.id
 const greaterThanTen = new Func(`gt`, [new PropRef([`rank`]), new Value(10)])
+const tenLessThanRank = new Func(`lt`, [new Value(10), new PropRef([`rank`])])
+const expectedGreaterThanTen = rows
+  .filter(({ rank }) => rank > 10)
+  .map(({ id }) => id)
+  .sort()
+const reversedBetweenTenAndThirty = new Func(`and`, [
+  tenLessThanRank,
+  new Func(`gt`, [new Value(30), new PropRef([`rank`])]),
+])
+const expectedBetweenTenAndThirty = rows
+  .filter(({ rank }) => 10 < rank && rank < 30)
+  .map(({ id }) => id)
+  .sort()
 const betweenTenAndThirty = new Func(`and`, [
   greaterThanTen,
   new Func(`lt`, [new PropRef([`rank`]), new Value(30)]),
@@ -178,38 +192,79 @@ describe.each(indexTypes)(
       }, [() => collection.cleanup()])
     })
 
-    it(`creates a compatible eager index for a range subscriber`, async () => {
-      const collection = collectionWithRows(
-        `custom-index-eager-range-${name}`,
-        IndexType,
+    it(`creates a compatible eager index for reversed single and paired ranges`, async () => {
+      const forms = [
+        {
+          name: `field-left`,
+          where: greaterThanTen,
+          expectedKeys: expectedGreaterThanTen,
+        },
+        {
+          name: `field-right`,
+          where: tenLessThanRank,
+          expectedKeys: expectedGreaterThanTen,
+        },
+        {
+          name: `paired-field-right`,
+          where: reversedBetweenTenAndThirty,
+          expectedKeys: expectedBetweenTenAndThirty,
+        },
+      ] as const
+      const collections = forms.map(({ name: formName }) =>
+        collectionWithRows(
+          `custom-index-eager-range-${name}-${formName}`,
+          IndexType,
+        ),
       )
-      await withOracleCleanup(async () => {
-        await collection.stateWhenReady()
-        collection.createIndex((row) => row.rank, {
-          indexType: IndexType,
-          options: { compareFn: (a: number, b: number) => b - a },
-        })
-        const initialKeys: Array<string> = []
-        const subscription = collection.subscribeChanges(
-          (changes) => initialKeys.push(...changes.map(({ key }) => key)),
-          { whereExpression: greaterThanTen, includeInitialState: true },
-        )
-        try {
-          expect(initialKeys.sort()).toEqual([`last`, `middle`])
-          expect(collection.indexes.size).toBe(2)
-          expect(
-            collection
-              .currentStateAsChanges({
-                where: greaterThanTen,
-                optimizedOnly: true,
+      await withOracleCleanup(
+        async () => {
+          await Promise.all(
+            collections.map((collection) => collection.stateWhenReady()),
+          )
+          const observations = []
+          for (const [index, form] of forms.entries()) {
+            const collection = collections[index]!
+            collection.createIndex((row) => row.rank, {
+              indexType: IndexType,
+              options: { compareFn: (a: number, b: number) => b - a },
+            })
+            const initialKeys: Array<string> = []
+            const subscription = collection.subscribeChanges(
+              (changes) => initialKeys.push(...changes.map(({ key }) => key)),
+              { whereExpression: form.where, includeInitialState: true },
+            )
+            try {
+              observations.push({
+                form: form.name,
+                initialKeys: initialKeys.sort(),
+                optimizedKeys: collection
+                  .currentStateAsChanges({
+                    where: form.where,
+                    optimizedOnly: true,
+                  })
+                  ?.map(({ key }) => key)
+                  .sort(),
+                indexCount: collection.indexes.size,
               })
-              ?.map(({ key }) => key)
-              .sort(),
-          ).toEqual([`last`, `middle`])
-        } finally {
-          subscription.unsubscribe()
-        }
-      }, [() => collection.cleanup()])
+            } finally {
+              subscription.unsubscribe()
+            }
+          }
+          // The first two expressions denote the same numeric relation; the
+          // paired form narrows it. Initial publication and optimized-only
+          // snapshots must follow those independent row filters after the
+          // subscription's eager index construction.
+          expect(observations).toEqual(
+            forms.map(({ name: formName, expectedKeys }) => ({
+              form: formName,
+              initialKeys: expectedKeys,
+              optimizedKeys: expectedKeys,
+              indexCount: 2,
+            })),
+          )
+        },
+        collections.map((collection) => () => collection.cleanup()),
+      )
     })
 
     it(`keeps a descending custom index out of an ascending public snapshot`, async () => {
@@ -268,6 +323,20 @@ describe.each(indexTypes)(
         expect(
           indexed.currentStateAsChanges({
             ...ascendingFirst,
+            optimizedOnly: true,
+          }),
+        ).toBeUndefined()
+        // A range read also cannot use the custom comparator when it is the
+        // only index, even if no later ordinary index is available.
+        expect(
+          indexed.currentStateAsChanges({
+            where: greaterThanTen,
+            optimizedOnly: true,
+          }),
+        ).toBeUndefined()
+        expect(
+          indexed.currentStateAsChanges({
+            where: betweenTenAndThirty,
             optimizedOnly: true,
           }),
         ).toBeUndefined()
