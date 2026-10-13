@@ -146,6 +146,7 @@ export function normalizeLegacyLoadSubsetDemandKey(
     return undefined
   }
 
+  const validation: { valid: boolean } = { valid: true }
   const normalize = (value: StableIdentityValue): StableIdentityValue => {
     if (Array.isArray(value)) return value.map(normalize)
     if (value === null || typeof value !== `object`) return value
@@ -159,7 +160,8 @@ export function normalizeLegacyLoadSubsetDemandKey(
         Object.keys(value).length !== 3 ||
         ![`type`, `name`, `args`].every((field) => field in value)
       ) {
-        throw new Error(`Invalid persisted function identity`)
+        validation.valid = false
+        return value
       }
       const args = value.args.map(normalize)
       const memberOperand = args[1]
@@ -199,7 +201,10 @@ export function normalizeLegacyLoadSubsetDemandKey(
   }
 
   try {
-    return JSON.stringify(normalize(parsed as StableIdentityValue)) as DemandKey
+    const normalized = normalize(parsed as StableIdentityValue)
+    return validation.valid
+      ? (JSON.stringify(normalized) as DemandKey)
+      : undefined
   } catch {
     return undefined
   }
