@@ -17,6 +17,8 @@ import { CollectionSyncManager } from './sync'
 import { CollectionIndexesManager } from './indexes'
 import { CollectionMutationsManager } from './mutations'
 import { CollectionEventsManager } from './events.js'
+import { buildErrorTree } from './error-tree.js'
+import type { ErrorTreeSource } from './error-tree.js'
 import type { SortedMap } from '../SortedMap.js'
 import type { PublicationDeferral } from './changes'
 import type { CollectionSubscription } from './subscription'
@@ -30,8 +32,10 @@ import type { IndexOptions } from '../indexes/index-options.js'
 import type {
   ChangeMessage,
   CollectionConfig,
+  CollectionHealth,
   CollectionStatus,
   CurrentStateAsChangesOptions,
+  ErrorTreeNode,
   InferSchemaInput,
   InferSchemaOutput,
   InsertConfig,
@@ -553,6 +557,30 @@ export class CollectionImpl<
   public get status(): CollectionStatus {
     return this._lifecycle.status
   }
+
+  /**
+   * The Collection's health after its first ready. `status` only gates the
+   * initial load; a later sync problem appears here and the rows stay.
+   */
+  public get health(): CollectionHealth {
+    return this._lifecycle.health
+  }
+
+  /**
+   * The error tree for this Collection and every Collection it depends on.
+   * It always has the same shape for a given query, so apps can parse it.
+   */
+  public get errors(): ErrorTreeNode {
+    return buildErrorTree(this)
+  }
+
+  /** @internal A Collection this one depends on changed its error tree. */
+  public _emitHealthChange(): void {
+    this._events.emitHealthChange()
+  }
+
+  /** @internal Set by a live query: the sources its error tree lists. */
+  public _errorTreeSources: (() => ReadonlyArray<ErrorTreeSource>) | undefined
 
   /**
    * Get the number of subscribers that ask for this collection's data. A live

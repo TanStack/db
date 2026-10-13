@@ -13,7 +13,12 @@ import { codedMessage, devBuild } from '../error-message'
 import { CleanupQueue } from './cleanup-queue'
 import type { IdleCallbackDeadline } from '../utils/browser-polyfills'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
-import type { CollectionConfig, CollectionStatus } from '../types'
+import type {
+  CollectionConfig,
+  CollectionErrorInfo,
+  CollectionHealth,
+  CollectionStatus,
+} from '../types'
 import type { CollectionEventsManager } from './events'
 import type { CollectionIndexesManager } from './indexes'
 import type { CollectionChangesManager } from './changes'
@@ -52,6 +57,11 @@ export class CollectionLifecycleManager<
   public onFirstReadyCallbacks: Array<() => void> = []
   private idleCallbackId: number | null = null
   private syncError: unknown
+  // Health is metadata after the first ready. A source's own report and a
+  // live query's request failures are separate, so settling a request cannot
+  // clear a source problem.
+  private sourceProblem: CollectionErrorInfo | null = null
+  private requestProblem: CollectionErrorInfo | null = null
   private cleanupConfig: () => void
   private statusRevision = 0
   private cleaningUp = false
@@ -102,8 +112,11 @@ export class CollectionLifecycleManager<
     > = {
       idle: [`loading`, `error`, `cleaned-up`],
       loading: [`ready`, `error`, `cleaned-up`],
+      // A ready Collection moves to `error` only through crash(); a source's
+      // later failure is health metadata.
       ready: [`cleaned-up`, `error`],
-      error: [`ready`, `cleaned-up`, `idle`],
+      // An initial error is final for its sync attempt.
+      error: [`cleaned-up`, `idle`],
       'cleaned-up': [`loading`, `error`],
     }
 
@@ -196,9 +209,8 @@ export class CollectionLifecycleManager<
     beforeEffects?: () => void,
   ): { error: unknown } | undefined {
     this.validateStatusTransition(this.status, `ready`)
-    // A successful initial sync or recovery establishes a ready snapshot.
-    if (this.status === `loading` || this.status === `error`) {
-      this.syncError = undefined
+    // A successful initial sync establishes a ready snapshot.
+    if (this.status === `loading`) {
       const readyRevision = this.statusRevision + 1
       this.setStatus(`ready`, true, beforeEffects)
 
@@ -235,11 +247,86 @@ export class CollectionLifecycleManager<
     return undefined
   }
 
-  /** Mark an asynchronous sync failure after sync has started. */
+  /**
+   * The source gave up. Before the first ready this fails the initial sync
+   * of the attempt; after it, the problem is final health metadata and the
+   * data stays.
+   */
   public markError(error?: unknown): void {
+    if (this.status === `ready`) {
+      if (devBuild() && process.env.NODE_ENV !== `production`) {
+        console.warn(
+          `[TanStack DB] Collection "${this.id}" called markError() after its first ready. ` +
+            `Call reportError(error, { final: true }) instead; the status stays ready.`,
+        )
+      }
+      this.reportError(error, { final: true })
+      return
+    }
+    this.crash(error)
+  }
+
+  /**
+   * Move the Collection to `error` from any active status. Internal
+   * invariant failures use this even after ready, so a Collection that holds
+   * unpublished rows stops being usable.
+   */
+  public crash(error?: unknown): void {
     this.validateStatusTransition(this.status, `error`)
     this.syncError = error
     this.setStatus(`error`)
+  }
+
+  public get health(): CollectionHealth {
+    const error = this.sourceProblem ?? this.requestProblem
+    return { isError: error !== null, error }
+  }
+
+  /** The cause of the initial gate error, as error tree detail. */
+  public get gateProblem(): CollectionErrorInfo | null {
+    return this.status === `error`
+      ? describeProblem(this.syncError, `initial`, true)
+      : null
+  }
+
+  /** A source's report after its first ready. Status and rows do not change. */
+  public reportError(error: unknown, options?: { final?: boolean }): void {
+    this.assertReportable(`reportError`)
+    // A final problem stays until a restart.
+    if (this.sourceProblem?.final) return
+    this.sourceProblem = describeProblem(error, `sync`, options?.final === true)
+    this.events.emitHealthChange()
+  }
+
+  /** The source synced successfully again. A final problem stays. */
+  public reportHealthy(): void {
+    this.assertReportable(`reportHealthy`)
+    if (!this.sourceProblem || this.sourceProblem.final) return
+    this.sourceProblem = null
+    this.events.emitHealthChange()
+  }
+
+  /** @internal A live query's load failed after its first ready. */
+  public reportRequestError(error: unknown): void {
+    this.requestProblem = describeProblem(error, `request`, false)
+    this.events.emitHealthChange()
+  }
+
+  /** @internal The failed request settled or was released. */
+  public clearRequestError(): void {
+    if (!this.requestProblem) return
+    this.requestProblem = null
+    this.events.emitHealthChange()
+  }
+
+  private assertReportable(operation: string): void {
+    if (this.status !== `ready`) {
+      throw new CollectionStateError(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `${operation}() reports a problem after the first ready, but Collection "${this.id}" is ${this.status}. Before the first ready, retry without reporting, or call markError() when the source gives up.`
+          : codedMessage(243, { operation, id: this.id, status: this.status }),
+      )
+    }
   }
 
   /** Return the cause supplied by the current sync run, if any. */
@@ -480,6 +567,9 @@ export class CollectionLifecycleManager<
 
     this.hasBeenReady = false
     this.syncError = undefined
+    // Health belongs to the discarded attempt.
+    this.sourceProblem = null
+    this.requestProblem = null
     // Cleanup is not readiness. Sync cleanup rejects pending preload callers;
     // first-ready listeners belong to the discarded run.
     this.onFirstReadyCallbacks = []
@@ -520,4 +610,29 @@ export class CollectionLifecycleManager<
     // a replacement run and cleanup while the first promise is still pending.
     return this.beginCleanup()
   }
+}
+
+function describeProblem(
+  error: unknown,
+  phase: CollectionErrorInfo[`phase`],
+  final: boolean,
+): CollectionErrorInfo {
+  const info = {
+    phase,
+    final,
+    name: error instanceof Error ? error.name : `Error`,
+    message:
+      error instanceof Error
+        ? error.message
+        : error === undefined
+          ? `Collection is in an error state`
+          : String(error),
+    ...(typeof (error as { code?: unknown } | null)?.code === `string`
+      ? { code: (error as { code: string }).code }
+      : {}),
+    at: Date.now(),
+  } as CollectionErrorInfo
+  // The original value stays available but out of JSON.
+  Object.defineProperty(info, `cause`, { value: error, enumerable: false })
+  return info
 }

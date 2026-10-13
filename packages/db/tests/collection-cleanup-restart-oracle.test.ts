@@ -1033,7 +1033,7 @@ describe(`Collection cleanup admission oracle`, () => {
   })
 
   it.each([`eager`, `on-demand`] as const)(
-    `recovers an errored %s source and dependent live query through their own restarts`,
+    `restarts a %s source that failed after ready, and its live query, through their own restarts`,
     async (syncMode) => {
       let sourceSync!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
       let starts = 0
@@ -1075,13 +1075,24 @@ describe(`Collection cleanup admission oracle`, () => {
         await live.preload()
         expect(live.get(1)?.rank).toBe(1)
 
+        // After the first ready a source failure is final health: the
+        // status and rows stay, and the live query's error tree reports it.
         sourceSync.markError(new Error(`source sync failed`))
-        expect(source.status).toBe(`error`)
-        expect(live.status).toBe(`error`)
+        expect(source.status).toBe(`ready`)
+        expect(source.health.error).toMatchObject({
+          phase: `sync`,
+          final: true,
+        })
+        expect(live.status).toBe(`ready`)
+        expect(live.get(1)?.rank).toBe(1)
+        expect(live.errors.sources[0]?.isError).toBe(true)
 
+        // Only a restart clears a final problem.
         await live.cleanup()
         await source.cleanup()
         await live.preload()
+        expect(source.health.isError).toBe(false)
+        expect(live.errors.hasErrors).toBe(false)
 
         expect(starts).toBe(2)
         expect(source.status).toBe(`ready`)

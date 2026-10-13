@@ -878,13 +878,20 @@ it('reports connection closure immediately and supports fresh Collections', asyn
       stores: ['items'],
     })
     h.descriptors.push(upgraded)
+    // The source retires. A live query that was already ready keeps its rows
+    // and reports the source's error in its error tree.
     expect(old.status).toBe('error')
-    expect(live.status).toBe('error')
+    expect(live.status).toBe('ready')
+    expect(live.errors.sources[0]).toMatchObject({
+      status: 'error',
+      isError: true,
+    })
     const fresh = await h.open('items', { db: upgraded })
     await fresh.insert({ id: 1, name: 'new' }).isPersisted.promise
     await Channel.deliver()
     expect(old.status).toBe('error')
-    expect(live.status).toBe('error')
+    expect(live.status).toBe('ready')
+    expect(live.errors.hasErrors).toBe(true)
     expect(fresh.status).toBe('ready')
     assertRows(
       fresh.values(),

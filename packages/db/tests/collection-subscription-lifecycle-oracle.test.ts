@@ -2,6 +2,7 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { afterAll, describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
+import { InvalidCollectionStatusTransitionError } from '../src/errors.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
 import { createOnDemandCollection, flushPromises } from './utils.js'
@@ -134,9 +135,12 @@ const acquisitionCellDefinitions = {
   'unavailable:request': { kind: `covered` },
   'unavailable:resume': {
     kind: `excluded`,
-    reason: `recovery in the same sync run uses markReady rather than defer resume`,
+    reason: `an initial error is final for its sync attempt; only a restart recovers`,
   },
-  'unavailable:markReady': { kind: `covered` },
+  'unavailable:markReady': {
+    kind: `excluded`,
+    reason: `markReady after markError in one sync attempt is a contract violation and throws`,
+  },
   'unavailable:markError': {
     kind: `excluded`,
     reason: `a repeated error leaves acquisition unavailable`,
@@ -2964,8 +2968,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
   )
 
   acquisitionCase(
-    [`starting:markError`, `unavailable:markReady`],
-    `retains demand requested during initial error for recovery in the same sync run`,
+    [`starting:markError`],
+    `keeps demand requested during initial error unacquired until a restart`,
     async (reach) => {
       const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
       const loads: Array<LoadSubsetOptions> = []
@@ -2977,7 +2981,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         startSync: false,
         sync: {
           sync: ({ markError, markReady }) => {
-            if (syncRunCount++ === 0) {
+            if (syncRunCount++ !== 1) {
               markReady()
               return {
                 loadSubset: (options) => {
@@ -3020,25 +3024,31 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       expect.soft(loads).toEqual([])
       expect.soft(observed).toEqual([expect.any(Promise)])
 
-      recover()
-      reach(`unavailable:markReady`)
+      // The initial error is final for this attempt.
+      expect(() => recover()).toThrow(InvalidCollectionStatusTransitionError)
       await flushPromises()
+      expect(collection.status).toBe(`error`)
+      expect(loads).toEqual([])
 
+      // A restart begins a new attempt, which acquires the surviving demand.
+      removeErrorListener()
+      await collection.cleanup()
+      collection.startSyncImmediate()
+      await flushPromises()
       expect(collection.status).toBe(`ready`)
       expect(loads.map(({ where: loadedWhere }) => loadedWhere)).toEqual([
         where,
       ])
-      expect(observed).toEqual([expect.any(Promise)])
-      await expect(observed[0]).resolves.toBeUndefined()
 
-      removeErrorListener()
       subscription.unsubscribe()
       await collection.cleanup()
     },
   )
 
+  // A cleaned-up attempt recovers with a restart. An errored attempt cannot
+  // recover in place; the test above owns its demand.
   it.each(
-    ([`error`, `cleaned-up`] as const).flatMap((unavailable) =>
+    ([`cleaned-up`] as const).flatMap((unavailable) =>
       (
         [
           `return`,
@@ -3068,7 +3078,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     ),
   )(
     `observes unavailable demand synchronously: $entry / $unavailable / $outcome / $phase`,
-    async ({ unavailable, outcome, phase, entry }) => {
+    async ({ outcome, phase, entry }) => {
       const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
       const transport = createDeferred<void>()
       const failure = new Error(`recovery acquisition failed`)
@@ -3115,9 +3125,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
             collection.createIndex((row) => row.id, { indexType: BTreeIndex }),
           )
         }
-        if (unavailable === `error`)
-          operations.markError(new Error(`initial error`))
-        else await collection.cleanup()
+        await collection.cleanup()
         const onLoadSubsetResult = (
           value: true | Promise<void>,
           _options: LoadSubsetOptions,
@@ -3160,7 +3168,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         expect(settlements).toEqual([])
         expect(loads).toEqual([])
         const recover = () => {
-          if (unavailable === `cleaned-up`) collection.startSyncImmediate()
+          collection.startSyncImmediate()
           operations.markReady()
         }
         if (phase === `during`) {
@@ -3225,7 +3233,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     },
   )
 
-  it(`re-enables an installed loader after initial recovery in the same sync run`, async () => {
+  it(`keeps an installed loader unavailable after its initial error`, async () => {
     const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
     const loads: Array<LoadSubsetOptions> = []
     let markError!: (error: unknown) => void
@@ -3253,11 +3261,12 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     })
 
     markError(new Error(`initial sync failed`))
-    markReady()
+    expect(() => markReady()).toThrow(InvalidCollectionStatusTransitionError)
     subscription.requestSnapshot({ where })
+    await flushPromises()
 
-    expect(collection.status).toBe(`ready`)
-    expect(loads.map(({ where: loadedWhere }) => loadedWhere)).toEqual([where])
+    expect(collection.status).toBe(`error`)
+    expect(loads).toEqual([])
 
     subscription.unsubscribe()
     await collection.cleanup()
@@ -3294,6 +3303,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     markError(new Error(`initial sync failed`))
     subscription.requestSnapshot({ where })
     subscription.releaseSnapshot(where)
+    // A restart is the only recovery; the released demand stays released.
+    await collection.cleanup()
+    collection.startSyncImmediate()
     markReady()
     await flushPromises()
 
@@ -3306,7 +3318,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
 
   acquisitionCase(
     [`on-demand:markError`],
-    `defers demand while an installed loader is in initial error`,
+    `keeps demand from an installed loader's initial error unacquired until a restart`,
     async (reach) => {
       const oldWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`old`)])
       const newWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`new`)])
@@ -3346,11 +3358,23 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       expect.soft(collection.status).toBe(`error`)
       expect.soft(loads.map(({ where }) => where)).toEqual([oldWhere])
 
+      expect(() => markReady()).toThrow(InvalidCollectionStatusTransitionError)
+      expect(collection.status).toBe(`error`)
+
+      // A restart begins a new attempt, which acquires the surviving demand.
+      removeErrorListener()
+      await collection.cleanup()
+      collection.startSyncImmediate()
       markReady()
       await flushPromises()
-      expect(loads.map(({ where }) => where)).toEqual([oldWhere, newWhere])
+      // The first attempt acquired `old` before its error. The new attempt
+      // acquires both surviving demands; `new` was never acquired before.
+      expect(loads.map(({ where }) => where)).toEqual([
+        oldWhere,
+        oldWhere,
+        newWhere,
+      ])
 
-      removeErrorListener()
       subscription.unsubscribe()
       await collection.cleanup()
     },

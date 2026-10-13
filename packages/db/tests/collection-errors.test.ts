@@ -615,7 +615,8 @@ describe(`Collection Error Handling`, () => {
         collectionImpl._lifecycle.validateStatusTransition(`ready`, `error`),
       ).not.toThrow()
 
-      // Valid transitions from error (allow recovery)
+      // Valid transitions from error. An initial error is final for its sync
+      // attempt, so the only way back to ready is a restart.
       expect(() =>
         collectionImpl._lifecycle.validateStatusTransition(
           `error`,
@@ -627,7 +628,7 @@ describe(`Collection Error Handling`, () => {
       ).not.toThrow()
       expect(() =>
         collectionImpl._lifecycle.validateStatusTransition(`error`, `ready`),
-      ).not.toThrow()
+      ).toThrow(InvalidCollectionStatusTransitionError)
 
       // Valid transitions from cleaned-up (allow restart)
       expect(() =>

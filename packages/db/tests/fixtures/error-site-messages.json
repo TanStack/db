@@ -923,5 +923,14 @@
     "file": "local-storage.ts",
     "template": "LocalStorage sync belongs to its options Collection.",
     "literals": ["LocalStorage sync belongs to its options Collection."]
+  },
+  "243": {
+    "file": "collection/lifecycle.ts",
+    "template": "${operation}() reports a problem after the first ready, but Collection \"${this.id}\" is ${this.status}. Before the first ready, retry without reporting, or call markError() when the source gives up.",
+    "literals": [
+      "() reports a problem after the first ready, but Collection \"",
+      "\" is ",
+      ". Before the first ready, retry without reporting, or call markError() when the source gives up."
+    ]
   }
 }

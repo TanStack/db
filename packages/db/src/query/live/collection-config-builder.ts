@@ -34,6 +34,7 @@ import type { CollectionSubscription } from '../../collection/subscription.js'
 import type { RootStreamBuilder } from '@tanstack/db-ivm'
 import type { OrderByOptimizationInfo } from '../compiler/order-by.js'
 import type { Collection } from '../../collection/index.js'
+import type { ErrorTreeSource } from '../../collection/error-tree.js'
 import type {
   CollectionConfigSingleRowOption,
   KeyedStream,
@@ -114,7 +115,8 @@ export class CollectionConfigBuilder<
   // Error state tracking
   private isInErrorState = false
   private fatalQueryError = false
-  private readonly erroredSourceIds = new Set<string>()
+  // Lazy demand that failed after the first ready, as request errors.
+  private readonly failedDemands = new Set<string>()
   private lastSubsetError: unknown | undefined
 
   // Reference to the live query collection for error state transitions
@@ -423,10 +425,19 @@ export class CollectionConfigBuilder<
     return generation
   }
 
+  /** The source aliases of this query, in query order, for its error tree. */
+  errorTreeSources(): ReadonlyArray<ErrorTreeSource> {
+    return this.collectionSources.map(({ alias, collection }) => ({
+      alias,
+      collection,
+    }))
+  }
+
   settleDemand(planId: string, generation: number): void {
     const demand = this.activeDemands.get(planId)
     if (!demand || demand.generation !== generation || demand.settled) return
     demand.settled = true
+    this.clearFailedDemand(planId)
     try {
       this.maybeRunGraphFn?.()
       demand.participant?.resolve()
@@ -450,6 +461,14 @@ export class CollectionConfigBuilder<
     if (!demand || demand.generation !== generation) return
     const normalized = this.recordSubsetError(error)
     demand.participant?.reject(normalized)
+    // After the first ready, a failed load is a request error on this query's
+    // node. It clears when the demand settles later or is released.
+    const lifecycle = this.liveQueryCollection?._lifecycle
+    if (lifecycle?.status === `ready`) {
+      this.failedDemands.add(planId)
+      lifecycle.reportRequestError(normalized)
+      return
+    }
     this.transitionToError(
       devBuild() && process.env.NODE_ENV !== `production`
         ? `Subset demand '${planId}' failed: ${normalized.message}`
@@ -548,7 +567,14 @@ export class CollectionConfigBuilder<
   retireDemand(planId: string): void {
     const demand = this.activeDemands.get(planId)
     this.activeDemands.delete(planId)
+    this.clearFailedDemand(planId)
     demand?.participant?.resolve()
+  }
+
+  private clearFailedDemand(planId: string): void {
+    if (!this.failedDemands.delete(planId)) return
+    if (this.failedDemands.size === 0)
+      this.liveQueryCollection?._lifecycle.clearRequestError()
   }
 
   hasPendingSourceRecovery(): boolean {
@@ -726,7 +752,7 @@ export class CollectionConfigBuilder<
     // Reset error state from any previous sync run so a restarted sync can become ready again.
     this.isInErrorState = false
     this.fatalQueryError = false
-    this.erroredSourceIds.clear()
+    this.failedDemands.clear()
     this.lastSubsetError = undefined
     // Store config and syncState as instance properties for the duration of this sync run
     this.currentSyncConfig = config
@@ -809,7 +835,7 @@ export class CollectionConfigBuilder<
     this.settledWindow = this.initialWindow
     this.isInErrorState = false
     this.fatalQueryError = false
-    this.erroredSourceIds.clear()
+    this.failedDemands.clear()
 
     // Reset caches so a fresh graph/pipeline is compiled on next start
     // This avoids reusing a finalized D2 graph across GC restarts
@@ -1109,14 +1135,20 @@ export class CollectionConfigBuilder<
   ) {
     const { status } = event
 
-    // Handle error state - any source collection in error puts live query in error
+    // Every source status appears in this query's error tree.
+    this.emitErrorTreeChange()
+
+    // A source's initial error is final for its attempt. Before this query's
+    // first ready it is this query's gate error, for every shape. After it,
+    // the source node shows the error and this query keeps its rows.
     if (status === `error`) {
-      this.erroredSourceIds.add(sourceId)
-      this.setErrorState(
-        devBuild() && process.env.NODE_ENV !== `production`
-          ? `Source collection '${collectionId}' entered error state`
-          : codedMessage(172, { collectionId }),
-      )
+      if (this.liveQueryCollection?.status !== `ready`) {
+        this.transitionToError(
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `Source collection '${collectionId}' entered error state`
+            : codedMessage(172, { collectionId }),
+        )
+      }
       return
     }
 
@@ -1128,15 +1160,6 @@ export class CollectionConfigBuilder<
     }
 
     if (status === `ready`) {
-      const recovered = this.erroredSourceIds.delete(sourceId)
-      if (
-        recovered &&
-        !this.fatalQueryError &&
-        this.erroredSourceIds.size === 0
-      ) {
-        this.isInErrorState = false
-        this.maybeRunGraphFn?.()
-      }
       if (
         Object.values(this.optimizableOrderByCollections).some(
           (info) => info.joinedFilterSourceId === sourceId,
@@ -1209,8 +1232,16 @@ export class CollectionConfigBuilder<
         : message,
     )
 
-    // Transition live query collection to error state
-    this.liveQueryCollection?._lifecycle.markError(error ?? new Error(message))
+    // These are query failures or contract violations, such as a source
+    // cleaned up under this query, so they end the query even after ready.
+    // A source's own failure after this query's first ready, and a failed
+    // request, are health metadata and never reach here.
+    this.liveQueryCollection?._lifecycle.crash(error ?? new Error(message))
+  }
+
+  /** The error tree changed below this query; dependents read it again. */
+  private emitErrorTreeChange(): void {
+    this.liveQueryCollection?._emitHealthChange()
   }
 
   private allRequiredSourcesReady() {
@@ -1258,6 +1289,10 @@ export class CollectionConfigBuilder<
       const statusUnsubscribe = collection.on(`status:change`, (event) => {
         this.handleSourceStatusChange(config, sourceId, collectionId, event)
       })
+      // Relay health changes so this query's error tree stays current.
+      syncState.unsubscribeCallbacks.add(
+        collection.on(`health:change`, () => this.emitErrorTreeChange()),
+      )
       let cleanupStartError: Error | undefined
       const cleanupStartUnsubscribe = collection._onCleanupStart(() => {
         cleanupStartError = this.handleSourceCleanupStart(collectionId)

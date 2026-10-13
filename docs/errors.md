@@ -2449,3 +2449,13 @@ Development builds show this message, with `${...}` replaced by values:
 ```text
 LocalStorage sync belongs to its options Collection.
 ```
+
+<a id="error-243"></a>
+
+## Error 243: `collection/lifecycle.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+${operation}() reports a problem after the first ready, but Collection "${this.id}" is ${this.status}. Before the first ready, retry without reporting, or call markError() when the source gives up.
+```

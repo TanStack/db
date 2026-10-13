@@ -45,6 +45,16 @@ export interface CollectionLoadingSubsetChangeEvent {
 }
 
 /**
+ * Event emitted when the Collection's error tree may have changed: its own
+ * health, or for a live query, the status or health of a Collection it
+ * depends on. Read `collection.errors` for the current tree.
+ */
+export interface CollectionHealthChangeEvent {
+  type: `health:change`
+  collection: Collection<any, any, any, any, any>
+}
+
+/**
  * Event emitted when the collection is truncated (all data cleared)
  */
 export interface CollectionTruncateEvent {
@@ -101,6 +111,7 @@ export type AllCollectionEvents = {
   'status:change': CollectionStatusChangeEvent
   'subscribers:change': CollectionSubscribersChangeEvent
   'loadingSubset:change': CollectionLoadingSubsetChangeEvent
+  'health:change': CollectionHealthChangeEvent
   truncate: CollectionTruncateEvent
   'index:added': CollectionIndexAddedEvent
   'index:removed': CollectionIndexRemovedEvent
@@ -163,6 +174,13 @@ export class CollectionEventsManager extends EventEmitter<AllCollectionEvents> {
       } as AllCollectionEvents[`status:${T}`],
       isCurrent,
     )
+  }
+
+  emitHealthChange() {
+    this.emit(`health:change`, {
+      type: `health:change`,
+      collection: this.collection,
+    })
   }
 
   emitSubscribersChange(

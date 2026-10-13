@@ -448,13 +448,25 @@ export interface SyncConfig<
      * named `AbortError`. Aborting after acceptance has no effect.
      */
     commit: (signal?: AbortSignal) => SyncAppliedReceipt
-    /** Signal that a usable initial or recovered snapshot is available. */
+    /** Signal that a usable initial snapshot is available for this attempt. */
     markReady: () => void
     /**
-     * Signal that initial sync failed before producing a usable snapshot.
-     * When supplied, `error` is preserved as the rejection reason from `preload()`.
+     * Signal that the initial sync of this attempt failed for good, before it
+     * produced a usable snapshot. Call it only when the source has stopped
+     * trying; while it retries, call nothing. When supplied, `error` is
+     * preserved as the rejection reason from `preload()`. Calling `markReady()`
+     * after `markError()` in the same attempt throws. After the first ready,
+     * `markError(error)` is treated as `reportError(error, { final: true })`.
      */
     markError: (error?: unknown) => void
+    /**
+     * Report a problem after the first ready. The status and rows do not
+     * change. `final: true` means the source stopped trying, and only a
+     * restart clears the problem. Throws before the first ready.
+     */
+    reportError: (error: unknown, options?: { final?: boolean }) => void
+    /** Report that sync works again after a non-final `reportError`. */
+    reportHealthy: () => void
     /**
      * Replace the synced rows. By default the replacement also marks the
      * Collection ready. Set markReady:false to publish without changing status,
@@ -720,8 +732,9 @@ export type DeleteMutationFn<
  * @example
  * // Status transitions
  * // idle → loading → ready (when markReady() is called)
- * // Any active status can transition to → error or cleaned-up
- * // error → ready after a successful sync recovery
+ * // loading → error when the initial sync of an attempt fails for good
+ * // An initial error is final for its sync attempt. cleanup() and a new
+ * // preload() or subscriber start a fresh attempt.
  */
 export type CollectionStatus =
   /** Collection is created but sync hasn't started yet (when startSync config is false) */
@@ -736,6 +749,55 @@ export type CollectionStatus =
   | `cleaned-up`
 
 export type SyncMode = `eager` | `on-demand`
+
+/**
+ * Detail about a Collection problem. Every field except `cause` is plain data,
+ * so the value can be logged or sent as JSON; `cause` keeps the original value
+ * and is omitted from JSON.
+ */
+export interface CollectionErrorInfo {
+  /**
+   * `initial`: the source gave up before its first ready, so `status` is
+   * `error`. `sync`: the source reported a problem after its first ready.
+   * `request`: loading data for a live query failed while its sources stayed
+   * healthy.
+   */
+  readonly phase: `initial` | `sync` | `request`
+  /** The source has stopped trying; only a restart clears this problem. */
+  readonly final: boolean
+  readonly name: string
+  readonly message: string
+  readonly code?: string
+  /** Epoch milliseconds when the problem was reported. */
+  readonly at: number
+  readonly cause: unknown
+}
+
+/** A Collection's health after its first ready. Status still gates the initial load. */
+export interface CollectionHealth {
+  readonly isError: boolean
+  readonly error: CollectionErrorInfo | null
+}
+
+/**
+ * One node of a live query's error tree. A live query has one node for itself
+ * and one for each source alias in query order; the shape is fixed by the
+ * query, and healthy nodes are present with `isError: false`.
+ */
+export interface ErrorTreeNode {
+  /** The query alias, or `root` for the Collection the tree was read from. */
+  readonly alias: string
+  readonly collectionId: string
+  readonly kind: `source` | `live-query`
+  /** The node's initial-load gate. */
+  readonly status: CollectionStatus
+  /** This node has a problem now: a gate error, a health error, or a request error. */
+  readonly isError: boolean
+  /** This node or any node below it has a problem. */
+  readonly hasErrors: boolean
+  readonly error: CollectionErrorInfo | null
+  readonly sources: ReadonlyArray<ErrorTreeNode>
+}
 
 export interface BaseCollectionConfig<
   T extends object = Record<string, unknown>,

@@ -724,11 +724,12 @@ describe(`Collection Lifecycle Management`, () => {
         expectedFirstReadyCalls: 1,
         invalid: false,
       },
+      // An initial error is final for its sync attempt.
       {
         from: `error`,
-        expectedStatus: `ready`,
-        expectedFirstReadyCalls: 1,
-        invalid: false,
+        expectedStatus: `error`,
+        expectedFirstReadyCalls: 0,
+        invalid: true,
       },
       {
         from: `idle`,
@@ -745,7 +746,7 @@ describe(`Collection Lifecycle Management`, () => {
     ] as const)(
       `defines the $from -> ready transition`,
       async ({ from, expectedStatus, expectedFirstReadyCalls, invalid }) => {
-        const syncFailure = new Error(`sync failed before recovery`)
+        const syncFailure = new Error(`initial sync failed`)
         let firstReadyCalls = 0
         let recoveryFirstReadyCalls = 0
         const collection = createCollection<{ id: string; name: string }>({
@@ -758,11 +759,12 @@ describe(`Collection Lifecycle Management`, () => {
           firstReadyCalls++
         })
 
-        if (from === `ready` || from === `error`) {
+        if (from === `ready`) {
           collection._lifecycle.setStatus(`loading`)
           collection._lifecycle.markReady()
         }
         if (from === `error`) {
+          collection._lifecycle.setStatus(`loading`)
           collection._lifecycle.markError(syncFailure)
           expect(collection._lifecycle.getSyncError()).toBe(syncFailure)
         } else if (from === `cleaned-up`) {
@@ -774,7 +776,7 @@ describe(`Collection Lifecycle Management`, () => {
           collection.onFirstReady(() => {
             recoveryFirstReadyCalls++
           })
-          expect(recoveryFirstReadyCalls).toBe(1)
+          expect(recoveryFirstReadyCalls).toBe(0)
         }
 
         const transitionTrace: Array<
@@ -828,25 +830,11 @@ describe(`Collection Lifecycle Management`, () => {
         }
         expect(collection.status).toBe(expectedStatus)
         expect(firstReadyCalls).toBe(expectedFirstReadyCalls)
-        expect(recoveryFirstReadyCalls).toBe(from === `error` ? 1 : 0)
-        expect(transitionTrace).toEqual(
-          from === `error`
-            ? [
-                {
-                  kind: `status`,
-                  previousStatus: `error`,
-                  status: `ready`,
-                  syncError: undefined,
-                },
-                {
-                  kind: `dependent-ready`,
-                  status: `ready`,
-                  syncError: undefined,
-                },
-              ]
-            : [],
+        expect(recoveryFirstReadyCalls).toBe(0)
+        expect(transitionTrace).toEqual([])
+        expect(collection._lifecycle.getSyncError()).toBe(
+          from === `error` ? syncFailure : undefined,
         )
-        expect(collection._lifecycle.getSyncError()).toBeUndefined()
 
         await collection.cleanup()
       },
@@ -899,8 +887,10 @@ describe(`Collection Lifecycle Management`, () => {
       )
       const firstReady = vi.fn()
       collection.onFirstReady(firstReady)
+      // An internal failure during the ready transition still ends it. A
+      // source's markError at this point would be health metadata instead.
       collection.on(`status:ready`, () => {
-        collection._lifecycle.markError(failure)
+        collection._lifecycle.crash(failure)
       })
       collection._lifecycle.setStatus(`loading`)
 
@@ -1187,7 +1177,7 @@ describe(`Collection Lifecycle Management`, () => {
       }
     })
 
-    it(`ends the synchronous sync-entry boundary after an adapter failure`, async () => {
+    it(`rejects markReady after a failed synchronous sync entry`, async () => {
       const adapterFailure = new Error(`adapter entry failed`)
       let markReadyCallback: (() => void) | undefined
       const collection = createCollection<{ id: string; name: string }>({
@@ -1217,9 +1207,10 @@ describe(`Collection Lifecycle Management`, () => {
           thrown = error
         }
 
+        // The failed entry ended this sync attempt; it cannot become ready.
         expect(didThrow).toBe(true)
-        expect(thrown).toBeUndefined()
-        expect(collection.status).toBe(`ready`)
+        expect(thrown).toBeInstanceOf(InvalidCollectionStatusTransitionError)
+        expect(collection.status).toBe(`error`)
       } finally {
         await collection.cleanup()
       }

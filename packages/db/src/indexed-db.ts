@@ -680,7 +680,9 @@ export function indexedDBCollectionOptions(
       channel?.close()
       if (activeSync === params) {
         broadcastChannel = undefined
-        markError(connection?.error)
+        // Closure ends read and admission authority, even after ready, so the
+        // Collection retires instead of reporting health.
+        params.collection._lifecycle.crash(connection?.error)
       }
     }
     if (connection?.error) {

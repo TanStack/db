@@ -323,6 +323,12 @@ export class CollectionSyncManager<
           markError: (error?: unknown) => {
             if (isCurrentSync()) this.lifecycle.markError(error)
           },
+          reportError: (error: unknown, options?: { final?: boolean }) => {
+            if (isCurrentSync()) this.lifecycle.reportError(error, options)
+          },
+          reportHealthy: () => {
+            if (isCurrentSync()) this.lifecycle.reportHealthy()
+          },
           truncate: (options) => {
             if (!isCurrentSync()) return
             const pendingTransaction = this.getActivePendingSyncTransaction()
@@ -389,7 +395,8 @@ export class CollectionSyncManager<
       this.syncEntryActive = false
       this.completePendingSyncEntryCleanup()
       finishReadyFailures()
-      if (isCurrentSync()) this.lifecycle.markError(error)
+      // A throwing sync function is a programming error, even after ready.
+      if (isCurrentSync()) this.lifecycle.crash(error)
       throw error
     }
     if (readyFailure) throw readyFailure.error
