@@ -5292,7 +5292,9 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
    * source fails its initial sync only when it gives up: there is no
    * `onError`, `onError` returns no retry or throws, the Electric client gives
    * up by itself, or the stream's external signal aborts. Then the Collection
-   * enters `error` and every waiting demand rejects with that cause. After
+   * enters `error`, and every waiting demand and readiness wait rejects with
+   * that same cause. A status listener that cleans the Collection up inside
+   * that failure does not turn a rejected demand into a quiet one. After
    * the first ready, a later failure does not change the status. A demand
    * whose snapshot arrived before an external abort still settles when its
    * rows apply. Cleanup ends a waiting demand quietly, except after an
@@ -5312,8 +5314,12 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
    * them, the final failure cause, the pending `onError` decision, and each
    * demand's settlement. It does not read production state.
    *
-   * The history grammar crosses the full-log and progressive waits, with and
-   * without `onError`, over errors whose decisions are a synchronous retry, a
+   * The history grammar crosses four sources: full-log and progressive
+   * waits, and eager and changes-only sources, which have no
+   * established-snapshot wait and so add no demands. Each runs with and
+   * without `onError`, with the external signal already aborted at sync start
+   * in one history in ten, and with or without a status listener that cleans
+   * up on `error`. Its steps are errors whose decisions are a synchronous retry, a
    * synchronous give-up, a throw, an asynchronous retry, or an asynchronous
    * give-up; a later error after a retry; an Electric client give-up; an
    * external abort before or during a decision; new demands; the first
@@ -5326,8 +5332,8 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
    *
    * The driver runs the real adapter and Collection behind the controlled
    * ShapeStream. After each step and a timer turn it compares the status,
-   * every demand's settlement and cause, and whether the snapshot's row is
-   * visible. The model lives in `electric-retry-decision-model.ts`. An
+   * every demand's settlement and cause, a readiness wait's settlement and
+   * cause, and whether the snapshot's row is visible. The model lives in `electric-retry-decision-model.ts`. An
    * installed-client lane in `electric-sdk-delivery-oracle.property.test.ts`
    * drives the same model through the real Electric client and HTTP.
    */
@@ -5352,20 +5358,34 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
   // are dropped, so every history is legal.
   const retryHistoryArb: fc.Arbitrary<RetryHistory> = fc
     .record({
-      wait: fc.constantFrom<RetryWait>(`full-log`, `progressive`),
+      wait: fc.constantFrom<RetryWait>(
+        `full-log`,
+        `progressive`,
+        `eager`,
+        `changes-only`,
+      ),
       hasOnError: fc.boolean(),
+      // One history in ten starts with the external signal already aborted.
+      abortedAtStart: fc.integer({ min: 0, max: 9 }).map((roll) => roll === 0),
+      cleanupOnError: fc.boolean(),
       steps: fc.array(retryStepArb, { minLength: 1, maxLength: 8 }),
     })
-    .map(({ wait, hasOnError, steps }) => {
-      const model = createRetryModel(wait === `progressive`)
-      const legal: Array<RetryStep> = [{ kind: `demand` }]
-      applyRetryModel(model, legal[0]!, hasOnError, `e0`)
+    .map(({ wait, hasOnError, abortedAtStart, cleanupOnError, steps }) => {
+      const model = createRetryModel(wait, cleanupOnError)
+      if (abortedAtStart)
+        applyRetryModel(model, { kind: `abort` }, hasOnError, `start`)
+      const legal: Array<RetryStep> = []
+      const initial: RetryStep = { kind: `demand` }
+      if (retryStepIsLegal(model, initial)) {
+        legal.push(initial)
+        applyRetryModel(model, initial, hasOnError, `e0`)
+      }
       for (const step of steps) {
         if (!retryStepIsLegal(model, step)) continue
         legal.push(step)
         applyRetryModel(model, step, hasOnError, `e${legal.length - 1}`)
       }
-      return { wait, hasOnError, steps: legal }
+      return { wait, hasOnError, abortedAtStart, cleanupOnError, steps: legal }
     })
 
   function retrySettlementTag(error: unknown, tags: Map<unknown, string>) {
@@ -5378,10 +5398,15 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     history: RetryHistory,
     id: string,
   ): Promise<void> {
+    // A reset resume marker selects the full log for an on-demand source;
+    // without it the source reads the changes-only log.
     const metadata = createMetadata(
-      new Map([[`electric:resume`, { kind: `reset`, updatedAt: 1 }]]),
+      history.wait === `changes-only`
+        ? new Map()
+        : new Map([[`electric:resume`, { kind: `reset`, updatedAt: 1 }]]),
     )
     const controller = new AbortController()
+    if (history.abortedAtStart) controller.abort()
     const tags = new Map<unknown, string>()
     let decide: ((retry: Record<string, never> | undefined) => void) | undefined
     let decision: RetryDecision = `sync-retry`
@@ -5396,7 +5421,11 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     }
     const trace = createOracleCollection(
       id,
-      history.wait === `progressive` ? `progressive` : `on-demand`,
+      history.wait === `progressive`
+        ? `progressive`
+        : history.wait === `eager`
+          ? `eager`
+          : `on-demand`,
       metadata.api,
       {
         signal: controller.signal,
@@ -5415,12 +5444,29 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
       }
     ).onError
     const settlements: Array<RetrySettlement> = []
-    const model = createRetryModel(history.wait === `progressive`)
+    const model = createRetryModel(history.wait, history.cleanupOnError)
+    if (history.abortedAtStart)
+      applyRetryModel(model, { kind: `abort` }, history.hasOnError, `start`)
+    if (history.cleanupOnError) {
+      trace.collection.on(`status:change`, ({ status }) => {
+        if (status === `error`) void trace.collection.cleanup()
+      })
+    }
+    let preload: RetrySettlement = `pending`
+    void trace.collection.preload().then(
+      () => {
+        preload = `fulfilled`
+      },
+      (reason: unknown) => {
+        preload = `rejected:${retrySettlementTag(reason, tags)}`
+      },
+    )
     const turn = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
     const observe = (): RetryObservation => ({
       status: trace.collection.status,
       demands: [...settlements],
       rowVisible: trace.collection.has(1),
+      preload: trace.collection.status === `cleaned-up` ? undefined : preload,
     })
     const decisions: Array<Promise<unknown>> = []
     const persistence = createDeferred<void>()
@@ -5464,7 +5510,11 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
             decide!(model.deciding!.decision === `async-retry` ? {} : undefined)
             break
           case `up-to-date`:
-            trace.subscriber([change(`insert`, 1, `recovered`), upToDate])
+            trace.subscriber(
+              history.wait === `changes-only`
+                ? [upToDate]
+                : [change(`insert`, 1, `recovered`), upToDate],
+            )
             break
           case `client-give-up`: {
             const error = new Error(`client gave up ${tag}`)
@@ -5636,6 +5686,61 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
           ],
         },
       ],
+      // The external signal is already aborted when sync starts, for each
+      // wait; a status listener that cleans up inside a give-up and inside an
+      // external abort; and the eager and changes-only sources, which have no
+      // established-snapshot wait.
+      ...([`full-log`, `progressive`, `eager`, `changes-only`] as const).map(
+        (wait): [RetryHistory] => [
+          { wait, hasOnError: true, abortedAtStart: true, steps: [] },
+        ],
+      ),
+      [
+        {
+          wait: `full-log`,
+          hasOnError: false,
+          cleanupOnError: true,
+          steps: [
+            { kind: `demand` },
+            { kind: `error`, decision: `sync-retry` },
+          ],
+        },
+      ],
+      [
+        {
+          wait: `progressive`,
+          hasOnError: true,
+          cleanupOnError: true,
+          steps: [
+            { kind: `demand` },
+            { kind: `error`, decision: `async-retry` },
+            { kind: `abort` },
+          ],
+        },
+      ],
+      ...([`eager`, `changes-only`] as const).map((wait): [RetryHistory] => [
+        {
+          wait,
+          hasOnError: true,
+          steps: [
+            { kind: `hold` },
+            { kind: `error`, decision: `async-retry` },
+            { kind: `decide` },
+            { kind: `up-to-date` },
+            { kind: `release` },
+          ],
+        },
+      ]),
+      ...([`eager`, `changes-only`] as const).map((wait): [RetryHistory] => [
+        {
+          wait,
+          hasOnError: true,
+          steps: [
+            { kind: `error`, decision: `async-give-up` },
+            { kind: `decide` },
+          ],
+        },
+      ]),
     ] satisfies Array<[RetryHistory]> as Array<[RetryHistory]>,
   )
 

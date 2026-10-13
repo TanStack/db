@@ -1925,12 +1925,19 @@ function createElectricSync<T extends Row<unknown>>(
     // Abort controller for the stream - wraps the signal if provided
     const abortController = new AbortController()
     let cleanupAbortedStream = false
+    // A final initial failure decides its waiting loads. A cleanup that a
+    // status listener runs inside that failure must not relabel it.
+    let initialSyncFailedFinally = false
+    const failInitialSync = (cause: unknown) => {
+      initialSyncFailedFinally = true
+      markError(cause)
+    }
     // An external abort stops the source for good. Before the first ready,
     // that is the final initial failure; cleanup aborts internally instead.
     const forwardExternalAbort = () => {
-      if (isActiveLifecycle() && collection.status === `loading`)
-        markError(new StreamAbortedError(collectionId))
+      const fails = isActiveLifecycle() && collection.status === `loading`
       abortController.abort()
+      if (fails) failInitialSync(new StreamAbortedError(collectionId))
     }
 
     if (shapeOptions.signal) {
@@ -1972,9 +1979,10 @@ function createElectricSync<T extends Row<unknown>>(
         // A stream error fails waiting loads and the initial sync only when no
         // retry follows. A retry that succeeds is a success: waiting loads
         // settle on the snapshot it establishes.
-        const fail = (error: unknown) => {
-          rejectFullSnapshot(error)
-          if (collection.status === `loading`) markError(errorParams)
+        // Waiting loads and readiness waits reject with the same cause.
+        const fail = (cause: unknown) => {
+          rejectFullSnapshot(cause)
+          if (collection.status === `loading`) failInitialSync(cause)
         }
 
         if (shapeOptions.onError) {
@@ -2681,7 +2689,7 @@ function createElectricSync<T extends Row<unknown>>(
           !abortController.signal.aborted &&
           collection.status === `loading`
         )
-          markError(error)
+          failInitialSync(error)
       },
     )
 
@@ -2715,7 +2723,8 @@ function createElectricSync<T extends Row<unknown>>(
     return {
       loadSubset: loadSubsetDedupe?.loadSubset,
       cleanup: () => {
-        if (!abortController.signal.aborted) cleanupAbortedStream = true
+        if (!abortController.signal.aborted && !initialSyncFailedFinally)
+          cleanupAbortedStream = true
         shapeOptions.signal?.removeEventListener(`abort`, forwardExternalAbort)
         // Unsubscribe from the stream
         unsubscribeStream()

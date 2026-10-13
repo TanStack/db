@@ -6,7 +6,10 @@
  * state. The law and its history grammar are documented beside the
  * retry-decision oracle.
  */
-export type RetryWait = `full-log` | `progressive`
+// `full-log` and `progressive` demands wait on the established snapshot.
+// `eager` and `changes-only` sources have no such wait, so their histories
+// observe only status, readiness, and row visibility.
+export type RetryWait = `full-log` | `progressive` | `eager` | `changes-only`
 export type RetryDecision =
   `sync-retry` | `sync-give-up` | `throw` | `async-retry` | `async-give-up`
 export type RetryStep =
@@ -21,6 +24,11 @@ export type RetryStep =
 export type RetryHistory = {
   wait: RetryWait
   hasOnError: boolean
+  // The stream's external signal is already aborted when sync starts.
+  abortedAtStart?: boolean
+  // A `status:change` listener cleans the Collection up when it enters
+  // `error`, inside the failure's own notification.
+  cleanupOnError?: boolean
   steps: Array<RetryStep>
 }
 export type RetrySettlement = `pending` | `fulfilled` | `rejected:${string}`
@@ -28,10 +36,17 @@ export type RetryObservation = {
   status: string
   demands: Array<RetrySettlement>
   rowVisible: boolean
+  // A readiness wait started with the history. It rejects with the same
+  // cause as every waiting demand. Not compared after cleanup.
+  preload?: RetrySettlement
 }
 
 export type RetryModel = {
   truncates: boolean
+  waits: boolean
+  rows: boolean
+  cleanupOnError: boolean
+  cleanedUp: boolean
   ready: boolean
   visible: boolean
   held: boolean
@@ -49,9 +64,13 @@ export function retryModelFail(model: RetryModel, cause: string): void {
   model.demands = model.demands.map((settlement): RetrySettlement =>
     settlement === `pending` ? `rejected:${cause}` : settlement,
   )
+  // The failure is decided before any cleanup it triggers, so a demand it
+  // rejected stays rejected with its cause.
+  if (model.cleanupOnError) model.cleanedUp = true
 }
 
 export function retryStepIsLegal(model: RetryModel, step: RetryStep): boolean {
+  if (model.cleanedUp) return false
   if (step.kind === `decide`) return model.deciding !== undefined
   if (step.kind === `release`) return model.held
   // A failed or aborted Collection refuses new optimistic writes.
@@ -59,7 +78,7 @@ export function retryStepIsLegal(model: RetryModel, step: RetryStep): boolean {
   if (step.kind === `hold`) return !model.held && !model.ready
   switch (step.kind) {
     case `demand`:
-      return true
+      return model.waits
     case `error`:
     case `client-give-up`:
       return model.deciding === undefined
@@ -72,7 +91,7 @@ export function retryStepIsLegal(model: RetryModel, step: RetryStep): boolean {
 
 // The ready snapshot's rows become visible; every waiting demand settles.
 export function retryModelApply(model: RetryModel): void {
-  model.visible = true
+  model.visible = model.rows
   model.demands = model.demands.map((settlement): RetrySettlement =>
     settlement === `pending` ? `fulfilled` : settlement,
   )
@@ -141,9 +160,17 @@ export function applyRetryModel(
 
 export function expectedRetryObservation(
   model: RetryModel,
-  cleanedUp: boolean,
+  cleanupRequested: boolean,
 ): RetryObservation {
+  const cleanedUp = cleanupRequested || model.cleanedUp
   return {
+    preload: cleanedUp
+      ? undefined
+      : model.failed !== undefined
+        ? `rejected:${model.failed}`
+        : model.ready
+          ? `fulfilled`
+          : `pending`,
     status: cleanedUp
       ? `cleaned-up`
       : model.failed !== undefined
@@ -165,9 +192,23 @@ export function expectedRetryObservation(
   }
 }
 
-export function createRetryModel(truncates: boolean): RetryModel {
+export function createRetryModel(
+  wait: RetryWait | boolean,
+  cleanupOnError = false,
+): RetryModel {
+  // The boolean form is the installed-client lane's full-log wait (`false`)
+  // or a progressive wait (`true`).
+  const resolved: RetryWait =
+    typeof wait === `boolean` ? (wait ? `progressive` : `full-log`) : wait
   return {
-    truncates,
+    // A progressive history starts with a must-refetch, so its first
+    // up-to-date commits a truncate, which core applies at once.
+    truncates: resolved === `progressive`,
+    waits: resolved === `full-log` || resolved === `progressive`,
+    // A changes-only source delivers no snapshot rows.
+    rows: resolved !== `changes-only`,
+    cleanupOnError,
+    cleanedUp: false,
     ready: false,
     visible: false,
     held: false,

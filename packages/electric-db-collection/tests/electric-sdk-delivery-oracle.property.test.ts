@@ -1987,10 +1987,13 @@ const clientRetryCells = (
 // The installed client's documented consecutive-retry budget.
 const CLIENT_RETRY_BUDGET = 50
 
-// A rejection's cause is checked by the controlled retry-decision oracle.
+// A rejection's cause, and the readiness wait's cause, are checked by the
+// controlled retry-decision oracle. Here a non-full-log demand is itself a
+// readiness wait.
 function clientObservation(observation: RetryObservation): RetryObservation {
   return {
-    ...observation,
+    status: observation.status,
+    rowVisible: observation.rowVisible,
     demands: observation.demands.map((settlement) =>
       settlement.startsWith(`rejected`) ? `rejected:any` : settlement,
     ),
