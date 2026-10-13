@@ -626,7 +626,81 @@ describe(`semantic expression identity`, () => {
   })
 })
 
+/**
+ * A non-null singleton IN is equality with that member under three-valued
+ * predicate semantics, so these two exact demands share identity;
+ * nullish members are excluded because NOT can distinguish the expressions.
+ * Authority: the TanStack DB 0.5 post's automatic request-collapsing promise
+ * (https://tanstack.com/blog/tanstack-db-0.5-query-driven-sync) and the
+ * exact-demand contract in live/ARCHITECTURE.md. These fixed expression pairs
+ * check the key at request construction; the Query Collection
+ * integration test checks provider calls after two live queries preload. This
+ * does not claim general semantic matching or reuse for broader subsets.
+ */
 describe(`loadSubset demand identity`, () => {
+  it(`shares non-null singleton membership with equality and keeps the boundaries distinct`, () => {
+    // A one-member set asks for the same rows as equality with its member.
+    // Nullish members are excluded: under NOT, equality is UNKNOWN while the
+    // constant-list IN evaluator treats a nonmember as false. Opaque values
+    // retain reference identity, so two equal-shaped objects are distinct.
+    const field = new PropRef<unknown>([`value`])
+    const key = (where: BasicExpression<boolean>) =>
+      getLoadSubsetDemandKey({ where })
+    const equality = (value: unknown) =>
+      new Func<boolean>(`eq`, [field, new Value(value)])
+    const singleton = (value: unknown) =>
+      new Func<boolean>(`in`, [field, new Value([value])])
+    const opaque = { id: 1 }
+    const opaqueFunction = () => 1
+    const localSymbol = Symbol(`one`)
+
+    for (const value of [
+      1,
+      -0,
+      NaN,
+      `one`,
+      true,
+      1n,
+      new Date(0),
+      new Date(NaN),
+      new Uint8Array([1, 2]),
+      localSymbol,
+      opaque,
+      opaqueFunction,
+    ]) {
+      const equal = equality(value)
+      const member = singleton(value)
+      expect(key(equal)).toBe(key(member))
+      for (const [rowValue, expected] of [
+        [value, true],
+        [Symbol(`different`), false],
+        [null, null],
+      ] as const) {
+        expect(compileExpression(equal)({ value: rowValue })).toBe(expected)
+        expect(compileExpression(member)({ value: rowValue })).toBe(expected)
+      }
+    }
+
+    expect(key(equality(opaque))).not.toBe(key(singleton({ id: 1 })))
+    expect(key(equality(1))).toBe(
+      key(new Func(`in`, [field, new Value([1, 1])])),
+    )
+    for (const value of [null, undefined]) {
+      expect(key(equality(value))).not.toBe(key(singleton(value)))
+      const row = { value: 1 }
+      expect(compileExpression(new Func(`not`, [equality(value)]))(row)).toBe(
+        null,
+      )
+      expect(compileExpression(new Func(`not`, [singleton(value)]))(row)).toBe(
+        true,
+      )
+    }
+
+    expect(key(equality(1))).not.toBe(
+      key(new Func(`in`, [field, new Value([1, 2])])),
+    )
+  })
+
   it(`preserves legacy nested-ref identity and distinguishes explicit qualification`, () => {
     const nested = new PropRef([`profile`, `score`])
     const qualified = new PropRef([`profile`, `score`], `profile`)

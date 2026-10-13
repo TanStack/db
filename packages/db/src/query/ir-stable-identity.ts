@@ -689,7 +689,13 @@ function canonicalizeExpression(
           scope,
         ),
       )
-      return canonicalizeFunction(expression.name, [
+      // IN candidates form a set; their order and duplicates do not matter.
+      const members = sortUniqueStableIdentityValues(candidates)
+      // A non-null singleton has EQ's three-valued result; nullish ones do not.
+      const singletonEquality =
+        members.length === 1 &&
+        expression.args[1].value.every((value) => value != null)
+      return canonicalizeFunction(singletonEquality ? `eq` : expression.name, [
         canonicalizeExpression(
           expression.args[0]!,
           `${path}.args[0]`,
@@ -699,9 +705,7 @@ function canonicalizeExpression(
         ),
         {
           type: `val`,
-          // IN tests membership. Candidate order and duplicates do not change
-          // its result, but each candidate keeps its own equality semantics.
-          value: [`set`, sortUniqueStableIdentityValues(candidates)],
+          value: singletonEquality ? members[0]! : [`set`, members],
         },
       ])
     }

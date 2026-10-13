@@ -755,6 +755,13 @@ The following related oracles own distinct production paths or observation cuts:
   owns runtime sharing and retry. The
   [transaction refinement oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/load-subset-transaction-refinement-oracle.test.ts)
   owns abort timing around sync acceptance and publication.
+  The IR identity owner also equates equality and non-null singleton membership
+  demands while keeping nullish members, broader sets, and opaque reference
+  identities distinct. `packages/query-db-collection/tests/joined-query-demand-dedupe.test.ts`
+  checks one Query Collection provider call for settled and concurrent identical
+  joins, independent parent sources with the same keys, and a direct equality
+  query followed by a one-key join. These witnesses do not establish sharing
+  across different adapters or general subset containment.
 
 The LocalStorage owners above also cover the [peer and materialization
 review](oracle-reviews/2026-10-08-localstorage-peer-review.md): a failing
