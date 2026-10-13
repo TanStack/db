@@ -203,8 +203,8 @@ export function processOrderBy(
         compareOpts,
       )
 
-      // Only use the index if it supports range queries
-      if (!index?.supports(`gt`)) {
+      // An ordered source prefix must agree with the query's declared order.
+      if (!index?.supports(`gt`) || !index.supportsOrderOptimization) {
         index = undefined
       }
 

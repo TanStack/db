@@ -5,7 +5,7 @@ import { BTreeIndex } from '../src/indexes/btree-index'
 import { createCollection } from '../src/collection/index'
 import { createLiveQueryCollection } from '../src/query/live-query-collection'
 import { PropRef } from '../src/query/ir'
-import { mockSyncCollectionOptions } from './utils'
+import { mockSyncCollectionOptions, withOracleCleanup } from './utils'
 import type { CompareOptions } from '../src/query/builder/types'
 
 /**
@@ -21,9 +21,11 @@ import type { CompareOptions } from '../src/query/builder/types'
  * direction, and equal-instant ties, then compares exact ordered keys after
  * the action. A ready source exercises scan and indexed live-query paths at
  * preload; an on-demand Collection checks the first published ordered row.
- * Index spies prove those paths read the index. The oracle does not claim mixed
- * Temporal kinds, custom index callbacks, mutated built-ins, or order for
- * Temporal kinds whose public comparison is undefined.
+ * Index spies prove the named indexed reads. The PlainDate lane checks one
+ * extended-year calendar boundary; the exception lane requires `TypeError`
+ * for its named mixed or unordered Temporal pairs and claims no ordered
+ * result for them. Custom index callbacks, mutated built-ins, and other
+ * mixed Temporal pairs remain outside this owner.
  */
 type Row = { id: string; value: Temporal.ZonedDateTime }
 const rows: ReadonlyArray<Row> = [
@@ -454,5 +456,189 @@ describe(`Duration indexed time order`, () => {
         await source.cleanup()
       }
     })
+  }
+})
+
+/**
+ * # Does string collation change PlainDate calendar order?
+ *
+ * Changelog #1519 promises calendar order for PlainDate. With equal month and
+ * day, the year decides: -100000 precedes +10000. Their ISO display strings
+ * have the opposite lexical order, so sorting normalized text would choose the
+ * wrong first row. String collation applies to strings, not Temporal values.
+ *
+ * A ready two-row source is read through a scan, BasicIndex, or BTreeIndex.
+ * The model reads the supplied years, while direct ordered snapshots and
+ * live-query preload expose the public first row. Index spies establish the
+ * direct indexed reads; preload is a parity check. This fixed history does
+ * not claim all extended-year pairs or on-demand publication.
+ */
+describe(`PlainDate extended-year calendar order`, () => {
+  const calendarRows = [
+    { id: `negative`, value: Temporal.PlainDate.from(`-100000-01-01`) },
+    { id: `positive`, value: Temporal.PlainDate.from(`+010000-01-01`) },
+  ]
+  const lexicalOrder = {
+    direction: `asc` as const,
+    nulls: `first` as const,
+    stringSort: `lexical` as const,
+  }
+
+  it(`calibrates opposing year and display orders`, () => {
+    expect(calendarRows[0]!.value.year).toBeLessThan(
+      calendarRows[1]!.value.year,
+    )
+    expect(
+      calendarRows[0]!.value.toString() > calendarRows[1]!.value.toString(),
+    ).toBe(true)
+  })
+
+  it.each([`scan`, `BasicIndex`, `BTreeIndex`] as const)(
+    `keeps calendar order with %s`,
+    async (path) => {
+      const source = createCollection(
+        mockSyncCollectionOptions({
+          id: `plain-date-extended-year-${path}`,
+          getKey: (row: (typeof calendarRows)[number]) => row.id,
+          initialData: calendarRows,
+          autoIndex: `off`,
+        }),
+      )
+      let live: ReturnType<typeof createLiveQueryCollection> | undefined
+      await withOracleCleanup(async () => {
+        await source.stateWhenReady()
+        const index =
+          path === `scan`
+            ? undefined
+            : source.createIndex((row) => row.value, {
+                indexType: path === `BasicIndex` ? BasicIndex : BTreeIndex,
+                options: { compareOptions: lexicalOrder },
+              })
+        const take = index && vi.spyOn(index, `takeFromStart`)
+        try {
+          const direct = source.currentStateAsChanges({
+            orderBy: [
+              {
+                expression: new PropRef([`value`]),
+                compareOptions: lexicalOrder,
+              },
+            ],
+            limit: 1,
+          })!
+          expect(direct.map((change) => change.value.id)).toEqual([`negative`])
+          if (take) expect(take).toHaveBeenCalled()
+
+          live = createLiveQueryCollection((q) =>
+            q
+              .from({ row: source })
+              .orderBy(({ row }) => row.value, lexicalOrder)
+              .limit(1),
+          )
+          await live.preload()
+          expect([...live.values()].map((row) => row.id)).toEqual([`negative`])
+        } finally {
+          take?.mockRestore()
+        }
+      }, [() => live?.cleanup(), () => source.cleanup()])
+    },
+  )
+})
+
+/**
+ * # Can an index hide an undefined public Temporal order?
+ *
+ * Changelog #1519 requires TanStack DB to reject ordering two different
+ * Temporal kinds; PlainMonthDay has no static comparison. The model therefore
+ * predicts a TypeError for either two-row ordering, regardless of which row
+ * would be first. Index storage may assign a physical position to both values,
+ * but that position cannot turn this query into a successful public read.
+ *
+ * Each fixed history starts a ready source with both rows, optionally creates
+ * a BasicIndex or BTreeIndex, then checks the direct ordered snapshot and a
+ * live-query preload. These are public observation cuts; the oracle does not
+ * claim that a later invalid update leaves a usable Collection or that an
+ * on-demand provider has a matching error boundary.
+ */
+type UnorderedTemporalRow = {
+  id: string
+  value: Temporal.PlainDate | Temporal.PlainDateTime | Temporal.PlainMonthDay
+}
+const unorderedTemporalCases: ReadonlyArray<{
+  name: string
+  rows: Array<UnorderedTemporalRow>
+}> = [
+  {
+    name: `different Temporal kinds`,
+    rows: [
+      { id: `date`, value: Temporal.PlainDate.from(`2024-01-01`) },
+      {
+        id: `date-time`,
+        value: Temporal.PlainDateTime.from(`2024-01-02T00:00`),
+      },
+    ],
+  },
+  {
+    name: `PlainMonthDay without an order`,
+    rows: [
+      { id: `january`, value: Temporal.PlainMonthDay.from(`01-01`) },
+      { id: `february`, value: Temporal.PlainMonthDay.from(`02-01`) },
+    ],
+  },
+]
+
+describe(`undefined Temporal public order`, () => {
+  it.each(unorderedTemporalCases)(
+    `calibrates the $name premise`,
+    ({ name, rows: sampleRows }) => {
+      if (name === `different Temporal kinds`) {
+        expect(Object.prototype.toString.call(sampleRows[0]!.value)).not.toBe(
+          Object.prototype.toString.call(sampleRows[1]!.value),
+        )
+      } else {
+        expect(Reflect.get(Temporal.PlainMonthDay, `compare`)).toBeUndefined()
+      }
+    },
+  )
+
+  for (const scenario of unorderedTemporalCases) {
+    for (const path of [`scan`, `BasicIndex`, `BTreeIndex`] as const) {
+      it(`${path} keeps the ${scenario.name} public error`, async () => {
+        const source = createCollection(
+          mockSyncCollectionOptions<UnorderedTemporalRow>({
+            id: `undefined-temporal-order-${scenario.name}-${path}`,
+            getKey: (row) => row.id,
+            initialData: scenario.rows,
+            autoIndex: `off`,
+          }),
+        )
+        let live: ReturnType<typeof createLiveQueryCollection> | undefined
+        await withOracleCleanup(async () => {
+          await source.stateWhenReady()
+          if (path !== `scan`) {
+            source.createIndex((row) => row.value, {
+              indexType: path === `BasicIndex` ? BasicIndex : BTreeIndex,
+            })
+          }
+          expect(() =>
+            source.currentStateAsChanges({
+              orderBy: [
+                {
+                  expression: new PropRef([`value`]),
+                  compareOptions: { direction: `asc`, nulls: `first` },
+                },
+              ],
+              limit: 1,
+            }),
+          ).toThrow(TypeError)
+          live = createLiveQueryCollection((q) =>
+            q
+              .from({ row: source })
+              .orderBy(({ row }) => row.value)
+              .limit(1),
+          )
+          await expect(live.preload()).rejects.toThrow(TypeError)
+        }, [() => live?.cleanup(), () => source.cleanup()])
+      })
+    }
   }
 })

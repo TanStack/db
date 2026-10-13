@@ -97,7 +97,6 @@ export class BTreeIndex<
       this.valueMap.delete(exact)
       group.buckets?.delete(exact)
     }
-    if (group.buckets?.size === 1) group.buckets = undefined
     if (group.keys.size && group.representativeKey === key) {
       // Advancing one iterator skips each removed Map slot at most once.
       const [nextKey, nextValue] = (group.nextRepresentative ??=

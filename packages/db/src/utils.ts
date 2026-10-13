@@ -21,7 +21,7 @@ export const durationFields = [
   `microseconds`,
   `nanoseconds`,
 ] as const
-type DurationFields = Record<(typeof durationFields)[number], number>
+export type DurationFields = Record<(typeof durationFields)[number], number>
 
 /**
  * Deep equality function that compares two values recursively

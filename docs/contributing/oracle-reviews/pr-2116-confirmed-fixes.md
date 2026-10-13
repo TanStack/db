@@ -15,9 +15,24 @@ receiving witness, and a bounded hostile challenge. `origin/main` was
 | An indexed ZonedDateTime `orderBy` follows instant order, as promised by changelog #1519. A time-only Duration uses its elapsed-time order while keeping exact field identity. | Indexed first-row reads placed a later ZonedDateTime first when display text opposed epoch order, including a 9ns/10ns digit-width pair. PT120M also preceded PT1H under string-key order. | The Temporal index-order oracle compares exact direct BasicIndex/BTreeIndex reads and bounded public first rows, including an on-demand Collection. Adjacent nanoseconds at a large epoch reject `Number` precision loss. PT1H/PT60M exclusive cursors reject an exact-suffix tie-break; negative durations reject absolute-value order. The hostile reviewer found no sign mismatch in 2,000 seeded valid day/time pairs. | ZonedDateTime instant and time-only Duration order in the named fixed histories. Calendar units needing `relativeTo`, mixed Temporal kinds, custom index callbacks, and arbitrary update histories remain open. |
 | A manual index cannot change the declared ascending `orderBy(rank).limit(1)` answer. Query order is public; index selection is physical planning. | A reverse manual BTree index made `currentStateAsChanges` return rank 30 instead of rank 10. | The custom-index selection oracle independently sorts two distinct numeric ranks and checks the direct public snapshot and an eager live-query result. The hostile reviewer found the direct path that the first witness missed; both paths now pass. An added compiler guard had no demonstrated effect on this witness and was removed. | Eager initial reads with distinct ranks; no callback-tie, on-demand, later-update, or work-bound claim. |
 | Index updates conserve each source key even when number and string values occupy different comparison domains. | The old comparator could make `2` tie `"2"` while putting them on opposite sides of `"10"`; a direct deletion then duplicated or lost a key. | A source Map predicts full direct traversals after bounded delete/update/re-add actions, and a bounded indexed Collection read checks the public key set. The hostile reviewer confirmed the original comparator fails the source-Map comparison. | Key conservation, not a mixed-kind public order policy or all Collection histories. |
-| An ordinary string beginning `\0tanstack-db:` obeys its declared string collation in indexed and scan reads. Internal Temporal order keys must not cause a tree to lose a neighboring ordinary string. | On `origin/main`, an en-US locale scan selected `\0tanstack-db:a` first while BasicIndex/BTreeIndex selected `tanstack-db:r`. Before the final kind classifier, deleting a neighboring ZonedDateTime or Duration also made BTreeIndex omit the surviving string. | The direct-index owner compares first public rows through scan and indexed paths under locale and custom string collations, with row IDs independent of label order. Two three-key BTree histories compare all surviving keys. The hostile reviewer ran 24 focused tests, 108 add/delete permutations, and a 27-value comparator transitivity sweep across five option variants. After the final classifier simplification, it also ran 3,456 four-key BasicIndex/BTreeIndex insertion/deletion histories (27,648 checkpoints) and a 16-value comparator sweep; no in-domain counterexample remained. | Named scalar, binary, Temporal, and string-kind histories. No arbitrary nested values, mixed-kind relative order, or custom index `compareFn` guarantee. |
+| An ordinary string beginning `\0tanstack-db:` obeys its declared string collation in indexed and scan reads. Internal Temporal order keys must not cause a tree to lose a neighboring ordinary string. | On `origin/main`, an en-US locale scan selected `\0tanstack-db:a` first while BasicIndex/BTreeIndex selected `tanstack-db:r`. Before the final kind classifier, deleting a neighboring ZonedDateTime or Duration also made BTreeIndex omit the surviving string. | The direct-index owner compares first public rows through scan and indexed paths under locale and custom string collations, with row IDs independent of label order. Two three-key BTree histories compare all surviving keys. The hostile reviewer ran 24 focused tests, 108 add/delete permutations, and a 27-value comparator transitivity sweep across five option variants. After the final classifier simplification, it also ran 3,456 four-key BasicIndex/BTreeIndex insertion/deletion histories (27,648 checkpoints) and a 16-value comparator sweep; no in-domain counterexample remained. | Named scalar, binary, Temporal, and string-kind histories. No arbitrary nested values, mixed-kind relative order, or arbitrary custom index `compareFn` guarantee. A separate two-value direct callback lane checks legacy scalar input kinds for immutable Date, Temporal.Instant, and Uint8Array values. |
 
 ## Design decisions and open work
+
+The removed `subset-dedupe.test.ts` case that overrode `Date.getTime` and
+`Uint8Array.slice` was omitted from the earlier retirement ledger. Its frozen
+assertion checked that request transport kept the same `where` object and that
+the evaluator produced the same answers before and after transport. A probe on
+this PR still passes that case. The maintainer excluded guarantees after callers
+modify standard data objects, so the overridden-method case has no receiving
+oracle law. Immutable Date, byte-array, and Buffer request identity and matching
+remain checked in `subset-dedupe.test.ts`; `immutable-demand-boundary.test.ts`
+also checks the direct and deferred request handoff. This records the excluded
+assertion explicitly rather than treating its deletion as a transfer.
+The rewritten `binary-equality-work.test.ts` also stopped editing a compiled
+byte literal in place. The evaluator still passes that old trace on this PR,
+but in-place edits to standard values are outside the accepted contract. Its
+fresh-value checks remain the supported equality and work witnesses.
 
 The captured-`inArray` list rebuild and per-row custom index callback ordering
 were proposed extensions, then withdrawn by the maintainer. This PR does not
@@ -119,3 +134,52 @@ follow-up. After that follow-up, the affected index and comparison files passed
 passed, and the DB source TypeScript and affected-file lint checks passed.
 Those runs cover the changed immutable-value paths; they do not establish
 arbitrary later Collection histories or the deferred mixed-Temporal error.
+
+## 2026-10-13 high-effort review of PR head `16b219224`
+
+This addendum supersedes the earlier manual-index row's two-rank limit. The
+earlier observations remain historical evidence. The follow-up tree has a
+three-rank/two-row owner and one ordered-index eligibility check shared with
+the mixed-kind repair. The reviewer withdrew the claimed wrong live-query
+result after finding that its scratch test resolved `@tanstack/db-ivm` from a
+different checkout. With the correct package, both the frozen PR head and
+`origin/main` published the expected prefix before and after the reported
+writes.
+
+| Review IDs | Law, experiment, and action | Remaining limit |
+| --- | --- | --- |
+| R01, R10 | Index choice cannot change an ordered public prefix. The new scan-versus-index owner rejected the frozen type-name order in eight initial ascending cases. Its repaired 20 ascending and descending BasicIndex/BTreeIndex cases include paired source updates and a ReverseIndex route. Forcing the index-eligibility getter true rejects all ten original ascending histories. A retained on-demand BTree history starts with numbers, inserts and moves a bigint, deletes a prefix row, then requests a later window. It asserts each settled public prefix against independently sorted provider rows. The finite request supplies a missing row; the later request uses a cursor after the retained index has become ineligible for new ordered plans. Withholding either requested row fails the corresponding public assertion. A single physical and query comparator is unsafe here: the query comparator does not form a transitive total order for all mixed JavaScript values. | The eager histories and this retained on-demand paging history pass. The withheld-row controls challenge the provider result, not production code. Other provider paging sequences and repeated domain changes remain untested; the retained loader still traverses the index after eligibility changes. |
+| R03 | The reviewer withdrew the `[20,30]` public-result claim after fixing the scratch test's cross-checkout `@tanstack/db-ivm` resolution. The corrected three-row eager fixture returns `[10,20]` on both the frozen PR and `origin/main`; the reviewer also checked the insert and delete checkpoints. Our widened owner independently sorts three ranks and compares eager and prepopulated on-demand public rows after preload. The compiler's ordered-index eligibility check stays because mixed-kind finding R01 needs it; the R03-only planner assertion was removed. | No confirmed live-query correctness defect remains for this fixture. Incomplete-provider paging and later updates are outside this owner. |
+| R04 | Direct index callbacks retain the legacy scalar input kinds for immutable Date, Temporal.Instant, and Uint8Array values. Five of six new callback cells failed on frozen head; callback-only normalization makes all six pass, with raw-object and collapsed-position hostile controls rejected. | Two-value direct-add histories only; arbitrary callbacks and later updates are not claimed. |
+| R06, R07 | BasicIndex now keeps admitted exact keys beside ordered representatives; a 64-row Temporal range and ordered read made zero `toString()` calls, down from 128. BTreeIndex keeps a comparator-tie bucket map after one exact bucket leaves; a return to the tie no longer copies every peer. | BasicIndex may retain one former representative per live exact group. No general heap limit is claimed beyond existing retained-index state. |
+| R08, R09 | Object comparison does allocate temporary reference-identity tuples, but a bounded timing probe found no object throughput regression; no extra hot-path code was added without a demonstrated cost. Auto-index now shares `indexableOperations`, and `DurationFields` is defined once. | An allocation profile under a representative workload would be needed to establish a material R08 performance defect. |
+| R02, R05, R11 | In-place byte edits can stale the normalized-key cache, and the overridden-method request test was omitted from the earlier retirement record. Both concern caller modification of standard data objects, which the maintainer excluded; fresh immutable matching and request identity remain covered. The reviewer's random index run supplied no seed, grammar, or count. | The cache holds one key per live byte array. The random run is stress evidence, not a witness for mixed public order or callback inputs. |
+
+An adjacent previously recorded defect also changed under the mixed-domain
+guard. On `origin/main`, ready BasicIndex and BTreeIndex direct ordered reads
+returned a row for PlainDate beside PlainDateTime, or for two PlainMonthDays,
+while the scan threw the `TypeError` promised by changelog #1519. The expanded
+Temporal index-order owner now checks six scan/index cases at direct-read and
+eager live-query checkpoints. All 68 tests in that file pass on this worktree.
+The eager live-query paths already threw on `origin/main`; the repair evidence
+is the indexed direct-read mismatch. On-demand and later-update exception
+histories are not claimed.
+
+The same rewrite repairs a separate PlainDate boundary under lexical string
+collation. The supplied year fields require `-100000-01-01` before
+`+010000-01-01`, while their display strings have the reverse lexical order.
+The expanded Temporal owner rejects the two `origin/main` indexed direct-read
+results, which selected the positive year; scan and eager live-query preload
+already selected the negative year. Current BasicIndex and BTreeIndex direct
+reads pass. This establishes the fixed ready-source history, not every
+extended-year pair or on-demand publication.
+
+The follow-up tree adds 406 and removes 541 production source lines against
+`origin/main`, for **135 fewer lines**. A paired local minified build of the 105
+DB JavaScript package files totals 205,973 gzip bytes, versus 206,122 for the
+same files on `origin/main`: **149 fewer gzip bytes**. Bundling each built DB
+ESM entry into one consumer file with esbuild instead yields 100,746 versus
+100,544 gzip bytes: **202 more gzip bytes**. Separate-file and whole-bundle
+compression have different dictionaries and tree-shaking boundaries. React DB
+has no source change in this follow-up; the CI size action has not yet run on
+the final pushed commit.

@@ -4,7 +4,12 @@ import {
   indexableOperations,
 } from '../query/builder/functions.js'
 import { DEFAULT_COMPARE_OPTIONS, deepEquals } from '../utils.js'
-import { makeCheckedComparator, makeComparator } from '../utils/comparison.js'
+import {
+  indexObjectKind,
+  makeCheckedComparator,
+  makeComparator,
+  normalizeValue,
+} from '../utils/comparison.js'
 import { codedMessage, codedWarning, devBuild } from '../error-message.js'
 import type { CompiledSingleRowExpression } from '../query/compiler/evaluators.js'
 import type { RangeQueryOptions } from './btree-index.js'
@@ -62,6 +67,7 @@ export type IndexReader<TKey extends string | number = string | number> = Pick<
   | `keyCount`
   | `supports`
   | `supportsRangeOptimization`
+  | `supportsOrderOptimization`
   | `canOptimizeRangeFor`
 >
 
@@ -110,6 +116,8 @@ export interface IndexInterface<
    * a full scan when this is `false`.
    */
   get supportsRangeOptimization(): boolean
+  /** Whether a query can use this index for its declared ordered prefix. */
+  readonly supportsOrderOptimization?: boolean
 
   /**
    * Whether the live values in this index share the predicate operand's
@@ -158,7 +166,9 @@ export abstract class BaseIndex<
     this.compareOptions = options?.compareOptions ?? DEFAULT_COMPARE_OPTIONS
     this.hasCustomComparator = options?.compareFn != null
     this.compareFn = makeCheckedComparator(
-      options?.compareFn ?? makeComparator(this.compareOptions, `index`),
+      options?.compareFn
+        ? (a, b) => options.compareFn(normalizeValue(a), normalizeValue(b))
+        : makeComparator(this.compareOptions, `index`),
     )
     this.name = name
     this.supportedOperations = new Set<IndexOperation>(indexableOperations)
@@ -244,6 +254,24 @@ export abstract class BaseIndex<
 
   get supportsRangeOptimization(): boolean {
     return !this.hasCustomComparator
+  }
+
+  get supportsOrderOptimization(): boolean {
+    if (this.hasCustomComparator || this.rangeValueDomains.size > 1)
+      return false
+    // Within these domains the index orders by a storage key (or lacks a
+    // defined query order), rather than by the query's value comparator.
+    const domain = this.rangeValueDomains.keys().next().value
+    return (
+      domain === undefined ||
+      ![
+        `Array`,
+        `Binary`,
+        `Temporal.Duration.calendar`,
+        `Temporal.PlainMonthDay`,
+        `function`,
+      ].includes(domain)
+    )
   }
 
   protected addRangeValue(value: unknown): void {
@@ -360,6 +388,7 @@ export abstract class BaseIndex<
 function rangeValueDomain(value: unknown): string | undefined {
   if (value == null) return undefined
   if (value instanceof Date) return `date`
+  if (typeof value === `object`) return indexObjectKind(value)
   return typeof value
 }
 

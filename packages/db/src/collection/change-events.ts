@@ -356,7 +356,12 @@ function getOrderedKeys<T extends object, TKey extends string | number>(
       // Find the index
       const index = findIndexForField(collection, fieldPath, compareOpts)
 
-      if (index && index.supports(`gt`) && index.supportsRangeOptimization) {
+      if (
+        index &&
+        index.supports(`gt`) &&
+        index.supportsRangeOptimization &&
+        index.supportsOrderOptimization
+      ) {
         // Use index optimization
         const filterFn = (key: TKey): boolean => {
           const value = collection.get(key)

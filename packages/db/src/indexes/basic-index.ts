@@ -41,6 +41,7 @@ export class BasicIndex<
   private valueMap = new Map<any, Set<TKey>>()
   // Sorted array of unique indexed values for range queries
   private sortedValues: Array<any> = []
+  private sortedExactValues: Array<unknown> = []
   // Set of all indexed PKs
   private indexedKeys = new Set<TKey>()
 
@@ -77,6 +78,7 @@ export class BasicIndex<
       )
       this.valueMap.set(normalizedValue, new Set([key]))
       this.sortedValues.splice(insertIdx, 0, orderedValue)
+      this.sortedExactValues.splice(insertIdx, 0, normalizedValue)
     }
   }
 
@@ -124,11 +126,12 @@ export class BasicIndex<
         ) {
           if (
             areSameValueZeroEqual(
-              normalizeValue(this.sortedValues[sortedIndex]),
+              this.sortedExactValues[sortedIndex],
               normalizedValue,
             )
           ) {
             this.sortedValues.splice(sortedIndex, 1)
+            this.sortedExactValues.splice(sortedIndex, 1)
             break
           }
           sortedIndex++
@@ -187,6 +190,7 @@ export class BasicIndex<
       else {
         this.valueMap.set(value, new Set([key]))
         this.sortedValues.push(orderValue(indexedValue))
+        this.sortedExactValues.push(value)
       }
       this.addRangeValue(indexedValue)
       this.indexedKeys.add(key)
@@ -194,9 +198,13 @@ export class BasicIndex<
 
     // Array.sort moves raw undefined values last without comparing them.
     // Wrap values so nulls-first comparison runs during a full build.
-    const sortable = this.sortedValues.map((value) => ({ value }))
+    const sortable = this.sortedValues.map((value, index) => ({
+      value,
+      exact: this.sortedExactValues[index],
+    }))
     sortable.sort((left, right) => this.compareFn(left.value, right.value))
     this.sortedValues = sortable.map(({ value }) => value)
+    this.sortedExactValues = sortable.map(({ exact }) => exact)
   }
 
   /**
@@ -205,6 +213,7 @@ export class BasicIndex<
   clear(): void {
     this.valueMap.clear()
     this.sortedValues = []
+    this.sortedExactValues = []
     this.indexedKeys.clear()
     this.clearRangeValues()
   }
@@ -289,7 +298,7 @@ export class BasicIndex<
 
     // Collect all keys in range
     for (let i = startIdx; i < endIdx; i++) {
-      const keys = this.valueMap.get(normalizeValue(this.sortedValues[i]))
+      const keys = this.valueMap.get(this.sortedExactValues[i])
       if (keys) {
         keys.forEach((key) => result.add(key))
       }
@@ -378,9 +387,8 @@ export class BasicIndex<
       const groupValue = this.sortedValues[index]
       const groupKeys: Array<TKey> = []
       do {
-        for (const key of this.valueMap.get(
-          normalizeValue(this.sortedValues[index]),
-        ) ?? []) {
+        for (const key of this.valueMap.get(this.sortedExactValues[index]) ??
+          []) {
           groupKeys.push(key)
         }
         index += step

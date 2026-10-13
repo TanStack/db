@@ -402,5 +402,6 @@
   "detach": "gC",
   "copyRows": "gD",
   "restore": "gE",
-  "attach": "gF"
+  "attach": "gF",
+  "sortedExactValues": "gG"
 }

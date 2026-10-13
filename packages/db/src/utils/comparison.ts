@@ -1,6 +1,7 @@
 import { durationFields, isTemporal } from '../utils'
 import { getRuntimeReferenceIdentity } from '../query/runtime-reference-identity'
 import { codedMessage, devBuild } from '../error-message'
+import type { DurationFields } from '../utils'
 import type { CompareOptions } from '../query/builder/types'
 
 /**
@@ -123,7 +124,7 @@ export const descComparator = (
     : ascComparator(b, a, opts)
 }
 
-function indexObjectKind(value: any): string {
+export function indexObjectKind(value: any): string {
   if (isUint8Array(value)) return `Binary`
   if (isTemporal(value)) {
     const tag = value[Symbol.toStringTag]
@@ -251,8 +252,6 @@ function normalizeBinary(value: Uint8Array): string {
   binaryKeys.set(value, key)
   return key
 }
-
-type DurationFields = Record<(typeof durationFields)[number], number>
 
 /**
  * Normalize a value for comparison and Map key usage

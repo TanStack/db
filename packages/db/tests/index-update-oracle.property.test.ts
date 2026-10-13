@@ -47,6 +47,8 @@ import type { StringCollationConfig } from '../src/types.js'
  * A separate mixed number/string lane checks key conservation only. A full
  * ordered read and an indexed public snapshot must contain each live source
  * key once, even when unlike values have no declared relative sort order.
+ * A separate two-value callback lane checks legacy scalar input kinds for
+ * immutable Date, Temporal.Instant, and byte values across both index types.
  */
 
 type IndexValue = number
@@ -2741,3 +2743,64 @@ test(`BTreeIndex bounded reads do not recompare every live tie`, () => {
   })
   expect(comparisons[2]).toBeLessThanOrEqual(comparisons[0]! + 4)
 })
+
+/**
+ * Preserve a bounded legacy callback input: older indexes supplied a Date's
+ * timestamp and a string for Temporal and binary values. For two immutable
+ * values of each named kind, a direct add comparison supplies that same scalar
+ * kind in both index types. The model uses two values with a known order; it
+ * does not copy or specify the index's string encoding. A callback that accepts
+ * only the old scalar kind distinguishes a raw-object leak. After both adds,
+ * full ordered keys and exact owners must match the supplied facts. This does
+ * not establish arbitrary callbacks, build/update/range paths, or mutation of
+ * the value objects after admission.
+ */
+describe.each(indexTypes)(
+  `%s comparator input compatibility`,
+  (_name, IndexType) => {
+    test.each([
+      {
+        name: `Date`,
+        values: [new Date(1), new Date(2)],
+        kind: `number`,
+      },
+      {
+        name: `Temporal.Instant`,
+        values: [
+          Temporal.Instant.from(`2020-01-01T00:00:00Z`),
+          Temporal.Instant.from(`2021-01-01T00:00:00Z`),
+        ],
+        kind: `string`,
+      },
+      {
+        name: `Uint8Array`,
+        values: [new Uint8Array([1]), new Uint8Array([2])],
+        kind: `string`,
+      },
+    ])(
+      `passes $name to callbacks in its legacy scalar kind`,
+      ({ values, kind }) => {
+        let comparisons = 0
+        const index = new IndexType(1, new PropRef([`value`]), undefined, {
+          compareFn: (left, right) => {
+            comparisons++
+            expect(typeof left).toBe(kind)
+            expect(typeof right).toBe(kind)
+            if (kind === `number`) return (left as number) - (right as number)
+            const a = left as string
+            const b = right as string
+            return a < b ? -1 : a > b ? 1 : 0
+          },
+        })
+        // Keys oppose value order, so collapsing both inputs to one comparator
+        // position cannot pass by key-tie ordering alone.
+        index.add(`a`, { value: values[1] })
+        index.add(`z`, { value: values[0] })
+        expect(comparisons).toBeGreaterThan(0)
+        expect(index.takeFromStart(2)).toEqual([`z`, `a`])
+        expect(index.equalityLookup(values[0])).toEqual(new Set([`z`]))
+        expect(index.equalityLookup(values[1])).toEqual(new Set([`a`]))
+      },
+    )
+  },
+)

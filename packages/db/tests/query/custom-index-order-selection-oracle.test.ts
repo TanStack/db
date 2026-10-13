@@ -7,49 +7,86 @@
  *
  * The Collection API also exposes an ordered, limited direct snapshot through
  * `currentStateAsChanges`. The model sorts a plain array by numeric rank and
- * slices it. Its two distinct ranks avoid any promise about callback ordering
- * within an equality class. The legal history starts one ready, eager source,
- * then reads a direct snapshot and compiles one limited live query. A scan and
- * a source with a reverse-order BTree index exercise both public paths. The
- * exact public row IDs must equal the model at the direct-read and post-preload
- * checkpoints. The reverse index is the hostile planner control: taking its
- * first entry as the first query row would expose rank 30 instead of rank 10.
- * This witness does not cover on-demand acquisition or later source changes.
+ * slices it. Its three distinct ranks avoid any promise about callback ordering
+ * within an equality class. The legal history starts one ready source, then
+ * reads a direct snapshot and compiles one limited live query. Eager and
+ * prepopulated on-demand sources each run with a scan and a reverse-order
+ * BTree index. Three distinct ranks and a two-row window can expose a reversed
+ * prefix whose membership and order differ from the query's prefix. The public row
+ * IDs must equal the model at the direct-read and post-preload checkpoints.
+ * Taking the reverse index's first two entries as the query window would
+ * expose ranks 30 and 20 instead of 10 and 20. The oracle checks the public
+ * result and allows any physical plan that produces it.
+ * The on-demand adapter confirms a finite request without adding rows because
+ * all three are already installed. This witness does not cover provider paging
+ * from an incomplete source or later source changes.
  */
 import { expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
 import { PropRef } from '../../src/query/ir.js'
-import { mockSyncCollectionOptions } from '../utils.js'
+import { mockSyncCollectionOptions, withOracleCleanup } from '../utils.js'
 
 type Row = { id: number; rank: number }
 
 const rows: ReadonlyArray<Row> = [
   { id: 30, rank: 30 },
+  { id: 20, rank: 20 },
   { id: 10, rank: 10 },
 ]
 
 // The query's rank order comes from its declaration, not index traversal.
 const expectedIds = [...rows]
   .sort((a, b) => a.rank - b.rank)
-  .slice(0, 1)
+  .slice(0, 2)
   .map((row) => row.id)
 
-it.each([`scan`, `reverse manual index`] as const)(
-  `keeps bounded public rank order with %s`,
-  async (path) => {
-    const source = createCollection(
+function makeSource(
+  mode: `eager` | `on-demand`,
+  path: `scan` | `reverse manual index`,
+) {
+  const id = `custom-index-order-selection-${mode}-${path}`
+  if (mode === `eager`) {
+    return createCollection(
       mockSyncCollectionOptions<Row>({
-        id: `custom-index-order-selection-${path}`,
+        id,
         getKey: (row) => row.id,
         initialData: [...rows],
         autoIndex: `off`,
       }),
     )
+  }
+  return createCollection<Row>({
+    id,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `off`,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        begin()
+        for (const row of rows) write({ type: `insert`, value: row })
+        commit()
+        markReady()
+        return { loadSubset: () => true, unloadSubset: () => {} }
+      },
+    },
+  })
+}
+
+it.each(
+  ([`eager`, `on-demand`] as const).flatMap((mode) =>
+    ([`scan`, `reverse manual index`] as const).map((path) => ({ mode, path })),
+  ),
+)(
+  `keeps bounded public rank order with $mode $path`,
+  async ({ mode, path }) => {
+    const source = makeSource(mode, path)
     let live: ReturnType<typeof createLiveQueryCollection> | undefined
-    try {
-      await source.stateWhenReady()
+    await withOracleCleanup(async () => {
+      if (mode === `eager`) await source.stateWhenReady()
+      else expect(source.isReady()).toBe(true)
       if (path === `reverse manual index`) {
         source.createIndex((row) => row.rank, {
           indexType: BTreeIndex,
@@ -64,7 +101,7 @@ it.each([`scan`, `reverse manual index`] as const)(
             compareOptions: { direction: `asc`, nulls: `first` },
           },
         ],
-        limit: 1,
+        limit: 2,
       })!
       expect(direct.map((change) => change.value.id)).toEqual(expectedIds)
 
@@ -72,13 +109,10 @@ it.each([`scan`, `reverse manual index`] as const)(
         q
           .from({ row: source })
           .orderBy(({ row }) => row.rank)
-          .limit(1),
+          .limit(2),
       )
       await live.preload()
       expect([...live.values()].map((row) => row.id)).toEqual(expectedIds)
-    } finally {
-      await live?.cleanup()
-      await source.cleanup()
-    }
+    }, [() => live?.cleanup(), () => source.cleanup()])
   },
 )
