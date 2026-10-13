@@ -1012,6 +1012,7 @@ describe(`persisted Electric recovery laws`, () => {
       },
       publish: () => {},
       isLeader: () => true,
+      getLeaderId: () => `local`,
       ensureLeadership: () => Promise.resolve(),
       requestEnsurePersistedIndex: () => Promise.resolve(),
       requestEnsureRemoteSubset: () => Promise.resolve(),

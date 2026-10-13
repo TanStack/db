@@ -532,6 +532,7 @@ function createCoordinatorHarness(): CoordinatorHarness {
     },
     publish: () => {},
     isLeader: () => true,
+    getLeaderId: () => `coordinator-node`,
     ensureLeadership: async () => {},
     requestEnsurePersistedIndex: async () => {},
     requestEnsureRemoteSubset: async () => {},
@@ -627,6 +628,7 @@ function createFailStopCoordinatorHarness(
       harness.publishCalls.push(message)
     },
     isLeader: () => true,
+    getLeaderId: () => `fail-stop-coordinator`,
     ensureLeadership: async () => {},
     requestEnsurePersistedIndex: async () => {},
     requestEnsureRemoteSubset: async (_collectionId, options) => {
@@ -6582,6 +6584,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       },
       publish: (_collectionId, message) => published.push(message),
       isLeader: () => false,
+      getLeaderId: () => null,
       ensureLeadership: async () => {},
       requestEnsurePersistedIndex: async () => {},
       requestEnsureRemoteSubset: async () => {},
@@ -21568,6 +21571,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       subscribe: () => () => {},
       publish: () => {},
       isLeader: () => false,
+      getLeaderId: () => null,
       ensureLeadership: async () => {},
       requestEnsurePersistedIndex: async () => {},
       requestApplyCommittedTx: (_collectionId, tx) =>
@@ -21673,6 +21677,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         subscribe: () => () => {},
         publish: () => {},
         isLeader: () => true,
+        getLeaderId: () => `cancel-ensure`,
         ensureLeadership: async () => {},
         requestEnsurePersistedIndex: async () => {},
         requestApplyCommittedTx: (_collectionId, tx) =>
@@ -22310,6 +22315,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       subscribe: () => () => {},
       publish: () => {},
       isLeader: () => true,
+      getLeaderId: () => `retry-node`,
       ensureLeadership: async () => {},
       requestEnsurePersistedIndex: async () => {},
       requestApplyCommittedTx: (_collectionId, tx) =>
@@ -22374,6 +22380,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       subscribe: () => () => {},
       publish: () => {},
       isLeader: () => true,
+      getLeaderId: () => `ownerless-node`,
       ensureLeadership: async () => {},
       requestEnsurePersistedIndex: async () => {},
       requestApplyCommittedTx: (_collectionId, tx) =>
@@ -22447,6 +22454,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       subscribe: () => () => {},
       publish: () => {},
       isLeader: () => isLeader,
+      getLeaderId: () => (isLeader ? `transitioning-node` : null),
       ensureLeadership: async () => {},
       requestEnsurePersistedIndex: async () => {},
       requestApplyCommittedTx: (_collectionId, tx) =>
@@ -22500,6 +22508,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       subscribe: () => () => {},
       publish: () => {},
       isLeader: () => false,
+      getLeaderId: () => null,
       ensureLeadership: async () => {},
       requestEnsurePersistedIndex: async () => {},
       requestApplyCommittedTx: (_collectionId, tx) =>
@@ -22557,6 +22566,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       subscribe: () => () => {},
       publish: () => {},
       isLeader: () => false,
+      getLeaderId: () => null,
       ensureLeadership: async () => {},
       requestEnsurePersistedIndex: async () => {},
       requestApplyCommittedTx: (_collectionId, tx) =>
@@ -25547,9 +25557,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
    * observations are the follower's rows when its first load settles, after
    * the rotation's reacquisition, and after the later broadcast, plus the
    * ensure log at quiescence. The coordinator is a controlled double of an
-   * elected owner; it does not prove the browser transport. A coordinator
-   * that does not report the elected owner is an open violation, pinned by
-   * two expected-failure cells below.
+   * elected owner; it does not prove the browser transport. Every
+   * coordinator reports the elected owner (`getLeaderId` is required), so a
+   * follower can always tell the owner's notice from a peer's.
    */
   type FollowerGenerationNoticeHistory = {
     ownerCommit: `before-rotation` | `after-rotation`
@@ -25559,15 +25569,12 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     // Control: an owner notice's read is in flight when rotation starts, and
     // then fails. Recovery owns that read, so its failure is ignored.
     readFailsAsRotationStarts?: boolean
-    // Whether the coordinator reports the elected owner (`getLeaderId`).
-    leader?: `reported` | `unreported`
   }
   const assertFollowerGenerationNoticeHistory = async ({
     ownerCommit,
     later,
     ownerRead,
     readFailsAsRotationStarts = false,
-    leader = `reported`,
   }: FollowerGenerationNoticeHistory): Promise<void> => {
     const readFailure = new Error(`owner update read failed`)
     let failNextRead = false
@@ -25671,7 +25678,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
     const coordinator: PersistedCollectionCoordinator = {
       getNodeId: () => `follower-node`,
-      ...(leader === `reported` ? { getLeaderId: () => ownerId } : {}),
+      getLeaderId: () => ownerId,
       subscribe: (id, onMessage) => {
         subscribers.set(id, onMessage)
         return () => {
@@ -25865,29 +25872,6 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     `fails a follower when its elected owner's update cannot be read after rotation: commit $ownerCommit`,
     (history) =>
       assertFollowerGenerationNoticeHistory({ ...history, ownerRead: `fails` }),
-  )
-
-  // Open violation: a coordinator that does not report the elected owner
-  // (`getLeaderId` is optional) gives the follower no way to recognize the
-  // owner's notice as source evidence. Scoped recovery then answers every
-  // owner notice with a refetch, the owner commits again, and the follower
-  // never shows the owner's rows: against an owner that commits on every
-  // ensure, the follower sent 9 or 10 ensures before the bounded owner
-  // stopped. These cells state the law and fail until the fallback is
-  // decided; they pass once a coordinator without `getLeaderId` also
-  // publishes the owner's rows without a refetch loop.
-  it.fails.each([
-    { ownerCommit: `before-rotation` },
-    { ownerCommit: `after-rotation` },
-  ] as const)(
-    `publishes an owner's rows after rotation when the coordinator does not report the owner: commit $ownerCommit`,
-    ({ ownerCommit }) =>
-      assertFollowerGenerationNoticeHistory({
-        ownerCommit,
-        later: `none`,
-        ownerRead: `ok`,
-        leader: `unreported`,
-      }),
   )
 
   it(`ignores a follower read failure when rotation starts while the read is in flight`, () =>

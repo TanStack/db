@@ -4656,6 +4656,7 @@ describe(`sync-ingested write ownership oracle`, () => {
       subscribe: () => () => {},
       publish: () => {},
       isLeader: () => electedOwner === `tab-a`,
+      getLeaderId: () => electedOwner,
       ensureLeadership: async () => {},
       requestEnsurePersistedIndex: async () => {},
       // Remote subset ownership is unrelated to this write-owner law.

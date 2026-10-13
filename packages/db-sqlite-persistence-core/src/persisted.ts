@@ -695,7 +695,7 @@ export interface PersistedCollectionCoordinator {
   publish: (collectionId: string, message: ProtocolEnvelope<unknown>) => void
   isLeader: (collectionId: string) => boolean
   /** The elected owner's node ID, when this node knows it. */
-  getLeaderId?: (collectionId: string) => string | null
+  getLeaderId: (collectionId: string) => string | null
   ensureLeadership: (collectionId: string) => Promise<void>
   requestEnsureRemoteSubset: (
     collectionId: string,
@@ -982,6 +982,11 @@ export class SingleProcessCoordinator implements PersistedCollectionCoordinator 
 
   public isLeader(): boolean {
     return true
+  }
+
+  // A single process has no followers; it owns every collection.
+  public getLeaderId(): string {
+    return this.nodeId
   }
 
   public async ensureLeadership(): Promise<void> {}
@@ -4574,7 +4579,7 @@ class PersistedCollectionRuntime<
       const fromElectedOwner =
         !isSelf &&
         message.senderId ===
-          this.persistence.coordinator.getLeaderId?.(message.collectionId)
+          this.persistence.coordinator.getLeaderId(message.collectionId)
       if (this.isHydratingNow()) {
         this.queuedTxCommitted.push({
           txCommitted: payload,
