@@ -20,7 +20,7 @@ function asMapKey<T>(value: T): T {
  */
 export class ReduceOperator<K, V1, V2> extends UnaryOperator<[K, V1], [K, V2]> {
   // Reduce never reads presence, so its indexes skip that bookkeeping.
-  #index = new Index<K, V1>({ trackPresence: false })
+  #index: Index<K, V1>
   #indexOut = new Index<K, V2>({ trackPresence: false })
   #f: (values: Array<[V1, number]>) => Array<[V2, number]>
 
@@ -29,8 +29,10 @@ export class ReduceOperator<K, V1, V2> extends UnaryOperator<[K, V1], [K, V2]> {
     inputA: DifferenceStreamReader<[K, V1]>,
     output: DifferenceStreamWriter<[K, V2]>,
     f: (values: Array<[V1, number]>) => Array<[V2, number]>,
+    options?: ReduceOptions,
   ) {
     super(id, inputA, output)
+    this.#index = new Index<K, V1>({ ...options, trackPresence: false })
     this.#f = f
   }
 
@@ -138,6 +140,16 @@ export class ReduceOperator<K, V1, V2> extends UnaryOperator<[K, V1], [K, V2]> {
   }
 }
 
+/** @internal groupBy's option; its producer must keep the identity exact. */
+export type ReduceOptions = {
+  /**
+   * Input values are `[identity, value]` with a string or number identity
+   * that determines the value: two inputs under one key with an equal
+   * identity are equal. They merge without a structural hash.
+   */
+  prefixIdentity?: boolean
+}
+
 /**
  * Reduces the elements in the stream by key (version-free)
  */
@@ -146,7 +158,10 @@ export function reduce<
   V1Type extends (T extends KeyValue<KType, infer V> ? V : never),
   R,
   T,
->(f: (values: Array<[V1Type, number]>) => Array<[R, number]>) {
+>(
+  f: (values: Array<[V1Type, number]>) => Array<[R, number]>,
+  options?: ReduceOptions,
+) {
   return (stream: IStreamBuilder<T>): IStreamBuilder<KeyValue<KType, R>> => {
     const output = new StreamBuilder<KeyValue<KType, R>>(
       stream.graph,
@@ -157,6 +172,7 @@ export function reduce<
       stream.connectReader() as DifferenceStreamReader<KeyValue<KType, V1Type>>,
       output.writer,
       f,
+      options,
     )
     stream.graph.addOperator(operator)
     return output

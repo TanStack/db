@@ -17,9 +17,16 @@
  * prefixes shows only for `NaN`, which a `Map` treats as one key and `===`
  * does not.
  *
+ * With `prefixIdentity`, the producer promises that a value's prefix
+ * determines it, so values under one key with the same prefix are one value
+ * whatever their payloads. Unprefixed values keep their structural identity;
+ * merging them would join values that differ. Each history runs in both
+ * modes.
+ *
  * Model: `expectedIndex` sums multiplicities in plain `Map`s under a string
- * identity built from each value's type and printed value. It does not call
- * the Index, `hash`, or the prefix helper.
+ * identity built from each value's type and printed value, or from its
+ * prefix alone under `prefixIdentity`. It does not call the Index, `hash`, or
+ * the prefix helper.
  *
  * History grammar: up to twelve additions to two keys. Values are prefixed
  * arrays `[prefix, payload]` with prefixes `NaN`, `0`, `-0`, `1`, `'1'`,
@@ -32,7 +39,9 @@
  * `addValue`.
  *
  * Refinement check: after each addition, `get` and `has` for both keys equal
- * the model, and `get` returns what `getIterator` yields, in its order.
+ * the model, and `get` returns what `getIterator` yields, in its order. Under
+ * `prefixIdentity` a merged value keeps one of its instances, so `get` is
+ * compared through the same prefix identity.
  *
  * Calibration: comparing prefixes with `===` kept a cancelled `NaN`-prefixed
  * value, or threw `Mismatching prefixes`, and fails the pinned histories and
@@ -62,19 +71,23 @@ function scalarIdentity(value: Prefix): string {
   return `${typeof value}:${String(value)}`
 }
 
-function identity(value: Value): string {
-  return Array.isArray(value)
-    ? `[${scalarIdentity(value[0])},${scalarIdentity(value[1])}]`
-    : scalarIdentity(value)
+type Mode = `structural` | `prefixIdentity`
+
+function identity(value: Value, mode: Mode = `structural`): string {
+  if (!Array.isArray(value)) return scalarIdentity(value)
+  return mode === `prefixIdentity`
+    ? `[${scalarIdentity(value[0])}]`
+    : `[${scalarIdentity(value[0])},${scalarIdentity(value[1])}]`
 }
 
 function expectedIndex(
   additions: ReadonlyArray<Addition>,
+  mode: Mode,
 ): Map<string, Map<string, number>> {
   const keys = new Map<string, Map<string, number>>()
   for (const { key, value, multiplicity } of additions) {
     const values = keys.get(key) ?? new Map<string, number>()
-    const id = identity(value)
+    const id = identity(value, mode)
     const sum = (values.get(id) ?? 0) + multiplicity
     if (sum === 0) values.delete(id)
     else values.set(id, sum)
@@ -179,23 +192,29 @@ const pinnedHistories: ReadonlyArray<{
 function observedMultiplicities(
   index: Index<string, Value>,
   key: string,
+  mode: Mode,
 ): Map<string, number> {
   const values = new Map<string, number>()
   for (const [value, multiplicity] of index.get(key)) {
-    const id = identity(value)
+    const id = identity(value, mode)
     values.set(id, (values.get(id) ?? 0) + multiplicity)
   }
   return values
 }
 
-function expectRefinement(additions: ReadonlyArray<Addition>): void {
-  const index = new Index<string, Value>()
+function expectRefinement(
+  additions: ReadonlyArray<Addition>,
+  mode: Mode = `structural`,
+): void {
+  const index = new Index<string, Value>({
+    prefixIdentity: mode === `prefixIdentity`,
+  })
   for (const [step, addition] of additions.entries()) {
     index.addValue(addition.key, [addition.value, addition.multiplicity])
-    const model = expectedIndex(additions.slice(0, step + 1))
+    const model = expectedIndex(additions.slice(0, step + 1), mode)
     for (const key of [`k1`, `k2`]) {
-      const checkpoint = `after addition ${step} for ${key}`
-      expect(observedMultiplicities(index, key), checkpoint).toEqual(
+      const checkpoint = `${mode}: after addition ${step} for ${key}`
+      expect(observedMultiplicities(index, key, mode), checkpoint).toEqual(
         model.get(key) ?? new Map(),
       )
       expect(index.has(key), `${checkpoint} has`).toBe(model.has(key))
@@ -230,8 +249,10 @@ const campaigns =
 describe(`Index refinement oracle`, () => {
   if (replaySeed === undefined && replayPath === undefined) {
     for (const { name, additions } of pinnedHistories) {
-      it(`matches the multiset model when ${name}`, () =>
-        expectRefinement(additions))
+      it(`matches the multiset model when ${name}`, () => {
+        expectRefinement(additions)
+        expectRefinement(additions, `prefixIdentity`)
+      })
     }
   }
 
@@ -247,9 +268,10 @@ describe(`Index refinement oracle`, () => {
       )
         throw new Error(`TANSTACK_DB_IVM_INDEX_SEED must be an integer`)
       fc.assert(
-        fc.property(historyArbitrary, (additions) =>
-          expectRefinement(additions),
-        ),
+        fc.property(historyArbitrary, (additions) => {
+          expectRefinement(additions)
+          expectRefinement(additions, `prefixIdentity`)
+        }),
         {
           numRuns: 300,
           ...(seed === undefined ? {} : { seed }),

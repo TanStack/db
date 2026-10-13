@@ -754,6 +754,90 @@ describe(`Operators`, () => {
       }
     })
 
+    test(`a retraction cancels its insert when it holds an equal array subclass`, () => {
+      // The hash treats an array subclass like an array, so the retraction
+      // below must meet the plain-array insert and remove it.
+      class Sub extends Array<number> {}
+      const graph = new D2()
+      const input = graph.newInput<{ k: Array<number>; v: number }>()
+      const groups = new Map<string, number>()
+      input.pipe(
+        groupBy((row) => ({ k: row.k }), {
+          lo: min((row) => row.v),
+          n: count((row) => row.v),
+        }),
+        output((message) => {
+          for (const [[, row], multiplicity] of message.getInner()) {
+            const tally = `${row.lo}:${row.n}`
+            groups.set(tally, (groups.get(tally) ?? 0) + multiplicity)
+          }
+        }),
+      )
+      graph.finalize()
+      input.sendData(
+        new MultiSet([
+          [{ k: [1], v: 5 }, 1],
+          [{ k: [1], v: 9 }, 1],
+        ]),
+      )
+      graph.run()
+      input.sendData(new MultiSet([[{ k: Sub.from([1]), v: 5 }, -1]]))
+      graph.run()
+      expect(
+        [...groups].filter(([, multiplicity]) => multiplicity !== 0),
+      ).toEqual([[`9:1`, 1]])
+    })
+
+    test(`a group reports the key of a current member, not of a deleted one`, () => {
+      // The two Maps serialize to one group key but hash differently, so
+      // their contributions must not merge. After the first row is deleted,
+      // the group's key comes from the row that remains.
+      const first = new Map([
+        [`a`, 1],
+        [`b`, 2],
+      ])
+      const second = new Map([
+        [`b`, 2],
+        [`a`, 1],
+      ])
+      expect(serializeValue({ k: first })).toBe(serializeValue({ k: second }))
+      expect(hash({ k: first })).not.toBe(hash({ k: second }))
+
+      const graph = new D2()
+      const input = graph.newInput<{ id: number; key: Map<string, number> }>()
+      // A retraction is a new object, so output rows are tallied by content:
+      // the count and which Map the row holds.
+      const rows = new Map<string, number>()
+      input.pipe(
+        groupBy((row) => ({ k: row.key }), {
+          n: count((row) => row.id),
+        }),
+        output((message) => {
+          for (const [[, row], multiplicity] of message.getInner()) {
+            const tally = `${row.n}:${row.k === first ? `first` : `second`}`
+            rows.set(tally, (rows.get(tally) ?? 0) + multiplicity)
+          }
+        }),
+      )
+      graph.finalize()
+      const deleted = { id: 1, key: first }
+      const kept = { id: 2, key: second }
+      input.sendData(
+        new MultiSet([
+          [deleted, 1],
+          [kept, 1],
+        ]),
+      )
+      graph.run()
+      input.sendData(new MultiSet([[deleted, -1]]))
+      graph.run()
+
+      const present = [...rows]
+        .filter(([, multiplicity]) => multiplicity !== 0)
+        .map(([tally, multiplicity]) => [tally, multiplicity])
+      expect(present).toEqual([[`1:second`, 1]])
+    })
+
     test(`min and max can return the deleted instance of a hash-equal value`, () => {
       // Current behavior, pinned so a db-ivm change alerts the compiler owner.
       // The delete's retraction is the last record the shared entry gets, so

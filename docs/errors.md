@@ -2439,3 +2439,13 @@ Development builds show this message, with `${...}` replaced by values:
 ```text
 A live query's child collection cannot be cleaned up directly. Clean up the live query instead.
 ```
+
+<a id="error-242"></a>
+
+## Error 242: `local-storage.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+LocalStorage sync belongs to its options Collection.
+```
