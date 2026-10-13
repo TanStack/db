@@ -332,3 +332,15 @@ default ordering of calendar-unit Durations requires `relativeTo`, so this
 evidence does not claim their default ordered-index behavior. The focused
 compiled and alias owners passed 75 tests. A fresh committed-head hostile
 review remains pending.
+
+## Exact-commit Duration review of `5c97f18dc`
+
+A fresh read-only reviewer found no blocker for the five new intrinsic-field
+classes. Each fixture variant differs from its baseline in one captured
+Duration field. Compiled `eq` and both `in` forms check both operand
+directions, and an omit-one-field wrong answer fails the independent
+membership comparison. The alias owner checks a public unindexed scan and
+both built index types' exact lookups. The explicit text comparator supplies
+only the index's required order. The two focused owners passed 75 tests with
+no type errors. The five variants do not themselves exercise indexed public
+reads, index removal, or default ordering of calendar-unit Durations.

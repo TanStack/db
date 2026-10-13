@@ -245,3 +245,55 @@ checks. The evidence covers these two public snapshot paths and fixed
 histories; provider ordering, source mutations, and full live-query
 publication require separate receiving witnesses. Fresh hostile review of
 the committed repair remains pending.
+
+## Exact-commit hostile finding at `5c97f18dc`
+
+The fresh reviewer confirmed that ordered indexes could compare encoded
+equality keys instead of source values. A custom string-length callback saw
+an escaped representation of `"\u0000tanstack-db:x"`, so an indexed ascending
+limit-one read selected a 17-character string before that 14-character
+string. The unindexed public read selected the 14-character row. Both
+BasicIndex and BTreeIndex failed. Direct take, range, and cursor reads also
+misordered or omitted it, and a direct subscription continued to the wrong
+row. The previous tie fixtures used ordinary strings, so they never crossed
+the encoding boundary.
+
+The same encoded-order error moved native byte views into the string order
+class. A bounded 40-case hostile sweep crossed five value groups, both index
+types, both null placements, and both order directions. String/byte,
+number/byte, and equal-content distinct byte-view groups disagreed with the
+public scan in their corresponding eight-cell lanes. String/Date and
+nullish/byte controls agreed. Exact byte lookups stayed correct. This was an
+order-operand bug, not an equality-key bug.
+
+The repaired oracle supplies raw string lengths for the custom callback,
+checks direct ordered take/range/cursor and one subscription continuation,
+then compares ready public scan and indexed snapshots. A mixed-value fixture
+checks primitive-before-byte order and preserves the scan order of two
+distinct equal-content byte views after indexing. Exact lookup still groups
+those byte views. A literal string that resembles the old BTree undefined
+marker stays distinct from undefined in both order and exact lookup. The
+production repair keeps raw order operands and normalized exact keys, with a
+unique undefined traversal marker for BTree. Six new public assertions and
+four direct comparisons per index type were RED on `5c97f18dc`; the focused
+649-test campaign passed afterward. A normalized-byte mutant fails both
+public indexed comparisons, and an old string marker fails the BTree ordered
+read. Both faults were restored.
+
+The earlier prefix helper's take spies establish that an index supplied the
+keys. They do not prove a strict work bound: ReverseIndex can enumerate its
+whole nullish group inside one finite take. The helper comment now limits
+its claim to the requested prefix and boundary group at its own boundary.
+The fixed rows and controlled subscription do not establish arbitrary value
+mixtures, source mutations, remote provider order, or all live-query
+publication schedules. A fresh hostile review of the next committed code
+remains necessary.
+
+## Exact-commit window review of `5c97f18dc`
+
+A separate fresh reviewer found no blocker in the finite provider order-hint
+repair. Physical provider order differs from rank order. Missing `orderBy`
+fails the finite-request guard; without that guard, it fails the initial
+public snapshot. All eight fixed window cases passed with no type errors.
+This controlled provider does not prove real-provider collation, index-use
+efficiency, ties, mutation, or replay.

@@ -194,3 +194,26 @@ outside this fixed stage owner.
   evidence needs a fresh hostile review tied to the exact committed head. The
   full DB and DB-IVM suites, builds, and source/test typechecks pass at the
   working-tree checkpoint above.
+
+## Exact-commit publication review of `5c97f18dc`
+
+A fresh read-only reviewer found no blocker in the retained direct WHERE
+receiver's callback and pre-event checks. The accepted law requires a whole
+current result after the next source transaction. The fixture changes
+`[1]` to `[2]` and then `[2,1]`, while an excluded source row supplies each
+event. The independent source-row model predicts all public keys. The
+recorder preserves callback boundaries, checks one complete delete/insert
+batch, and reads the whole public result during delivery. The focused
+checkpoint passed with no type errors. The earlier pre-event assertion
+covered only the synchronous call stack. The next repair waits one microtask
+turn after each edit, then checks the old keys and zero callbacks again. The
+33-test focused WHERE owner passes. Later timers, arbitrary asynchronous
+schedules, and real providers remain outside this fixed history. A fresh
+review of the committed microtask addition remains pending.
+
+The captured-list stage owner received a separate read-only review at
+`d917ba4c9`. All twelve fixed checks passed. Four temporary public probes
+also passed for repeated list edits, combined stages, an unmatched LEFT JOIN,
+and a UNION refreshed by another source. Those probes were removed and do
+not extend the committed owner's claim. Broader callback coherence and real
+provider behavior remain open for that owner.

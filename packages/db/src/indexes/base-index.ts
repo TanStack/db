@@ -222,7 +222,7 @@ export abstract class BaseIndex<
     return !this.hasCustomComparator
   }
 
-  /** Temporal uses raw values for order while retaining normalized exact keys. */
+  /** Ordering sees raw values; exact lookup keeps its normalized key. */
   protected orderValue(value: unknown, exactKey: unknown): unknown {
     return indexOrderValue(value, exactKey)
   }

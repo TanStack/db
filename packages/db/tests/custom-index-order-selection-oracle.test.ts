@@ -30,8 +30,13 @@ import { withOracleCleanup } from './utils.js'
  * establish key-ascending ties in public ordered snapshots. The witnesses
  * below add equal numeric and custom-collation values, nullish values, finite
  * windows, and unbounded reads. A direct on-demand ordered subscription
- * checks initial and cursor snapshots of an equal-rank group. They do not
- * claim mutation histories, provider ordering, or live-query publication.
+ * checks initial and cursor snapshots of an equal-rank group. Raw escaped
+ * strings must reach custom-collation callbacks without their exact-key
+ * encoding; direct range and cursor operations use those same positions.
+ * A mixed string, number, and byte fixture checks that opaque byte order
+ * still matches the public scan while byte content retains exact equality.
+ * They do not claim mutation histories, provider ordering, arbitrary binary
+ * values, or live-query publication.
  */
 type Row = { id: string; rank: number }
 
@@ -805,6 +810,271 @@ describe.each(indexTypes)(`%s public key ties`, (name, IndexType) => {
       } finally {
         subscription.unsubscribe()
       }
+    }, [() => cleanup?.()])
+  })
+
+  it(`passes raw escaped strings to a direct custom comparator`, () => {
+    const source = [
+      { id: `a`, label: `abcdefghijklmnopq` },
+      { id: `b`, label: `\u0000tanstack-db:x` },
+      { id: `c`, label: `abcdefghij` },
+    ]
+    const index = new IndexType(1, new PropRef([`label`]), undefined, {
+      compareFn: (left: string, right: string) => left.length - right.length,
+    })
+    for (const row of source) index.add(row.id, row)
+
+    // This callback's law is raw length: 10 < 14 < 17. Exact equality has
+    // its own normalized key, while every direct traversal boundary uses the
+    // callback position. Soft comparisons record all boundary failures on
+    // the original implementation before any production edit.
+    expect.soft(index.takeFromStart(3)).toEqual([`c`, `b`, `a`])
+    expect.soft(index.take(3, source[2]!.label)).toEqual([`b`, `a`])
+    expect.soft(index.take(3, source[0]!.label)).toEqual([])
+    expect
+      .soft(index.rangeQuery({ from: source[2]!.label, to: source[0]!.label }))
+      .toEqual(new Set([`c`, `b`, `a`]))
+    expect(index.equalityLookup(source[1]!.label)).toEqual(new Set([`b`]))
+  })
+
+  it(`orders escaped strings by their raw custom-collation values`, async () => {
+    type LabelRow = { id: string; label: string }
+    const source: ReadonlyArray<LabelRow> = [
+      { id: `a`, label: `abcdefghijklmnopq` },
+      { id: `b`, label: `\u0000tanstack-db:x` },
+      { id: `c`, label: `abcdefghij` },
+    ]
+    const compare = (left: string, right: string) => left.length - right.length
+    const model = [...source]
+      .sort(
+        (left, right) =>
+          left.label.length - right.label.length ||
+          (left.id < right.id ? -1 : left.id > right.id ? 1 : 0),
+      )
+      .map(({ id }) => id)
+    let cleanup: (() => unknown) | undefined
+    await withOracleCleanup(async () => {
+      const collection = createCollection<LabelRow, string>({
+        id: `escaped-custom-collation-${name}`,
+        getKey: ({ id }) => id,
+        autoIndex: `off`,
+        defaultStringCollation: { stringSort: `custom`, compare },
+        startSync: true,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            for (const row of source) write({ type: `insert`, value: row })
+            commit()
+            markReady()
+          },
+        },
+      })
+      cleanup = () => collection.cleanup()
+      await collection.stateWhenReady()
+      const orderBy = [
+        {
+          expression: new PropRef([`label`]),
+          compareOptions: {
+            direction: `asc` as const,
+            nulls: `first` as const,
+          },
+        },
+      ]
+      const read = (limit?: number, optimizedOnly?: boolean) =>
+        collection
+          .currentStateAsChanges({ orderBy, limit, optimizedOnly })
+          ?.map(({ key }) => key)
+
+      // The model reads the supplied string lengths, not an index key. The
+      // leading zero marks an ordinary user string; it has length 14, between
+      // c's 10 and a's 17. A finite prefix exposes the wrong encoded order.
+      expect(model).toEqual([`c`, `b`, `a`])
+      expect(read()).toEqual(model)
+      expect(read(2)).toEqual(model.slice(0, 2))
+      const index = collection.createIndex((row) => row.label, {
+        indexType: IndexType,
+        options: {
+          compareOptions: {
+            direction: `asc`,
+            nulls: `first`,
+            stringSort: `custom`,
+            compare,
+          },
+        },
+      })
+      const take = vi.spyOn(index, `takeFromStart`)
+      expect(read(undefined, true)).toEqual(model)
+      expect(read(2, true)).toEqual(model.slice(0, 2))
+      expect(take).toHaveBeenCalled()
+
+      // Direct ordered traversal, both boundaries, and exact equality are
+      // separate observations of the same installed index. A cursor after a
+      // excludes every earlier callback position; equality still uses its
+      // normalized key, so another spelling cannot alias b.
+      expect(index.takeFromStart(3)).toEqual(model)
+      expect(index.take(3, source[2]!.label)).toEqual([`b`, `a`])
+      expect(index.take(3, source[0]!.label)).toEqual([])
+      expect(
+        index.rangeQuery({ from: source[2]!.label, to: source[0]!.label }),
+      ).toEqual(new Set(model))
+      expect(index.equalityLookup(source[1]!.label)).toEqual(new Set([`b`]))
+      expect(
+        index.equalityLookup(`\u0000tanstack-db:string:\u0000tanstack-db:x`),
+      ).toEqual(new Set())
+    }, [() => cleanup?.()])
+  })
+
+  it(`continues a custom-collation subscription from the raw string position`, async () => {
+    type LabelRow = { id: string; label: string }
+    const source: ReadonlyArray<LabelRow> = [
+      { id: `a`, label: `abcdefghijklmnopq` },
+      { id: `b`, label: `\u0000tanstack-db:x` },
+      { id: `c`, label: `abcdefghij` },
+    ]
+    const compare = (left: string, right: string) => left.length - right.length
+    let cleanup: (() => unknown) | undefined
+    await withOracleCleanup(async () => {
+      const collection = createCollection<LabelRow, string>({
+        id: `escaped-custom-cursor-${name}`,
+        getKey: ({ id }) => id,
+        autoIndex: `off`,
+        syncMode: `on-demand`,
+        startSync: true,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            for (const row of source) write({ type: `insert`, value: row })
+            commit()
+            markReady()
+            return { loadSubset: () => true }
+          },
+        },
+      })
+      cleanup = () => collection.cleanup()
+      await collection.stateWhenReady()
+      const index = collection.createIndex((row) => row.label, {
+        indexType: IndexType,
+        options: {
+          compareOptions: {
+            direction: `asc`,
+            nulls: `first`,
+            stringSort: `custom`,
+            compare,
+          },
+        },
+      })
+      const batches: Array<Array<string>> = []
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          if (changes.length) batches.push(changes.map(({ key }) => key))
+        },
+        { includeInitialState: false },
+      )
+      try {
+        subscription.setOrderByIndex(index)
+        const orderBy = [
+          {
+            expression: new PropRef([`label`]),
+            compareOptions: {
+              direction: `asc` as const,
+              nulls: `first` as const,
+            },
+          },
+        ]
+        subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
+        subscription.requestLimitedSnapshot({
+          orderBy,
+          limit: 1,
+          minValues: [source[2]!.label],
+        })
+        expect(batches).toEqual([[`c`], [`b`]])
+      } finally {
+        subscription.unsubscribe()
+      }
+    }, [() => cleanup?.()])
+  })
+
+  it(`keeps an escaped user string distinct from the undefined order marker`, () => {
+    const literal = `\u0000tanstack-db:undefined:`
+    const index = new IndexType(1, new PropRef([`value`]), undefined, {
+      compareOptions: {
+        direction: `asc`,
+        nulls: `first`,
+        stringSort: `lexical`,
+      },
+    })
+    index.add(`z`, { value: `z` })
+    index.add(`literal`, { value: literal })
+    index.add(`missing`, { value: undefined })
+
+    // BTree uses a traversal marker for undefined, but this exact string is
+    // ordinary user data. The two have different order and equality classes.
+    expect(index.takeFromStart(3)).toEqual([`missing`, `literal`, `z`])
+    expect(index.rangeQuery({ from: literal, to: literal })).toEqual(
+      new Set([`literal`]),
+    )
+    expect(index.equalityLookup(undefined)).toEqual(new Set([`missing`]))
+    expect(index.equalityLookup(literal)).toEqual(new Set([`literal`]))
+  })
+
+  it(`keeps raw byte order distinct from content-based equality`, async () => {
+    type MixedRow = { id: string; value: string | number | Uint8Array }
+    const firstByte = new Uint8Array([1])
+    const secondByte = new Uint8Array([1])
+    const source: ReadonlyArray<MixedRow> = [
+      { id: `s`, value: `z` },
+      { id: `n`, value: 1 },
+      { id: `z-byte`, value: firstByte },
+      { id: `a-byte`, value: secondByte },
+    ]
+    let cleanup: (() => unknown) | undefined
+    await withOracleCleanup(async () => {
+      const collection = createCollection<MixedRow, string>({
+        id: `mixed-byte-order-${name}`,
+        getKey: ({ id }) => id,
+        autoIndex: `off`,
+        startSync: true,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            for (const row of source) write({ type: `insert`, value: row })
+            commit()
+            markReady()
+          },
+        },
+      })
+      cleanup = () => collection.cleanup()
+      await collection.stateWhenReady()
+      const orderBy = [
+        {
+          expression: new PropRef([`value`]),
+          compareOptions: DEFAULT_COMPARE_OPTIONS,
+        },
+      ]
+      const read = (optimizedOnly?: boolean) =>
+        collection
+          .currentStateAsChanges({ orderBy, optimizedOnly })
+          ?.map(({ key }) => key)
+
+      // Public scan order is the independent receiving path for opaque byte
+      // references. The value-kind law puts string and number before bytes;
+      // the scan also records the runtime order of these two distinct views.
+      const scanned = read()
+      expect(scanned?.slice(0, 2)).toEqual([`s`, `n`])
+      expect(scanned?.slice(2)).toEqual([`z-byte`, `a-byte`])
+      expect(new Set(scanned)).toEqual(new Set([`s`, `n`, `z-byte`, `a-byte`]))
+      const index = collection.createIndex((row) => row.value, {
+        indexType: IndexType,
+      })
+      const take = vi.spyOn(index, `takeFromStart`)
+      expect(read(true)).toEqual(scanned)
+      expect(take).toHaveBeenCalled()
+      expect(index.equalityLookup(new Uint8Array([1]))).toEqual(
+        new Set([`z-byte`, `a-byte`]),
+      )
+      expect(index.equalityLookup(`\u0000tanstack-db:binary:\u0001`)).toEqual(
+        new Set(),
+      )
     }, [() => cleanup?.()])
   })
 })

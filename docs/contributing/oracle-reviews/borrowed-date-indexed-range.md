@@ -141,3 +141,13 @@ four range operators and operand arrangements, two index types, and public
 snapshot keys. Later publication, generated subclass histories, invalid Dates,
 arbitrary coercion methods, provider cursors, and other hosts still need their
 own witnesses before broader closure.
+
+## Exact-commit review of `5c97f18dc`
+
+A fresh read-only reviewer found no blocker in the tied-subclass Date-range
+matrix. The frozen native timestamps predict strict exclusion and inclusive
+inclusion of all three tied keys. Exact public key arrays, index lookup spies,
+and the omitted-key wrong-result control reach the intended scan and indexed
+checkpoints for both index types. The focused owner passed 18 tests with no
+type errors. This verdict remains limited to ready in-memory snapshots and
+the fixed rows, operators, and bounds described above.

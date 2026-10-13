@@ -148,3 +148,13 @@ Both false rejection and false acceptance failed at the compiled return before
 the repair; the sparse-hole and nullish controls pass afterward. The focused
 `in` owner passed 44 tests. This proves the named array-method boundary at
 evaluation, not every possible proxy or mutation during one evaluation.
+
+## Exact-commit review of `5c97f18dc`
+
+A fresh read-only reviewer found no blocker in the own-method repair. The
+model walks present indices independently of production's native `some`
+call. Fixed constant and row-supplied cases reject both lying-false and
+lying-true methods after a slot edit; sparse and nullish controls preserve the
+stated behavior. The compiled `in` and byte-work owners passed 120 tests with
+no type errors. Generated lists remain dense and static. Arbitrary getters,
+proxies, and mutation during one evaluation remain outside this verdict.

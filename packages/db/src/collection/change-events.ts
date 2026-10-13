@@ -418,9 +418,10 @@ function getOrderedKeys<T extends object, TKey extends string | number>(
 /**
  * Takes an indexed ordered prefix, completing its comparator-equal boundary.
  * Public snapshots keep source keys ascending within ties even when a reversed
- * index walks them backward. A finite read visits the indexed prefix and its
- * boundary group; an unbounded read traverses all indexed keys. `from` marks
- * an exclusive comparator position, including an explicit nullish value.
+ * index walks them backward. A finite read asks for an indexed prefix and
+ * completes its boundary group; it does not bound work inside the index.
+ * An unbounded read asks for all indexed keys. `from` marks an exclusive
+ * comparator position, including an explicit nullish value.
  */
 export function takeOrderedIndexKeys<
   T extends object,

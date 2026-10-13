@@ -87,10 +87,10 @@
  * with that model. On-demand ordered, joined, and include receivers check that
  * the first acquisition is unfiltered when the captured list is mutable.
  * The retained direct query also checks that a list edit alone preserves the
- * old public snapshot and sends no callback. At the next source transaction,
- * one subscriber callback contains the complete insert/delete batch and reads
- * the new whole result. It checks no duplicate event when the list did not
- * change. Separate fixed
+ * old public snapshot and sends no callback, including after a microtask turn.
+ * At the next source transaction, one subscriber callback contains the
+ * complete insert/delete batch and reads the new whole result. It checks no
+ * duplicate event when the list did not change. Separate fixed
  * Date and byte-item cases change contents inside the captured list, then
  * check the next source event. An ordered limit witness deletes a source row
  * outside the old loaded prefix after a list edit; it requires the newly
@@ -1473,6 +1473,9 @@ describe(`WHERE predicate publication oracle`, () => {
         // remains in place until a source event clocks the retained query.
         expect([...live.keys()].sort()).toEqual([`one`])
         expect(batches).toEqual([])
+        await Promise.resolve()
+        expect([...live.keys()].sort()).toEqual([`one`])
+        expect(batches).toEqual([])
         source.utils.begin()
         source.utils.write({
           type: `update`,
@@ -1492,6 +1495,9 @@ describe(`WHERE predicate publication oracle`, () => {
         batches.length = 0
 
         members.push(1)
+        expect([...live.keys()].sort()).toEqual([`two`])
+        expect(batches).toEqual([])
+        await Promise.resolve()
         expect([...live.keys()].sort()).toEqual([`two`])
         expect(batches).toEqual([])
         source.utils.begin()

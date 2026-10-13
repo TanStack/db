@@ -131,3 +131,13 @@ that every byte sequence or all binary consumers were exercised. The focused
 comparison owner passed 117 tests with no Vitest type errors; explicit test
 TypeScript, ESLint, Prettier, and whitespace checks passed. Final exact-commit
 hostile review of this repair is pending.
+
+## Exact-commit review of `5c97f18dc`
+
+A fresh read-only reviewer found no blocker for the five retired same-realm
+comparison blocks or the two fixed byte positions. It checked the old unit
+assertions, the independent tagged model, production comparison code, and the
+new direct equality and normalization returns. The first-64-byte fault fails
+at the intended changed-byte assertion. The focused comparison owner passed
+117 tests with no type errors. This verdict does not establish every byte
+position, offset view, or public binary query path.

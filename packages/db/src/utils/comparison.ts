@@ -366,7 +366,7 @@ function brandedTemporal(value: unknown): BrandedTemporal | undefined {
  * This allows distinguishing between "start from beginning" (undefined parameter)
  * and "start from the key undefined" (actual undefined value in the tree).
  */
-export const UNDEFINED_SENTINEL = normalizedKey(`undefined`, ``)
+export const UNDEFINED_SENTINEL = Symbol(`undefined index value`)
 
 /**
  * Normalize a value for comparison and Map key usage
@@ -497,11 +497,9 @@ export function normalizeForBTree(value: any): any {
   return normalizeValue(value)
 }
 
-/** Keep native Date and Temporal order separate from exact lookup keys. */
+/** Order raw values while keeping BTree's undefined position distinct from its traversal marker. */
 export function indexOrderValue(value: any, exactKey: any): any {
-  return dateTimestamp(value) !== undefined || brandedTemporal(value)
-    ? value
-    : exactKey
+  return value === undefined ? exactKey : value
 }
 
 /** Supply custom comparators the Temporal display key used before raw ordering. */
@@ -514,9 +512,7 @@ export function indexCustomComparatorValue(value: unknown): unknown {
 
 /** Recover the exact lookup key from a stored ordered value. */
 export function indexExactKey(value: any): any {
-  return dateTimestamp(value) !== undefined || brandedTemporal(value)
-    ? normalizeValue(value)
-    : value
+  return normalizeValue(value)
 }
 
 /**
