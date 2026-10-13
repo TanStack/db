@@ -1592,6 +1592,8 @@ class PersistedCollectionRuntime<
   private sourceTruncateGeneration = 0
   /** Durable rows cannot replace source rows during scoped recovery. */
   private scopedRecovery = false
+  /** Scoped recovery rotated into a generation only the owner has written. */
+  private scopedRecoveryRotated = false
   private scopedRecoveryPending = false
   private scopedRecoverySequence = 0
   private recoverQueuedAfterLocalLoadFailure = false
@@ -2381,6 +2383,7 @@ class PersistedCollectionRuntime<
     const restartSource = this.restartSourceAfterScopedRecovery
     // Invalidate an in-flight old-cache read before yielding to the mutex.
     this.scopedRecovery = true
+    this.scopedRecoveryRotated = false
     this.scopedRecoveryPending = true
     const recoverySequence = ++this.scopedRecoverySequence
     this.hydratedDemands.clear()
@@ -2441,6 +2444,7 @@ class PersistedCollectionRuntime<
           this.coordinatorUnsubscribe?.()
           this.coordinatorUnsubscribe = null
           this.cacheGenerationClaim = rotated
+          this.scopedRecoveryRotated = true
           this.latestTerm = 0
           this.latestSeq = 0
           this.latestRowVersion = 0
@@ -3242,7 +3246,8 @@ class PersistedCollectionRuntime<
     adapter: HydrationPersistenceAdapter,
     ownerEvidence = false,
   ): Promise<Array<{ key: TKey; value: T; metadata?: unknown }>> {
-    if (this.scopedRecovery && !ownerEvidence) return Promise.resolve([])
+    if (this.scopedRecovery && !(ownerEvidence && this.scopedRecoveryRotated))
+      return Promise.resolve([])
     return adapter.loadSubset(this.storageTargetFor(), options, {
       requiredIndexSignatures: this.getRequiredIndexSignatures(),
       cacheGenerationClaimId: this.cacheGenerationClaim?.claimId,
@@ -5159,7 +5164,9 @@ class PersistedCollectionRuntime<
     ownerEvidence = false,
     replayDemand = false,
   ): Promise<void> {
-    if (this.scopedRecovery && !ownerEvidence) {
+    // Owner evidence reads durable rows only from a rotated generation, which
+    // holds nothing but the owner's writes.
+    if (this.scopedRecovery && !(ownerEvidence && this.scopedRecoveryRotated)) {
       this.refreshScopedSubsets()
       return
     }

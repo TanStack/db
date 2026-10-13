@@ -26394,6 +26394,142 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
   })
 
+  // Scoped recovery means durable rows cannot replace source rows. Owner
+  // evidence is an exception only in a rotated generation, which holds
+  // nothing but the owner's writes. Without a managed generation the old
+  // durable cache stays in place, so the model predicts that an owner notice
+  // during that recovery republishes none of the untrusted durable rows.
+  it(`an owner notice does not republish untrusted durable rows without rotation`, async () => {
+    const errors = vi.spyOn(console, `error`).mockImplementation(() => {})
+    const warnings = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    const durable: Array<FollowerRow> = [{ id: `stale`, group: `a` }]
+    let subscriber: ((message: ProtocolEnvelope<unknown>) => void) | undefined
+    let seq = 0
+    const notice = (collectionId: string, value: FollowerRow) => {
+      seq++
+      if (!durable.some((row) => row.id === value.id)) durable.push(value)
+      const payload: TxCommitted = {
+        type: `tx:committed`,
+        term: 1,
+        seq,
+        txId: `owner-tx-${seq}`,
+        latestRowVersion: seq,
+        requiresFullReload: false,
+        changedRows: [{ key: value.id, value }],
+        deletedKeys: [],
+      }
+      subscriber?.({
+        v: 1,
+        dbName: `test-db`,
+        collectionId,
+        senderId: `owner`,
+        ts: Date.now(),
+        payload,
+      })
+    }
+    let ensures = 0
+    const adapter = {
+      loadSubset: async () =>
+        durable.map((value) => ({ key: value.id, value })),
+      loadResumeSnapshot: () =>
+        Promise.resolve({
+          rows: [],
+          keySet: { status: `consistent` },
+          collectionMetadata: [],
+          latestTerm: 0,
+          latestSeq: 0,
+          latestRowVersion: 0,
+          resetEpoch: 0,
+        }),
+      applyCommittedTx: async () => {},
+      ensureIndex: async () => {},
+    } as unknown as PersistenceAdapter
+    const coordinator = {
+      getNodeId: () => `follower`,
+      getLeaderId: () => `owner`,
+      subscribe: (
+        _collectionId: string,
+        onMessage: (message: ProtocolEnvelope<unknown>) => void,
+      ) => {
+        subscriber = onMessage
+        return () => {
+          subscriber = undefined
+        }
+      },
+      publish: () => {},
+      isLeader: () => false,
+      ensureLeadership: async () => {},
+      requestEnsurePersistedIndex: async () => {},
+      requestEnsureRemoteSubset: async (collectionId: string) => {
+        if (++ensures === 1) notice(collectionId, { id: `remote`, group: `a` })
+      },
+      requestReleaseRemoteSubset: async () => {},
+      registerRemoteSubsetOwner: () => () => {},
+      requestApplyCommittedTx: (_collectionId: string, tx: TxCommitted) =>
+        Promise.resolve({
+          type: `rpc:applyCommittedTx:res`,
+          rpcId: tx.txId,
+          ok: true,
+          term: tx.term,
+          seq: tx.seq,
+          latestRowVersion: seq,
+        }),
+      pullSince: () =>
+        Promise.resolve({
+          type: `rpc:pullSince:res`,
+          rpcId: `unrotated-pull`,
+          ok: true,
+          latestTerm: 1,
+          latestSeq: seq,
+          latestRowVersion: seq,
+          requiresFullReload: false,
+          changedKeys: [],
+          deletedKeys: [],
+        }),
+    } as unknown as PersistedCollectionCoordinator
+    let sourceParams: SyncConfig<FollowerRow, string>[`sync`] extends (
+      params: infer P,
+    ) => unknown
+      ? P
+      : never
+    const source = createCollection(
+      persistedCollectionOptions<FollowerRow, string>({
+        id: `follower-unrotated-${Math.random().toString(36).slice(2)}`,
+        getKey: (row) => row.id,
+        persistence: { adapter, coordinator },
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            return {
+              loadSubset: () => Promise.resolve(),
+              restartAfterScopedRecovery: () => {},
+            }
+          },
+        },
+      }),
+    )
+    source.startSyncImmediate()
+    const query = createLiveQueryCollection((q) =>
+      q.from({ row: source }).where(({ row }) => eq(row.group, `a`)),
+    )
+    try {
+      await query.preload()
+      expect(Array.from(source.keys()).sort()).toEqual([`remote`, `stale`])
+
+      // The source reports that the old durable rows are untrusted.
+      await sourceParams!.metadata!.persistence!.startScopedRecovery!()
+      notice(source.id, { id: `fresh`, group: `a` })
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      expect(Array.from(source.keys())).not.toContain(`stale`)
+    } finally {
+      await query.cleanup()
+      await source.cleanup()
+      errors.mockRestore()
+      warnings.mockRestore()
+    }
+  })
+
   const followerRemoteDemandHistory = fc.record({
     placement: fc.constantFrom<FollowerRemoteDemandHistory[`placement`]>(
       `direct`,
