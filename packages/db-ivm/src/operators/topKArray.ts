@@ -62,6 +62,8 @@ export type TopKMoveChanges<V> = {
  */
 export interface TopK<V> {
   size: number
+  /** The number of values in the window that satisfy the predicate. */
+  countInWindow: (predicate: (value: V) => boolean) => number
   insert: (value: V) => TopKChanges<V>
   delete: (value: V) => TopKChanges<V>
 }
@@ -93,6 +95,15 @@ export class TopKArray<V> implements TopK<V> {
     const limit = this.#topKEnd - this.#topKStart
     const available = this.#sortedValues.length - offset
     return Math.max(0, Math.min(limit, available))
+  }
+
+  countInWindow(predicate: (value: V) => boolean): number {
+    let count = 0
+    const end = this.#topKStart + this.size
+    for (let index = this.#topKStart; index < end; index++) {
+      if (predicate(getValue(this.#sortedValues[index]!))) count++
+    }
+    return count
   }
 
   /**

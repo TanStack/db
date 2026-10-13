@@ -73,6 +73,17 @@ class TopKTree<V> implements TopK<V> {
     return Math.max(0, Math.min(limit, available))
   }
 
+  countInWindow(predicate: (value: V) => boolean): number {
+    let count = 0
+    let entry = this.#topKFirstElem
+    for (let seen = 0; entry && seen < this.size; seen++) {
+      const value = getValue(entry)
+      if (predicate(value)) count++
+      entry = this.#tree.nextHigherPair(value)?.[1] ?? null
+    }
+    return count
+  }
+
   /**
    * Insert a *new* value.
    * Ignores the value if it is already present.

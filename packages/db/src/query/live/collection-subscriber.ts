@@ -226,15 +226,6 @@ export class CollectionSubscriber<
     changes: Iterable<ChangeMessage<any, string | number>>,
   ): void {
     const changesArray = Array.isArray(changes) ? changes : [...changes]
-    // A joined filter can drop a root row without a root change, which leaves
-    // a gap that a live root row past the bounded prefix could fill.
-    if (
-      changesArray.some(
-        ({ type, key }) => type !== `insert` && this.sentToD2Rows.has(key),
-      )
-    ) {
-      this.collectionConfigBuilder.invalidateJoinedFilterOrdering(this.sourceId)
-    }
     const reconciledChanges = reconcileChangesForD2(
       changesArray,
       this.sentToD2Rows,
@@ -401,10 +392,6 @@ export class CollectionSubscriber<
         )
       },
     }
-  }
-
-  invalidateSourceOrdering(): void {
-    this.orderedLoader?.invalidateSourceOrdering()
   }
 
   // This function is called by maybeRunGraph

@@ -25,7 +25,11 @@ import type {
   NamespacedAndKeyedStream,
   NamespacedRow,
 } from '../../types.js'
-import type { IStreamBuilder, KeyValue } from '@tanstack/db-ivm'
+import type {
+  IStreamBuilder,
+  KeyValue,
+  SetSizeCallback,
+} from '@tanstack/db-ivm'
 import type { IndexReader } from '../../indexes/base-index.js'
 import type { Collection } from '../../collection/index.js'
 
@@ -43,7 +47,11 @@ export type OrderByOptimizationInfo = {
   valueExtractorForRawRow: (row: Record<string, unknown>) => unknown
   /** Index on the first orderBy column - used for lazy loading */
   index?: IndexReader<string | number>
-  dataNeeded?: () => number
+  /**
+   * Rows the window still needs. Given the loader's settled boundary, a window
+   * row after it does not count: the graph may lack an earlier eligible row.
+   */
+  dataNeeded?: (boundary?: Record<string, unknown>) => number
   /** Reads the source loader's synchronous request guard, when installed. */
   isRequesting?: () => boolean
   /**
@@ -139,7 +147,7 @@ export function processOrderBy(
     return defaultComparator(a, b)
   }
 
-  let setSizeCallback: ((getSize: () => number) => void) | undefined
+  let setSizeCallback: SetSizeCallback | undefined
 
   let orderByOptimizationInfo: OrderByOptimizationInfo | undefined
 
@@ -308,12 +316,20 @@ export function processOrderBy(
       // Only enable when an index exists — without an index, lazy loading can't work
       // and all data is loaded eagerly via requestSnapshot instead.
       if (index) {
-        setSizeCallback = (getSize: () => number) => {
-          optimizableOrderByCollections[orderBySourceId]![`dataNeeded`] =
-            () => {
-              const size = getSize()
-              return Math.max(0, info.limit - size)
-            }
+        setSizeCallback = (getSize) => {
+          optimizableOrderByCollections[orderBySourceId]![`dataNeeded`] = (
+            boundary,
+          ) => {
+            const size = getSize(
+              boundary &&
+                ((row) =>
+                  compareSourceRows(
+                    (row as NamespacedRow)[orderByAlias],
+                    boundary,
+                  ) <= 0),
+            )
+            return Math.max(0, info.limit - size)
+          }
         }
       }
     }

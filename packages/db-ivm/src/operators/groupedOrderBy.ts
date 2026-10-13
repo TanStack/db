@@ -1,6 +1,7 @@
 import { groupedTopKWithFractionalIndex } from './groupedTopKWithFractionalIndex.js'
 import { consolidate } from './consolidate.js'
 import type { IStreamBuilder, KeyValue } from '../types.js'
+import type { SetSizeCallback } from './topKWithFractionalIndex.js'
 
 export interface GroupedOrderByOptions<Ve> {
   comparator?: (a: Ve, b: Ve) => number
@@ -13,7 +14,7 @@ export interface GroupedOrderByWithFractionalIndexOptions<
   KeyType = unknown,
   ValueType = unknown,
 > extends GroupedOrderByOptions<Ve> {
-  setSizeCallback?: (getSize: () => number) => void
+  setSizeCallback?: SetSizeCallback
   setWindowFn?: (
     windowFn: (options: { offset?: number; limit?: number }) => void,
   ) => void

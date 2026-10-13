@@ -130,21 +130,6 @@ export class CollectionConfigBuilder<
     return this.liveQueryCollection?._hasSubscriberOrPreload() ?? true
   }
 
-  private collectionSubscribers = new Map<
-    string,
-    CollectionSubscriber<TContext, TResult>
-  >()
-
-  invalidateJoinedFilterOrdering(joinedSourceId: string): void {
-    for (const info of Object.values(this.optimizableOrderByCollections)) {
-      if (info.joinedFilterSourceId === joinedSourceId) {
-        this.collectionSubscribers
-          .get(info.sourceId)
-          ?.invalidateSourceOrdering()
-      }
-    }
-  }
-
   private windowFn: ((options: WindowOptions) => void) | undefined
   private readonly initialWindow: WindowOptions | undefined
   private currentWindow: WindowOptions | undefined
@@ -850,7 +835,6 @@ export class CollectionConfigBuilder<
     Object.keys(this.subscriptions).forEach(
       (key) => delete this.subscriptions[key],
     )
-    this.collectionSubscribers.clear()
   }
 
   /**
@@ -1273,7 +1257,6 @@ export class CollectionConfigBuilder<
         collection,
         this,
       )
-      this.collectionSubscribers.set(sourceId, collectionSubscriber)
 
       // Subscribe to status changes for status flow
       const statusUnsubscribe = collection.on(`status:change`, (event) => {

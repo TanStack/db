@@ -77,6 +77,9 @@ type Row = {
   rank: number
   eligible: boolean
   label: string
+  // The marker key a joined plan matches; the row's id unless eligibility is
+  // held on the join key (EagerCase.via).
+  link?: number
 }
 
 type Marker = { id: number; rowId: number }
@@ -4378,14 +4381,22 @@ type EagerCommand =
   // Changes only the label, so a row outside the window enters the query's
   // input without changing which rows are eligible or their order.
   | { type: `touch`; id: number }
+  // Changes only eligibility. The order value stays, so a joined plan sees
+  // the row leave or return only through the join.
+  | { type: `flip`; id: number }
   | { type: `delete-visible` }
 
 type EagerCase = {
   path: `sync` | `local-only`
   // Where eligibility is decided: a predicate on the ordered source itself,
-  // a JavaScript function filter, or a filter on a LEFT-joined marker. The
-  // last two drop rows only after the source's limit.
-  filter: `source` | `function` | `joined`
+  // a JavaScript function filter, or a filter on a LEFT-joined marker, where
+  // a marker admits its row (`joined`) or excludes it (`anti-joined`). The
+  // last three drop rows only after the source's limit.
+  filter: `source` | `function` | `joined` | `anti-joined`
+  // How a joined plan changes a row's eligibility: by inserting or deleting
+  // its marker, or by pointing the row's join key at a marker or at none.
+  // A join-key change leaves the row's order value as it was.
+  via?: `marker` | `link`
   indexed: boolean
   direction: `asc` | `desc`
   terms: 1 | 2
@@ -4408,16 +4419,49 @@ function fillerRows(direction: `asc` | `desc`): Array<Row> {
   }))
 }
 
-const eagerRow = fc.record({
-  id: fc.integer({ min: 0, max: 29 }),
-  // NaN and null exercise comparator placement outside the integer order.
-  rank: fc.oneof(
-    { weight: 6, arbitrary: fc.integer({ min: 0, max: 15 }) },
-    { weight: 1, arbitrary: fc.constant(Number.NaN) },
-    { weight: 1, arbitrary: fc.constant(null as unknown as number) },
-  ),
-  eligible: fc.boolean(),
-})
+function eagerRowOf(maxId: number) {
+  return fc.record({
+    id: fc.integer({ min: 0, max: maxId }),
+    // NaN and null exercise comparator placement outside the integer order.
+    rank: fc.oneof(
+      { weight: 6, arbitrary: fc.integer({ min: 0, max: 15 }) },
+      { weight: 1, arbitrary: fc.constant(Number.NaN) },
+      { weight: 1, arbitrary: fc.constant(null as unknown as number) },
+    ),
+    eligible: fc.boolean(),
+  })
+}
+
+const eagerRow = eagerRowOf(29)
+
+function eagerHistory(
+  flipWeight: number,
+  maxId: number,
+): fc.Arbitrary<Array<EagerCommand>> {
+  return fc.array(
+    fc.oneof(
+      eagerRowOf(maxId).map((row) => ({ type: `upsert` as const, ...row })),
+      fc.record({
+        type: fc.constant(`delete` as const),
+        id: fc.integer({ min: 0, max: maxId }),
+      }),
+      fc.record({
+        type: fc.constant(`touch` as const),
+        id: fc.integer({ min: 0, max: maxId }),
+      }),
+      {
+        weight: flipWeight,
+        arbitrary: fc.record({
+          type: fc.constant(`flip` as const),
+          id: fc.integer({ min: 0, max: maxId }),
+        }),
+      },
+      // Deletes the first visible row, so a repair runs on most histories.
+      fc.constant({ type: `delete-visible` as const }),
+    ),
+    { minLength: 1, maxLength: 12 },
+  )
+}
 
 const eagerCase: fc.Arbitrary<EagerCase> = fc.record({
   path: fc.constantFrom(`sync` as const, `local-only` as const),
@@ -4425,7 +4469,9 @@ const eagerCase: fc.Arbitrary<EagerCase> = fc.record({
     `source` as const,
     `function` as const,
     `joined` as const,
+    `anti-joined` as const,
   ),
+  via: fc.constantFrom(`marker` as const, `link` as const),
   indexed: fc.boolean(),
   direction: fc.constantFrom(`asc` as const, `desc` as const),
   terms: fc.constantFrom(1 as const, 2 as const),
@@ -4435,32 +4481,96 @@ const eagerCase: fc.Arbitrary<EagerCase> = fc.record({
     selector: (row) => row.id,
     maxLength: 20,
   }),
-  history: fc.array(
-    fc.oneof(
-      eagerRow.map((row) => ({ type: `upsert` as const, ...row })),
-      fc.record({
-        type: fc.constant(`delete` as const),
-        id: fc.integer({ min: 0, max: 29 }),
-      }),
-      fc.record({
-        type: fc.constant(`touch` as const),
-        id: fc.integer({ min: 0, max: 29 }),
-      }),
-      // Deletes the first visible row, so a repair runs on most histories.
-      fc.constant({ type: `delete-visible` as const }),
-    ),
-    { minLength: 1, maxLength: 12 },
-  ),
+  history: eagerHistory(1, 29),
 })
 
 // The premise of the joined-filter law: an indexed single-term plan whose
 // filter drops rows after the bounded read.
-const eagerJoinedCase: fc.Arbitrary<EagerCase> = eagerCase.map((testCase) => ({
-  ...testCase,
-  filter: `joined` as const,
-  indexed: true,
-  terms: 1 as const,
-}))
+// A repair before the gap forms reads the whole source for a joined plan, so
+// no row can be missing afterwards. These histories therefore insert fresh
+// keys (10 to 19), which can land past the bounded prefix, and change initial
+// rows (0 to 9) mostly by eligibility alone, so a window row leaves only
+// through the join.
+const eagerJoinedHistory: fc.Arbitrary<Array<EagerCommand>> = fc.array(
+  fc.oneof(
+    {
+      weight: 2,
+      arbitrary: eagerRowOf(9).map((row) => ({
+        type: `upsert` as const,
+        ...row,
+        id: row.id + 10,
+      })),
+    },
+    {
+      weight: 3,
+      arbitrary: fc.record({
+        type: fc.constant(`flip` as const),
+        id: fc.integer({ min: 0, max: 9 }),
+      }),
+    },
+    fc.record({
+      type: fc.constant(`touch` as const),
+      id: fc.integer({ min: 0, max: 19 }),
+    }),
+    fc.record({
+      type: fc.constant(`delete` as const),
+      id: fc.integer({ min: 0, max: 19 }),
+    }),
+    fc.constant({ type: `delete-visible` as const }),
+  ),
+  { minLength: 1, maxLength: 8 },
+)
+
+// Its histories favor eligibility-only changes: a row inserted past the
+// bounded prefix, then a window row leaving only through the join.
+const eagerJoinedCase: fc.Arbitrary<EagerCase> = fc
+  .tuple(
+    eagerCase,
+    fc.constantFrom(`joined` as const, `anti-joined` as const),
+    fc.uniqueArray(eagerRowOf(9), {
+      selector: (row) => row.id,
+      minLength: 4,
+      maxLength: 8,
+    }),
+    eagerJoinedHistory,
+  )
+  .map(([testCase, filter, initial, history]) => ({
+    ...testCase,
+    filter,
+    indexed: true,
+    terms: 1 as const,
+    initial,
+    history,
+  }))
+
+// The law's premise directly: eligible rows at distinct ranks, so the bounded
+// prefix leaves rows unsent; a fresh row that may land past the prefix; then
+// an initial row changes eligibility alone, so it can leave the window only
+// through the join. Random commands may follow.
+const eagerJoinedGapCase: fc.Arbitrary<EagerCase> = fc
+  .record({
+    base: eagerJoinedCase,
+    ranks: fc.uniqueArray(fc.integer({ min: 0, max: 15 }), {
+      minLength: 4,
+      maxLength: 8,
+    }),
+    insertRank: fc.integer({ min: 0, max: 15 }),
+    flipped: fc.nat(7),
+    rest: eagerJoinedHistory,
+  })
+  .map(({ base, ranks, insertRank, flipped, rest }) => ({
+    ...base,
+    initial: ranks.map((rank, id) => ({ id, rank, eligible: true })),
+    history: [
+      { type: `upsert` as const, id: 10, rank: insertRank, eligible: true },
+      { type: `flip` as const, id: flipped % ranks.length },
+      ...rest,
+    ],
+  }))
+
+function isJoinedFilter({ filter }: EagerCase): boolean {
+  return filter === `joined` || filter === `anti-joined`
+}
 
 function eagerOrder(
   rows: ReadonlyMap<number, Row>,
@@ -4508,7 +4618,7 @@ function expectEagerWindow(
   label: string,
 ): void {
   const expected = eagerWindow(rows, testCase)
-  if (testCase.filter !== `joined`) {
+  if (!isJoinedFilter(testCase)) {
     expect(actual, label).toEqual(expected)
     return
   }
@@ -4533,9 +4643,21 @@ function boundaryRanks(
 }
 
 async function checkEagerWindow(testCase: EagerCase): Promise<void> {
+  const joined = isJoinedFilter(testCase)
+  const viaLink = joined && testCase.via === `link`
+  // A marker admits its row in a joined plan and excludes it in an anti-joined
+  // one. Under `link`, every row id has a marker and a row's join key points
+  // at its own (matched) or at a negative key (unmatched).
+  const admitsWhenMatched = testCase.filter === `joined`
+  const linkFor = (id: number, eligible: boolean) =>
+    !viaLink || eligible === admitsWhenMatched ? id : -1 - id
   const rows = new Map<number, Row>()
   for (const row of [...fillerRows(testCase.direction), ...testCase.initial]) {
-    rows.set(row.id, { label: `row`, ...row })
+    rows.set(row.id, {
+      label: `row`,
+      ...row,
+      link: linkFor(row.id, row.eligible),
+    })
   }
   let syncControls:
     | {
@@ -4577,26 +4699,33 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
   if (testCase.indexed) {
     source.createIndex((row) => row.rank, { indexType: BTreeIndex })
   }
-  // A joined filter keeps eligibility on a marker per eligible row.
+  // A joined filter keeps eligibility on a marker per matched row.
   const markers = createCollection(
     localOnlyCollectionOptions<{ rowId: number }, number>({
       id: `${id}-markers`,
       getKey: (marker) => marker.rowId,
-      initialData:
-        testCase.filter === `joined`
-          ? [...rows.values()]
-              .filter((row) => row.eligible)
-              .map((row) => ({ rowId: row.id }))
-          : [],
+      initialData: !joined
+        ? []
+        : viaLink
+          ? [
+              ...Array.from({ length: 30 }, (_, rowId) => rowId),
+              ...[...rows.keys()].filter((rowId) => rowId >= 1000),
+            ].map((rowId) => ({ rowId }))
+          : [...rows.values()]
+              .filter((row) => row.eligible === admitsWhenMatched)
+              .map((row) => ({ rowId: row.id })),
     }),
   )
   // Source changes committed by the current step. A joined step can change a
   // row and its marker in two commits, and each commit may publish.
   let commits = 0
   const setMarker = async (rowId: number, eligible: boolean) => {
-    if (testCase.filter !== `joined` || markers.has(rowId) === eligible) return
+    // Under `link`, the root write already moved the row's join key.
+    if (!joined || viaLink) return
+    const matched = eligible === admitsWhenMatched
+    if (markers.has(rowId) === matched) return
     commits++
-    await (eligible ? markers.insert({ rowId }) : markers.delete(rowId))
+    await (matched ? markers.insert({ rowId }) : markers.delete(rowId))
       .isPersisted.promise
   }
   // Work has two counts: rows a local snapshot reads for the query, and rows
@@ -4624,34 +4753,60 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       yield entry
     }
   } as typeof source.entries
+  const buildQuery = (q: InitialQueryBuilder) => {
+    const joinedRows = q
+      .from({ row: source })
+      .leftJoin({ marker: markers }, ({ row, marker }) =>
+        eq(row.link, marker.rowId),
+      )
+    const ordered = (
+      joined
+        ? admitsWhenMatched
+          ? joinedRows.where(({ marker }) => not(isUndefined(marker.rowId)))
+          : joinedRows.where(({ marker }) => isUndefined(marker.rowId))
+        : testCase.filter === `function`
+          ? q.from({ row: source }).fn.where(({ row }) => row.eligible)
+          : q.from({ row: source }).where(({ row }) => eq(row.eligible, true))
+    ).orderBy(({ row }) => row.rank, testCase.direction)
+    return (
+      testCase.terms === 2 ? ordered.orderBy(({ row }) => row.id) : ordered
+    )
+      .offset(testCase.offset)
+      .limit(testCase.limit)
+  }
   const query = createLiveQueryCollection({
     startSync: true,
-    query: (q) => {
-      const ordered = (
-        testCase.filter === `joined`
-          ? q
-              .from({ row: source })
-              .leftJoin({ marker: markers }, ({ row, marker }) =>
-                eq(row.id, marker.rowId),
-              )
-              .where(({ marker }) => not(isUndefined(marker.rowId)))
-          : testCase.filter === `function`
-            ? q.from({ row: source }).fn.where(({ row }) => row.eligible)
-            : q.from({ row: source }).where(({ row }) => eq(row.eligible, true))
-      ).orderBy(({ row }) => row.rank, testCase.direction)
-      return (
-        testCase.terms === 2 ? ordered.orderBy(({ row }) => row.id) : ordered
-      )
-        .offset(testCase.offset)
-        .limit(testCase.limit)
-    },
+    query: buildQuery,
   })
+  // An Effect runs the same joined query through its own graph loop, so the
+  // window law must hold for both consumers. It holds its rows by result key.
+  const effectRows = new Map<string | number, number>()
+  const effect = joined
+    ? createEffect({
+        query: buildQuery,
+        onBatch: (events) => {
+          for (const event of events) {
+            if (event.type === `exit`) effectRows.delete(event.key)
+            else effectRows.set(event.key, (event.value as { row: Row }).row.id)
+          }
+        },
+      })
+    : undefined
+  // Effect events carry no position; order its rows as the model orders all
+  // rows, so a row that should not be visible still shows its rank.
+  const effectIds = () => {
+    const everyRow = new Map(
+      [...rows].map(([rowId, row]) => [rowId, { ...row, eligible: true }]),
+    )
+    const order = eagerOrder(everyRow, testCase).map((row) => row.id)
+    return [...effectRows.values()].sort(
+      (left, right) => order.indexOf(left) - order.indexOf(right),
+    )
+  }
   // A joined query's rows nest the source row under its alias.
   const visibleIds = () =>
     query.toArray.map((result) =>
-      testCase.filter === `joined`
-        ? (result as unknown as { row: Row }).row.id
-        : (result as Row).id,
+      joined ? (result as unknown as { row: Row }).row.id : (result as Row).id,
     )
   const window = testCase.offset + testCase.limit
   // The bound for one load: a prefix, the boundary ties, a refill, and the
@@ -4681,6 +4836,10 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
   try {
     await query.preload()
     expectEagerWindow(visibleIds(), rows, testCase, `initial rows`)
+    if (effect) {
+      await flushPromises()
+      expectEagerWindow(effectIds(), rows, testCase, `initial Effect rows`)
+    }
     const subscription = query.subscribeChanges(() => {
       published.push(visibleIds())
     })
@@ -4724,6 +4883,26 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
           await source.delete(command.id).isPersisted.promise
         }
         await setMarker(command.id, false)
+      } else if (command.type === `flip`) {
+        if (!before) continue
+        const eligible = !before.eligible
+        const next = {
+          ...before,
+          eligible,
+          link: linkFor(command.id, eligible),
+        }
+        rows.set(command.id, next)
+        if (testCase.path === `sync`) {
+          syncControls!.begin()
+          syncControls!.write({ type: `update`, value: next })
+          syncControls!.commit()
+        } else {
+          await source.update(command.id, (draft) => {
+            draft.eligible = next.eligible
+            draft.link = next.link
+          }).isPersisted.promise
+        }
+        await setMarker(command.id, eligible)
       } else if (command.type === `touch`) {
         if (!before) continue
         const next = { ...before, label: `touched-${step}` }
@@ -4743,6 +4922,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
           rank: command.rank,
           eligible: command.eligible,
           label: `row`,
+          link: linkFor(command.id, command.eligible),
         }
         rows.set(command.id, next)
         if (testCase.path === `sync`) {
@@ -4756,6 +4936,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
           await source.update(command.id, (draft) => {
             draft.rank = next.rank
             draft.eligible = next.eligible
+            draft.link = next.link
           }).isPersisted.promise
         } else {
           await source.insert(next).isPersisted.promise
@@ -4764,6 +4945,14 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       }
       await flushPromises()
       expectEagerWindow(visibleIds(), rows, testCase, `rows after step ${step}`)
+      if (effect) {
+        expectEagerWindow(
+          effectIds(),
+          rows,
+          testCase,
+          `Effect rows after step ${step}`,
+        )
+      }
       // Each commit publishes at most once, and the commit that completes
       // the step publishes the final window. With one commit, every batch
       // shows it.
@@ -4808,6 +4997,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
     }
   } finally {
     unsubscribe?.()
+    await effect?.dispose()
     await query.cleanup()
     await source.cleanup()
     await markers.cleanup()
@@ -4899,12 +5089,17 @@ describe(`eager indexed ordered windows`, () => {
         offset: 1,
         initial: [
           { id: 1, rank: 0, eligible: true },
-          { id: 3, rank: null, eligible: true },
+          { id: 3, rank: null as unknown as number, eligible: true },
           { id: 4, rank: 1, eligible: true },
         ],
         history: [
           { type: `upsert`, id: 0, rank: 2, eligible: true },
-          { type: `upsert`, id: 3, rank: null, eligible: false },
+          {
+            type: `upsert`,
+            id: 3,
+            rank: null as unknown as number,
+            eligible: false,
+          },
         ],
       })
     },
@@ -4947,6 +5142,19 @@ describe(`eager indexed ordered windows`, () => {
     oracleRandomParameters(runs, replay, `ordered-work.eager-indexed-window`),
   )(
     `keeps rows and per-change work bounded for a random or replayed seed`,
+    checkEagerWindow,
+  )
+
+  fcTest.prop([eagerJoinedGapCase], { numRuns: runs, seed: 2063 })(
+    `keeps a joined-filter window whose row leaves only through the join for a fixed seed`,
+    checkEagerWindow,
+  )
+
+  fcTest.prop(
+    [eagerJoinedGapCase],
+    oracleRandomParameters(runs, replay, `ordered-work.eager-joined-gap`),
+  )(
+    `keeps a joined-filter window whose row leaves only through the join for a random or replayed seed`,
     checkEagerWindow,
   )
 
