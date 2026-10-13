@@ -12260,54 +12260,73 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   /**
-   * A complete, applied full-source result establishes its own Query scope.
-   * It does not silently retire a historical filtered owner's durable edge.
+   * On-demand absence claims belong to the fetched Query scope. A complete,
+   * applied full-source result keeps its own row and owner but does not retire
+   * a historical filtered owner's durable edge merely because that row is
+   * absent from the full result.
    * Once that filtered demand is acquired, its old owner must be reconciled
    * before the acquisition settles. An implementation may fetch the exact
    * subset or reconcile it from authoritative full-source rows; the public
-   * and durable result is the same. The unrelated full-source row survives.
+   * and durable result is the same. An interrupted unload can leave an old
+   * owner without a retention marker, so both metadata shapes are legal.
+   * The unrelated full-source row survives.
    */
-  it(`reconciles a historical filtered owner beside an applied full source`, async () => {
-    const id = `pre-upgrade-singleton-beside-full-source`
-    const oldHash = hashKey([id, legacySingletonCategoryDemandKey])
-    const filtered = { where: eq(new IR.PropRef([`category`]), `shared`) }
-    const storage = createOwnershipStorage({
-      rows: new Map([[shared.id, shared]]),
-      rowMetadata: new Map([
-        [shared.id, { queryCollection: { owners: { [oldHash]: true } } }],
-      ]),
-      collectionMetadata: new Map([
-        [
-          `queryCollection:gc:${oldHash}`,
-          { queryHash: oldHash, mode: `until-revalidated` },
-        ],
-      ]),
-    })
-    const { collection, queryFn } = createPersistedOwnershipFixture(
-      id,
-      storage,
-      [detailOnly],
-    )
-    await collection.stateWhenReady()
-    await collection._sync.loadSubset({})
-    expect(queryFn).toHaveBeenCalledTimes(1)
-    expect(rows(collection)).toEqual([detailOnly.id, shared.id])
-    expect(persistedOwners(storage.snapshot().rowMetadata, shared.id)).toEqual([
-      oldHash,
-    ])
-    expect([...storage.snapshot().collectionMetadata.keys()]).toEqual([
-      `queryCollection:gc:${oldHash}`,
-    ])
+  it.each([{ marker: false }, { marker: true }])(
+    `reconciles a historical filtered owner beside an applied full source, marker=$marker`,
+    async ({ marker }) => {
+      const id = `pre-upgrade-singleton-beside-full-source-${marker}`
+      const oldHash = hashKey([id, legacySingletonCategoryDemandKey])
+      const fullHash = hashKey([id])
+      const filtered = { where: eq(new IR.PropRef([`category`]), `shared`) }
+      const storage = createOwnershipStorage({
+        rows: new Map([[shared.id, shared]]),
+        rowMetadata: new Map([
+          [shared.id, { queryCollection: { owners: { [oldHash]: true } } }],
+        ]),
+        collectionMetadata: new Map(
+          marker
+            ? [
+                [
+                  `queryCollection:gc:${oldHash}`,
+                  { queryHash: oldHash, mode: `until-revalidated` },
+                ],
+              ]
+            : [],
+        ),
+      })
+      const { collection, queryFn } = createPersistedOwnershipFixture(
+        id,
+        storage,
+        [detailOnly],
+      )
+      await collection.stateWhenReady()
+      await collection._sync.loadSubset({})
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect(rows(collection)).toEqual([detailOnly.id, shared.id])
+      expect(
+        persistedOwners(storage.snapshot().rowMetadata, detailOnly.id),
+      ).toEqual([fullHash])
+      expect(
+        persistedOwners(storage.snapshot().rowMetadata, shared.id),
+      ).toEqual([oldHash])
+      expect([...storage.snapshot().collectionMetadata.keys()]).toEqual(
+        marker ? [`queryCollection:gc:${oldHash}`] : [],
+      )
 
-    await collection._sync.loadSubset(filtered)
-    await vi.waitFor(() => {
-      const snapshot = storage.snapshot()
+      await collection._sync.loadSubset(filtered)
+      // Successful subset settlement includes publication of its result.
       expect(rows(collection)).toEqual([detailOnly.id])
-      expect(storedItems(storage)).toEqual([detailOnly])
-      expect(persistedOwners(snapshot.rowMetadata, shared.id)).toEqual([])
-      expect(snapshot.collectionMetadata.size).toBe(0)
-    })
-  })
+      await vi.waitFor(() => {
+        const snapshot = storage.snapshot()
+        expect(storedItems(storage)).toEqual([detailOnly])
+        expect(persistedOwners(snapshot.rowMetadata, shared.id)).toEqual([])
+        expect(persistedOwners(snapshot.rowMetadata, detailOnly.id)).toEqual([
+          fullHash,
+        ])
+        expect(snapshot.collectionMetadata.size).toBe(0)
+      })
+    },
+  )
 
   /**
    * A cached current-key result is not evidence that a historical owner has
