@@ -26108,6 +26108,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     let subscriber: ((message: ProtocolEnvelope<unknown>) => void) | undefined
     let ensures = 0
     let releases = 0
+    let resetPending = false
     const coordinator: PersistedCollectionCoordinator = {
       getNodeId: () => `follower`,
       getLeaderId: () => `owner`,
@@ -26124,7 +26125,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       // The owner commits once, broadcasts, then replies; later ensures find
       // nothing new.
       requestEnsureRemoteSubset: async (collectionId) => {
-        if (++ensures > 1) return
+        if (++ensures > 1 && !resetPending) return
+        resetPending = false
         if (history.placement === `queued`) await otherHydrationStarted.promise
         // The follower's claim lapses before the owner's notice reaches it.
         if (expiring) now += 20_000
@@ -26133,9 +26135,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         const payload: TxCommitted = {
           type: `tx:committed`,
           term: 1,
-          seq: 1,
-          txId: `owner-tx-1`,
-          latestRowVersion: 1,
+          seq: ensures,
+          txId: `owner-tx-${ensures}`,
+          latestRowVersion: ensures,
           requiresFullReload: false,
           changedRows: [{ key: value.id, value }],
           deletedKeys: [],
@@ -26199,6 +26201,25 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       releaseApply: () => applyRead.resolve(),
       releaseOtherHydration: () => otherHydration.resolve(),
       releases: () => releases,
+      ensures: () => ensures,
+      // The owner resets durable storage and announces it; it loads the
+      // demanded row again on the next ensure.
+      resetOwner: () => {
+        durable.length = 0
+        resetPending = true
+        subscriber?.({
+          v: 1,
+          dbName: `test-db`,
+          collectionId: source.id,
+          senderId: `owner`,
+          ts: Date.now(),
+          payload: {
+            type: `collection:reset`,
+            schemaVersion: 1,
+            resetEpoch: 1,
+          },
+        })
+      },
     }
   }
 
@@ -26336,6 +26357,43 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     `settles a follower's remote demand with the owner's applied rows: $placement broadcast, apply $apply, $consumer`,
     assertFollowerRemoteDemandHistory,
   )
+  // A reset clears the owner's durable rows. Its rows return only when the
+  // follower requests its demand again, so the model predicts one more
+  // ensure, the owner's row visible again, and no further ensures: replacing
+  // rows in place must not drop the replay that a reset owes.
+  it(`a follower requests its demand again after the owner resets, once`, async () => {
+    const errors = vi.spyOn(console, `error`).mockImplementation(() => {})
+    const warnings = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    const tab = createFollowerTab({
+      placement: `direct`,
+      apply: `ok`,
+      consumer: `live-query`,
+    })
+    const query = createLiveQueryCollection((q) =>
+      q.from({ row: tab.source }).where(({ row }) => eq(row.group, `a`)),
+    )
+    try {
+      void query.preload()
+      await within(tab.applyReadStarted)
+      tab.releaseApply()
+      await vi.waitFor(() => expect(query.size).toBe(1), { timeout: 1_000 })
+      expect(tab.ensures()).toBe(1)
+
+      tab.resetOwner()
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      expect({
+        ensures: tab.ensures(),
+        rows: query.toArray.map((row) => (row as FollowerRow).id),
+        status: query.status,
+      }).toEqual({ ensures: 2, rows: [`remote`], status: `ready` })
+    } finally {
+      await query.cleanup()
+      await tab.source.cleanup()
+      errors.mockRestore()
+      warnings.mockRestore()
+    }
+  })
+
   const followerRemoteDemandHistory = fc.record({
     placement: fc.constantFrom<FollowerRemoteDemandHistory[`placement`]>(
       `direct`,

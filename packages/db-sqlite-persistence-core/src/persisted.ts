@@ -3732,6 +3732,7 @@ class PersistedCollectionRuntime<
   private replaceCollectionSnapshot(
     rows: Array<{ key: TKey; value: T; metadata?: unknown }>,
     collectionMetadata: Array<{ key: string; value: unknown }>,
+    replayDemand: boolean,
   ): SyncAppliedReceipt {
     if (
       !this.syncControls.begin ||
@@ -3751,9 +3752,12 @@ class PersistedCollectionRuntime<
     const rowKeys = new Set(rows.map((row) => row.key))
     // A truncate replays the Collection's demand. A follower routes that
     // demand to its leader, whose source loads and commits again, so a
-    // follower replaces its rows in place instead.
-    const truncate =
-      hydratedKeys.size === 0 && !this.canRouteRemoteDemandThroughCoordinator()
+    // follower replaces its rows in place, except after a reset, which owes
+    // the replay.
+    const followsLeader =
+      this.canRouteRemoteDemandThroughCoordinator() &&
+      !this.persistence.coordinator.isLeader(this.storageCollectionId)
+    const truncate = hydratedKeys.size === 0 && (replayDemand || !followsLeader)
 
     return this.withInternalApply(() => {
       this.syncControls.begin?.()
@@ -4984,10 +4988,14 @@ class PersistedCollectionRuntime<
     }
 
     if (lifecycleGeneration !== this.lifecycleGeneration) return
+    // A reset replays demand: the owner's reset rows return only when the
+    // follower requests its demand again.
     await this.reloadActiveSubsetsUnsafe(
       adapter,
       false,
       this.syncMode === `eager`,
+      false,
+      true,
     )
   }
 
@@ -5149,6 +5157,7 @@ class PersistedCollectionRuntime<
     skipUnchangedReplace = false,
     restoreResetBaseline = false,
     ownerEvidence = false,
+    replayDemand = false,
   ): Promise<void> {
     if (this.scopedRecovery && !ownerEvidence) {
       this.refreshScopedSubsets()
@@ -5314,6 +5323,7 @@ class PersistedCollectionRuntime<
             metadata: row.metadata,
           })),
           collectionMetadata,
+          replayDemand,
         )
         await whenSyncAccepted(applied)
       }
