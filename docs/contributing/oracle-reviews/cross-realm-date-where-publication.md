@@ -1,5 +1,10 @@
 # Cross-realm Date equality at WHERE publication
 
+Scope update for PR #2116: this is the review record for an earlier, wider
+Date oracle. The current WHERE owner checks ordinary native Dates across realms;
+tagged, subclass, borrowed-prototype, and forged cases no longer state its
+contract. The [coverage map](../oracle-coverage.md) describes the active cut.
+
 The [comparison transfer ledger](comparison-unit-retirement-round-5.md)
 retired five same-realm NaN and invalid-Date examples. A hostile review of
 their receiving law found a different defect: a native Date created in another

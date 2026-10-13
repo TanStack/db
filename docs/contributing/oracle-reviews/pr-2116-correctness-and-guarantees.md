@@ -57,13 +57,14 @@ figure mixed production code and architecture prose at an earlier head.
 | Guarantee or work cost | Authority and value | Decision surface |
 | --- | --- | --- |
 | A captured mutable `inArray` reads current members and refreshes the whole retained query on the next source event. | The maintainer explicitly chose both rules. The receiving oracles cover WHERE, joins, selections, groups, aggregates, HAVING, order, nested queries, and selected on-demand/include paths. | Largest cost: the review estimated about 427 source lines. Full-source acquisition disables index/subset pushdown, keyed lazy demand, and pooled fast paths for this query shape. Changing this requires a contract decision; freezing a list already restores the optimizations. |
+| A captured list's Date or byte-array item changes in place. | The maintainer declined guarantees after modifying standard values. Replacing the list entry remains inside the accepted live-list rule. | The evaluator and WHERE publication witnesses replace each list entry with a new native value. No oracle promises an observation after mutating the old item. |
 | A custom index callback orders **each stored row**, even when query equality groups two values together. | The maintainer explicitly chose this. | Both indexes retain per-row order operands and may sort/refresh more rows. Callback arguments now expose raw Date/Uint8Array values instead of the former timestamp/encoded-byte representation. That compatibility change follows the per-row rule and should be called out in release notes. |
-| Default native-byte order is unsigned lexicographic order. | This PR proposes the policy; no separate maintainer decision was recorded. | It requires scan/index agreement and comparator machinery. Keep or remove as a product decision, rather than treating the old encoded-string order as authoritative. |
-| Cross-realm native Dates and byte views, plus Date subclasses with overridden coercion, use intrinsic times or bytes. | The branch adds public and direct witnesses; ordinary local Dates and bytes already have value semantics. The wider host/subclass scope has no separate maintainer decision. | Removing this scope would revise several oracle laws and could let valid foreign values change a stored row without publishing it. Keep the R25 mirror repair as long as this scope is promised. |
+| Default native-byte order is unsigned lexicographic order. | This PR proposed the policy; the maintainer declined it. | The signed/unsigned and prefix order checks were removed. Byte-content equality and indexed/scan coherence remain. |
+| Ordinary cross-realm native Dates and Uint8Arrays use their times or bytes. | The maintainer questioned realm-sensitive inequality after its history showed only a transport test, not a public promise. | Keep ordinary cross-realm equality with a narrow native-value detector. Date subclasses with overridden coercion are outside this choice. |
 | Mixed-kind default index order stays total, while public Temporal `orderBy` still rejects kinds without an order. | Valid mixed rows must be admitted without partially updating a Collection; the specific rank between unlike ordinary kinds is a policy chosen by this branch. | The kind separation and private Temporal order add comparator code. A narrower accepted input domain or another internal order would need an explicit contract change and the R16 atomic-publication witness. |
 | A direct index removal accepts an equal-time but different old Date whose custom callback position differs from the stored Date. | The general refinement law supports normal remove/re-add, but the index API does not document this substitution. | Added per-key stored-order state supports it. This is a candidate to narrow if the direct API may require the actual prior value. |
 | A fresh, equal-field Duration replacement emits no update message. | Consistent with existing change-event suppression; the mirror law requires changed-field publication, not this silence. | The public R29 receiver asserts silence. It can be relaxed independently of exact field equality and changed-field publication. |
-| User-modified Date display tags, byte-view length properties, and an array's own `some` method cannot redefine intrinsic value or `inArray` membership. | These are valid JavaScript objects but user-modified built-ins, with weaker product authority than ordinary Dates, byte views, and arrays. | Their checks and helpers add complexity. Treat them as separate compatibility decisions. Deliberately malformed, borrowed, forged, and shadowed Temporal values were removed from the claimed domain. |
+| User-modified Date display tags, byte-view length properties, and an array's own `some` method cannot redefine intrinsic value or `inArray` membership. | The maintainer expressly declined guarantees after callers modify standard data types. | These tests and their protective helpers were removed. Deliberately malformed, borrowed, forged, and shadowed Temporal values are also outside the claimed domain. |
 | Repeated Temporal key/display work, per-row BasicIndex build sorting, and equal-row index refresh. | Deterministic work probes observed these costs; no work budget was promised. | Optimize only if a bounded workload justifies it. The old claim that *every* Temporal comparison calls `toString` is stale after the valid-value narrowing. |
 
 R21 is not closed as a Firefox defect. A mocked time-zone formatter preserving
@@ -100,11 +101,82 @@ public DB source entry is 112,595 to 115,464 gzip bytes (**+2,869**) under
 the same esbuild command at both revisions. The main bundle was reproduced
 byte for byte before comparing. These views overlap and must not be added.
 
-The guarantee choices in the table above still apply. The two largest behavior
-costs, live captured arrays with whole-result refresh and per-row custom
-callback order, are explicit maintainer decisions. Unsigned default byte order,
-cross-realm/subclass scope, mixed-kind default order, different-position
-old-Date removal, silence for equal-field Duration copies, and intrinsic
-semantics for user-modified built-ins remain separate product choices. No size
-reduction is credited for dropping them without a same-path oracle and a
-measured implementation change.
+The two largest behavior costs, live captured arrays with whole-result refresh
+and per-row custom callback order, are explicit maintainer decisions. Ordinary
+cross-realm native equality is retained after examining the old transport
+test's history. Unsigned default byte order and intrinsic semantics for
+user-modified built-ins are declined. Mixed-kind default rank,
+different-position old-Date removal, and silence for equal-field Duration
+copies remain separate product choices. The paired measurement below records
+the current narrowed tree.
+
+On `origin/main`, `query/where.test.ts` and `query/indexes.test.ts` exercise
+fixed `inArray` lists, including Date-by-time matching and an indexed lookup.
+The `in-evaluator` oracle supplies constant or row-field lists but does not
+edit a captured constant list after compilation. One direct evaluator work
+test mutates a retained byte-array item and expects `in` to observe the new
+bytes; it does not exercise a live-query Collection. Constant `Value` lists
+were compiled into a `Set` once. No earlier test requires a captured list's
+entries to be added, removed, or replaced after compilation, or a whole
+retained result to refresh on the next source event. The current live-list
+rule is an explicit new contract choice, not a unit-test transfer.
+
+## Narrowing decision: bytes and modified built-ins
+
+The retired unit-test blocks did not assert default byte ordering or resilience
+to caller-modified standard values. The maintainer declined both guarantees.
+Ordinary byte-content equality remains covered by earlier unit tests and the
+binary-ID equality fix (#779). The maintainer also kept the explicit choice
+that a custom index comparator orders each stored row.
+
+Before changing oracle expectations, the distinguishing predictions are:
+
+| Input and checkpoint | Earlier PR law | Narrowed law |
+| --- | --- | --- |
+| Two ordinary byte views `[127]` and `[128]`, default `orderBy` or direct comparator | The first sorts before the second by unsigned content. | No specific byte-content order is promised. Indexed and unindexed public reads of the same rows must agree, and exact lookup still groups equal byte contents. |
+| Two fresh ordinary byte views with equal contents, exact lookup | Both match one content key. | Both still match one content key. A custom comparator may place their rows separately according to the callback. |
+| A Date with an own display tag, a byte view with an own count or iterator shadow, or an array with an own `some` method | Native slots or intrinsic methods override the caller's changes. | These caller-modified built-ins are outside the oracle's declared domain. The oracle makes no prediction for them. Ordinary Dates, byte views, and arrays keep their retained laws. |
+| An existing Date or byte-array item in a captured `inArray` list changes in place | The earlier working tree required the next source event to observe its changed content. | The accepted live-list law covers adding, removing, and replacing array entries only. Replacing an entry with a fresh native value refreshes the whole result; changing an existing item in place is outside scope. |
+| An ordinary local Date or Uint8Array and an equal-content value made in a second JavaScript environment, compiled `eq` and `in` | The PR revision predicts both values match. | Retain content/time equality for ordinary native values. The surviving `subset-dedupe.test.ts` had expected only the literal's environment to match, so this remains an explicit behavior revision. |
+
+Removing a law from this table does not change the expected results of any
+retired unit-test block. The cross-environment case is a separate revision of
+a **surviving** `subset-dedupe.test.ts` expectation. That test entered in
+commit `cfb01cee34` (PR #1797) under “request transport preserves predicate
+matches.” It checked that the request kept its literal object and that the
+evaluator returned its then-current result. The earlier code used local
+`instanceof` checks; no public guide or changelog claimed realm-sensitive
+equality. The maintainer questioned why such a distinction should be retained,
+so this PR keeps equality for ordinary native values across JavaScript
+environments while separately checking request identity.
+
+The R25 table above describes the earlier reviewed commit, which included a
+foreign Date with a user-added display tag. After removing that case, the
+ordinary changed-time foreign-Date replacement is a guard against an
+always-equal model, not a reproduction of the original missed update. Source
+inspection of `origin/main` shows that distinct unmodified foreign Dates were
+always treated as unequal: a changed timestamp published, while equal
+timestamps could publish an extra update. The current equal-time receiver
+checks the narrowed publication rule. Cross-realm equality is a deliberate
+contract choice of this PR; none of the retired unit-test blocks required it.
+
+## Narrowed working-tree weight
+
+After removing the declined byte-order, modified-value, and item-in-place
+cases, production TypeScript is **+804 net lines** against `origin/main`
+(1,305 added, 501 removed). Architecture prose is **+61 net lines** separately.
+A paired browser source-entry measurement uses esbuild 0.28.1
+with `--bundle --minify --platform=browser --format=esm --target=es2020`, then
+`gzip -n -9`, while resolving the same installed dependencies for each source
+snapshot. The baseline is 114,670 bytes, the published PR head is 117,566
+(**+2,896**), and the narrowed working tree is 115,901 (**+1,231**). This
+isolates the DB source change and is not the all-ESM-module sum. The absolute
+byte counts differ from the earlier build method above; their paired deltas
+are close. The entry-only list snapshot removes per-item normalization and
+descriptor checks at each source event. Holding every other current source
+file fixed, restoring the previous `snapshotList` produces 117,419 bytes,
+so this simplification saves **1,512 gzip bytes**. A separate comparator loop
+cleanup saves another six bytes. The current tree saves 1,665 bytes against
+the published head. Most remaining code weight implements the two explicit maintainer
+choices: live captured lists with whole-result refresh and per-row custom
+comparator ordering.

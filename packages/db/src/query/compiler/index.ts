@@ -476,36 +476,17 @@ function selectHasMutableInList(select: QueryIR[`select`]): boolean {
   return lists.size > 0
 }
 
-const missingListSlot = Symbol(`missing inArray list slot`)
-
-function snapshotList(list: ReadonlyArray<unknown>): {
-  values: Array<unknown>
-  volatile: boolean
-} {
-  const values: Array<unknown> = []
-  let volatile = false
-  for (let index = 0; index < list.length; index++) {
-    let slot: PropertyDescriptor | undefined
-    try {
-      slot = Object.getOwnPropertyDescriptor(list, index)
-    } catch {
-      volatile = true
-    }
-    if (!slot || !(`value` in slot)) volatile = true
-    const item = index in list ? list[index] : missingListSlot
-    values.push(normalizeValue(item))
-  }
-  return { values, volatile }
+function snapshotList(list: ReadonlyArray<unknown>): Array<unknown> {
+  return Array.from(list)
 }
 
 function sameListSnapshot(
   left: ReturnType<typeof snapshotList>,
   right: ReturnType<typeof snapshotList>,
 ): boolean {
-  if (left.volatile || right.volatile) return false
-  if (left.values.length !== right.values.length) return false
-  return left.values.every((value, index) =>
-    Object.is(value, right.values[index]),
+  return (
+    left.length === right.length &&
+    left.every((value, index) => Object.is(value, right[index]))
   )
 }
 

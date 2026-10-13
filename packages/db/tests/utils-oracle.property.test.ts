@@ -20,12 +20,9 @@ import { deepEquals, equalPersistedSnapshotValues } from '../src/utils'
  * pairs remain unequal, even when a primitive displays or encodes a Date or
  * RegExp value. Separate bounded graph laws construct corresponding rings
  * and acyclic copies without reusing the production walk.
- * A native typed-array length shadow cannot change how many intrinsic
- * elements participate in change-event equality. A supplied changed byte
- * must remain unequal even when both views report an own `length` of zero.
  * Ordinary native Dates compare by time across JavaScript realms. One fixed
- * pair with the same own string label tests a changed-time fallback. It does
- * not define equality for Dates with different own labels or replaced methods.
+ * changed-time pair tests a false-equality fallback. Caller-modified built-ins
+ * are outside this oracle's declared domain.
  * Ordinary Temporal.Duration values compare by their ten supplied fields,
  * including opposite signs and carried units that represent equal lengths.
  * `packages/db/CHANGELOG.md` says equivalent Duration forms remain unequal
@@ -34,8 +31,7 @@ import { deepEquals, equalPersistedSnapshotValues } from '../src/utils'
  * publication path.
  * Keyless DataViews have hidden state but no typed-array elements. Distinct
  * views from one foreign realm remain unequal by the keyless-instance law;
- * pairing one with a typed array must return false without reading a typed-
- * array length from the DataView, even if it spoofs a display tag.
+ * pairing one with a typed array must return false.
  *
  * Arbitrary different cycle topologies are outside this model. Naming that
  * exclusion matters: more random examples cannot establish semantics the
@@ -120,13 +116,11 @@ type NativeDatePair = {
   rightTime: number | null
   leftRealm: DateRealm
   rightRealm: DateRealm
-  ownLabel?: boolean
 }
 
 // `null` is a model-only invalid-time marker. The supplied times, rather than
 // a production Date classifier, determine equality. Both foreign operands are
-// constructed in one realm so a labeled unequal pair can reach the historical
-// same-prototype fallback that hid its different native timestamps.
+// constructed in one realm to exercise changed timestamps on one prototype.
 function nativeDatePair(spec: NativeDatePair): [Date, Date] {
   const leftTime = spec.leftTime ?? Number.NaN
   const rightTime = spec.rightTime ?? Number.NaN
@@ -137,14 +131,6 @@ function nativeDatePair(spec: NativeDatePair): [Date, Date] {
   const left = spec.leftRealm === `foreign` ? foreignLeft : new Date(leftTime)
   const right =
     spec.rightRealm === `foreign` ? foreignRight : new Date(rightTime)
-  if (spec.ownLabel) {
-    for (const date of [left, right]) {
-      Object.defineProperty(date, `label`, {
-        value: `same`,
-        enumerable: true,
-      })
-    }
-  }
   return [left, right]
 }
 
@@ -1089,14 +1075,12 @@ describe(`deepEquals property-based tests`, () => {
         rightTime: 1,
         leftRealm: `local`,
         rightRealm: `foreign`,
-        ownLabel: false,
       }
-      const labeledChanged: NativeDatePair = {
+      const changed: NativeDatePair = {
         leftTime: 1,
         rightTime: 2,
         leftRealm: `foreign`,
         rightRealm: `foreign`,
-        ownLabel: true,
       }
       expect(() =>
         assertNativeDateEquality(
@@ -1107,24 +1091,10 @@ describe(`deepEquals property-based tests`, () => {
             Object.is(left.getTime(), right.getTime()),
         ),
       ).toThrow(`forward`)
-      expect(() =>
-        assertNativeDateEquality(labeledChanged, () => true),
-      ).toThrow(`forward`)
-      // This fixed diagnostic preserves the missed-event counterexample
-      // without extending the generated grammar to modified Date objects.
-      assertNativeDateEquality(labeledChanged)
-    })
-
-    it(`keeps a foreign Date distinct from an equal-keyed plain record`, () => {
-      const date = runInNewContext(`new Date(1)`) as Date
-      Object.defineProperty(date, `label`, {
-        value: `same`,
-        enumerable: true,
-      })
-      const record = { label: `same` }
-      expect(Date.prototype.getTime.call(date)).toBe(1)
-      expect(deepEquals(date, record)).toBe(false)
-      expect(deepEquals(record, date)).toBe(false)
+      expect(() => assertNativeDateEquality(changed, () => true)).toThrow(
+        `forward`,
+      )
+      assertNativeDateEquality(changed)
     })
 
     utilsProperty([arbitraryTemporalPlainDate])(
@@ -1365,26 +1335,6 @@ describe(`deepEquals property-based tests`, () => {
       },
     )
 
-    utilsProperty([fc.uint8Array({ minLength: 1, maxLength: 20 }), fc.nat(20)])(
-      `native bytes ignore own length shadows`,
-      (bytes, indexHint) => {
-        const changedIndex = indexHint % bytes.length
-        const changed = Uint8Array.from(bytes)
-        changed[changedIndex] = (changed[changedIndex]! + 1) % 256
-        const shadow = (view: Uint8Array) =>
-          Object.defineProperty(view, `length`, { value: 0 })
-        const original = shadow(Uint8Array.from(bytes))
-        const copy = shadow(Uint8Array.from(bytes))
-        const different = shadow(changed)
-
-        // The supplied byte sequence, rather than either public `length`,
-        // determines both expected outcomes at the direct equality return.
-        expectEqualityPair(original, copy, true)
-        expectEqualityPair(original, different, false)
-        expectEqualityPair({ value: original }, { value: different }, false)
-      },
-    )
-
     it(`keeps foreign DataViews opaque and distinct from typed arrays`, () => {
       const [first, second] = runInNewContext(
         `[new DataView(new Uint8Array([1]).buffer),
@@ -1392,11 +1342,7 @@ describe(`deepEquals property-based tests`, () => {
       ) as [DataView, DataView]
       const local = new DataView(Uint8Array.of(1).buffer)
       const bytes = Uint8Array.of(1)
-      Object.defineProperty(first, Symbol.toStringTag, {
-        value: `Uint8Array`,
-      })
-
-      // Neither equal bytes nor a display tag supplies typed-array elements.
+      // A DataView has no typed-array elements.
       expectEqualityPair(first, first, true)
       expectEqualityPair(first, second, false)
       expectEqualityPair(local, first, false)

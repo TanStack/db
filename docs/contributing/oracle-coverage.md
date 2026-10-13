@@ -467,40 +467,21 @@ sorted row IDs. Its [transfer ledger](oracle-reviews/comparison-unit-retirement-
 records the five retired same-realm examples. A separate
 [cross-realm Date witness](oracle-reviews/cross-realm-date-order.md) compares
 native `node:vm` Dates by supplied timestamps and invalidity, including equal
-times, numeric NaN with an invalid Date, and Dates with an own display tag.
-A fixed local/foreign subclass witness checks native timestamps inherited
-through a Date prototype, checks valid and invalid subclass order in both
-directions against finite Dates, and rejects local and foreign
-borrowed-prototype impostors. The owner
-also checks an unindexed public ordered scan with a tagged foreign invalid
-Date. A fixed 129-byte witness changes interior byte 64, and a 200-byte
+times and numeric NaN with an invalid Date. The owner also checks an unindexed
+public ordered scan with an ordinary foreign invalid Date. A fixed 129-byte
+witness changes interior byte 64, and a 200-byte
 witness changes the last byte. Both compare direct `areValuesEqual` returns
 in each direction and distinct `normalizeValue` keys. The generated
 changed-byte grammar spans lengths 1–200, but its fixed 100-run campaign did
 not reach those long positions; the fixed witnesses reject a first-64-byte
-comparator.
-The proposed default native-byte order is unsigned lexicographic content,
-with shorter prefixes first and equal contents at one comparator position.
-Direct signs cover fresh equal views, the 127/128 boundary, prefixes,
-an equal first byte followed by different second bytes, Buffer/Uint8Array
-pairs, a foreign native view, and own `length` and `byteLength` shadows. The
-later-byte case and its ready public scan/index counterpart reject a
-first-byte-only order
-mutant at their direct comparison and exact ordered-array checkpoints.
-Fixed and random direct samples vary a common prefix of 2–24 bytes before
-the first differing byte; a third-byte ready public case checks both index
-types and rejects a comparator that reads only the first two bytes.
-A byte/object/byte triple checks transitivity without prescribing which kind
-comes first. These are immediate comparator observations, not relational
-`WHERE` comparisons or live-query publication. The deep-equality owner also
-checks that an own `length` shadow cannot hide a changed intrinsic byte in
-direct equality, including a nested row field, over fixed and random 1–20
-byte inputs. Other typed-array class transitions remain under its existing
-class-agnostic equality law; whether such transitions must publish a source
-change needs a separate contract witness.
+comparator. Default byte-content ordering is not promised. The custom-index
+order owner checks that direct indexed and public scan reads conserve the same
+keys through one byte-view update, deletion, and reinsertion; exact lookup
+still groups ordinary equal byte contents. Other typed-array class transitions
+remain under its existing class-agnostic equality law; whether such transitions
+must publish a source change needs a separate contract witness.
 The same deep-equality owner checks two distinct keyless DataViews from one
-foreign realm against the keyless-instance rule, including a forged display
-tag, plus a mixed typed-array/DataView
+foreign realm against the keyless-instance rule, plus a mixed typed-array/DataView
 pair. The Collection change-event owner receives that boundary through a
 typed-array-to-foreign-DataView update and a same-realm foreign-DataView
 replacement. Both commits must settle with public state, BasicIndex or
@@ -515,20 +496,16 @@ time across local and `node:vm` realms. A fixed matrix crosses both operand
 realms and equal or changed valid and invalid times. Fixed-seed and random
 campaigns sample finite times from -1e12 to 1e12, invalid time, equal or
 adjacent changed time, and both realm placements. Direct results in both
-operand orders reject a local-only Date classifier. One fixed equal-label
-foreign Date pair rejects an enumerable-key answer that ignores changed time;
-another keeps a labeled foreign Date distinct from an equal-keyed plain record.
-These fixed controls do not specify a general policy for user-added Date
-properties. The Collection change-event owner receives the ordinary Date rule
-through six one-row sync updates, including invalid-to-valid and
-valid-to-invalid transitions. A seventh fixed equal-label update preserves the
-original missed-event counterexample. Each checks exact subscriber batches,
+operand orders reject a local-only Date classifier. One fixed changed-time
+foreign Date pair rejects an answer that ignores changed time. The Collection
+change-event owner receives the ordinary Date rule through seven one-row sync
+updates, including changed foreign times, invalid-to-valid, and
+valid-to-invalid transitions. Each checks exact subscriber batches,
 callback-time public time, and the change-message mirror against public time
 after commit. These witnesses cover one `node:vm` host, unindexed sync
 publication, and native Dates with unchanged prototypes and methods.
-Optimistic publication, indexed Date updates, other hosts, proxies, user-added
-properties beyond the fixed controls, and replaced Date prototypes or methods
-remain open.
+Optimistic publication, indexed Date updates, other hosts, proxies, and
+caller-modified Dates remain outside this witness.
 The same deep-equality owner models ordinary Temporal.Duration equality by an
 independent ten-field vector. Fixed copies and one-field changes reconstruct
 each field under both signs. Fixed opposite-sign seconds reject absolute-field
@@ -611,33 +588,29 @@ scan and BasicIndex/BTreeIndex equality lookup with an explicit total
 comparator; default ordering of calendar-unit Durations needs `relativeTo`
 and is outside this equality claim.
 Equal and unequal values within Instant, PlainDate, PlainDateTime, and
-PlainTime reject a kind-only Temporal equality key at those same paths. A
-genuine Uint8Array with a shadowed display tag and a spoof-tagged Uint16Array
-check the intrinsic byte-class boundary. Native `node:vm` Uint8Arrays with
-equal and unequal content, including an own tag shadow, also reach compiled
+PlainTime reject a kind-only Temporal equality key at those same paths. Native
+`node:vm` Uint8Arrays with equal and unequal content also reach compiled
 `eq`, constant `in`, and row-supplied `in` in both operand directions; the
 original classifier failed equal foreign/local byte pairs. The `in` property has a guarded
 direct replay selector that runs only its random/replay campaign.
-For caller-owned arrays, the compiled `in` owner now walks current indexed
-members independently of an own `some` method. Constant and row-supplied
-lists check false rejection and false acceptance after compilation and a list
-slot edit. The production evaluator calls native Array `some` on the current
-list; sparse and nullish controls retain native membership behavior. This
+For caller-owned arrays, the compiled `in` owner now reads current members.
+Constant and row-supplied lists check false rejection and false acceptance
+after compilation and a list slot edit. Sparse and nullish controls retain
+native membership behavior. This
 direct evaluation does not by itself establish live-query publication.
 Native local and `node:vm` Dates, including invalid Dates and timestamp
 numbers, reach those three compiled equality paths in both operand directions.
 An equal-timestamp Date from a second VM context is a positive compiled
 equality control, so the reference cannot accept only the first foreign
 prototype.
-Borrowed Date prototypes remain ordinary reference values. The native-Date
-reference model uses a captured Date intrinsic rather than local `instanceof`.
-Own `length` and `byteLength` shadows, including a foreign byte view, and a
-shadowed iterator cannot redefine native byte content. The compiled owner
-checks equal and unequal pairs in both operand directions through `eq` and
-both `in` forms; the comparison owner checks direct normalized-key relations.
-The old byte-count read failed both boolean equality and direct key
-normalization. Public indexed publication, detached buffers, and proxies
-need separate witnesses.
+One frozen primitive constant-list matrix checks the evaluator's immutable
+list path against the same independent membership model, including NaN,
+signed zero, Date normalization, nullish values, bigint, and a
+normalization-prefix string.
+The native-Date reference model uses a captured Date intrinsic rather than
+local `instanceof`. Caller-modified Dates, byte views, and arrays are outside
+these owners. Public indexed publication, detached buffers, and proxies need
+separate witnesses.
 The alias owner also checks a public unindexed `eq` scan with two native-equal
 PlainMonthDay rows and a distinct reference year. Direct BasicIndex/BTreeIndex
 add, build, removal, re-add, and public indexed `eq` cover the orderable
@@ -693,15 +666,11 @@ A custom-collation cursor includes an unsent string from the cursor's
 comparator-equal group. Escaped strings reach direct custom callbacks and
 Collection custom collation as raw values across ordered snapshots, direct
 range/take operations, and one subscription cursor; normalized exact lookup
-still distinguishes their string keys. A mixed string/number/two-byte-view
-snapshot and bounded native-byte fixtures compare unsigned content order and
-source-key ties with the unindexed scan and both index types. They include the
-127/128 boundary, prefixes, Buffer, a foreign view, and an own `length`
-shadow; exact lookup still groups equal byte content. An escaped literal
-remains distinct from the BTree undefined traversal marker. One source
-history silently replaces an equal-content byte view and checks scan/index
-order and key count. Another adopts a peer view, deletes, and reinserts its
-key, checking ordered arrays and exact sets after every commit. A custom
+still distinguishes their string keys. A bounded ordinary byte-view history
+compares indexed and unindexed order without specifying a default byte-content
+rank. It adopts a peer view, deletes, and reinserts its key, checking key
+conservation and exact content sets after every commit. An escaped literal
+remains distinct from the BTree undefined traversal marker. A custom
 callback history moves an equal-content view to a different callback rank and
 checks direct take, range, and cursor positions. The working-tree version of
 these histories rejected stale index positions and duplicate keys on
@@ -728,24 +697,17 @@ ordinary-index use and an eager source path need distinct witnesses.
 The [WHERE predicate publication oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/where-predicate-publication-oracle.property.test.ts)
 also has a [cross-realm Date equality matrix](oracle-reviews/cross-realm-date-where-publication.md).
 For local and `node:vm` Dates with timestamps 1 and 2 or invalid timestamps,
-including tagged foreign Dates and fixed local/foreign subclasses with an own
-display tag, plus number 1, NaN, and a foreign borrowed-prototype impostor, it
-compares public live-query keys, filtered subscriber keys, and direct snapshot
-keys after preload and a four-row sync transaction.
+plus number 1 and NaN, it compares public live-query keys, filtered subscriber
+keys, and direct snapshot keys after preload and a four-row sync transaction.
 The generated WHERE histories check direct snapshots at attachment; the fixed
 Date matrix also checks them after its commit. Subscriber batches reconstruct
 subscriber state after each generated commit.
 Auto-indexing is off in both modes; one mode adds BasicIndex explicitly and
 also checks its equality lookup and an optimized-only public snapshot. This
 proves a public indexed snapshot result but does not prove that the live-query
-planner chose the index. Other realm hosts, proxies, deeper subclass chains,
-Date prototype swaps or method replacement, public range predicates, and
-generated subclass histories need separate witnesses.
-A focused unindexed public query also keeps one local
-`Object.create(DateSubclass.prototype)` impostor outside Date equality while
-retaining its same-object match. It also excludes the impostor from the
-invalid-Date/NaN and valid zero Date/number equality classes at public
-checkpoints. Indexed publication for that local impostor remains open.
+planner chose the index. Other realm hosts, proxies, modified Dates, subclasses,
+public range predicates, and generated Date
+histories need separate witnesses.
 
 The [captured `inArray` publication review](oracle-reviews/captured-inarray-publication.md)
 records the caller-owned list law: changing its members alone does not
@@ -759,8 +721,9 @@ after that repair; the plan now pays full-source transfer to observe unseen
 source events. A pooled query with an equality group and residual mutable
 list uses the live-query Collection path; a source event in another group
 must still refresh its result. Controlled on-demand acquisition, no-delta events on both joined
-source sides, an outer QueryRef filter, a correlated include, and mutable Date
-and byte-list items have fixed working-tree receivers. One 40-row direct-query
+source sides, an outer QueryRef filter, a correlated include, and replaced Date
+and byte-array list members have fixed working-tree receivers. In-place changes
+to those members are outside the captured-list law. One 40-row direct-query
 witness rejects an all-candidate membership rescan on an ordinary
 unchanged-list event while requiring a revisit after a list change. These are bounded
 in-memory receiving cuts. A controlled on-demand ordered receiver checks that
@@ -828,27 +791,15 @@ behavior, or exact committed-head review.
 The [review record](oracle-reviews/captured-inarray-publication.md) tracks the
 ORC-012 applicability audit and unresolved cells.
 
-The [borrowed-Date range review](oracle-reviews/borrowed-date-indexed-range.md)
-records a separate public range owner in `index-path-collision-oracle.test.ts`.
-Fixed `gt` and `lt` histories compare public snapshots before and after
-BasicIndex or BTreeIndex is installed. An ordinary object borrowing a local
-Date subclass prototype must take the scan path whether it is a source value
-or the predicate bound. A genuine foreign Date subclass is a positive indexed
-range control. A later fixed history gives local and foreign native Date
-subclasses misleading `valueOf` results. Public scan and indexed `gt`, `gte`,
-`lt`, and `lte` snapshots use their intrinsic timestamps, with an
-optimized-only index-path check. The model freezes each source timestamp
-before Collection admission, so later changes to a source Date cannot alter
-the expected answer. A native subclass also serves as a bound for all four
-effective relations in both operand positions while its `valueOf` reports a
-misleading number.
-Plain, local-subclass, and foreign-subclass rows also share the bound's exact
-timestamp. Inclusive and exclusive ranges compare complete key sets across
-the scan and both indexed paths; an omitted tied subclass fails the exact-key
-assertion.
-Date/number scan predicates run in both
-operand orders; mixed-domain index eligibility is not claimed. Other coercion
-methods, invalid Dates, later publication, and proxies remain open there.
+The [historical borrowed-Date range review](oracle-reviews/borrowed-date-indexed-range.md)
+records a wider law that this PR has narrowed. The public range owner in
+`index-path-collision-oracle.test.ts` now supplies ordinary local and `node:vm`
+Dates before, at, and after a bound from either realm. Public `gt` and `gte`
+snapshots agree with supplied timestamps before and after installing BasicIndex or BTreeIndex;
+an optimized-only snapshot confirms the indexed path. Equal local and foreign
+Dates distinguish inclusive from exclusive ranges. Modified Dates, subclasses,
+borrowed prototypes, invalid Dates, other relational operators, and later
+publication remain outside this owner's current Date range claim.
 
 The [mixed-value index order review](oracle-reviews/mixed-value-index-order.md)
 links the direct index and public WHERE owners. The direct owner checks
@@ -1567,12 +1518,10 @@ new returned-mutation check. The direct index refinement owner does not prove
 this Collection mutation path. Callback-time index agreement,
 the reported insert-seeded string-key setup, adapter cancellation, and
 non-local-only persistence remain outside this lane.
-Its native-byte sync witness adds a one-key `[1]` to `[2]` replacement in which
-both genuine views shadow own `length` as zero. After commit, one update with
-the previous and current intrinsic bytes must reach the subscriber while
+Its native-byte sync witness adds a one-key `[1]` to `[2]` replacement. After
+commit, one update with the previous and current bytes must reach the subscriber while
 public state and BasicIndex or BTreeIndex exact lookup agree with `[2]`. A
-fresh equal-content view then remains silent. The pre-fix implementation
-updated state and indexes but emitted no message for the changed bytes. This
+fresh equal-content view then remains silent. This
 bounded sync cut records whole callback batches, so even an empty callback
 after the equal copy fails the silence check. It does not cover optimistic
 draft admission, other typed-array classes, or live-query notification.

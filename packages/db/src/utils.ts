@@ -9,26 +9,6 @@ interface TypedArray {
   [index: number]: number
 }
 
-const typedArrayLength = Object.getOwnPropertyDescriptor(
-  Object.getPrototypeOf(Uint8Array.prototype),
-  `length`,
-)!.get!
-const typedArrayTag = Object.getOwnPropertyDescriptor(
-  Object.getPrototypeOf(Uint8Array.prototype),
-  Symbol.toStringTag,
-)!.get!
-
-/** Read a native typed-array class across realms without trusting display tags. */
-export function nativeTypedArrayTag(value: unknown): string | undefined {
-  if (!ArrayBuffer.isView(value)) return undefined
-  return Reflect.apply(typedArrayTag, value, []) as string | undefined
-}
-
-/** Read the native element count even when a view shadows its length property. */
-export function nativeTypedArrayLength(value: ArrayBufferView): number {
-  return Reflect.apply(typedArrayLength, value, []) as number
-}
-
 // Duration equality retains the exact units, including subsecond units that
 // share a default display. Query normalization uses the same field order.
 export const durationFields = [
@@ -44,32 +24,15 @@ export const durationFields = [
   `nanoseconds`,
 ] as const
 
-// The Date intrinsic recognizes native Dates across realms. A display tag
-// cannot hide a Date's timestamp or make an ordinary object into a Date.
+// Ordinary native Dates compare by timestamp, including across realms.
 export function dateTimestamp(value: unknown): number | undefined {
   if (value === null || typeof value !== `object`) return undefined
+  if (value instanceof Date) return value.getTime()
+  if (Object.prototype.toString.call(value) !== `[object Date]`)
+    return undefined
   try {
-    if (value instanceof Date) return Date.prototype.getTime.call(value)
-    if (Symbol.toStringTag in value) {
-      // A Date subclass can inherit getTime from its Date prototype. Walk
-      // descriptors without reading a user display-tag or getTime getter;
-      // the intrinsic below still checks for the native Date slot.
-      let prototype = Object.getPrototypeOf(value)
-      while (prototype !== null) {
-        const descriptor = Object.getOwnPropertyDescriptor(prototype, `getTime`)
-        if (descriptor) {
-          if (typeof descriptor.value !== `function`) return undefined
-          break
-        }
-        prototype = Object.getPrototypeOf(prototype)
-      }
-      if (prototype === null) return undefined
-    } else if (Object.prototype.toString.call(value) !== `[object Date]`) {
-      return undefined
-    }
     return Date.prototype.getTime.call(value)
   } catch {
-    // An ordinary object or proxy has no native Date timestamp.
     return undefined
   }
 }
@@ -148,8 +111,6 @@ export function deepEqualsInternal(
     return false
   }
 
-  // Native Dates compare by time even when their constructors come from
-  // different realms. An invalid Date has a NaN time, distinct from no Date.
   const aDateTime = dateTimestamp(a)
   const bDateTime = dateTimestamp(b)
   if (aDateTime !== undefined || bDateTime !== undefined) {
@@ -286,13 +247,16 @@ export function deepEqualsInternal(
   if (b instanceof Set) return false
 
   // Handle TypedArrays
-  const typedArrayTagA = nativeTypedArrayTag(a)
-  const typedArrayTagB = nativeTypedArrayTag(b)
-  if (typedArrayTagA !== undefined && typedArrayTagB !== undefined) {
+  if (
+    ArrayBuffer.isView(a) &&
+    ArrayBuffer.isView(b) &&
+    Object.prototype.toString.call(a) !== `[object DataView]` &&
+    Object.prototype.toString.call(b) !== `[object DataView]`
+  ) {
     const typedA = a as unknown as TypedArray
     const typedB = b as unknown as TypedArray
-    const lengthA = nativeTypedArrayLength(a)
-    const lengthB = nativeTypedArrayLength(b)
+    const lengthA = typedA.length
+    const lengthB = typedB.length
     // Elements compare like numbers: -0 equals 0, NaN equals NaN. Only a
     // draft treats a change of typed-array class as a change.
     if (
@@ -310,7 +274,11 @@ export function deepEqualsInternal(
     return true
   }
   // Symmetric check: if b is TypedArray but a is not, they're not equal
-  if (typedArrayTagB !== undefined && !ArrayBuffer.isView(a)) {
+  if (
+    ArrayBuffer.isView(b) &&
+    Object.prototype.toString.call(b) !== `[object DataView]` &&
+    !ArrayBuffer.isView(a)
+  ) {
     return false
   }
 

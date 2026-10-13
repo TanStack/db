@@ -1,5 +1,11 @@
 # Temporal alias equality
 
+Scope update for PR #2116: this record retains earlier forged, borrowed, and
+shadowed-value experiments. The current oracles claim valid Temporal values
+from one polyfill copy and ordinary native byte arrays; caller-modified and
+malformed values are outside their active laws. See the
+[coverage map](../oracle-coverage.md) for current owners and limits.
+
 Changelog #1519 promises `ZonedDateTime` query equality consistent with
 Temporal's `.equals()`. At one instant, `[UTC]` and `[Etc/UTC]` are equal,
 while `[+00:00]` is a distinct zone. Exact nanoseconds and calendar identity

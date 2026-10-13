@@ -66,15 +66,10 @@
  * source restarted after cleanup retracts a vanished row even when its first
  * batch cannot satisfy the predicate. A third witness checks that a same-key
  * update which stays TRUE publishes its new row and exact subscriber payload.
- * A focused tagged-Date matrix checks native Dates from this and another
+ * A focused Date matrix checks ordinary native Dates from this and another
  * JavaScript realm. It compares direct snapshot, filtered subscriber, and live
  * query keys after preload and one sync transaction; an explicit BasicIndex
- * lookup checks the indexed equality key when an index is present. Fixed local
- * and foreign Date subclasses with inherited `getTime` join the same
- * timestamp classes. A forged object with a borrowed subclass prototype does
- * not join a Date class. A separate unindexed public query checks the local
- * borrowed-prototype case against Date inequality and object identity,
- * including the zero timestamp class.
+ * lookup checks the indexed equality key when an index is present.
  *
  * Captured-list law: a caller-owned array passed to `inArray` remains live
  * input. Editing that array alone does not publish. At the next delivered
@@ -95,8 +90,9 @@
  * At the next source transaction, one subscriber callback contains the
  * complete insert/delete batch and reads the new whole result. It checks no
  * duplicate event when the list did not change. Separate fixed
- * Date and byte-item cases change contents inside the captured list, then
- * check the next source event. An ordered limit witness deletes a source row
+ * Date and byte-array cases replace members of the captured list, then check
+ * the next source event. Mutating an item in place is outside this law.
+ * An ordered limit witness deletes a source row
  * outside the old loaded prefix after a list edit; it requires the newly
  * matching row to appear, so ordered acquisition must retain all source rows
  * while this live list is captured. Joined and included on-demand sources use
@@ -128,12 +124,9 @@
  * open; the lifecycle publication owner needs a predicate dimension to reach
  * them. The mock sync source is a controlled provider; this oracle claims only
  * how the Collection filters and routes the sync transactions it supplies.
- * The tagged-Date matrix covers native `node:vm` Dates with ordinary Date
- * prototypes, including own display tags, and fixed local and foreign Date
- * subclasses with inherited `getTime`. It excludes proxies, prototype swaps,
- * replaced `getTime` methods, other hosts, and generated subclass histories.
- * The local borrowed-prototype query uses one row and observes keys after
- * preload. It does not claim indexed publication for that forged object.
+ * The Date matrix covers ordinary native `node:vm` Dates. Modified Date
+ * objects, subclasses, borrowed prototypes, proxies, and other hosts are
+ * outside its claimed domain.
  * A pinned mixed-scalar history checks an indexed source after deleting and
  * replacing rows. Its WHERE result still follows `eq` truth; the index's
  * private order must not lose an equality member or interrupt publication.
@@ -320,21 +313,17 @@ function syncedModelRow(id: string, v: FieldValue): ModelRow {
 // This focused model starts from tags, not runtime Date classification. A
 // native Date and a number with the same finite timestamp are equal. Invalid
 // Dates and NaN occupy one equality class under the documented float rule.
-// An own display tag or a subclass does not change a native Date's equality
-// class. A borrowed prototype without the native Date slot matches no Date.
 type DateEqualityTag =
   | {
       kind: `date`
       realm: `local` | `foreign`
       timestamp: number | `invalid`
-      ownTag?: boolean
-      subclass?: boolean
     }
   | { kind: `number`; value: number | `NaN` }
 
 type TaggedDateRow = {
   id: string
-  tag: DateEqualityTag | { kind: `forged` }
+  tag: DateEqualityTag
 }
 
 function dateEqualityClass(tag: DateEqualityTag): number | `unordered` {
@@ -350,11 +339,7 @@ function expectedTaggedDateKeys(
 ): Array<string> {
   const expectedClass = dateEqualityClass(literal)
   return rows
-    .filter(
-      (row) =>
-        row.tag.kind !== `forged` &&
-        dateEqualityClass(row.tag) === expectedClass,
-    )
+    .filter((row) => dateEqualityClass(row.tag) === expectedClass)
     .map((row) => row.id)
     .sort()
 }
@@ -640,19 +625,13 @@ const pinnedChangeHistories: ReadonlyArray<History> = [
   },
 ]
 
-// The fixed realm grammar crosses the Date constructor's realm with equal,
-// unequal, and invalid timestamps, plus foreign Dates with an own display tag.
-// Fixed subclass rows and literals exercise inherited getTime on both sides of
-// eq; the forged row controls against trusting only the borrowed prototype.
-// Number literals test the Date/number and invalid-Date/NaN equality classes.
-// A later sync transaction moves four rows between those classes.
+// The fixed grammar crosses the Date constructor's realm with equal, unequal,
+// and invalid timestamps. Number literals test the Date/number and
+// invalid-Date/NaN equality classes. A later sync transaction moves four rows
+// between those classes.
 const taggedDateRows: ReadonlyArray<TaggedDateRow> = [
   { id: `local-one`, tag: { kind: `date`, realm: `local`, timestamp: 1 } },
   { id: `foreign-one`, tag: { kind: `date`, realm: `foreign`, timestamp: 1 } },
-  {
-    id: `foreign-tagged-one`,
-    tag: { kind: `date`, realm: `foreign`, timestamp: 1, ownTag: true },
-  },
   { id: `foreign-two`, tag: { kind: `date`, realm: `foreign`, timestamp: 2 } },
   {
     id: `local-invalid`,
@@ -662,86 +641,18 @@ const taggedDateRows: ReadonlyArray<TaggedDateRow> = [
     id: `foreign-invalid`,
     tag: { kind: `date`, realm: `foreign`, timestamp: `invalid` },
   },
-  {
-    id: `foreign-tagged-invalid`,
-    tag: { kind: `date`, realm: `foreign`, timestamp: `invalid`, ownTag: true },
-  },
   { id: `number-one`, tag: { kind: `number`, value: 1 } },
   { id: `number-nan`, tag: { kind: `number`, value: `NaN` } },
-  {
-    id: `local-subclass-one`,
-    tag: {
-      kind: `date`,
-      realm: `local`,
-      timestamp: 1,
-      subclass: true,
-      ownTag: true,
-    },
-  },
-  {
-    id: `foreign-subclass-one`,
-    tag: {
-      kind: `date`,
-      realm: `foreign`,
-      timestamp: 1,
-      subclass: true,
-      ownTag: true,
-    },
-  },
-  {
-    id: `foreign-subclass-two`,
-    tag: {
-      kind: `date`,
-      realm: `foreign`,
-      timestamp: 2,
-      subclass: true,
-      ownTag: true,
-    },
-  },
-  {
-    id: `foreign-subclass-invalid`,
-    tag: {
-      kind: `date`,
-      realm: `foreign`,
-      timestamp: `invalid`,
-      subclass: true,
-      ownTag: true,
-    },
-  },
-  { id: `borrowed-prototype-object`, tag: { kind: `forged` } },
 ]
 
 const taggedDateLiterals: ReadonlyArray<DateEqualityTag> = [
   { kind: `date`, realm: `local`, timestamp: 1 },
   { kind: `date`, realm: `foreign`, timestamp: 1 },
-  { kind: `date`, realm: `foreign`, timestamp: 1, ownTag: true },
   { kind: `date`, realm: `foreign`, timestamp: 2 },
   { kind: `date`, realm: `local`, timestamp: `invalid` },
   { kind: `date`, realm: `foreign`, timestamp: `invalid` },
-  { kind: `date`, realm: `foreign`, timestamp: `invalid`, ownTag: true },
   { kind: `number`, value: 1 },
   { kind: `number`, value: `NaN` },
-  {
-    kind: `date`,
-    realm: `local`,
-    timestamp: 1,
-    subclass: true,
-    ownTag: true,
-  },
-  {
-    kind: `date`,
-    realm: `foreign`,
-    timestamp: 1,
-    subclass: true,
-    ownTag: true,
-  },
-  {
-    kind: `date`,
-    realm: `foreign`,
-    timestamp: `invalid`,
-    subclass: true,
-    ownTag: true,
-  },
 ]
 
 // ---------------------------------------------------------------------------
@@ -816,42 +727,17 @@ function sourceRow(id: string, v: FieldValue): Row {
   return v === MISSING ? { id } : { id, v }
 }
 
-function runtimeTaggedDateValue(
-  tag: TaggedDateRow[`tag`],
-): Date | number | object {
-  if (tag.kind === `forged`) {
-    const foreignSubclass = runInNewContext(
-      `class D extends Date {}; new D(1)`,
-    ) as Date
-    const forged = Object.create(
-      Object.getPrototypeOf(foreignSubclass),
-    ) as object
-    Object.defineProperty(forged, Symbol.toStringTag, { value: `Other` })
-    return forged
-  }
+function runtimeTaggedDateValue(tag: DateEqualityTag): Date | number {
   if (tag.kind === `number`) {
     return tag.value === `NaN` ? Number.NaN : tag.value
   }
   const timestamp = tag.timestamp === `invalid` ? Number.NaN : tag.timestamp
-  class LocalDate extends Date {}
-  const date =
-    tag.realm === `foreign`
-      ? (runInNewContext(
-          tag.subclass
-            ? `class D extends Date {}; new D(timestamp)`
-            : `new Date(timestamp)`,
-          { timestamp },
-        ) as Date)
-      : tag.subclass
-        ? new LocalDate(timestamp)
-        : new Date(timestamp)
-  if (tag.ownTag) {
-    Object.defineProperty(date, Symbol.toStringTag, { value: `Other` })
-  }
-  return date
+  return tag.realm === `foreign`
+    ? (runInNewContext(`new Date(timestamp)`, { timestamp }) as Date)
+    : new Date(timestamp)
 }
 
-type TaggedValueRow = { id: string; v: Date | number | object }
+type TaggedValueRow = { id: string; v: Date | number }
 
 // The tag model predicts keys before the runtime values are constructed. The
 // driver observes the public live query, filtered subscription, and direct
@@ -939,21 +825,9 @@ async function observeTaggedDateEquality(
           index: 0,
           tag: { kind: `date`, realm: `foreign`, timestamp: `invalid` },
         },
-        {
-          index: 3,
-          tag: { kind: `date`, realm: `foreign`, timestamp: 1, ownTag: true },
-        },
-        { index: 4, tag: { kind: `date`, realm: `foreign`, timestamp: 2 } },
-        {
-          index: 10,
-          tag: {
-            kind: `date`,
-            realm: `foreign`,
-            timestamp: 2,
-            subclass: true,
-            ownTag: true,
-          },
-        },
+        { index: 2, tag: { kind: `date`, realm: `foreign`, timestamp: 1 } },
+        { index: 3, tag: { kind: `date`, realm: `foreign`, timestamp: 2 } },
+        { index: 5, tag: { kind: `date`, realm: `local`, timestamp: 2 } },
       ]
     collection.utils.begin()
     for (const transition of transitions) {
@@ -1548,7 +1422,7 @@ describe(`WHERE predicate publication oracle`, () => {
       }, [() => unsubscribe?.(), () => live.cleanup(), () => source.cleanup()])
     })
 
-    it(`a source event reads current Date and byte list-item contents`, async () => {
+    it(`a source event reads replaced Date and byte-array list members`, async () => {
       type MembershipRow = {
         id: string
         date: Date
@@ -1557,7 +1431,7 @@ describe(`WHERE predicate publication oracle`, () => {
       }
       const source = createCollection(
         mockSyncCollectionOptions<MembershipRow>({
-          id: `where-publication-mutable-items-${collectionSerial++}`,
+          id: `where-publication-replaced-items-${collectionSerial++}`,
           getKey: (row) => row.id,
           initialData: [1, 2, 3].map((value) => ({
             id: String(value),
@@ -1584,8 +1458,8 @@ describe(`WHERE predicate publication oracle`, () => {
         expect([...dates.keys()]).toEqual([`1`])
         expect([...bytes.keys()]).toEqual([`1`])
 
-        dateMembers[0]!.setTime(2)
-        byteMembers[0]![0] = 2
+        dateMembers[0] = new Date(2)
+        byteMembers[0] = new Uint8Array([2])
         source.utils.begin()
         source.utils.write({
           type: `update`,
@@ -2556,7 +2430,7 @@ describe(`WHERE predicate publication oracle`, () => {
       }, [() => subscription.unsubscribe(), () => collection.cleanup()])
     })
 
-    it(`native Dates and subclasses publish by timestamp and invalid-Date equality`, async () => {
+    it(`ordinary native Dates publish by timestamp across realms and invalid-Date equality`, async () => {
       const foreign = runtimeTaggedDateValue({
         kind: `date`,
         realm: `foreign`,
@@ -2565,97 +2439,11 @@ describe(`WHERE predicate publication oracle`, () => {
       // This checks the host premise: a native Date can fail local instanceof.
       expect(foreign instanceof Date).toBe(false)
       expect(Date.prototype.getTime.call(foreign)).toBe(1)
-      const foreignSubclass = runtimeTaggedDateValue({
-        kind: `date`,
-        realm: `foreign`,
-        timestamp: 1,
-        subclass: true,
-        ownTag: true,
-      })
-      expect(Date.prototype.getTime.call(foreignSubclass)).toBe(1)
-      expect(foreignSubclass instanceof Date).toBe(false)
-
       for (const indexed of [false, true]) {
         for (const literal of taggedDateLiterals) {
           await observeTaggedDateEquality(literal, indexed)
         }
       }
-    })
-
-    it(`keeps a forged local Date subclass prototype outside Date equality`, async () => {
-      class LocalDate extends Date {}
-      const forged = Object.create(LocalDate.prototype) as object
-      // The native-slot check establishes that this is an ordinary object,
-      // despite local instanceof reporting Date.
-      expect(forged instanceof Date).toBe(true)
-      expect(() => Date.prototype.getTime.call(forged)).toThrow(TypeError)
-      let collectionCleanup: (() => unknown) | undefined
-      let notDateCleanup: (() => unknown) | undefined
-      let sameObjectCleanup: (() => unknown) | undefined
-      let invalidDateCleanup: (() => unknown) | undefined
-      let zeroDateCleanup: (() => unknown) | undefined
-      let zeroNumberCleanup: (() => unknown) | undefined
-      await withOracleCleanup(async () => {
-        const collection = createCollection(
-          mockSyncCollectionOptions<{ id: string; v: object }>({
-            id: `where-publication-forged-date-${collectionSerial++}`,
-            getKey: (row) => row.id,
-            autoIndex: `off`,
-            initialData: [{ id: `forged`, v: forged }],
-          }),
-        )
-        collectionCleanup = () => collection.cleanup()
-        const notDate = createLiveQueryCollection((q) =>
-          q
-            .from({ row: collection })
-            .where(({ row }) => not(eq(row.v, new Date(1)))),
-        )
-        notDateCleanup = () => notDate.cleanup()
-        const sameObject = createLiveQueryCollection((q) =>
-          q.from({ row: collection }).where(({ row }) => eq(row.v, forged)),
-        )
-        sameObjectCleanup = () => sameObject.cleanup()
-        const invalidDate = createLiveQueryCollection((q) =>
-          q
-            .from({ row: collection })
-            .where(({ row }) => eq(row.v, new Date(Number.NaN))),
-        )
-        invalidDateCleanup = () => invalidDate.cleanup()
-        const zeroDate = createLiveQueryCollection((q) =>
-          q
-            .from({ row: collection })
-            .where(({ row }) => eq(row.v, new Date(0))),
-        )
-        zeroDateCleanup = () => zeroDate.cleanup()
-        const zeroNumber = createLiveQueryCollection((q) =>
-          q
-            .from({ row: collection })
-            .where(
-              () => new Func(`eq`, [new PropRef([`row`, `v`]), new Value(0)]),
-            ),
-        )
-        zeroNumberCleanup = () => zeroNumber.cleanup()
-        await notDate.preload()
-        // A distinct Date is unequal to this object. The same object remains
-        // equal by identity at the public query publication checkpoint. It
-        // also cannot join the invalid-Date/NaN equality class.
-        expect([...notDate.keys()]).toEqual([`forged`])
-        await sameObject.preload()
-        expect([...sameObject.keys()]).toEqual([`forged`])
-        await invalidDate.preload()
-        expect([...invalidDate.keys()]).toEqual([])
-        await zeroDate.preload()
-        expect([...zeroDate.keys()]).toEqual([])
-        await zeroNumber.preload()
-        expect([...zeroNumber.keys()]).toEqual([])
-      }, [
-        () => notDateCleanup?.(),
-        () => sameObjectCleanup?.(),
-        () => invalidDateCleanup?.(),
-        () => zeroDateCleanup?.(),
-        () => zeroNumberCleanup?.(),
-        () => collectionCleanup?.(),
-      ])
     })
 
     for (const history of [

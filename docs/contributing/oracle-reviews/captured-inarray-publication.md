@@ -40,9 +40,10 @@ must publish one coherent reverse insert/delete batch for the already joined
 rows. A QueryRef receiver puts mutable membership in the outer query while
 the inner filter suppresses the triggering source change. A correlated
 include receiver changes an unrelated child row and checks the parent row's
-child Collection against current membership. Fixed Date and byte-array
-items mutate in place inside their captured lists and change the result at
-the next unrelated source event.
+child Collection against current membership. Earlier fixed Date and byte-array
+witnesses mutated items in place inside their captured lists and observed a
+changed result at the next unrelated source event. The current scope is
+clarified below.
 
 The pooled-query receiver is
 `packages/db/tests/query/pooled-live-query-oracle.property.test.ts`. A query
@@ -292,3 +293,16 @@ before subset settlement. Returning equality for every local comparison in
 the unbounded captured-list path failed the opposed key/value order check.
 The reviewer found no further defect in those two witnesses. Their stated
 composition and provider limits still apply.
+
+## Scope refinement for native list items
+
+The maintainer declined a guarantee after callers modify standard data values.
+The older Date and byte-array witnesses above edited an item already held in
+the captured list. The current evaluator and WHERE publication witnesses
+instead replace the list entry with a new Date or byte array, then compare
+current membership at evaluation or at the next source event. The prior
+in-place observations remain historical evidence only. No current oracle
+claims what a retained query does after an existing native item is mutated.
+The compiler now snapshots entry identity rather than re-encoding each item
+or checking its property descriptors at every source event. Same-length
+replacement witnesses reject an array-reference or length-only detector.

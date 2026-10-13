@@ -383,26 +383,6 @@ describe(`DeduplicatedLoadSubset`, () => {
     expect(loadSubset).toHaveBeenCalledTimes(2)
   })
 
-  it(`does not substitute comparison payloads with custom instance methods`, () => {
-    const date = new Date(2)
-    const bytes = new Uint8Array([1, 2, 3])
-    Object.defineProperty(date, `getTime`, { value: () => 1 })
-    Object.defineProperty(bytes, `slice`, { value: () => bytes })
-    const where = new Func<boolean>(`and`, [
-      eq(ref(`date`), val(date)),
-      eq(ref(`bytes`), val(bytes)),
-    ])
-    const request = captureRequest({ where })
-    const rows = [
-      { date, bytes },
-      { date: new Date(2), bytes: new Uint8Array([1, 2, 3]) },
-    ]
-    expect(request.where).toBe(where)
-    expect(rows.map(compileSingleRowExpression(request.where!))).toEqual(
-      rows.map(compileSingleRowExpression(where)),
-    )
-  })
-
   describe.each([`Date`, `Uint8Array`] as const)(
     `request transport preserves %s predicate matches`,
     (type) => {
@@ -429,6 +409,8 @@ describe(`DeduplicatedLoadSubset`, () => {
           expect(request).toBe(options)
           expect(request.where).toBe(where)
           const matches = compileSingleRowExpression(request.where!)
+          // Transport keeps the literal object; ordinary native value
+          // equality uses its time or bytes across JavaScript environments.
           expect(
             [foreign, local].map((item) => matches({ value: item })),
           ).toEqual([true, true])

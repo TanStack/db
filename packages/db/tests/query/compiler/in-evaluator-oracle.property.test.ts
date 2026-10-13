@@ -11,9 +11,9 @@ import { oraclePropertyOptions, oracleRuns } from '../../oracle-config.js'
  *
  * Transfer law: The public `inArray` API describes array membership. A
  * compiled expression holding a caller-owned array reads that array's current
- * members whenever it evaluates, even if the array or one of its items has
- * changed since compilation. An own `some` method is not a list member and
- * cannot decide membership. The current evaluator returns UNKNOWN (`null`)
+ * members whenever it evaluates, including entries replaced since compilation.
+ * Mutating a Date or byte-array item in place is outside this law. The current
+ * evaluator returns UNKNOWN (`null`)
  * for a null or undefined value and FALSE for a list that is not an array.
  * Otherwise the result is TRUE when some list item equals the value under the
  * evaluator's equality, and FALSE when none does. A null or undefined item
@@ -24,10 +24,9 @@ import { oraclePropertyOptions, oracleRuns } from '../../oracle-config.js'
  *
  * - `NaN` and an invalid Date equal each other and nothing else.
  * - A native Date from either realm equals its millisecond timestamp, and
- *   another Date with the same timestamp. A borrowed Date prototype does not
- *   give an ordinary object native Date identity.
- * - Two Uint8Arrays (Buffers included) are equal when their native bytes are
- *   equal. Own `length` or `byteLength` properties cannot change that result.
+ *   another Date with the same timestamp.
+ * - Two ordinary Uint8Arrays (Buffers included) are equal when their bytes are
+ *   equal.
  * - Temporal kinds with an intrinsic `.equals()` use that relation. This
  *   includes equivalent time-zone aliases for ZonedDateTime, but excludes a
  *   distinct fixed-offset zone. PlainMonthDay and PlainYearMonth also retain
@@ -40,27 +39,24 @@ import { oraclePropertyOptions, oracleRuns } from '../../oracle-config.js'
  *
  * Model: `referenceIn` walks present indices through the length captured at
  * the start of evaluation and applies `referenceEqual`, which restates the
- * rules above. It does not call the array's overridable methods and imports
- * no production comparison or normalization helper.
+ * rules above. It imports no production comparison or normalization helper.
  *
  * Domain: values and items come from a pool that contains the boundaries
  * of each rule: equal and unequal strings, a string that begins with the
  * internal normalization prefix, booleans, `0`, `-0`, `1`, `NaN`, `1n`, a
  * local and foreign valid Dates and their timestamps, local and foreign
- * invalid Dates, borrowed Date prototypes, equal and unequal byte
- * arrays, a Buffer, native bytes from another realm with equal and unequal
- * content, genuine local and foreign bytes with own display-tag shadows, bytes
- * with own `length` or `byteLength` shadows, and a wide typed array with a
- * spoofed byte tag. A fixed control also shadows byte iteration. Temporal
+ * invalid Dates, equal and unequal byte arrays, a Buffer, and native bytes
+ * from another realm with equal and unequal content. Temporal
  * values include ZonedDateTime zone aliases, unequal values within each
  * modeled Temporal kind, reference ISO year/day
  * differences hidden by default display, and Duration carry forms with equal
  * display but distinct fields, one shared object and a structurally equal
  * copy, `null` and `undefined`. Lists have zero to six
  * items and may repeat. The list is a constant `Value`, the shape that join
- * demand builds, or a row field. Fixed histories also compile a caller-owned
- * list, then replace a slot or mutate a Date or byte item before reevaluating.
- * A fixed history also compiles, shadows `some`, and edits a list slot.
+ * demand builds, or a row field. A fixed immutable primitive list checks the
+ * compiled constant-list path against the same independent membership model.
+ * Fixed histories also compile a caller-owned list, then replace a scalar,
+ * Date, or byte-array slot before reevaluating.
  *
  * Production driver: compile `in` with the public IR and evaluate it for
  * each row, as a WHERE clause does.
@@ -73,8 +69,8 @@ import { oraclePropertyOptions, oracleRuns } from '../../oracle-config.js'
  *
  * Limits: this owner checks the boolean result of `in` for ordinary values
  * from one Temporal polyfill copy. It does not claim mixed Temporal
- * implementations, malformed Temporal lookalikes, deliberately shadowed
- * Temporal members, or replaced genuine prototypes. WHERE
+ * implementations, caller-modified built-ins, malformed Temporal lookalikes,
+ * deliberately shadowed Temporal members, or replaced genuine prototypes. WHERE
  * publication, indexes, and subset loading have other owners.
  */
 
@@ -97,44 +93,10 @@ const foreignDate = runInNewContext(`new Date(1000)`) as Date
 const laterForeignDate = runInNewContext(`new Date(1001)`) as Date
 const localInvalidDate = new Date(Number.NaN)
 const foreignInvalidDate = runInNewContext(`new Date(NaN)`) as Date
-const borrowedDate = Object.create(Date.prototype) as object
-const otherBorrowedDate = Object.create(Date.prototype) as object
-const shadowedTagBytes = new Uint8Array([1, 2])
-Object.defineProperty(shadowedTagBytes, Symbol.toStringTag, {
-  value: `ordinary`,
-})
 const foreignBytes = runInNewContext(`new Uint8Array([1, 2])`) as Uint8Array
 const unequalForeignBytes = runInNewContext(
   `new Uint8Array([1, 3])`,
 ) as Uint8Array
-const shadowedForeignBytes = runInNewContext(
-  `Object.defineProperty(new Uint8Array([1, 2]), Symbol.toStringTag, { value: 'ordinary' })`,
-) as Uint8Array
-const byteLengthShadowedForeignBytes = Object.defineProperty(
-  runInNewContext(`new Uint8Array([1, 2])`) as Uint8Array,
-  `byteLength`,
-  { value: 0 },
-)
-function shadowByteCount(
-  bytes: ReadonlyArray<number>,
-  field: `length` | `byteLength`,
-): Uint8Array {
-  return Object.defineProperty(Uint8Array.from(bytes), field, { value: 0 })
-}
-const byteLengthShadowed = shadowByteCount([1, 2], `byteLength`)
-const equalByteLengthShadowed = shadowByteCount([1, 2], `byteLength`)
-const unequalByteLengthShadowed = shadowByteCount([9, 9], `byteLength`)
-const lengthShadowed = shadowByteCount([1, 2], `length`)
-const equalLengthShadowed = shadowByteCount([1, 2], `length`)
-const unequalLengthShadowed = shadowByteCount([9, 9], `length`)
-const spoofedWideBytes = new Uint16Array([1, 2])
-Object.defineProperty(spoofedWideBytes, Symbol.toStringTag, {
-  value: `Uint8Array`,
-})
-const otherSpoofedWideBytes = new Uint16Array([1, 2])
-Object.defineProperty(otherSpoofedWideBytes, Symbol.toStringTag, {
-  value: `Uint8Array`,
-})
 const samePlainDate = Temporal.PlainDate.from(`2024-01-01`)
 const leapMonthDay = new Temporal.PlainMonthDay(2, 29, `iso8601`, 1972)
 const sameLeapMonthDay = new Temporal.PlainMonthDay(2, 29, `iso8601`, 1972)
@@ -191,25 +153,12 @@ const pool: ReadonlyArray<unknown> = [
   1000,
   localInvalidDate,
   foreignInvalidDate,
-  borrowedDate,
-  otherBorrowedDate,
   new Uint8Array([1, 2]),
   new Uint8Array([1, 2]),
   new Uint8Array([1, 3]),
   Buffer.from([1, 2]),
-  shadowedTagBytes,
   foreignBytes,
   unequalForeignBytes,
-  shadowedForeignBytes,
-  byteLengthShadowedForeignBytes,
-  byteLengthShadowed,
-  equalByteLengthShadowed,
-  unequalByteLengthShadowed,
-  lengthShadowed,
-  equalLengthShadowed,
-  unequalLengthShadowed,
-  spoofedWideBytes,
-  otherSpoofedWideBytes,
   plainDate,
   Temporal.PlainDate.from(`2024-01-01`),
   otherPlainDate,
@@ -246,17 +195,11 @@ const pool: ReadonlyArray<unknown> = [
   undefined,
 ]
 
-// The intrinsic typed-array tag reads the internal class across realms. An
-// instance's own display tag cannot hide genuine bytes or forge wide bytes.
+// The intrinsic typed-array tag reads ordinary byte-view classes across realms.
 const typedArrayTag = Object.getOwnPropertyDescriptor(
   Object.getPrototypeOf(Uint8Array.prototype),
   Symbol.toStringTag,
 )!.get!
-const typedArrayLength = Object.getOwnPropertyDescriptor(
-  Object.getPrototypeOf(Uint8Array.prototype),
-  `length`,
-)!.get!
-const typedArrayValues = Uint8Array.prototype.values
 
 // Date's native method reads the internal timestamp in either realm and
 // rejects an object that only borrows the prototype. The reference captures
@@ -353,19 +296,12 @@ function referenceEqual(left: unknown, right: unknown): boolean {
   }
   if (isBytes(left) || isBytes(right)) {
     if (!isBytes(left) || !isBytes(right)) return false
-    // Captured native length and value iteration ignore own properties. The
-    // model materializes the two byte sequences before comparing them;
-    // production walks indexes directly.
-    const leftLength = Reflect.apply(typedArrayLength, left, []) as number
-    const rightLength = Reflect.apply(typedArrayLength, right, []) as number
-    const leftBytes = Array.from(
-      Reflect.apply(typedArrayValues, left, []) as Iterable<number>,
-    )
-    const rightBytes = Array.from(
-      Reflect.apply(typedArrayValues, right, []) as Iterable<number>,
-    )
+    // Materialize the ordinary byte sequences for an independent comparison;
+    // production walks indexed elements directly.
+    const leftBytes = Array.from(left)
+    const rightBytes = Array.from(right)
     return (
-      leftLength === rightLength &&
+      leftBytes.length === rightBytes.length &&
       leftBytes.every((byte, index) => byte === rightBytes[index])
     )
   }
@@ -492,8 +428,6 @@ function evaluateWithKindOnlyTemporalKey(testCase: InCase): boolean | null {
 
 function describeCase(testCase: InCase): string {
   const show = (value: unknown): string => {
-    if (value === borrowedDate) return `borrowed Date prototype`
-    if (value === otherBorrowedDate) return `other borrowed Date prototype`
     const dateTime = nativeDateTimestamp(value)
     return typeof value === `bigint`
       ? `${value}n`
@@ -554,42 +488,6 @@ describe(`in evaluator`, () => {
     checkCurrent(2)
   })
 
-  it.each([
-    { listFromRow: false, source: `constant` },
-    { listFromRow: true, source: `row-supplied` },
-  ])(
-    `ignores an own some method after compiling a $source list and editing its member`,
-    ({ listFromRow }) => {
-      const list: Array<unknown> = [1]
-      const listExpression = listFromRow
-        ? new PropRef([`row`, `list`])
-        : new Value(list)
-      const evaluate = compileExpression(
-        new Func(`in`, [new PropRef([`row`, `value`]), listExpression]),
-      )
-      const checkCurrent = (value: unknown) =>
-        expect
-          .soft(evaluate({ row: { value, list } }))
-          .toBe(referenceIn(value, list))
-
-      // A hostile own method can lie, but indexed members remain the input.
-      checkCurrent(1)
-      Object.defineProperty(list, `some`, {
-        configurable: true,
-        value: () => false,
-      })
-      checkCurrent(1)
-      list[0] = 2
-      Object.defineProperty(list, `some`, {
-        configurable: true,
-        value: () => true,
-      })
-      checkCurrent(1)
-      checkCurrent(2)
-      checkCurrent(null)
-    },
-  )
-
   it(`skips sparse holes and nullish items while retaining present members`, () => {
     const list = Array<unknown>(4)
     list[1] = null
@@ -604,9 +502,8 @@ describe(`in evaluator`, () => {
     }
   })
 
-  it(`reads a Date item's current timestamp after compilation`, () => {
-    const dateItem = new Date(1)
-    const list = [dateItem]
+  it(`reads a replaced Date member after compilation`, () => {
+    const list = [new Date(1)]
     const evaluate = compileExpression(
       new Func(`in`, [new PropRef([`row`, `value`]), new Value(list)]),
     )
@@ -614,14 +511,13 @@ describe(`in evaluator`, () => {
       expect(evaluate({ row: { value } })).toBe(referenceIn(value, list))
 
     checkCurrent(1)
-    dateItem.setTime(2)
+    list[0] = new Date(2)
     checkCurrent(1)
     checkCurrent(2)
   })
 
-  it(`reads a byte item's current content after compilation`, () => {
-    const byteItem = new Uint8Array([1, 2])
-    const list = [byteItem]
+  it(`reads a replaced byte-array member after compilation`, () => {
+    const list = [new Uint8Array([1, 2])]
     const evaluate = compileExpression(
       new Func(`in`, [new PropRef([`row`, `value`]), new Value(list)]),
     )
@@ -629,7 +525,7 @@ describe(`in evaluator`, () => {
       expect(evaluate({ row: { value } })).toBe(referenceIn(value, list))
 
     checkCurrent(new Uint8Array([1, 2]))
-    byteItem[1] = 3
+    list[0] = new Uint8Array([1, 3])
     checkCurrent(new Uint8Array([1, 2]))
     checkCurrent(new Uint8Array([1, 3]))
   })
@@ -649,43 +545,52 @@ describe(`in evaluator`, () => {
     check(evaluateWithProduction, testCase)
   })
 
-  it(`uses intrinsic byte class when a typed array shadows its display tag`, () => {
-    expect(Object.prototype.toString.call(shadowedTagBytes)).toBe(
-      `[object ordinary]`,
-    )
-    expect(Object.prototype.toString.call(spoofedWideBytes)).toBe(
-      `[object Uint8Array]`,
-    )
-    expect(isBytes(shadowedTagBytes)).toBe(true)
-    expect(isBytes(spoofedWideBytes)).toBe(false)
-    checkEqualityPaths(shadowedTagBytes, new Uint8Array([1, 2]), true)
-    checkEqualityPaths(spoofedWideBytes, otherSpoofedWideBytes, false)
+  it(`keeps frozen primitive constants in the same membership classes`, () => {
+    const lists: ReadonlyArray<ReadonlyArray<unknown>> = [
+      Object.freeze([]),
+      Object.freeze([0, Number.NaN, 1n, `a`, PREFIX, null, undefined]),
+    ]
+    const values = [
+      0,
+      -0,
+      Number.NaN,
+      new Date(0),
+      runInNewContext(`new Date(0)`) as Date,
+      new Date(Number.NaN),
+      1n,
+      1,
+      `a`,
+      PREFIX,
+      `b`,
+      null,
+      undefined,
+      new Uint8Array([0]),
+    ]
+    for (const list of lists) {
+      const evaluate = compileExpression(
+        new Func(`in`, [new PropRef([`row`, `value`]), new Value(list)]),
+      )
+      for (const value of values) {
+        expect(evaluate({ row: { value } })).toBe(referenceIn(value, list))
+      }
+    }
   })
 
   it(`compares native bytes from another realm by content in every compiled equality path`, () => {
-    // The independent model's captured typed-array intrinsic accepts a native
-    // view across realms. An own display tag does not change its byte class.
+    // The independent model's typed-array intrinsic accepts an ordinary
+    // native view across realms.
     expect(foreignBytes instanceof Uint8Array).toBe(false)
     expect(ArrayBuffer.isView(foreignBytes)).toBe(true)
-    expect(Object.prototype.toString.call(shadowedForeignBytes)).toBe(
-      `[object ordinary]`,
-    )
     expect(isBytes(foreignBytes)).toBe(true)
-    expect(isBytes(shadowedForeignBytes)).toBe(true)
-    expect(isBytes(spoofedWideBytes)).toBe(false)
     checkEqualityPaths(foreignBytes, new Uint8Array([1, 2]), true)
-    checkEqualityPaths(shadowedForeignBytes, shadowedTagBytes, true)
     checkEqualityPaths(unequalForeignBytes, new Uint8Array([1, 2]), false)
-    checkEqualityPaths(foreignBytes, spoofedWideBytes, false)
   })
 
-  it(`compares foreign native Dates by timestamp and excludes borrowed prototypes in every compiled equality path`, () => {
+  it(`compares foreign native Dates by timestamp in every compiled equality path`, () => {
     expect(foreignDate instanceof Date).toBe(false)
     expect(foreignInvalidDate instanceof Date).toBe(false)
-    expect(borrowedDate instanceof Date).toBe(true)
     expect(nativeDateTimestamp(foreignDate)).toBe(1000)
     expect(Number.isNaN(nativeDateTimestamp(foreignInvalidDate))).toBe(true)
-    expect(nativeDateTimestamp(borrowedDate)).toBeUndefined()
     checkEqualityPaths(foreignDate, localDate, true)
     checkEqualityPaths(foreignDate, 1000, true)
     checkEqualityPaths(laterForeignDate, localDate, false)
@@ -696,47 +601,6 @@ describe(`in evaluator`, () => {
     checkEqualityPaths(foreignInvalidDate, localInvalidDate, true)
     checkEqualityPaths(foreignInvalidDate, Number.NaN, true)
     checkEqualityPaths(foreignInvalidDate, localDate, false)
-    checkEqualityPaths(borrowedDate, localDate, false)
-    checkEqualityPaths(borrowedDate, 1000, false)
-    checkEqualityPaths(borrowedDate, borrowedDate, true)
-    checkEqualityPaths(borrowedDate, otherBorrowedDate, false)
-  })
-
-  it(`ignores own byte-count shadows in every compiled equality path`, () => {
-    // Both shadowed arrays still hold two native bytes. Pairing two zero
-    // shadows catches a comparison that stops before reading their content;
-    // pairing one with an unshadowed array catches a false inequality.
-    expect(byteLengthShadowed.byteLength).toBe(0)
-    expect(lengthShadowed.length).toBe(0)
-    expect(Reflect.apply(typedArrayLength, byteLengthShadowed, [])).toBe(2)
-    expect(Reflect.apply(typedArrayLength, lengthShadowed, [])).toBe(2)
-    expect(byteLengthShadowedForeignBytes instanceof Uint8Array).toBe(false)
-    expect(byteLengthShadowedForeignBytes.byteLength).toBe(0)
-    checkEqualityPaths(byteLengthShadowed, new Uint8Array([1, 2]), true)
-    checkEqualityPaths(byteLengthShadowed, equalByteLengthShadowed, true)
-    checkEqualityPaths(byteLengthShadowed, unequalByteLengthShadowed, false)
-    checkEqualityPaths(byteLengthShadowedForeignBytes, byteLengthShadowed, true)
-    checkEqualityPaths(
-      byteLengthShadowedForeignBytes,
-      unequalByteLengthShadowed,
-      false,
-    )
-    checkEqualityPaths(lengthShadowed, new Uint8Array([1, 2]), true)
-    checkEqualityPaths(lengthShadowed, equalLengthShadowed, true)
-    checkEqualityPaths(lengthShadowed, unequalLengthShadowed, false)
-  })
-
-  it(`reads native byte values when an array shadows its iterator`, () => {
-    const bytes = new Uint8Array([1, 2])
-    Object.defineProperty(bytes, Symbol.iterator, {
-      value: function* () {
-        yield 9
-        yield 9
-      },
-    })
-    expect(Array.from(bytes)).toEqual([9, 9])
-    checkEqualityPaths(bytes, new Uint8Array([1, 2]), true)
-    checkEqualityPaths(bytes, new Uint8Array([9, 9]), false)
   })
 
   it(`distinguishes unequal intrinsic values within each Temporal kind`, () => {

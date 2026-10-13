@@ -1,10 +1,4 @@
-import {
-  dateTimestamp,
-  durationFields,
-  isTemporal,
-  nativeTypedArrayLength,
-  nativeTypedArrayTag,
-} from '../utils'
+import { dateTimestamp, durationFields, isTemporal } from '../utils'
 import { getRuntimeReferenceIdentity } from '../query/runtime-reference-identity'
 import { codedMessage, devBuild } from '../error-message'
 import type { CompareOptions } from '../query/builder/types'
@@ -112,21 +106,6 @@ export const ascComparator = (a: any, b: any, opts: CompareOptions): number => {
     return compareTemporalValues(a, b)
   }
 
-  // Native byte views use their unsigned contents for default order. This
-  // agrees with their content-based equality and gives fresh equal views the
-  // same position; source keys break ties between rows.
-  const aIsBytes = isUint8Array(a)
-  const bIsBytes = isUint8Array(b)
-  if (aIsBytes && bIsBytes) {
-    const aLength = nativeTypedArrayLength(a)
-    const bLength = nativeTypedArrayLength(b)
-    for (let index = 0; index < Math.min(aLength, bLength); index++) {
-      const difference = a[index]! - b[index]!
-      if (difference !== 0) return difference
-    }
-    return aLength - bLength
-  }
-
   // Symbols have identity but no built-in order: relational comparison throws.
   // A stable runtime ID gives tree indexes a total order while preserving
   // equality only for the same symbol.
@@ -156,18 +135,14 @@ export const ascComparator = (a: any, b: any, opts: CompareOptions): number => {
           ? 1
           : aTemporal
             ? 2
-            : aIsBytes
-              ? 3
-              : 4
+            : 3
       const bKind = Array.isArray(b)
         ? 0
         : bDateTime !== undefined
           ? 1
           : bTemporal
             ? 2
-            : bIsBytes
-              ? 3
-              : 4
+            : 3
       if (aKind !== bKind) return aKind - bKind
       const aId = getObjectId(a)
       const bId = getObjectId(b)
@@ -277,15 +252,18 @@ export const defaultComparator = makeComparator({
   stringSort: `locale`,
 })
 
-/** Recognize native Uint8Array values, including Buffers and foreign realms. */
+/** Recognize ordinary Uint8Array values, including Buffers and foreign realms. */
 export function isUint8Array(value: unknown): value is Uint8Array {
-  return nativeTypedArrayTag(value) === `Uint8Array`
+  return (
+    ArrayBuffer.isView(value) &&
+    Object.prototype.toString.call(value) === `[object Uint8Array]`
+  )
 }
 
 /** Compare two Uint8Arrays for content equality. */
 function areUint8ArraysEqual(a: Uint8Array, b: Uint8Array): boolean {
-  const length = nativeTypedArrayLength(a)
-  if (length !== nativeTypedArrayLength(b)) {
+  const length = a.length
+  if (length !== b.length) {
     return false
   }
   for (let i = 0; i < length; i++) {
@@ -322,9 +300,8 @@ function canonicalTemporalZone(zoneId: string): string {
 
 function normalizeBinary(value: Uint8Array): string {
   let bytes = ``
-  const length = nativeTypedArrayLength(value)
-  for (let index = 0; index < length; index++) {
-    bytes += String.fromCharCode(value[index]!)
+  for (const byte of value) {
+    bytes += String.fromCharCode(byte)
   }
   return normalizedKey(`binary`, bytes)
 }
@@ -491,9 +468,9 @@ export function compareTemporalValues(a: unknown, b: unknown): number {
  *
  * Temporal types intentionally throw from `valueOf` to prevent silent
  * miscomparison via the native relational operators — delegate to
- * `compareTemporalValues` for them. Native Dates compare by their intrinsic
- * timestamps, including against numbers and when a subclass overrides
- * `valueOf`. Other values retain the native relational comparison.
+ * `compareTemporalValues` for them. Ordinary native Dates compare by their
+ * timestamps, including against numbers and across realms. Other values
+ * retain the native relational comparison.
  *
  * Callers must handle null/undefined themselves — this helper assumes both
  * arguments are non-null.

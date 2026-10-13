@@ -753,9 +753,13 @@ read in `where`, a join operand, `select`, a group key or aggregate argument,
 `having`, or an order expression. One source transaction publishes the new
 result coherently; changing a projected value, group, or order cannot leave
 the old stage output behind or expose an intermediate public result.
+This rule covers entries added, removed, or replaced in the captured array;
+it does not specify behavior after an existing Date or byte-array member is
+mutated in place.
 
-The compiler derives one list revision from raw source events and shares it
-across the compiled query graph. A list change makes each affected expression
+The compiler compares captured array entries by identity at raw source events
+and shares one list revision across the compiled query graph.
+A list change makes each affected expression
 stage revisit its retained inputs; an ordinary delta with an unchanged list
 visits only the inputs it changes. Each stage retains its prior output for
 retraction before it evaluates the new membership. JOIN, WHERE, SELECT,
@@ -1614,12 +1618,13 @@ create recursive Collection machinery.
     counts as a preload. A deferring live query keeps its sources from
     garbage collection but is not counted in their `subscriberCount` or
     `subscribers:change`, which adapters read as a request for live data.
-16. **Captured membership:** editing a caller-owned `inArray` list does not
-    publish by itself. After the next source event, the complete existing
-    live-query result reflects the list's current members at every expression
-    stage, including rows untouched by that event. Value, group, join, and
-    order changes publish coherently. Submitted source request data remains
-    immutable.
+16. **Captured membership:** adding, removing, or replacing entries in a
+    caller-owned `inArray` list does not publish by itself. After the next
+    source event, the complete existing live-query result reflects those
+    current entries at every expression stage, including rows untouched by
+    that event. Value, group, join, and order changes publish coherently.
+    Mutating an existing Date or byte-array member in place is outside this
+    law. Submitted source request data remains immutable.
 
 ## Glossary
 

@@ -1,5 +1,11 @@
 # Date order across JavaScript realms
 
+Scope update for PR #2116: this record preserves evidence from an earlier
+commit. The current comparison oracle keeps ordinary native Date timestamps
+across realms; its tagged, forged, borrowed, and subclass cases were removed
+after the maintainer declined guarantees for caller-modified built-ins. See
+the current [coverage map](../oracle-coverage.md) for the active witness.
+
 The comparison loss audit led to a same-realm NaN/invalid-Date transfer. A
 fresh hostile review then challenged the whole published Date ordering law,
 including native Dates created in another JavaScript realm. The live-query

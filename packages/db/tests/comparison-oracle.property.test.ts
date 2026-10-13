@@ -1,4 +1,3 @@
-import { Buffer } from 'node:buffer'
 import { runInNewContext } from 'node:vm'
 import { describe, expect, it } from 'vitest'
 import { fc, test as fcTest } from '@fast-check/vitest'
@@ -28,7 +27,7 @@ import type { CompareOptions } from '../src/query/builder/types'
  * position and follow finite values; null remains first. The published NaN
  * ordering change in `packages/db/CHANGELOG.md` (#1582) and the live-query
  * guide establish that law for Dates with native prototypes regardless of
- * their JavaScript realm.
+ * their JavaScript realm in the currently broader Date-order lane.
  *
  * Authority: `OrderByOptions` and `CompareOptions` in the query builder's
  * option types declare these modes. The index comparator contract accepts
@@ -40,9 +39,7 @@ import type { CompareOptions } from '../src/query/builder/types'
  * input tags and finite epoch-day values, rather than the production
  * unorderable classifier. It covers number-only and Date-only sorts with
  * optional null. A separate realm-tagged Date model below checks native Date
- * timestamps and invalidity across realms, plus one public ordered scan. A
- * fixed Date-subclass witness covers an inherited native `getTime` beyond the
- * generated plain-Date grammar.
+ * timestamps and invalidity across realms, plus one public ordered scan.
  * Neither lane claims mixed-type order or every query/index path. Equality laws separately
  * cover the normalized value classes and changed-byte controls. Comparator
  * signs reject NaN and non-number results before reduction. Signed infinity
@@ -54,20 +51,11 @@ import type { CompareOptions } from '../src/query/builder/types'
  * recorded in `packages/db/CHANGELOG.md` (#779). The bounded key-size and
  * indexed-byte checks retain the regression contract introduced with #1797;
  * they constrain this internal utility, not a public serialized format or a
- * universal performance bound. Own `length` and `byteLength` properties do
- * not change native byte content. The 32-character margin is the existing
+ * universal performance bound. The 32-character margin is the existing
  * constant-overhead budget for the sampled 0..200-byte keys. Changed-byte
  * equality and key histories cover lengths 1..200. Fixed changes at byte 64
  * of a 129-byte view and the last byte of a 200-byte view pin positions that
  * a short generated campaign need not sample.
- *
- * The proposed native-byte ORDER BY law compares genuine Uint8Arrays and
- * Buffers by unsigned byte content, with a shorter equal prefix first. Equal
- * contents compare at one position. Genuine foreign-realm views and own
- * length shadows retain their native bytes. The mixed-object witness checks
- * total-order transitivity without choosing which kind comes first. This
- * bounded direct-return witness does not claim relational WHERE comparison,
- * other typed-array classes, arbitrary object order, or mutation.
  */
 
 const defaultOpts: CompareOptions = {
@@ -353,23 +341,13 @@ type RealmDateSample = {
   rightTime: number | null
   leftForeign: boolean
   rightForeign: boolean
-  leftOwnTag?: boolean
-  rightOwnTag?: boolean
 }
 
-function dateInRealm(
-  time: number | null,
-  foreign: boolean,
-  ownTag = false,
-): Date {
+function dateInRealm(time: number | null, foreign: boolean): Date {
   const timestamp = time ?? Number.NaN
-  const date = foreign
+  return foreign
     ? (runInNewContext(`new Date(timestamp)`, { timestamp }) as Date)
     : new Date(timestamp)
-  if (ownTag) {
-    Object.defineProperty(date, Symbol.toStringTag, { value: `Other` })
-  }
-  return date
 }
 
 // `null` is a model-only invalid-Date tag; production receives a real Date
@@ -383,16 +361,8 @@ function modelDateSign(left: number | null, right: number | null): -1 | 0 | 1 {
 }
 
 function assertRealmDateOrder(sample: RealmDateSample): void {
-  const left = dateInRealm(
-    sample.leftTime,
-    sample.leftForeign,
-    sample.leftOwnTag,
-  )
-  const right = dateInRealm(
-    sample.rightTime,
-    sample.rightForeign,
-    sample.rightOwnTag,
-  )
+  const left = dateInRealm(sample.leftTime, sample.leftForeign)
+  const right = dateInRealm(sample.rightTime, sample.rightForeign)
   const expected = modelDateSign(sample.leftTime, sample.rightTime)
   const reverseExpected = expected === 0 ? 0 : -expected
   expect(isUnorderable(left)).toBe(sample.leftTime === null)
@@ -412,10 +382,8 @@ function assertRealmDateOrder(sample: RealmDateSample): void {
 // Legal pairs cross local and foreign native Dates, valid epoch milliseconds
 // in -1e12..1e12 and invalid Dates. The fixed witnesses below force the
 // foreign-valid and foreign-invalid paths; generated pairs add equal times,
-// both operand orders, both invalid values, and Dates with an own display tag.
-// A display tag cannot change native Date identity. Proxies, non-Date objects,
-// and user-defined Date subclasses are outside this generated grammar. The
-// fixed witness below covers local and foreign subclasses with an own tag.
+// both operand orders and both invalid values. Caller-modified built-ins,
+// proxies, and user-defined Date subclasses are outside this grammar.
 const arbitraryDateTime = fc.oneof(
   fc.integer({ min: -1_000_000_000_000, max: 1_000_000_000_000 }),
   fc.constant(null),
@@ -426,24 +394,18 @@ const arbitraryRealmDateSample: fc.Arbitrary<RealmDateSample> = fc.oneof(
     rightTime: arbitraryDateTime,
     leftForeign: fc.boolean(),
     rightForeign: fc.boolean(),
-    leftOwnTag: fc.boolean(),
-    rightOwnTag: fc.boolean(),
   }),
   fc
     .record({
       time: arbitraryDateTime,
       leftForeign: fc.boolean(),
       rightForeign: fc.boolean(),
-      leftOwnTag: fc.boolean(),
-      rightOwnTag: fc.boolean(),
     })
-    .map(({ time, leftForeign, rightForeign, leftOwnTag, rightOwnTag }) => ({
+    .map(({ time, leftForeign, rightForeign }) => ({
       leftTime: time,
       rightTime: time,
       leftForeign,
       rightForeign,
-      leftOwnTag,
-      rightOwnTag,
     })),
 )
 
@@ -1011,217 +973,6 @@ describe(`NaN and invalid Date default-order refinement`, () => {
 })
 
 describe(`native Date order across JavaScript realms`, () => {
-  it(`uses the native Date brand without reading an unrelated display tag`, () => {
-    const forged = { [Symbol.toStringTag]: `Date` }
-    let tagReads = 0
-    const unrelated = Object.defineProperty({}, Symbol.toStringTag, {
-      get() {
-        tagReads++
-        return `Other`
-      },
-    })
-    expect(isUnorderable(forged)).toBe(false)
-    expect(normalizeValue(forged)).toBe(forged)
-    expect(
-      sign(ascComparator(forged, new Date(0), DEFAULT_COMPARE_OPTIONS)),
-    ).not.toBe(0)
-    expect(isUnorderable(unrelated)).toBe(false)
-    expect(tagReads).toBe(0)
-  })
-
-  it(`keeps native Date semantics when a foreign Date has an own display tag`, () => {
-    const timestamp = 123
-    const foreignValid = dateInRealm(timestamp, true, true)
-    const foreignInvalid = dateInRealm(null, true, true)
-    const foreignTemporalTagged = dateInRealm(timestamp, true)
-    Object.defineProperty(foreignTemporalTagged, Symbol.toStringTag, {
-      value: `Temporal.PlainDate`,
-    })
-    const foreignPrototypeTagged = dateInRealm(timestamp, true)
-    Object.defineProperty(
-      Object.getPrototypeOf(foreignPrototypeTagged),
-      Symbol.toStringTag,
-      { value: `Other` },
-    )
-    const foreignGetter = dateInRealm(timestamp, true)
-    let tagReads = 0
-    Object.defineProperty(foreignGetter, Symbol.toStringTag, {
-      get() {
-        tagReads++
-        return `Other`
-      },
-    })
-    const localValid = new Date(timestamp)
-    // The intrinsic establishes the native Date premise without consulting
-    // the production detector or the object's display tag.
-    expect(Date.prototype.getTime.call(foreignValid)).toBe(timestamp)
-    expect(Date.prototype.getTime.call(foreignInvalid)).toBeNaN()
-    expect(normalizeValue(foreignValid)).toBe(timestamp)
-    expect(normalizeValue(foreignTemporalTagged)).toBe(timestamp)
-    expect(normalizeValue(foreignPrototypeTagged)).toBe(timestamp)
-    expect(normalizeValue(foreignGetter)).toBe(timestamp)
-    expect(tagReads).toBe(0)
-    expect(normalizeValue(foreignInvalid)).toBeNaN()
-    expect(isUnorderable(foreignInvalid)).toBe(true)
-    expect(
-      ascComparator(foreignValid, localValid, DEFAULT_COMPARE_OPTIONS),
-    ).toBe(0)
-    expect(
-      ascComparator(localValid, foreignValid, DEFAULT_COMPARE_OPTIONS),
-    ).toBe(0)
-    expect(
-      ascComparator(foreignTemporalTagged, localValid, DEFAULT_COMPARE_OPTIONS),
-    ).toBe(0)
-    expect(
-      ascComparator(
-        foreignPrototypeTagged,
-        localValid,
-        DEFAULT_COMPARE_OPTIONS,
-      ),
-    ).toBe(0)
-    expect(
-      sign(ascComparator(foreignInvalid, localValid, DEFAULT_COMPARE_OPTIONS)),
-    ).toBe(1)
-  })
-
-  it(`uses the native timestamp of a tagged foreign Date subclass`, () => {
-    class LocalDate extends Date {}
-    const timestamp = 123
-    const localSubclass = new LocalDate(timestamp)
-    const foreignSubclass = runInNewContext(
-      `class D extends Date {}; new D(timestamp)`,
-      { timestamp },
-    ) as Date
-    const localInvalid = new LocalDate(Number.NaN)
-    const foreignInvalid = runInNewContext(
-      `class D extends Date {}; new D(Number.NaN)`,
-    ) as Date
-    for (const value of [
-      localSubclass,
-      foreignSubclass,
-      localInvalid,
-      foreignInvalid,
-    ]) {
-      Object.defineProperty(value, Symbol.toStringTag, { value: `Other` })
-    }
-    // The supplied time and native slot establish the Date premise. The
-    // foreign subclass's immediate prototype inherits native getTime.
-    expect(Date.prototype.getTime.call(foreignSubclass)).toBe(timestamp)
-    expect(foreignSubclass instanceof Date).toBe(false)
-    expect(
-      Object.getOwnPropertyDescriptor(
-        Object.getPrototypeOf(foreignSubclass),
-        `getTime`,
-      ),
-    ).toBeUndefined()
-
-    const assertEarlierDateOrder = (
-      value: Date,
-      compare: typeof ascComparator = ascComparator,
-    ) => {
-      expect(
-        sign(compare(value, new Date(timestamp - 1), DEFAULT_COMPARE_OPTIONS)),
-      ).toBe(1)
-      expect(
-        sign(compare(new Date(timestamp - 1), value, DEFAULT_COMPARE_OPTIONS)),
-      ).toBe(-1)
-    }
-
-    for (const value of [localSubclass, foreignSubclass]) {
-      expect(normalizeValue(value)).toBe(timestamp)
-      expect(
-        ascComparator(value, new Date(timestamp), DEFAULT_COMPARE_OPTIONS),
-      ).toBe(0)
-      expect(
-        ascComparator(new Date(timestamp), value, DEFAULT_COMPARE_OPTIONS),
-      ).toBe(0)
-      // A subclass-first comparator would put this value before both
-      // unequal Dates. The earlier Date must instead precede it.
-      assertEarlierDateOrder(value)
-      expect(
-        sign(
-          ascComparator(
-            value,
-            new Date(timestamp + 1),
-            DEFAULT_COMPARE_OPTIONS,
-          ),
-        ),
-      ).toBe(-1)
-      expect(
-        sign(
-          ascComparator(
-            new Date(timestamp + 1),
-            value,
-            DEFAULT_COMPARE_OPTIONS,
-          ),
-        ),
-      ).toBe(1)
-    }
-    // Feed a subclass-first answer through the same earlier-Date comparison.
-    // It reaches the comparison and fails at the expected sign assertion.
-    let reachedWrongOrder = false
-    expect(() =>
-      assertEarlierDateOrder(foreignSubclass, (left, right, options) => {
-        if (left === foreignSubclass && right instanceof Date) {
-          reachedWrongOrder = true
-          return -1
-        }
-        return ascComparator(left, right, options)
-      }),
-    ).toThrowError()
-    expect(reachedWrongOrder).toBe(true)
-
-    for (const invalid of [localInvalid, foreignInvalid]) {
-      expect(normalizeValue(invalid)).toBeNaN()
-      expect(isUnorderable(invalid)).toBe(true)
-      expect(ascComparator(invalid, Number.NaN, DEFAULT_COMPARE_OPTIONS)).toBe(
-        0,
-      )
-      expect(
-        sign(
-          ascComparator(invalid, new Date(timestamp), DEFAULT_COMPARE_OPTIONS),
-        ),
-      ).toBe(1)
-      expect(
-        sign(
-          ascComparator(new Date(timestamp), invalid, DEFAULT_COMPARE_OPTIONS),
-        ),
-      ).toBe(-1)
-    }
-
-    // Borrowing that prototype and display tag cannot forge native Date
-    // slots. The intrinsic rejects this adjacent non-Date control.
-    const forged = Object.create(Object.getPrototypeOf(foreignSubclass)) as Date
-    Object.defineProperty(forged, Symbol.toStringTag, { value: `Other` })
-    expect(() => Date.prototype.getTime.call(forged)).toThrow(TypeError)
-    expect(normalizeValue(forged)).toBe(forged)
-    expect(isUnorderable(forged)).toBe(false)
-    const forward = sign(
-      ascComparator(forged, foreignSubclass, DEFAULT_COMPARE_OPTIONS),
-    )
-    const reverse = sign(
-      ascComparator(foreignSubclass, forged, DEFAULT_COMPARE_OPTIONS),
-    )
-    expect(forward).not.toBe(0)
-    expect(reverse).toBe(-forward)
-  })
-
-  it(`rejects a local Date subclass prototype without a native Date slot`, () => {
-    class LocalDate extends Date {}
-    const forged = Object.create(LocalDate.prototype) as object
-    const real = new Date(1)
-    // instanceof sees the borrowed local prototype, but the Date intrinsic
-    // rejects the missing native slot. The object keeps reference identity.
-    expect(forged instanceof Date).toBe(true)
-    expect(() => Date.prototype.getTime.call(forged)).toThrow(TypeError)
-    expect(normalizeValue(forged)).toBe(forged)
-    expect(isUnorderable(forged)).toBe(false)
-    const forward = sign(ascComparator(forged, real, DEFAULT_COMPARE_OPTIONS))
-    const reverse = sign(ascComparator(real, forged, DEFAULT_COMPARE_OPTIONS))
-    expect(forward).not.toBe(0)
-    expect(reverse).toBe(-forward)
-  })
-
   it(`treats numeric NaN and invalid Dates as one non-finite order position`, () => {
     for (const foreign of [false, true]) {
       const invalid = dateInRealm(null, foreign)
@@ -1269,15 +1020,11 @@ describe(`native Date order across JavaScript realms`, () => {
   )
 
   it(`orders a foreign invalid Date after a valid Date in a public scan`, async () => {
-    for (const [foreign, ownTag] of [
-      [false, false],
-      [true, false],
-      [true, true],
-    ] as const) {
-      const invalid = dateInRealm(null, foreign, ownTag)
+    for (const foreign of [false, true]) {
+      const invalid = dateInRealm(null, foreign)
       const valid = new Date(Date.UTC(2023, 0, 1))
       const source = createCollection({
-        id: `realm-date-order-${foreign}-${ownTag}`,
+        id: `realm-date-order-${foreign}`,
         getKey: (row: { id: number; when: Date }) => row.id,
         autoIndex: `off`,
         sync: {
@@ -1403,28 +1150,6 @@ describe(`makeComparator property-based tests`, () => {
 })
 
 describe(`normalizeValue property-based tests`, () => {
-  it(`binary keys ignore own byte-count shadows`, () => {
-    // Supplied native bytes, rather than public count properties, establish
-    // the key relation. The function return is the comparison checkpoint.
-    const equalKey = normalizeValue(new Uint8Array([1, 2]))
-    const unequalKey = normalizeValue(new Uint8Array([9, 9]))
-    expect(equalKey).not.toBe(unequalKey)
-    for (const field of [`length`, `byteLength`] as const) {
-      const equal = Object.defineProperty(new Uint8Array([1, 2]), field, {
-        value: 0,
-      })
-      const unequal = Object.defineProperty(new Uint8Array([9, 9]), field, {
-        value: 0,
-      })
-      expect(equal[field]).toBe(0)
-      expect(unequal[field]).toBe(0)
-      expect(Array.from(equal)).toEqual([1, 2])
-      expect(Array.from(unequal)).toEqual([9, 9])
-      expect(normalizeValue(equal)).toBe(equalKey)
-      expect(normalizeValue(unequal)).toBe(unequalKey)
-    }
-  })
-
   it(`binary key size and content laws reach the bounded length margins`, () => {
     for (const length of [0, 1, 128, 129, 200]) {
       const bytes = Uint8Array.from({ length }, (_, index) => index % 256)
@@ -1484,17 +1209,6 @@ describe(`normalizeValue property-based tests`, () => {
       expect(normalizeValue(normalized)).not.toBe(normalized)
     },
   )
-
-  fcTest(`reads binary keys from indexed bytes, not custom iteration`, () => {
-    const bytes = new Uint8Array([2])
-    Object.defineProperty(bytes, Symbol.iterator, {
-      value: function* () {
-        yield 1
-      },
-    })
-
-    expect(normalizeValue(bytes)).toBe(normalizeValue(new Uint8Array([2])))
-  })
 })
 
 describe(`areValuesEqual property-based tests`, () => {
@@ -1847,146 +1561,6 @@ describe(`native binary key content`, () => {
       )
     },
   )
-})
-
-describe(`native byte content order`, () => {
-  // The independent rule reads only the supplied unsigned elements. It does
-  // not use the production object-identity allocator, comparator, or exact-key
-  // normalization. Each fresh pair exercises immediate comparator returns.
-  const model = (left: Uint8Array, right: Uint8Array): number => {
-    // Native iteration reads the byte slots even when an own `length`
-    // property shadows the public getter.
-    const leftBytes = Array.from(Uint8Array.prototype.values.call(left))
-    const rightBytes = Array.from(Uint8Array.prototype.values.call(right))
-    for (
-      let index = 0;
-      index < Math.min(leftBytes.length, rightBytes.length);
-      index++
-    ) {
-      const difference = leftBytes[index]! - rightBytes[index]!
-      if (difference !== 0) return difference
-    }
-    return leftBytes.length - rightBytes.length
-  }
-
-  it.each([
-    {
-      caseId: `equal-content distinct views`,
-      makePair: () => [Uint8Array.of(1), Uint8Array.of(1)] as const,
-      expectedSign: 0,
-    },
-    {
-      caseId: `first differing unsigned byte`,
-      makePair: () => [Uint8Array.of(1, 255), Uint8Array.of(2, 0)] as const,
-      expectedSign: -1,
-    },
-    {
-      caseId: `later differing byte with equal first byte`,
-      makePair: () => [Uint8Array.of(1, 2), Uint8Array.of(1, 3)] as const,
-      expectedSign: -1,
-    },
-    {
-      caseId: `unsigned 127/128 boundary`,
-      makePair: () => [Uint8Array.of(127), Uint8Array.of(128)] as const,
-      expectedSign: -1,
-    },
-    {
-      caseId: `foreign native byte view`,
-      makePair: () =>
-        [
-          runInNewContext(`new Uint8Array([1])`) as Uint8Array,
-          Uint8Array.of(2),
-        ] as const,
-      expectedSign: -1,
-    },
-    {
-      caseId: `own length shadow`,
-      makePair: () =>
-        [
-          Uint8Array.of(1),
-          Object.defineProperty(Uint8Array.of(2), `length`, { value: 0 }),
-        ] as const,
-      expectedSign: -1,
-    },
-    {
-      caseId: `own byteLength shadow`,
-      makePair: () =>
-        [
-          Uint8Array.of(1),
-          Object.defineProperty(Uint8Array.of(2), `byteLength`, { value: 0 }),
-        ] as const,
-      expectedSign: -1,
-    },
-    {
-      caseId: `shorter equal prefix`,
-      makePair: () => [Uint8Array.of(1), Uint8Array.of(1, 0)] as const,
-      expectedSign: -1,
-    },
-    {
-      caseId: `Buffer and Uint8Array with equal content`,
-      makePair: () => [Uint8Array.of(1), Buffer.from([1])] as const,
-      expectedSign: 0,
-    },
-    {
-      caseId: `Buffer and Uint8Array with differing content`,
-      makePair: () => [Uint8Array.of(1), Buffer.from([2])] as const,
-      expectedSign: -1,
-    },
-  ])(`compares $caseId`, ({ makePair, expectedSign }) => {
-    const [lessOrEqual, greaterOrEqual] = makePair()
-    expect(sign(model(lessOrEqual, greaterOrEqual))).toBe(expectedSign)
-    const reverseSign = expectedSign === 0 ? 0 : -expectedSign
-
-    // Call the reverse direction first. An identity-order implementation
-    // assigns its first runtime ID to the greater operand here; content order
-    // must still return the opposite sign. Both directions and descending
-    // have the same immediate checkpoint.
-    expect
-      .soft(sign(ascComparator(greaterOrEqual, lessOrEqual, defaultOpts)))
-      .toBe(reverseSign)
-    expect
-      .soft(sign(ascComparator(lessOrEqual, greaterOrEqual, defaultOpts)))
-      .toBe(expectedSign)
-    expect
-      .soft(sign(descComparator(lessOrEqual, greaterOrEqual, defaultOpts)))
-      .toBe(reverseSign)
-  })
-
-  comparisonProperty([
-    fc.array(fc.integer({ min: 0, max: 255 }), {
-      minLength: 2,
-      maxLength: 24,
-    }),
-    fc.integer({ min: 0, max: 254 }),
-    fc.array(fc.integer({ min: 0, max: 255 }), { maxLength: 8 }),
-  ])(
-    `compares the first differing byte after a common prefix`,
-    (prefix, lowerByte, suffix) => {
-      // The prefix varies the first-difference position. A comparator that
-      // inspects only one or two leading bytes agrees on the pinned examples
-      // but disagrees with this independent content rule.
-      const lower = Uint8Array.from([...prefix, lowerByte, ...suffix])
-      const higher = Uint8Array.from([...prefix, lowerByte + 1, ...suffix])
-      expect(sign(model(lower, higher))).toBe(-1)
-      expect(sign(ascComparator(higher, lower, defaultOpts))).toBe(1)
-      expect(sign(ascComparator(lower, higher, defaultOpts))).toBe(-1)
-      expect(sign(descComparator(lower, higher, defaultOpts))).toBe(1)
-    },
-  )
-
-  it(`keeps byte content order transitive through ordinary objects`, () => {
-    const high = Uint8Array.of(2)
-    const ordinary = {}
-    const low = Uint8Array.of(1)
-    // These two mixed comparisons assign identity IDs in an implementation
-    // that wrongly groups bytes with ordinary objects. The content edge then
-    // closes a strict cycle: high < ordinary < low < high.
-    const highToOrdinary = ascComparator(high, ordinary, defaultOpts)
-    const ordinaryToLow = ascComparator(ordinary, low, defaultOpts)
-    const highToLow = ascComparator(high, low, defaultOpts)
-    expect(highToLow).toBeGreaterThan(0)
-    assertTransitive(highToOrdinary, ordinaryToLow, highToLow)
-  })
 })
 
 if (requestedProperty !== undefined) {

@@ -1,5 +1,11 @@
 # Custom comparator index selection
 
+Scope update for PR #2116: later sections record an unsigned default-byte
+order and caller-modified byte controls from an earlier commit. Those proposed
+guarantees were declined. The current oracle keeps byte-content equality,
+scan/index order agreement, and the maintainer-approved per-row custom
+comparator rule. The [coverage map](../oracle-coverage.md) states the active cut.
+
 An index with a user-supplied `compareFn` cannot advertise the ordinary
 Collection `orderBy` comparator merely through `compareOptions`. The
 live-query architecture's Identity contract requires advertised comparison

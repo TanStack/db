@@ -1,5 +1,11 @@
 # Borrowed Date prototypes in indexed ranges
 
+Scope update for PR #2116: the tests and contract claims described below are
+historical. The current indexed range owner keeps ordinary local and
+cross-realm Date source values and bounds, while borrowed prototypes,
+subclasses, and overridden methods are outside its contract. See the
+[coverage map](../oracle-coverage.md) for the active witness.
+
 A Collection index may change the work used to answer a range predicate, but
 it must not change the public key set. The live-query architecture requires a
 range to fall back when indexed values do not share the bound's relational

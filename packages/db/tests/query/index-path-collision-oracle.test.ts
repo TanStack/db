@@ -18,25 +18,14 @@
  * argument order, bound inclusivity, reversed operands, and bound field.
  * A selected-field ordering reads both paths through the public `$selected`
  * callback proxy.
- * A separate range history stores genuine Dates, a native Date subclass, and
- * an ordinary object with a borrowed Date subclass prototype. Its public
- * `gt` result must be the same before and after installing either index type.
- * Another range history uses the borrowed object as the predicate bound.
- * Both mixed domains require scan fallback after installation.
- * A foreign Date subclass is the adjacent valid-domain control: its native
- * timestamp keeps the range eligible for index lookup across realms.
- * A further valid-Date history overrides `valueOf` in local and foreign
- * subclasses while retaining native `getTime`. An ordinary Date bound and a
- * subclass bound each reach all four effective relations; the subclass bound
- * occupies both operand positions. Plain, local-subclass, and foreign-subclass
- * rows share the bound's exact timestamp, so inclusive and exclusive ranges
- * must respectively keep or exclude every tied key. The intrinsic-timestamp
- * model compares public scan and indexed snapshots, and both index types must
- * remain eligible for optimized-only reads. The reference captures each source
- * timestamp before the rows enter the Collection, so later source-Date changes
- * cannot change the expected answer. Date/number scan comparisons in both
- * operand orders use the same model; mixed-domain range indexes make no
- * eligibility claim here.
+ * A separate range history stores ordinary native Dates from this and another
+ * JavaScript realm. Supplied timestamps predict inclusive and exclusive range
+ * keys before and after installing either index type. Local and foreign Dates
+ * at the exact bound distinguish a missing equality tie; a foreign Date after
+ * the bound distinguishes a scan or index that loses that row. The bound also
+ * comes from both realms, so index eligibility cannot recognize only local
+ * bounds. The timestamp model does not read production comparison or index
+ * classification.
  *
  * Production driver: `currentStateAsChanges`, Collection subscriptions, and
  * live-query Collections run the real predicates and callback compilers.
@@ -53,8 +42,9 @@
  * Known omissions: This bounded owner does not claim arbitrary path segments,
  * nullish values, custom collation, or incremental publication histories.
  * Lazy demand target deduplication has a separate compiler-boundary witness.
- * The Date-domain histories cover a `valueOf` override but not other coercion
- * methods, invalid Dates, or publication after later writes.
+ * The Date range history covers ordinary native Dates only. Modified Date
+ * objects, subclasses, borrowed prototypes, invalid Dates, and publication
+ * after later writes are outside its claimed domain.
  */
 import { runInNewContext } from 'node:vm'
 import { expect, it, vi } from 'vitest'
@@ -197,136 +187,63 @@ it.each([
   { name: `BasicIndex`, indexType: BasicIndex },
   { name: `BTreeIndex`, indexType: BTreeIndex },
 ])(
-  `keeps borrowed Date prototypes outside indexed range results: $name`,
+  `keeps ordinary foreign Dates in indexed timestamp ranges: $name`,
   async ({ name, indexType }) => {
     await checkWithCleanup(async (register) => {
-      class NativeDate extends Date {}
-      const borrowed = Object.create(NativeDate.prototype) as object
+      // Supplied times, rather than production values, define the reference.
+      // Both realms have a Date at the exact lower bound.
+      const inputs = [
+        { id: `local-before`, time: 0, foreign: false },
+        { id: `local-equal`, time: 1, foreign: false },
+        { id: `foreign-equal`, time: 1, foreign: true },
+        { id: `foreign-after`, time: 2, foreign: true },
+      ] as const
+      const dateRows = inputs.map(({ id, time, foreign }) => ({
+        id,
+        v: foreign
+          ? (runInNewContext(`new Date(time)`, { time }) as Date)
+          : new Date(time),
+      }))
+      expect(dateRows[2]!.v instanceof Date).toBe(false)
+      expect(Date.prototype.getTime.call(dateRows[2]!.v)).toBe(1)
       const bound = new Date(1)
-      const dateRows: Array<{ id: string; v: object }> = [
-        { id: `before`, v: new Date(0) },
-        { id: `borrowed`, v: borrowed },
-        { id: `after`, v: new Date(2) },
-        { id: `subclass`, v: new NativeDate(3) },
-      ]
-      const collection = createCollection(
-        mockSyncCollectionOptions({
-          id: `index-borrowed-date-${name}`,
-          getKey: (row: (typeof dateRows)[number]) => row.id,
-          initialData: dateRows,
-          autoIndex: `off`,
-        }),
-      )
-      register(() => collection.cleanup())
-      await collection.stateWhenReady()
-
-      // The reference uses JavaScript numeric coercion for this Date bound.
-      // Borrowing a Date prototype cannot supply its native timestamp, so the
-      // coercion fails and that source row cannot satisfy `v > bound`.
-      const expected = dateRows
-        .filter(({ v }) => {
-          try {
-            return Number(v) > bound.getTime()
-          } catch {
-            return false
-          }
-        })
-        .map(({ id }) => id)
-        .sort()
-      expect(expected).toEqual([`after`, `subclass`])
-
-      const where = gt(new PropRef([`v`]), bound)
-      const snapshotKeys = () =>
-        collection
-          .currentStateAsChanges({ where })!
-          .map((change) => String(change.key))
-          .sort()
-
-      // An unindexed public snapshot establishes the first checkpoint. The
-      // indexed snapshot must refine the same result; optimizedOnly may decline
-      // this mixed-domain index rather than claiming a complete answer.
-      expect(snapshotKeys(), `before ${name}`).toEqual(expected)
-      const index = collection.createIndex((row) => row.v, { indexType })
-      const lookup = vi.spyOn(index, `lookup`)
-      expect(snapshotKeys(), `after ${name}`).toEqual(expected)
-      expect(lookup, `unsafe range index not used`).not.toHaveBeenCalled()
-      expect(
-        collection.currentStateAsChanges({ where, optimizedOnly: true }),
-      ).toBeUndefined()
-    })
-  },
-)
-
-it.each([
-  { name: `BasicIndex`, indexType: BasicIndex },
-  { name: `BTreeIndex`, indexType: BTreeIndex },
-])(
-  `does not treat a borrowed Date prototype as a range bound: $name`,
-  async ({ name, indexType }) => {
-    await checkWithCleanup(async (register) => {
-      class NativeDate extends Date {}
-      const borrowed = Object.create(NativeDate.prototype) as Date
-      const dateRows = [
-        { id: `before`, v: new Date(0) },
-        { id: `after`, v: new NativeDate(2) },
-      ]
-      const collection = createCollection(
-        mockSyncCollectionOptions({
-          id: `index-borrowed-date-bound-${name}`,
-          getKey: (row: (typeof dateRows)[number]) => row.id,
-          initialData: dateRows,
-          autoIndex: `off`,
-        }),
-      )
-      register(() => collection.cleanup())
-      await collection.stateWhenReady()
-
-      // Numeric coercion of the borrowed bound throws. No source row can
-      // satisfy the relational predicate, regardless of index availability.
-      const expected = dateRows
-        .filter(({ v }) => {
-          try {
-            return Number(v) < Number(borrowed)
-          } catch {
-            return false
-          }
-        })
-        .map(({ id }) => id)
-      expect(expected).toEqual([])
-
-      const where = lt(new PropRef([`v`]), borrowed)
-      const snapshotKeys = () =>
-        collection
-          .currentStateAsChanges({ where })!
-          .map((change) => String(change.key))
-          .sort()
-      expect(snapshotKeys(), `before ${name}`).toEqual(expected)
-      const index = collection.createIndex((row) => row.v, { indexType })
-      const lookup = vi.spyOn(index, `lookup`)
-      expect(snapshotKeys(), `after ${name}`).toEqual(expected)
-      expect(lookup, `unsafe range index not used`).not.toHaveBeenCalled()
-      expect(
-        collection.currentStateAsChanges({ where, optimizedOnly: true }),
-      ).toBeUndefined()
-    })
-  },
-)
-
-it.each([
-  { name: `BasicIndex`, indexType: BasicIndex },
-  { name: `BTreeIndex`, indexType: BTreeIndex },
-])(
-  `keeps foreign Date subclasses in the indexed Date domain: $name`,
-  async ({ name, indexType }) => {
-    await checkWithCleanup(async (register) => {
-      const bound = new Date(1)
-      const dateRows = [
-        { id: `before`, v: new Date(0) },
+      const foreignBound = runInNewContext(`new Date(1)`) as Date
+      expect(foreignBound instanceof Date).toBe(false)
+      const field = new PropRef([`v`])
+      const rangeCases = [
         {
-          id: `foreign-subclass`,
-          v: runInNewContext(`new (class extends Date {})(2)`) as Date,
+          name: `exclusive`,
+          where: gt(field, bound),
+          accepts: (time: number) => time > 1,
+        },
+        {
+          name: `inclusive`,
+          where: gte(field, bound),
+          accepts: (time: number) => time >= 1,
+        },
+        {
+          name: `foreign exclusive bound`,
+          where: gt(field, foreignBound),
+          accepts: (time: number) => time > 1,
+        },
+        {
+          name: `foreign inclusive bound`,
+          where: gte(field, foreignBound),
+          accepts: (time: number) => time >= 1,
         },
       ]
+      const matchingKeys = (accepts: (time: number) => boolean) =>
+        inputs
+          .filter(({ time }) => accepts(time))
+          .map(({ id }) => id)
+          .sort()
+      expect(matchingKeys(rangeCases[0]!.accepts)).toEqual([`foreign-after`])
+      expect(matchingKeys(rangeCases[1]!.accepts)).toEqual([
+        `foreign-after`,
+        `foreign-equal`,
+        `local-equal`,
+      ])
+
       const collection = createCollection(
         mockSyncCollectionOptions({
           id: `index-foreign-date-${name}`,
@@ -337,181 +254,6 @@ it.each([
       )
       register(() => collection.cleanup())
       await collection.stateWhenReady()
-
-      // A foreign subclass has a native Date timestamp, so the direct numeric
-      // relation predicts the same key on scans and both indexed paths.
-      const expected = dateRows
-        .filter(({ v }) => Number(v) > bound.getTime())
-        .map(({ id }) => id)
-      expect(expected).toEqual([`foreign-subclass`])
-      const where = gt(new PropRef([`v`]), bound)
-      const snapshotKeys = () =>
-        collection.currentStateAsChanges({ where })!.map((change) => change.key)
-      expect(snapshotKeys(), `before ${name}`).toEqual(expected)
-      const index = collection.createIndex((row) => row.v, { indexType })
-      const lookup = vi.spyOn(index, `lookup`)
-      expect(snapshotKeys(), `after ${name}`).toEqual(expected)
-      expect(lookup, `native Date range index reached`).toHaveBeenCalled()
-      expect(
-        collection
-          .currentStateAsChanges({ where, optimizedOnly: true })
-          ?.map((change) => change.key),
-      ).toEqual(expected)
-    })
-  },
-)
-
-it.each([
-  { name: `BasicIndex`, indexType: BasicIndex },
-  { name: `BTreeIndex`, indexType: BTreeIndex },
-])(
-  `compares native Date subclasses by timestamp across scan and indexed ranges: $name`,
-  async ({ name, indexType }) => {
-    await checkWithCleanup(async (register) => {
-      class LaterDate extends Date {
-        override valueOf() {
-          return -100
-        }
-      }
-      const earlierForeign = runInNewContext(
-        `new (class extends Date { valueOf() { return 100 } })(0)`,
-      ) as Date
-      const equalForeign = runInNewContext(
-        `new (class extends Date { valueOf() { return 100 } })(1)`,
-      ) as Date
-      const equalLocal = new LaterDate(1)
-      const localLater = new LaterDate(2)
-      const dateRows = [
-        { id: `plain-before`, v: new Date(-1) },
-        { id: `foreign-earlier`, v: earlierForeign },
-        { id: `equal`, v: new Date(1) },
-        { id: `local-equal`, v: equalLocal },
-        { id: `foreign-equal`, v: equalForeign },
-        { id: `local-later`, v: localLater },
-        { id: `plain-after`, v: new Date(3) },
-      ]
-      const bound = new Date(1)
-      const subclassBound = new LaterDate(1)
-      const nativeGetTime = Date.prototype.getTime
-      const boundTime = nativeGetTime.call(bound)
-      const subclassBoundTime = nativeGetTime.call(subclassBound)
-      // Capture the model before Collection admission. Neither the scan nor
-      // the indexed checkpoint may rederive its answer from mutable source
-      // Date objects handed to production.
-      const referenceRows = Object.freeze(
-        dateRows.map(({ id, v }) =>
-          Object.freeze({ id, time: nativeGetTime.call(v) }),
-        ),
-      )
-      const field = new PropRef([`v`])
-      const predicates = [
-        {
-          name: `gt`,
-          where: gt(field, bound),
-          accepts: (time: number) => time > boundTime,
-        },
-        {
-          name: `gte`,
-          where: gte(field, bound),
-          accepts: (time: number) => time >= boundTime,
-        },
-        {
-          name: `lt`,
-          where: lt(field, bound),
-          accepts: (time: number) => time < boundTime,
-        },
-        {
-          name: `lte`,
-          where: lte(field, bound),
-          accepts: (time: number) => time <= boundTime,
-        },
-        {
-          name: `gt with subclass bound`,
-          where: gt(field, subclassBound),
-          accepts: (time: number) => time > subclassBoundTime,
-        },
-        {
-          name: `gte with subclass bound`,
-          where: gte(field, subclassBound),
-          accepts: (time: number) => time >= subclassBoundTime,
-        },
-        {
-          name: `lt with subclass bound`,
-          where: lt(field, subclassBound),
-          accepts: (time: number) => time < subclassBoundTime,
-        },
-        {
-          name: `lte with subclass bound`,
-          where: lte(field, subclassBound),
-          accepts: (time: number) => time <= subclassBoundTime,
-        },
-        {
-          name: `subclass bound less than field`,
-          where: lt(subclassBound, field),
-          accepts: (time: number) => subclassBoundTime < time,
-        },
-        {
-          name: `subclass bound less than or equal to field`,
-          where: lte(subclassBound, field),
-          accepts: (time: number) => subclassBoundTime <= time,
-        },
-        {
-          name: `subclass bound greater than field`,
-          where: gt(subclassBound, field),
-          accepts: (time: number) => subclassBoundTime > time,
-        },
-        {
-          name: `subclass bound greater than or equal to field`,
-          where: gte(subclassBound, field),
-          accepts: (time: number) => subclassBoundTime >= time,
-        },
-      ]
-      const mixedPredicates = [
-        {
-          name: `Date greater than number`,
-          where: gt(field, 1),
-          accepts: (time: number) => time > 1,
-        },
-        {
-          name: `number less than Date`,
-          where: lt(1, field),
-          accepts: (time: number) => 1 < time,
-        },
-        {
-          name: `Date less than number`,
-          where: lt(field, 1),
-          accepts: (time: number) => time < 1,
-        },
-        {
-          name: `number greater than Date`,
-          where: gt(1, field),
-          accepts: (time: number) => 1 > time,
-        },
-      ]
-      const collection = createCollection(
-        mockSyncCollectionOptions({
-          id: `index-valueof-date-${name}`,
-          getKey: (row: (typeof dateRows)[number]) => row.id,
-          initialData: dateRows,
-          autoIndex: `off`,
-        }),
-      )
-      register(() => collection.cleanup())
-      await collection.stateWhenReady()
-
-      // The model captured native timestamps, which ignore subclass valueOf.
-      // The overrides deliberately move their native-operator positions,
-      // including at the exact bound, while ordinary Dates control both sides.
-      expect(Number(earlierForeign)).toBe(100)
-      expect(Number(equalForeign)).toBe(100)
-      expect(Number(equalLocal)).toBe(-100)
-      expect(Number(localLater)).toBe(-100)
-      expect(Number(subclassBound)).toBe(-100)
-      const expectedDateKeys = (accepts: (time: number) => boolean) =>
-        referenceRows
-          .filter(({ time }) => accepts(time))
-          .map(({ id }) => id)
-          .sort()
       const snapshotKeys = (
         where: BasicExpression<boolean>,
         optimizedOnly = false,
@@ -520,72 +262,42 @@ it.each([
           .currentStateAsChanges({ where, optimizedOnly })
           ?.map((change) => String(change.key))
           .sort()
-      expect(
-        referenceRows
-          .filter(({ time }) => time === boundTime)
-          .map(({ id }) => id)
-          .sort(),
-        `plain and native subclass rows at the range bound`,
-      ).toEqual([`equal`, `foreign-equal`, `local-equal`])
 
-      // A ready Collection's public snapshots are the comparison cuts. Scan
-      // first, then install one index and require both the ordinary and
-      // optimized-only path to refine the same timestamp relation.
-      for (const predicate of predicates) {
-        expect(snapshotKeys(predicate.where), `scan ${predicate.name}`).toEqual(
-          expectedDateKeys(predicate.accepts),
+      // Exact public keys at the ready Collection checkpoint expose missing
+      // foreign rows and missing ties, before and after index installation.
+      for (const range of rangeCases) {
+        expect(snapshotKeys(range.where), `scan ${range.name}`).toEqual(
+          matchingKeys(range.accepts),
         )
-        expect(
-          snapshotKeys(predicate.where, true),
-          `unindexed optimized-only ${predicate.name}`,
-        ).toBeUndefined()
+        expect(snapshotKeys(range.where, true)).toBeUndefined()
       }
-      // Calibrate the exact-key refinement check with a plausible wrong
-      // result: dropping one tied subclass from an inclusive public scan.
-      const inclusive = predicates[1]!
+      const inclusive = rangeCases[1]!
       const fullScan = snapshotKeys(inclusive.where)!
-      expect(fullScan).toContain(`foreign-equal`)
       expect(() =>
-        expect(
-          fullScan.filter((key) => key !== `foreign-equal`),
-          `wrong-result control: omitted foreign Date tie`,
-        ).toEqual(expectedDateKeys(inclusive.accepts)),
+        expect(fullScan.filter((key) => key !== `foreign-equal`)).toEqual(
+          matchingKeys(inclusive.accepts),
+        ),
       ).toThrow()
-      // Equality already normalizes native Dates to numbers. Relational scan
-      // results must use the same timestamp when either operand is a number.
-      for (const predicate of mixedPredicates) {
-        expect(snapshotKeys(predicate.where), `scan ${predicate.name}`).toEqual(
-          expectedDateKeys(predicate.accepts),
-        )
-      }
+
       const index = collection.createIndex((row) => row.v, { indexType })
       const lookup = vi.spyOn(index, `lookup`)
-      for (const predicate of predicates) {
-        expect(
-          snapshotKeys(predicate.where),
-          `indexed ${predicate.name}`,
-        ).toEqual(expectedDateKeys(predicate.accepts))
-        expect(lookup, `indexed ${predicate.name} reached`).toHaveBeenCalled()
+      for (const range of rangeCases) {
+        const expected = matchingKeys(range.accepts)
+        expect(snapshotKeys(range.where), `indexed ${range.name}`).toEqual(
+          expected,
+        )
+        expect(lookup, `indexed ${range.name} reached`).toHaveBeenCalled()
         lookup.mockClear()
         expect(
-          snapshotKeys(predicate.where, true),
-          `optimized-only ${predicate.name}`,
-        ).toEqual(expectedDateKeys(predicate.accepts))
+          snapshotKeys(range.where, true),
+          `optimized-only ${range.name}`,
+        ).toEqual(expected)
         expect(
           lookup,
-          `optimized-only ${predicate.name} reached`,
+          `optimized-only ${range.name} reached`,
         ).toHaveBeenCalled()
         lookup.mockClear()
       }
-
-      // This hostile mutation crosses the bound after every public check.
-      // The expected keys stay fixed because the model recorded the original
-      // timestamps before production received the source rows.
-      const greaterKeys = expectedDateKeys((time) => time > boundTime)
-      expect(greaterKeys).toContain(`local-later`)
-      localLater.setTime(-2)
-      expect(nativeGetTime.call(localLater)).toBe(-2)
-      expect(expectedDateKeys((time) => time > boundTime)).toEqual(greaterKeys)
     })
   },
 )

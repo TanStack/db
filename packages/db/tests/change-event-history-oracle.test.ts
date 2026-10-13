@@ -879,10 +879,9 @@ describe(`change-event history oracle`, () => {
 
 describe(`native-byte change publication`, () => {
   /**
-   * A sync replacement with different intrinsic bytes changes the visible
-   * row, so one update must reach a subscriber after commit. An own `length`
-   * shadow is display state, not a way to erase the byte difference. The
-   * source's one-key before/after sequence supplies the expected payload;
+   * A sync replacement with different bytes changes the visible row, so one
+   * update must reach a subscriber after commit. The source's one-key sequence
+   * supplies the expected payload;
    * exact index lookup is a separate receiving path. An equal-byte copy then
    * remains silent. This bounded history does not claim optimistic writes or
    * other typed-array classes.
@@ -890,94 +889,88 @@ describe(`native-byte change publication`, () => {
   it.each([
     [`BasicIndex`, BasicIndex],
     [`BTreeIndex`, BTreeIndex],
-  ] as const)(
-    `publishes changed intrinsic bytes with %s`,
-    async (name, IndexType) => {
-      type ByteRow = { id: string; value: Uint8Array }
-      type ByteSync = Parameters<SyncConfig<ByteRow, string>[`sync`]>[0]
-      const shadow = (value: number) =>
-        Object.defineProperty(Uint8Array.of(value), `length`, { value: 0 })
-      const bytes = (view: Uint8Array) =>
-        Array.from(Uint8Array.prototype.values.call(view))
-      const before = shadow(1)
-      const after = shadow(2)
-      const equalCopy = shadow(2)
-      let sync!: ByteSync
-      let unsubscribe: (() => unknown) | undefined
-      let cleanup: (() => unknown) | undefined
+  ] as const)(`publishes changed bytes with %s`, async (name, IndexType) => {
+    type ByteRow = { id: string; value: Uint8Array }
+    type ByteSync = Parameters<SyncConfig<ByteRow, string>[`sync`]>[0]
+    const bytes = (view: Uint8Array) => Array.from(view)
+    const before = Uint8Array.of(1)
+    const after = Uint8Array.of(2)
+    const equalCopy = Uint8Array.of(2)
+    let sync!: ByteSync
+    let unsubscribe: (() => unknown) | undefined
+    let cleanup: (() => unknown) | undefined
 
-      await withOracleCleanup(async () => {
-        const collection = createCollection<ByteRow, string>({
-          id: `native-byte-publication-${name}`,
-          getKey: ({ id }) => id,
-          autoIndex: `off`,
-          startSync: true,
-          sync: {
-            sync: (actions) => {
-              sync = actions
-              actions.begin()
-              actions.write({
-                type: `insert`,
-                value: { id: `a`, value: before },
-              })
-              actions.commit()
-              actions.markReady()
-            },
+    await withOracleCleanup(async () => {
+      const collection = createCollection<ByteRow, string>({
+        id: `native-byte-publication-${name}`,
+        getKey: ({ id }) => id,
+        autoIndex: `off`,
+        startSync: true,
+        sync: {
+          sync: (actions) => {
+            sync = actions
+            actions.begin()
+            actions.write({
+              type: `insert`,
+              value: { id: `a`, value: before },
+            })
+            actions.commit()
+            actions.markReady()
           },
-        })
-        cleanup = () => collection.cleanup()
-        await collection.stateWhenReady()
-        const index = collection.createIndex((row) => row.value, {
-          indexType: IndexType,
-        })
-        const batches: Array<
-          Array<{
-            type: string
-            key: string
-            previous: Array<number> | undefined
-            value: Array<number>
-          }>
-        > = []
-        const subscription = collection.subscribeChanges(
-          (changes) => {
-            batches.push(
-              changes.map((change) => ({
-                type: change.type,
-                key: change.key,
-                previous:
-                  change.type === `update`
-                    ? bytes(change.previousValue!.value)
-                    : undefined,
-                value: bytes(change.value.value),
-              })),
-            )
-          },
-          { includeInitialState: false },
-        )
-        unsubscribe = () => subscription.unsubscribe()
-        expect(batches).toEqual([])
+        },
+      })
+      cleanup = () => collection.cleanup()
+      await collection.stateWhenReady()
+      const index = collection.createIndex((row) => row.value, {
+        indexType: IndexType,
+      })
+      const batches: Array<
+        Array<{
+          type: string
+          key: string
+          previous: Array<number> | undefined
+          value: Array<number>
+        }>
+      > = []
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          batches.push(
+            changes.map((change) => ({
+              type: change.type,
+              key: change.key,
+              previous:
+                change.type === `update`
+                  ? bytes(change.previousValue!.value)
+                  : undefined,
+              value: bytes(change.value.value),
+            })),
+          )
+        },
+        { includeInitialState: false },
+      )
+      unsubscribe = () => subscription.unsubscribe()
+      expect(batches).toEqual([])
 
-        sync.begin()
-        sync.write({ type: `update`, value: { id: `a`, value: after } })
-        await sync.commit()
-        expect(bytes(collection.get(`a`)!.value)).toEqual([2])
-        expect(index.equalityLookup(Uint8Array.of(1))).toEqual(new Set())
-        expect(index.equalityLookup(Uint8Array.of(2))).toEqual(new Set([`a`]))
-        expect(batches).toEqual([
-          [{ type: `update`, key: `a`, previous: [1], value: [2] }],
-        ])
+      sync.begin()
+      sync.write({ type: `update`, value: { id: `a`, value: after } })
+      await sync.commit()
+      expect(bytes(collection.get(`a`)!.value)).toEqual([2])
+      expect(index.equalityLookup(Uint8Array.of(1))).toEqual(new Set())
+      expect(index.equalityLookup(Uint8Array.of(2))).toEqual(new Set([`a`]))
+      expect(batches).toEqual([
+        [{ type: `update`, key: `a`, previous: [1], value: [2] }],
+      ])
 
-        sync.begin()
-        sync.write({ type: `update`, value: { id: `a`, value: equalCopy } })
-        await sync.commit()
-        expect(bytes(collection.get(`a`)!.value)).toEqual([2])
-        expect(index.equalityLookup(Uint8Array.of(2))).toEqual(new Set([`a`]))
-        expect(batches).toEqual([
-          [{ type: `update`, key: `a`, previous: [1], value: [2] }],
-        ])
-      }, [() => unsubscribe?.(), () => cleanup?.()])
-    },
-  )
+      sync.begin()
+      sync.write({ type: `update`, value: { id: `a`, value: equalCopy } })
+      await sync.commit()
+      expect(bytes(collection.get(`a`)!.value)).toEqual([2])
+      expect(index.equalityLookup(Uint8Array.of(2))).toEqual(new Set([`a`]))
+      expect(batches).toEqual([
+        [{ type: `update`, key: `a`, previous: [1], value: [2] }],
+      ])
+    }, [() => unsubscribe?.(), () => cleanup?.()])
+  })
 })
 
 describe(`opaque DataView change publication`, () => {
@@ -1122,20 +1115,17 @@ describe(`native Date change publication across realms`, () => {
    * states. The native Date timestamp rule in `docs/guides/live-queries.md`
    * includes Dates from another JavaScript realm and invalid Dates. The model
    * knows the two supplied times and predicts one update exactly when they
-   * differ. One fixed pair has the same own string label on both Dates; it
-   * preserves a missed-update counterexample without defining behavior for
-   * differently labeled Dates. The driver uses real sync writes and a public
+   * differ. The driver uses real sync writes and a public
    * subscriber; it checks the callback and the settled commit. These fixed
    * histories do not claim optimistic writes, indexes, or other hosts.
    */
   it.each([
     {
-      name: `changed equally labeled Dates in one foreign realm`,
+      name: `changed Dates in one foreign realm`,
       beforeTime: 1,
       afterTime: 2,
       beforeRealm: `foreign`,
       afterRealm: `foreign`,
-      ownLabel: true,
     },
     {
       name: `equal Dates in one foreign realm`,
@@ -1143,7 +1133,6 @@ describe(`native Date change publication across realms`, () => {
       afterTime: 1,
       beforeRealm: `foreign`,
       afterRealm: `foreign`,
-      ownLabel: false,
     },
     {
       name: `equal local-to-foreign Dates`,
@@ -1151,7 +1140,6 @@ describe(`native Date change publication across realms`, () => {
       afterTime: 1,
       beforeRealm: `local`,
       afterRealm: `foreign`,
-      ownLabel: false,
     },
     {
       name: `equal foreign-to-local Dates`,
@@ -1159,7 +1147,6 @@ describe(`native Date change publication across realms`, () => {
       afterTime: 1,
       beforeRealm: `foreign`,
       afterRealm: `local`,
-      ownLabel: false,
     },
     {
       name: `equal invalid local-to-foreign Dates`,
@@ -1167,7 +1154,6 @@ describe(`native Date change publication across realms`, () => {
       afterTime: null,
       beforeRealm: `local`,
       afterRealm: `foreign`,
-      ownLabel: false,
     },
     {
       name: `foreign invalid-to-valid Dates`,
@@ -1175,7 +1161,6 @@ describe(`native Date change publication across realms`, () => {
       afterTime: 1,
       beforeRealm: `foreign`,
       afterRealm: `foreign`,
-      ownLabel: false,
     },
     {
       name: `foreign valid-to-invalid Dates`,
@@ -1183,7 +1168,6 @@ describe(`native Date change publication across realms`, () => {
       afterTime: null,
       beforeRealm: `foreign`,
       afterRealm: `foreign`,
-      ownLabel: false,
     },
   ] as const)(`keeps the public mirror for $name`, async (sample) => {
     type DateRow = { id: string; value: Date }
@@ -1198,14 +1182,6 @@ describe(`native Date change publication across realms`, () => {
       sample.beforeRealm === `foreign` ? foreignBefore : new Date(beforeTime)
     const after =
       sample.afterRealm === `foreign` ? foreignAfter : new Date(afterTime)
-    if (sample.ownLabel) {
-      for (const date of [before, after]) {
-        Object.defineProperty(date, `label`, {
-          value: `same`,
-          enumerable: true,
-        })
-      }
-    }
     // The native intrinsic verifies the host supplied real Dates. The model
     // itself uses the constructor inputs, never the production classifier.
     expect(Date.prototype.getTime.call(before)).toEqual(beforeTime)
