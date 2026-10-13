@@ -47,6 +47,16 @@ executable head `905b93323`. That is **891 more minified bytes / 397 more gzip
 bytes**. Both outputs use Node's `zlib.gzipSync`. The source-line budget is
 negative; the consumer-bundle budget remains positive.
 
+The later build-cache commit `ad6f22105` removes the obsolete `compareStored`
+minifier entry and registers 23 private members that the cache check recognizes
+as safe. Production TypeScript is unchanged from the reviewed executable head.
+After a fresh build, the same consumer-bundle measurement is 335,182 bytes /
+100,737 gzip: **431 fewer minified bytes / 245 more gzip bytes** than baseline.
+The local cache check and minified public API check pass. This narrows, but does
+not close, the consumer-bundle gap. The repository's separate compressed-size
+check reports **395 fewer bytes** across its published ESM package files at
+`ad6f22105`; that unbundled package measure is net negative.
+
 ## Exact-head hostile review of the index rewrite
 
 The executable revision is `905b93323` (following `2f852dcd1`); the baseline
