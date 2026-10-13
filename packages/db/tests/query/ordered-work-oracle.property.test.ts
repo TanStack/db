@@ -4408,7 +4408,10 @@ describe(`ordered source work oracle`, () => {
  * once no change is pending, and every refetching history ends with a
  * refetch. On either provider, after every step the Collection holds exactly
  * the rows in the provider's ledger, and the query and the Effect show their
- * window over those rows. A holding provider answers a load only at a
+ * window over those rows. A joined or anti-joined filter over an on-demand
+ * source must not request the whole source at its initial load when the
+ * first window's worth of source rows all pass the join and no boundary
+ * value is null or NaN. A holding provider answers a load only at a
  * `release` step, from the rows at that moment, so live changes and other
  * loads can arrive while it is in flight; every holding history ends by
  * answering all held loads. While a load is in flight, the Collection must
@@ -4964,9 +4967,14 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
   }> = []
   let holding = false
   const inFlight = () => heldRequests.length > 0
+  // Requests for the whole source: no predicate, cursor, or limit.
+  let fullSourceRequests = 0
   function servePage(options: LoadSubsetOptions): true | Promise<void> {
     providerRequests++
     servedRequests.push(options)
+    if (!options.where && !options.cursor && options.limit === undefined) {
+      fullSourceRequests++
+    }
     if (!holding) return answer(options)
     return new Promise((resolve) => heldRequests.push({ options, resolve }))
   }
@@ -5384,6 +5392,35 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       { includeInitialState: true },
     )
     unsubscribe = () => subscription.unsubscribe()
+    // A joined filter needs the whole on-demand source only when the first
+    // window's worth of source rows, in query order, cannot prove the
+    // window: one fails the join, or a boundary value is null or NaN and
+    // cannot be a cursor. When every such row passes, the initial load
+    // must not request the whole source.
+    if (testCase.path === `on-demand` && joined) {
+      const sourceOrder = eagerOrder(
+        new Map(
+          [...rows].map(([rowId, row]) => [rowId, { ...row, eligible: true }]),
+        ),
+        testCase,
+      )
+      const prefix = sourceOrder.slice(0, window + 1)
+      const passesJoin = (row: Row) =>
+        markersOf(row.link ?? row.id).length > 0 === admitsWhenMatched
+      const proven =
+        prefix.slice(0, window).every(passesJoin) &&
+        // Generated rows may carry a null rank behind the `number` row type.
+        prefix.every(
+          (row) =>
+            (row.rank as number | null) !== null && !Number.isNaN(row.rank),
+        )
+      if (proven) {
+        expect(
+          fullSourceRequests,
+          `full-source requests by the initial load of a proven prefix`,
+        ).toBe(0)
+      }
+    }
     const initialBound = workBound(boundaryRanks(rows, testCase))
     // On demand, the provider's transfer is bounded; the local snapshot
     // delivers every installed row, so read and delivered counts are not.
