@@ -1583,12 +1583,16 @@ create recursive Collection machinery.
     graph failure or a source cleaned up under the query, still end the
     query. So does an IndexedDB connection closure: it ends read and
     admission authority, which no health report can restore. An Effect has
-    the same two axes, with its gate at its settled initial loads.
+    the same two axes, with its gate at its settled initial loads: a load
+    that fails after the gate is a request error on the Effect's tree,
+    delivered through `onHealthChange`, and the Effect keeps running.
 17. **Error tree:** a live query's `errors` has one node for itself and one per
     source alias in query order, recursing through nested live queries. An
     include's source has `kind: 'include'`; when the include materializes a
     child Collection per parent row, its node rolls those up as
-    `instances: { total, inError }`. A pooled live query's tree is the tree a
+    `instances: { total, inError }`, counting only that include's children
+    even when another include reads the same alias, and a child's health
+    change is relayed like a source's. A pooled live query's tree is the tree a
     live-query Collection over its source would have, so it also reaches
     deeper levels. The shape is fixed by the query. Each node mirrors its
     Collection when read, and the query emits `health:change` whenever a node

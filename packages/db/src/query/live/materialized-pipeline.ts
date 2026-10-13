@@ -55,8 +55,8 @@ export type BucketRow = readonly [
 
 export type BucketFacadeCompilation = {
   edgeId: string
-  /** The include's FROM and JOIN aliases, whose error-tree nodes roll up its instances. */
-  aliases: Array<string>
+  /** The include's own source IDs, whose error-tree nodes roll up its instances. */
+  sourceIds: Array<string>
   rows: IStreamBuilder<[string, BucketRow]>
   activeBuckets: IStreamBuilder<[string, true]>
   hasOrderBy: boolean
@@ -167,9 +167,7 @@ function materializeRelation(
       ) as IStreamBuilder<[string, BucketRow]>
       facades.push({
         edgeId,
-        aliases: Object.keys(
-          include.childCompilationResult.aliasToCollectionId,
-        ),
+        sourceIds: include.sourceIds,
         rows: activeBucketRows,
         activeBuckets,
         hasOrderBy: include.hasOrderBy,

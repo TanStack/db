@@ -517,7 +517,7 @@ class PooledLiveQuery {
 
   /** The same error tree a live-query Collection over this source exposes. */
   get errors(): ErrorTreeNode {
-    const source = buildErrorTree(this.source, this.alias)
+    const source = buildErrorTree(this.source, { alias: this.alias })
     // The view shows its source's gate. A terminated partition also ended
     // this view, for example when its source was cleaned up under it.
     const error =
@@ -533,7 +533,7 @@ class PooledLiveQuery {
             true,
           ))
         : null)
-    return errorTreeNode(this, {
+    return errorTreeNode(this, undefined, {
       alias: `root`,
       collectionId: this.source.id,
       kind: `live-query`,

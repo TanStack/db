@@ -4,6 +4,8 @@ import type { CollectionImpl } from './index.js'
 /** A Collection that another Collection reads, under its query alias. */
 export interface ErrorTreeSource {
   readonly alias: string
+  /** Tells apart two sources under one alias, such as two includes. */
+  readonly id?: string
   readonly collection: CollectionImpl<any, any, any, any, any>
   readonly kind?: ErrorTreeNode[`kind`]
   /** An include's per-row child Collections, for its `instances` roll-up. */
@@ -12,7 +14,7 @@ export interface ErrorTreeSource {
   >
 }
 
-// One cached node per Collection and alias. A node keeps its identity until
+// One cached node per Collection and source. A node keeps its identity until
 // its own fields or one of its children change, so a change replaces only the
 // nodes on its path and readers can compare nodes with `===`.
 const nodeCache = new WeakMap<object, Map<string, ErrorTreeNode>>()
@@ -25,23 +27,18 @@ const nodeCache = new WeakMap<object, Map<string, ErrorTreeNode>>()
  */
 export function buildErrorTree(
   collection: CollectionImpl<any, any, any, any, any>,
-  alias: string = `root`,
-  kind?: ErrorTreeNode[`kind`],
-  instances?: ErrorTreeSource[`instances`],
+  { alias, id, kind, instances }: Omit<ErrorTreeSource, `collection`> = {
+    alias: `root`,
+  },
 ): ErrorTreeNode {
   const sources = collection._errorTreeSources?.() ?? []
   const lifecycle = collection._lifecycle
   const error: CollectionErrorInfo | null =
     lifecycle.gateProblem ?? lifecycle.health.error
   const children = sources.map((source) =>
-    buildErrorTree(
-      source.collection,
-      source.alias,
-      source.kind,
-      source.instances,
-    ),
+    buildErrorTree(source.collection, source),
   )
-  return errorTreeNode(collection, {
+  return errorTreeNode(collection, id, {
     alias,
     collectionId: collection.id,
     kind: kind ?? (collection._errorTreeSources ? `live-query` : `source`),
@@ -58,10 +55,11 @@ export function buildErrorTree(
  */
 export function errorTreeNode(
   owner: object,
+  id: string | undefined,
   fields: Omit<ErrorTreeNode, `isError` | `hasErrors`>,
 ): ErrorTreeNode {
   const { error, instances, sources } = fields
-  return cachedNode(owner, {
+  return cachedNode(owner, id ?? fields.alias, {
     ...fields,
     isError: error !== null,
     hasErrors:
@@ -82,12 +80,16 @@ function countInstances(
 }
 
 /** Return the cached node for this Collection and alias if nothing changed. */
-function cachedNode(owner: object, next: ErrorTreeNode): ErrorTreeNode {
+function cachedNode(
+  owner: object,
+  key: string,
+  next: ErrorTreeNode,
+): ErrorTreeNode {
   let nodes = nodeCache.get(owner)
   if (!nodes) nodeCache.set(owner, (nodes = new Map()))
-  const previous = nodes.get(next.alias)
+  const previous = nodes.get(key)
   if (previous && sameNode(previous, next)) return previous
-  nodes.set(next.alias, next)
+  nodes.set(key, next)
   return next
 }
 

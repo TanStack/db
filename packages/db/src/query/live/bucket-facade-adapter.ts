@@ -79,6 +79,8 @@ export class BucketFacadeAdapter {
     private readonly parentId: string,
     private readonly compilations: Array<BucketFacadeCompilation>,
     onMessages: (count: number) => void,
+    // A per-row child Collection's health is part of the parent's error tree.
+    private readonly onInstanceHealthChange: () => void = () => {},
   ) {
     for (const compilation of compilations) {
       compilation.rows.pipe(
@@ -218,10 +220,10 @@ export class BucketFacadeAdapter {
     return this.resolveValue(value) as T
   }
 
-  /** The live per-row Collections of the includes that read this alias. */
-  instancesFor(alias: string): Array<Collection<any, any, any>> {
+  /** The live per-row Collections of the includes that read this source. */
+  instancesFor(sourceId: string): Array<Collection<any, any, any>> {
     return this.compilations
-      .filter((compilation) => compilation.aliases.includes(alias))
+      .filter((compilation) => compilation.sourceIds.includes(sourceId))
       .flatMap((compilation) => [
         ...(this.entries.get(compilation.edgeId)?.values() ?? []),
       ])
@@ -464,6 +466,7 @@ export class BucketFacadeAdapter {
       startSync: true,
       gcTime: 0,
     })
+    collection.on(`health:change`, this.onInstanceHealthChange)
     const dispose = collection.cleanup.bind(collection)
     // Other parent rows can share this facade, so a holder must not end it.
     collection.cleanup = () =>

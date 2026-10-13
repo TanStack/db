@@ -6,6 +6,7 @@ import { normalizeError } from '../utils/error.js'
 import { deepEquals } from '../utils.js'
 import { codedMessage, devBuild } from '../error-message.js'
 import { buildErrorTree, errorTreeNode } from '../collection/error-tree.js'
+import { describeProblem } from '../collection/lifecycle.js'
 import { compileQuery } from './compiler/index.js'
 import { normalizeExpressionPaths } from './compiler/expressions.js'
 import { getCollectionBuilder } from './live/collection-registry.js'
@@ -40,6 +41,7 @@ import type {
 } from './compiler/joins.js'
 import type {
   ChangeMessage,
+  CollectionErrorInfo,
   ErrorTreeNode,
   KeyedStream,
   StringCollationConfig,
@@ -473,6 +475,8 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   // initial load has settled, with or without skipInitial. After it, a
   // source problem is health, not disposal.
   private reachedReady = false
+  private readonly failedRequests = new Set<string>()
+  private requestProblem: CollectionErrorInfo | null = null
   private readonly onHealthChange: ((errors: ErrorTreeNode) => void) | undefined
 
   // Scheduler integration
@@ -630,16 +634,20 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
           orderByInfo,
           whereExpression,
         ),
-        onLoadSubsetError: ({ error }) => {
-          this.onSourceError(normalizeError(error))
-        },
+        onLoadSubsetError: ({ error }) =>
+          this.failLoad(sourceId, normalizeError(error)),
         // subscribeChanges can report a result before it returns the
         // subscription, so read it from the record when a load fails.
-        onLoadSubsetResult: (result) =>
+        onLoadSubsetResult: (result) => {
           this.trackInitialLoad(
             result,
             () => this.subscriptions[sourceId]?.pendingTruncateReplacement,
-          ),
+          )
+          void Promise.resolve(result).then(
+            () => this.settleLoad(sourceId),
+            () => {},
+          )
+        },
       })
 
       // Store subscription immediately so the join compiler can find it
@@ -678,7 +686,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       const lazyCallbacks = this.lazySourcesCallbacks[sourceId]
       if (lazyCallbacks) {
         lazyCallbacks.setDemand = (plan: LazyDemandPlan, keys: Set<unknown>) =>
-          this.setDemand(subscription, plan, keys)
+          this.setDemand(sourceId, subscription, plan, keys)
         for (const plan of lazyCallbacks.plans ?? []) {
           if (plan.initialKeys.size > 0) {
             lazyCallbacks.setDemand(plan, plan.initialKeys)
@@ -694,6 +702,10 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
           subscription,
           alias,
           (result, holdPublication) => {
+            this.trackInitialLoad(
+              result,
+              () => subscription.pendingTruncateReplacement,
+            )
             const holdsInitialPublication =
               this.skipInitial && !this.initialLoadComplete
             if (holdPublication || holdsInitialPublication) {
@@ -836,6 +848,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   }
 
   private setDemand(
+    sourceId: string,
     subscription: CollectionSubscription,
     plan: LazyDemandPlan,
     keys: Set<unknown>,
@@ -861,7 +874,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       // detached error channel.
       void update.ready.then(
         () => {
-          if (!this.disposed) this.scheduleGraphRun()
+          if (this.disposed) return
+          this.settleLoad(sourceId)
+          this.scheduleGraphRun()
         },
         () => {},
       )
@@ -896,11 +911,14 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       if (this.pendingInitialLoads.delete(result) && !this.disposed)
         this.scheduleGraphRun()
     }
-    // A load failure disposes the Effect through onLoadSubsetError. Any other
-    // rejection comes from an obsolete or aborted acquisition, so the hold
-    // fails open: it releases unless a truncate replacement takes it over.
+    // A load failure disposes the Effect through onLoadSubsetError, so a
+    // rejection releases one microtask later, after that event, as a live
+    // query's tracked rejection does. Any other rejection comes from an
+    // obsolete or aborted acquisition, so the hold fails open: it releases
+    // unless a truncate replacement takes it over.
     followHeldAcquisition(result, replacementAfterFailure, {
-      settled: release,
+      settled: (succeeded) =>
+        succeeded ? release() : void Promise.resolve().then(release),
       replaced: (replacement) => {
         this.trackInitialLoad(replacement, replacementAfterFailure)
         release()
@@ -1061,16 +1079,33 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     return this.reachedReady
   }
 
+  // Before the gate, a failed load ends the Effect. After it, the failure is
+  // a request error on the Effect's own node, as on a live query's, until a
+  // later load of that source settles.
+  private failLoad(sourceId: string, error: Error): void {
+    if (!this.reachedReady) return this.onSourceError(error)
+    this.failedRequests.add(sourceId)
+    this.requestProblem = describeProblem(error, `request`, false)
+    this.reportHealth()
+  }
+
+  private settleLoad(sourceId: string): void {
+    if (!this.failedRequests.delete(sourceId) || this.failedRequests.size > 0)
+      return
+    this.requestProblem = null
+    this.reportHealth()
+  }
+
   /** The error tree for this effect's sources, in query order. */
   private errorTree(): ErrorTreeNode {
-    return errorTreeNode(this, {
+    return errorTreeNode(this, undefined, {
       alias: `root`,
       collectionId: `effect`,
       kind: `live-query`,
       status: this.reachedReady ? `ready` : `loading`,
-      error: null,
-      sources: this.collectionSources.map(({ alias, collection }) =>
-        buildErrorTree(collection, alias),
+      error: this.requestProblem,
+      sources: this.collectionSources.map(({ sourceId, alias, collection }) =>
+        buildErrorTree(collection, { alias, id: sourceId }),
       ),
     })
   }

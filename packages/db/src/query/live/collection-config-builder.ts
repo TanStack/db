@@ -432,16 +432,18 @@ export class CollectionConfigBuilder<
   /** The source aliases of this query, in query order, for its error tree. */
   errorTreeSources(): ReadonlyArray<ErrorTreeSource> {
     return this.collectionSources.map(({ sourceId, alias, collection }) => {
-      if (!this.includeSourceIds.has(sourceId)) return { alias, collection }
+      const source = { id: sourceId, alias, collection }
+      if (!this.includeSourceIds.has(sourceId)) return source
       const instanced = this.bucketFacadesCache?.some((compilation) =>
-        compilation.aliases.includes(alias),
+        compilation.sourceIds.includes(sourceId),
       )
       return {
-        alias,
-        collection,
+        ...source,
         kind: `include` as const,
         ...(instanced
-          ? { instances: () => this.bucketFacades?.instancesFor(alias) ?? [] }
+          ? {
+              instances: () => this.bucketFacades?.instancesFor(sourceId) ?? [],
+            }
           : {}),
       }
     })
@@ -977,9 +979,14 @@ export class CollectionConfigBuilder<
     // and pays for no facade state.
     const facadeCompilations = this.bucketFacadesCache
     const bucketFacades = facadeCompilations
-      ? new BucketFacadeAdapter(this.id, facadeCompilations, (count) => {
-          syncState.messagesCount += count
-        })
+      ? new BucketFacadeAdapter(
+          this.id,
+          facadeCompilations,
+          (count) => {
+            syncState.messagesCount += count
+          },
+          () => this.liveQueryCollection?._emitHealthChange(),
+        )
       : undefined
     this.bucketFacades = bucketFacades
     if (bucketFacades) {

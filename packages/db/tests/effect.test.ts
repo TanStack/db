@@ -8,6 +8,7 @@ import {
 } from './utils.js'
 import type {
   DeltaEvent,
+  ErrorTreeNode,
   SubscriptionLoadSubsetErrorEvent,
 } from '../src/index.js'
 
@@ -1968,6 +1969,7 @@ describe(`createEffect`, () => {
         },
       })
       const sourceErrors: Array<Error> = []
+      const trees: Array<ErrorTreeNode> = []
       const effect = createEffect({
         query: (q) =>
           q
@@ -1981,6 +1983,7 @@ describe(`createEffect`, () => {
             })),
         onBatch: () => {},
         onSourceError: (error) => sourceErrors.push(error),
+        onHealthChange: (errors) => trees.push(errors),
       })
 
       try {
@@ -1994,8 +1997,14 @@ describe(`createEffect`, () => {
         }
 
         expect(commitError).toBeUndefined()
-        expect(sourceErrors).toEqual([failure])
-        expect(effect.disposed).toBe(true)
+        // After the Effect's gate, a failed load is a request error on its
+        // tree; the Effect keeps running.
+        expect(sourceErrors).toEqual([])
+        expect(effect.disposed).toBe(false)
+        expect(trees.at(-1)?.error).toMatchObject({
+          phase: `request`,
+          message: failure.message,
+        })
       } finally {
         await effect.dispose()
         await Promise.all([users.cleanup(), issues.cleanup()])
@@ -2039,6 +2048,7 @@ describe(`createEffect`, () => {
         },
       })
       const sourceErrors: Array<Error> = []
+      const trees: Array<ErrorTreeNode> = []
       const effect = createEffect({
         query: (q) =>
           q
@@ -2052,6 +2062,7 @@ describe(`createEffect`, () => {
             })),
         onBatch: () => {},
         onSourceError: (error) => sourceErrors.push(error),
+        onHealthChange: (errors) => trees.push(errors),
       })
 
       try {
@@ -2065,8 +2076,13 @@ describe(`createEffect`, () => {
         }).not.toThrow()
         await flushPromises()
 
-        expect(sourceErrors).toEqual([failure])
-        expect(effect.disposed).toBe(true)
+        // A failed release after the gate is a request error.
+        expect(sourceErrors).toEqual([])
+        expect(effect.disposed).toBe(false)
+        expect(trees.at(-1)?.error).toMatchObject({
+          phase: `request`,
+          message: failure.message,
+        })
         expect(unloadCount).toBe(1)
 
         await effect.dispose()
