@@ -205,9 +205,11 @@ export function trailBaseCollectionOptions<
       const cursors = new Map<string | number, string>()
 
       let listening = false
-      // Orders this run's change events against its list calls.
+      // Orders this run's change events against its list calls. Only loads
+      // in flight compare against it, so it is kept only while one runs.
       let eventSequence = 0
       const eventSequenceByKey = new Map<TKey, number>()
+      let loadsInFlight = 0
       // Settles when the listener runs, cannot start (with the failure), or
       // the session cleans up, so a waiting load never depends on the order
       // of their continuations.
@@ -268,78 +270,85 @@ export function trailBaseCollectionOptions<
         }
         const appliedPages: Array<Promise<void>> = []
 
-        while (true) {
-          const limit = Math.min(remaining, 256)
-          let response
-          // A change event after this point is newer than the page.
-          const listedAfter = eventSequence
-          try {
-            response = await config.recordApi.list({
-              pagination: {
-                limit,
-                offset,
-                cursor,
-              },
-              order,
-              filters,
-            })
-          } catch (error) {
-            if (cancelled) return
-            if (opts.signal?.aborted) break
-            throw error
-          }
-          if (cancelled) return
-          // Check the signal before commit to discard a stale page.
-          if (opts.signal?.aborted) break
-
-          const length = response.records.length
-          if (length === 0) {
-            // Drained - read everything.
-            break
-          }
-
-          begin()
-
-          for (let i = 0; i < Math.min(length, remaining); ++i) {
-            const value = parse(response.records[i]!)
-            const key = getKey(value)
-            // The listener already applied a newer change for this row.
-            if ((eventSequenceByKey.get(key) ?? 0) > listedAfter) continue
-            write({ type: collection.has(key) ? `update` : `insert`, value })
-          }
-
-          // An accepted page always applies.
-          const applied = commit(opts.signal)
-          if (applied !== true) {
-            appliedPages.push(applied)
-          }
-          if (cancelled || opts.signal?.aborted) break
-
-          remaining -= length
-
-          // Drained or read enough.
-          if (length < limit || remaining <= 0) {
-            // Core subscriptions cannot send lastKey, so retaining their
-            // cursors only grows this cache. Direct callers can use the key
-            // from a completed page as their next opaque boundary.
-            if (
-              response.cursor &&
-              (opts.subscription === undefined || lastKey !== undefined)
-            ) {
-              cursors.set(
-                getKey(parse(response.records.at(-1)!)),
-                response.cursor,
-              )
+        loadsInFlight++
+        try {
+          while (true) {
+            const limit = Math.min(remaining, 256)
+            let response
+            // A change event after this point is newer than the page.
+            const listedAfter = eventSequence
+            try {
+              response = await config.recordApi.list({
+                pagination: {
+                  limit,
+                  offset,
+                  cursor,
+                },
+                order,
+                filters,
+              })
+            } catch (error) {
+              if (cancelled) return
+              if (opts.signal?.aborted) break
+              throw error
             }
-            break
-          }
+            if (cancelled) return
+            // Check the signal before commit to discard a stale page.
+            if (opts.signal?.aborted) break
 
-          // Update params for next iteration.
-          if (offset !== undefined) {
-            offset += length
-          } else {
-            cursor = response.cursor
+            const length = response.records.length
+            if (length === 0) {
+              // Drained - read everything.
+              break
+            }
+
+            begin()
+
+            for (let i = 0; i < Math.min(length, remaining); ++i) {
+              const value = parse(response.records[i]!)
+              const key = getKey(value)
+              // The listener already applied a newer change for this row.
+              if ((eventSequenceByKey.get(key) ?? 0) > listedAfter) continue
+              // A page row is a full row. An update creates a missing row and
+              // replaces a held one, including one an accepted event queued.
+              write({ type: `update`, value })
+            }
+
+            // An accepted page always applies.
+            const applied = commit(opts.signal)
+            if (applied !== true) {
+              appliedPages.push(applied)
+            }
+            if (cancelled || opts.signal?.aborted) break
+
+            remaining -= length
+
+            // Drained or read enough.
+            if (length < limit || remaining <= 0) {
+              // Core subscriptions cannot send lastKey, so retaining their
+              // cursors only grows this cache. Direct callers can use the key
+              // from a completed page as their next opaque boundary.
+              if (
+                response.cursor &&
+                (opts.subscription === undefined || lastKey !== undefined)
+              ) {
+                cursors.set(
+                  getKey(parse(response.records.at(-1)!)),
+                  response.cursor,
+                )
+              }
+              break
+            }
+
+            // Update params for next iteration.
+            if (offset !== undefined) {
+              offset += length
+            } else {
+              cursor = response.cursor
+            }
           }
+        } finally {
+          if (--loadsInFlight === 0) eventSequenceByKey.clear()
         }
 
         await Promise.all(appliedPages)
@@ -374,7 +383,9 @@ export function trailBaseCollectionOptions<
           void commit()
 
           if (value) {
-            eventSequenceByKey.set(getKey(value), ++eventSequence)
+            ++eventSequence
+            if (loadsInFlight > 0)
+              eventSequenceByKey.set(getKey(value), eventSequence)
             seenIds.setState((curr: Map<string, number>) => {
               const newIds = new Map(curr)
               newIds.set(String(getKey(value)), Date.now())

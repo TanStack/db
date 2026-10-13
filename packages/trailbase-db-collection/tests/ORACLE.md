@@ -38,8 +38,9 @@ The same interpreter runs a fixed corpus and generated histories.
 - Once a page and every change event for its rows have arrived, the
   Collection's rows equal the service's rows. A page was read before any
   change that the listener applies while the page is in flight, so the page
-  skips rows that such an event touched, and it updates a row that the
-  Collection already holds instead of inserting it again. The page-event lane
+  skips rows that such an event touched. Every page row is written as a
+  full-row `update`, which creates a missing row and replaces a held one, so
+  a page never collides with an event that core accepted but still holds. The page-event lane
   enumerates 15 histories: eager startup or an on-demand load; an update,
   delete, or insert; committed before the list call (on-demand only), while
   the page is in flight, or after it applies. It compares the Collection's
@@ -51,13 +52,28 @@ The same interpreter runs a fixed corpus and generated histories.
   value; after the history drains, every returned or changed key does. Four
   named replays pin an update between pages, an update then a delete during a
   page, overlapping loads around an update, and offset paging with two
-  updates. The page fence orders events by a sequence that each sync run
-  counts, so a fresh run never skips a row because of an earlier run's event.
+  updates. After the history drains, the Collection holds exactly the rows
+  that a page returned or an event touched and that the service still has.
+  The page fence orders events by a sequence that each sync run counts, so a
+  fresh run never skips a row because of an earlier run's event. The fence
+  keeps per-key sequences only while a load is in flight and clears them when
+  the last load ends; no public observation measures that bound.
+- A page never fails a load for an older event that core accepted but holds
+  while a user mutation persists. TrailBase mutation handlers wait for their
+  own change event, so core holds sync commits for the round trip of every
+  mutation. Four histories cross a persisting mutation (or none) with an
+  older insert or update event queued before the list call and a page that
+  lists a newer value. While the mutation holds commits the load stays
+  pending; once the newer event and the mutation settle, the load is
+  fulfilled and the rows equal the service.
 - The adapter subscribes once per sync run and does not resubscribe. After the
   stream closes or fails, the Collection keeps its rows and stays ready, a
   later service change does not reach it, and a later on-demand load lists
   the service's current rows without waiting. Two histories make this limit
-  executable; they do not claim it is the right product behavior.
+  executable; they do not claim it is the right product behavior. They pin
+  one stream end followed by one change and one load. A page whose newer
+  event never arrives because the stream ended keeps the value the fence
+  allowed; that follows from the same no-resubscribe limit and has no cell.
 - Graceful closure drains buffered events before releasing the reader.
 - Processing failures cancel an open source. Terminal paths release readers and
   timers without detached rejections, including same-turn cleanup.
@@ -145,6 +161,22 @@ collides the same way.
 | Adapter before this change           |                 6 |
 | Pages ignore change events in flight |                 4 |
 | Pages always insert                  |                 2 |
+
+The held-commit lane fails on the adapter before this change: with a
+mutation persisting, a page's `insert` for a row that a held event inserted
+is a duplicate of the pending synced row, and the load rejects. Deciding
+insert or update from the visible rows (`collection.has`) still fails that
+history, because the held event is pending, not visible.
+
+| Mutant of the page write or fence           | Failing tests |
+| ------------------------------------------- | ------------: |
+| Decide insert or update by `collection.has` |             1 |
+| Always insert                               |             6 |
+| No fence                                    |            10 |
+| Wall-clock fence                            |             1 |
+| Loads skip the listener wait                |            16 |
+| Clear the fence when any load ends          |             1 |
+| Record events only with two loads in flight |             9 |
 
 The generated lane and its four replays all fail on the adapter before the
 fence and on the fence-less mutant; both properties shrink to one update while

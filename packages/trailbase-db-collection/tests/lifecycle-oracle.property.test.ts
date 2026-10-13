@@ -968,6 +968,141 @@ it.each(racePlans)(
 )
 
 /**
+ * ## Does a page converge while a user mutation holds sync commits?
+ *
+ * Law: the same convergence law as above, and a page never fails a load for
+ * an older event that core has accepted but not yet shown. A TrailBase
+ * mutation handler waits for its own change event, so core holds every sync
+ * commit while that mutation persists. An accepted event is then part of the
+ * pending synced state but not of the visible rows.
+ *
+ * Reference: the service model above. A user mutation updates row 2; its
+ * request and its own change event arrive only when the history releases them.
+ * The prediction ignores the mutation's timing for the other rows: once every
+ * page, event, and the mutation have settled, the Collection equals the
+ * service, and the on-demand load is fulfilled.
+ *
+ * Grammar (exhaustive, 4 histories): a mutation persists during the page or
+ * no mutation runs; the older event before the list call inserts a new row or
+ * updates an existing one, and the page lists a newer value whose event is
+ * still in transit.
+ *
+ * A first load establishes the service's base rows before the history starts.
+ *
+ * Checkpoints: after the page settles, the load is pending while the mutation
+ * holds commits and fulfilled otherwise; it never rejects. After the newer
+ * event and the mutation settle, the load is fulfilled and the rows equal the
+ * service.
+ */
+type HeldPlan = {
+  held: boolean
+  change: `insert` | `update`
+}
+
+async function checkHeldPage(plan: HeldPlan) {
+  const id = plan.change === `insert` ? 3 : 1
+  const service = new Map(raceServiceRows.map((row) => [row.id, row]))
+  const stream = new TransformStream<Event>()
+  const listener = stream.writable.getWriter()
+  const page = deferred<ListResponse<RaceRow>>()
+  const userRequest = deferred<void>()
+  let snapshot: Array<RaceRow> | undefined
+  const api = new MockRecordApi<RaceRow>()
+  api.subscribe.mockImplementation(() => Promise.resolve(stream.readable))
+  // The first list loads the base rows; the second is the page under test.
+  let lists = 0
+  api.list.mockImplementation(() => {
+    if (lists++ === 0)
+      return Promise.resolve({ records: [...service.values()] })
+    snapshot = [...service.values()]
+    return page.promise
+  })
+  api.update.mockImplementation(() => userRequest.promise)
+  const deliver = async (event: Event) => {
+    await listener.write(event)
+    await turn()
+  }
+  const collection = createCollection(
+    trailBaseCollectionOptions({
+      recordApi: api,
+      getKey: (row: RaceRow) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      parse: {},
+      serialize: {},
+    }),
+  )
+  const rows = () => sortedRows(collection.toArray)
+  const trace = JSON.stringify(plan)
+
+  try {
+    await turn()
+    await collection._sync.loadSubset({})
+    await turn()
+    let mutation: ReturnType<typeof observe> | undefined
+    if (plan.held) {
+      mutation = observe(
+        collection.update(2, (draft) => {
+          draft.data = `local`
+        }).isPersisted.promise,
+      )
+      await turn()
+    }
+    const older = { id, data: `older` }
+    service.set(id, older)
+    await deliver(
+      plan.change === `insert` ? { Insert: older } : { Update: older },
+    )
+    const newer = { id, data: `newer` }
+    service.set(id, newer)
+
+    const settled = observe(Promise.resolve(collection._sync.loadSubset({})))
+    await turn()
+    expect(snapshot, `${trace} list called`).toBeDefined()
+    page.resolve({ records: snapshot! })
+    await turn()
+    await turn()
+    // Held commits apply only when the mutation settles, and a load waits
+    // until its rows are visible. It must not fail in the meantime.
+    expect(settled.result, `${trace} load after the page`).toBe(
+      plan.held ? `pending` : `fulfilled`,
+    )
+
+    await deliver({ Update: newer })
+    if (mutation) {
+      const confirmed = { id: 2, data: `local` }
+      service.set(2, confirmed)
+      userRequest.resolve()
+      await turn()
+      await deliver({ Update: confirmed })
+      await turn()
+      expect(mutation.result, `${trace} mutation persisted`).toBe(`fulfilled`)
+    }
+    expect(settled.result, `${trace} load after everything settles`).toBe(
+      `fulfilled`,
+    )
+    expect(rows(), `${trace} rows after everything settles`).toEqual(
+      sortedRows(service.values()),
+    )
+  } finally {
+    page.resolve({ records: [] })
+    userRequest.resolve()
+    await collection.cleanup()
+    void listener.close().catch(() => undefined)
+    await turn()
+  }
+}
+
+const heldPlans: Array<HeldPlan> = [true, false].flatMap((held) =>
+  ([`insert`, `update`] as const).map((change) => ({ held, change })),
+)
+
+it.each(heldPlans)(
+  `converges while a mutation holds sync commits: held=$held / $change`,
+  (plan) => checkHeldPage(plan),
+)
+
+/**
  * ## What happens after the change stream ends?
  *
  * Law (the adapter's current contract, `ORACLE.md`): the adapter subscribes
@@ -982,7 +1117,9 @@ it.each(racePlans)(
  *
  * Grammar (exhaustive, 2 histories): the stream closes gracefully or fails
  * with a read error after the first page applies; then the service changes a
- * row, and an on-demand load runs.
+ * row, and an on-demand load runs. The lane pins one stream end followed by
+ * one change and one load. It does not cover several later loads, a page in
+ * flight when the stream ends, or cleanup between them.
  *
  * Checkpoints: after the stream ends, after the service change, and after the
  * later load. Each compares rows, status, and subscribe calls.
@@ -1255,8 +1392,16 @@ async function checkPageHistory(history: PageHistory) {
     }
     for (const load of loads)
       expect(load.result, `${trace} load settled`).toBe(`fulfilled`)
-    for (const id of new Set([...returnedKeys, ...changedKeys]))
+    const reached = new Set([...returnedKeys, ...changedKeys])
+    for (const id of reached)
       expect(value(id), `${trace} drained: key ${id}`).toEqual(service.get(id))
+    // No other row exists: every visible key came from a page or an event.
+    expect(
+      [...collection.keys()].sort((a, b) => Number(a) - Number(b)),
+      `${trace} drained: key set`,
+    ).toEqual(
+      [...reached].filter((id) => service.has(id)).sort((a, b) => a - b),
+    )
   } finally {
     for (const queue of pending)
       for (const next of queue.splice(0)) next.resolve()
