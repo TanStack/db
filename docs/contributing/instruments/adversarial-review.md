@@ -20,10 +20,8 @@ levels; they are different questions, not a mandatory sequence:
 | Composition | Find obligations that conflict, duplicate each other, or require a shared ordering or authority rule. Use the tension or restructuring card if that is the material uncertainty.               |
 | Concepts    | Question the chosen identity, state, ownership, or boundary distinctions. Describe the same case without relying on its current names and check what is lost or becomes visible.               |
 
-For an information-sufficiency formulation attack, seek two legal histories
-that give the same initial state and inputs to the same production path through
-the promised checkpoint but require incompatible public observations. Test a
-nearby path that receives the missing distinction before that checkpoint.
+For a suspected information gap, use [law discovery](law-discovery.md#operation),
+step 5.
 
 ### Locate the repair
 

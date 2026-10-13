@@ -31,11 +31,12 @@ lead, not evidence that one contract governs every item.
    condition such as cardinality, ordering, identity, authority, or observation
    time. Keep other conditions fixed where possible. Check the boundary is
    within the claimed domain.
-5. Check whether the proposed result is determined by the information available
-   to the responsible production path at the named checkpoint. Seek two legal
-   underlying histories that give the production path the same initial state
-   and inputs through that checkpoint, but require incompatible public
-   observations. If they exist, name the missing information or provider
+5. Identify the checkpoint where the contract requires the proposed result; a
+   permitted pending state does not establish a gap. Check whether the result
+   is determined by the information available to the responsible production
+   path there. Seek two legal underlying histories that give the path the same
+   initial state and inputs through that checkpoint but require incompatible
+   public observations. If they exist, name the missing information or provider
    obligation. A candidate law may be scoped explicitly; do not silently narrow
    an accepted promise, which requires authority to revise.
 6. Describe the smallest independent model that enacts the obligation and limits
