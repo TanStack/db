@@ -70,3 +70,38 @@ and no conforming real-host failure was found. The speculative alias scan
 repair was removed. Reopen on a supported engine/version where two native-equal
 zones produce different resolved names and a public scan or indexed equality
 misses.
+
+## Integration after merging main
+
+Merge commit `f42e816d9c0442448624ab418074fd5008ee14c7` combines the reviewed
+repair with `origin/main` at `bbbf017ef5b3884515295a4225faacdfd814499e`.
+Main added replay retirement and bounded ordered-window behavior. The only
+textual conflict was this architecture document; its resolution keeps both the
+captured-list full-source rule and main's finite-window rule. No R16, R17, R25,
+or R29 oracle expectation was changed during the merge.
+
+The combined tree passes 13,381 DB source tests, 705 DB-IVM tests, and 291 DB
+dist tests. The packed IndexedDB package check passes 19 tests. Five focused
+Temporal/index/equality/publication/replay owners pass 874 tests, with no test
+type errors. DB source and test TypeScript checks and both package builds pass.
+The focused integration review found no new mismatch in ordinary ready sync
+publication. Date or Duration replacement during truncate replay is not a
+separately generated cross-product; replay histories use numeric rows and the
+replay path calls the repaired equality function. This is a receiving limit,
+not evidence of a known failing legal history.
+
+Against this newer `origin/main`, production TypeScript is **+878 net lines**
+(1,388 added, 510 removed); architecture prose is **+56 net lines** separately.
+Minified ESM modules total 206,777 to 211,426 gzip bytes for DB (**+4,649**)
+and 24,350 to 24,369 for DB-IVM (**+19**). A minified browser bundle of the
+public DB source entry is 112,595 to 115,464 gzip bytes (**+2,869**) under
+the same esbuild command at both revisions. The main bundle was reproduced
+byte for byte before comparing. These views overlap and must not be added.
+
+The guarantee choices in the table above still apply. The two largest behavior
+costs, live captured arrays with whole-result refresh and per-row custom
+callback order, are explicit maintainer decisions. Unsigned default byte order,
+different-position old-Date removal, silence for equal-field Duration copies,
+and intrinsic semantics for user-modified Date or byte built-ins remain separate
+product choices. No size reduction is credited for dropping them without a
+same-path oracle and a measured implementation change.
