@@ -25537,7 +25537,12 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
    *
    * The grammar crosses when the owner first commits the row (before or
    * after the rotation) with a later broadcast for the same key: none, an
-   * owner update, or a peer notice that claims a different value. The
+   * owner update, or a peer notice that claims a different value. An owner
+   * update's durable read either succeeds or fails. The owner's notice is
+   * source evidence, so a failed read of it is a real failure: the follower
+   * becomes terminal and keeps the rows it showed, instead of silently
+   * ignoring the failure as if a new recovery had started during the read.
+   * The
    * observations are the follower's rows when its first load settles, after
    * the rotation's reacquisition, and after the later broadcast, plus the
    * ensure log at quiescence. The coordinator is a controlled double of an
@@ -25546,11 +25551,22 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   type FollowerGenerationNoticeHistory = {
     ownerCommit: `before-rotation` | `after-rotation`
     later: `none` | `owner` | `peer`
+    // Applies only to a later owner update.
+    ownerRead: `ok` | `fails`
+    // Control: an owner notice's read is in flight when rotation starts, and
+    // then fails. Recovery owns that read, so its failure is ignored.
+    readFailsAsRotationStarts?: boolean
   }
   const assertFollowerGenerationNoticeHistory = async ({
     ownerCommit,
     later,
+    ownerRead,
+    readFailsAsRotationStarts = false,
   }: FollowerGenerationNoticeHistory): Promise<void> => {
+    const readFailure = new Error(`owner update read failed`)
+    let failNextRead = false
+    let holdNextRead:
+      { promise: Promise<void>; reject: (e: unknown) => void } | undefined
     const oldStorageId = `follower-notice-old`
     const newStorageId = `follower-notice-new`
     const ownerId = `elected-owner`
@@ -25601,14 +25617,24 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       notify(id, row, ownerId)
     }
     const adapter: PersistenceAdapter = {
-      loadSubset: async (target) =>
-        Array.from(
+      loadSubset: async (target) => {
+        const hold = holdNextRead
+        if (hold) {
+          holdNextRead = undefined
+          await hold.promise
+        }
+        if (failNextRead) {
+          failNextRead = false
+          throw readFailure
+        }
+        return Array.from(
           durable.get(recordedStorageId(target))!.values(),
           (value) => ({
             key: value.id,
             value: structuredClone(value),
           }),
-        ),
+        )
+      },
       claimCacheGeneration: async () => ({
         storageCollectionId: oldStorageId,
         claimId: `follower-notice-claim`,
@@ -25746,8 +25772,26 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       if (!persistence?.startScopedRecovery) {
         throw new Error(`Expected scoped recovery capability`)
       }
+      let rotation: Promise<void>
+      if (readFailsAsRotationStarts) {
+        let reject!: (error: unknown) => void
+        const promise = new Promise<void>((_resolve, rejectRead) => {
+          reject = rejectRead
+        })
+        void promise.catch(() => undefined)
+        holdNextRead = { promise, reject }
+        ownerCommits(oldStorageId, {
+          id: `remote`,
+          title: `Pre-rotation update`,
+        })
+        await flushAsyncWork()
+        rotation = persistence.startScopedRecovery()
+        reject(readFailure)
+      } else {
+        rotation = persistence.startScopedRecovery()
+      }
       await atPersistedOracleCheckpoint(
-        persistence.startScopedRecovery(),
+        rotation,
         `follower cache rotation settled`,
       )
       await atPersistedOracleCheckpoint(
@@ -25764,9 +25808,17 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
 
       if (later === `owner`) {
         upstream = v2
+        failNextRead = ownerRead === `fails`
         ownerCommits(newStorageId, v2)
-        await settled(`owner update processed`)
-        expectOwnerEvidence(visible)
+        if (ownerRead === `fails`) {
+          // Not settled(): a terminal runtime rejects the checkpoint scan.
+          await flushAsyncWork()
+          await vi.waitFor(() => expect(collection.status).toBe(`error`))
+          expectExactSnapshot(publicRows(), visible)
+        } else {
+          await settled(`owner update processed`)
+          expectOwnerEvidence(visible)
+        }
       } else if (later === `peer`) {
         // A non-owner claims a change. It is not source evidence: the rows
         // stay as they were, and the follower asks the owner again.
@@ -25798,8 +25850,26 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     { ownerCommit: `before-rotation`, later: `peer` },
   ] as const)(
     `publishes an elected owner's rows to a follower after rotation: commit $ownerCommit, later $later`,
-    (history) => assertFollowerGenerationNoticeHistory(history),
+    (history) =>
+      assertFollowerGenerationNoticeHistory({ ...history, ownerRead: `ok` }),
   )
+
+  it.each([
+    { ownerCommit: `before-rotation`, later: `owner` },
+    { ownerCommit: `after-rotation`, later: `owner` },
+  ] as const)(
+    `fails a follower when its elected owner's update cannot be read after rotation: commit $ownerCommit`,
+    (history) =>
+      assertFollowerGenerationNoticeHistory({ ...history, ownerRead: `fails` }),
+  )
+
+  it(`ignores a follower read failure when rotation starts while the read is in flight`, () =>
+    assertFollowerGenerationNoticeHistory({
+      ownerCommit: `before-rotation`,
+      later: `none`,
+      ownerRead: `ok`,
+      readFailsAsRotationStarts: true,
+    }))
 
   const followerGenerationNoticeHistory = fc.record({
     ownerCommit: fc.constantFrom<
@@ -25809,6 +25879,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       `none`,
       `owner`,
       `peer`,
+    ),
+    ownerRead: fc.constantFrom<FollowerGenerationNoticeHistory[`ownerRead`]>(
+      `ok`,
+      `fails`,
     ),
   })
   fcTest.prop([followerGenerationNoticeHistory], {

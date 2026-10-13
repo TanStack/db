@@ -5115,6 +5115,11 @@ class PersistedCollectionRuntime<
     }
     const lifecycleGeneration = this.lifecycleGeneration
     const truncateGeneration = this.sourceTruncateGeneration
+    // An owner-evidence reload starts during recovery; only a recovery that
+    // starts while this read is awaited owns its failure.
+    const recoveryAtStart = this.scopedRecovery
+      ? this.scopedRecoverySequence
+      : undefined
     const activeSubsetOptions = Array.from(this.activeSubsets.values())
     if (restoreResetBaseline && activeSubsetOptions.length === 0) {
       activeSubsetOptions.push({})
@@ -5195,8 +5200,11 @@ class PersistedCollectionRuntime<
         }
       } catch (error) {
         // Recovery may have started while the adapter read was awaited.
-
-        if (this.scopedRecovery) return
+        if (
+          this.scopedRecovery &&
+          this.scopedRecoverySequence !== recoveryAtStart
+        )
+          return
         // SQLite may reject its second read-admission check after a claim
         // expires. A read from that cache has no authority to fail the
         // Collection; recovery will reload its active demands.
