@@ -238,6 +238,24 @@ function normalizedKey(kind: string, value: string): string {
   return `${NORMALIZED_KEY_PREFIX}${kind}:${value}`
 }
 
+const canonicalTemporalZones = new Map<string, string>()
+
+function canonicalTemporalZone(zoneId: string): string {
+  const cached = canonicalTemporalZones.get(zoneId)
+  if (cached !== undefined) return cached
+
+  let canonical = zoneId
+  try {
+    canonical = new Intl.DateTimeFormat(`en-US`, {
+      timeZone: zoneId,
+    }).resolvedOptions().timeZone
+  } catch {
+    // Keep valid Temporal zones that this host's Intl does not recognize.
+  }
+  canonicalTemporalZones.set(zoneId, canonical)
+  return canonical
+}
+
 function normalizeBinary(value: Uint8Array): string {
   let bytes = ``
   for (let index = 0; index < value.byteLength; index++) {
@@ -276,10 +294,52 @@ export function normalizeValue(value: any): any {
   if (timestamp !== undefined) return timestamp
 
   if (isTemporal(value)) {
-    return normalizedKey(
-      `temporal`,
-      `${value[Symbol.toStringTag]}:${value.toString()}`,
-    )
+    const kind = value[Symbol.toStringTag]
+    if (kind === `Temporal.ZonedDateTime`) {
+      // Read Temporal's internal slots through its prototype getters. Own
+      // properties can shadow the public accessors without changing equals().
+      const prototype = Object.getPrototypeOf(value)
+      if (prototype?.[Symbol.toStringTag] !== kind) return value
+      let epochNanoseconds: unknown
+      let timeZoneId: unknown
+      let calendarId: unknown
+      try {
+        epochNanoseconds = Object.getOwnPropertyDescriptor(
+          prototype,
+          `epochNanoseconds`,
+        )?.get?.call(value)
+        timeZoneId = Object.getOwnPropertyDescriptor(
+          prototype,
+          `timeZoneId`,
+        )?.get?.call(value)
+        calendarId = Object.getOwnPropertyDescriptor(
+          prototype,
+          `calendarId`,
+        )?.get?.call(value)
+      } catch {
+        // A borrowed prototype is not a branded Temporal instance.
+        return value
+      }
+      if (
+        typeof epochNanoseconds === `bigint` &&
+        typeof timeZoneId === `string` &&
+        typeof calendarId === `string`
+      ) {
+        // Equality retains the instant, calendar, and canonical zone. A fixed
+        // +00:00 zone stays distinct from named UTC, while UTC aliases merge.
+        return normalizedKey(
+          `temporal`,
+          JSON.stringify([
+            kind,
+            String(epochNanoseconds),
+            canonicalTemporalZone(timeZoneId),
+            calendarId,
+          ]),
+        )
+      }
+      return value
+    }
+    return normalizedKey(`temporal`, `${kind}:${value.toString()}`)
   }
 
   // Normalize Uint8Arrays/Buffers to a string representation for Map key usage
@@ -307,6 +367,16 @@ export function normalizeForBTree(value: any): any {
 /** Keep Temporal's native order separate from its exact index lookup key. */
 export function indexOrderValue(value: any, exactKey: any): any {
   return isTemporal(value) ? value : exactKey
+}
+
+/** Supply custom comparators the Temporal display key used before raw ordering. */
+export function indexCustomComparatorValue(value: unknown): unknown {
+  return isTemporal(value)
+    ? normalizedKey(
+        `temporal`,
+        `${value[Symbol.toStringTag]}:${value.toString()}`,
+      )
+    : value
 }
 
 /** Recover the exact lookup key from a stored ordered value. */

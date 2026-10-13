@@ -73,7 +73,7 @@ verdict follows after commit.
 | ORC-008 | Not applicable: tuple and instant models have no mutable state. Fresh modules control production cache history, not reference-model state. |
 | ORC-009 | Date tuples and nanosecond offsets are model input labels. Comparator zero describes order position, while `eq` identity retains the zone. |
 | ORC-010 | The shared harness keeps the original failure checkpoint through shrinking. The direct tests own no cleanup resource. |
-| ORC-011 | The hostile text-order and millisecond formulations distinguish shared semantic mistakes. The index/public path has its own oracle. |
+| ORC-011 | Not triggered: the reviewer named no plausible fault shared by the calendar/instant model and production within this bounded lane. Text-order and millisecond injections are ORC-006 wrong-result controls. The index/public path has its own oracle. |
 | ORC-012 | This record contains the source ledger, RED/GREEN evidence, hostile verdict, limits, and committed-head recheck. |
 | ORC-013 | Equal instants in different zones and adjacent nanoseconds distinguish text order and millisecond truncation from the promised instant law. |
 | ORC-014 | Not applicable: this lane has no controlled provider or claim across a host boundary. |
@@ -85,4 +85,11 @@ properties as selectors 39 and 40 with seed `20260911` and path `0`. Each
 requested replay passed with no type errors; 39 other properties were skipped
 in each run. After the final index oracle edit, the full DB suite passed
 12,154 tests in 278 files with no type errors. The DB package build passed.
-The exact committed-head review remains pending.
+At committed head `8b04592724fb943b04a56c6682757448d26a8ff6`, the fresh
+hostile reviewer `/root/exact_temporal_comparison_review` found no lost
+assertion in the two retired blocks. It reconstructed the original PlainDate
+and ZonedDateTime operands and checked all four assertions at the direct
+`ascComparator` return. Its focused run passed 112 comparison tests and 149
+evaluator/index tests with no type errors. It replayed properties 39 and 40
+with seed `20260911` and path `0`. The reviewer corrected the ORC-011
+classification above. Cross-realm Temporal values remain outside this verdict.

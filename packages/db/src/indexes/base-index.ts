@@ -1,7 +1,12 @@
 import { compileSingleRowExpression } from '../query/compiler/evaluators.js'
 import { comparisonFunctions } from '../query/builder/functions.js'
 import { DEFAULT_COMPARE_OPTIONS, deepEquals } from '../utils.js'
-import { makeCheckedComparator, makeComparator } from '../utils/comparison.js'
+import {
+  indexCustomComparatorValue,
+  indexOrderValue,
+  makeCheckedComparator,
+  makeComparator,
+} from '../utils/comparison.js'
 import { codedMessage, codedWarning, devBuild } from '../error-message.js'
 import type { CompiledSingleRowExpression } from '../query/compiler/evaluators.js'
 import type { RangeQueryOptions } from './btree-index.js'
@@ -147,8 +152,15 @@ export abstract class BaseIndex<
     this.expression = expression
     this.compareOptions = options?.compareOptions ?? DEFAULT_COMPARE_OPTIONS
     this.hasCustomComparator = options?.compareFn != null
+    const compareFn = options?.compareFn
     this.compareFn = makeCheckedComparator(
-      options?.compareFn ?? makeComparator(this.compareOptions),
+      compareFn == null
+        ? makeComparator(this.compareOptions)
+        : (a, b) =>
+            compareFn(
+              indexCustomComparatorValue(a),
+              indexCustomComparatorValue(b),
+            ),
     )
     this.name = name
     this.initialize(options)
@@ -205,6 +217,11 @@ export abstract class BaseIndex<
 
   get supportsRangeOptimization(): boolean {
     return !this.hasCustomComparator
+  }
+
+  /** Temporal uses raw values for order while retaining normalized exact keys. */
+  protected orderValue(value: unknown, exactKey: unknown): unknown {
+    return indexOrderValue(value, exactKey)
   }
 
   protected addRangeValue(value: unknown): void {

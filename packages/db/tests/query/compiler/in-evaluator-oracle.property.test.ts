@@ -19,7 +19,9 @@ import { oraclePropertyOptions, oracleRuns } from '../../oracle-config.js'
  * - A valid Date equals its millisecond timestamp, and another Date with the
  *   same timestamp.
  * - Two Uint8Arrays (Buffers included) are equal when their bytes are equal.
- * - A Temporal value equals a Temporal value of the same kind and string.
+ * - A Temporal value equals another of the same kind when its native
+ *   `.equals()` relation holds. This includes equivalent time-zone aliases
+ *   for ZonedDateTime, but excludes a distinct fixed-offset zone.
  * - Every other pair compares with `===`, so `-0` equals `0`, `1n` does not
  *   equal `1`, and objects compare by reference.
  *
@@ -31,10 +33,11 @@ import { oraclePropertyOptions, oracleRuns } from '../../oracle-config.js'
  * of each rule: equal and unequal strings, a string that begins with the
  * internal normalization prefix, booleans, `0`, `-0`, `1`, `NaN`, `1n`, a
  * valid Date and its timestamp, an invalid Date, equal and unequal byte
- * arrays, a Buffer, Temporal values, one shared object and a structurally
- * equal copy, `null` and `undefined`. Lists have zero to six items and may
- * repeat items. The list is a constant `Value`, the shape that join demand
- * builds, or a row field, so a list that changes between rows is also checked.
+ * arrays, a Buffer, Temporal values including ZonedDateTime zone aliases,
+ * a forged tag and shadowed zone accessor, one shared object and a
+ * structurally equal copy, `null` and `undefined`. Lists have zero to six
+ * items and may repeat. The list is a constant `Value`, the shape that join
+ * demand builds, or a row field, so changing lists are also checked.
  *
  * Production driver: compile `in` with the public IR and evaluate it for
  * each row, as a WHERE clause does.
@@ -51,6 +54,24 @@ import { oraclePropertyOptions, oracleRuns } from '../../oracle-config.js'
 const PROPERTY = `evaluators.in`
 const PREFIX = `\u0000tanstack-db:binary:`
 const shared = { id: 1 }
+const utcZoned = Temporal.ZonedDateTime.from(`2024-01-15T09:00:00+00:00[UTC]`)
+const aliasZoned = Temporal.ZonedDateTime.from(
+  `2024-01-15T09:00:00+00:00[Etc/UTC]`,
+)
+const offsetZoned = Temporal.ZonedDateTime.from(
+  `2024-01-15T09:00:00+00:00[+00:00]`,
+)
+const shadowedOffsetZoned = Temporal.ZonedDateTime.from(
+  `2024-01-15T09:00:00+00:00[+00:00]`,
+)
+Object.defineProperty(shadowedOffsetZoned, `timeZoneId`, { value: `UTC` })
+const forgedZoned = {
+  [Symbol.toStringTag]: `Temporal.ZonedDateTime`,
+  epochNanoseconds: utcZoned.epochNanoseconds,
+  timeZoneId: `UTC`,
+  calendarId: `iso8601`,
+  toString: () => `unrelated plain object`,
+}
 const pool: ReadonlyArray<unknown> = [
   `a`,
   `b`,
@@ -73,6 +94,11 @@ const pool: ReadonlyArray<unknown> = [
   Temporal.PlainDate.from(`2024-01-01`),
   Temporal.PlainDate.from(`2024-01-01`),
   Temporal.PlainTime.from(`10:00`),
+  utcZoned,
+  aliasZoned,
+  offsetZoned,
+  shadowedOffsetZoned,
+  forgedZoned,
   shared,
   { id: 1 },
   null,
@@ -88,15 +114,21 @@ function isBytes(value: unknown): value is Uint8Array {
   )
 }
 
-function isTemporalValue(value: unknown): value is { toString: () => string } {
+function isTemporalValue(value: unknown): value is {
+  [Symbol.toStringTag]: string
+  equals: (other: unknown) => boolean
+} {
+  const tag =
+    typeof value === `object` && value !== null
+      ? (value as { [Symbol.toStringTag]?: unknown })[Symbol.toStringTag]
+      : undefined
   return (
     typeof value === `object` &&
     value !== null &&
-    typeof (value as { [Symbol.toStringTag]?: unknown })[Symbol.toStringTag] ===
-      `string` &&
-    (value as { [Symbol.toStringTag]: string })[Symbol.toStringTag].startsWith(
-      `Temporal.`,
-    )
+    typeof (value as { equals?: unknown }).equals === `function` &&
+    typeof tag === `string` &&
+    tag.startsWith(`Temporal.`) &&
+    Object.getPrototypeOf(value)?.[Symbol.toStringTag] === tag
   )
 }
 
@@ -127,9 +159,8 @@ function referenceEqual(left: unknown, right: unknown): boolean {
     return (
       isTemporalValue(left) &&
       isTemporalValue(right) &&
-      (left as Record<symbol, unknown>)[Symbol.toStringTag] ===
-        (right as Record<symbol, unknown>)[Symbol.toStringTag] &&
-      left.toString() === right.toString()
+      left[Symbol.toStringTag] === right[Symbol.toStringTag] &&
+      left.equals(right)
     )
   }
   return asComparable(left) === asComparable(right)
@@ -224,6 +255,52 @@ describe(`in evaluator`, () => {
     const testCase = { value, list: [...list], listFromRow: false }
     expect(referenceIn(value, testCase.list)).toBe(expected)
     check(evaluateWithProduction, testCase)
+  })
+
+  it.each([false, true])(
+    `matches equivalent zone aliases in a %s list and rejects a distinct zone`,
+    (listFromRow) => {
+      // Temporal's own equality is the external semantic base, while the
+      // model below keeps the two expected outcomes explicit.
+      expect(utcZoned.equals(aliasZoned)).toBe(true)
+      expect(offsetZoned.equals(aliasZoned)).toBe(false)
+      check(evaluateWithProduction, {
+        value: aliasZoned,
+        list: [utcZoned],
+        listFromRow,
+      })
+      check(evaluateWithProduction, {
+        value: offsetZoned,
+        list: [utcZoned],
+        listFromRow,
+      })
+    },
+  )
+
+  it.each([false, true])(
+    `rejects a forged tag and a shadowed zone in a %s list`,
+    (listFromRow) => {
+      expect(utcZoned.equals(shadowedOffsetZoned)).toBe(false)
+      for (const value of [forgedZoned, shadowedOffsetZoned]) {
+        check(evaluateWithProduction, {
+          value,
+          list: [utcZoned],
+          listFromRow,
+        })
+      }
+    },
+  )
+
+  it(`rejects display-string equality for equivalent zone aliases`, () => {
+    const lexical: Evaluate = ({ value, list }) =>
+      list.some((candidate) => String(candidate) === String(value))
+    expect(() =>
+      check(lexical, {
+        value: aliasZoned,
+        list: [utcZoned],
+        listFromRow: false,
+      }),
+    ).toThrow(/in mismatch/)
   })
 
   it(`rejects an evaluator that compares raw values`, () => {

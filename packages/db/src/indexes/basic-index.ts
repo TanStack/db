@@ -2,7 +2,6 @@ import { compareKeys } from '@tanstack/db-ivm'
 import {
   areSameValueZeroEqual,
   indexExactKey,
-  indexOrderValue,
   normalizeValue,
 } from '../utils/comparison.js'
 import {
@@ -78,7 +77,7 @@ export class BasicIndex<
     this.addToBucket(
       key,
       normalizedValue,
-      indexOrderValue(indexedValue, normalizedValue),
+      this.orderValue(indexedValue, normalizedValue),
     )
     this.addRangeValue(indexedValue)
 
@@ -125,7 +124,7 @@ export class BasicIndex<
     this.removeFromBucket(
       key,
       normalizedValue,
-      indexOrderValue(indexedValue, normalizedValue),
+      this.orderValue(indexedValue, normalizedValue),
     )
     this.removeRangeValue(indexedValue)
 
@@ -199,10 +198,10 @@ export class BasicIndex<
     this.removeFromBucket(
       key,
       oldValue,
-      indexOrderValue(oldIndexedValue, oldValue),
+      this.orderValue(oldIndexedValue, oldValue),
     )
     this.removeRangeValue(oldIndexedValue)
-    this.addToBucket(key, newValue, indexOrderValue(newIndexedValue, newValue))
+    this.addToBucket(key, newValue, this.orderValue(newIndexedValue, newValue))
     this.addRangeValue(newIndexedValue)
     this.indexedKeys.add(key)
   }
@@ -221,7 +220,7 @@ export class BasicIndex<
       entriesArray.push({
         key,
         value,
-        orderValue: indexOrderValue(indexedValue, value),
+        orderValue: this.orderValue(indexedValue, value),
       })
       this.addRangeValue(indexedValue)
       this.indexedKeys.add(key)
@@ -318,8 +317,8 @@ export class BasicIndex<
 
     const normalizedFrom = normalizeValue(from)
     const normalizedTo = normalizeValue(to)
-    const orderFrom = indexOrderValue(from, normalizedFrom)
-    const orderTo = indexOrderValue(to, normalizedTo)
+    const orderFrom = this.orderValue(from, normalizedFrom)
+    const orderTo = this.orderValue(to, normalizedTo)
     const hasFrom = `from` in options
     const hasTo = `to` in options
 
@@ -376,7 +375,7 @@ export class BasicIndex<
    */
   take(n: number, from: any, filterFn?: (key: TKey) => boolean): Array<TKey> {
     const normalizedFrom = normalizeValue(from)
-    const orderFrom = indexOrderValue(from, normalizedFrom)
+    const orderFrom = this.orderValue(from, normalizedFrom)
     let startIdx = findInsertPositionInArray(
       this.sortedValues,
       orderFrom,
@@ -402,7 +401,7 @@ export class BasicIndex<
     filterFn?: (key: TKey) => boolean,
   ): Array<TKey> {
     const normalizedFrom = normalizeValue(from)
-    const orderFrom = indexOrderValue(from, normalizedFrom)
+    const orderFrom = this.orderValue(from, normalizedFrom)
     let startIdx =
       findInsertPositionInArray(this.sortedValues, orderFrom, this.compareFn) -
       1

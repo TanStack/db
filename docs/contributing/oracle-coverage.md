@@ -481,9 +481,24 @@ BasicIndex and BTreeIndex ordered takes after add/build and one mutation
 continuation, plus an optimized-only public Collection snapshot with an
 explicit index. Supplied epoch nanoseconds establish order without promising
 a key tie break for equal instants; distinct zones retain exact lookup
-identities. Custom comparators, mixed value domains, other Temporal kinds,
-public WHERE ranges, provider cursors, longer histories, and live-query
-publication require separate witnesses.
+identities. A focused callback witness preserves the former string operands
+for a custom comparator over two distinct pre-epoch values. Custom comparators
+that distinguish values in one query-equality class, mixed value domains,
+other Temporal kinds, public WHERE ranges, provider cursors, longer histories,
+and live-query publication require separate witnesses.
+
+The [Temporal alias equality oracle](../../packages/db/tests/temporal-equality-alias-oracle.test.ts)
+and its [review record](oracle-reviews/temporal-equality-alias.md) own the
+bounded `ZonedDateTime.equals()` partition for UTC/Etc/UTC aliases, a distinct
+fixed-offset zone, adjacent nanoseconds, and a different calendar. Direct
+BasicIndex/BTreeIndex add, build, and removal checks compare independent
+fixture-assigned classes. Unindexed and optimized-only indexed Collection
+snapshots check public `eq`; the `in` evaluator oracle checks constant and
+row-supplied alias lists. A plain object with a forged Temporal tag and a
+genuine value with a shadowed zone accessor must stay outside the UTC class.
+Other zone aliases, mixed Temporal implementations, joins, grouping, query
+identity, live-query publication, and provider paths remain unproved. Direct
+D2 `groupBy` has its separately approved kind-and-string identity policy.
 
 The [WHERE predicate publication oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/where-predicate-publication-oracle.property.test.ts)
 also has a [cross-realm Date equality matrix](oracle-reviews/cross-realm-date-where-publication.md).

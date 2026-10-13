@@ -18,9 +18,11 @@ import { orderedEntriesArray, withOracleCleanup } from './utils.js'
  * around the epoch. Equal-instant peers may appear in either key order. It
  * checks direct BasicIndex/BTreeIndex adds, builds, and value cursors, one
  * removal/insertion/update continuation, then the public ordered Collection
- * snapshot with limit 1. It does not claim arbitrary Temporal
- * kinds, time-zone transitions, longer mutation histories, public/provider
- * cursor continuation, or live-query publication.
+ * snapshot with limit 1. A separate direct-index witness preserves a custom
+ * comparator that accepts the string keys supplied before raw Temporal
+ * ordering was introduced. It does not claim arbitrary Temporal kinds,
+ * time-zone transitions, longer mutation histories, public/provider cursor
+ * continuation, or live-query publication.
  */
 
 type Row = { id: string; when: Temporal.ZonedDateTime }
@@ -215,9 +217,8 @@ describe.each(indexTypes)(
       expect(index.equalityLookup(plusFourteen!.when)).toEqual(new Set())
       expect(index.equalityLookup(utc!.when)).toEqual(new Set([`c-utc`]))
 
-      // The ordered tree or array must now hold a live value at this position.
-      // This storage invariant catches a stale BTree representative even when
-      // its instant still compares equal to the surviving public row.
+      // The ordered group must keep a live representative after removal.
+      // The live-query architecture requires this for stable traversal.
       expect(orderedEntriesArray(index)[0]?.[0]).toBe(utc!.when)
 
       const inserted: Fixture = {
@@ -274,6 +275,23 @@ describe.each(indexTypes)(
         )
       },
     )
+
+    it(`retains a string-compatible custom comparator across negative instants`, () => {
+      const [minusTen, minusHundred] = rowsFromFixtures(negativeFixtures)
+      const index = new IndexType(1, new PropRef([`when`]), undefined, {
+        compareFn: (left: string, right: string) => left.localeCompare(right),
+      })
+
+      // This legal callback ordered normalized strings before the Temporal
+      // index repair. Negative decimal strings distinguish the former display
+      // operands from the new exact-equality tuple.
+      index.add(minusTen!.id, minusTen)
+      index.add(minusHundred!.id, minusHundred)
+      expect(index.takeFromStart(2)).toEqual([`b-minus-hundred`, `a-minus-ten`])
+      expect(index.equalityLookup(minusHundred!.when)).toEqual(
+        new Set([`b-minus-hundred`]),
+      )
+    })
 
     it(`publishes the earliest instant from an indexed ordered Collection snapshot`, async () => {
       const rows = rowsFromFixtures()

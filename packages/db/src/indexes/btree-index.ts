@@ -4,7 +4,6 @@ import { BTree } from '../utils/btree.js'
 import {
   areSameValueZeroEqual,
   denormalizeUndefined,
-  indexOrderValue,
   normalizeForBTree,
 } from '../utils/comparison.js'
 import { codedMessage, devBuild } from '../error-message.js'
@@ -90,7 +89,7 @@ export class BTreeIndex<
     this.addToBucket(
       key,
       normalizedValue,
-      indexOrderValue(indexedValue, normalizedValue),
+      this.orderValue(indexedValue, normalizedValue),
     )
     this.addRangeValue(indexedValue)
 
@@ -208,7 +207,7 @@ export class BTreeIndex<
 
     this.removeFromBucket(key, oldValue)
     this.removeRangeValue(oldIndexedValue)
-    this.addToBucket(key, newValue, indexOrderValue(newIndexedValue, newValue))
+    this.addToBucket(key, newValue, this.orderValue(newIndexedValue, newValue))
     this.addRangeValue(newIndexedValue)
     this.indexedKeys.add(key)
   }
@@ -300,10 +299,10 @@ export class BTreeIndex<
     const hasTo = `to` in options
 
     const fromKey = hasFrom
-      ? indexOrderValue(from, normalizeForBTree(from))
+      ? this.orderValue(from, normalizeForBTree(from))
       : this.orderedEntries.minKey()
     const toKey = hasTo
-      ? indexOrderValue(to, normalizeForBTree(to))
+      ? this.orderValue(to, normalizeForBTree(to))
       : this.orderedEntries.maxKey()
 
     this.orderedEntries.forRange(
@@ -377,7 +376,7 @@ export class BTreeIndex<
   take(n: number, from: any, filterFn?: (key: TKey) => boolean): Array<TKey> {
     const nextPair = (k?: any) => this.orderedEntries.nextHigherPair(k)
     // Normalize the from value
-    const normalizedFrom = indexOrderValue(from, normalizeForBTree(from))
+    const normalizedFrom = this.orderValue(from, normalizeForBTree(from))
     return this.takeInternal(n, nextPair, normalizedFrom, filterFn)
   }
 
@@ -406,7 +405,7 @@ export class BTreeIndex<
   ): Array<TKey> {
     const nextPair = (k?: any) => this.orderedEntries.nextLowerPair(k)
     // Normalize the from value
-    const normalizedFrom = indexOrderValue(from, normalizeForBTree(from))
+    const normalizedFrom = this.orderValue(from, normalizeForBTree(from))
     return this.takeInternal(n, nextPair, normalizedFrom, filterFn, true)
   }
 
