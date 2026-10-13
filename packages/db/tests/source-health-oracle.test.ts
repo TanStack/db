@@ -77,16 +77,19 @@
  * `health:change`. When the expected tree changed, the last event must show
  * the current tree. Request lanes check that a lazy load or a root source's
  * load that fails after the first ready is a request error on the query's
- * node, and that it clears. An Effect lane checks the Effect's gate.
+ * node, and that it clears. Effect lanes check the Effect's gate and its
+ * request errors after the gate.
  *
  * ## Limits
  *
  * Sources are eager, so a live query cannot become ready while a source is
  * still loading. The on-demand case, where a source can fail its initial sync
  * after the live query is ready, is not generated here. Per-row child
- * Collections are rolled up, not nodes, and no grammar step fails one, so
- * `inError` is always 0 here; an instance change emits no `health:change` of
- * its own. Pooled histories do not restart: a pooled view ends for good when
+ * Collections are rolled up, not nodes, and no grammar step fails one; the
+ * include-instances lane fails one and checks the roll-up, the relay, and
+ * that two includes under one alias count separately. An Effect's request
+ * error clears on a later successful load of the same source; release of
+ * only the failed demand is not exercised. Pooled histories do not restart: a pooled view ends for good when
  * its source is cleaned up. The ordering check reads the observed query
  * only, not its sources.
  */
@@ -99,6 +102,7 @@ import { createPooledLiveQuery } from '../src/query/pooled-live-query.js'
 import { Query } from '../src/query/builder/index.js'
 import { eq } from '../src/query/builder/functions.js'
 import { InvalidCollectionStatusTransitionError } from '../src/errors.js'
+import { BasicIndex } from '../src/indexes/basic-index.js'
 import { oraclePropertyOptions } from './oracle-config.js'
 import { flushPromises } from './utils.js'
 import type { Collection } from '../src/collection/index.js'
@@ -1083,4 +1087,207 @@ describe(`effect health`, () => {
       }
     },
   )
+})
+
+/**
+ * A load that fails after the Effect's gate is a request error, as it is on
+ * a live query's node: the Effect is not disposed, `onHealthChange` receives
+ * a tree whose root node has a `request` error, and a later successful load
+ * of the same source clears it. The parents lead the Effect, and a lazy join
+ * loads the children each new parent row reaches. The lane crosses
+ * `skipInitial` with the parents' source mode.
+ */
+describe(`effect request errors`, () => {
+  type RequestHistory = {
+    skipInitial: boolean
+    parentMode: `eager` | `on-demand`
+  }
+  const histories: Array<RequestHistory> = [true, false].flatMap(
+    (skipInitial) =>
+      ([`eager`, `on-demand`] as const).map((parentMode) => ({
+        skipInitial,
+        parentMode,
+      })),
+  )
+
+  it.each(histories)(`%j`, async ({ skipInitial, parentMode }) => {
+    let parentParams!: SyncParams
+    const outcomes: Array<`ok` | `fail`> = []
+    const parents = createCollection<Row, number>({
+      id: `health-effect-parents-${Math.random().toString(36).slice(2)}`,
+      getKey: (row) => row.id,
+      syncMode: parentMode,
+      gcTime: 0,
+      sync: {
+        sync: (params) => {
+          parentParams = params
+          if (parentMode === `on-demand`) {
+            params.markReady()
+            return { loadSubset: () => Promise.resolve() }
+          }
+          return undefined
+        },
+      },
+    })
+    const children = createCollection<Row, number>({
+      id: `health-effect-children-${Math.random().toString(36).slice(2)}`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      gcTime: 0,
+      sync: {
+        sync: (params) => {
+          params.markReady()
+          return {
+            loadSubset: () =>
+              (outcomes.shift() ?? `ok`) === `ok`
+                ? Promise.resolve()
+                : Promise.reject(new Error(`child load failed`)),
+          }
+        },
+      },
+    })
+    const writeParent = (id: number) => {
+      parentParams.begin()
+      parentParams.write({ type: `insert`, value: { id, parentId: id } })
+      parentParams.commit()
+    }
+    const sourceErrors: Array<Error> = []
+    const trees: Array<ErrorTreeNode> = []
+    const effect = createEffect({
+      query: (q) =>
+        q
+          .from({ parent: parents })
+          .leftJoin({ child: children }, ({ parent, child }) =>
+            eq(parent.id, child.parentId),
+          ),
+      skipInitial,
+      onBatch: () => {},
+      onSourceError: (error) => sourceErrors.push(error),
+      onHealthChange: (errors) => trees.push(errors),
+    })
+    const consoleError = console.error
+    console.error = () => {}
+    try {
+      await flushPromises()
+      writeParent(1)
+      if (parentMode === `eager`) parentParams.markReady()
+      await flushPromises()
+
+      // Model: past the gate, a failed load is a request error.
+      outcomes.push(`fail`)
+      writeParent(2)
+      await flushPromises()
+      expect(effect.disposed).toBe(false)
+      expect(sourceErrors).toEqual([])
+      expect(trees.at(-1)?.error).toMatchObject({
+        phase: `request`,
+        final: false,
+      })
+      expect(trees.at(-1)?.hasErrors).toBe(true)
+
+      // Model: a later successful load of the same source clears it.
+      outcomes.push(`ok`)
+      writeParent(3)
+      await flushPromises()
+      expect(effect.disposed).toBe(false)
+      expect(trees.at(-1)?.error).toBeNull()
+      expect(trees.at(-1)?.hasErrors).toBe(false)
+    } finally {
+      console.error = consoleError
+      await effect.dispose()
+      await parents.cleanup()
+      await children.cleanup()
+    }
+  })
+})
+
+/**
+ * An include node rolls up the include's own per-row child Collections. A
+ * child Collection that fails, here because an index the reader created on
+ * it throws on a new row, counts in `inError` and makes the include node
+ * `hasErrors`; the live query emits `health:change` for it and keeps its own
+ * status. Two includes that read one Collection under the same alias are
+ * two nodes, and each counts only its own children.
+ */
+describe(`include instances`, () => {
+  it(`a failing child Collection counts in its own include only`, async () => {
+    const make = (name: string) => {
+      let params!: SyncParams
+      const collection = createCollection<Row, number>({
+        id: `health-include-${name}-${Math.random().toString(36).slice(2)}`,
+        getKey: (row) => row.id,
+        gcTime: 0,
+        sync: {
+          sync: (next) => {
+            params = next
+          },
+        },
+      })
+      const write = (row: Row) => {
+        params.begin()
+        params.write({ type: `insert`, value: row })
+        params.commit()
+      }
+      return { collection, write, ready: () => params.markReady() }
+    }
+    const A = make(`A`)
+    const B = make(`B`)
+    const query = createLiveQueryCollection((q) =>
+      q.from({ b: B.collection }).select(({ b }) => ({
+        id: b.id,
+        items: q
+          .from({ a: A.collection })
+          .where(({ a }) => eq(a.parentId, b.id)),
+        same: q.from({ a: A.collection }).where(({ a }) => eq(a.id, b.id)),
+      })),
+    )
+    const consoleError = console.error
+    console.error = () => {}
+    try {
+      const preload = query.preload()
+      B.write({ id: 1, parentId: 1 })
+      B.write({ id: 2, parentId: 2 })
+      B.ready()
+      A.write({ id: 1, parentId: 1 })
+      A.ready()
+      await preload
+      const includes = () => query.errors.sources.slice(1)
+      expect(includes().map((node) => [node.kind, node.instances])).toEqual([
+        [`include`, { total: 2, inError: 0 }],
+        [`include`, { total: 2, inError: 0 }],
+      ])
+
+      let events = 0
+      const stop = query.on(`health:change`, () => {
+        events++
+      })
+      // One child Collection of `items` fails: its index throws on row 9.
+      class FailingIndex extends BasicIndex<number> {
+        override add(key: number, item: any): void {
+          if (key === 9) throw new Error(`index failed`)
+          super.add(key, item)
+        }
+      }
+      const items = query.get(1)!.items
+      items.createIndex((row) => row.id, { indexType: FailingIndex })
+      expect(() => A.write({ id: 9, parentId: 1 })).toThrow(`index failed`)
+      await flushPromises()
+      stop()
+
+      expect(items.status).toBe(`error`)
+      expect(query.status).toBe(`ready`)
+      expect(events, `health:change relay`).toBeGreaterThan(0)
+      const [itemsNode, sameNode] = includes()
+      expect(itemsNode!.instances).toEqual({ total: 2, inError: 1 })
+      expect(itemsNode!.hasErrors).toBe(true)
+      expect(sameNode!.instances).toEqual({ total: 2, inError: 0 })
+      expect(sameNode!.hasErrors).toBe(false)
+      expect(query.errors.hasErrors).toBe(true)
+    } finally {
+      console.error = consoleError
+      await query.cleanup()
+      await A.collection.cleanup()
+      await B.collection.cleanup()
+    }
+  })
 })
