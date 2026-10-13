@@ -847,20 +847,30 @@ it.each(earlyDemandPlans)(
  * settles they equal the service at that moment, and after every step they
  * equal it again. It never reads adapter state.
  *
- * Grammar (exhaustive, 15 histories): the mode is eager startup or an
- * on-demand load; the change updates an existing row, deletes it, or inserts a
- * new row; the change commits before the list call (on-demand only, since an
- * eager list starts as soon as the listener runs), while the page is in flight,
- * or after the page applies.
+ * Grammar (exhaustive, 28 histories): the mode is eager startup or an
+ * on-demand load; the change updates an existing row, deletes it, inserts a
+ * new row, or inserts a new row and then updates it; the change commits
+ * before the list call (on-demand only, since an eager list starts as soon as
+ * the listener runs), while the page is in flight, or after the page applies.
+ * A change committed before the list call is part of the page's snapshot, but
+ * its events can still be in transit: they reach the listener at once, while
+ * the page is in flight, or only after the page applies.
  *
- * Checkpoints: after the page settles, and after the change when it comes
- * last. Each compares the Collection's rows with the service.
+ * Checkpoints: after the page settles, and after the last event. Each
+ * compares the Collection's rows with the service once every event for a row
+ * has arrived. A later change to another row then checks that the listener
+ * is still alive. An older event delivered after a newer page can show its
+ * older value until the newer event that follows it arrives; the adapter has
+ * no row version to order an event against a page, so the lane only checks a
+ * row once all of its events have arrived.
  */
 type RaceRow = { id: number; data: string }
 type RacePlan = {
   mode: `eager` | `on-demand`
-  change: `update` | `delete` | `insert`
+  change: `update` | `delete` | `insert` | `insert-then-update`
   timing: `before-list` | `during-fetch` | `after-page`
+  // When a change committed before the list call reaches the listener.
+  delivery?: `at-once` | `during-fetch` | `after-page`
 }
 
 const raceServiceRows: Array<RaceRow> = [
@@ -869,19 +879,28 @@ const raceServiceRows: Array<RaceRow> = [
 ]
 
 function raceChange(change: RacePlan[`change`]): {
-  event: Event
+  events: Array<Event>
   apply: (rows: Map<number, RaceRow>) => void
 } {
   if (change === `update`) {
     const row = { id: 1, data: `v2` }
-    return { event: { Update: row }, apply: (rows) => rows.set(1, row) }
+    return { events: [{ Update: row }], apply: (rows) => rows.set(1, row) }
   }
   if (change === `delete`) {
     const row = { id: 1, data: `v1` }
-    return { event: { Delete: row }, apply: (rows) => rows.delete(1) }
+    return { events: [{ Delete: row }], apply: (rows) => rows.delete(1) }
   }
-  const row = { id: 3, data: `v1` }
-  return { event: { Insert: row }, apply: (rows) => rows.set(3, row) }
+  const inserted = { id: 3, data: `v1` }
+  if (change === `insert`)
+    return {
+      events: [{ Insert: inserted }],
+      apply: (rows) => rows.set(3, inserted),
+    }
+  const updated = { id: 3, data: `v2` }
+  return {
+    events: [{ Insert: inserted }, { Update: updated }],
+    apply: (rows) => rows.set(3, updated),
+  }
 }
 
 // Compare only the row fields; the Collection adds virtual properties.
@@ -890,7 +909,7 @@ const sortedRows = (rows: Iterable<RaceRow>) =>
 
 async function checkPageEventRace(plan: RacePlan) {
   const service = new Map(raceServiceRows.map((row) => [row.id, row]))
-  const { event, apply } = raceChange(plan.change)
+  const { events, apply } = raceChange(plan.change)
   const stream = new TransformStream<Event>()
   const listener = stream.writable.getWriter()
   const page = deferred<ListResponse<RaceRow>>()
@@ -901,11 +920,22 @@ async function checkPageEventRace(plan: RacePlan) {
     snapshot = [...service.values()]
     return page.promise
   })
-  const commitChange = async () => {
-    apply(service)
-    await listener.write(event)
+  // A write rejects once the adapter has torn its stream down.
+  let listenerGone = false
+  const send = async (event: Event) => {
+    await listener.write(event).catch(() => {
+      listenerGone = true
+    })
     await turn()
   }
+  const deliverEvents = async () => {
+    for (const event of events) await send(event)
+  }
+  const commitChange = async () => {
+    apply(service)
+    await deliverEvents()
+  }
+  const delivery = plan.timing === `before-list` ? plan.delivery : undefined
   const collection = createCollection(
     trailBaseCollectionOptions({
       recordApi: api,
@@ -921,7 +951,10 @@ async function checkPageEventRace(plan: RacePlan) {
 
   try {
     await turn()
-    if (plan.timing === `before-list`) await commitChange()
+    if (plan.timing === `before-list`) {
+      apply(service)
+      if (delivery === `at-once`) await deliverEvents()
+    }
     const settled = observe(
       plan.mode === `eager`
         ? collection.preload()
@@ -930,20 +963,30 @@ async function checkPageEventRace(plan: RacePlan) {
     await turn()
     expect(snapshot, `${trace} list called`).toBeDefined()
     if (plan.timing === `during-fetch`) await commitChange()
+    if (delivery === `during-fetch`) await deliverEvents()
     page.resolve({ records: snapshot! })
     await turn()
     await turn()
     expect(settled.result, `${trace} page settled`).toBe(`fulfilled`)
-    expect(rows(), `${trace} rows after the page`).toEqual(
+    if (delivery !== `after-page`)
+      expect(rows(), `${trace} rows after the page`).toEqual(
+        sortedRows(service.values()),
+      )
+
+    if (plan.timing === `after-page`) await commitChange()
+    if (delivery === `after-page`) await deliverEvents()
+    expect(rows(), `${trace} rows after the last event`).toEqual(
       sortedRows(service.values()),
     )
 
-    if (plan.timing === `after-page`) {
-      await commitChange()
-      expect(rows(), `${trace} rows after the change`).toEqual(
-        sortedRows(service.values()),
-      )
-    }
+    // The listener is still alive: a later change to another row arrives.
+    const later = { id: 2, data: `later` }
+    service.set(2, later)
+    await send({ Update: later })
+    expect(listenerGone, `${trace} listener torn down`).toBe(false)
+    expect(rows(), `${trace} rows after a later change`).toEqual(
+      sortedRows(service.values()),
+    )
   } finally {
     page.resolve({ records: [] })
     await collection.cleanup()
@@ -954,16 +997,23 @@ async function checkPageEventRace(plan: RacePlan) {
 
 const racePlans: Array<RacePlan> = ([`eager`, `on-demand`] as const).flatMap(
   (mode) =>
-    ([`update`, `delete`, `insert`] as const).flatMap((change) =>
-      (mode === `eager`
-        ? ([`during-fetch`, `after-page`] as const)
-        : ([`before-list`, `during-fetch`, `after-page`] as const)
-      ).map((timing) => ({ mode, change, timing })),
+    ([`update`, `delete`, `insert`, `insert-then-update`] as const).flatMap(
+      (change) =>
+        (mode === `eager`
+          ? ([`during-fetch`, `after-page`] as const)
+          : ([`before-list`, `during-fetch`, `after-page`] as const)
+        ).flatMap((timing): Array<RacePlan> =>
+          timing === `before-list`
+            ? ([`at-once`, `during-fetch`, `after-page`] as const).map(
+                (delivery) => ({ mode, change, timing, delivery }),
+              )
+            : [{ mode, change, timing }],
+        ),
     ),
 )
 
 it.each(racePlans)(
-  `keeps a newer change over an older page: $mode / $change / $timing`,
+  `keeps a newer change over an older page: $mode / $change / $timing / $delivery`,
   (plan) => checkPageEventRace(plan),
 )
 
@@ -1199,7 +1249,10 @@ it.each([`close`, `read-error`] as const)(
  * answers only when the history releases it. With cursor paging, a page
  * returns the rows after the previous page's last key; with offset paging, it
  * returns rows by position from the requested offset. A change commits to the
- * service and reaches the established listener at once. The model records
+ * service at once; its event reaches the established listener at once or
+ * stays in transit until a later `deliver` step or the drain, in commit order.
+ * A page can therefore apply a newer value before an older event arrives.
+ * The model records
  * which keys the service returned and which keys changed, and predicts the
  * Collection from the service's current rows for those keys. It never reads
  * adapter state.
@@ -1207,18 +1260,27 @@ it.each([`close`, `read-error`] as const)(
  * Grammar (generated): one or two on-demand loads, the second starting at
  * once or after a step; cursor or offset paging; up to four changes among
  * page releases, each an insert, update, or delete of a key on the first
- * page, the second page, or a new key. Offset paging takes updates only,
+ * page, the second page, or a new key, delivered at once or later. Offset
+ * paging takes updates only,
  * because an insert or delete between pages moves rows across a position
  * boundary at the service, not in the adapter. An eager load cannot overlap
  * an on-demand one: an eager source has no subset loader.
  *
- * Checkpoints: after every step, every changed key holds the service's value;
- * after the history drains, every returned or changed key does.
+ * Checkpoints: after every step, every changed key with no event in transit
+ * holds the service's value; after the history drains (every page, then every
+ * event in transit), every returned or changed key does, and a later change
+ * still reaches the listener.
  */
 type PagingMode = `cursor` | `offset`
 type PageStep =
   | { kind: `release`; load: 0 | 1 }
-  | { kind: `change`; id: 1 | 258 | 300; operation: `set` | `delete` }
+  | {
+      kind: `change`
+      id: 1 | 258 | 300
+      operation: `set` | `delete`
+      delivery: `now` | `later`
+    }
+  | { kind: `deliver` }
   | { kind: `start-second` }
 type PageHistory = {
   paging: PagingMode
@@ -1244,7 +1306,9 @@ const pageHistoryArb: fc.Arbitrary<PageHistory> = fc
           kind: fc.constant(`change` as const),
           id: fc.constantFrom<1 | 258 | 300>(1, 258, 300),
           operation: fc.constantFrom<`set` | `delete`>(`set`, `delete`),
+          delivery: fc.constantFrom<`now` | `later`>(`now`, `later`),
         }),
+        fc.constant({ kind: `deliver` as const }),
         fc.constant({ kind: `start-second` as const }),
       ),
       { maxLength: 10 },
@@ -1280,6 +1344,15 @@ async function checkPageHistory(history: PageHistory) {
   const pending: [Array<PendingPage>, Array<PendingPage>] = [[], []]
   const returnedKeys = new Set<number>()
   const changedKeys = new Set<number>()
+  // Events in transit, in commit order.
+  const inTransit: Array<{ id: number; event: Event }> = []
+  let listenerGone = false
+  const send = async (event: Event) => {
+    await listener.write(event).catch(() => {
+      listenerGone = true
+    })
+    await turn()
+  }
   let version = 0
   let loadOfNextCall: 0 | 1 = 0
   const api = new MockRecordApi<RaceRow>()
@@ -1335,8 +1408,14 @@ async function checkPageHistory(history: PageHistory) {
   }
   const trace = JSON.stringify(history)
   const checkChangedKeys = (label: string) => {
-    for (const id of changedKeys)
+    for (const id of changedKeys) {
+      if (inTransit.some((pending) => pending.id === id)) continue
       expect(value(id), `${trace} ${label}: key ${id}`).toEqual(service.get(id))
+    }
+  }
+  const deliverNext = async () => {
+    const next = inTransit.shift()
+    if (next) await send(next.event)
   }
   const release = async (load: 0 | 1) => {
     const next = pending[load].shift()
@@ -1357,6 +1436,7 @@ async function checkPageHistory(history: PageHistory) {
     }
     for (const [index, step] of history.steps.entries()) {
       if (step.kind === `release`) await release(step.load)
+      else if (step.kind === `deliver`) await deliverNext()
       else if (step.kind === `start-second`) {
         if (history.loads === 2 && !secondStarted) {
           await startLoad(1)
@@ -1377,8 +1457,10 @@ async function checkPageHistory(history: PageHistory) {
         }
         if (event) {
           changedKeys.add(step.id)
-          await listener.write(event)
-          await turn()
+          // Events keep commit order: a change behind one in transit waits.
+          if (step.delivery === `later` || inTransit.length > 0)
+            inTransit.push({ id: step.id, event })
+          else await send(event)
         }
       }
       checkChangedKeys(`after step ${index}`)
@@ -1390,6 +1472,7 @@ async function checkPageHistory(history: PageHistory) {
       if (pending[0].length === 0 && pending[1].length === 0) break
       await release(pending[0].length > 0 ? 0 : 1)
     }
+    while (inTransit.length > 0) await deliverNext()
     for (const load of loads)
       expect(load.result, `${trace} load settled`).toBe(`fulfilled`)
     const reached = new Set([...returnedKeys, ...changedKeys])
@@ -1402,6 +1485,12 @@ async function checkPageHistory(history: PageHistory) {
     ).toEqual(
       [...reached].filter((id) => service.has(id)).sort((a, b) => a - b),
     )
+    // The listener is still alive: a later change to an unrelated row arrives.
+    const later = { id: 2, data: `later` }
+    service.set(2, later)
+    await send({ Update: later })
+    expect(listenerGone, `${trace} listener torn down`).toBe(false)
+    expect(value(2), `${trace} a later change arrives`).toEqual(later)
   } finally {
     for (const queue of pending)
       for (const next of queue.splice(0)) next.resolve()
@@ -1414,6 +1503,22 @@ async function checkPageHistory(history: PageHistory) {
 // Named replays: each closes one dimension the single-page lane leaves open.
 const pageReplays: Array<[string, PageHistory]> = [
   [
+    `an insert and its update in transit until after the page`,
+    {
+      paging: `cursor`,
+      loads: 1,
+      secondAtOnce: false,
+      steps: [
+        { kind: `change`, id: 300, operation: `set`, delivery: `later` },
+        { kind: `change`, id: 300, operation: `set`, delivery: `later` },
+        { kind: `release`, load: 0 },
+        { kind: `release`, load: 0 },
+        { kind: `deliver` },
+        { kind: `deliver` },
+      ],
+    },
+  ],
+  [
     `an update between the two pages of one load`,
     {
       paging: `cursor`,
@@ -1421,7 +1526,7 @@ const pageReplays: Array<[string, PageHistory]> = [
       secondAtOnce: false,
       steps: [
         { kind: `release`, load: 0 },
-        { kind: `change`, id: 258, operation: `set` },
+        { kind: `change`, id: 258, operation: `set`, delivery: `now` },
         { kind: `release`, load: 0 },
       ],
     },
@@ -1433,8 +1538,8 @@ const pageReplays: Array<[string, PageHistory]> = [
       loads: 1,
       secondAtOnce: false,
       steps: [
-        { kind: `change`, id: 1, operation: `set` },
-        { kind: `change`, id: 1, operation: `delete` },
+        { kind: `change`, id: 1, operation: `set`, delivery: `now` },
+        { kind: `change`, id: 1, operation: `delete`, delivery: `now` },
         { kind: `release`, load: 0 },
       ],
     },
@@ -1446,7 +1551,7 @@ const pageReplays: Array<[string, PageHistory]> = [
       loads: 2,
       secondAtOnce: true,
       steps: [
-        { kind: `change`, id: 1, operation: `set` },
+        { kind: `change`, id: 1, operation: `set`, delivery: `now` },
         { kind: `release`, load: 1 },
         { kind: `release`, load: 0 },
       ],
@@ -1460,8 +1565,8 @@ const pageReplays: Array<[string, PageHistory]> = [
       secondAtOnce: false,
       steps: [
         { kind: `release`, load: 0 },
-        { kind: `change`, id: 258, operation: `set` },
-        { kind: `change`, id: 258, operation: `set` },
+        { kind: `change`, id: 258, operation: `set`, delivery: `now` },
+        { kind: `change`, id: 258, operation: `set`, delivery: `now` },
         { kind: `release`, load: 0 },
       ],
     },

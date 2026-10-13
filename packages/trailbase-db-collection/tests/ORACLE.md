@@ -58,6 +58,18 @@ The same interpreter runs a fixed corpus and generated histories.
   fresh run never skips a row because of an earlier run's event. The fence
   keeps per-key sequences only while a load is in flight and clears them when
   the last load ends; no public observation measures that bound.
+- Events for a change committed before a list call can arrive after the page
+  applies, because the stream and the list are separate requests. An
+  `Insert` event is a full row, so the listener writes it as an `update`: a
+  late insert for a row that a page already holds no longer tears the stream
+  down with `DuplicateKeySyncError`. The page-event lane crosses changes
+  committed before the list with delivery at once, while the page is in
+  flight, or after it applies, including an insert followed by an update;
+  the generated lane delivers each change at once or later, in commit order.
+  Both check that a later change still reaches the listener. A late older
+  event shows its older value until the newer event that follows it arrives.
+  The adapter has no row version to order an event against a page, so the
+  lanes check a row only once every event for it has arrived.
 - A page never fails a load for an older event that core accepted but holds
   while a user mutation persists. TrailBase mutation handlers wait for their
   own change event, so core holds sync commits for the round trip of every
@@ -177,6 +189,13 @@ history, because the held event is pending, not visible.
 | Loads skip the listener wait                |            16 |
 | Clear the fence when any load ends          |             1 |
 | Record events only with two loads in flight |             9 |
+
+The delivery dimension fails on the adapter before the listener change: an
+insert and its update committed before the list call, delivered after the
+page applies, make the listener's `insert` collide with the page's newer row.
+The stream tears down, and a later change never arrives. A listener that
+writes `insert` fails both the single-page history and the generated lane's
+named replay at that assertion.
 
 The generated lane and its four replays all fail on the adapter before the
 fence and on the fence-less mutant; both properties shrink to one update while

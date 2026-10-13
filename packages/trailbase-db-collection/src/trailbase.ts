@@ -370,7 +370,9 @@ export function trailBaseCollectionOptions<
           let value: TItem | undefined
           if (`Insert` in event) {
             value = parse(event.Insert as TRecord)
-            write({ type: `insert`, value })
+            // A page may already hold a newer value for this row, so an
+            // insert is written as a full-row update; it creates a missing row.
+            write({ type: `update`, value })
           } else if (`Delete` in event) {
             value = parse(event.Delete as TRecord)
             write({ type: `delete`, value })
