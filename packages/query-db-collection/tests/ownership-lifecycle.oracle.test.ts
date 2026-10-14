@@ -1434,6 +1434,7 @@ function createPersistedOwnershipFixture(
   retentionOrConfigureClient:
     number | ((queryClient: QueryClient) => void) = Number.POSITIVE_INFINITY,
   configureClient?: (queryClient: QueryClient) => void,
+  scanDeliveryGate?: { entered: () => void; released: Promise<void> },
 ) {
   const queryClient = createQueryClient()
   const persistedGcTime =
@@ -1451,6 +1452,17 @@ function createPersistedOwnershipFixture(
       selectOwnershipRows(providerRows, context.meta?.loadSubsetOptions ?? {}),
     ),
   )
+  const queryOptions = queryCollectionOptions<Item>({
+    id,
+    queryClient,
+    queryKey: [id],
+    queryFn,
+    getKey: (item) => item.id,
+    syncMode,
+    persistedGcTime,
+    startSync: true,
+  })
+  const originalSync = queryOptions.sync
   const collection = createCollection(
     persistedCollectionOptions<
       Item,
@@ -1458,15 +1470,38 @@ function createPersistedOwnershipFixture(
       never,
       QueryCollectionUtils<Item, string | number, Item, unknown>
     >({
-      ...queryCollectionOptions<Item>({
-        id,
-        queryClient,
-        queryKey: [id],
-        queryFn,
-        getKey: (item) => item.id,
-        syncMode,
-        persistedGcTime,
-        startSync: true,
+      ...queryOptions,
+      ...(scanDeliveryGate && {
+        sync: {
+          ...originalSync,
+          sync: (params: Parameters<typeof originalSync.sync>[0]) => {
+            const metadata = params.metadata
+            const persistence = metadata?.persistence
+            if (!metadata || !persistence) {
+              throw new Error(`Persistence metadata is unavailable`)
+            }
+            return originalSync.sync({
+              ...params,
+              metadata: {
+                ...metadata,
+                persistence: {
+                  ...persistence,
+                  scanPersistedRows: async (options) => {
+                    const scannedRows =
+                      await persistence.scanPersistedRows(options)
+                    if (options?.metadataOnly) {
+                      // Hold delivery to Query DB after the storage scan has
+                      // released its apply mutex, so other TTLs may commit.
+                      scanDeliveryGate.entered()
+                      await scanDeliveryGate.released
+                    }
+                    return scannedRows
+                  },
+                },
+              },
+            })
+          },
+        },
       }),
       persistence: { adapter: storage.adapter },
     }),
@@ -20968,6 +21003,283 @@ describe(`query collection ownership lifecycle`, () => {
       }
     },
   )
+
+  /**
+   * A pending alias scan protects its matching historical owner, not an
+   * unrelated owner's expired TTL. The independent detail row remains only
+   * in storage and must retire there at its deadline while the shared-row
+   * preload still waits for its metadata scan and provider result.
+   */
+  it(`expires an unrelated owner while a historical alias scan is held`, async () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(1_000)
+      const id = `singleton-alias-scan-unrelated-ttl`
+      const oldHash = hashKey([id, legacySingletonCategoryDemandKey])
+      const detailDemand = {
+        where: eq(new IR.PropRef([`category`]), `detail`),
+      }
+      const detailHash = hashKey([id, getLoadSubsetDemandKey(detailDemand)])
+      const sharedMarker = `queryCollection:gc:${oldHash}`
+      const detailMarker = `queryCollection:gc:${detailHash}`
+      const storage = createOwnershipStorage({
+        rows: new Map([
+          [shared.id, shared],
+          [detailOnly.id, detailOnly],
+        ]),
+        rowMetadata: new Map([
+          [shared.id, { queryCollection: { owners: { [oldHash]: true } } }],
+          [
+            detailOnly.id,
+            { queryCollection: { owners: { [detailHash]: true } } },
+          ],
+        ]),
+        collectionMetadata: new Map([
+          [sharedMarker, { queryHash: oldHash, mode: `ttl`, expiresAt: 1_050 }],
+          [
+            detailMarker,
+            { queryHash: detailHash, mode: `ttl`, expiresAt: 1_050 },
+          ],
+        ]),
+      })
+      const scanEntered = createDeferred<void>()
+      const releaseScan = createDeferred<void>()
+      const { collection, queryFn } = createPersistedOwnershipFixture(
+        id,
+        storage,
+        [],
+        `on-demand`,
+        100,
+        undefined,
+        { entered: () => scanEntered.resolve(), released: releaseScan.promise },
+      )
+      const providerResult = createDeferred<Array<Item>>()
+      queryFn.mockImplementationOnce(() => providerResult.promise)
+      await collection.stateWhenReady()
+      expect(Date.now()).toBe(1_000)
+      expect(storedItems(storage)).toEqual([detailOnly, shared])
+      const live = createLiveQueryCollection((query) =>
+        query
+          .from({ item: collection })
+          .where(({ item }) => eq(item.category, `shared`))
+          .select(({ item }) => ({ id: item.id, name: item.name })),
+      )
+      try {
+        const preload = live.preload()
+        await scanEntered.promise
+        expect(rows(collection)).toEqual([shared.id])
+        await vi.advanceTimersByTimeAsync(50)
+        await vi.waitFor(() => {
+          expect(storedItems(storage)).toEqual([shared])
+          expect(storage.snapshot().collectionMetadata.has(detailMarker)).toBe(
+            false,
+          )
+        })
+        expect(rows(collection)).toEqual([shared.id])
+        expect(rows(live)).toEqual([shared.id])
+        expect(storage.snapshot().collectionMetadata.has(sharedMarker)).toBe(
+          true,
+        )
+        expect(queryFn).toHaveBeenCalledTimes(0)
+
+        releaseScan.resolve()
+        await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(1))
+        providerResult.resolve([shared])
+        await preload
+      } finally {
+        releaseScan.resolve()
+        providerResult.resolve([])
+        await live.cleanup()
+      }
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  /**
+   * A released or aborted acquisition no longer protects a historical owner,
+   * whether it leaves before or after the timer fires. The metadata scan may
+   * still be awaiting delivery, but the expired row and marker must retire
+   * without starting a provider request. Unload removes the pending token;
+   * signal abort leaves its token until the scan continuation runs.
+   */
+  it.each(
+    ([`unload`, `signal`] as const).flatMap((release) =>
+      ([`before`, `after`] as const).map((timer) => ({ release, timer })),
+    ),
+  )(
+    `expires a historical owner after $release $timer its timer fires during a held alias scan`,
+    async ({ release, timer }) => {
+      vi.useFakeTimers()
+      try {
+        vi.setSystemTime(1_000)
+        const id = `singleton-alias-scan-${release}-${timer}-ttl`
+        const oldHash = hashKey([id, legacySingletonCategoryDemandKey])
+        const marker = `queryCollection:gc:${oldHash}`
+        const storage = createOwnershipStorage({
+          rows: new Map([[shared.id, shared]]),
+          rowMetadata: new Map([
+            [shared.id, { queryCollection: { owners: { [oldHash]: true } } }],
+          ]),
+          collectionMetadata: new Map([
+            [marker, { queryHash: oldHash, mode: `ttl`, expiresAt: 1_050 }],
+          ]),
+        })
+        const scanEntered = createDeferred<void>()
+        const releaseScan = createDeferred<void>()
+        const { collection, queryFn } = createPersistedOwnershipFixture(
+          id,
+          storage,
+          [],
+          `on-demand`,
+          100,
+          undefined,
+          {
+            entered: () => scanEntered.resolve(),
+            released: releaseScan.promise,
+          },
+        )
+        await collection.stateWhenReady()
+        const controller = new AbortController()
+        const live =
+          release === `unload`
+            ? createLiveQueryCollection((query) =>
+                query
+                  .from({ item: collection })
+                  .where(({ item }) => eq(item.category, `shared`))
+                  .select(({ item }) => ({ id: item.id, name: item.name })),
+              )
+            : undefined
+        try {
+          const load = Promise.resolve(
+            live
+              ? live.preload()
+              : collection._sync.loadSubset({
+                  where: eq(new IR.PropRef([`category`]), `shared`),
+                  signal: controller.signal,
+                }),
+          ).then(
+            () => `fulfilled`,
+            (error: unknown) => (error as Error).name,
+          )
+          await scanEntered.promise
+          if (timer === `before`) {
+            if (live) await live.cleanup()
+            else controller.abort()
+          }
+          await vi.advanceTimersByTimeAsync(50)
+          if (timer === `after`) {
+            expect(storedItems(storage)).toEqual([shared])
+            expect(storage.snapshot().collectionMetadata.has(marker)).toBe(true)
+            if (live) await live.cleanup()
+            else controller.abort()
+          }
+          await vi.waitFor(() => {
+            expect(storedItems(storage)).toEqual([])
+            expect(storage.snapshot().collectionMetadata.has(marker)).toBe(
+              false,
+            )
+          })
+          expect(queryFn).toHaveBeenCalledTimes(0)
+          releaseScan.resolve()
+          expect(await load).toBe(`AbortError`)
+          expect(queryFn).toHaveBeenCalledTimes(0)
+        } finally {
+          releaseScan.resolve()
+          await live?.cleanup()
+        }
+      } finally {
+        vi.useRealTimers()
+      }
+    },
+  )
+
+  /**
+   * Two equivalent live demands share alias discovery. Retiring the first
+   * demand does not release the second one's claim. The old durable edge
+   * stays through the TTL and provider wait, then transfers only when the
+   * second demand's result applies.
+   */
+  it(`keeps a historical owner for a surviving peer during a held alias scan`, async () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(1_000)
+      const id = `singleton-alias-scan-surviving-peer`
+      const oldHash = hashKey([id, legacySingletonCategoryDemandKey])
+      const equality = { where: eq(new IR.PropRef([`category`]), `shared`) }
+      const currentHash = hashKey([id, getLoadSubsetDemandKey(equality)])
+      const marker = `queryCollection:gc:${oldHash}`
+      const storage = createOwnershipStorage({
+        rows: new Map([[shared.id, shared]]),
+        rowMetadata: new Map([
+          [shared.id, { queryCollection: { owners: { [oldHash]: true } } }],
+        ]),
+        collectionMetadata: new Map([
+          [marker, { queryHash: oldHash, mode: `ttl`, expiresAt: 1_050 }],
+        ]),
+      })
+      const scanEntered = createDeferred<void>()
+      const releaseScan = createDeferred<void>()
+      const { collection, queryFn } = createPersistedOwnershipFixture(
+        id,
+        storage,
+        [],
+        `on-demand`,
+        100,
+        undefined,
+        { entered: () => scanEntered.resolve(), released: releaseScan.promise },
+      )
+      const providerResult = createDeferred<Array<Item>>()
+      queryFn.mockImplementationOnce(() => providerResult.promise)
+      await collection.stateWhenReady()
+      const buildLive = () =>
+        createLiveQueryCollection((query) =>
+          query
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `shared`))
+            .select(({ item }) => ({ id: item.id, name: item.name })),
+        )
+      const first = buildLive()
+      const second = buildLive()
+      try {
+        const retiredLoad = first.preload().then(
+          () => `fulfilled`,
+          (error: unknown) => (error as Error).name,
+        )
+        const survivingLoad = second.preload()
+        await scanEntered.promise
+        await vi.advanceTimersByTimeAsync(50)
+        await first.cleanup()
+        expect(await retiredLoad).toBe(`AbortError`)
+        expect(rows(collection)).toEqual([shared.id])
+        expect(rows(second)).toEqual([shared.id])
+        expect(storedItems(storage)).toEqual([shared])
+        expect(storage.snapshot().collectionMetadata.has(marker)).toBe(true)
+        expect(queryFn).toHaveBeenCalledTimes(0)
+
+        releaseScan.resolve()
+        await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(1))
+        expect(storedItems(storage)).toEqual([shared])
+        expect(storage.snapshot().collectionMetadata.has(marker)).toBe(true)
+        providerResult.resolve([shared])
+        await survivingLoad
+        await vi.waitFor(() => {
+          expect(rows(second)).toEqual([shared.id])
+          expect(
+            persistedOwners(storage.snapshot().rowMetadata, shared.id),
+          ).toEqual([currentHash])
+          expect(storage.snapshot().collectionMetadata.has(marker)).toBe(false)
+        })
+      } finally {
+        releaseScan.resolve()
+        providerResult.resolve([])
+        await first.cleanup()
+        await second.cleanup()
+      }
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 
   /**
    * Under the old encoder, AND(IN [shared]) and AND(IN [shared], EQ shared)

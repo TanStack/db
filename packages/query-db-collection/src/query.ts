@@ -1501,6 +1501,10 @@ export function queryCollectionOptions(
     const legacyPersistedOwnerHashes = new Map<string, Set<string>>()
     let persistedOwnerHashes: Set<string> | undefined
     let persistedOwnerScan: Promise<void> | undefined
+    const pendingStartupLoadListeners = new Set<() => void>()
+    const notifyPendingStartupLoads = () => {
+      pendingStartupLoadListeners.forEach((listener) => listener())
+    }
 
     const scanPersistedOwnerHashes = (): Promise<void> => {
       persistedOwnerScan ??= persistence!
@@ -1527,6 +1531,35 @@ export function queryCollectionOptions(
       return persistedOwnerScan
     }
 
+    const getLegacyOwnerShapeIdentity = (options: LoadSubsetOptions) => {
+      const oldShapeKey = getLegacyLoadSubsetDemandKey(options)
+      return oldShapeKey === undefined
+        ? undefined
+        : normalizeLegacyLoadSubsetDemandKey(oldShapeKey)
+    }
+    const matchesLegacyOwnerHash = (
+      hash: string,
+      demandKey: string,
+      currentHash: string,
+      oldShapeIdentity: string | undefined,
+    ): boolean => {
+      if (typeof queryKey === `function` || hash === currentHash) return false
+      try {
+        const parts: unknown = JSON.parse(hash)
+        if (!Array.isArray(parts) || typeof parts.at(-1) !== `string`)
+          return false
+        const oldKey = parts.at(-1) as string
+        const normalized = normalizeLegacyLoadSubsetDemandKey(oldKey)
+        return (
+          hashKey([...queryKey, oldKey]) === hash &&
+          normalized !== undefined &&
+          (normalized === demandKey || normalized === oldShapeIdentity)
+        )
+      } catch {
+        // Foreign or malformed ownership keys cannot certify an alias.
+        return false
+      }
+    }
     const getLegacyOwnerHashes = (
       demandKey: string,
       currentHash: string,
@@ -1534,11 +1567,7 @@ export function queryCollectionOptions(
     ): Set<string> => {
       const aliases = new Set<string>()
       if (typeof queryKey === `function`) return aliases
-      const oldShapeKey = getLegacyLoadSubsetDemandKey(options)
-      const oldShapeIdentity =
-        oldShapeKey === undefined
-          ? undefined
-          : normalizeLegacyLoadSubsetDemandKey(oldShapeKey)
+      const oldShapeIdentity = getLegacyOwnerShapeIdentity(options)
       const candidateHashes = new Set(persistedOwnerHashes)
       metadata?.collection
         .list(QUERY_COLLECTION_GC_PREFIX)
@@ -1549,23 +1578,10 @@ export function queryCollectionOptions(
           }
         })
       for (const hash of candidateHashes) {
-        if (hash === currentHash) continue
-        try {
-          const parts: unknown = JSON.parse(hash)
-          if (!Array.isArray(parts) || typeof parts.at(-1) !== `string`)
-            continue
-          const oldKey = parts.at(-1) as string
-          const normalized = normalizeLegacyLoadSubsetDemandKey(oldKey)
-          if (
-            hashKey([...queryKey, oldKey]) === hash &&
-            normalized !== undefined &&
-            (normalized === demandKey || normalized === oldShapeIdentity)
-          ) {
-            aliases.add(hash)
-          }
-        } catch {
-          // Foreign or malformed ownership keys cannot certify an alias.
-        }
+        if (
+          matchesLegacyOwnerHash(hash, demandKey, currentHash, oldShapeIdentity)
+        )
+          aliases.add(hash)
       }
       return aliases
     }
@@ -2028,33 +2044,75 @@ export function queryCollectionOptions(
 
       const delay = Math.max(0, entry.expiresAt - Date.now())
       const timer = setTimeout(() => {
-        void runPersistedRetentionMaintenance(async () => {
-          // An acquisition that began before expiry may still be discovering
-          // this hash as a historical alias. Its scan settles before its
-          // continuation cancels the timer or reports a scan failure.
-          try {
-            await persistedOwnerScan
-          } catch {
-            // A failed scan leaves no acquired alias to protect this owner.
-          }
-          if (persistedRetentionTimers.get(entry.queryHash) !== timer) return
-          persistedRetentionTimers.delete(entry.queryHash)
-          const currentEntry = metadata?.collection.get(
-            `${QUERY_COLLECTION_GC_PREFIX}${entry.queryHash}`,
+        // This expired owner waits only for demands already pending at its
+        // deadline. An unrelated owner or a retired demand cannot hold GC.
+        const scanAtExpiry = persistedOwnerScan
+        const matchingPending =
+          scanAtExpiry && typeof queryKey !== `function`
+            ? [...pendingStartupLoads.keys()].filter((opts) => {
+                if (opts.signal?.aborted) return false
+                const requestedHash = hashKey(generateQueryKeyFromOptions(opts))
+                if (requestedHash === entry.queryHash) return true
+                const demandKey = getLoadSubsetDemandKey(opts)
+                return (
+                  demandKey !== undefined &&
+                  matchesLegacyOwnerHash(
+                    entry.queryHash,
+                    demandKey,
+                    requestedHash,
+                    getLegacyOwnerShapeIdentity(opts),
+                  )
+                )
+              })
+            : []
+        const hasPendingClaim = () =>
+          matchingPending.some(
+            (opts) =>
+              !opts.signal?.aborted &&
+              (pendingStartupLoads.get(opts)?.size ?? 0) > 0,
           )
-          const parsedCurrentEntry = parsePersistedQueryRetentionEntry(
-            currentEntry,
-            entry.queryHash,
-          )
-          if (
-            !parsedCurrentEntry ||
-            parsedCurrentEntry.mode !== `ttl` ||
-            parsedCurrentEntry.expiresAt > Date.now()
-          ) {
-            return
-          }
-          await cleanupPersistedPlaceholder(entry.queryHash)
-        })
+        const waitForClaim =
+          scanAtExpiry && hasPendingClaim()
+            ? new Promise<void>((resolve) => {
+                const finish = () => {
+                  pendingStartupLoadListeners.delete(onChange)
+                  matchingPending.forEach((opts) =>
+                    opts.signal?.removeEventListener(`abort`, onChange),
+                  )
+                  resolve()
+                }
+                const onChange = () => {
+                  if (!hasPendingClaim()) finish()
+                }
+                pendingStartupLoadListeners.add(onChange)
+                matchingPending.forEach((opts) =>
+                  opts.signal?.addEventListener(`abort`, onChange),
+                )
+                void scanAtExpiry.then(finish, finish)
+                onChange()
+              })
+            : Promise.resolve()
+        void waitForClaim.then(() =>
+          runPersistedRetentionMaintenance(async () => {
+            if (persistedRetentionTimers.get(entry.queryHash) !== timer) return
+            persistedRetentionTimers.delete(entry.queryHash)
+            const currentEntry = metadata?.collection.get(
+              `${QUERY_COLLECTION_GC_PREFIX}${entry.queryHash}`,
+            )
+            const parsedCurrentEntry = parsePersistedQueryRetentionEntry(
+              currentEntry,
+              entry.queryHash,
+            )
+            if (
+              !parsedCurrentEntry ||
+              parsedCurrentEntry.mode !== `ttl` ||
+              parsedCurrentEntry.expiresAt > Date.now()
+            ) {
+              return
+            }
+            await cleanupPersistedPlaceholder(entry.queryHash)
+          }),
+        )
       }, delay)
 
       persistedRetentionTimers.set(entry.queryHash, timer)
@@ -2387,6 +2445,7 @@ export function queryCollectionOptions(
           const current = pendingStartupLoads.get(opts) === pending
           const active = pending.delete(token)
           if (current && pending.size === 0) pendingStartupLoads.delete(opts)
+          notifyPendingStartupLoads()
           return current && active
         }
         return work.then(
@@ -4531,6 +4590,7 @@ export function queryCollectionOptions(
     const cleanup = () => {
       if (activeSyncSession === syncSession) activeSyncSession = undefined
       pendingStartupLoads.clear()
+      notifyPendingStartupLoads()
       fullSourceDependents.clear()
       appliedResultVersions.clear()
       activeAcquisitions.forEach((routes) => {
@@ -4631,6 +4691,7 @@ export function queryCollectionOptions(
       if (pending) {
         pending.delete(pending.values().next().value!)
         if (pending.size === 0) pendingStartupLoads.delete(options)
+        notifyPendingStartupLoads()
         return
       }
       const routes = acquisitionRoutes.get(options)
