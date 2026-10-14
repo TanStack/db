@@ -7,7 +7,7 @@ title: warnOnce
 function warnOnce(key, message): void;
 ```
 
-Defined in: [packages/db/src/utils.ts:410](https://github.com/TanStack/db/blob/main/packages/db/src/utils.ts#L410)
+Defined in: [packages/db/src/utils.ts:434](https://github.com/TanStack/db/blob/main/packages/db/src/utils.ts#L434)
 
 **`Internal`**
 
