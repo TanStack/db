@@ -1207,7 +1207,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     this.disposed = true
     this.subscribedToAllCollections = false
 
-    // Release every source in one sync run; the first failure wins after the
+    // Release every source in one pass; the first failure wins after the
     // peers finish. A reentrant dispose returns at the guard above, so this
     // call still owns each release exactly once.
     try {
