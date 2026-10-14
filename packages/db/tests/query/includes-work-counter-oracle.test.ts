@@ -12,7 +12,10 @@ import {
   toArray,
 } from '../../src/query/index.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
-import { SetWindowRequiresOrderByError } from '../../src/errors.js'
+import {
+  SetWindowFindOneLimitError,
+  SetWindowRequiresOrderByError,
+} from '../../src/errors.js'
 import type { Collection } from '../../src/collection/index.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
 
@@ -614,13 +617,14 @@ describe(`includes deterministic work-counter oracle`, () => {
  *
  * A static parent filter (`eq` or `inArray` on the correlation field) may
  * create child demand before the window runs only when no window can drop the
- * rows it names: no enclosing query has a window, no window requested before
- * start has a nonzero offset, and either the query has no window or it is a
+ * rows it names: no enclosing query has a window, the window at start, if one
+ * was requested before start, has offset 0, and either the query has no window or it is a
  * `findOne` that shows one row, with no `offset`, for one named correlation
  * value. Any other window can drop them, including one `setWindow` requests
  * later, so the static demand must wait for the window. A `findOne` window
  * keeps its compiled limit (1, or 0 for `.limit(0).findOne()`): `setWindow`
- * may move its offset and throws for any other limit.
+ * throws `SetWindowFindOneLimitError` for any other limit. A window is an
+ * ordered view, so only an ordered `findOne` may move its offset.
  *
  * ## Model
  *
@@ -1187,11 +1191,9 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<number> {
               limit: 1,
             }
           : { offset: testCase.offset, limit: testCase.limit }
-    // A window requested before the live query starts replaces the compiled
-    // one before its first load.
-    // A findOne's window always shows one row.
     // A findOne's window keeps its compiled limit, 1, and setWindow may move
-    // only its offset.
+    // only its offset. A window requested before the live query starts
+    // replaces the compiled one before its first load.
     const windowFor = (window: { offset: number; limit: number }) =>
       testCase.parentForm === `findOne` ? { offset: window.offset } : window
     const startWindow = testCase.startWindow
@@ -1502,7 +1504,7 @@ describe(`includes work under an ordered parent window`, () => {
       history: [{ type: `insert-parent`, copy: 3 }],
     }))
 
-  it(`seeds no child demand from a static parent filter`, () =>
+  it(`creates no static child demand from a static parent filter`, () =>
     expectWindowedIncludeWork({
       ...pinnedWindowCase,
       childSource: `on-demand`,
@@ -1569,8 +1571,8 @@ describe(`includes work under an ordered parent window`, () => {
   })
 
   // A window requested before start can drop rows a static filter names,
-  // so the static seed must not load their children.
-  it(`seeds no static child demand under a window requested before start`, () =>
+  // so static child demand must not load their children.
+  it(`creates no static child demand under a window requested before start`, () =>
     expectWindowedIncludeWork({
       ...pinnedWindowCase,
       childForm: `ordered`,
@@ -1582,7 +1584,7 @@ describe(`includes work under an ordered parent window`, () => {
 
   // A child's static filter names a child whose parent the window drops, so
   // its grandchild demand must wait for the window too.
-  it(`seeds no grandchild demand below a windowed parent`, () =>
+  it(`creates no static grandchild demand below a windowed parent`, () =>
     expectWindowedIncludeWork({
       ...pinnedWindowCase,
       parents: 10,
@@ -1596,7 +1598,7 @@ describe(`includes work under an ordered parent window`, () => {
   // A window requested before start that moves a findOne past its one named
   // correlation value drops that row, so its children must not load; one at
   // offset 0 drops nothing, so its static demand still starts at once.
-  it(`seeds no child demand for a findOne moved past its named value before start`, () =>
+  it(`creates no static child demand for a findOne moved past its named value before start`, () =>
     expectWindowedIncludeWork({
       ...pinnedWindowCase,
       parents: 21,
@@ -1998,7 +2000,7 @@ describe(`static include demand and setWindow ownership`, () => {
 
   // A findOne's window keeps its compiled limit. setWindow may move its
   // offset or pass that limit, and throws for any other limit.
-  it(`keeps a findOne's compiled window limit under setWindow`, async () => {
+  it(`keeps a findOne's compiled window limit and moves only an ordered findOne`, async () => {
     const rows = createSourceCollection(
       `find-one-window-rows`,
       Array.from({ length: 4 }, (_, rank) => ({ id: `row-${rank}`, rank })),
@@ -2016,10 +2018,13 @@ describe(`static include demand and setWindow ownership`, () => {
         .limit(0)
         .findOne(),
     )
+    const unordered = createLiveQueryCollection((q) =>
+      q.from({ row: rows }).findOne(),
+    )
     try {
-      await Promise.all([one.preload(), none.preload()])
+      await Promise.all([one.preload(), none.preload(), unordered.preload()])
       expect(() => one.utils.setWindow({ offset: 0, limit: 3 })).toThrow(
-        /limit/,
+        SetWindowFindOneLimitError,
       )
       for (const window of [{ offset: 2 }, { offset: 1, limit: 1 }]) {
         const settled = one.utils.setWindow(window)
@@ -2036,11 +2041,20 @@ describe(`static include demand and setWindow ownership`, () => {
       if (moved !== true) await moved
       expect(none.toArray).toEqual([])
       expect(none.utils.getWindow()).toEqual({ offset: 1, limit: 0 })
-      expect(() => none.utils.setWindow({ limit: 1 })).toThrow(/limit/)
+      expect(() => none.utils.setWindow({ limit: 1 })).toThrow(
+        SetWindowFindOneLimitError,
+      )
+      // A window is an ordered view: an unordered findOne keeps offset 0.
+      expect(() => unordered.utils.setWindow({ offset: 1 })).toThrow(
+        SetWindowRequiresOrderByError,
+      )
+      expect(unordered.utils.setWindow({ offset: 0 })).toBe(true)
+      expect(unordered.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
     } finally {
       await runCleanups([
         () => one.cleanup(),
         () => none.cleanup(),
+        () => unordered.cleanup(),
         () => rows.cleanup(),
       ])
     }
