@@ -68,6 +68,7 @@ sync after that. Neither one changes the other.
 | --- | --- | --- |
 | initial gate | The role of Collection status during a sync run's initial sync. The status stays `loading` while the sync adapter retries, then becomes `ready` through `markReady()` or `error` through `markError()`. After Collection readiness in a sync run, the status no longer reflects sync failures. | Collection health or a live query's request errors. |
 | initial error | The `markError()` failure that ends a sync run's initial gate in `error`, recorded with `phase: 'initial'`. It is final for its sync run: `markReady()` afterward throws, and only a restart can reach `ready`. | Health error or a retry. |
+| crash | Moving a Collection to `error` from any active status, including after Collection readiness, because the Collection can no longer serve reads or admit writes in its sync run. Core uses it for IndexedDB closure, terminal local persistence failures, and internal invariant failures. It is final for the sync run; only a restart recovers. | Initial error, final health error, or cleanup. |
 | Collection health | The sync adapter's report on a Collection's sync after Collection readiness in the current sync run, read through `collection.health` and `health:change`. Only `reportError()` and `reportHealthy()` change it. It never changes Collection status or rows. Cleanup resets it. | Collection status, `persistedError`, or subscription status. |
 | health error | One problem reported through `reportError()`, recorded as `CollectionErrorInfo` with `phase: 'sync'`. A health error that is not final means the sync adapter is still trying in the current sync run; `reportHealthy()` clears it. | Initial error or request error. |
 | final health error | A health error with `final: true`: the sync adapter stopped trying in the current sync run. Only a restart clears it; `reportHealthy()` does not. | A Collection status of `error`. |
@@ -229,6 +230,7 @@ Use nouns for state and verbs for transitions:
 - A sync adapter **gives up** with `markError()` before Collection readiness.
   After it, the adapter **reports** a health error and **reports healthy**.
   A restart **clears** a final health error.
+- A Collection **crashes** when it can no longer serve reads or admit writes.
 
 Use `settled` for a promise that fulfilled or rejected. Use `complete` for named
 coverage, content, history, or a non-promise operation only when no stronger
