@@ -846,10 +846,12 @@ function createPowerSyncCollectionConfig<
                   if (collection.status === `loading`) {
                     // Initial load failure is final for the attempt
                     markError(error)
-                  } else {
-                    // Post-ready failures are reported as health issues
+                  } else if (collection.status === `ready`) {
+                    // Post-ready failures are reported as health issues (not final;
+                    // the adapter may retry on new demand or automatic reconciliation)
                     reportError(error, { final: false })
                   }
+                  // Other statuses (error, idle, cleaned-up) don't report
                 }
                 throw error
               })

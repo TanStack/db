@@ -1203,10 +1203,25 @@ async function expectInitialQueryFailureStatus(): Promise<void> {
       throw new TraceAssertionError(0, caught)
     }
 
+    // With the new design, an initial error is final for its sync attempt.
+    // clearError() triggers a refetch, but the status stays error until
+    // cleanup() + preload() starts a fresh sync attempt.
+    // First, note that the refetch will succeed and the data will be available
+    // in lastError tracking, but status stays error.
     await collection.utils.clearError()
+    // After a successful refetch from an error state, status stays error,
+    // but utils.lastError clears and we can see the data
+    await vi.waitFor(() => {
+      expect(collection.utils.lastError).toBeUndefined()
+      expect(collection.get(`recovered`)).toBeDefined()
+    })
+    // To fully recover to ready status, cleanup and restart
+    await collection.cleanup()
+    await live.cleanup()
+    await collection.preload()
+    await live.preload()
     await vi.waitFor(() => {
       expect(collection.status).toBe(`ready`)
-      expect(collection.get(`recovered`)).toBeDefined()
       expect(live.status).toBe(`ready`)
       expect(live.get(`recovered`)).toBeDefined()
     })
@@ -1315,13 +1330,30 @@ async function expectEveryFailedSourceToRecover(): Promise<void> {
     await expect(preload).rejects.toThrow()
     expect(live.status).toBe(`error`)
 
+    // With the new design, recovery from initial errors requires cleanup() + preload().
+    // After markError(), you cannot call markReady() in the same sync run.
+    // Instead, recovery is via cleanup() + preload() which starts a fresh sync attempt.
+
+    // Restart left
+    await left.collection.cleanup()
+    const leftPreload = left.collection.preload()
     left.recover({ id: `shared` })
+    await leftPreload
     expect(left.collection.status).toBe(`ready`)
     expect(right.collection.status).toBe(`error`)
     expect(live.status).toBe(`error`)
 
+    // Restart right
+    await right.collection.cleanup()
+    const rightPreload = right.collection.preload()
     right.recover({ id: `shared` })
-    await expect(live.preload()).resolves.toBeUndefined()
+    await rightPreload
+    expect(right.collection.status).toBe(`ready`)
+
+    // Live query should now be ready after both sources recover
+    await live.cleanup()
+    const livePreload2 = live.preload()
+    await livePreload2
     expect(live.status).toBe(`ready`)
     expect(live.toArray.map((row) => row.id)).toEqual([`shared`])
   } finally {

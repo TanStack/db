@@ -3246,7 +3246,11 @@ describe(`On-Demand Sync Mode`, () => {
             collection._sync.loadSubset({ where: categoryEquals(`clothing`) }),
           ),
         ).rejects.toBe(failure)
-        expect(collection.status).toBe(`error`)
+        // After the first ready, failures don't change status. Instead, they're
+        // reported as health errors. Status stays ready; data stays available.
+        expect(collection.status).toBe(`ready`)
+        expect(collection.health.isError).toBe(true)
+        expect(collection.health.error?.message).toMatch(`trigger installation failed`)
       } finally {
         await collection.cleanup()
       }

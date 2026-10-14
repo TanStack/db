@@ -2801,7 +2801,9 @@ export function queryCollectionOptions(
             `[QueryCollection] Error applying query ${String(hashToQueryKey.get(hashedQueryKey))}:`,
             error,
           )
-          // Report post-ready failures as health issues (not final)
+          // Report post-ready failures as health issues. Not final because query
+          // observers will retry via refetchInterval, refetchOnWindowFocus, or
+          // manual refetch() calls; the observer may succeed on the next attempt.
           if (collection.status === `ready`) {
             reportError(error, { final: false })
           }
@@ -3181,7 +3183,8 @@ export function queryCollectionOptions(
           if (collection.status === `loading`) {
             markError(result.error)
           } else if (collection.status === `ready`) {
-            // Report post-ready failures as health issues (not final)
+            // Report post-ready failures as health issues. Not final because
+            // observers will retry on interval/reconnect/manual refetch.
             reportError(result.error, { final: false })
           }
         }
