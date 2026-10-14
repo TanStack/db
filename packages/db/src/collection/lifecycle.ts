@@ -57,12 +57,12 @@ export class CollectionLifecycleManager<
   public onFirstReadyCallbacks: Array<() => void> = []
   private idleCallbackId: number | null = null
   private syncError: unknown
-  // Health is metadata after the first ready. A source's own report and a
+  // Health is metadata after Collection readiness. The sync adapter's own report and a
   // live query's request failures are separate, so settling a request cannot
-  // clear a source problem.
+  // clear the sync adapter's problem.
   private sourceProblem: CollectionErrorInfo | null = null
   // Error tree detail for the initial gate error, kept so readers see the
-  // same object until the attempt ends.
+  // same object until the sync run ends.
   private initialProblem: CollectionErrorInfo | null = null
   private requestProblem: CollectionErrorInfo | null = null
   private cleanupConfig: () => void
@@ -118,7 +118,7 @@ export class CollectionLifecycleManager<
       // A ready Collection moves to `error` only through crash(); a source's
       // later failure is health metadata.
       ready: [`cleaned-up`, `error`],
-      // An initial error is final for its sync attempt.
+      // An initial error is final for its sync run.
       error: [`cleaned-up`, `idle`],
       'cleaned-up': [`loading`, `error`],
     }
@@ -251,15 +251,15 @@ export class CollectionLifecycleManager<
   }
 
   /**
-   * The source gave up. Before the first ready this fails the initial sync
-   * of the attempt; after it, the problem is final health metadata and the
+   * The sync adapter gave up. Before Collection readiness this fails the initial sync
+   * of the sync run; after it, the problem is final health metadata and the
    * data stays.
    */
   public markError(error?: unknown): void {
     if (this.status === `ready`) {
       if (devBuild() && process.env.NODE_ENV !== `production`) {
         console.warn(
-          `[TanStack DB] Collection "${this.id}" called markError() after its first ready. ` +
+          `[TanStack DB] Collection "${this.id}" called markError() after Collection readiness. ` +
             `Call reportError(error, { final: true }) instead; the status stays ready.`,
         )
       }
@@ -275,7 +275,7 @@ export class CollectionLifecycleManager<
    * unpublished rows stops being usable.
    */
   public crash(error?: unknown): void {
-    // The first error is final for the attempt.
+    // The first error is final for the sync run.
     if (this.status === `error`) return
     this.validateStatusTransition(this.status, `error`)
     this.syncError = error
@@ -293,7 +293,7 @@ export class CollectionLifecycleManager<
     return this.status === `error` ? this.initialProblem : null
   }
 
-  /** A source's report after its first ready. Status and rows do not change. */
+  /** The sync adapter's report after Collection readiness. Status and rows do not change. */
   public reportError(error: unknown, options?: { final?: boolean }): void {
     this.assertReportable(`reportError`)
     // A final problem stays until a restart.
@@ -310,7 +310,7 @@ export class CollectionLifecycleManager<
     this.events.emitHealthChange()
   }
 
-  /** @internal A live query's load failed after its first ready. */
+  /** @internal A live query's load failed after Collection readiness. */
   public reportRequestError(error: unknown): void {
     this.requestProblem = describeProblem(error, `request`, false)
     this.events.emitHealthChange()
@@ -327,7 +327,7 @@ export class CollectionLifecycleManager<
     if (this.status !== `ready`) {
       throw new CollectionStateError(
         devBuild() && process.env.NODE_ENV !== `production`
-          ? `${operation}() reports a problem after the first ready, but Collection "${this.id}" is ${this.status}. Before the first ready, retry without reporting, or call markError() when the source gives up.`
+          ? `${operation}() reports a problem after Collection readiness, but Collection "${this.id}" is ${this.status}. Before Collection readiness, retry without reporting, or call markError() when the sync adapter gives up.`
           : codedMessage(243, { operation, id: this.id, status: this.status }),
       )
     }

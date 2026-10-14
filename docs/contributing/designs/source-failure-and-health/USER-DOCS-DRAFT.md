@@ -11,13 +11,13 @@ A Collection answers two separate questions:
 
 | Question | Where to look | Changes when |
 | --- | --- | --- |
-| Can I show this data yet? | `status`, `isReady`, `isError` | Only during the initial load of a sync attempt |
+| Can I show this data yet? | `status`, `isReady`, `isError` | Only during the initial load of a sync run |
 | Is this data still being kept up to date? | `errors` (the error tree) | Any time a source reports a problem or recovers |
 
 ### The initial load
 
 Until a Collection has its first usable snapshot, `status` is `loading`. If the
-source keeps retrying, it stays `loading`. If the source gives up, `status`
+source keeps retrying, it stays `loading`. If the sync adapter gives up, `status`
 becomes `error`, `isError` is `true`, `preload()` rejects with the original
 cause, and every live query that depends on it is in error too.
 
@@ -134,7 +134,7 @@ For the query above, while the users sync is disconnected:
 
 Phases:
 
-- `initial`: the source gave up before its first ready. `status` is `error`.
+- `initial`: the source gave up before Collection readiness. `status` is `error`.
 - `sync`: the source reported a problem after ready. `final: false` means it
   is still trying; `final: true` means it stopped, and only a restart clears it.
 - `request`: loading data for this query failed while its source stayed
@@ -211,21 +211,21 @@ The rules:
 
 1. While you are still retrying the initial load, call nothing. The
    Collection stays `loading`.
-2. Call `markError(error)` only when you give up before the first ready. Do
+2. Call `markError(error)` only when you give up before Collection readiness. Do
    not call `markReady()` after that; restart is the app's job.
 3. After the first ready, call `reportError(error, { final })` for problems
    and `reportHealthy()` when sync works again. Never move a ready Collection
    to `error`.
 4. Do not discard rows because sync failed.
 
-`markError(error)` after the first ready still works during migration. It is
+`markError(error)` after Collection readiness still works during migration. It is
 treated as `reportError(error, { final: true })` and logs a development
 warning.
 
 ### Migration notes for the built-in adapters
 
 - **Electric:** a stream error that `onError` retries is not reported. When the
-  stream gives up after the first ready, it reports `final: true` instead of
+  stream gives up after Collection readiness, it reports `final: true` instead of
   moving the Collection to `error`.
 - **PowerSync:** a failed tracking rebuild reports `reportError`; a successful
   rebuild reports `reportHealthy()` instead of `markReady()`.

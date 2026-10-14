@@ -135,15 +135,15 @@ export interface EffectConfig<
   onError?: (error: Error, event: DeltaEvent<TRow, TKey>) => void
 
   /**
-   * Called when a source collection fails before the effect's first ready, or
+   * Called when a Collection fails before the effect's initial-query readiness, or
    * is cleaned up. The effect is automatically disposed after this callback
    * fires. If not provided, the error is logged to console.error.
    */
   onSourceError?: (error: Error) => void
 
   /**
-   * Called after the effect's first ready whenever a source's status or health
-   * changes. A source problem after the first ready does not dispose the
+   * Called after the effect's initial-query readiness whenever a Collection's status or health
+   * changes. A Collection health problem after initial-query readiness does not dispose the
    * effect; read the error tree to decide what to do.
    */
   onHealthChange?: (errors: ErrorTreeNode) => void
@@ -471,9 +471,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   // skipInitial state
   private readonly skipInitial: boolean
   private initialLoadComplete = false
-  // The Effect's gate, as a live query's first ready: latched when every
-  // initial load has settled, with or without skipInitial. After it, a
-  // source problem is health, not disposal.
+  // The Effect's initial gate: latched when every
+  // initial load has settled, with or without skipInitial. After it,
+  // a Collection health problem does not dispose the Effect.
   private reachedReady = false
   private readonly failedRequests = new Set<string>()
   private requestProblem: CollectionErrorInfo | null = null
@@ -742,8 +742,8 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
         const { status } = event
 
-        // A source failure before the effect's first ready ends the effect.
-        // After it, the failure is health and the effect keeps running.
+        // A Collection failure before the effect's initial gate ends the effect.
+        // After it, the failure is health metadata and the effect keeps running.
         if (status === `error` && this.reachedReady) {
           this.reportHealth()
           return
@@ -1072,7 +1072,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     )
   }
 
-  /** Latch the Effect's gate, its first ready, and report whether it has passed. */
+  /** Latch the Effect's initial gate and report whether it has been reached. */
   private latchReady(): boolean {
     if (!this.reachedReady && this.canCompleteInitialLoad())
       this.reachedReady = true
@@ -1211,7 +1211,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     this.disposed = true
     this.subscribedToAllCollections = false
 
-    // Release every source in one attempt; the first failure wins after the
+    // Release every source in one sync run; the first failure wins after the
     // peers finish. A reentrant dispose returns at the guard above, so this
     // call still owns each release exactly once.
     try {
