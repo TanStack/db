@@ -604,29 +604,35 @@ describe(`includes deterministic work-counter oracle`, () => {
  *
  * An ordered parent query shows only the rows in its window. Law 12 of the
  * live-query architecture (Work) says irrelevant rows must not activate
- * unrelated routes. A parent row the window drops is irrelevant to the
- * result, so its include must not load child rows: not before the window
- * exists (a static parent filter must not seed demand), not with `distinct`,
- * which reads every parent row before the window, and not after `setWindow`
- * narrows a parent that has only an `orderBy`. Only the parent's window
- * answers `setWindow`; an include child's own `orderBy` or `limit` must not
- * take it over.
+ * unrelated routes. A parent row the window drops is irrelevant to the public
+ * snapshot, so the route relation must not activate its bucket, and the
+ * include must create no demand for its children. That holds with `distinct`,
+ * which reads every parent row before the window, and after `setWindow`
+ * narrows a parent that has only an `orderBy`, whether before or after the
+ * live query starts. Only the parent's window answers `setWindow`; an include
+ * child's own `orderBy` or `limit` must not take it over.
+ *
+ * A static parent filter (`eq` or `inArray` on the correlation field) may
+ * create child demand before the window runs only when no window can drop the
+ * rows it names: the query has no window, or it is a `findOne` with no
+ * `offset` over one named row. Any other window can drop them, including one
+ * `setWindow` requests later, so the static demand must wait for the window.
  *
  * ## Model
  *
  * Parents have a rank and a group; children and their include correlate by
- * group, so parents of one group share their children, and every child has
- * one grandchild. A parent filter may keep only some groups, by `eq` or
- * `inArray` on the correlation field. The model sorts the shown units by rank
- * and takes the window. A unit is a parent, or, with `distinct`, one
- * distinct (rank, group) pair, because the selected values then omit the
- * parent id and parents with equal rank and group collapse. Ranks can tie, so
- * the comparison accepts any tied units at the window edge: the rank sequence
- * must match, every shown row must be a unit with that rank, and no unit may
- * appear twice. The parent is a page (`offset` and `limit`), a `findOne`
- * with an `offset`, or an `orderBy` alone, whose window starts unbounded.
- * Each shown row must carry its group's children in the include form under
- * test:
+ * group, so parents of one group share one active bucket, and every child has
+ * one grandchild. The model sorts the shown units by rank and takes the
+ * window. A unit is a model-only abstraction: a parent row, or, with
+ * `distinct`, one distinct (rank, group) pair, because the selected values
+ * then omit the parent id and parents with equal rank and group collapse into
+ * one public row. Ranks can tie, so the comparison accepts any member of the
+ * tie group at the window edge: the rank sequence must match, every shown row
+ * must be a unit with that rank, and no unit may appear twice. The parent is a
+ * page (`offset` and `limit`), a `findOne` with or without an `offset`, or an
+ * `orderBy` alone, whose window starts unbounded unless `setWindow` requests
+ * one before start. Each shown row must carry its group's children in the
+ * include form under test:
  *
  * - `materialize` and `collection` (a child Collection): every child;
  * - `ordered`: every child by `n`, descending, with the child's own `orderBy`;
@@ -637,38 +643,48 @@ describe(`includes deterministic work-counter oracle`, () => {
  *
  * ## Work
  *
- * The child source is local or on demand. Work is the child rows it delivers
- * (local) or its loads serve (on demand), and the grandchild rows the local
- * grandchild source delivers. Preload may load only the children of the shown
- * rows' groups and the grandchildren of the shown children. A step may newly
- * load only the groups of rows that entered the window and were not shown
- * before it, the grandchildren of children that entered an include, and the
- * rows the step itself writes, which a local subscription receives whether or
- * not their group is loaded. An on-demand child arrives only through a load,
- * so that path shows routing even for rows the step writes. A query that
- * routes the row after the window, every row tied with an edge, rows before
- * the window, rows `setWindow` dropped, or rows a static filter names fails.
+ * The child source Collection is local or on demand. For an on-demand child,
+ * the test's `loadSubset` handler stands in for both the sync adapter and the
+ * provider: it serves each acquisition attempt from the model's rows by the
+ * request data's predicate, keeps a ledger of sent rows, and forwards a later
+ * change message only for a sent row or a row a served predicate matches.
+ * Work is a model observation: the child rows the local source Collection
+ * delivers to the query, or the rows the on-demand handler's acquisitions
+ * serve, plus the grandchild rows the local grandchild source delivers.
+ * Preload may load only the children of the shown rows' groups and the
+ * grandchildren of the shown children. A step may newly load only the groups
+ * of rows that entered the window and were not shown before it, the
+ * grandchildren of children that entered an include, and the rows the step
+ * itself writes, which a local subscription receives whether or not their
+ * group is loaded. An on-demand child arrives only through an acquisition, so
+ * that path shows routing even for rows the step writes. A query that routes
+ * the row after the window, every row in an edge tie group, rows before the
+ * window, rows `setWindow` dropped, or rows a static filter names fails.
  *
  * ## Recorded limit: transient top-K rows (#2151)
  *
  * While an index-backed parent top-K refills its window within one graph run,
- * after a held row moves out, a tie at the window edge loads, or the window
- * moves, it can briefly hold a row outside the settled window, and that row's
- * children load. The published rows stay correct. The harness sees such a
- * checkpoint by counting the change batches the parent Collection delivers to
- * the query: more than the initial load at preload, or more than the step's
- * own parent write, means the ordered loader acquired more rows. The generated
- * campaigns skip the work bound at those checkpoints only (about 2.5% of
- * them) and still check the rows. Replays pin every known trace and allow
- * exactly the one extra child row each shows.
+ * after a held row moves out, a tie group at the window edge loads, or the
+ * window moves forward, it can briefly hold a row outside the settled window,
+ * and that row's children load. The public snapshot stays correct. An
+ * unsettled checkpoint is a model observation that combines two production
+ * facts the harness cannot see directly, ordered acquisition and its
+ * settlement within the graph run: it counts the change batches the parent
+ * Collection delivers to the query, and more than the initial load at
+ * preload, or more than the step's own parent write, means the ordered
+ * acquisition took more rows. The generated campaigns skip only the work bound
+ * at unsettled checkpoints and still check the rows. Replays pin every known
+ * trace and allow exactly the one extra child row each shows, and pinned
+ * forward moves allow none.
  *
  * ## Histories
  *
  * Histories insert parents (fresh, or copying an existing rank and group),
  * delete parents, move a parent's rank past every other rank, insert and
  * delete children, and move the parent window with `setWindow` (not for a
- * `findOne` parent). Indexes exist before the live query starts, and every
- * step settles before it is checked.
+ * `findOne` parent), optionally after a window requested before start.
+ * Indexes exist before the live query starts, and every step settles before it
+ * is checked.
  */
 type WindowParent = { id: string; rank: number; group: string }
 type WindowChild = { id: string; group: string; n: number }
@@ -1715,12 +1731,14 @@ describe(`includes work under an ordered parent window`, () => {
 /**
  * # Static demand and window ownership
  *
- * A window can drop rows only when it cuts with `limit` or `offset`, or when a
- * `findOne` chooses among several rows. When a parent `where` names its only
- * candidate by the correlation field, the include may demand that child at
- * once, beside the parent load, so a detail page does not wait for its parent
- * before it starts its child load. Only the query's own window answers
- * `setWindow`; a window inside a `from` or a joined subquery never does.
+ * A static parent filter that names one row of a `findOne` with no `offset`
+ * leaves the window nothing to drop, so the include may create that child's
+ * demand at once: a detail page starts its child acquisition attempt beside
+ * its parent acquisition attempt instead of after the parent's rows arrive.
+ * Each test's `loadSubset` handler stands in for both the sync adapter and the
+ * provider, and records each acquisition attempt in order. Only the query's
+ * own window answers `setWindow`; a window inside a `from` or a joined
+ * subquery never does.
  */
 describe(`static include demand and setWindow ownership`, () => {
   it(`starts a findOne detail page's child load beside its parent load`, async () => {
@@ -1795,7 +1813,7 @@ describe(`static include demand and setWindow ownership`, () => {
     try {
       const ready = live.toArrayWhenReady()
       await new Promise((resolve) => setTimeout(resolve, 0))
-      // The child load has started while the parent load is still held.
+      // The child acquisition attempt has started while the parent's is held.
       expect(calls).toEqual([`parent`, `child`])
       releaseParent()
       await ready
