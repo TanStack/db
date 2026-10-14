@@ -1865,24 +1865,27 @@ class PersistedCollectionRuntime<
     this.restartSourceAfterScopedRecovery = undefined
   }
 
-  reportSyncError(error: unknown, isTerminal = this.terminalFailure): unknown {
+  /**
+   * Reports one failure for the current sync run. The wrapped sync adapter's
+   * own markError keeps core's meaning: final before Collection readiness, a
+   * final health error after it. A failure raised by persistence itself means
+   * the Collection can no longer serve reads or admit writes, so it crashes.
+   */
+  reportSyncError(
+    error: unknown,
+    origin: `persistence` | `sync adapter` = `persistence`,
+  ): unknown {
     const markError = this.syncControls.markError
     if (this.syncErrorReported) return this.reportedSyncError
     if (!markError) return error
 
     this.syncErrorReported = true
     this.reportedSyncError = error
-    // Terminal local persistence failures crash the Collection, like IndexedDB
-    // closure does. Upstream (wrapped sync adapter) failures after readiness
-    // stay health metadata through reportError.
-    if (isTerminal && this.collection?._lifecycle.hasBeenReady) {
-      this.collection._lifecycle.crash(error)
-    } else {
-      try {
-        markError(error)
-      } catch {
-        // Reporting must not replace the original asynchronous failure.
-      }
+    try {
+      if (origin === `sync adapter`) markError(error)
+      else this.collection?._lifecycle.crash(error)
+    } catch {
+      // Reporting must not replace the original asynchronous failure.
     }
     return error
   }
@@ -5744,7 +5747,7 @@ function createWrappedSyncConfig<
       const getTerminalFailure = () => runtime.getCurrentTerminalFailure()
       const reportUpstreamError = (error: unknown) => {
         if (persistedReadiness?.getSnapshot().status !== `loading`) {
-          runtime.reportSyncError(error)
+          runtime.reportSyncError(error, `sync adapter`)
           return
         }
         // An early network error must not stop the live-query graph before
@@ -5752,7 +5755,7 @@ function createWrappedSyncConfig<
         void (fullStartPromise ?? runtime.ensureStarted()).then(
           () => {
             if (!isCleanedUp() && !getTerminalFailure()) {
-              runtime.reportSyncError(error)
+              runtime.reportSyncError(error, `sync adapter`)
             }
           },
           () => undefined,
