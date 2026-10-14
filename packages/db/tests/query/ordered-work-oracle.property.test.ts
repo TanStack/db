@@ -5190,7 +5190,7 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
   // Answers one held request from the current rows and fulfills its load
   // once the rows apply.
   // The held load fulfills when the applied receipt fulfills, and rejects
-  // if it rejects.
+  // if it rejects; a rejection also fails the step.
   async function answerOldest(): Promise<void> {
     const { options, resolve, reject, answeredAfterAbort } =
       heldRequests.shift()!
@@ -5202,7 +5202,10 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
       if (applied !== true) await applied
       resolve()
     } catch (error) {
+      // No signal or cleanup rejects a receipt here, so a rejection is an
+      // invariant violation: reject the held load and fail the step.
       reject(error)
+      throw error
     }
   }
   // A request counts as served once it is answered.
@@ -6224,7 +6227,7 @@ describe(`eager indexed ordered windows`, () => {
   // a short joined window (#2155): after the refetch the peer shows ranks
   // [0, 0] where the model shows [0, 0, 100]. Only that symptom satisfies
   // this replay; when #2155 is fixed, flip it to expect the case to pass.
-  it(`keeps a peer's joined window short after a refetch removes a tied row`, async () => {
+  it(`shows the known short peer joined window after a refetch removes a tied row`, async () => {
     await expect(
       checkEagerWindow({
         path: `on-demand`,
@@ -6547,10 +6550,14 @@ describe(`eager indexed ordered windows`, () => {
         `held cases with a held request but no in-flight change`,
       ).toEqual([])
       // `release-peer` aborts held requests: at one times the run count, 5
-      // are aborted in flight and a late provider answers 1 anyway.
+      // are aborted in flight; a late provider answers 1 anyway and a
+      // cooperative one cancels 4.
       expect(
-        reach.reduce((sum, count) => sum + count.abortedHeld, 0),
-        `held requests aborted while in flight`,
+        reach.reduce(
+          (sum, count) => sum + count.abortedHeld - count.lateAnswers,
+          0,
+        ),
+        `held requests a cooperative provider cancelled`,
       ).toBeGreaterThanOrEqual(3)
       expect(
         reach.reduce((sum, count) => sum + count.lateAnswers, 0),
