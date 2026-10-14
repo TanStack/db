@@ -310,9 +310,7 @@ export function processOrderBy(
         info.joinedFilterSourceId !== undefined && !info.sourceHoldsAllRows
       if (index || needsCount) {
         setSizeCallback = (getSize) => {
-          optimizableOrderByCollections[orderBySourceId]![`dataNeeded`] = (
-            boundary,
-          ) => {
+          info.dataNeeded = (boundary) => {
             // Window rows at or before the boundary are a leading run of
             // the window order.
             const size = getSize(
