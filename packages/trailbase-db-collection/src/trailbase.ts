@@ -192,7 +192,6 @@ export function trailBaseCollectionOptions<
         markReady,
         markError,
         reportError,
-        reportHealthy: _reportHealthy,
         collection,
       } = params
       let cancelled = false
@@ -406,6 +405,15 @@ export function trailBaseCollectionOptions<
         }
       }
 
+      function reportStreamEnd(error: unknown, closed = false) {
+        if (cancelled) return
+        if (collection.status === `loading`) markError(error)
+        else if (collection.status === `ready`)
+          reportError(error, { final: true })
+        // A failed sync run already reported why it ended.
+        else if (!closed) console.error(`TrailBase subscription failed`, error)
+      }
+
       async function start() {
         let reader: ReadableStreamDefaultReader<Event> | undefined
         try {
@@ -430,18 +438,16 @@ export function trailBaseCollectionOptions<
               subscribedReader.releaseLock()
               if (eventReader === subscribedReader) eventReader = undefined
             })
-            .catch((error: unknown) => {
-              if (!cancelled) {
-                if (collection.status === `loading`) {
-                  markError(error)
-                } else if (collection.status === `ready`) {
-                  // Post-readiness stream failure: adapter does not resubscribe
-                  reportError(error, { final: true })
-                } else {
-                  console.error(`TrailBase subscription failed`, error)
-                }
-              }
-            })
+            // The adapter does not resubscribe, so any end of the stream it
+            // did not cancel stops change delivery for this sync run.
+            .then(
+              () =>
+                reportStreamEnd(
+                  new Error(`TrailBase change stream closed`),
+                  true,
+                ),
+              (error: unknown) => reportStreamEnd(error),
+            )
           listening = true
           settleListener()
 
