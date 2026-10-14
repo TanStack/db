@@ -565,6 +565,66 @@ counterexamples do not by themselves establish an `origin/main` failure.
 
 The Query DB ownership oracle owns the direct-write no-automatic-refetch law
 ([review](oracle-reviews/issue-1935-direct-write-refetch.md)).
+The load-lifecycle owner checks the bounded static-key full-source reuse law
+through live-query subscriptions: a settled full request serves a later
+filtered demand with no second provider call; after the full view releases,
+invalidation still updates the filtered view; an overlapping exact refetch
+keeps its own rows and owner; and final release removes them. A pending full
+request does not establish filtered coverage; the filtered demand may wait for
+its application or request its exact scope. The settled-full witness
+fails on the original implementation at the provider-call checkpoint.
+It checks that the initial full acquisition signal may abort while a later
+shared full fetch receives a live signal.
+Another held-fetch cut releases the final filtered owner during full Query
+revalidation, then checks transport abort and no late row publication.
+Query-cache success reentry checks that initial and replacement full results
+cannot settle a filtered acquisition before Collection application; the
+replacement cut rejects a gate based only on previous full-row ownership. An
+applied direct cache patch permits reuse or one exact filtered revalidation
+for a new demand, but cannot trigger a redundant full request. The bounded
+history has no retry, invalidation, or explicit refetch; a duplicate filtered
+provider-call mutant fails its full request-sequence assertion. Signal
+witnesses cover providers that ignore
+their signal and may finish into Query cache after final unload for full-source
+and equal filtered sharing; equal full-source and filtered peers after the
+first releases; and two Collections sharing a Query whose later fetch runs the
+released Collection's queryFn. Held initial and refetch histories acquire an
+equal filtered peer before or after fetch start, then release the first owner.
+They distinguish exact and custom abort reasons, a fresh provider AbortError,
+no remaining peer, and an unrelated ordinary error at provider-call,
+acquisition-settlement, public-row, cache-row, and error checkpoints. A
+recovery-specific ignored-signal witness rejects a guard that consumes Query
+Core's lazy signal before the replacement provider runs. The foreign closure
+witnesses verify the installed Query Core's option-selection path both before
+and during a shared fetch. A synchronous provider throw caused by reentrant
+peer acquisition has no separate witness.
+The ownership owner seeds a persisted `until-revalidated` subset owner, then
+applies a complete full-source result and acquires that subset. An omitted,
+unchanged, or moved source row must match public and durable rows at settlement,
+and the subset's retention marker must clear. A moved row must retain its full
+Query owner after its old subset owner retires. Reusing the full Query while
+leaving the subset owner unvalidated fails the row and marker observations;
+unconditional row deletion fails the moved-row control. Arbitrary predicate
+containment, function-built Query keys, TTL retention, native SQLite replay,
+and other persisted startup histories with a shared full-source lease still
+need distinct witnesses.
+These tests do not prove every provider returns a complete full source,
+arbitrary observer-option selection, or the policy for a new equal demand after
+failed revalidation. A fresh AbortError caused by the request signal and an
+unrelated fresh AbortError after that signal abort are indistinguishable to the
+adapter; the one-retry policy favors a surviving peer and may retry the latter.
+Real network providers and cross-Collection option selection beyond the
+installed Query Core version need receiving witnesses. The load-lifecycle owner
+also needs an external `queryClient.cancelQueries` history with a pending
+on-demand acquisition and a surviving peer; compare the public acquisition
+promise and status at cancellation and after release. A late-peer release
+history also needs a public live-query preload checkpoint for the retired
+creator, separate from the surviving peer's load. The raw internal
+`_sync.loadSubset` creator promise can fulfill in the current fixture; its
+settlement policy is unresolved at that boundary. Neither observation alone
+establishes a public cancellation bug. The load-lifecycle owner also needs a
+cleanup-fault calibration that preserves a primary row mismatch and reports
+secondary cleanup failure separately.
 Its real QueryClient witness loads ten disjoint on-demand subsets, then checks
 `writeUpsert`, `writeUpdate`, `writeDelete`, `writeInsert`, and a mixed
 `writeBatch`. After each accepted write it compares public live-query rows with
