@@ -547,7 +547,14 @@ async function runRejectedDurablePrefixWitness(
     subscriber!([secondMessage, upToDate])
     if (acceptedPrefix) {
       await atCheckpoint(rejectedAttempt.promise, `second durability rejection`)
-      await vi.waitFor(() => expect(collection.status).toBe(`error`))
+      await vi.waitFor(() => {
+        // After Collection readiness, a sync failure doesn't change status.
+        // The failure is reported as a final health error instead.
+        expect(collection.status).toBe(`ready`)
+        expect(collection.health.isError).toBe(true)
+        expect(collection.health.error?.phase).toBe(`sync`)
+        expect(collection.health.error?.final).toBe(true)
+      })
       // A later source callback may arrive after the failed durability turn.
       // It cannot become part of the accepted prefix or start another write.
       subscriber!([change(`insert`, 3, `retired`), upToDate])
@@ -573,10 +580,10 @@ async function runRejectedDurablePrefixWitness(
       expect(durableAttempts[1]?.keys).toContain(2)
       expect(durableAttempts[1]?.sourceTxids).toEqual([702])
     }
-    // A rejected durability boundary is terminal: it cannot retry, admit the
-    // later source commit, or publish a resume claim for an undurable prefix.
-    // Clearing the accepted prefix on a later rejection is also a wrong rule.
-    expect(statusAtTerminalCut).toBe(`error`)
+    // A rejected durability boundary is terminal: the final health error stays
+    // until cleanup. Status stays ready; only a restart reaches ready again
+    // after cleanup and preload. Rows are unchanged by the sync failure.
+    expect(statusAtTerminalCut).toBe(`ready`)
     expect(durableOffset).toBe(acceptedPrefix ? `21_0` : undefined)
     expect(rowsFromMap(persistedRows)).toEqual(rowsFromMap(acceptedRows))
   }, [() => collection.cleanup()])
@@ -2108,6 +2115,7 @@ async function runPersistenceFailureCrashOnlyWitness(
 
     const statusAtAdmissionCut = collection.status
     const publicErrorAtAdmissionCut = collection._lifecycle.getSyncError()
+    const healthAtAdmissionCut = structuredClone(collection.health)
     const publicationsBeforeRetiredWork = structuredClone(publications.entries)
     mockStream.lastOffset = `32_0`
     const secondMessage = change(`insert`, secondRow.id, secondRow.name)
@@ -2124,13 +2132,20 @@ async function runPersistenceFailureCrashOnlyWitness(
             path?: unknown
           })
         : undefined
+    const healthAtFailureCut = structuredClone(collection.health)
     expect({
       statusAtAdmissionCut,
+      healthAtAdmissionCutIsError: healthAtAdmissionCut.isError,
+      healthAtAdmissionCutPhase: healthAtAdmissionCut.error?.phase,
+      healthAtAdmissionCutFinal: healthAtAdmissionCut.error?.final,
       publicErrorNameAtAdmissionCut:
         publicErrorAtAdmissionCut instanceof Error
           ? publicErrorAtAdmissionCut.name
           : undefined,
       status: collection.status,
+      healthIsError: healthAtFailureCut.isError,
+      healthPhase: healthAtFailureCut.error?.phase,
+      healthFinal: healthAtFailureCut.error?.final,
       publicErrorName:
         publicPersistenceError instanceof Error
           ? publicPersistenceError.name
@@ -2148,9 +2163,15 @@ async function runPersistenceFailureCrashOnlyWitness(
         publicationsBeforeRetiredWork,
       ),
     }).toEqual({
-      statusAtAdmissionCut: `error`,
-      publicErrorNameAtAdmissionCut: `PersistedCollectionDurabilityError`,
-      status: `error`,
+      statusAtAdmissionCut: `ready`,
+      healthAtAdmissionCutIsError: false,
+      healthAtAdmissionCutPhase: undefined,
+      healthAtAdmissionCutFinal: undefined,
+      publicErrorNameAtAdmissionCut: undefined,
+      status: `ready`,
+      healthIsError: true,
+      healthPhase: `sync`,
+      healthFinal: true,
       publicErrorName: `PersistedCollectionDurabilityError`,
       hasNamedPersistenceSemantics: true,
       preservesCause: true,
@@ -2449,7 +2470,15 @@ async function runProcessGrammar(
         : []
       expect(rowsFromCollection(runtime.collection)).toEqual(expected)
       if (runtime.terminalError) {
-        expect(runtime.collection.status).toBe(`error`)
+        // After Collection readiness, a sync failure does not change status.
+        // The error is reported as health metadata instead.
+        // Before readiness, markError() sets status to 'error' (initial error).
+        // The collection reaches ready through the initial preload, so
+        // post-readiness failures stay at 'ready' with health.error.phase='sync'.
+        expect(runtime.collection.status).toBe(`ready`)
+        expect(runtime.collection.health.isError).toBe(true)
+        expect(runtime.collection.health.error?.phase).toBe(`sync`)
+        expect(runtime.collection.health.error?.final).toBe(true)
       }
       if (!runtime.active && runtime.retired) {
         expect(runtime.collection.status).toBe(`cleaned-up`)
@@ -4212,7 +4241,10 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
             ])
             for (const batch of partition) trace.subscriber(batch)
 
-            expect(trace.collection.status).toBe(`error`)
+            // After the initial upToDate, the collection is ready. An invalid
+            // resume transition in a post-readiness batch is a health error, not
+            // a status change. Status stays ready.
+            expect(trace.collection.status).toBe(`ready`)
             expect(trace.collection.get(id)).toEqual(
               expect.objectContaining({ stable: `stable-${id}` }),
             )
@@ -4306,7 +4338,9 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
         trace.subscriber([change(`insert`, 1, `complete`), upToDate])
         for (const batch of partition) trace.subscriber(batch)
 
-        expect(trace.collection.status).toBe(`error`)
+        // After readiness, an invalid resume in a partition is a health error.
+        // Status stays ready.
+        expect(trace.collection.status).toBe(`ready`)
         expect(trace.collection.get(1)).toEqual(
           expect.objectContaining({ stable: `stable-1` }),
         )
