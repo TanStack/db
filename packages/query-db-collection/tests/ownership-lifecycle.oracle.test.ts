@@ -10684,13 +10684,12 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   /**
-   * A Query observer can retain a listener after its last subset lease ends.
-   * The independent row rule is that an accepted direct update wins until a
-   * newer provider result arrives. Keep that observer alive, update the row,
-   * then reacquire the subset without a new request. Both its cached and
-   * public row must reflect the write at that checkpoint.
+   * A listener on Query DB's observer is not an acquisition lease. After the
+   * final subset unload, its public row must leave even if that listener is
+   * still installed. This checks the ownership boundary, not Query Core's
+   * separate cache lifetime.
    */
-  it(`patches a zero-lease observer retained by a listener`, async () => {
+  it(`retires a zero-lease subset despite an observer listener`, async () => {
     type Row = { id: string; name: string }
     const id = `listener-retained-direct-write`
     const queryClient = createQueryClient()
@@ -10719,11 +10718,10 @@ describe(`query collection ownership lifecycle`, () => {
     const query = queryClient.getQueryCache().find({ queryKey: [id] })!
     const observer = query.observers[0]!
     releaseListener = observer.subscribe(() => {})
+    expect(collection.get(`x`)?.name).toBe(`before`)
     collection._sync.unloadSubset(request)
-    await collection.utils.writeUpdate({ id: `x`, name: `after` })
-    expect(query.state.data).toEqual([{ id: `x`, name: `after` }])
-    await collection._sync.loadSubset({})
-    expect(collection.get(`x`)?.name).toBe(`after`)
+    expect(observer.hasListeners()).toBe(true)
+    expect(collection.has(`x`)).toBe(false)
     expect(queryFn).toHaveBeenCalledTimes(1)
   })
 

@@ -726,8 +726,8 @@ a derived `select` still applies a held fetch's rows and settles eager
 readiness after a direct insert; overlapping explicit refetch callers follow
 the replacement request after a silent cancellation; a fetched result queued
 behind a persisted-baseline scan cannot overwrite a later accepted write; a
-zero-lease subset observer retained by a listener receives a direct cache
-patch before reacquisition; and eight retired on-demand subsets leave no
+zero-lease subset leaves no public row even when an observer listener remains;
+and eight retired on-demand subsets leave no
 fetch-start positions (removing the retirement call fails at eight retained
 entries). The Query error, invalidation, and staleness checks now cover both
 eager and on-demand modes. These are controlled Query Core and persistence

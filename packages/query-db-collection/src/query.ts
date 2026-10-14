@@ -1261,8 +1261,9 @@ export function queryCollectionOptions(
       return controller.signal
     }
     const abortQueryCommit = (hashedQueryKey: string) => {
-      queryCommitControllers.get(hashedQueryKey)?.abort()
+      const controller = queryCommitControllers.get(hashedQueryKey)
       queryCommitControllers.delete(hashedQueryKey)
+      controller?.abort()
     }
     const effectivePersistedGcTimes = new Map<string, number>()
     const persistedRetentionTimers = new Map<
@@ -2419,6 +2420,9 @@ export function queryCollectionOptions(
       if (collection.status === `cleaned-up` || signal?.aborted) {
         throw new LoadSubsetOperationAbortedError()
       }
+      // Reserve the Query owner's cancellation before getKey, write, or a
+      // wrapping sync can synchronously release the final acquisition.
+      const commitSignal = queryCommitSignal(hashedQueryKey)
 
       if (isMutationPublicationBlocked()) {
         applicationToken.settleRefetchAtFetchBoundary?.()
@@ -2686,7 +2690,7 @@ export function queryCollectionOptions(
         }
         // An accepted sync transaction always applies, so a later result or
         // cleanup must not cancel it or roll back the ownership it records.
-        const applied = commit(queryCommitSignal(hashedQueryKey))
+        const applied = commit(commitSignal)
         applicationToken.rollback = undefined
         transactionActive = false
         retainedQueriesPendingRevalidation.delete(hashedQueryKey)
@@ -3473,10 +3477,7 @@ export function queryCollectionOptions(
       effectivePersistedGcTimes.delete(hashedQueryKey)
     }
 
-    /**
-     * Attempt to cleanup a query when it appears unused.
-     * Respects refcounts and invalidateQueries cycles via hasListeners().
-     */
+    /** Retire a Query after its final acquisition lease leaves. */
     const cleanupQueryIfIdle = (hashedQueryKey: string) => {
       const refcount = queryRefCounts.get(hashedQueryKey) || 0
       const observer = state.observers.get(hashedQueryKey)
@@ -3484,7 +3485,6 @@ export function queryCollectionOptions(
         effectivePersistedGcTimes.get(hashedQueryKey)
 
       if (refcount <= 0) {
-        // Drop our subscription so hasListeners reflects only active consumers
         unsubscribes.get(hashedQueryKey)?.()
         unsubscribes.delete(hashedQueryKey)
         unsubscribePendingReadyListeners(hashedQueryKey)
@@ -3493,14 +3493,6 @@ export function queryCollectionOptions(
       // Refcounts are explicit ownership tokens. A cache event can remove the
       // observer while an active acquisition still owns this query.
       if (refcount > 0) {
-        return
-      }
-
-      const hasListeners = observer?.hasListeners() ?? false
-      if (hasListeners) {
-        // During invalidateQueries, TanStack Query keeps internal listeners alive.
-        // Leave refcount at 0 but keep observer so it can resubscribe.
-        queryRefCounts.set(hashedQueryKey, 0)
         return
       }
 
@@ -3763,16 +3755,7 @@ export function queryCollectionOptions(
      * Flow:
      * 1. Finds the physical Query recorded for this acquisition's options.
      * 2. Decrements that Query's refcount.
-     * 3. If refcount reaches 0:
-     *    - Checks hasListeners() to detect invalidateQueries cycles
-     *    - If hasListeners is true: resets refcount (TanStack Query keeping observer alive)
-     *    - If hasListeners is false: calls forceCleanupQuery() to perform row-level GC
-     *
-     * The hasListeners() check prevents premature cleanup during invalidateQueries:
-     * - invalidateQueries causes temporary unsubscribe/resubscribe
-     * - During unsubscribe, our refcount drops to 0
-     * - But observer.hasListeners() is still true (TanStack Query's internal listeners)
-     * - We skip cleanup and reset refcount, allowing resubscribe to succeed
+     * 3. Retires the Query's row ownership when its refcount reaches 0.
      *
      * Ordinary in-flight requests may continue after this observer unsubscribes and remain
      * cached by TanStack Query. A pending explicit refetch is acquisition-scoped: releasing

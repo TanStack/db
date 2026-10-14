@@ -2753,6 +2753,184 @@ it(`preserves the primary mismatch when a cleanup step also fails`, async () => 
 
 describe(`loadSubset lifecycle oracle`, () => {
   /**
+   * A sync adapter may call user code while writing a fetched result. The
+   * final owner can leave from that callback, before commit() is entered.
+   * The pending transaction must not publish a row after that release. If a
+   * peer still owns the Query, its acquisition may accept the same result.
+   */
+  it.each([false, true])(
+    `does not publish a result after release during write, peer=%s`,
+    async (peer) => {
+      const queryClient = createQueryClient()
+      const id = `release-during-result-write-${collectionSequence++}`
+      const result = createDeferred<Array<Row>>()
+      let released = false
+      const baseOptions = queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn: () => result.promise,
+        getKey: (row) => row.id,
+        startSync: true,
+        syncMode: `on-demand`,
+      })
+      const originalSync = baseOptions.sync
+      const collection = createCollection({
+        ...baseOptions,
+        sync: {
+          sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+            originalSync.sync({
+              ...params,
+              write: (change) => {
+                if (!released) {
+                  released = true
+                  first.unsubscribe()
+                }
+                params.write(change)
+              },
+            }),
+        },
+      })
+      const first = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+      const second = peer
+        ? collection.subscribeChanges(() => {}, { includeInitialState: false })
+        : undefined
+
+      await checkPublicCleanupWitness(async () => {
+        let firstLoad: true | Promise<void> | undefined
+        let secondLoad: true | Promise<void> | undefined
+        first.requestSnapshot({
+          onLoadSubsetResult: (load) => {
+            firstLoad = load
+          },
+        })
+        second?.requestSnapshot({
+          onLoadSubsetResult: (load) => {
+            secondLoad = load
+          },
+        })
+        expect(firstLoad).toBeDefined()
+        if (firstLoad === undefined || firstLoad === true)
+          throw new Error(`No pending first load`)
+        const firstOutcome = firstLoad.then(
+          () => `fulfilled` as const,
+          () => `rejected` as const,
+        )
+        const secondOutcome =
+          secondLoad && secondLoad !== true
+            ? secondLoad.then(
+                () => `fulfilled` as const,
+                () => `rejected` as const,
+              )
+            : undefined
+        result.resolve([{ id: `a` }])
+        await firstOutcome
+        await secondOutcome
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        expect(released).toBe(true)
+        expect(collection.subscriberCount).toBe(peer ? 1 : 0)
+        expect(collection.has(`a`)).toBe(peer)
+        if (peer) expect(await secondOutcome).toBe(`fulfilled`)
+        else expect(await firstOutcome).toBe(`rejected`)
+      }, [
+        [`provider`, () => result.resolve([])],
+        [`first subscription`, () => first.unsubscribe()],
+        [`second subscription`, () => second?.unsubscribe()],
+        [`Collection`, () => collection.cleanup()],
+        [`Query client`, () => queryClient.clear()],
+      ])
+    },
+  )
+
+  /**
+   * A direct write can overlap a fetched result. While merging that result,
+   * Query DB briefly subscribes to its own Query observer. That temporary
+   * listener is not an owner: final public release in the cache notification
+   * must retire the fetched-only row. The accepted direct write stays ordered
+   * ahead of the older fetch for as long as its row has an owner.
+   */
+  it(`retires a late fetched row after final release during cache notification`, async () => {
+    const queryClient = createQueryClient()
+    const id = `release-during-cache-notification-${collectionSequence++}`
+    const nextResult = createDeferred<Array<Row>>()
+    let calls = 0
+    const collection = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn: () =>
+          ++calls === 1
+            ? Promise.resolve([{ id: `x`, group: `before` }])
+            : nextResult.promise,
+        getKey: (row) => row.id,
+        startSync: true,
+        syncMode: `on-demand`,
+      }),
+    )
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+
+    await checkPublicCleanupWitness(async () => {
+      let initialLoad: true | Promise<void> | undefined
+      subscription.requestSnapshot({
+        onLoadSubsetResult: (load) => {
+          initialLoad = load
+        },
+      })
+      expect(initialLoad).toBeDefined()
+      if (initialLoad === undefined || initialLoad === true)
+        throw new Error(`No pending initial load`)
+      await initialLoad
+      expect(collection.get(`x`)?.group).toBe(`before`)
+
+      const refetch = queryClient.refetchQueries({
+        queryKey: [id],
+        exact: true,
+      })
+      await vi.waitFor(() => expect(calls).toBe(2))
+      await collection.utils.writeUpdate({ id: `x`, group: `manual` })
+      expect(collection.get(`x`)?.group).toBe(`manual`)
+
+      let releaseCount = 0
+      const stopCacheListener = queryClient
+        .getQueryCache()
+        .subscribe((event) => {
+          if (
+            event.type === `updated` &&
+            event.action.type === `setState` &&
+            Array.isArray(event.query.state.data) &&
+            event.query.state.data.some((row: Row) => row.id === `y`)
+          ) {
+            releaseCount++
+            subscription.unsubscribe()
+          }
+        })
+      try {
+        nextResult.resolve([
+          { id: `x`, group: `older` },
+          { id: `y`, group: `fetched` },
+        ])
+        await refetch
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        expect(releaseCount).toBe(1)
+        expect(collection.subscriberCount).toBe(0)
+        expect(collection.has(`y`)).toBe(false)
+      } finally {
+        stopCacheListener()
+      }
+    }, [
+      [`provider`, () => nextResult.resolve([])],
+      [`subscription`, () => subscription.unsubscribe()],
+      [`Collection`, () => collection.cleanup()],
+      [`Query client`, () => queryClient.clear()],
+    ])
+  })
+
+  /**
    * Query success does not settle a load while its Collection commit is held.
    * A wrapping sync may delay acceptance after the provider returns. Releasing
    * the last public owner at that cut cancels the acquisition and its pending

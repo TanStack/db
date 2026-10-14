@@ -1151,10 +1151,10 @@ matches your API semantics:
 
 ### Empty Array Behavior
 
-When `queryFn` returns an empty array, **all items in the collection will be deleted**. This is because the collection interprets an empty array as "the server has no items".
+When `queryFn` returns an empty array, the rows owned only by that Query are removed. In on-demand mode, the empty result applies to the requested subset; rows outside that scope and rows with another active owner remain.
 
 ```typescript
-// This will delete all items in the collection
+// This removes rows owned only by this Query
 queryFn: async () => []
 ```
 
