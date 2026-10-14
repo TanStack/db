@@ -764,3 +764,21 @@ row comparisons. The revised history passes against the read-only exact Core
 `371b1f49e` archive. Its full Query DB suite reports 949 passed and two failed
 reset/cache-version cases. Core #12023 owns those receiving failures. This
 candidate needs a fresh compatible Core run and independent review after push.
+
+## Independent oracle review of pushed `097559165`
+
+The pushed head `097559165d70e9cf06c659683c3244c1aa895776` tested a new
+filtered demand after full refresh failure only when an earlier filtered
+dependent existed. An independent reviewer added a mutant that reused the
+failed full Query only when no such dependent existed. All 92 load-lifecycle
+tests passed on that mutant. A temporary public live-query probe passed on the
+pushed head and failed on the mutant at filtered preload.
+
+The primary history now crosses presence or absence of an earlier filtered
+dependent. Both rows pass on frozen Core `273eb2526`. With the expanded oracle
+copied into the disposable mutant checkout, the new row fails at the public
+preload and provider-scope comparison: the caller receives the old full-refresh
+error after requests `[full, full]`, rather than fulfillment after
+`[full, full, filtered]`. This was an assertion failure at the intended
+checkpoint. The earlier-dependent row remains a control. Other cross-branch
+and Core receiving paths remain open for review.

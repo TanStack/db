@@ -574,10 +574,11 @@ request does not establish filtered coverage; the filtered demand may wait for
 its application or request its exact scope. The settled-full witness
 fails on the original implementation at the provider-call checkpoint.
 If a later full refresh fails, an existing filtered dependent keeps its full
-observer lease and prior rows. A new equal filtered demand instead requests its
-exact scope. The failed-full witness checks the new provider scope and outcome,
-both dependent views, and rows after the old leases release; restoring the old
-dependent-map shortcut fails at the new caller's outcome and scope comparison.
+observer lease and prior rows. A new filtered demand requests its exact scope
+whether or not such a dependent exists. The two failed-full histories check the
+new provider scope and outcome, any earlier dependent view, and rows after the
+old leases release. Reusing the failed full Query in either history fails at the
+new caller's outcome and scope comparison.
 The same owner checks a public `QueryClient` behavior that throws during fetch
 setup, both before and after invoking `queryFn`. Direct on-demand loads and
 live-query preloads reject with the exact setup error. Exact subset refetches

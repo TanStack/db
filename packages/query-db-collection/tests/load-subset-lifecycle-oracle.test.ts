@@ -198,15 +198,17 @@ async function expectActiveFullSourceServesFilteredDemand(): Promise<void> {
 }
 
 /**
- * The first filtered acquisition borrows an applied full result and keeps its
- * observer lease after that Query's later refresh fails. The failed refresh
- * establishes no coverage for a new caller. The reference therefore leaves
- * the first lease on the full Query but starts one exact filtered acquisition
- * for the new caller. Public live-query preload, provider scopes, source rows,
- * and final release distinguish that rule from routing every equal caller
- * through the existing dependent lease.
+ * A successful full result may first serve a filtered acquisition. That lease
+ * stays on the full Query after its later refresh fails. The failed refresh
+ * establishes no coverage for the next filtered caller, whether an earlier
+ * filtered dependent exists or not. The reference therefore starts one exact
+ * filtered acquisition for the new caller while preserving any earlier lease.
+ * Public live-query preload, provider scopes, source rows, and final release
+ * distinguish both legal histories from routing the new caller to failed work.
  */
-async function expectFailedFullRefreshStartsExactNewDemand(): Promise<void> {
+async function expectFailedFullRefreshStartsExactNewDemand(
+  hasPriorDependent: boolean,
+): Promise<void> {
   const queryClient = createQueryClient()
   const id = `failed-full-source-new-demand-${collectionSequence++}`
   const requests: Array<`full` | `filtered`> = []
@@ -250,18 +252,20 @@ async function expectFailedFullRefreshStartsExactNewDemand(): Promise<void> {
   const full = createLiveQueryCollection((query) =>
     query.from({ row: collection }).select(({ row }) => ({ id: row.id })),
   )
-  const firstFiltered = makeFiltered()
+  const firstFiltered = hasPriorDependent ? makeFiltered() : undefined
   const nextFiltered = makeFiltered()
   try {
     await full.preload()
-    await firstFiltered.preload()
+    await firstFiltered?.preload()
     expect(requests).toEqual([`full`])
-    expect(firstFiltered.toArray.map((row) => row.id)).toEqual([`a1`])
+    if (firstFiltered)
+      expect(firstFiltered.toArray.map((row) => row.id)).toEqual([`a1`])
 
     await queryClient.refetchQueries({ queryKey: [id], exact: true })
     expect(requests).toEqual([`full`, `full`])
     expect(collection.toArray.map((row) => row.id).sort()).toEqual([`a1`, `b1`])
-    expect(firstFiltered.toArray.map((row) => row.id)).toEqual([`a1`])
+    if (firstFiltered)
+      expect(firstFiltered.toArray.map((row) => row.id)).toEqual([`a1`])
 
     const outcome = await nextFiltered.preload().then(
       () => `fulfilled` as const,
@@ -275,19 +279,20 @@ async function expectFailedFullRefreshStartsExactNewDemand(): Promise<void> {
       `a1`,
       `a2`,
     ])
-    expect(firstFiltered.toArray.map((row) => row.id).sort()).toEqual([
-      `a1`,
-      `a2`,
-    ])
+    if (firstFiltered)
+      expect(firstFiltered.toArray.map((row) => row.id).sort()).toEqual([
+        `a1`,
+        `a2`,
+      ])
 
     await full.cleanup()
-    await firstFiltered.cleanup()
+    await firstFiltered?.cleanup()
     expect(collection.toArray.map((row) => row.id).sort()).toEqual([`a1`, `a2`])
     await nextFiltered.cleanup()
     await vi.waitFor(() => expect(collection.size).toBe(0))
   } finally {
     await nextFiltered.cleanup()
-    await firstFiltered.cleanup()
+    await firstFiltered?.cleanup()
     await full.cleanup()
     await collection.cleanup()
     queryClient.clear()
@@ -2963,9 +2968,12 @@ describe(`loadSubset lifecycle oracle`, () => {
     await expectActiveFullSourceServesFilteredDemand()
   })
 
-  it(`starts an exact new filtered acquisition after its borrowed full Query fails`, async () => {
-    await expectFailedFullRefreshStartsExactNewDemand()
-  })
+  it.each([false, true])(
+    `starts an exact new filtered acquisition after full refresh fails, prior dependent=%s`,
+    async (hasPriorDependent) => {
+      await expectFailedFullRefreshStartsExactNewDemand(hasPriorDependent)
+    },
+  )
 
   it(`does not treat an unfinished full-source Query as filtered coverage`, async () => {
     await expectPendingFullSourceNeedsAppliedEvidence()
