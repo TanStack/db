@@ -148,9 +148,15 @@ names and shapes.
   - [ ] Update the stream-end lane in `tests/lifecycle-oracle.property.test.ts`
         (added in #2126) from "rows stay, later changes are not delivered"
         to also expect a final health error.
-- [ ] **RxDB** (`rxdb-db-collection/src/rxdb.ts`, 3 sites): post-readiness
-      failures call `reportError`. Observe what happens to pending loads on a
-      final error (evidence gap V10).
+- [x] **RxDB** (`rxdb-db-collection/src/rxdb.ts`): no change. V10 is
+      closed by inspection: RxDB is eager and has no `loadSubset`, so a final
+      error has no pending subset loads; its only failure path is the initial
+      fetch, which calls `markError` before Collection readiness and rejects
+      readiness waiters under the core initial-error law. Open: the
+      `rxCollection.$` subscription has no error handler, so an RxDB stream
+      failure after readiness is not reported at all. Reporting it as a final
+      health error needs an RxDB fault a test can drive; owner: RxDB adapter,
+      witness: an observable error after readiness.
 - [ ] **Persistence** (`db-sqlite-persistence-core/src/persisted.ts`, 19
       sites):
   - [ ] forward upstream Collection health; keep local storage failures on
