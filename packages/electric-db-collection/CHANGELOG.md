@@ -1,5 +1,30 @@
 # @tanstack/electric-db-collection
 
+## 0.6.0
+
+### Minor Changes
+
+- A stream error that `onError` retries no longer fails the initial sync or the subset loads that are waiting for it. The collection stays `loading` while `onError` decides, and waiting loads settle when the retried stream delivers its snapshot. Before, the collection entered `error` and waiting loads rejected even when the retry succeeded, which could leave a joined or included live query in error for good. A stream error without `onError`, or one where `onError` gives up or throws, still fails the initial sync and its waiting loads. The initial sync also fails when the Electric client gives up by itself after `onError` asked for a retry, for example on a response without Electric headers or after its retry limit, and when the stream's external `signal` aborts before the first ready. Before, the collection stayed `loading` in both cases. When the initial sync fails, waiting loads and readiness waits such as `preload()` now reject with the same cause, including when `onError` throws. A status listener that cleans the Collection up while it enters `error` no longer makes a waiting load succeed without rows. Once the first up-to-date is committed, its persistence step alone decides the initial sync: the Collection becomes ready when that snapshot is accepted, even after a retry or a give-up, and fails with the persistence error when it is not. ([#2127](https://github.com/TanStack/db/pull/2127))
+
+  Migration note: while `onError` decides whether to retry, the Collection now stays `loading`, and `preload()` and other readiness waits stay pending. Before, they entered `error` and rejected at once, even when the retry later succeeded. Code that showed a reconnecting state on `status === 'error'` during a retry should read `onError` itself instead.
+
+### Patch Changes
+
+- Recover persisted on-demand Electric and Query collections after cache claim loss by rotating their SQLite cache and reloading active subsets. Fence retired provider work and expired claims, preserve warm runs on their claimed cache generation, and forward claim lifetime options through SQLite host factories. Require explicit eager or claim-bound managed targets for SQLite adapter data operations, and forward them through Electron IPC protocol v6. Bare collection IDs no longer work at this lower-level adapter boundary. ([#2069](https://github.com/TanStack/db/pull/2069))
+
+- A live query over a progressive Electric collection is now ready once its own snapshot loads. Before, it stayed loading until the collection's background full sync completed, so `preload()`, `isReady`, and `useLiveSuspenseQuery` waited for the whole dataset even when the query's rows were already present. A live query now waits for an eager source to be ready and for an on-demand source's subset loads to settle. An on-demand source's own readiness no longer gates the query. ([#2115](https://github.com/TanStack/db/pull/2115))
+
+  An effect with `skipInitial: true` ends its initial suppression at the same point. Before, an effect over an on-demand source that was already ready reported its initial rows as `enter` events.
+
+  A live query no longer enters an error state when a truncate of a lazily loaded source (a joined or included collection) aborts that source's pending load during the initial load. The truncate's replacement load now decides the demand.
+
+  A progressive Electric load that arrives while a must-refetch is replacing the initial snapshot now settles when the replacement completes. Before, it settled at once without loading rows, which the new readiness rule would have reported as a ready, empty query. After a stream error that `onError` retries, later progressive loads settle once the stream recovers.
+
+  `toArrayWhenReady()` and `stateWhenReady()` now resolve when `preload()` does. Before, they resolved as soon as the collection held any row, so on a live query they could resolve before the query was ready.
+
+- Updated dependencies [[`cda9d6a`](https://github.com/TanStack/db/commit/cda9d6a731e93777f1c8bfdab7d9e22f70e80dc6), [`2f928e6`](https://github.com/TanStack/db/commit/2f928e6f240adb8874a6537905000009a2e9b53f), [`dfec42e`](https://github.com/TanStack/db/commit/dfec42e4a78ef609f9aa2f2c0f863a1e4f1ae1e3), [`1a65c2c`](https://github.com/TanStack/db/commit/1a65c2c63db9ad14c08d35b09d0081ecc121fbfc), [`1b4ee8d`](https://github.com/TanStack/db/commit/1b4ee8d57168978847687e75dbc1c33ddb935ed3), [`bbbf017`](https://github.com/TanStack/db/commit/bbbf017ef5b3884515295a4225faacdfd814499e), [`bc6f30e`](https://github.com/TanStack/db/commit/bc6f30e716aeb26c13b6a0e9ba00a27edc72a4d7), [`fade2e2`](https://github.com/TanStack/db/commit/fade2e24cfb9922b9b172f96194f7b6246731f50), [`bbe9327`](https://github.com/TanStack/db/commit/bbe9327ce90ab587ee6ef24e0030f79291f3057d), [`b34a579`](https://github.com/TanStack/db/commit/b34a579762b36dd49a89e11eacd7788f1df89453), [`6fa60aa`](https://github.com/TanStack/db/commit/6fa60aa7ada4d418f85cd745c9eea0af3de0efb4), [`f84387c`](https://github.com/TanStack/db/commit/f84387cd8220e8603dc24a99fe4881fa4cd5ddcd), [`be4a3d6`](https://github.com/TanStack/db/commit/be4a3d642c6d292150f7ff4e041442338e5a2de2), [`0dc696a`](https://github.com/TanStack/db/commit/0dc696a64901973d8025cb1a40af34c68c856855), [`fd13e3c`](https://github.com/TanStack/db/commit/fd13e3cc9d3302e7598a78ac8f49d06dbbde7e08)]:
+  - @tanstack/db@0.14.0
+
 ## 0.5.9
 
 ### Patch Changes
