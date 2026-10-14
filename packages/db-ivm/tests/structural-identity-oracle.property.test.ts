@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { equalHashValues, structuralIdentity } from '../src/hashing/hash.js'
-import { oraclePropertyOptions } from '../../db/tests/oracle-config.js'
+import {
+  oraclePropertyOptions,
+  readOracleRunConfig,
+} from '../../db/tests/oracle-config.js'
 
 /**
  * # Does a structural identity agree with D2 value identity?
@@ -17,10 +20,11 @@ import { oraclePropertyOptions } from '../../db/tests/oracle-config.js'
  *    contributions merge.
  *
  * Model: values are built from generated specs, and two values are equal
- * exactly when their specs are equal after normalization: -0 as 0, every
- * NaN as one value, object entries in key order, and holes kept. A RegExp
- * whose lastIndex is NaN equals nothing, because D2 compares headers with
- * ===. The model shares no code with the hashing module; a sanity check also
+ * exactly when their specs denote equal values after normalization: -0 as 0,
+ * every NaN as one value, object entries in key order, and holes kept.
+ * `deep` and explicit one-element `array` nodes denote the same nested arrays.
+ * A RegExp whose lastIndex is NaN equals nothing because D2 compares headers
+ * with ===. The model shares no code with the hashing module; a sanity check also
  * compares it with `equalHashValues`.
  *
  * Histories: pairs built from one spec, once directly and once with
@@ -34,6 +38,8 @@ import { oraclePropertyOptions } from '../../db/tests/oracle-config.js'
  * Pinned pairs cover the joins a random short string cannot build. The depth
  * cap bounds work and recursion, including on a cyclic value; it does not
  * decide equality, so raising it changes no law here.
+ * Both generated pair grammars run fixed and fresh-seed campaigns. A replay
+ * seed and path select the requested property without running the fixed one.
  */
 
 type Spec =
@@ -50,6 +56,7 @@ type Spec =
 
 const SYMBOL = Symbol(`s`)
 const ENUMERABLE_SYMBOL = Symbol(`enumerable`)
+const { replayProperty } = readOracleRunConfig()
 const LEAVES: ReadonlyArray<unknown> = [
   0,
   -0,
@@ -247,15 +254,13 @@ function normal(spec: Spec): string | undefined {
     case `binary`:
       return `binary:${spec.bytes.join(`,`)}`
     case `deep`: {
-      // Collapse nested deep nodes by summing their depths
-      let innerSpec = spec.v
-      let totalDepth = spec.depth
-      while (innerSpec.k === `deep`) {
-        totalDepth += innerSpec.depth
-        innerSpec = innerSpec.v
+      // `deep` is model shorthand for repeated single-element arrays.
+      let value = normal(spec.v)
+      if (value === undefined) return undefined
+      for (let level = 0; level < spec.depth; level++) {
+        value = `array:${JSON.stringify([value])}`
       }
-      const v = normal(innerSpec)
-      return v && `deep:${totalDepth}:${v}`
+      return value
     }
   }
 }
@@ -307,23 +312,32 @@ describe(`structuralIdentity`, () => {
   })
 
   it(`agrees with D2 value identity for equal representations`, () => {
-    fc.assert(
-      fc.property(
-        specArbitrary,
-        fc.array(fc.boolean(), { minLength: 64, maxLength: 64 }),
-        (spec, coins) => {
-          let index = 0
-          const vary = () => coins[index++ % coins.length]!
-          expectAgreement(
-            spec,
-            spec,
-            build(spec, () => false),
-            build(spec, vary),
-          )
-        },
-      ),
-      { numRuns: 2000 },
+    if (
+      replayProperty !== undefined &&
+      replayProperty !== `structural-identity.equal-representations`
     )
+      return
+    const property = fc.property(
+      specArbitrary,
+      fc.array(fc.boolean(), { minLength: 64, maxLength: 64 }),
+      (spec, coins) => {
+        let index = 0
+        const vary = () => coins[index++ % coins.length]!
+        expectAgreement(
+          spec,
+          spec,
+          build(spec, () => false),
+          build(spec, vary),
+        )
+      },
+    )
+    const options = oraclePropertyOptions(
+      2000,
+      `structural-identity.equal-representations`,
+    )
+    if (options.seed === undefined)
+      fc.assert(property, { numRuns: options.numRuns, seed: 20261014 })
+    fc.assert(property, options)
   })
 
   // Named replays of counterexamples the random campaign found. Nested `deep`
@@ -344,6 +358,16 @@ describe(`structuralIdentity`, () => {
       { k: `set`, v: { k: `text`, s: `` } },
       { k: `set`, v: { k: `leaf`, i: 5 } },
     ],
+    [
+      `a deep node and an explicit array`,
+      { k: `array`, items: [{ k: `deep`, depth: 5, v: { k: `leaf`, i: 3 } }] },
+      { k: `deep`, depth: 6, v: { k: `leaf`, i: 3 } },
+    ],
+    [
+      `adjacent nesting depths`,
+      { k: `array`, items: [{ k: `deep`, depth: 5, v: { k: `leaf`, i: 3 } }] },
+      { k: `deep`, depth: 5, v: { k: `leaf`, i: 3 } },
+    ],
   ] as Array<[string, Spec, Spec]>)(
     `agrees with D2 value identity for %s`,
     (_name, left, right) => {
@@ -357,16 +381,29 @@ describe(`structuralIdentity`, () => {
   )
 
   it(`agrees with D2 value identity for independent values`, () => {
-    fc.assert(
-      fc.property(specArbitrary, specArbitrary, (left, right) => {
+    if (
+      replayProperty !== undefined &&
+      replayProperty !== `structural-identity.independent-values`
+    )
+      return
+    const property = fc.property(
+      specArbitrary,
+      specArbitrary,
+      (left, right) => {
         expectAgreement(
           left,
           right,
           build(left, () => false),
           build(right, () => false),
         )
-      }),
-      oraclePropertyOptions(2000, `structural-identity.independent-values`),
+      },
     )
+    const options = oraclePropertyOptions(
+      2000,
+      `structural-identity.independent-values`,
+    )
+    if (options.seed === undefined)
+      fc.assert(property, { numRuns: options.numRuns, seed: 1158727847 })
+    fc.assert(property, options)
   })
 })
