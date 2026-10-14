@@ -1,10 +1,10 @@
 # PR #2134 identity and persisted-key oracle review
 
-**Current evidence, 2026-10-14:** The final review below supersedes the earlier
-source-only proxy-fixture claim and held-fetch calibration. Its executable code
-head is `d7ab913a4`. Earlier sections record how the repair changed; their
-bounded results remain evidence only for the setup stated there.
-The earlier sections remain as the history of how the oracle and repair changed.
+**Latest executable evidence, 2026-10-14:** The head-bound disposition below
+audits `7ebfb4dee`; the later branch commit changes this record only. Earlier
+sections preserve the sequence of repairs and reviews, with each result bound
+to its stated executable head. The source-only proxy-fixture claim and the
+first held-fetch calibration were superseded by later receiving checks.
 
 Reviewed PR head: `5e224075f`. Semantic repair: `9092cbf26`, 2026-10-13.
 The initial record correction changed no production code or executable oracle.
