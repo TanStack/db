@@ -31262,6 +31262,9 @@ function expectHydrationReceiptsPending(
 
 // A routing reproduction must not contaminate a requested generated-property
 // replay from this shared file. These bounded cases exclude every explicit replay.
+// Terminal local persistence failures crash the Collection after readiness,
+// following the IndexedDB closure precedent. Upstream (wrapped sync adapter)
+// failures after readiness stay health metadata; this lane holds both.
 describeUnlessAnyOracleReplay(`hydration source durability routing`, () => {
   const first = { id: `shared`, title: `first source value` }
   const second = { id: `shared`, title: `last source value` }

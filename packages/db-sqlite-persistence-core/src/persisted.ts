@@ -2011,7 +2011,17 @@ class PersistedCollectionRuntime<
       this.remoteEnsureRetryTimer = null
     }
     this.rejectQueuedHydrationTransactions(error)
-    this.reportSyncError(error)
+    // Terminal local persistence failures crash the Collection, like IndexedDB
+    // closure does. This stops admitting new work and makes status `error` even
+    // after readiness. Upstream (wrapped sync adapter) failures after readiness
+    // stay health metadata through reportError.
+    if (this.collection) {
+      try {
+        this.collection._lifecycle.crash(error)
+      } catch {
+        // Crash must not replace the original asynchronous failure.
+      }
+    }
     return error
   }
 
