@@ -3914,7 +3914,8 @@ export function queryCollectionOptions(
         client: context.client,
         queryKey: generateQueryKeyFromOptions(options),
         signal,
-        meta: withLoadSubsetOptions(context.meta, options),
+        // `LoadSubsetOptions.signal` is the documented cancellation field.
+        meta: withLoadSubsetOptions(context.meta, { ...options, signal }),
       })
       signal.throwIfAborted()
       if (!Array.isArray(page)) {
