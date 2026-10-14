@@ -14256,6 +14256,93 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   /**
+   * Caller settlement is independent of a successor's successful
+   * revalidation. In this history A owns the historical demand, then its
+   * signal aborts and its provider rejects. A must reject with AbortError
+   * even if B acquires the same predicate and publishes an empty F2 result.
+   * B retires the old durable owner only after its own result applies.
+   */
+  it(`rejects an aborted historical owner while its successor revalidates`, async () => {
+    const id = `pre-upgrade-singleton-aborted-reacquire`
+    const oldHash = hashKey([id, legacySingletonCategoryDemandKey])
+    const firstAbort = new AbortController()
+    const firstOptions = {
+      where: eq(new IR.PropRef([`category`]), `shared`),
+      signal: firstAbort.signal,
+    }
+    const storage = createOwnershipStorage({
+      rows: new Map([[shared.id, shared]]),
+      rowMetadata: new Map([
+        [shared.id, { queryCollection: { owners: { [oldHash]: true } } }],
+      ]),
+      collectionMetadata: new Map([
+        [
+          `queryCollection:gc:${oldHash}`,
+          { queryHash: oldHash, mode: `until-revalidated` },
+        ],
+      ]),
+    })
+    const { collection, queryClient, queryFn } =
+      createPersistedOwnershipFixture(id, storage, [])
+    const firstResult = createDeferred<Array<Item>>()
+    const secondResult = createDeferred<Array<Item>>()
+    let physicalSignal: AbortSignal | undefined
+    queryFn
+      .mockImplementationOnce((context: QueryFunctionContext) => {
+        physicalSignal = context.meta?.loadSubsetOptions?.signal
+        physicalSignal?.addEventListener(
+          `abort`,
+          () => firstResult.reject(new Error(`first fetch aborted`)),
+          { once: true },
+        )
+        return firstResult.promise
+      })
+      .mockImplementationOnce(() => secondResult.promise)
+    await collection.stateWhenReady()
+    queryClient.setQueryData(
+      [id, getLoadSubsetDemandKey(firstOptions)],
+      [shared],
+    )
+
+    const firstOperation = collection._sync.loadSubset(firstOptions)
+    expect(firstOperation).not.toBe(true)
+    const firstLoad = Promise.resolve(firstOperation).then(
+      () => `ready`,
+      (error: unknown) => (error as Error).name,
+    )
+    let firstSettled = false
+    void firstLoad.then(() => (firstSettled = true))
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(1))
+    expect(firstSettled).toBe(false)
+    firstAbort.abort()
+    collection._sync.unloadSubset(firstOptions)
+    expect(physicalSignal?.aborted).toBe(true)
+    expect(persistedOwners(storage.snapshot().rowMetadata, shared.id)).toEqual([
+      oldHash,
+    ])
+
+    const secondOptions = { where: eq(new IR.PropRef([`category`]), `shared`) }
+    const secondLoad = collection._sync.loadSubset(secondOptions)
+    await vi.waitFor(() =>
+      expect(queryFn.mock.calls.length).toBeGreaterThanOrEqual(2),
+    )
+    // A's canceled load must settle while B's replacement result is held.
+    await vi.waitFor(() => expect(firstSettled).toBe(true))
+    expect(await firstLoad).toBe(`AbortError`)
+    secondResult.resolve([])
+    await expect(secondLoad).resolves.toBeUndefined()
+    await vi.waitFor(() => {
+      expect(rows(collection)).toEqual([])
+      expect(storedItems(storage)).toEqual([])
+      expect(
+        persistedOwners(storage.snapshot().rowMetadata, shared.id),
+      ).toEqual([])
+      expect(storage.snapshot().collectionMetadata.size).toBe(0)
+    })
+    collection._sync.unloadSubset(secondOptions)
+  })
+
+  /**
    * Public live-query preload owns the acquisition lease. Retiring its final
    * owner rejects that preload before either endpoint settles. A new live
    * query must wait for a new result, then replace the old durable owner.

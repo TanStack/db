@@ -1,4 +1,5 @@
 import {
+  LoadSubsetOperationAbortedError,
   NoPendingSyncTransactionCommitError,
   NoPendingSyncTransactionWriteError,
   PERSISTED_READINESS,
@@ -6555,8 +6556,7 @@ function createWrappedSyncConfig<
             const abortable = !signal
               ? work
               : new Promise<void>((resolve, reject) => {
-                  const abortError = () =>
-                    signal.reason ?? new SyncTransactionAbortedError()
+                  const abortError = () => new LoadSubsetOperationAbortedError()
                   const onAbort = () => {
                     // Once an uncancelable baseline read begins, its returned
                     // load keeps core's overlapping replay private until the
@@ -6578,9 +6578,11 @@ function createWrappedSyncConfig<
                   )
                 })
             return abortable.catch((error: unknown) => {
+              // Releasing a lease cannot turn its caller's abort into success.
               if (
-                startupState.cleanedUp ||
-                acquisitions.get(options) !== acquisition
+                !options.signal?.aborted &&
+                (startupState.cleanedUp ||
+                  acquisitions.get(options) !== acquisition)
               ) {
                 return
               }

@@ -626,7 +626,12 @@ causes one fresh fetch for a new caller; an ignored abort can leave a cache
 result reusable by a fast remount. A historical-owner history therefore accepts
 either the ignored-abort result or a new fetch after a same-turn reacquisition,
 while requiring the successor to remain pending and the old owner durable
-until an applicable result arrives. A later external refetch supersedes a
+until an applicable result arrives. A neighboring persisted history aborts the
+first caller and unloads its lease after its provider starts. Even when the
+replacement demand applies an empty result, the first caller must reject with
+`AbortError` while that replacement result is still held; old durable ownership
+stays intact until replacement application.
+A later external refetch supersedes a
 canceled Collection fetch, and reacquisition applies its newer cached result
 before load settlement. A second successor history lets that external fetch
 finish before acquisition; with infinite stale time it applies the fetched
@@ -659,7 +664,9 @@ scan schedules remain open. The old encoder distinguished a literal proxy from a
 collapsed distinct literal proxies with the same path; the accepted migration
 policy retires that ambiguous old key when a matching proxy demand succeeds. The
 [PR #2134 oracle review](oracle-reviews/pr-2134-identity-and-persisted-key.md)
-records the RED/GREEN and hostile-mutant checks. The first eligible demand
+records the RED/GREEN and hostile-mutant checks. Literal-proxy tests import the
+built `@tanstack/db` ref-proxy module to match Query Collection's runtime;
+rebuild `@tanstack/db` before interpreting a source mutant's result. The first eligible demand
 requests one persisted-row metadata scan per sync run; the SQLite adapter still
 reads row values in that scan. Later eligible demands parse every persisted
 owner hash and retention marker. The oracle bounds scan count, not latency or
@@ -1284,7 +1291,16 @@ hydration, later work, known durability failures, and an unchanged
 reconciliation reload. Its orphan row-metadata case fails on a shortcut that
 skips needed cleanup. Sparse-array, extra-array-property, and nested-prototype
 histories require a changed durable value to reload even when ordinary deep
-equality would skip it.
+equality would skip it. A post-source-entry three-case history distinguishes an
+explicit caller abort followed by unload from direct unload without a signal
+before the controlled source rejects after unload. Both default and custom
+caller abort reasons must
+reject with `AbortError` despite lease retirement; direct unload suppresses a
+retired failure. All three leave the sync run
+able to serve a later subset. Restoring the old unconditional release
+suppression fails the abort cases at the caller-outcome checkpoint while the
+direct unload control still passes. Passing through the custom reason as the
+rejection also fails at that checkpoint.
 
 The PR #2096 four-oracle review adds a mixed-demand reset route to the
 targeted/full-reload history. A previously public row outside the current

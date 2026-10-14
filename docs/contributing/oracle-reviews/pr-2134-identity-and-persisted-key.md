@@ -465,6 +465,52 @@ The cancellation guide now distinguishes eager `ctx.signal` from on-demand
 `ctx.meta.loadSubsetOptions.signal`. Both on-demand pagination examples pass
 the latter signal to their provider or cursor pager.
 
+An external review found a separate persisted-wrapper caller-settlement bug
+after a historical owner unloaded. A's caller signal aborted after F1 started,
+F1's provider rejected on its physical signal, and A unloaded while B acquired
+the same predicate. B applied an empty F2 result and retired the historical
+owner, but A's load incorrectly fulfilled. The primary Query Collection
+ownership oracle now records A's `AbortError`, B's successful load, public
+empty rows, and retired durable row and marker. It checks A's rejection while
+B's replacement result remains held. The persisted-wrapper oracle
+crosses the same post-source-entry cut with an independent source: abort then
+unload must reject, while direct unload without a signal may suppress a late
+upstream error. Its controlled source rejects after unload in all cases; the
+Query Collection witness covers a provider that rejects on physical abort.
+Both paths leave a later subset load usable. The old unconditional suppression
+failed both new abort witnesses at the caller-outcome assertion, while the
+direct unload control passed. The repair makes release suppression conditional
+on the caller signal remaining live. `@tanstack/db-sqlite-persistence-core`
+receives its own patch changeset; no Query Collection map deletion or source
+proxy-import change is involved.
+
+After rebuilding `@tanstack/db`, the Query DB package suite passed 1,410 tests
+in 40 files with no type errors. The persistence-core suite passed 1,568 tests
+in 27 files with two existing todo cases and no type errors. Literal-proxy
+identity tests intentionally import the built `@tanstack/db` module because
+the Query Collection test runtime also uses that build. A source-only mutant
+run without rebuilding is not evidence of an oracle survivor.
+
+A fresh oracle review found that an aborted load with a custom signal reason
+returned that raw `Error` instead of `AbortError`. The new persistence case
+reached the same post-source-entry, abort, unload, and upstream-rejection
+checkpoint and failed with `Error` on the first repair. The wrapper now creates
+`LoadSubsetOperationAbortedError` at its load-settlement boundary. The
+admission waiter's internal rejection still passes through that boundary. The
+three-case matrix passes with type checking. A direct unload
+without a signal remains the control; Collection subscription release aborts
+its generated acquisition signal before adapter unload, so that control does
+not claim public release fulfillment.
+
+A proposed mid-history assertion that the historical row stays public while
+B's replacement result is held failed in the current implementation. It is not
+part of the accepted on-demand law: the Query Collection guide promises
+continuous public visibility while a loaded subset owns the row, and the cold
+historical-owner oracle starts with a durable owner but no public row. A's last
+loaded subset has unloaded before B starts. The witness therefore preserves
+the historical durable owner and marker until B applies, without requiring an
+intermediate public row.
+
 Query Core notifies observers before cache listeners. A distinct observer can
 start F2 synchronously while F1's reverted cancellation is still notifying.
 The held replacement witness reaches that order and checks F2's live provider

@@ -21224,6 +21224,79 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     },
   )
 
+  // A caller's explicit abort remains its own settlement after it releases
+  // the subset lease. A direct unload without a signal may suppress a late
+  // source failure, but it cannot turn an aborted caller's pending load into
+  // success. Default and custom abort reasons both produce AbortError. These
+  // histories cross the same upstream rejection cut; the second load checks
+  // that neither outcome fails the surviving sync run.
+  it.each([
+    { action: `abort-then-unload`, expected: `AbortError` },
+    { action: `custom-abort-then-unload`, expected: `AbortError` },
+    { action: `unload-only`, expected: `ready` },
+  ] as const)(
+    `preserves caller settlement after $action and upstream rejection`,
+    async ({ action, expected }) => {
+      const sourceEntered = createEventGate()
+      const sourceResult = createEventGate()
+      const sourceLoads: Array<number | undefined> = []
+      const controller = new AbortController()
+      const firstOptions: LoadSubsetOptions = {
+        limit: 1,
+        ...(action !== `unload-only` ? { signal: controller.signal } : {}),
+      }
+      const secondOptions: LoadSubsetOptions = { limit: 2 }
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `released-load-settlement-${action}`,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          sync: {
+            sync: ({ markReady }) => {
+              markReady()
+              return {
+                loadSubset: (options) => {
+                  sourceLoads.push(options.limit)
+                  if (options.limit !== 1) return true
+                  sourceEntered.resolve()
+                  return sourceResult.promise
+                },
+              }
+            },
+          },
+          persistence: { adapter: createRecordingAdapter() },
+        }),
+      )
+      const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      try {
+        collection.startSyncImmediate()
+        await collection.stateWhenReady()
+        const firstLoad = Promise.resolve(
+          collection._sync.loadSubset(firstOptions),
+        ).then(
+          () => `ready`,
+          (error: unknown) => (error as Error).name,
+        )
+        await sourceEntered.promise
+        if (action === `abort-then-unload`) controller.abort()
+        if (action === `custom-abort-then-unload`)
+          controller.abort(new Error(`custom abort reason`))
+        collection._sync.unloadSubset(firstOptions)
+        sourceResult.reject(new Error(`released source failed`))
+        expect(await firstLoad).toBe(expected)
+
+        await collection._sync.loadSubset(secondOptions)
+        expect(sourceLoads).toEqual([1, 2])
+        expect(collection.status).toBe(`ready`)
+        collection._sync.unloadSubset(secondOptions)
+      } finally {
+        sourceResult.resolve()
+        warning.mockRestore()
+        await collection.cleanup()
+      }
+    },
+  )
+
   it(`does not mark a demand hydrated after its last acquisition leaves mid-read`, async () => {
     const adapter = createRecordingAdapter([
       { id: `1`, title: `one` },
