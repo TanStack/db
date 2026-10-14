@@ -2380,16 +2380,19 @@ export function queryCollectionOptions(
           if (current && pending.size === 0) pendingStartupLoads.delete(opts)
           return current && active
         }
-        return work.then(() => {
-          if (!releaseToken() || opts.signal?.aborted) {
-            throw new LoadSubsetOperationAbortedError()
-          }
-          const resumed = createQueryFromOpts(opts, queryFunction)
-          return resumed === true ? undefined : resumed
-        }, (error: unknown) => {
-          releaseToken()
-          throw error
-        })
+        return work.then(
+          () => {
+            if (!releaseToken() || opts.signal?.aborted) {
+              throw new LoadSubsetOperationAbortedError()
+            }
+            const resumed = createQueryFromOpts(opts, queryFunction)
+            return resumed === true ? undefined : resumed
+          },
+          (error: unknown) => {
+            releaseToken()
+            throw error
+          },
+        )
       }
       if (opts.signal?.aborted) {
         return Promise.reject(new LoadSubsetOperationAbortedError())
@@ -2404,7 +2407,11 @@ export function queryCollectionOptions(
       }
       const requestedHash = hashKey(requestedKey)
       let legacyAliases: Set<string> | undefined
-      if (metadata && syncMode === `on-demand` && typeof queryKey !== `function`) {
+      if (
+        metadata &&
+        syncMode === `on-demand` &&
+        typeof queryKey !== `function`
+      ) {
         const demandKey = getLoadSubsetDemandKey(opts)
         if (
           demandKey !== undefined &&
