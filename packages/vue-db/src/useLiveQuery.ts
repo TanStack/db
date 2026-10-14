@@ -406,6 +406,7 @@ export function useLiveQuery(
       status.value = `disabled` as const
       persistedStatus.value = `unavailable`
       persistedError.value = undefined
+      errors.value = undefined
       state.clear()
       internalData.value = []
       return
