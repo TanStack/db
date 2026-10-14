@@ -12,6 +12,7 @@ import {
   onlineManager,
 } from '@tanstack/query-core'
 import {
+  BasicIndex,
   IR,
   createCollection,
   createLiveQueryCollection,
@@ -24,8 +25,6 @@ import {
 } from '@tanstack/db'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createDeferred } from '../../db/src/deferred.js'
-import { createSingleRowRefProxy } from '../../db/src/query/builder/ref-proxy.js'
-import { isRefProxy } from '../../db/src/query/builder/ref-proxy-identity.js'
 import {
   compileSingleRowExpression,
   toBooleanPredicate,
@@ -327,6 +326,36 @@ const listOnly = { id: `list`, category: `list`, name: `List` }
 const categoryIn = (...categories: Array<string>) =>
   new IR.Func(`in`, [new IR.PropRef([`category`]), new IR.Value(categories)])
 const cleanups: Array<() => Promise<void>> = []
+let proxyFixtureSequence = 0
+
+/**
+ * Collection.createIndex supplies a single-row proxy from the same DB package
+ * instance that Query Collection uses to encode its demand. The index is only
+ * a public route to that fixture; no index behavior is under test here.
+ */
+function literalProxy(path: `category` | `other` | `value`): unknown {
+  type ProxyRow = {
+    id: string
+    category: string
+    other: string
+    value: number
+  }
+  const collection = createCollection<ProxyRow>({
+    id: `literal-proxy-fixture-${proxyFixtureSequence++}`,
+    getKey: (row) => row.id,
+    defaultIndexType: BasicIndex,
+    sync: { sync: () => {} },
+  })
+  cleanups.push(() => collection.cleanup())
+  let member: unknown
+  const index = collection.createIndex((row) => {
+    member = row[path]
+    return row[path]
+  })
+  collection.removeIndex(index)
+  expect(member).toBeDefined()
+  return member
+}
 
 async function runCleanups(): Promise<void> {
   const results = await Promise.allSettled(
@@ -1188,9 +1217,7 @@ const legacyProxyCategoryEqualityDemandKey = `{"type":"loadSubsetDemand","query"
 const legacyProxyCategoryMembershipDemandKey = `{"type":"loadSubsetDemand","query":{"type":"loadSubsetQuery","where":{"type":"func","name":"in","args":[{"type":"ref","path":[["string","category"]]},{"type":"val","value":["set",[{"type":"ref","path":[["string","category"]]}]]}]}}}`
 
 function proxyCategorySubset(operator: `eq` | `in`): LoadSubsetOptions {
-  const member = createSingleRowRefProxy<{ category: string }>().category
-  // The identity oracle must exercise a proxy recognized by this DB source.
-  expect(isRefProxy(member)).toBe(true)
+  const member = literalProxy(`category`)
   return {
     where: new IR.Func(operator, [
       new IR.PropRef([`category`]),
@@ -16674,10 +16701,8 @@ describe(`query collection ownership lifecycle`, () => {
   it(`does not reuse a Query result for a different literal proxy value`, async () => {
     type Row = { id: string; value: unknown }
     const id = `literal-proxy-query-identity`
-    const firstValue = createSingleRowRefProxy<{ value: number }>().value
-    const secondValue = createSingleRowRefProxy<{ value: number }>().value
-    expect(isRefProxy(firstValue)).toBe(true)
-    expect(isRefProxy(secondValue)).toBe(true)
+    const firstValue = literalProxy(`value`)
+    const secondValue = literalProxy(`value`)
     const source: Row = { id: `one`, value: firstValue }
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false, staleTime: Infinity } },
@@ -16718,6 +16743,15 @@ describe(`query collection ownership lifecycle`, () => {
     })
     const first = request(firstValue)
     const second = request(secondValue)
+    // The old encoder collapsed these objects by path; the new encoder must
+    // keep their runtime identities distinct before QueryClient sees them.
+    expect(getLegacyLoadSubsetDemandKey(first)).toBe(
+      getLegacyLoadSubsetDemandKey(second),
+    )
+    expect(getLegacyLoadSubsetDemandKey(first)).toBeDefined()
+    expect(getLoadSubsetDemandKey(first)).not.toBe(
+      getLoadSubsetDemandKey(second),
+    )
 
     await collection._sync.loadSubset(first)
     expect(collection.has(`one`)).toBe(true)
@@ -20992,11 +21026,7 @@ describe(`query collection ownership lifecycle`, () => {
       `"value":{"type":"ref","path":[["string","category"]]}`,
       `"value":{"type":"ref","path":[["string","other"]]}`,
     )
-    const otherMember = createSingleRowRefProxy<{
-      category: string
-      other: string
-    }>().other
-    expect(isRefProxy(otherMember)).toBe(true)
+    const otherMember = literalProxy(`other`)
     const otherDemand: LoadSubsetOptions = {
       where: new IR.Func(`eq`, [
         new IR.PropRef([`category`]),

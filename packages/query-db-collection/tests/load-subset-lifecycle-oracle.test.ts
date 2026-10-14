@@ -660,8 +660,9 @@ async function expectFilteredDemandAfterDirectWriteAvoidsRedundantFetch(): Promi
  * live and the old rows visible. The narrower lease is then the final owner:
  * releasing it aborts the fetch and retires the rows. Late provider settlement
  * cannot republish. The two legal histories cross full-view release before
- * versus during the held request; Query observer count, provider signal, and
- * public rows are checked before final release.
+ * versus during the held request. They pin the original held provider call and
+ * compare its signal, exact request count, Query observer count, and public
+ * rows at both release checkpoints; a replacement fetch cannot satisfy it.
  */
 async function expectFinalFullSourceDependentCancelsFetch(
   fullExit: `before-revalidation` | `during-revalidation`,
@@ -672,18 +673,21 @@ async function expectFinalFullSourceDependentCancelsFetch(
   let heldSignal: AbortSignal | undefined
   let requests = 0
   const queryFn = vi.fn((context: QueryFunctionContext) => {
-    requests++
-    if (requests === 1) {
+    const requestNumber = ++requests
+    if (requestNumber === 1) {
       return Promise.resolve([
         { id: `a1`, group: `a` },
         { id: `b1`, group: `b` },
       ])
     }
-    heldSignal = context.meta?.loadSubsetOptions?.signal
-    expect(heldSignal).toBeDefined()
-    return new Promise<Array<Row>>((resolve) => {
-      resolveHeldFetch = resolve
-    })
+    if (requestNumber === 2) {
+      heldSignal = context.meta?.loadSubsetOptions?.signal
+      expect(heldSignal).toBeDefined()
+      return new Promise<Array<Row>>((resolve) => {
+        resolveHeldFetch = resolve
+      })
+    }
+    return Promise.resolve([])
   })
   const collection = createCollection(
     queryCollectionOptions<Row>({
@@ -725,6 +729,7 @@ async function expectFinalFullSourceDependentCancelsFetch(
       await full.cleanup()
       fullReleased = true
     }
+    expect(requests).toBe(2)
     expect(filtered.status).toBe(`ready`)
     expect(filtered.toArray.map((row) => row.id)).toEqual([`a1`])
     expect(collection.toArray.map((row) => row.id).sort()).toEqual([`a1`, `b1`])
@@ -736,10 +741,12 @@ async function expectFinalFullSourceDependentCancelsFetch(
     ).toBe(1)
     expect(heldSignal?.aborted).toBe(false)
     await filtered.cleanup()
+    expect(requests).toBe(2)
     expect(heldSignal?.aborted).toBe(true)
     expect(collection.size).toBe(0)
     resolveHeldFetch?.([{ id: `late`, group: `a` }])
     await invalidation
+    expect(requests).toBe(2)
     expect(collection.size).toBe(0)
     expect(collection.has(`late`)).toBe(false)
   }, [
