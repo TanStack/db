@@ -6,6 +6,8 @@ import {
 } from '@tanstack/query-core'
 import {
   LoadSubsetOperationAbortedError,
+  and,
+  buildCursorExpressions,
   compileSingleRowExpression,
   deepEquals,
   getLoadSubsetDemandKey,
@@ -68,6 +70,21 @@ type TQueryKeyBuilder<TQueryKey> = (opts: LoadSubsetOptions) => TQueryKey
 function isStoredLoadSubsetOptions(value: unknown): value is LoadSubsetOptions {
   // This adapter stores typed request options in its observer metadata.
   return value !== null && typeof value === `object`
+}
+
+function withLoadSubsetOptions(
+  meta: Record<string, unknown> | undefined,
+  options: LoadSubsetOptions,
+): Record<string, unknown> {
+  const extendedMeta = { ...meta }
+  // Query functions need request options, but SSR must not serialize them.
+  Object.defineProperty(extendedMeta, `loadSubsetOptions`, {
+    value: options,
+    enumerable: false,
+    configurable: true,
+    writable: true,
+  })
+  return extendedMeta
 }
 
 const queryObserverOptionKeys = [
@@ -1040,6 +1057,11 @@ export function queryCollectionOptions(
   // 3. Decrements refcount and GCs rows where count reaches 0
   const queryRefCounts = new Map<string, number>()
 
+  // An explicit on-demand refetch fetches each ordered page's served prefix
+  // through one shared request per predicate and order. The Query function
+  // wrapper uses it in place of that page's own request.
+  const prefixRefetches = new Map<string, typeof queryFn>()
+
   // Eager startup holds one reference until cleanup. Cache removal detaches
   // observation, not that ownership or its rows.
   let ensureEagerSubscription = () => {}
@@ -1890,14 +1912,7 @@ export function queryCollectionOptions(
         refetch: _refetch,
         ...requestOptions
       } = opts
-      const extendedMeta = { ...meta }
-      // Query functions need request options, but SSR must not serialize them.
-      Object.defineProperty(extendedMeta, `loadSubsetOptions`, {
-        value: requestOptions,
-        enumerable: false,
-        configurable: true,
-        writable: true,
-      })
+      const extendedMeta = withLoadSubsetOptions(meta, requestOptions)
       const retainedEntry = metadata?.collection.get(
         `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,
       )
@@ -1924,6 +1939,8 @@ export function queryCollectionOptions(
         const currentResult = observer.getCurrentResult()
 
         if (opts.refetch) {
+          // The loader proves its boundary again from this acquisition.
+          servedPrefixEnds.delete(observer.getCurrentQuery())
           return refetchAndWaitForApplication(observer, hashedQueryKey)
         }
 
@@ -1989,7 +2006,15 @@ export function queryCollectionOptions(
               directWriteGeneration,
             ),
           )
-          return queryFunction(context)
+          const fetchPrefix = prefixRefetches.get(logicalHash)
+          if (fetchPrefix) return fetchPrefix(context)
+          const result = queryFunction(context)
+          if (!requestOptions.orderBy?.length || select) return result
+          const query = localObserver.getCurrentQuery()
+          return Promise.resolve(result).then((data) => {
+            recordServedPrefixEnd(query, requestOptions, data)
+            return data
+          })
         },
         meta: extendedMeta,
         structuralSharing: true,
@@ -2088,6 +2113,7 @@ export function queryCollectionOptions(
           )
         }
         const currentResult = localObserver.getCurrentResult()
+        if (opts.refetch) servedPrefixEnds.delete(localQuery)
         if (
           opts.refetch ||
           unpatchedCacheVersions.has(localQuery) ||
@@ -3464,6 +3490,7 @@ export function queryCollectionOptions(
 
     const cleanup = () => {
       if (activeSyncSession === syncSession) activeSyncSession = undefined
+      prefixRefetchAbort?.abort()
       pendingStartupLoads.clear()
       ensureEagerSubscription = () => {}
       applyRefetchResultWhenUnsubscribed = () => false
@@ -3628,6 +3655,205 @@ export function queryCollectionOptions(
   }
 
   /**
+   * The LoadSubset contract requires a provider to keep each served ordered
+   * prefix whole. A page's prefix runs from the start of its order through
+   * the leading order value of the last row it served, ties included; an
+   * empty page served none. The ordered loader's boundary was proven from
+   * that serve, so the end stays fixed until the page unloads.
+   *
+   * Refetching each page alone can leave a gap: a row that now sorts between
+   * two pages is in neither result, and the loader sees no change. An
+   * explicit refetch therefore reads each predicate and order's deepest
+   * served prefix once, with the request shapes the loader itself sends: a
+   * first page, then a tie and a cursor continuation from each last row,
+   * until a row sorts past the end or a page comes back short. A provider
+   * may honor either the cursor or the offset. Every page in that family
+   * takes the combined rows. Other requests refetch as themselves.
+   */
+  type PrefixFamily = {
+    where: LoadSubsetOptions[`where`]
+    orderBy: NonNullable<LoadSubsetOptions[`orderBy`]>
+    end: unknown
+    firstLimit: number
+    pageSize: number
+    members: Array<string>
+  }
+
+  // The leading order value of the last row each ordered page served.
+  // `null` records an empty first result.
+  const servedPrefixEnds = new WeakMap<AnyQuery, { end: unknown } | null>()
+  const recordServedPrefixEnd = (
+    query: AnyQuery,
+    options: LoadSubsetOptions,
+    data: unknown,
+  ): void => {
+    if (servedPrefixEnds.has(query) || !Array.isArray(data)) return
+    const last = data.at(-1)
+    servedPrefixEnds.set(
+      query,
+      last === undefined
+        ? null
+        : {
+            end: compileSingleRowExpression(options.orderBy![0]!.expression)(
+              last,
+            ),
+          },
+    )
+  }
+
+  /**
+   * Compare two leading order values in request order. Values of different
+   * kinds are not comparable.
+   */
+  const compareLeadingValues = (
+    orderBy: NonNullable<LoadSubsetOptions[`orderBy`]>,
+    value: unknown,
+    boundary: unknown,
+  ): number | undefined => {
+    const { direction, nulls } = orderBy[0]!.compareOptions
+    if (value == null || boundary == null) {
+      if (value == null && boundary == null) return 0
+      return (value == null) === (nulls === `first`) ? -1 : 1
+    }
+    if (value instanceof Date !== boundary instanceof Date) return undefined
+    // Both are Dates or both are primitives of one kind, compared natively.
+    const left = (value instanceof Date ? value.getTime() : value) as number
+    const right = (
+      boundary instanceof Date ? boundary.getTime() : boundary
+    ) as number
+    if (typeof left !== typeof right) return undefined
+    const order = left < right ? -1 : left > right ? 1 : 0
+    return direction === `asc` ? order : -order
+  }
+
+  const planPrefixRefetches = (
+    hashedQueryKeys: Array<string>,
+  ): Array<PrefixFamily> => {
+    const families = new Map<string, PrefixFamily | undefined>()
+    for (const hashedQueryKey of hashedQueryKeys) {
+      const query = state.observers.get(hashedQueryKey)?.getCurrentQuery()
+      const options = query?.meta?.loadSubsetOptions
+      // A selected response has no row array to combine.
+      if (select || !query || !isStoredLoadSubsetOptions(options)) continue
+      const { where, orderBy } = options
+      if (!orderBy?.length || !Array.isArray(query.state.data)) continue
+      recordServedPrefixEnd(query, options, query.state.data)
+      const served = servedPrefixEnds.get(query)
+      if (!served) continue
+      const familyKey = getLoadSubsetDemandKey({ where, orderBy })!
+      const servedCount = (options.offset ?? 0) + query.state.data.length
+      const family = families.get(familyKey)
+      if (!families.has(familyKey)) {
+        families.set(
+          familyKey,
+          buildCursorExpressions(orderBy, served.end)
+            ? {
+                where,
+                orderBy,
+                end: served.end,
+                firstLimit: servedCount,
+                pageSize: options.limit ?? servedCount,
+                members: [hashedQueryKey],
+              }
+            : undefined,
+        )
+        continue
+      }
+      if (!family) continue
+      const order = compareLeadingValues(orderBy, served.end, family.end)
+      if (
+        order === undefined ||
+        buildCursorExpressions(orderBy, served.end) === undefined
+      ) {
+        // Members of an unplannable family refetch as themselves.
+        families.set(familyKey, undefined)
+        continue
+      }
+      if (order > 0) family.end = served.end
+      family.firstLimit = Math.max(family.firstLimit, servedCount)
+      family.pageSize = Math.max(family.pageSize, options.limit ?? 0)
+      family.members.push(hashedQueryKey)
+    }
+    return [...families.values()].filter(
+      (family): family is PrefixFamily => family !== undefined,
+    )
+  }
+
+  const fetchServedPrefix = async (
+    family: PrefixFamily,
+    context: QueryFunctionContext<any>,
+    signal: AbortSignal,
+  ): Promise<Array<Record<string, unknown>>> => {
+    const { where, orderBy, end } = family
+    const request = async (options: LoadSubsetOptions) => {
+      const page: unknown = await queryFn({
+        client: context.client,
+        queryKey: context.queryKey,
+        signal,
+        meta: withLoadSubsetOptions(context.meta, options),
+      })
+      signal.throwIfAborted()
+      if (!Array.isArray(page)) {
+        throw new InvalidQueryResultError(
+          `@tanstack/query-db-collection: queryFn must return an array of objects. Got: ${typeof page} for queryKey ${JSON.stringify(context.queryKey)}`,
+        )
+      }
+      return page as Array<Record<string, unknown>>
+    }
+    const rows = new Map<string | number, Record<string, unknown>>()
+    const leadingValue = compileSingleRowExpression(orderBy[0]!.expression)
+    let limit = family.firstLimit
+    let page = await request({ where, orderBy, limit })
+    let offset = 0
+    for (;;) {
+      page.forEach((row) => rows.set(getKey(row), row))
+      offset += page.length
+      const last = page.at(-1)
+      if (last === undefined) break
+      const value = leadingValue(last)
+      const order = compareLeadingValues(orderBy, value, end)
+      if (page.length < limit || order === undefined || order > 0) break
+      const cursor = buildCursorExpressions(orderBy, value)
+      // A boundary the predicate IR cannot express ends the read.
+      if (!cursor) break
+      // A cursor starts after the value, so first read the rest of its tie.
+      const tie = await request({
+        where: where ? and(where, cursor.whereCurrent) : cursor.whereCurrent,
+      })
+      tie.forEach((row) => rows.set(getKey(row), row))
+      if (order === 0) break
+      limit = family.pageSize
+      page = await request({ where, orderBy, cursor, offset, limit })
+    }
+    return [...rows.values()]
+  }
+
+  // A newer refetch or cleanup aborts an unfinished prefix read.
+  let prefixRefetchAbort: AbortController | undefined
+
+  const startPrefixRefetches = (
+    families: Array<PrefixFamily>,
+  ): Map<string, typeof queryFn> => {
+    const plan = new Map<string, typeof queryFn>()
+    if (families.length === 0) return plan
+    prefixRefetchAbort?.abort()
+    const { signal } = (prefixRefetchAbort = new AbortController())
+    for (const family of families) {
+      let prefixFetch: Promise<Array<Record<string, unknown>>> | undefined
+      const fetchPrefix: typeof queryFn = (context) =>
+        (prefixFetch ??= fetchServedPrefix(family, context, signal).catch(
+          (error: unknown) => {
+            // A Query retry starts a new prefix read.
+            prefixFetch = undefined
+            throw error
+          },
+        ))
+      for (const member of family.members) plan.set(member, fetchPrefix)
+    }
+    return plan
+  }
+
+  /**
    * Refetch the query data
    *
    * Uses queryObserver.refetch() because:
@@ -3655,6 +3881,14 @@ export function queryCollectionOptions(
     awaitApplications: boolean,
   ): ReturnType<RefetchFn> => {
     const allQueryKeys = [...hashToQueryKey.values()]
+    const prefixPlan = startPrefixRefetches(
+      syncMode === `on-demand`
+        ? planPrefixRefetches(allQueryKeys.map((key) => hashKey(key)))
+        : [],
+    )
+    prefixPlan.forEach((fetchPrefix, hashedQueryKey) =>
+      prefixRefetches.set(hashedQueryKey, fetchPrefix),
+    )
 
     // A replaced eager Query must reattach before refetch. An idle observer
     // on the same Query is applied explicitly below to avoid an extra fetch.
@@ -3677,6 +3911,14 @@ export function queryCollectionOptions(
         const fetch = queryObserver.refetch({
           throwOnError: opts?.throwOnError,
         })
+        const fetchPrefix = prefixPlan.get(hashedQueryKey)
+        if (fetchPrefix) {
+          const retire = () => {
+            if (prefixRefetches.get(hashedQueryKey) === fetchPrefix)
+              prefixRefetches.delete(hashedQueryKey)
+          }
+          void fetch.then(retire, retire)
+        }
         query = queryObserver.getCurrentQuery()
         startingResult = queryObserver.getCurrentResult()
         const fetchStart = queryCollectionCurrentFetchStarts.get(query)

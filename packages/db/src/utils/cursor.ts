@@ -12,6 +12,7 @@ import {
 import { Value } from '../query/ir.js'
 import { codedMessage, devBuild } from '../error-message.js'
 import type { BasicExpression, OrderBy, OrderByClause } from '../query/ir.js'
+import type { CursorExpressions } from '../types.js'
 
 function isNullish(
   expression: OrderByClause[`expression`],
@@ -74,6 +75,21 @@ export function buildCursorCurrent(
   }
   if (typeof value === `object`) return undefined
   return eq(expression, new Value(value))
+}
+
+/**
+ * Build the continuation cursor and tie predicate for a leading-term
+ * boundary value, in the form the ordered loader sends to `loadSubset`.
+ * Returns `undefined` when the predicate IR cannot express the boundary.
+ */
+export function buildCursorExpressions(
+  orderBy: OrderBy,
+  value: unknown,
+): CursorExpressions | undefined {
+  if (!canExpressCursorOrder(orderBy, [value])) return undefined
+  const whereCurrent = buildCursorCurrent(orderBy, [value])
+  if (!whereCurrent) return undefined
+  return { whereFrom: followsBoundary(orderBy[0]!, value), whereCurrent }
 }
 
 /**

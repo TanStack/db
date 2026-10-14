@@ -327,6 +327,12 @@ export type CursorExpressions = {
  * Use stable data properties, not stateful getters, for request data.
  * Signal and subscription references stay fixed, but their lifecycle remains
  * live: aborting the signal or releasing the subscription is supported.
+ *
+ * An ordered request with `orderBy` serves a prefix: every matching row from
+ * the start of the order through the leading order value of the last row the
+ * request returned, ties included. A request that returned no rows served no
+ * prefix. The ordered loader treats every row in a served prefix as loaded.
+ * See `LoadSubsetFn` for what a provider owes after it refetches.
  */
 export type LoadSubsetOptions = {
   /**
@@ -381,6 +387,15 @@ export type LoadSubsetRequestResult = true | Promise<void>
  * implementation must await or return every receipt from the sync
  * `commit()` calls that establish the loaded subset. A result describes only
  * the exact `options` passed to this call.
+ *
+ * A provider keeps each served ordered prefix whole (see `LoadSubsetOptions`).
+ * When it refetches loaded subsets without a new `loadSubset` call, it must
+ * deliver every row that now sorts within a served prefix, even when the row
+ * now falls between two served pages. Refetching each ordered page alone does
+ * not satisfy this: a row that moves between two pages is in neither result,
+ * and the loader receives no change that would request it. A provider may
+ * instead delete the rows of the later pages, so the loader requests them
+ * again.
  */
 export type LoadSubsetFn = (options: LoadSubsetOptions) => true | Promise<void>
 
