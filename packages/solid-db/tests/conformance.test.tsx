@@ -28,6 +28,7 @@ import {
 import { useLiveQuery } from '../src/useLiveQuery'
 import { runSuite } from '../../db/tests/conformance/suite'
 import { makeLaggingSource } from '../../db/tests/conformance/lagging-source'
+import { makeHealthSource } from '../../db/tests/conformance/health-source'
 import { expectResultSurface } from '../../db/tests/conformance/result-laws'
 import { withScopeSetup } from '../../db/tests/conformance/scope-setup'
 import type {
@@ -147,6 +148,7 @@ function makeHandle(
         isError: result?.isError,
         // solid-db exposes no `isEnabled`; derive it from status (status-derived).
         isEnabled: result?.status !== `disabled`,
+        errors: result?.errors,
       })
     },
     flush: settle,
@@ -228,6 +230,12 @@ const solidDriver: LiveQueryDriver = {
     makeLaggingSource<T>(
       createCollection,
       `conformance-solid-lagging-${sourceSeq++}`,
+    ),
+  makeHealthSource: <T extends { id: string }>(data: ReadonlyArray<T>) =>
+    makeHealthSource<T>(
+      createCollection,
+      `conformance-solid-health-${sourceSeq++}`,
+      data,
     ),
   makePrecreated,
   makeErrorSource,

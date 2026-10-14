@@ -825,7 +825,7 @@ live query itself. This differs from a source truncate, which keeps the live
 query active behind its replay publication barrier.
 
 An initial sync error also leaves newly requested demand detached, even when
-the adapter has installed a loader. The error is final for its sync attempt:
+the adapter has installed a loader. The error is final for its sync run:
 `markReady()` in the same sync run is a contract violation and throws, and
 only a restart, which begins a new sync run, acquires that demand. Releasing it
 before the restart creates no physical acquisition or unload. Queued
@@ -1580,22 +1580,27 @@ create recursive Collection machinery.
     counts as a preload. A deferring live query keeps its sources from
     garbage collection but is not counted in their `subscriberCount` or
     `subscribers:change`, which adapters read as a request for live data.
-16. **Final initial errors and source health:** a sync attempt's initial
-    error is final for that attempt; a Collection moves from `error` to
-    `ready` only through a restart. Before a live query's first ready, a
-    source that fails fails the query's attempt, for every shape. After its
-    first ready, a source's later problem is health metadata: the query keeps
-    its status and rows, and its error tree reports the problem. A lazy load
-    or a root source's load that fails after the first ready is a request
-    error on the query's node. A lazy demand's error clears when that demand
-    settles or is released; a root source's error clears when a later load of
-    that source settles. Query failures and contract violations, such as a
-    graph failure or a source cleaned up under the query, still end the
-    query. So does an IndexedDB connection closure: it ends read and
-    admission authority, which no health report can restore. An Effect has
-    the same two axes, with its gate at its settled initial loads: a load
-    that fails after the gate is a request error on the Effect's tree,
-    delivered through `onHealthChange`, and the Effect keeps running.
+16. **Final initial errors, crashes, and Collection health:** a sync run's
+    initial error is final for that sync run; a Collection moves from `error`
+    to `ready` only through a restart. A source Collection in `error` ends the
+    sync run of every live query above it, for every shape and at any time.
+    Before the query's initial-query readiness this is an initial error.
+    After it, a source reaches `error` only by an initial error during an
+    on-demand source's own initial sync, or by a crash: IndexedDB closure, a
+    terminal local persistence failure, or an internal invariant failure. A
+    query cannot keep serving rows from a Collection that cannot serve reads.
+    Every other problem after initial-query readiness is health metadata: the
+    query keeps its status and rows, and its error tree reports the problem.
+    A lazy load or a root Collection's load that fails after initial-query
+    readiness is a request error on the query's node. A lazy demand's error
+    clears when that demand settles or is released; a root Collection's error
+    clears when a later load of that Collection settles. Query failures and
+    contract violations, such as a graph failure or a Collection cleaned up
+    under the query, also end the query. An Effect follows the same rules,
+    with its initial-query readiness at its settled initial loads: a source in
+    `error` ends it through `onSourceError`, and a load that fails after its
+    initial-query readiness is a request error on the Effect's error tree,
+    delivered through `onHealthChange`, while the Effect keeps running.
 17. **Error tree:** a live query's `errors` has one node for itself and one per
     source alias in query order, recursing through nested live queries. An
     include's source has `kind: 'include'`; when the include materializes a

@@ -23,7 +23,8 @@
  * Coverage: query/where/select, live insert/update/delete, orderBy, join,
  * groupBy/aggregate, nested aggregates, `.includes` subqueries, findOne
  * cardinality, disabled + transitions, deferred readiness / eager / ready-with-
- * no-data, initial readiness over a lagging on-demand source, param recompilation, optimistic mutation, pre-created & config-object
+ * no-data, initial readiness over a lagging on-demand source, Collection
+ * health after readiness, param recompilation, optimistic mutation, pre-created & config-object
  * inputs, error status, and order-only moves.
  */
 import { describe, expect, it } from 'vitest'
@@ -85,6 +86,8 @@ export function runSuite(rawDriver: LiveQueryDriver) {
       sources!.track(rawDriver.makeDeferredSource<T>()),
     makeLaggingSource: <T extends { id: string }>() =>
       sources!.track(rawDriver.makeLaggingSource<T>()),
+    makeHealthSource: <T extends { id: string }>(data: ReadonlyArray<T>) =>
+      sources!.track(rawDriver.makeHealthSource<T>(data)),
     makePrecreated: (build, options) =>
       sources!.track(rawDriver.makePrecreated(build, options)),
     makeErrorSource: () => sources!.track(rawDriver.makeErrorSource()),
@@ -1054,9 +1057,173 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           // boundary to catch), rather than exposing a readable flag.
           expect(() => h.current()).toThrow()
         } else {
-          expect(h.current().status).toBe(`error`)
-          expect(h.current().isError).toBe(true)
+          const result = h.current()
+          expect(result.status).toBe(`error`)
+          expect(result.isError).toBe(true)
+          // An initial error also explains itself in the error tree: the
+          // mounted Collection's own node carries it with phase `initial`.
+          expect(result.errors?.hasErrors).toBe(true)
+          expect(result.errors?.isError).toBe(true)
+          expect(result.errors?.error).toMatchObject({
+            phase: `initial`,
+            final: true,
+            message: source.expectedError.message,
+          })
         }
+        h.unmount()
+      },
+    )
+
+    // Collection health after Collection readiness. The law (ARCHITECTURE.md
+    // law 16 and decisions 5, 6, and 10 of the source-failure PLAN): Collection
+    // status is only the initial gate, so health reports after readiness never
+    // change status, `isError`, or rows. They appear only in the error tree, on
+    // the node for the source alias. `reportHealthy()` clears a health error
+    // that is not final; a final health error stays until a restart. The tree
+    // keeps its object identity until its content changes.
+    //
+    // The model below is the whole expectation: one optional problem with a
+    // serial number. A report is a new problem with a new serial, so the tree
+    // must be a new object; a call that changes nothing keeps the serial, so
+    // the tree must be the same object. Row writes do not touch the model.
+    // Each step is observed after the driver's `flush` cut.
+    scenario(
+      `health-after-readiness`,
+      `health reports after readiness appear only in the error tree`,
+      async () => {
+        type Problem = { final: boolean; message: string; serial: number }
+        let problem: Problem | null = null
+        let serial = 0
+        const report = (message: string, final: boolean) => {
+          if (problem?.final) return
+          problem = { final, message, serial: ++serial }
+        }
+        const healthy = () => {
+          if (problem && !problem.final) problem = null
+        }
+
+        const source = driver.makeHealthSource(SEED)
+        const h = driver.mount((q) =>
+          q
+            .from({ items: source.collection })
+            .select(({ items }: any) => ({ id: items.id, name: items.name })),
+        )
+        await h.flush()
+        let rows = SEED.map(({ id, name }) => ({ id, name }))
+        let previous: { tree: unknown; serial: number | null } | undefined
+
+        const observe = (step: string) => {
+          const result = h.current()
+          const tree = result.errors
+          expect(result.status, step).toBe(`ready`)
+          expect(result.isError, `${step}: isError is the initial gate`).toBe(
+            false,
+          )
+          expectUnorderedRows(result.data, rows)
+          expect(tree, step).toBeDefined()
+          const node = tree!.sources.find(({ alias }) => alias === `items`)
+          expect(
+            {
+              rootIsError: tree!.isError,
+              hasErrors: tree!.hasErrors,
+              node: node && {
+                kind: node.kind,
+                status: node.status,
+                isError: node.isError,
+                error: node.error && {
+                  phase: node.error.phase,
+                  final: node.error.final,
+                  message: node.error.message,
+                },
+              },
+            },
+            step,
+          ).toEqual({
+            rootIsError: false,
+            hasErrors: problem !== null,
+            node: {
+              kind: `source`,
+              status: `ready`,
+              isError: problem !== null,
+              error: problem && {
+                phase: `sync`,
+                final: problem.final,
+                message: problem.message,
+              },
+            },
+          })
+          const current = { tree, serial: problem?.serial ?? null }
+          if (previous) {
+            if (previous.serial === current.serial)
+              expect(tree, `${step}: unchanged tree keeps identity`).toBe(
+                previous.tree,
+              )
+            else
+              expect(tree, `${step}: changed tree is a new object`).not.toBe(
+                previous.tree,
+              )
+          }
+          previous = current
+        }
+
+        observe(`ready`)
+        await h.flush()
+        observe(`a flush without changes`)
+
+        source.insert({ id: `4`, name: `Dave`, age: 40, team: `b` })
+        rows = [...rows, { id: `4`, name: `Dave` }]
+        await h.flush()
+        observe(`a row write`)
+
+        const steps: Array<[string, () => void]> = [
+          [
+            `a health error that is not final`,
+            () => {
+              source.reportError(new Error(`stream stalled`), { final: false })
+              report(`stream stalled`, false)
+            },
+          ],
+          [
+            `reportHealthy clears it`,
+            () => {
+              source.reportHealthy()
+              healthy()
+            },
+          ],
+          [
+            `a final health error`,
+            () => {
+              source.reportError(new Error(`stream ended`), { final: true })
+              report(`stream ended`, true)
+            },
+          ],
+          [
+            `reportHealthy cannot clear a final health error`,
+            () => {
+              source.reportHealthy()
+              healthy()
+            },
+          ],
+          [
+            `a later report cannot replace a final health error`,
+            () => {
+              source.reportError(new Error(`late`), { final: false })
+              report(`late`, false)
+            },
+          ],
+        ]
+        for (const [step, act] of steps) {
+          act()
+          await h.flush()
+          observe(step)
+        }
+
+        source.update({ id: `1`, name: `Johnny Doe`, age: 30, team: `a` })
+        rows = rows.map((row) =>
+          row.id === `1` ? { id: `1`, name: `Johnny Doe` } : row,
+        )
+        await h.flush()
+        observe(`rows still publish under a final health error`)
         h.unmount()
       },
     )
@@ -1098,7 +1265,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
     )
 
     it(`registers every distinct scenario without whole-test waivers`, () => {
-      expect(registry.size).toBe(32)
+      expect(registry.size).toBe(33)
     })
   })
 }

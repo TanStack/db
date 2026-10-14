@@ -6170,7 +6170,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     )
     const failing: LoadSubsetOptions = { limit: 1 }
     const sibling: LoadSubsetOptions = { limit: 2 }
-    const markError = vi.spyOn(collection._lifecycle, `markError`)
+    const crash = vi.spyOn(collection._lifecycle, `crash`)
     const unhandled: Array<unknown> = []
     const captureUnhandled = (error: unknown) => unhandled.push(error)
     process.on(`unhandledRejection`, captureUnhandled)
@@ -6189,7 +6189,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         error: collection._lifecycle.getSyncError(),
         unloadThenCalls,
         unloadOptions: sourceUnloadMock.mock.calls.map(([options]) => options),
-        lifecycleErrors: markError.mock.calls.map(([error]) => error),
+        lifecycleErrors: crash.mock.calls.map(([error]) => error),
         unhandled,
       }).toEqual({
         status: `error`,
@@ -6202,7 +6202,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
 
       await flushAsyncWork()
       expect(sourceUnloadMock).toHaveBeenCalledTimes(2)
-      expect(markError).toHaveBeenCalledTimes(1)
+      expect(crash).toHaveBeenCalledTimes(1)
     } finally {
       process.off(`unhandledRejection`, captureUnhandled)
       await collection.cleanup()
@@ -7201,29 +7201,27 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
 
       try {
         await collection.stateWhenReady()
-        const originalMarkError = collection._lifecycle.markError.bind(
+        const originalCrash = collection._lifecycle.crash.bind(
           collection._lifecycle,
         )
-        vi.spyOn(collection._lifecycle, `markError`).mockImplementation(
-          (error) => {
-            sourceParams.begin()
-            sourceParams.write({
-              type: `insert`,
-              value: {
-                get id() {
-                  reentrantKeyReads++
-                  return `reentrant`
-                },
-                title: `must be fenced before error observation`,
+        vi.spyOn(collection._lifecycle, `crash`).mockImplementation((error) => {
+          sourceParams.begin()
+          sourceParams.write({
+            type: `insert`,
+            value: {
+              get id() {
+                reentrantKeyReads++
+                return `reentrant`
               },
-            })
-            reentrantReceipt = Promise.resolve(sourceParams.commit()).then(
-              () => ({ status: `fulfilled` as const }),
-              (reason: unknown) => ({ status: `rejected` as const, reason }),
-            )
-            originalMarkError(error)
-          },
-        )
+              title: `must be fenced before error observation`,
+            },
+          })
+          reentrantReceipt = Promise.resolve(sourceParams.commit()).then(
+            () => ({ status: `fulfilled` as const }),
+            (reason: unknown) => ({ status: `rejected` as const, reason }),
+          )
+          originalCrash(error)
+        })
 
         sourceParams.begin()
         sourceParams.write({
@@ -22226,11 +22224,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           persistence: { adapter, coordinator },
         }),
       )
-      const markError = collection._lifecycle.markError.bind(
-        collection._lifecycle,
-      )
+      const crash = collection._lifecycle.crash.bind(collection._lifecycle)
       const report = vi
-        .spyOn(collection._lifecycle, `markError`)
+        .spyOn(collection._lifecycle, `crash`)
         .mockImplementation((error) => {
           reported.push(error)
           // Invoke while the error is being reported, before core marks the
@@ -22238,7 +22234,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           reentrantFailure = Promise.resolve(
             collection._sync.loadSubset(sibling),
           ).catch((reason: unknown) => reason)
-          markError(error)
+          crash(error)
           errorReported.resolve()
         })
       let hasPrimaryFailure = false
@@ -22822,26 +22818,24 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
 
     try {
       await collection.stateWhenReady()
-      const originalMarkError = collection._lifecycle.markError.bind(
+      const originalCrash = collection._lifecycle.crash.bind(
         collection._lifecycle,
       )
-      vi.spyOn(collection._lifecycle, `markError`).mockImplementation(
-        (error) => {
-          reentrantOutcome = Promise.resolve(
-            collection.utils.acceptMutations({
-              mutations: [
-                reentrantMutation as unknown as PendingMutation<
-                  Record<string, unknown>
-                >,
-              ],
-            }),
-          ).then(
-            () => ({ status: `fulfilled` as const }),
-            (reason: unknown) => ({ status: `rejected` as const, reason }),
-          )
-          originalMarkError(error)
-        },
-      )
+      vi.spyOn(collection._lifecycle, `crash`).mockImplementation((error) => {
+        reentrantOutcome = Promise.resolve(
+          collection.utils.acceptMutations({
+            mutations: [
+              reentrantMutation as unknown as PendingMutation<
+                Record<string, unknown>
+              >,
+            ],
+          }),
+        ).then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        )
+        originalCrash(error)
+      })
 
       const primary = collection.insert({
         id: `primary-local`,
@@ -31262,6 +31256,9 @@ function expectHydrationReceiptsPending(
 
 // A routing reproduction must not contaminate a requested generated-property
 // replay from this shared file. These bounded cases exclude every explicit replay.
+// Terminal local persistence failures crash the Collection after readiness,
+// following the IndexedDB closure precedent. Upstream (wrapped sync adapter)
+// failures after readiness stay health metadata; this lane holds both.
 describeUnlessAnyOracleReplay(`hydration source durability routing`, () => {
   const first = { id: `shared`, title: `first source value` }
   const second = { id: `shared`, title: `last source value` }

@@ -58,6 +58,24 @@ production queues, caches, or semantic helpers merely to share their names.
 `source session`. Use `sync run` for the local Collection sync invocation
 and a provider-qualified `provider session` for a remote lifecycle.
 
+## Collection health terms
+
+Collection status and Collection health are separate axes. Status decides
+whether a sync run's initial sync may be shown; health reports what happens to
+sync after that. Neither one changes the other.
+
+| Term | Meaning | Do not use as a synonym |
+| --- | --- | --- |
+| initial gate | The role of Collection status during a sync run's initial sync. The status stays `loading` while the sync adapter retries, then becomes `ready` through `markReady()` or `error` through `markError()`. After Collection readiness in a sync run, the status no longer reflects sync failures. | Collection health or a live query's request errors. |
+| initial error | The `markError()` failure that ends a sync run's initial gate in `error`, recorded with `phase: 'initial'`. It is final for its sync run: `markReady()` afterward throws, and only a restart can reach `ready`. | Health error or a retry. |
+| crash | Moving a Collection to `error` from any active status, including after Collection readiness, because the Collection can no longer serve reads or admit writes in its sync run. Core uses it for IndexedDB closure, terminal local persistence failures, and internal invariant failures. It is final for the sync run; only a restart recovers. | Initial error, final health error, or cleanup. |
+| Collection health | A Collection's report of problems after Collection readiness in the current sync run, read through `collection.health` and `health:change`. A sync adapter changes it only through `reportError()` and `reportHealthy()`. A live-query Collection's health also carries its own request errors. It never changes Collection status or rows. Cleanup resets it. | Collection status, `persistedError`, or subscription status. |
+| health error | One problem reported through `reportError()`, recorded as `CollectionErrorInfo` with `phase: 'sync'`. A health error that is not final means the sync adapter is still trying in the current sync run; `reportHealthy()` clears it. | Initial error or request error. |
+| final health error | A health error with `final: true`: the sync adapter stopped trying in the current sync run. Only a restart clears it; `reportHealthy()` does not. | A Collection status of `error`. |
+| request error | A rejected subset load for demand that a live query or Effect started after its initial-query readiness, recorded with `phase: 'request'` on that query's error tree node and, for a live query, in its live-query Collection's health. The source Collection's health does not change. The public name stays general on purpose: an application sees a failed request for more data, not the subset-load mechanism. It clears when a later subset load for that demand fulfills or the demand retires. | Health error or request data. |
+| error tree | The `errors` value of a live query or Effect: one error tree node per query alias, in query order, fixed by the query definition. It keeps stable object identity while its content is unchanged. | Collection health or an error list. |
+| error tree node | One `ErrorTreeNode` in an error tree, for a source Collection, a nested live-query Collection, or one include. An include node summarizes all its per-row child Collections in `instances`. A nested live-query node carries its own error tree in `sources`. | Bucket or Collection facade. |
+
 ## Persistence coordination terms
 
 | Term | Meaning |
@@ -209,6 +227,10 @@ Use nouns for state and verbs for transitions:
   `cleaned-up`. Restart then **starts** a new sync run.
 - Truncate replay **replaces** source state inside the current sync run and
   any current dependent graph.
+- A sync adapter **gives up** with `markError()` before Collection readiness.
+  After it, the adapter **reports** a health error and **reports healthy**.
+  A restart **clears** a final health error.
+- A Collection **crashes** when it can no longer serve reads or admit writes.
 
 Use `settled` for a promise that fulfilled or rejected. Use `complete` for named
 coverage, content, history, or a non-promise operation only when no stronger

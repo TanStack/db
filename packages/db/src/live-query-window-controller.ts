@@ -16,7 +16,7 @@ import type {
   LiveQuerySnapshot,
 } from './live-query-observer.js'
 import type { Collection } from './collection/index.js'
-import type { CollectionStatus } from './types.js'
+import type { CollectionStatus, ErrorTreeNode } from './types.js'
 import type {
   Context,
   InitialQueryBuilder,
@@ -537,6 +537,8 @@ export interface LiveQueryWindowSnapshot<
   isError: boolean
   isCleanedUp: boolean
   isEnabled: boolean
+  /** The error tree for the collection and its dependencies, or `undefined` when disabled. */
+  errors: ErrorTreeNode | undefined
 }
 
 /** @internal This contract is unstable while RFC #1623 is being implemented. */
@@ -587,6 +589,7 @@ interface CachedFrom {
   hasPaginationError: boolean
   paginationError: unknown
   failedHasNextPage: boolean
+  errors: unknown
 }
 
 interface SubscriptionRecord {
@@ -668,7 +671,8 @@ class LiveQueryWindowControllerImpl<
       this.cachedFrom.isFetchingNextPage === this.isFetchingNextPage &&
       this.cachedFrom.hasPaginationError === this.hasPaginationError &&
       this.cachedFrom.paginationError === this.paginationError &&
-      this.cachedFrom.failedHasNextPage === this.failedHasNextPage
+      this.cachedFrom.failedHasNextPage === this.failedHasNextPage &&
+      this.cachedFrom.errors === observerSnapshot.errors
     ) {
       return cached
     }
@@ -717,6 +721,7 @@ class LiveQueryWindowControllerImpl<
       isError: statusFlags.isError,
       isCleanedUp: observerSnapshot.isCleanedUp,
       isEnabled: observerSnapshot.isEnabled,
+      errors: observerSnapshot.errors,
     }
     this.cachedFrom = {
       observerSnapshot,
@@ -725,6 +730,7 @@ class LiveQueryWindowControllerImpl<
       hasPaginationError: this.hasPaginationError,
       paginationError: this.paginationError,
       failedHasNextPage: this.failedHasNextPage,
+      errors: observerSnapshot.errors,
     }
     return this.cachedSnapshot
   }

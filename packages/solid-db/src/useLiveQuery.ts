@@ -23,6 +23,7 @@ import type {
   Collection,
   CollectionStatus,
   Context,
+  ErrorTreeNode,
   GetResult,
   InferResultType,
   InitialQueryBuilder,
@@ -128,6 +129,7 @@ export function useLiveQuery<TContext extends Context>(
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
+  errors: ErrorTreeNode | undefined
 }
 
 // Overload 1b: Accept query function that can return undefined/null
@@ -152,6 +154,7 @@ export function useLiveQuery<TContext extends Context>(
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
+  errors: ErrorTreeNode | undefined
 }
 
 /**
@@ -214,6 +217,7 @@ export function useLiveQuery<TContext extends Context>(
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
+  errors: ErrorTreeNode | undefined
 }
 
 /**
@@ -277,6 +281,7 @@ export function useLiveQuery<
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
+  errors: ErrorTreeNode | undefined
 }
 
 // Overload 3b: Accept pre-created live query collection with singleResult: true
@@ -305,6 +310,7 @@ export function useLiveQuery<
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
+  errors: ErrorTreeNode | undefined
 }
 
 // Implementation - use function overloads to infer the actual collection type
@@ -372,6 +378,7 @@ export function useLiveQuery(
   const [persistedStatus, setLocalStatus] =
     createSignal<LiveQueryPersistedStatus>(`unavailable`)
   const [persistedError, setLocalError] = createSignal<unknown>(undefined)
+  const [errors, setErrors] = createSignal<ErrorTreeNode | undefined>(undefined)
 
   // Helper to sync data array from collection in correct order
   const syncDataFromCollection = (
@@ -422,6 +429,7 @@ export function useLiveQuery(
         return []
       }
       setStatus(currentCollection.status)
+      setErrors(currentCollection.errors)
       try {
         const observer = createLiveQueryObserver(currentCollection)
         localWaitObserver = observer
@@ -447,6 +455,7 @@ export function useLiveQuery(
         }
         syncDataFromCollection(currentCollection)
         setStatus(currentCollection.status)
+        setErrors(currentCollection.errors)
       })
       return data
     },
@@ -463,6 +472,7 @@ export function useLiveQuery(
       setStatus(`disabled` as const)
       setLocalStatus(`unavailable`)
       setLocalError(undefined)
+      setErrors(undefined)
       state.clear()
       rowsByKey.clear()
       rowsCollection = undefined
@@ -511,6 +521,7 @@ export function useLiveQuery(
           setStatus(snapshot.status)
           setLocalStatus(snapshot.persistedStatus)
           setLocalError(snapshot.persistedError)
+          setErrors(snapshot.errors)
         })
       },
     )
@@ -523,6 +534,7 @@ export function useLiveQuery(
       setStatus(snapshot.status)
       setLocalStatus(snapshot.persistedStatus)
       setLocalError(snapshot.persistedError)
+      setErrors(snapshot.errors)
     })
 
     onCleanup(() => {
@@ -603,6 +615,11 @@ export function useLiveQuery(
     isCleanedUp: {
       get() {
         return status() === `cleaned-up`
+      },
+    },
+    errors: {
+      get() {
+        return errors()
       },
     },
   })

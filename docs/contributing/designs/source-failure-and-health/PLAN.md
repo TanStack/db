@@ -9,10 +9,10 @@ Branch: `feat/source-health-channel` (worktree
 
 ## 1. Decisions (maintainer, 2026-10-13)
 
-1. **A retry that succeeds is a success.** While a source retries, it reports
+1. **A retry that succeeds is a success.** While the sync adapter retries, it reports
    nothing. The Collection stays `loading`. (Already in #2127 for Electric.)
-2. **`markError` is final for its sync attempt.** A source calls it only when
-   it gives up. The framework never heals an attempt: no `error` → `ready`.
+2. **`markError` is final for its sync run.** A sync adapter calls it only when
+   it gives up. The framework never heals a sync run: no `error` → `ready`.
 3. **Recovery is the app's job.** `cleanup()` then `preload()`, a refetch, or a
    user refresh starts a fresh attempt. The framework adds no retries.
 4. **A final initial error reaches every consumer with its cause**: readiness
@@ -42,12 +42,12 @@ names and shapes.
 
 - **Two axes.** Gate: `status` (`idle | loading | ready | error |
   cleaned-up`), decided only by an attempt's initial sync. Health: per
-  Collection, changed only by its source after the first ready.
+  Collection, changed only by its sync adapter after Collection readiness.
 - **Adapter API.** Sync params gain `reportError(error, { final })` and
-  `reportHealthy()`. `markError` is for giving up before the first ready.
-  `markError` after the first ready is treated as
+  `reportHealthy()`. `markError` is for giving up before Collection readiness.
+  `markError` after Collection readiness is treated as
   `reportError(error, { final: true })` with a development warning.
-  `markReady()` after `markError()` in one attempt throws.
+  `markReady()` after `markError()` in one sync run throws.
 - **Collection surface.** `collection.health` and a `health:change` event.
 - **Error info.** `{ phase: 'initial' | 'sync' | 'request', final, name,
   message, code?, at, cause }`. Everything except `cause` is JSON-safe.
@@ -60,15 +60,15 @@ names and shapes.
     `instances: { total, inError }`.
   - Nested live queries recurse.
   - Healthy nodes are present with `isError: false`.
-- **Final flag** (fracture F-b). `final: true` means the source stopped
+- **Final flag** (fracture F-b). `final: true` means the sync adapter stopped
   trying; only a restart clears it. `reportHealthy()` cannot clear it.
 - **Request errors** (fracture F-c). A load for new demand that fails after
-  ready sets `phase: 'request'` on the live-query node that issued it. The
-  source stays healthy. It clears when that demand later settles or is
+  Collection readiness sets `phase: 'request'` on the live-query node that issued it. The
+  Collection stays healthy. It clears when that demand later settles or is
   released.
 - **Hooks.** Return `errors` beside `data`. `isError` keeps meaning "the
   initial gate is `error`". Docs lead with `errors.hasErrors` for stale data.
-- **Effects.** `onHealthChange(errors)` after the first ready; no disposal.
+- **Effects.** `onHealthChange(errors)` after Collection readiness; no disposal.
   Initial gate errors still dispose through `onSourceError`.
 - **SSR.** `errors` is not dehydrated; the client builds its own tree.
 
@@ -77,11 +77,11 @@ names and shapes.
 ### 3.1 Core: `packages/db`
 
 - [ ] `collection/lifecycle.ts`: remove `error` → `ready` from the valid
-      transitions. `markReady()` after `markError()` in the same attempt
+      transitions. `markReady()` after `markError()` in the same sync run
       throws. Keep `error` → `cleaned-up` and `idle`.
-- [ ] `collection/lifecycle.ts` / `sync.ts`: add health state, `reportError`,
+- [ ] `collection/lifecycle.ts` / `sync.ts`: add Collection health state, `reportError`,
       `reportHealthy`, the `final` rule, and reset on cleanup and restart.
-      Scope the callbacks to the sync-run epoch so a stale attempt cannot
+      Scope the callbacks to the sync-run epoch so a stale sync run cannot
       report.
 - [ ] `collection/events.ts`: add `health:change` to `AllCollectionEvents`.
       Define the payload (previous, current) and the ordering: same tick,
@@ -92,11 +92,11 @@ names and shapes.
 - [ ] `markError` after the first ready: forward to
       `reportError(error, { final: true })` and warn in development.
 - [ ] `query/live/collection-config-builder.ts`:
-  - [ ] a source entering `error` before the live query's first ready stays
+  - [ ] a Collection entering `error` before the live query's initial-query readiness stays
         a gate error for every shape (root, join, include alike);
   - [ ] remove the `erroredSourceIds` recovery path (line ~1131) and its
         status-based healing;
-  - [ ] post-ready source health does not change the live query's status or
+  - [ ] post-readiness Collection health does not change the live query's status or
         rows;
   - [ ] build and maintain the `errors` tree: per-alias nodes, include
         roll-ups, nested live-query relay, and request errors;
@@ -106,8 +106,7 @@ names and shapes.
 - [ ] `collection/subscription.ts`: keep `lastError` and `loadSubset:error`
       for every rejected load (#2129 review C8). Do not detach demand for
       recovery.
-- [ ] `query/effect.ts`: `onHealthChange`; no disposal after the first
-      ready.
+- [ ] `query/effect.ts`: `onHealthChange`; no disposal after Collection readiness.
 - [ ] `live-query-adapter.ts` and `live-query-observer.ts`: add `errors` to
       the snapshot and status flags, so every framework adapter gets it from
       one place. Keep `isError` as the gate.
@@ -121,26 +120,26 @@ names and shapes.
 
 - [ ] **Electric** (`electric-db-collection/src/electric.ts`, 9 call
       sites):
-  - [ ] post-ready `markError` at `:2628` and `:2708` becomes `reportError`
+  - [ ] post-readiness `markError` at `:2628` and `:2708` becomes `reportError`
         (`final` per site);
   - [ ] `reportHealthy()` after the next successful up-to-date following a
         problem;
-  - [ ] the SDK give-up path: before the first ready, `markError`; after it,
+  - [ ] the SDK give-up path: before Collection readiness, `markError`; after it,
         `reportError(..., { final: true })`. This extends #2127's E1 fix.
 - [ ] **query-db** (`query-db-collection/src/query.ts`, 6 sites):
-  - [ ] a failed refetch after ready calls `reportError`; a successful
+  - [ ] a failed refetch after readiness calls `reportError`; a successful
         result after a problem calls `reportHealthy()`;
   - [ ] `:2556`: no `markReady()` when the status is `error` (V1);
   - [ ] keep `utils.lastError`, `utils.isError`, and `utils.errorCount`, and
-        state how they relate to health (assay compromise).
+        state how they relate to Collection health (assay compromise).
 - [ ] **PowerSync** (`powersync-db-collection/src/powersync.ts`, 6 sites):
       a failed tracking rebuild at `:826` calls `reportError`; a successful
-      rebuild at `:813` calls `reportHealthy()` instead of `markReady()` (V2).
+      rebuild at `:813` calls `reportHealthy()` instead of `markReady()` (V2, post-readiness health).
 - [ ] **TrailBase** (`trailbase-db-collection/src/trailbase.ts`, 4 sites):
-      post-ready stream failures call `reportError`. Check them against the
+      post-readiness stream failures call `reportError`. Check them against the
       #2126 fix.
   - [ ] A stream that ends, whether it closes or errors, reports
-        `reportError(error, { final: true })` after the first ready. The
+        `reportError(error, { final: true })` after Collection readiness. The
         adapter does not resubscribe. The `trailbase` SDK (0.10.0) has no
         reconnect or resume: `subscribe` is one `fetch` stream, and
         `subscribeWs` closes without retrying. A correct reconnect would
@@ -149,12 +148,18 @@ names and shapes.
   - [ ] Update the stream-end lane in `tests/lifecycle-oracle.property.test.ts`
         (added in #2126) from "rows stay, later changes are not delivered"
         to also expect a final health error.
-- [ ] **RxDB** (`rxdb-db-collection/src/rxdb.ts`, 3 sites): post-ready
-      failures call `reportError`. Observe what happens to pending loads on a
-      final error (evidence gap V10).
+- [x] **RxDB** (`rxdb-db-collection/src/rxdb.ts`): no change. V10 is
+      closed by inspection: RxDB is eager and has no `loadSubset`, so a final
+      error has no pending subset loads; its only failure path is the initial
+      fetch, which calls `markError` before Collection readiness and rejects
+      readiness waiters under the core initial-error law. Open: the
+      `rxCollection.$` subscription has no error handler, so an RxDB stream
+      failure after readiness is not reported at all. Reporting it as a final
+      health error needs an RxDB fault a test can drive; owner: RxDB adapter,
+      witness: an observable error after readiness.
 - [ ] **Persistence** (`db-sqlite-persistence-core/src/persisted.ts`, 19
       sites):
-  - [ ] forward upstream health; keep local storage failures on
+  - [ ] forward upstream Collection health; keep local storage failures on
         `persistedError`;
   - [ ] follower tabs learn the leader's upstream health through the
         coordinator (open question);
@@ -189,7 +194,7 @@ names and shapes.
       model-d-source-error-grammar.patch` (the C4, C5, and C6 grammar
       dimensions: truncate during the error, ready → error, exact
       acquisitions, and every `source-ready` position). Under the new law,
-      `source-ready` after `source-error` in one attempt is illegal, so those
+      `source-ready` after `source-error` in one sync run is illegal, so those
       histories become "restart, then recover".
 - [ ] Shared framework conformance suite (`packages/db/tests/conformance/`):
       a health scenario, so all five drivers check `errors` the same way.
@@ -211,23 +216,23 @@ names and shapes.
       recovery) and line ~534 (a refetch recovers).
 - [ ] `docs/guides/collection-options-creator.md`: the adapter rules from
       `USER-DOCS-DRAFT.md` (stay silent while retrying; `markError` only when
-      giving up before ready; `reportError` and `reportHealthy` after ready;
+      giving up before Collection readiness; `reportError` and `reportHealthy` after readiness;
       never drop rows).
 - [ ] `docs/guides/live-queries.md`: the `errors` tree and the
       `isError` / `errors.hasErrors` callout.
 - [ ] `docs/guides/sqlite-persistence.md`, `docs/guides/offline-transactions.md`:
-      upstream health against `persistedError`.
+      upstream Collection health against `persistedError`.
 - [ ] `docs/errors.md`: the `markReady`-after-`markError` contract error,
       and any new error code.
 - [ ] `docs/collections/electric-collection.md`: `onError` retries are
-      silent; a give-up is final; post-ready health.
+      silent; a give-up is final; post-readiness health.
 - [ ] `docs/collections/local-storage-collection.md`: check its error-state
       wording.
 - [ ] `docs/collections/query-collection.md` (if present): how `utils` relate
       to health; recovery by restart.
 - [ ] Package skills: `packages/db/skills/db-core/custom-adapter/SKILL.md`
       (remove "later successful work in the same sync run can call
-      `markReady()` to recover", line ~349), and the React, Vue, Solid, and
+      `markReady()` to recover", line ~349, since recovery now requires a restart), and the React, Vue, Solid, and
       Angular skill files. Confirm with the maintainer that these package
       skills are in scope.
 - [ ] Package READMEs that mention `isError` (for example
@@ -244,7 +249,7 @@ names and shapes.
       changes. Include a migration guide:
   - an initial error no longer heals; recover with `cleanup()` and
     `preload()`;
-  - after the first ready, failures no longer move a Collection or a live
+  - after Collection readiness, failures no longer move a Collection or a live
     query to `error`; read `errors`;
   - adapter authors: `reportError` and `reportHealthy`;
   - `markReady()` after `markError()` now throws.
@@ -284,4 +289,4 @@ names and shapes.
   yes. It is in 3.1.
 - #2129 C4, C5, and C6 (Model D grammar gaps) carry over in 3.4.
 - #2127 E1 (an SDK give-up must be reported) is fixed in #2127 for the
-  initial gate. The post-ready half is in 3.2.
+  initial gate. The post-readiness half is in 3.2.

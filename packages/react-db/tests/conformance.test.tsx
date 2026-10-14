@@ -27,6 +27,7 @@ import {
 import { useLiveQuery } from '../src/useLiveQuery'
 import { runSuite } from '../../db/tests/conformance/suite'
 import { makeLaggingSource } from '../../db/tests/conformance/lagging-source'
+import { makeHealthSource } from '../../db/tests/conformance/health-source'
 import { expectResultSurface } from '../../db/tests/conformance/result-laws'
 import type { RenderHookResult } from '@testing-library/react'
 import type {
@@ -182,6 +183,7 @@ function makeHandle(hook: RenderHookResult<any, any>) {
         // Read react-db's real `isEnabled` field so the suite catches a broken
         // one (deriving from status would mask it).
         isEnabled: r?.isEnabled,
+        errors: r?.errors,
       })
     },
     async flush() {
@@ -211,6 +213,12 @@ const reactDriver: LiveQueryDriver = {
     makeLaggingSource<T>(
       createCollection,
       `conformance-react-lagging-${sourceSeq++}`,
+    ),
+  makeHealthSource: <T extends { id: string }>(data: ReadonlyArray<T>) =>
+    makeHealthSource<T>(
+      createCollection,
+      `conformance-react-health-${sourceSeq++}`,
+      data,
     ),
   makePrecreated,
   makeErrorSource,
