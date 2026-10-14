@@ -4449,8 +4449,9 @@ describe(`ordered source work oracle`, () => {
  * premise uses a forwarding provider and an indexed source filter or a
  * joined filter that refills from it, deletes three visible rows, then
  * upserts an eligible row with an unshared id; a reconstruction check, in
- * the same test as the fixed-seed campaign, reads its per-case counts and requires every case that
- * issues a held request to change rows while it is in flight. Loading must
+ * the same test as the fixed-seed campaign, reads its per-case counts and
+ * requires every case that issues a held request to change rows while it is
+ * in flight. Loading must
  * reach a fixed point: past a request budget the provider rejects and
  * records it, and every checkpoint asserts it did not. A bounded step makes
  * at most four provider requests. On either provider a step may publish one
@@ -4514,8 +4515,8 @@ type EagerCase = {
   // means `forward`.
   provider?: `forward` | `refetch`
   // When an on-demand provider answers a load. `immediate` answers within
-  // the request. `held` answers only at an `answer` or `drain` step, from the rows
-  // at that moment, so live changes can arrive while a load is in flight.
+  // the request. `held` answers only at an `answer` or `drain` step, from the
+  // rows at that moment, so live changes can arrive while a load is in flight.
   // Initial loads answer immediately. Omitted means `immediate`.
   latency?: `immediate` | `held`
   // What a holding provider does with an aborted or unloaded held request:
@@ -4976,7 +4977,6 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
 async function runEagerWindow(testCase: EagerCase): Promise<{
   heldChanges: number
   heldRequests: number
-  abortedHeld: number
   cooperativeCancels: number
   lateAnswers: number
 }> {
@@ -5130,10 +5130,7 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
   let stepChangedInFlight = false
   let caseHeldChanges = 0
   let caseHeldRequests = 0
-  // Held requests aborted or unloaded while in flight, each counted once
-  // (an acquisition release both aborts and unloads), and the ones a late
-  // provider answered anyway.
-  const abortedRequests = new Set<LoadSubsetOptions>()
+  // Held requests a late provider answered after their abort.
   let lateAnswers = 0
   // Held requests a cooperative provider cancelled (once each: the unload
   // after an abort finds the request already gone).
@@ -5154,7 +5151,6 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
   const dropHeld = (options: LoadSubsetOptions): boolean => {
     const index = heldRequests.findIndex((entry) => entry.options === options)
     if (index === -1) return false
-    abortedRequests.add(options)
     if (testCase.cancellation === `late`) {
       heldRequests[index]!.answeredAfterAbort = true
       return true
@@ -5782,13 +5778,13 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
         shownIds.length,
       )
       for (const [index, rowId] of shownIds.slice(1).entries()) {
-        const previous = shownIds[index]!
+        const predecessor = shownIds[index]!
         const sameRank = Object.is(
-          ledger.get(previous)?.rank,
+          ledger.get(predecessor)?.rank,
           ledger.get(rowId)?.rank,
         )
         expect(
-          sameRank || position.get(previous)! < position.get(rowId)!,
+          sameRank || position.get(predecessor)! < position.get(rowId)!,
           `${label}: rows in query order`,
         ).toBe(true)
       }
@@ -6022,13 +6018,13 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
         published.length,
         `publications by step ${step}`,
       ).toBeLessThanOrEqual(commits + requests)
-      for (const window of lagging() || inFlight()
+      for (const publishedWindow of lagging() || inFlight()
         ? []
         : commits === 1 && !onDemand
           ? published
           : published.slice(-1)) {
         expectEagerWindow(
-          window,
+          publishedWindow,
           modelRows(),
           shown,
           `published window at step ${step}`,
@@ -6084,7 +6080,6 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
     return {
       heldChanges: caseHeldChanges,
       heldRequests: caseHeldRequests,
-      abortedHeld: abortedRequests.size,
       cooperativeCancels,
       lateAnswers,
     }
@@ -6510,7 +6505,8 @@ describe(`eager indexed ordered windows`, () => {
 
   // The fixed-seed held campaign and its reconstruction run in one test, so
   // the reach check always reads the cases that test just executed. Reach is
-  // keyed by case, so a shrink run adds no entry.
+  // keyed by case, so rerunning an identical case overwrites its entry;
+  // shrinking runs only after a failure, which ends the test first.
   it(`keeps a window whose loads answer between live changes for a fixed seed`, async () => {
     const HELD_SEED = 2081
     const heldReach = new Map<
