@@ -2453,20 +2453,20 @@ export function queryCollectionOptions(
         ) !== undefined || (legacyAliases?.size ?? 0) > 0
       // Existing dependents keep their original observer lease even if an
       // explicit refetch creates an exact Query for the same requested scope.
+      // A new dependent needs a currently successful, applied full result.
       const sharesFullSource =
         !opts.refetch &&
         fullSourceKey !== undefined &&
         fullSourceHash !== requestedHash &&
         !requestedScopeNeedsRevalidation &&
-        (hasFullSourceDependent ||
-          (!state.observers.has(requestedHash) &&
-            (queryRefCounts.get(fullSourceHash!) ?? 0) > 0 &&
-            fullResult?.isSuccess === true &&
-            fullQuery?.state.fetchStatus === `idle` &&
-            hasCurrentCacheGenerationFetch(fullQuery) &&
-            !pendingResultApplications.has(fullSourceHash!) &&
-            !failedResultApplications.has(fullSourceHash!) &&
-            appliedFullResult))
+        (hasFullSourceDependent || !state.observers.has(requestedHash)) &&
+        (queryRefCounts.get(fullSourceHash!) ?? 0) > 0 &&
+        fullResult?.isSuccess === true &&
+        fullQuery?.state.fetchStatus === `idle` &&
+        hasCurrentCacheGenerationFetch(fullQuery) &&
+        !pendingResultApplications.has(fullSourceHash!) &&
+        !failedResultApplications.has(fullSourceHash!) &&
+        appliedFullResult
       const key = sharesFullSource ? fullSourceKey : requestedKey
       const hashedQueryKey = sharesFullSource ? fullSourceHash! : requestedHash
       const {

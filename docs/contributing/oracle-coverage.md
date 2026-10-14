@@ -573,6 +573,15 @@ keeps its own rows and owner; and final release removes them. A pending full
 request does not establish filtered coverage; the filtered demand may wait for
 its application or request its exact scope. The settled-full witness
 fails on the original implementation at the provider-call checkpoint.
+A failed full refresh leaves the prior public rows visible but cannot serve a
+new filtered acquisition from that failed Query result. Paired public preload
+histories retain or release an earlier filtered dependent, then require the
+new demand's own filtered provider request with the four-row predicate truth
+table, a new matching row, and no new nonmatching row. The original dependent
+keeps its recorded full-Query lease.
+The pre-repair shortcut fails
+the retained case at the new preload outcome and provider-scope checkpoint;
+the released control passes.
 It checks that the provider sees a live physical fetch signal when the first
 full acquisition releases but a narrower acquisition still owns the Query.
 Another held-fetch cut releases the final filtered owner during full Query
@@ -634,9 +643,9 @@ implementation fulfilled before eligible application and fails the public
 promise comparison. The reverse retention-before-F1 order needs a connected
 Collection that records the marker before F1 starts. This cold history does
 not establish whether F1 may revalidate in that order.
-These tests do not prove every provider returns a complete full source,
-arbitrary observer-option selection, or the policy for a new equal demand after
-failed revalidation. A separate metadata signal belongs to each physical Query
+These tests do not prove every provider returns a complete full source or
+arbitrary observer-option selection. A separate metadata signal belongs to each
+physical Query
 fetch started by a Collection acquisition and remains a data property when the
 provider inspects or clones request options. Query Core's lazy transport signal
 remains unread when that provider ignores cancellation, so its cache can retain

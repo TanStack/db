@@ -10,6 +10,10 @@ import {
 import { describe, expect, it, vi } from 'vitest'
 import { TraceAssertionError } from '../../db/tests/trace-runner.js'
 import { createDeferred } from '../../db/src/deferred.js'
+import {
+  compileSingleRowExpression,
+  toBooleanPredicate,
+} from '../../db/src/query/compiler/evaluators.js'
 import { queryCollectionOptions } from '../src/query.js'
 import type { QueryFunctionContext } from '@tanstack/query-core'
 import type { LoadSubsetOptions, SyncMetadataApi } from '@tanstack/db'
@@ -264,6 +268,118 @@ async function expectPendingFullSourceNeedsAppliedEvidence(): Promise<void> {
     resolveFull?.(fullRows)
     await full.cleanup()
     await filtered.cleanup()
+    await collection.cleanup()
+    queryClient.clear()
+  }
+}
+
+/**
+ * A failed full-source refresh does not establish coverage for a new filtered
+ * acquisition. The earlier filtered owner keeps its original full-Query lease
+ * and the last ready rows, but its presence cannot lend the failed result to
+ * the new owner. The reference response for the new owner is the exact filtered
+ * source result. Releasing the earlier owner is the control: both histories
+ * must make the same filtered request and settle with the same public rows.
+ * Real live-query preloads and a QueryClient invalidation drive the history;
+ * compare the provider predicate's truth table, new preload outcome, and
+ * public rows after the failed full fetch and later filtered acquisition
+ * settle. A newly available filtered row distinguishes application from the
+ * old full owner. The truth table checks these four rows, not arbitrary IR.
+ */
+async function expectFailedFullRefreshDoesNotCoverNewFilteredDemand(
+  retainFirstFiltered: boolean,
+): Promise<void> {
+  const queryClient = createQueryClient()
+  const id = `failed-full-source-new-filtered-${collectionSequence++}`
+  const fullFailure = new Error(`full refresh failed`)
+  let providerRows: Array<Row> = [
+    { id: `a1`, group: `a` },
+    { id: `b1`, group: `b` },
+  ]
+  const requests: Array<`full` | `filtered`> = []
+  const filteredTruthTables: Array<Array<boolean>> = []
+  let failFullRefresh = false
+  const queryFn = vi.fn((context: QueryFunctionContext) => {
+    const where = context.meta?.loadSubsetOptions?.where
+    const scope = where === undefined ? `full` : `filtered`
+    requests.push(scope)
+    if (scope === `full` && failFullRefresh) return Promise.reject(fullFailure)
+    if (where === undefined) return Promise.resolve(providerRows)
+    const evaluate = compileSingleRowExpression(where)
+    const truthTable = providerRows.map((row) =>
+      toBooleanPredicate(evaluate(row)),
+    )
+    filteredTruthTables.push(truthTable)
+    return Promise.resolve(providerRows.filter((_, index) => truthTable[index]))
+  })
+  const collection = createCollection(
+    queryCollectionOptions<Row>({
+      id,
+      queryClient,
+      queryKey: [id],
+      queryFn,
+      getKey: (row) => row.id,
+      startSync: true,
+      syncMode: `on-demand`,
+      staleTime: Number.POSITIVE_INFINITY,
+    }),
+  )
+  const full = createLiveQueryCollection((query) =>
+    query.from({ row: collection }).select(({ row }) => ({ id: row.id })),
+  )
+  const makeFiltered = () =>
+    createLiveQueryCollection((query) =>
+      query
+        .from({ row: collection })
+        .where(({ row }) => eq(row.group, `a`))
+        .select(({ row }) => ({ id: row.id })),
+    )
+  const firstFiltered = makeFiltered()
+  let secondFiltered: ReturnType<typeof makeFiltered> | undefined
+  try {
+    await full.preload()
+    await firstFiltered.preload()
+    expect(requests).toEqual([`full`])
+    if (!retainFirstFiltered) await firstFiltered.cleanup()
+
+    failFullRefresh = true
+    await queryClient.invalidateQueries({ queryKey: [id], exact: true })
+    expect(
+      queryClient.getQueryCache().find({ queryKey: [id], exact: true })?.state
+        .status,
+    ).toBe(`error`)
+    expect(requests).toEqual([`full`, `full`])
+    expect(collection.toArray.map((row) => row.id).sort()).toEqual([`a1`, `b1`])
+
+    providerRows = [
+      ...providerRows,
+      { id: `a2`, group: `a` },
+      { id: `b2`, group: `b` },
+    ]
+    secondFiltered = makeFiltered()
+    const outcome = await secondFiltered.preload().then(
+      () => `ready`,
+      () => `rejected`,
+    )
+    expect({
+      outcome,
+      requests,
+      filteredTruthTables,
+      secondRows: secondFiltered.toArray.map((row) => row.id),
+      sourceRows: collection.toArray.map((row) => row.id).sort(),
+    }).toEqual({
+      outcome: `ready`,
+      requests: [`full`, `full`, `filtered`],
+      filteredTruthTables: [providerRows.map((row) => row.group === `a`)],
+      secondRows: [`a1`, `a2`],
+      sourceRows: [`a1`, `a2`, `b1`],
+    })
+    if (retainFirstFiltered)
+      expect(firstFiltered.toArray.map((row) => row.id)).toEqual([`a1`, `a2`])
+  } finally {
+    await firstFiltered.cleanup()
+    await secondFiltered?.cleanup()
+    await full.cleanup()
     await collection.cleanup()
     queryClient.clear()
   }
@@ -2489,6 +2605,18 @@ describe(`loadSubset lifecycle oracle`, () => {
   it(`does not treat an unfinished full-source Query as filtered coverage`, async () => {
     await expectPendingFullSourceNeedsAppliedEvidence()
   })
+
+  it.each([
+    { first: `retained`, retainFirstFiltered: true },
+    { first: `released`, retainFirstFiltered: false },
+  ])(
+    `loads an exact filtered demand after a failed full refresh with the first filtered owner $first`,
+    async ({ retainFirstFiltered }) => {
+      await expectFailedFullRefreshDoesNotCoverNewFilteredDemand(
+        retainFirstFiltered,
+      )
+    },
+  )
 
   it.each([
     { previousFullResult: false, description: `initial full result` },
