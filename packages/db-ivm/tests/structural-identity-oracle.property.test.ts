@@ -23,8 +23,8 @@ import {
  * exactly when their specs denote equal values after normalization: -0 as 0,
  * every NaN as one value, object entries in key order, and holes kept.
  * `deep` and explicit one-element `array` nodes denote the same nested arrays.
- * A RegExp whose lastIndex is NaN equals nothing because D2 compares headers
- * with ===. The model shares no code with the hashing module; a sanity check also
+ * Distinct RegExp objects whose lastIndex is NaN compare unequal because D2
+ * compares headers with ===. The model shares no code with the hashing module; a sanity check also
  * compares it with `equalHashValues`.
  *
  * Histories: pairs built from one spec, once directly and once with
@@ -311,13 +311,14 @@ describe(`structuralIdentity`, () => {
     expect(structuralIdentity(cyclic)).toBeUndefined()
   })
 
-  it(`agrees with D2 value identity for equal representations`, () => {
+  it(`agrees with D2 value identity for equal representations`, async () => {
     if (
       replayProperty !== undefined &&
       replayProperty !== `structural-identity.equal-representations`
     )
       return
-    const property = fc.property(
+    // The guarded replay records completed runs through an async reporter.
+    const property = fc.asyncProperty(
       specArbitrary,
       fc.array(fc.boolean(), { minLength: 64, maxLength: 64 }),
       (spec, coins) => {
@@ -329,6 +330,7 @@ describe(`structuralIdentity`, () => {
           build(spec, () => false),
           build(spec, vary),
         )
+        return Promise.resolve()
       },
     )
     const options = oraclePropertyOptions(
@@ -336,8 +338,11 @@ describe(`structuralIdentity`, () => {
       `structural-identity.equal-representations`,
     )
     if (options.seed === undefined)
-      fc.assert(property, { numRuns: options.numRuns, seed: 20261014 })
-    fc.assert(property, options)
+      await fc.assert(property, { numRuns: options.numRuns, seed: 20261014 })
+    await fc.assert(
+      property,
+      options.path === undefined ? options : { ...options, numRuns: 1 },
+    )
   })
 
   // Named replays of counterexamples the random campaign found. Nested `deep`
@@ -380,13 +385,13 @@ describe(`structuralIdentity`, () => {
     },
   )
 
-  it(`agrees with D2 value identity for independent values`, () => {
+  it(`agrees with D2 value identity for independent values`, async () => {
     if (
       replayProperty !== undefined &&
       replayProperty !== `structural-identity.independent-values`
     )
       return
-    const property = fc.property(
+    const property = fc.asyncProperty(
       specArbitrary,
       specArbitrary,
       (left, right) => {
@@ -396,6 +401,7 @@ describe(`structuralIdentity`, () => {
           build(left, () => false),
           build(right, () => false),
         )
+        return Promise.resolve()
       },
     )
     const options = oraclePropertyOptions(
@@ -403,7 +409,10 @@ describe(`structuralIdentity`, () => {
       `structural-identity.independent-values`,
     )
     if (options.seed === undefined)
-      fc.assert(property, { numRuns: options.numRuns, seed: 1158727847 })
-    fc.assert(property, options)
+      await fc.assert(property, { numRuns: options.numRuns, seed: 1158727847 })
+    await fc.assert(
+      property,
+      options.path === undefined ? options : { ...options, numRuns: 1 },
+    )
   })
 })
