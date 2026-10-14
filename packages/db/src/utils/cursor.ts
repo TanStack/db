@@ -78,9 +78,10 @@ export function buildCursorCurrent(
 }
 
 /**
- * Build the continuation cursor and tie predicate for a leading-term
- * boundary value, in the form the ordered loader sends to `loadSubset`.
- * Returns `undefined` when the predicate IR cannot express the boundary.
+ * Build the continuation cursor and tie predicate for a leading-term boundary
+ * value from `buildCursor`'s boundary rule and `buildCursorCurrent`, which the
+ * ordered loader uses for its own continuations. Returns `undefined` when the
+ * predicate IR cannot express the boundary.
  */
 export function buildCursorExpressions(
   orderBy: OrderBy,

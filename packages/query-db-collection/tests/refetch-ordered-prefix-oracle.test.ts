@@ -4,11 +4,12 @@ import {
   createCollection,
   createLiveQueryCollection,
   eq,
+  getLoadSubsetDemandKey,
   isUndefined,
   not,
 } from '@tanstack/db'
 import fc from 'fast-check'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   oraclePropertyOptions,
   oracleRuns,
@@ -37,10 +38,20 @@ import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
  * refetches each page alone, a row that now sorts between two pages is in no
  * result, and the loader sees no change that would start another load.
  *
- * Law: after preload, and after `utils.refetch()` settles and the loader
- * reaches its fixed point, the public window equals the window over the
- * current backend rows. Between those checkpoints the provider may lag the
- * backend, so no window is owed.
+ * Law: after preload, and after a refetch settles and the loader reaches its
+ * fixed point, the public window equals the window over the current backend
+ * rows. A refetch is either `utils.refetch()` or a Query refetch of the
+ * collection's pages, such as `invalidateQueries`. Between those checkpoints
+ * the provider may lag the backend, so no window is owed.
+ *
+ * Two neighboring laws bound how the refetch does its work:
+ * - Repeating a refetch with an unchanged backend serves no more rows than the
+ *   refetch before it. A refetch reads the served prefixes, not a prefix that
+ *   grows with each read.
+ * - A provider that honors neither `cursor` nor `offset` breaks the request
+ *   contract. Refetch must then settle with an error, not request forever.
+ * Each request also carries a Query key that matches its own request data,
+ * so a `queryFn` may read either one.
  *
  * Limits:
  * - The generated campaigns use a provider that honors `cursor`. A provider
@@ -69,7 +80,11 @@ type Marker = { id: number; itemId: number }
 // The model sorts the current backend rows with an independent comparator.
 // It shares no production cursor, comparator, or ordering code.
 type Scenario = {
-  encoding: `cursor` | `offset`
+  // `ignore` honors neither cursor nor offset. It breaks the request
+  // contract and is used only to check that refetch fails fast.
+  encoding: `cursor` | `offset` | `ignore`
+  // A function Query key derives each key from the request data.
+  functionKey: boolean
   // One order term uses unique ranks. Two terms allow rank ties, which the
   // loader resolves with separate tie requests.
   terms: 1 | 2
@@ -100,9 +115,9 @@ function expectedWindow(
 // - `flip` adds or removes one local marker. Removing a window row's marker
 //   makes the loader request another page from the current backend.
 // - `invalidate` invalidates the Query cache, which refetches each active page
-//   alone. A page's result can then end before its served boundary. It is not
-//   a checkpoint: the background refetch gap is outside this oracle. A later
-//   `refetch` must still cover the boundary the loader proved at serve time.
+//   through Query Core rather than `utils.refetch()`. Each page must still read
+//   its whole served prefix, and a later `refetch` must still cover the
+//   boundary the loader proved at serve time.
 // - `refetch` calls `utils.refetch()`, which makes the provider current.
 //
 // A generated history is one to three rounds. Each round flips markers, which
@@ -150,6 +165,7 @@ const backendChange: fc.Arbitrary<Command> = fc.oneof(
 const caseArbitrary: fc.Arbitrary<Case> = fc.record({
   scenario: fc.record({
     encoding: fc.constant(`cursor` as const),
+    functionKey: fc.boolean(),
     terms: fc.constantFrom(1 as const, 2 as const),
     limit: fc.integer({ min: 1, max: 3 }),
     offset: fc.integer({ min: 0, max: 1 }),
@@ -197,6 +213,12 @@ type Run = {
   markers: Set<number>
   apply: (command: Command) => Promise<void>
   requests: Array<LoadSubsetOptions>
+  // Rows returned by the provider so far.
+  servedRows: () => number
+  // Requests whose Query key does not match their request data.
+  keyMismatches: () => number
+  setEncoding: (encoding: Scenario[`encoding`]) => void
+  refetch: (opts?: { throwOnError?: boolean }) => Promise<unknown>
   cleanup: () => Promise<Array<unknown>>
 }
 
@@ -220,9 +242,16 @@ async function startRun(testCase: Case): Promise<Run> {
     testCase.initial.filter((row) => row.marked).map((row) => row.id),
   )
   const requests: Array<LoadSubsetOptions> = []
+  let encoding = scenario.encoding
+  let servedRows = 0
+  let keyMismatches = 0
+  const keyFor = (options: LoadSubsetOptions) => {
+    const demandKey = getLoadSubsetDemandKey(options)
+    return demandKey === undefined ? [id] : [id, demandKey]
+  }
   const serve = (options: LoadSubsetOptions): Array<Item> => {
     requests.push(options)
-    const usesCursor = scenario.encoding === `cursor` && options.cursor
+    const usesCursor = encoding === `cursor` && options.cursor
     const predicates = [
       options.where,
       usesCursor ? options.cursor!.whereFrom : undefined,
@@ -234,9 +263,12 @@ async function startRun(testCase: Case): Promise<Run> {
     )
     if (options.orderBy) {
       page.sort((a, b) => compareRows(a, b, scenario.terms))
-      if (!usesCursor) page = page.slice(options.offset ?? 0)
+      if (!usesCursor && encoding !== `ignore`) {
+        page = page.slice(options.offset ?? 0)
+      }
       if (options.limit !== undefined) page = page.slice(0, options.limit)
     }
+    servedRows += page.length
     return page.map((row) => ({ ...row }))
   }
 
@@ -249,10 +281,18 @@ async function startRun(testCase: Case): Promise<Run> {
     queryCollectionOptions<Item>({
       id,
       queryClient,
-      queryKey: [id],
+      queryKey: scenario.functionKey ? keyFor : [id],
       syncMode: `on-demand`,
-      queryFn: (context) =>
-        Promise.resolve(serve(context.meta!.loadSubsetOptions!)),
+      queryFn: (context) => {
+        const options = context.meta!.loadSubsetOptions!
+        if (
+          scenario.functionKey &&
+          JSON.stringify(context.queryKey) !== JSON.stringify(keyFor(options))
+        ) {
+          keyMismatches++
+        }
+        return Promise.resolve(serve(options))
+      },
       getKey: (row) => row.id,
       autoIndex: `eager`,
       defaultIndexType: BTreeIndex,
@@ -337,6 +377,12 @@ async function startRun(testCase: Case): Promise<Run> {
     markers,
     apply,
     requests,
+    servedRows: () => servedRows,
+    keyMismatches: () => keyMismatches,
+    setEncoding: (next) => {
+      encoding = next
+    },
+    refetch: (opts) => items.utils.refetch(opts),
     cleanup: async () => {
       const failures: Array<unknown> = []
       for (const collection of [window, items, markerCollection]) {
@@ -354,13 +400,14 @@ async function startRun(testCase: Case): Promise<Run> {
 
 // ## Refinement check
 //
-// The checkpoints are preload and every refetch. There the public window's
+// The checkpoints are preload, every invalidation, and every refetch. There the
+// public window's
 // ordered ids must equal the model's ids. The comparison keeps order, duplicates, and missing
 // rows. A failure names its checkpoint, so a loader defect at preload is not
 // mistaken for a refetch defect.
 //
-// The run also records the premise of the gap: a refetch of a lagging
-// provider after a continuation page was served. The campaigns must reach it.
+// The run also records the premise of the gap: a refetch or invalidation of a
+// lagging provider after a continuation page was served. The campaigns must reach it.
 type Observation = {
   reachedLaggingRefetchAfterContinuation: boolean
 }
@@ -384,7 +431,7 @@ async function checkCase(testCase: Case): Promise<Observation> {
     const history: Array<Command> = [...testCase.history, { type: `refetch` }]
     for (const [step, command] of history.entries()) {
       if (
-        command.type === `refetch` &&
+        (command.type === `refetch` || command.type === `invalidate`) &&
         !providerCurrent &&
         run.requests.some((options) => options.cursor !== undefined)
       ) {
@@ -393,10 +440,30 @@ async function checkCase(testCase: Case): Promise<Observation> {
       await run.apply(command)
       if (command.type === `upsert` || command.type === `delete`) {
         providerCurrent = false
-      } else if (command.type === `refetch`) {
+      } else if (command.type === `refetch` || command.type === `invalidate`) {
         providerCurrent = true
+        check(`after ${command.type} at step ${step}`)
       }
-      if (command.type === `refetch`) check(`after refetch at step ${step}`)
+    }
+    // Repeat the refetch twice with the backend unchanged. The second read
+    // must serve no more rows than the first.
+    const servedBy = async () => {
+      const before = run.servedRows()
+      await run.apply({ type: `refetch` })
+      return run.servedRows() - before
+    }
+    const first = await servedBy()
+    const second = await servedBy()
+    if (second > first) {
+      throw new Error(
+        `a repeated refetch served ${second} rows after ${first} with an unchanged backend`,
+      )
+    }
+    check(`after repeated refetches`)
+    if (run.keyMismatches() > 0) {
+      throw new Error(
+        `${run.keyMismatches()} requests carried a Query key that did not match their request data`,
+      )
     }
   } catch (error) {
     primary = error
@@ -471,7 +538,13 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
     `shows a row that moved between two served pages after a refetch (%s encoding)`,
     async (encoding) => {
       const observation = await checkCase({
-        scenario: { encoding, terms: 1, limit: 2, offset: 0 },
+        scenario: {
+          encoding,
+          functionKey: false,
+          terms: 1,
+          limit: 2,
+          offset: 0,
+        },
         // With one order term the fixture rank is `rank * 100 + id`, so
         // rank 0 orders these rows by id: 10, 4, 1, 0.
         initial: [10, 4, 1, 0].map((id) => ({ id, rank: 0, marked: true })),
@@ -486,6 +559,33 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
     },
   )
 
+  // The issue's trace again, but the pages refetch through a Query
+  // invalidation instead of `utils.refetch()`. Each page refetches alone, so
+  // each must read its own served prefix.
+  it.each([`cursor`, `offset`] as const)(
+    `shows a row that moved between two served pages after a Query invalidation (%s encoding)`,
+    async (encoding) => {
+      const observation = await checkCase({
+        scenario: {
+          encoding,
+          functionKey: false,
+          terms: 1,
+          limit: 2,
+          offset: 0,
+        },
+        initial: [10, 4, 1, 0].map((id) => ({ id, rank: 0, marked: true })),
+        history: [
+          { type: `flip`, id: 10 },
+          { type: `upsert`, id: 5, rank: 0 },
+          { type: `flip`, id: 5 },
+          { type: `upsert`, id: 6, rank: 0 },
+          { type: `invalidate` },
+        ],
+      })
+      expect(observation.reachedLaggingRefetchAfterContinuation).toBe(true)
+    },
+  )
+
   // A second refetch must still cover the first served boundary. The first
   // refetch inserts rows ahead of it; the backend then gains a row between
   // the new and old ends, which the second refetch must deliver.
@@ -493,7 +593,13 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
     `a second refetch still covers the first served boundary (%s encoding)`,
     async (encoding) => {
       const observation = await checkCase({
-        scenario: { encoding, terms: 2, limit: 2, offset: 0 },
+        scenario: {
+          encoding,
+          functionKey: true,
+          terms: 2,
+          limit: 2,
+          offset: 0,
+        },
         initial: [
           { id: 0, rank: 6, marked: true },
           { id: 1, rank: 4, marked: true },
@@ -512,6 +618,36 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
     },
   )
 
+  // A provider that honors neither encoding returns the same page for every
+  // continuation. Refetch must settle with an error instead of requesting
+  // forever (AGENTS.md: fail fast on a contradictory collaborator signal).
+  it(`refetch rejects when the provider honors neither cursor nor offset`, async () => {
+    const run = await startRun({
+      scenario: {
+        encoding: `cursor`,
+        functionKey: false,
+        terms: 1,
+        limit: 1,
+        offset: 0,
+      },
+      // With one order term the fixture rank is `rank * 100 + id`: 3, 2, 1, 0.
+      initial: [3, 2, 1, 0].map((id) => ({ id, rank: 0, marked: id === 0 })),
+      history: [],
+    })
+    // Query DB logs the rejected fetch; the rejection itself is the check.
+    const loggedError = vi.spyOn(console, `error`).mockImplementation(() => {})
+    try {
+      expect(run.requests.some((options) => options.cursor)).toBe(true)
+      run.setEncoding(`ignore`)
+      await expect(
+        withDeadline(run.refetch({ throwOnError: true })),
+      ).rejects.toThrow(/did not advance/)
+    } finally {
+      loggedError.mockRestore()
+      await run.cleanup()
+    }
+  })
+
   // Known loader defects outside #2136. These witnesses fail today and
   // reproduce on main; `it.fails` turns green work into a red signal once the
   // ordered loader is fixed, so the limits above can be removed.
@@ -519,7 +655,13 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
     `an offset-only provider fills a joined window at preload (known loader defect)`,
     async () => {
       const run = await startRun({
-        scenario: { encoding: `offset`, terms: 1, limit: 1, offset: 0 },
+        scenario: {
+          encoding: `offset`,
+          functionKey: false,
+          terms: 1,
+          limit: 1,
+          offset: 0,
+        },
         initial: [
           { id: 0, rank: 0, marked: true },
           { id: 1, rank: 0, marked: false },
@@ -539,7 +681,13 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
     `a current provider refills a joined window after a marker removal (known loader defect)`,
     async () => {
       const testCase: Case = {
-        scenario: { encoding: `cursor`, terms: 1, limit: 2, offset: 0 },
+        scenario: {
+          encoding: `cursor`,
+          functionKey: false,
+          terms: 1,
+          limit: 2,
+          offset: 0,
+        },
         initial: [
           { id: 5, rank: 2, marked: true },
           { id: 1, rank: 2, marked: false },

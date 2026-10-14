@@ -53,6 +53,7 @@ export * from './errors'
 export * from './sync-persistence'
 export * from './sync-receipt'
 export { deepEquals, equalPersistedSnapshotValues } from './utils'
+/** @internal Used by first-party collection adapters. */
 export { buildCursorExpressions } from './utils/cursor.js'
 /** @internal Used by first-party collection adapters. */
 export { warnOnce, resetWarnings } from './utils'
