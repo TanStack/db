@@ -1188,11 +1188,15 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<number> {
     // A window requested before the live query starts replaces the compiled
     // one before its first load.
     // A findOne's window always shows one row.
+    // A findOne's window keeps its compiled limit, 1, and setWindow may move
+    // only its offset.
     const windowFor = (window: { offset: number; limit: number }) =>
-      testCase.parentForm === `findOne` ? { ...window, limit: 1 } : window
+      testCase.parentForm === `findOne` ? { offset: window.offset } : window
     const startWindow = testCase.startWindow
-    const startSettled = startWindow ? live.utils.setWindow(startWindow) : true
-    if (startWindow) shown = windowFor(startWindow)
+    const startSettled = startWindow
+      ? live.utils.setWindow(windowFor(startWindow))
+      : true
+    if (startWindow) shown = { ...shown, ...windowFor(startWindow) }
     const sign = testCase.direction === `asc` ? 1 : -1
     const sortedUnits = () =>
       windowUnits(keptParents(), testCase.distinct).sort(
@@ -1345,8 +1349,11 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<number> {
         await changeChild(`delete`, child)
       } else {
         windowBefore = shown
-        const requested = { offset: command.offset, limit: command.limit }
-        shown = windowFor(requested)
+        const requested = windowFor({
+          offset: command.offset,
+          limit: command.limit,
+        })
+        shown = { ...shown, ...requested }
         const settled = live.utils.setWindow(requested)
         if (settled !== true) await settled
       }
@@ -1584,6 +1591,21 @@ describe(`includes work under an ordered parent window`, () => {
       childFilter: [5],
     }))
 
+  // A window requested before start that moves a findOne past its one named
+  // correlation value drops that row, so its children must not load; one at
+  // offset 0 drops nothing, so its static demand still starts at once.
+  it(`seeds no child demand for a findOne moved past its named value before start`, () =>
+    expectWindowedIncludeWork({
+      ...pinnedWindowCase,
+      parents: 21,
+      groups: 11,
+      childrenPerGroup: 1,
+      parentForm: `findOne`,
+      findOneOffset: false,
+      parentFilter: [10],
+      startWindow: { offset: 1, limit: 1 },
+    }))
+
   // Forward moves load more parent rows, so the generated campaigns cannot
   // check them strictly; these do, with no overshoot allowed.
   it.each([
@@ -1807,35 +1829,41 @@ describe(`includes work under an ordered parent window`, () => {
  * subquery never does.
  */
 describe(`static include demand and setWindow ownership`, () => {
-  it(`starts a findOne detail page's child load beside its parent load`, async () => {
-    const calls: Array<string> = []
-    let releaseParent!: () => void
-    const parentHeld = new Promise<void>((resolve) => {
-      releaseParent = resolve
-    })
-    const parents = createCollection<{ id: string }, string>({
-      id: `detail-parents-${nextCollectionId++}`,
-      getKey: (row) => row.id,
-      syncMode: `on-demand`,
-      startSync: true,
-      sync: {
-        sync: ({ begin, write, commit, markReady }) => {
-          markReady()
-          return {
-            loadSubset: () => {
-              calls.push(`parent`)
-              return parentHeld.then(() => {
-                begin()
-                write({ type: `insert`, value: { id: `parent-1` } })
-                commit()
-              })
-            },
-          }
+  // A window requested before start at offset 0 drops nothing, so it keeps
+  // the static demand.
+  it.each([null, { offset: 0 }] as const)(
+    `starts a findOne detail page's child load beside its parent load (window before start: %o)`,
+    async (startWindow) => {
+      const calls: Array<string> = []
+      let releaseParent!: () => void
+      const parentHeld = new Promise<void>((resolve) => {
+        releaseParent = resolve
+      })
+      const parents = createCollection<{ id: string }, string>({
+        id: `detail-parents-${nextCollectionId++}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => {
+                calls.push(`parent`)
+                return parentHeld.then(() => {
+                  begin()
+                  write({ type: `insert`, value: { id: `parent-1` } })
+                  commit()
+                })
+              },
+            }
+          },
         },
-      },
-    })
-    const children = createCollection<{ id: string; parentId: string }, string>(
-      {
+      })
+      const children = createCollection<
+        { id: string; parentId: string },
+        string
+      >({
         id: `detail-children-${nextCollectionId++}`,
         getKey: (row) => row.id,
         syncMode: `on-demand`,
@@ -1857,50 +1885,54 @@ describe(`static include demand and setWindow ownership`, () => {
             }
           },
         },
-      },
-    )
-    const live = createLiveQueryCollection({
-      startSync: true,
-      query: (q) =>
-        q
-          .from({ parent: parents })
-          .where(({ parent }) => eq(parent.id, `parent-1`))
-          .select(({ parent }) => ({
-            id: parent.id,
-            kids: toArray(
-              q
-                .from({ child: children })
-                .where(({ child }) => eq(child.parentId, parent.id))
-                .select(({ child }) => ({ id: child.id })),
-            ),
-          }))
-          .findOne(),
-    })
-    try {
-      const ready = live.toArrayWhenReady()
-      await new Promise((resolve) => setTimeout(resolve, 0))
-      // The child acquisition attempt has started while the parent's is held.
-      expect(calls).toEqual([`parent`, `child`])
-      releaseParent()
-      await ready
-      expect(
-        (
-          live.toArray as unknown as Array<{
-            id: string
-            kids: Array<{ id: string }>
-          }>
-        ).map((row) => ({ id: row.id, kids: row.kids.map((kid) => kid.id) })),
-      ).toEqual([{ id: `parent-1`, kids: [`child-1`] }])
-      expect(calls).toEqual([`parent`, `child`])
-    } finally {
-      releaseParent()
-      await runCleanups([
-        () => live.cleanup(),
-        () => parents.cleanup(),
-        () => children.cleanup(),
-      ])
-    }
-  })
+      })
+      const live = createLiveQueryCollection({
+        startSync: false,
+        query: (q) =>
+          q
+            .from({ parent: parents })
+            .where(({ parent }) => eq(parent.id, `parent-1`))
+            .select(({ parent }) => ({
+              id: parent.id,
+              kids: toArray(
+                q
+                  .from({ child: children })
+                  .where(({ child }) => eq(child.parentId, parent.id))
+                  .select(({ child }) => ({ id: child.id })),
+              ),
+            }))
+            .findOne(),
+      })
+      if (startWindow) {
+        const settled = live.utils.setWindow(startWindow)
+        if (settled !== true) void settled.catch(() => {})
+      }
+      try {
+        const ready = live.toArrayWhenReady()
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        // The child acquisition attempt has started while the parent's is held.
+        expect(calls).toEqual([`parent`, `child`])
+        releaseParent()
+        await ready
+        expect(
+          (
+            live.toArray as unknown as Array<{
+              id: string
+              kids: Array<{ id: string }>
+            }>
+          ).map((row) => ({ id: row.id, kids: row.kids.map((kid) => kid.id) })),
+        ).toEqual([{ id: `parent-1`, kids: [`child-1`] }])
+        expect(calls).toEqual([`parent`, `child`])
+      } finally {
+        releaseParent()
+        await runCleanups([
+          () => live.cleanup(),
+          () => parents.cleanup(),
+          () => children.cleanup(),
+        ])
+      }
+    },
+  )
 
   // A findOne with limit 0 shows no row, so its named correlation value's child must
   // not load.
@@ -1958,6 +1990,56 @@ describe(`static include demand and setWindow ownership`, () => {
         () => live.cleanup(),
         () => parents.cleanup(),
         () => children.cleanup(),
+      ])
+    }
+  })
+
+  // A findOne's window keeps its compiled limit. setWindow may move its
+  // offset or pass that limit, and throws for any other limit.
+  it(`keeps a findOne's compiled window limit under setWindow`, async () => {
+    const rows = createSourceCollection(
+      `find-one-window-rows`,
+      Array.from({ length: 4 }, (_, rank) => ({ id: `row-${rank}`, rank })),
+    )
+    const one = createLiveQueryCollection((q) =>
+      q
+        .from({ row: rows })
+        .orderBy(({ row }) => row.rank)
+        .findOne(),
+    )
+    const none = createLiveQueryCollection((q) =>
+      q
+        .from({ row: rows })
+        .orderBy(({ row }) => row.rank)
+        .limit(0)
+        .findOne(),
+    )
+    try {
+      await Promise.all([one.preload(), none.preload()])
+      expect(() => one.utils.setWindow({ offset: 0, limit: 3 })).toThrow(
+        /limit/,
+      )
+      for (const window of [{ offset: 2 }, { offset: 1, limit: 1 }]) {
+        const settled = one.utils.setWindow(window)
+        if (settled !== true) await settled
+        expect(one.toArray.map((row) => row.id)).toEqual([
+          `row-${window.offset}`,
+        ])
+        expect(one.utils.getWindow()).toEqual({
+          offset: window.offset,
+          limit: 1,
+        })
+      }
+      const moved = none.utils.setWindow({ offset: 1 })
+      if (moved !== true) await moved
+      expect(none.toArray).toEqual([])
+      expect(none.utils.getWindow()).toEqual({ offset: 1, limit: 0 })
+      expect(() => none.utils.setWindow({ limit: 1 })).toThrow(/limit/)
+    } finally {
+      await runCleanups([
+        () => one.cleanup(),
+        () => none.cleanup(),
+        () => rows.cleanup(),
       ])
     }
   })
