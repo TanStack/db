@@ -1865,7 +1865,7 @@ class PersistedCollectionRuntime<
     this.restartSourceAfterScopedRecovery = undefined
   }
 
-  reportSyncError(error: unknown): unknown {
+  reportSyncError(error: unknown, isTerminal = this.terminalFailure): unknown {
     const markError = this.syncControls.markError
     if (this.syncErrorReported) return this.reportedSyncError
     if (!markError) return error
@@ -1875,7 +1875,7 @@ class PersistedCollectionRuntime<
     // Terminal local persistence failures crash the Collection, like IndexedDB
     // closure does. Upstream (wrapped sync adapter) failures after readiness
     // stay health metadata through reportError.
-    if (this.terminalFailure && this.collection?._lifecycle.hasBeenReady) {
+    if (isTerminal && this.collection?._lifecycle.hasBeenReady) {
       this.collection._lifecycle.crash(error)
     } else {
       try {
