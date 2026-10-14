@@ -2753,6 +2753,144 @@ it(`preserves the primary mismatch when a cleanup step also fails`, async () => 
 
 describe(`loadSubset lifecycle oracle`, () => {
   /**
+   * Query success does not settle a load while its Collection commit is held.
+   * A wrapping sync may delay acceptance after the provider returns. Releasing
+   * the last public owner at that cut cancels the acquisition and its pending
+   * write. A peer acquired at the same cut keeps the result live. Once the
+   * gate opens, a canceled load must reject without publishing a row, while
+   * the peer's load applies the row. Both unsubscribe and Collection cleanup
+   * are legal final release actions.
+   */
+  it.each([
+    { release: `subscription`, peer: false },
+    { release: `Collection`, peer: false },
+    { release: `subscription`, peer: true },
+  ] as const)(
+    `settles an unaccepted result commit after $release release, peer=$peer`,
+    async ({ release, peer }) => {
+      const queryClient = createQueryClient()
+      const id = `release-before-result-commit-${collectionSequence++}`
+      const commitEntered = createDeferred<void>()
+      const commitGate = createDeferred<void>()
+      let heldCommit = false
+      const queryFn = vi.fn(() =>
+        Promise.resolve([{ id: `a` }] satisfies Array<Row>),
+      )
+      const baseOptions = queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (row) => row.id,
+        startSync: true,
+        syncMode: `on-demand`,
+      })
+      const originalSync = baseOptions.sync
+      const collection = createCollection({
+        ...baseOptions,
+        sync: {
+          sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+            originalSync.sync({
+              ...params,
+              commit: (signal) => {
+                if (heldCommit) return params.commit(signal)
+                heldCommit = true
+                commitEntered.resolve()
+                return commitGate.promise.then(() => {
+                  const applied = params.commit(signal)
+                  return applied === true ? undefined : applied
+                })
+              },
+            }),
+        },
+      })
+      const subscription = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+      let peerSubscription: typeof subscription | undefined
+
+      await checkPublicCleanupWitness(async () => {
+        let load: true | Promise<void> | undefined
+        subscription.requestSnapshot({
+          onLoadSubsetResult: (result) => {
+            load = result
+          },
+        })
+        expect(load).toBeDefined()
+        expect(load).not.toBe(true)
+        if (load === undefined || load === true)
+          throw new Error(`No pending load`)
+        const outcome = load.then(
+          () => ({ status: `fulfilled` as const }),
+          (error: unknown) => ({ status: `rejected` as const, error }),
+        )
+        await commitEntered.promise
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        expect(collection.has(`a`)).toBe(false)
+        peerSubscription = peer
+          ? collection.subscribeChanges(() => {}, {
+              includeInitialState: false,
+            })
+          : undefined
+        let peerLoad: true | Promise<void> | undefined
+        peerSubscription?.requestSnapshot({
+          onLoadSubsetResult: (result) => {
+            peerLoad = result
+          },
+        })
+        const peerOutcome =
+          peerLoad && peerLoad !== true
+            ? peerLoad.then(
+                () => ({ status: `fulfilled` as const }),
+                (error: unknown) => ({ status: `rejected` as const, error }),
+              )
+            : undefined
+        if (peer) expect(peerOutcome).toBeDefined()
+        // Release in the same continuation that observes commit entry. An
+        // extra microtask lets the final-owner waiter choose a different path.
+        if (release === `subscription`) subscription.unsubscribe()
+        else await collection.cleanup()
+        expect(collection.has(`a`)).toBe(false)
+        let beforeGate: Awaited<typeof outcome> | undefined
+        void outcome.then((result) => {
+          beforeGate = result
+        })
+        let peerBeforeGate: Awaited<NonNullable<typeof peerOutcome>> | undefined
+        void peerOutcome?.then((result) => {
+          peerBeforeGate = result
+        })
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        expect(collection.has(`a`)).toBe(false)
+        const settledBeforeGate = beforeGate
+        const peerSettledBeforeGate = peerBeforeGate
+        commitGate.resolve()
+        const result = await outcome
+        const peerResult = await peerOutcome
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        if (peer) {
+          expect(settledBeforeGate).toBeUndefined()
+          expect(peerSettledBeforeGate).toBeUndefined()
+          expect(peerResult?.status).toBe(`fulfilled`)
+          expect(queryFn).toHaveBeenCalledTimes(1)
+          expect(collection.has(`a`)).toBe(true)
+        } else {
+          expect(settledBeforeGate?.status).not.toBe(`fulfilled`)
+          expect(result.status).toBe(`rejected`)
+          if (result.status === `rejected`)
+            expect(result.error).toMatchObject({ name: `AbortError` })
+          expect(collection.has(`a`)).toBe(false)
+        }
+      }, [
+        [`commit gate`, () => commitGate.resolve()],
+        [`subscription`, () => subscription.unsubscribe()],
+        [`peer subscription`, () => peerSubscription?.unsubscribe()],
+        [`Collection`, () => collection.cleanup()],
+        [`Query client`, () => queryClient.clear()],
+      ])
+    },
+  )
+
+  /**
    * Query Core publishes a new cache entry while constructing an observer.
    * Cleanup from that synchronous notification precedes Query DB's ownership
    * registration. Once cleanup settles, the obsolete Query must have no

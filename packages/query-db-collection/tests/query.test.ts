@@ -7699,7 +7699,7 @@ describe(`QueryCollection`, () => {
 
       collection._sync.unloadSubset(request)
       persistedScan.resolve([])
-      await load
+      await expect(load).rejects.toMatchObject({ name: `AbortError` })
       await flushPromises()
 
       expect(collection.has(item.id)).toBe(false)

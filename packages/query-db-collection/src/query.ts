@@ -1248,6 +1248,22 @@ export function queryCollectionOptions(
       string,
       ResultApplicationController
     >()
+    // A newer result may replace an application without releasing its Query.
+    // A commit held by a wrapping sync is canceled only when the Query owner
+    // leaves, including after that result replacement.
+    const queryCommitControllers = new Map<string, AbortController>()
+    const queryCommitSignal = (hashedQueryKey: string): AbortSignal => {
+      let controller = queryCommitControllers.get(hashedQueryKey)
+      if (!controller) {
+        controller = new AbortController()
+        queryCommitControllers.set(hashedQueryKey, controller)
+      }
+      return controller.signal
+    }
+    const abortQueryCommit = (hashedQueryKey: string) => {
+      queryCommitControllers.get(hashedQueryKey)?.abort()
+      queryCommitControllers.delete(hashedQueryKey)
+    }
     const effectivePersistedGcTimes = new Map<string, number>()
     const persistedRetentionTimers = new Map<
       string,
@@ -1290,9 +1306,13 @@ export function queryCollectionOptions(
       createCancellationError: () => Error,
       acceptsResult: (result: QueryObserverResult<any, any>) => boolean = () =>
         true,
+      settleResult?: (
+        result: QueryObserverResult<Array<any>, any>,
+      ) => true | Promise<void>,
     ): Promise<QueryObserverResult<Array<any>, any>> =>
       new Promise((resolve, reject) => {
         let active = true
+        let settling = false
         let unsubscribe = () => {}
         const pending =
           pendingReadyUnsubscribes.get(hashedQueryKey) ?? new Set()
@@ -1320,7 +1340,31 @@ export function queryCollectionOptions(
               (result.isSuccess && !collection.deferDataRefresh) ||
               (result.isError && !result.isFetching)
             ) {
-              if (acceptsResult(result)) finish(() => resolve(result))
+              if (!active || settling || !acceptsResult(result)) return
+              settling = true
+              if (!settleResult) {
+                finish(() => resolve(result))
+                return
+              }
+              // The result handler publishes its application after Query's
+              // observer notification. Read it at the same microtask cut as
+              // the former post-result Promise continuation.
+              queueMicrotask(() => {
+                if (!active) return
+                try {
+                  const settlement = settleResult(result)
+                  if (settlement === true) {
+                    finish(() => resolve(result))
+                  } else {
+                    void settlement.then(
+                      () => finish(() => resolve(result)),
+                      (error: unknown) => finish(() => reject(error)),
+                    )
+                  }
+                } catch (error) {
+                  finish(() => reject(error))
+                }
+              })
             }
           })
         })
@@ -1795,7 +1839,7 @@ export function queryCollectionOptions(
             }
           })
 
-    const waitForQueryReady = (
+    const waitForQueryReadyAndApplied = (
       observer: QueryObserver<Array<any>, any, Array<any>, Array<any>, any>,
       hashedQueryKey: string,
       acceptsResult?: (result: QueryObserverResult<any, any>) => boolean,
@@ -1805,19 +1849,11 @@ export function queryCollectionOptions(
         hashedQueryKey,
         () => new LoadSubsetOperationAbortedError(),
         acceptsResult,
-      ).then((result) => {
-        if (result.isError) throw result.error
-      })
-
-    const waitForQueryReadyAndApplied = (
-      observer: QueryObserver<Array<any>, any, Array<any>, Array<any>, any>,
-      hashedQueryKey: string,
-      acceptsResult?: (result: QueryObserverResult<any, any>) => boolean,
-    ): Promise<void> =>
-      waitForQueryReady(observer, hashedQueryKey, acceptsResult).then(() => {
-        const settlement = getResultApplicationSettlement(hashedQueryKey)
-        return settlement === true ? undefined : settlement
-      })
+        (result) => {
+          if (result.isError) throw result.error
+          return getResultApplicationSettlement(hashedQueryKey)
+        },
+      ).then(() => undefined)
 
     const refetchAndWaitForApplication = async (
       observer: QueryObserver<Array<any>, any, Array<any>, Array<any>, any>,
@@ -2650,7 +2686,7 @@ export function queryCollectionOptions(
         }
         // An accepted sync transaction always applies, so a later result or
         // cleanup must not cancel it or roll back the ownership it records.
-        const applied = commit()
+        const applied = commit(queryCommitSignal(hashedQueryKey))
         applicationToken.rollback = undefined
         transactionActive = false
         retainedQueriesPendingRevalidation.delete(hashedQueryKey)
@@ -3363,6 +3399,7 @@ export function queryCollectionOptions(
 
     const cleanupQueryInternal = (hashedQueryKey: string) => {
       const query = state.observers.get(hashedQueryKey)?.getCurrentQuery()
+      abortQueryCommit(hashedQueryKey)
       unsubscribes.get(hashedQueryKey)?.()
       unsubscribes.delete(hashedQueryKey)
       unsubscribePendingReadyListeners(hashedQueryKey)
@@ -3472,6 +3509,7 @@ export function queryCollectionOptions(
         metadata &&
         persistence?.scanPersistedRows
       ) {
+        abortQueryCommit(hashedQueryKey)
         invalidatePendingResultApplication(hashedQueryKey)
         begin()
         metadata.collection.set(
@@ -3655,6 +3693,9 @@ export function queryCollectionOptions(
 
     const cleanup = () => {
       if (activeSyncSession === syncSession) activeSyncSession = undefined
+      for (const controller of queryCommitControllers.values())
+        controller.abort()
+      queryCommitControllers.clear()
       pendingStartupLoads.clear()
       fullSourceDependents.clear()
       acquisitionLeasesByOptions = new WeakMap()

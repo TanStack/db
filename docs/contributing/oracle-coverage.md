@@ -592,8 +592,16 @@ both filtered acquisitions remain pending while it is closed and while a
 second gate holds the Collection commit after it opens. The first acquisition
 is recorded once so a later Query success cannot replace its observation.
 Removing the readiness gate or the post-result application wait fails at the
-respective checkpoint. An
-applied direct cache patch permits reuse or one exact filtered revalidation
+respective checkpoint. A wrapping sync can hold an unaccepted Collection result
+commit after Query success.
+At commit entry, final subscription release or Collection cleanup rejects the
+pending public load; opening the commit gate later leaves the row absent. An
+equal peer acquired before first-owner release keeps the commit and both loads
+pending until the gate opens, then receives the row. Removing the application
+wait falsely fulfills the final-owner load before the gate; dropping the
+application signal lets its canceled commit publish the row afterward. These
+histories hold an in-memory wrapping sync, not a native persister.
+An applied direct cache patch permits reuse or one exact filtered revalidation
 for a new demand, but cannot trigger a redundant full request. The bounded
 history has no retry, invalidation, or explicit refetch; a duplicate filtered
 provider-call mutant fails its full request-sequence assertion. Signal
