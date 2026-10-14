@@ -883,3 +883,49 @@ The published Query Core receiving gap remains as recorded above.
 | ORC-012 review evidence | **Met for the stated boundary.** This exact-head record gives RED/GREEN and mutant outcomes for static on-demand key × retained/released F1 after failed full invalidation × real QueryClient and Collection × F2 request/outcome/public rows. The coverage map owns the untested cells. |
 | ORC-013 boundary witnesses | **Met.** Retained and released F1 distinguish the old shortcut; settled-full reuse rejects always-exact routing, while fresh `a2`/`b2` distinguish application and predicate errors. |
 | ORC-014 controlled-premise handoff | **Open for the integrated branch.** This controlled provider is cited only for the four-row Query Collection law. The custom Query behavior and compatible published Core receiving cells remain assigned in the coverage map. |
+
+## Failed-refresh ownership and cleanup follow-up at `65432b73f`
+
+The executable head is `65432b73fb67bb585961847e213b879621fdeb4c`,
+based on `8c615772df68772476643ef9c5fc24685f548478`. The binary diff of
+`query.ts` and `load-subset-lifecycle-oracle.test.ts` between those heads has
+SHA-256 `a1957c99b86429d85022d7256cabb66b2ab4a4e7f2eb9933966`.
+Production `query.ts` is unchanged, with SHA-256
+`f26ee7c89f68510c97ca8c1246def66bbe6326b8e33c4aa16d7d548d436fa827`;
+the revised oracle has SHA-256
+`e4487c03a67ac935105c54fcff12c2b5e4014da12b7b455d854766c95a6f3900`.
+
+The v7 oracle review found that both earlier failed-refresh histories kept the
+original full view mounted. F1's rows were checked only after F2 succeeded,
+so F2 could conceal a temporary loss. The new third history applies the full
+result, acquires filtered F1, fails a full invalidation, checks F1's `ready`
+status and `a1` row, then releases the original full view. Before F2 attaches,
+it checks F1's status and row again, the source's old `a1`/`b1` rows, and one
+remaining full-Query observer. F2 must then request its exact filtered scope,
+classify `a1`/`a2` as matching and `b1`/`b2` as nonmatching, fulfill its preload,
+and publish `a2` without `b2`. The retained and released controls remain.
+These checks establish retained ownership and new-demand coverage for this
+schedule. They do not infer global deletion from rows omitted by F2: F1 still
+owns the old full-source rows.
+
+A disposable production mutant set the full Query refcount to zero when its
+original full owner released after a failed refresh, ignoring F1's remaining
+lease. Both earlier failed-refresh histories passed. The new history failed
+immediately after the full-view release: F1's expected `a1` row was absent.
+This distinguishes the new ownership checkpoint from the earlier F2 result
+checks. The repaired production code passes all three histories.
+
+The failed-refresh helper now attempts every acquired cleanup even if an
+earlier cleanup fails. Its comparison failure remains the primary error;
+secondary cleanup errors remain separate in an `AggregateError`. A harness
+calibration injects one comparison error, a synchronous cleanup error, and an
+asynchronous cleanup error, then verifies that all three cleanup actions ran
+and that the aggregate retains the primary cause and both cleanup diagnostics.
+ORC-010 is met for this helper; this does not certify every cleanup path in
+the larger oracle file.
+
+The Query DB suite passed 1,033 tests in 20 files against immutable
+attribution-enabled Query Core source `877655c66`. TypeScript, changed-file
+ESLint, Prettier, and `git diff --check` passed. The custom Query-behavior
+receiving witness and compatible published Query Core release remain open
+under ORC-014 as assigned in the coverage map.
