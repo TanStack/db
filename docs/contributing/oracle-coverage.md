@@ -597,23 +597,51 @@ provider. Two four-case public preload histories release either owner during a h
 shared fetch. The equal-owner history belongs to the primary ownership oracle;
 the direct-EQ/joined-singleton history checks the joined route. Both require the
 surviving preload and public row, while one provider call checks shared work.
-The proposed physical-Query signal repair passes those shared histories but
-fails a sole public `requestSnapshot({ signal })` abort while its owner remains
-retained: the provider can publish a late row. The signal law remains open;
-the [design review](oracle-reviews/pr-2134-identity-and-persisted-key.md)
-records both counterexamples. The primary ownership oracle now holds a public
-filtered snapshot across caller abort and rejects a late public row from a
-provider that ignores cancellation. The caller's load must reject with
-`AbortError`; an isolated empty-success mutant passed the former row check and
-failed the added outcome check. The oracle also requires two source Collections
-to share one Query and keeps the first fetch alive when one live-query owner
-retires. Query Core may cache an ignored result, but the canceled request must
-not install its row in the Collection. The same owner now checks two public
-snapshot callers sharing one provider response with either one or both caller
-signals aborted while both leases remain retained. The both-aborted branch
-rejects the local prototype at two fulfilled outcomes and one public row.
-A compatible owner-aware signal still needs a late-peer history after sole
-abort.
+The first physical-Query signal prototype failed a sole public
+`requestSnapshot({ signal })` abort while its lease remained retained: an
+ignoring provider published a late row and fulfilled the aborted caller. The
+[design review](oracle-reviews/pr-2134-identity-and-persisted-key.md) records
+that counterexample and the later repair. The primary ownership oracle now
+requires `AbortError` and no public row for that history, then crosses one or
+both callers aborting during one shared provider response. A held persisted-owner
+scan cannot resume an aborted request or change durable ownership. A caller
+arriving after the sole prior caller aborts needs a fresh physical fetch and
+cannot publish the prior response. A no-signal creator and signal-bearing peer
+share one physical fetch; its provider signal stays live after creator release
+and aborts when the peer aborts. The shared live-query histories cross creator
+and retiring-owner order, and a separate history shares one physical Query
+across two source Collections. An outside Query Core observer also refetches a
+Query with no live acquisition after final unload or while an aborted caller
+retains its lease. The no-signal, aborted-and-unloaded, and
+aborted-but-retained creators each require a live provider metadata signal and
+an applied Query cache result. An always-owner-driven signal mutant fails at
+the live-signal checkpoint. A distinct outside observer joining an active
+Collection fetch keeps its provider signal live after the Collection caller
+aborts, receives the row itself, and leaves the Collection rowless. Removing
+that outside observer then aborts the signal if no live Collection owner remains;
+the two transitions failed separate pre-repair checkpoints. An offline paused
+request starts no provider work after its sole caller aborts, but can complete
+for an outside observer. A signal-honoring rejection after ordinary unload
+causes one fresh fetch for a new caller; an ignored abort can leave a cache
+result reusable by a fast remount. A historical-owner history therefore accepts
+either the ignored-abort result or a new fetch after a same-turn reacquisition,
+while requiring the successor to remain pending and the old owner durable
+until an applicable result arrives. A later external refetch supersedes a
+canceled Collection fetch, and reacquisition applies its newer cached result
+before load settlement. A second successor history lets that external fetch
+finish before acquisition; with infinite stale time it applies the fetched
+cache row without a redundant failing request. A held reentrant
+F1-cancellation/F2-start history
+requires F2's provider signal, public row, and cache result to survive F1's
+later terminal notification. A separate two-Collection history cleans up the
+first source itself during their shared fetch; the provider signal remains live
+and the second source publishes the result from the single provider call. These
+observations cover exact on-demand keys, the exercised release and abort order,
+public rows, caller outcomes, provider signals and call counts, plus the held
+historical scan's durable state. They do not establish arbitrary provider
+schedules, external observer options with a different query function, or custom
+query-key functions.
+
 The old singleton-IN implementation failed the public-row or durable-owner and marker
 checkpoints; the warm-cache gate and alias parser have separate hostile-mutant
 checks in the review record. A separate full-source handoff keeps an applied

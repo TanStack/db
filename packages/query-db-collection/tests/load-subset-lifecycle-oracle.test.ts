@@ -38,7 +38,10 @@ import type { LoadSubsetOptions, SyncMetadataApi } from '@tanstack/db'
  * authorize the identity, request-scoped release, and applied-settlement laws.
  * Each direct load below represents one acquisition lease; the small reference
  * history keeps a shared Query transport active while any lease remains. The
- * held provider checks the abort signal at each release checkpoint. These
+ * held provider checks the abort signal at each release checkpoint. Every
+ * on-demand provider fetch exposes a physical AbortSignal in request metadata,
+ * even when its first caller supplies none; demand identity uses the immutable
+ * request fields, not that signal. These
  * controlled histories do not establish real network cancellation, arbitrary
  * Query scheduling, or native persistence behavior.
  */
@@ -906,9 +909,15 @@ async function observeDemandIdentity(
   const requests: Array<LoadSubsetOptions> = []
   const queryFn = vi.fn((context: QueryFunctionContext) => {
     const options = context.meta?.loadSubsetOptions ?? {}
-    // Direct calls in this fixture supply only immutable request data, not a
-    // signal/subscription. Capture the complete received request before checks.
-    requests.push(structuredClone(options))
+    // The physical fetch signal is transport ownership, not demand identity.
+    // Check it independently, then compare every immutable request field.
+    const { signal, ...requestData } = options
+    if (!(signal instanceof AbortSignal) || signal.aborted)
+      throw new Error(`Identity fetch requires a live physical signal`)
+    const descriptor = Object.getOwnPropertyDescriptor(options, `signal`)
+    if (descriptor?.value !== signal || descriptor.get !== undefined)
+      throw new Error(`Identity fetch requires a signal data property`)
+    requests.push(structuredClone(requestData))
     const result = selectIdentityRows(options, providerRows)
     return Promise.resolve(
       fault === `wrong value`

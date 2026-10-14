@@ -1475,9 +1475,25 @@ The live-query graph publishes coherent rows but does not own query-db cache or
 listener lifetime.
 When query-db acquisitions share a physical Query, releasing one acquisition
 must leave work needed by another active acquisition alive. A query function
-that reads `meta.loadSubsetOptions.signal` receives the physical Query fetch
-signal. If it consumes that signal, Query Core can cancel the fetch after its
-last observer releases; a function that ignores it may finish into Query cache.
+that reads `meta.loadSubsetOptions.signal` during an acquisition-driven fetch
+receives a native signal data property for the physical Query fetch, even when
+its first caller supplied no signal. Each caller's own signal still determines
+its load outcome. Releasing one acquisition cannot abort the physical fetch
+while another live acquisition needs it. An active eager Collection observer or
+independent Query Core observer can also keep that fetch alive. The physical
+signal aborts when its final live owner leaves during the fetch; a function
+that ignores it may finish into Query cache but cannot publish an ownerless row
+to the Collection. A new caller after ordinary unload may use that cached result.
+If the provider rejects after honoring the abort, the new caller starts fresh
+work. A retained aborted caller cannot give its later result to a new caller.
+After an independent Query Core refetch succeeds with no live Collection owner,
+a later acquisition applies its still-fresh fetched cache result before its
+load settles.
+An older fetch's terminal notification cannot abort or retire replacement work
+that an observer started reentrantly before the notification reaches query-db.
+An external Query Core refetch with no live query-db acquisition exposes Query
+Core's own signal in that metadata property and may settle into Query cache.
+An aborted caller can retain an acquisition lease without keeping it live.
 
 ### Pooled live queries
 

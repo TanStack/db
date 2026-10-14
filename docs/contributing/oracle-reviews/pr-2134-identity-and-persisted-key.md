@@ -346,3 +346,179 @@ fulfills both and publishes the row. The targeted runtime check fails at the
 combined outcome and row comparison with no type errors. A peer that arrives
 after sole abort still needs a public receiving history before an owner-aware
 composite can claim closure.
+
+## Owner-aware cancellation repair after the design attack
+
+The repair represents each logical load as an acquisition separate from the
+shared Query observer. Its caller signal determines that caller's outcome and
+whether its rows may be published. A physical Query fetch has one provider
+signal across Collections. An active eager or independent Query Core observer
+can also own that fetch. Its signal aborts when the final live owner leaves.
+A provider that ignores cancellation may finish into Query Core's private
+cache; an ownerless result cannot enter Collection rows. After ordinary unload,
+a fast remount can reuse that cached result. After an aborted caller retains
+its lease, a successor starts fresh work instead of adopting the canceled fetch.
+
+The primary ownership oracle adds three receiving histories. A held
+persisted-owner metadata scan followed by caller abort must reject with
+`AbortError` without starting a provider request or changing the old durable
+row, owner, or marker. Before the repair, releasing the scan started the
+provider. A successor arriving after sole abort but before the old provider
+settles must start a second fetch; the first response cannot settle the
+successor or become public. Before the repair, only one fetch started. A fetch
+started by a caller without a signal must still expose a physical provider
+signal when a signal-bearing peer joins. That signal survives creator release
+and aborts when the peer aborts; an ignored late response remains private.
+Before the last wrapper correction, the provider signal was `undefined` at the
+first checkpoint. Each history failed at its named checkpoint before its code
+change and passed afterward, with type checking enabled.
+
+Together with the earlier sole-abort, two-caller, four live-query release
+orders, and two-Collection shared-Query histories, these witnesses exercise
+the owner-set rule across caller abort, lease release, metadata suspension,
+and late succession. The acceptance comparison uses caller outcomes, provider
+signal state and call count, public rows, and durable ownership at specified
+settlement cuts. The model is the set of live logical owners; it does not
+derive expected rows from Query Core's observer or cache state. The repair
+removes redundant acquisition flags and uses set membership and physical
+Query association as its two lifecycle facts. Its remaining state tracks
+logical callers and physical fetches, which Query Core's observer refcount
+does not represent.
+
+The evidence does not cover every schedule. A later receiving history drives
+source Collection cleanup while another Collection retains the same physical
+Query, using one static key and the same query function. Custom query-key
+functions and shared Queries with different query functions remain open.
+
+## Metadata signal and external Query Core ownership boundary
+
+The five demand-identity forms in `load-subset-lifecycle-oracle.test.ts` used
+an exact comparison of every `loadSubsetOptions` property. It treated absent
+`signal` as part of immutable demand identity because the fixture's direct
+calls did not supply a caller signal. That was a fixture assumption, not the
+documented demand-key law. The revised oracle asserts that each on-demand
+provider call receives a live native physical signal as an own data property,
+then compares every
+remaining request field, query call count, public row, and owner transition.
+This retains the identity law while checking the provider signal separately.
+The Query Collection guide and live-query architecture now state the physical
+signal contract, including a no-signal creator.
+
+An outside Query Core observer can retain a Query after its final Query
+Collection acquisition unloads, or while an aborted caller still holds a
+lease. A three-case ownership history holds an explicit external refetch after
+a no-signal creator, an aborted-and-unloaded creator, and an
+aborted-but-retained creator. At the provider boundary,
+`meta.loadSubsetOptions.signal` must be a live Query Core signal; after the
+held response, the Query cache must contain its new row and have idle fetch
+status. Before the external-path repair, metadata signal was absent in the
+first case and inherited the aborted creator signal in the second. The
+acquisition-count gate failed the retained case: it started a physical
+controller and immediately aborted it because no caller was live. A hostile
+mutant that starts an owner-driven physical signal with zero acquisitions
+failed the live-signal check with no type errors. The repaired no-live-owner path
+passes Query Core's signal as a native metadata data property and leaves its
+transport under Query Core ownership. This history does not promise public
+Collection rows without a logical acquisition.
+
+A getter that returns the same native signal passed the earlier two oracle
+files (444 tests) even though the Query Collection guide promises a data
+property. The provider-boundary assertions now inspect the own `signal`
+descriptor for acquisition-driven demand forms and external refetch forms.
+They require the descriptor's `value` to be the live signal and its `get` to be
+absent; they do not constrain writable or configurable flags. The getter
+mutant was executed on the later review cut and failed at those descriptor
+assertions, demonstrating that the provider-boundary oracle kills this shape
+of contract violation.
+
+An active Collection-origin physical fetch can also gain an independent Query
+Core observer before the Collection caller aborts. The new oracle witness
+first checks two distinct QueryObserver identities and one provider call. It
+then aborts the Collection caller. Before repair, the provider signal aborted
+at that checkpoint even though the outside observer still owned the work.
+After repair, the outside observer receives the row through Query Core while
+the Collection stays rowless. This separates the physical owner set from
+Collection row ownership. A second witness lets that outside observer leave
+while the canceled Collection lease remains. Before the observer-removal hook,
+the provider signal stayed live with no owner; after repair it aborts at that
+checkpoint. A provider that ignores this abort may still update Query cache,
+but it cannot publish the ownerless row. The two witnesses passed with the
+repair along with all 1,406 tests in the package-local Query DB suite's 40
+test files. A subsequent Collection-cleanup witness checked that cleaning up
+source A preserves source B's shared physical fetch, signal, and public row
+with one provider call. The full package-local suite then passed 1,408 tests
+in 40 files without type errors. The React pagination and hydration pair
+passed 100 tests before that final oracle-only addition.
+
+The raw historical-owner reacquisition history initially required F2 to start
+before the ignored-abort F1 provider promise settled, then still required F2
+after F1 settled. Neither call count is a product law: ordinary unload may let
+an ignored-abort F1 finish into Query cache for the successor. The revised
+history checks that the successor remains pending and the old owner stays
+durable before any applicable response. It then accepts either F1's distinct
+fresh row or F2's empty result, but requires the public row, Query cache,
+durable row, current owner, and retired historical marker to agree. The public
+preload history retains the F2-specific route because Query Core cancels F1
+when the provider reads `ctx.signal` and its final live owner retires.
+
+The cancellation guide now distinguishes eager `ctx.signal` from on-demand
+`ctx.meta.loadSubsetOptions.signal`. Both on-demand pagination examples pass
+the latter signal to their provider or cursor pager.
+
+Query Core notifies observers before cache listeners. A distinct observer can
+start F2 synchronously while F1's reverted cancellation is still notifying.
+The held replacement witness reaches that order and checks F2's live provider
+signal before releasing its response, then its public row and Query cache.
+Before the terminal-event guard, F1's old `setState(idle)` notification aborted
+F2's controller. The guard compares the Query's current fetch status with the
+old event before aborting a controller or retiring fetch-application records;
+the witness now passes. The same guard applies to old error notifications.
+
+The external-success successor schedule revealed another missing history. A
+caller loaded v1, aborted while retaining its lease, and an independent Query
+Core observer fetched v2 with no live Collection owner. Only after F2 had
+settled did a new caller acquire the same fresh Query. The old oracle acquired
+that caller before F2 settled. Before repair, `unpatchedCacheVersions` treated
+the fetched v2 as a local cache edit and started F3; the probe's rejecting F3
+made the caller fail while Query cache held v2. Removing that marker stopped F3
+but left a false success: the still-subscribed Collection handler had declined
+v2 when it had no owner, and the caller returned the old v1 settlement. The
+primary ownership oracle now checks the post-F2 acquisition cut, provider
+call count, public row, and Query cache. Reacquisition replays a current fetched
+result only when it has no result-specific application settlement, then waits
+for that application's settlement. With infinite stale time and no
+intervening edit, the caller applies v2 without F3.
+
+The ordinary-unload witness's two-call assertion is specific to a provider
+that rejected after honoring F1's abort: its new caller needs fresh work.
+The accepted contract also permits an ignored-abort F1 result to remain in
+cache after full release; it does not require every such successor to make or
+avoid a particular number of provider calls.
+
+The production diff adds 389 lines and removes 46 in `query.ts` at this review
+cut; tests and contract prose are counted separately. The persistent facts
+serve different observable boundaries:
+
+- `acquisitionsByHash` distinguishes same-key callers and their release order.
+  A logical caller can abort while the Query observer stays subscribed.
+- Each acquisition's `physicalQuery` and the shared
+  `queryCollectionPhysicalAcquisitions` set identify the live callers of one
+  Query across Collections. A logical hash alone cannot represent that sharing.
+- `queryCollectionPhysicalFetchControllers` supplies one provider signal for
+  Collection-origin work. It must be separate from each caller's signal and
+  Query Core's external-fetch signal.
+- `queryCollectionObserverModes` distinguishes eager Collection ownership from
+  an on-demand observer whose acquisition has aborted, and from an independent
+  Query Core observer. Observer count alone merges these cases.
+- `queryCollectionFetchStartedWithOwner` remembers the current fetch origin.
+  A paused old Collection fetch and a later external Query Core refetch require
+  different signal and restart decisions even when their current observers are
+  the same.
+
+The two recovery paths have different premises. A retained canceled lease
+cannot pass its old result to a successor, so that path cancels and restarts.
+After ordinary unload, an ignored-abort result may still be used; only the
+old Query's actual fetch rejection starts one retry. The retry checks that the
+rejection is the Query's current error, so an application failure remains a
+failure. A fresh oracle review should challenge this code weight and each
+state distinction before closure.

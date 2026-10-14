@@ -212,11 +212,11 @@ Some TanStack Query fields are owned or reinterpreted by Query Collection and ar
 
 `placeholderData` is intentionally unsupported. TanStack Query treats placeholder data as observer-local presentation state rather than cached Query data. Materializing it would expose temporary UI data as collection-wide normalized rows. Render placeholders in the consuming UI instead.
 
-### Request Cancellation with `QueryFunctionContext.signal`
+### Eager request cancellation with `QueryFunctionContext.signal`
 
-TanStack Query passes an `AbortSignal` to `queryFn` through the query function
-context. Forward `ctx.signal` to `fetch` or another abortable client to make the
-request cancellable:
+For an eager collection, TanStack Query passes an `AbortSignal` to `queryFn`
+through the query function context. Forward `ctx.signal` to `fetch` or another
+abortable client to make the request cancellable:
 
 ```typescript
 const todosCollection = createCollection(
@@ -234,34 +234,36 @@ const todosCollection = createCollection(
       return response.json() as Promise<Array<Todo>>
     },
     queryClient,
+    syncMode: "eager",
     getKey: (todo) => todo.id,
   }),
 )
 ```
 
-Explicit collection cleanup cancels each exact Query key the collection is
-currently tracking before removing it from the Query cache:
+Explicit cleanup of an eager collection cancels each exact Query key it is
+tracking before removing it from the Query cache:
 
 ```typescript
 await todosCollection.cleanup()
 ```
 
-The underlying request is aborted only when its client consumes `ctx.signal`.
-A client that ignores the signal may continue its request even though the
-collection has been cleaned up.
+For an eager collection, TanStack Query aborts `ctx.signal` when the final
+observer leaves after `queryFn` has read it. A client that honors the signal
+stops its request; a client that ignores it may continue after cleanup.
 
 An unloaded on-demand subset is no longer tracked. A later explicit collection
 cleanup does not revisit its Query key.
 
-Query cache entries are shared within a `QueryClient`. Explicit cleanup can
-affect other consumers using the same exact Query keys.
+Query cache entries are shared within a `QueryClient`. Eager cleanup can affect
+other consumers using the same exact Query keys. On-demand collection cleanup
+releases its acquisitions and preserves a Query while another Collection or
+independent Query Core observer owns it.
 
-On-demand subset unloading does not explicitly call
-`queryClient.cancelQueries()`. It removes the subset's Query observer. If this
-was the final observer and the query function consumed `ctx.signal`, TanStack
-Query aborts the request. If the signal was ignored, or another observer still
-uses the same exact Query key, the request may finish and remain cached until
-`gcTime`.
+On-demand subset unloading releases that acquisition without explicitly
+calling `queryClient.cancelQueries()`. For an on-demand provider, pass
+`ctx.meta.loadSubsetOptions.signal` to the abortable client. That signal aborts
+when the final live owner leaves during the fetch. If the provider ignores it,
+the result may remain in Query cache until `gcTime`.
 
 ### Using with `queryOptions(...)`
 
@@ -428,11 +430,19 @@ Do not edit expression nodes, ordering options, Dates, byte arrays, or membershi
 arrays. Build separate API parameters instead. Core retains request data without
 cloning it; changing submitted data can make the request disagree with its cache
 key. To change a query constant, supply a new value rather than mutating the old
-one. Use `ctx.signal` for the provider call. When a subset request supplies a
-signal, `ctx.meta.loadSubsetOptions.signal` follows the physical Query fetch.
-Releasing one acquisition does not abort a fetch that another acquisition
-still owns. If the provider ignores the signal, Query Core may let the fetch
-finish into cache after the final owner releases.
+one. For an on-demand provider call, use
+`ctx.meta.loadSubsetOptions.signal`. It is a native `AbortSignal` data property
+for each fetch serving a live on-demand acquisition, including one whose first
+caller supplied no signal. Releasing one acquisition does not abort a fetch
+that another live acquisition, eager Collection observer, or independent Query
+Core observer still owns. Its signal aborts when the final live owner leaves
+during the fetch. If the provider ignores the signal, Query Core may let the
+fetch finish into cache, but its rows cannot enter the Collection without a
+live owner. A later on-demand acquisition can apply a fresh fetched cache
+result before its load settles. An external Query Core refetch with no live on-demand
+acquisition exposes Query Core's own signal in the same metadata property and
+may settle into Query cache, even if an aborted caller retains its acquisition
+lease. Use `ctx.signal` for eager calls.
 
 ### Type-Safe Meta Access
 
@@ -934,19 +944,21 @@ const postsCollection = createCollection(
     getKey: (post: Post) => post.id,
     queryFn: async (ctx): Promise<Array<Post>> => {
       const { where, orderBy, offset = 0, limit } = ctx.meta?.loadSubsetOptions ?? {}
+      const signal = ctx.meta?.loadSubsetOptions?.signal
+      if (!signal) throw new Error('Expected on-demand request signal')
       const skip = offset % serverPageSize
       let page: number | null = Math.floor(offset / serverPageSize)
       const gathered: Array<Post> = []
 
       while (page !== null && (limit === undefined || gathered.length < skip + limit)) {
-        ctx.signal.throwIfAborted()
+        signal.throwIfAborted()
         const response: { rows: Array<Post>; nextPage: number | null } =
           await api.listPosts({
             page,
             pageSize: serverPageSize,
             where,
             orderBy,
-            signal: ctx.signal,
+            signal,
           })
         gathered.push(...response.rows)
         page = response.nextPage
@@ -1003,6 +1015,8 @@ const postsCollection = createCollection(
     getKey: (post: Post) => post.id,
     queryFn: async (ctx) => {
       const { where, orderBy, offset = 0, limit } = ctx.meta?.loadSubsetOptions ?? {}
+      const signal = ctx.meta?.loadSubsetOptions?.signal
+      if (!signal) throw new Error('Expected on-demand request signal')
 
       // Translate every filter and sort, or reject unsupported expressions.
       // This stable, serializable value identifies one ordered result sequence.
@@ -1021,7 +1035,7 @@ const postsCollection = createCollection(
         },
       })
 
-      return pager.read({ offset, limit }, ctx.signal)
+      return pager.read({ offset, limit }, signal)
     },
   }),
 )

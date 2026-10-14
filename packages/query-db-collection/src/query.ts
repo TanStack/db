@@ -2,6 +2,7 @@ import {
   CancelledError,
   QueryObserver,
   hashKey,
+  isCancelledError,
   partialMatchKey,
 } from '@tanstack/query-core'
 import {
@@ -392,6 +393,54 @@ const queryCollectionSuccessfulFetchStarts = new WeakMap<AnyQuery, number>()
 const queryCollectionSuccessfulFetchData = new WeakMap<AnyQuery, unknown>()
 const queryCollectionSuccessfulFetchVersions = new WeakMap<AnyQuery, number>()
 const queryCollectionCacheOwners = new WeakMap<AnyQuery, Set<object>>()
+// Physical Query fetches may be shared by acquisitions in several Collections.
+// Their signal is separate from each acquisition's caller signal.
+const queryCollectionPhysicalFetchControllers = new WeakMap<
+  AnyQuery,
+  AbortController
+>()
+const queryCollectionPhysicalAcquisitions = new WeakMap<
+  AnyQuery,
+  Set<{ options: { signal?: AbortSignal } }>
+>()
+// Query Core tracks active observers. Their mode distinguishes eager ownership
+// from on-demand observers whose retained acquisition may already be aborted.
+const queryCollectionObserverModes = new WeakMap<
+  object,
+  `eager` | `on-demand`
+>()
+const queryCollectionFetchStartedWithOwner = new WeakMap<AnyQuery, boolean>()
+function hasRetainedCanceledPhysicalAcquisition(query: AnyQuery): boolean {
+  return [...(queryCollectionPhysicalAcquisitions.get(query) ?? [])].some(
+    ({ options }) => options.signal?.aborted,
+  )
+}
+function hasLivePhysicalAcquisition(query: AnyQuery): boolean {
+  return [...(queryCollectionPhysicalAcquisitions.get(query) ?? [])].some(
+    ({ options }) => !options.signal?.aborted,
+  )
+}
+function hasLiveCollectionOwner(query: AnyQuery): boolean {
+  return (
+    query.observers.some(
+      (observer) => queryCollectionObserverModes.get(observer) === `eager`,
+    ) || hasLivePhysicalAcquisition(query)
+  )
+}
+function hasLivePhysicalOwner(query: AnyQuery): boolean {
+  return (
+    hasLiveCollectionOwner(query) ||
+    (queryCollectionFetchStartedWithOwner.get(query) === true &&
+      query.observers.some(
+        (observer) => !queryCollectionObserverModes.has(observer),
+      ))
+  )
+}
+function abortUnownedPhysicalFetch(query: AnyQuery): void {
+  if (query.state.fetchStatus === `idle`) return
+  if (hasLivePhysicalOwner(query)) return
+  queryCollectionPhysicalFetchControllers.get(query)?.abort()
+}
 const queryCollectionDirectCachePatches = new WeakMap<
   AnyQuery,
   { owner: object; session: object | undefined }
@@ -1167,7 +1216,51 @@ export function queryCollectionOptions(
     // Track whether sync has been started
     let syncStarted = false
     let startupRetentionSettled = false
-    const pendingStartupLoads = new Map<LoadSubsetOptions, Set<object>>()
+    // One logical acquisition can abort without ending a Query fetch shared
+    // by another. Keep its caller signal separate from the Query observer.
+    type QueryAcquisition = {
+      options: LoadSubsetOptions
+      queryKey: QueryKey
+      hashedQueryKey: string
+      physicalQuery?: AnyQuery
+      removeAbortListener?: () => void
+    }
+    const acquisitionsByHash = new Map<string, Set<QueryAcquisition>>()
+    const recordPhysicalAcquisition = (
+      acquisition: QueryAcquisition | undefined,
+      query: AnyQuery,
+    ): void => {
+      if (!acquisition || acquisition.physicalQuery) return
+      acquisition.physicalQuery = query
+      const physical =
+        queryCollectionPhysicalAcquisitions.get(query) ?? new Set()
+      physical.add(acquisition)
+      queryCollectionPhysicalAcquisitions.set(query, physical)
+      const signal = acquisition.options.signal
+      if (signal) {
+        const onAbort = () => abortUnownedPhysicalFetch(query)
+        signal.addEventListener(`abort`, onAbort, { once: true })
+        acquisition.removeAbortListener = () =>
+          signal.removeEventListener(`abort`, onAbort)
+        if (signal.aborted) onAbort()
+      }
+    }
+    const releasePhysicalAcquisition = (acquisition: QueryAcquisition) => {
+      acquisition.removeAbortListener?.()
+      const query = acquisition.physicalQuery
+      if (!query) return
+      queryCollectionPhysicalAcquisitions.get(query)?.delete(acquisition)
+      abortUnownedPhysicalFetch(query)
+    }
+    const hasLiveAcquisition = (hashedQueryKey: string): boolean => {
+      const acquisitions = acquisitionsByHash.get(hashedQueryKey)
+      if (!acquisitions) return (queryRefCounts.get(hashedQueryKey) ?? 0) > 0
+      return [...acquisitions].some(
+        (acquisition) =>
+          acquisition.physicalQuery !== undefined &&
+          !acquisition.options.signal?.aborted,
+      )
+    }
     const retainedQueriesPendingRevalidation = new Set<string>()
     const observedErrorUpdates = new WeakMap<AnyQuery, number>()
     let errorRevision = 0
@@ -1947,6 +2040,80 @@ export function queryCollectionOptions(
       })
     }
 
+    const restartCanceledPhysicalFetch = (
+      observer: QueryObserver<Array<any>, any, Array<any>, Array<any>, any>,
+      hashedQueryKey: string,
+      acquisition?: QueryAcquisition,
+    ): Promise<void> | undefined => {
+      const query = observer.getCurrentQuery()
+      if (
+        !queryCollectionFetchStartedWithOwner.get(query) ||
+        !hasRetainedCanceledPhysicalAcquisition(query) ||
+        (syncMode !== `eager` && !hasLiveAcquisition(hashedQueryKey))
+      )
+        return undefined
+
+      const hasOtherLiveOwner =
+        query.observers.some(
+          (other) =>
+            other !== observer &&
+            queryCollectionObserverModes.get(other) === `eager`,
+        ) ||
+        [...(queryCollectionPhysicalAcquisitions.get(query) ?? [])].some(
+          (other) => other !== acquisition && !other.options.signal?.aborted,
+        )
+      if (
+        !queryCollectionPhysicalFetchControllers.get(query)?.signal.aborted &&
+        !(query.state.fetchStatus === `paused` && !hasOtherLiveOwner)
+      )
+        return undefined
+
+      // A new owner cannot adopt a fetch canceled after its prior owner left.
+      // Subscribe while Query Core still sees the old in-flight request, so
+      // cancellation followed by one refetch cannot trigger an extra mount fetch.
+      if (syncStarted || collection.subscriberCount > 0)
+        subscribeToQuery(observer, hashedQueryKey, {
+          data: query.state.data,
+          version: query.state.dataUpdateCount,
+          fetchStart: queryCollectionCurrentFetchStarts.get(query),
+        })
+      const retired =
+        query.state.fetchStatus === `fetching`
+          ? query.cancel({ silent: true })
+          : Promise.resolve()
+      return retired.then(() =>
+        refetchAndWaitForApplication(observer, hashedQueryKey),
+      )
+    }
+
+    const retryReleasedFetchFailure = (
+      observer: QueryObserver<Array<any>, any, Array<any>, Array<any>, any>,
+      hashedQueryKey: string,
+      result: Promise<void>,
+    ): Promise<void> => {
+      const query = observer.getCurrentQuery()
+      const releasedController =
+        queryCollectionPhysicalFetchControllers.get(query)
+      if (
+        !releasedController?.signal.aborted ||
+        hasRetainedCanceledPhysicalAcquisition(query)
+      )
+        return result
+      return result.catch((error: unknown) => {
+        if (
+          observer.getCurrentQuery() !== query ||
+          queryCollectionPhysicalFetchControllers.get(query) !==
+            releasedController ||
+          query.state.error !== error ||
+          !hasLiveAcquisition(hashedQueryKey)
+        )
+          throw error
+        // Ordinary unload may leave an ignored-abort result cacheable. If the
+        // provider honored abort instead, the new owner needs one fresh fetch.
+        return refetchAndWaitForApplication(observer, hashedQueryKey)
+      })
+    }
+
     const shareRetainedRevalidation = (
       hashedQueryKey: string,
       start: () => Promise<void>,
@@ -1966,36 +2133,40 @@ export function queryCollectionOptions(
     const createQueryFromOpts = (
       opts: LoadSubsetOptions = {},
       queryFunction: typeof queryFn = queryFn,
+      acquisition?: QueryAcquisition,
     ): true | Promise<void> => {
       const deferUntil = (work: Promise<unknown>): Promise<void> => {
-        // Unload can revoke an acquisition while metadata work is pending.
-        const acquisition = {}
-        const pending = pendingStartupLoads.get(opts) ?? new Set<object>()
-        pending.add(acquisition)
-        pendingStartupLoads.set(opts, pending)
-        return work.then(
-          () => {
-            if (!pendingStartupLoads.get(opts)?.delete(acquisition)) {
-              throw new LoadSubsetOperationAbortedError()
-            }
-            if (pending.size === 0) pendingStartupLoads.delete(opts)
-            const resumed = createQueryFromOpts(opts, queryFunction)
-            return resumed === true ? undefined : resumed
-          },
-          (error: unknown) => {
-            pending.delete(acquisition)
-            if (pending.size === 0) pendingStartupLoads.delete(opts)
-            throw error
-          },
-        )
+        return work.then(() => {
+          // The scan discovers keys; it cannot revive a canceled caller.
+          if (
+            (acquisition &&
+              !acquisitionsByHash
+                .get(acquisition.hashedQueryKey)
+                ?.has(acquisition)) ||
+            opts.signal?.aborted
+          ) {
+            throw new LoadSubsetOperationAbortedError()
+          }
+          const resumed = createQueryFromOpts(opts, queryFunction, acquisition)
+          return resumed === true ? undefined : resumed
+        })
+      }
+      if (
+        (acquisition &&
+          !acquisitionsByHash
+            .get(acquisition.hashedQueryKey)
+            ?.has(acquisition)) ||
+        opts.signal?.aborted
+      ) {
+        return Promise.reject(new LoadSubsetOperationAbortedError())
       }
       if (!startupRetentionSettled) {
         return deferUntil(startupRetentionMaintenancePromise)
       }
 
       // Generate key using common function
-      const key = generateQueryKeyFromOptions(opts)
-      const hashedQueryKey = hashKey(key)
+      const key = acquisition?.queryKey ?? generateQueryKeyFromOptions(opts)
+      const hashedQueryKey = acquisition?.hashedQueryKey ?? hashKey(key)
       if (
         metadata &&
         syncMode === `on-demand` &&
@@ -2054,7 +2225,15 @@ export function queryCollectionOptions(
 
         // Get the current result and return based on its state
         const observer = state.observers.get(hashedQueryKey)!
+        recordPhysicalAcquisition(acquisition, observer.getCurrentQuery())
         const currentResult = observer.getCurrentResult()
+
+        const restart = restartCanceledPhysicalFetch(
+          observer,
+          hashedQueryKey,
+          acquisition,
+        )
+        if (restart) return restart
 
         if (opts.refetch) {
           return refetchAndWaitForApplication(observer, hashedQueryKey)
@@ -2085,6 +2264,19 @@ export function queryCollectionOptions(
         }
 
         if (currentResult.isSuccess) {
+          // An outside listener can retain this observer after our final
+          // lease unsubscribes. Reattach our result handler before treating
+          // its newer cached result as applied on reacquisition.
+          if (syncStarted || collection.subscriberCount > 0)
+            subscribeToQuery(observer, hashedQueryKey)
+          if (
+            !getRecordedResultApplicationSettlement(
+              hashedQueryKey,
+              currentResult,
+            )
+          ) {
+            makeQueryResultHandler(key)(currentResult)
+          }
           if (collection.deferDataRefresh) {
             return waitForQueryReadyAndApplied(observer, hashedQueryKey)
           }
@@ -2093,7 +2285,11 @@ export function queryCollectionOptions(
           // Error already occurred, reject immediately
           return Promise.reject(currentResult.error)
         } else {
-          return waitForQueryReadyAndApplied(observer, hashedQueryKey)
+          return retryReleasedFetchFailure(
+            observer,
+            hashedQueryKey,
+            waitForQueryReadyAndApplied(observer, hashedQueryKey),
+          )
         }
       }
 
@@ -2120,6 +2316,10 @@ export function queryCollectionOptions(
         queryKey: key,
         queryFn: (context: Parameters<typeof queryFunction>[0]) => {
           const logicalHash = hashKey(context.queryKey)
+          const physicalQuery = queryClient.getQueryCache().find({
+            queryKey: context.queryKey,
+            exact: true,
+          })
           fetchStartGenerations.set(
             logicalHash,
             Math.max(
@@ -2127,20 +2327,61 @@ export function queryCollectionOptions(
               directWriteGeneration,
             ),
           )
+          if (!physicalQuery)
+            throw new Error(`Missing physical Query for fetch`)
+          if (
+            syncMode === `eager` &&
+            !hasLivePhysicalAcquisition(physicalQuery)
+          ) {
+            queryCollectionPhysicalFetchControllers.get(physicalQuery)?.abort()
+            queryCollectionPhysicalFetchControllers.delete(physicalQuery)
+            return queryFunction(context)
+          }
+          const hasOwner = hasLivePhysicalOwner(physicalQuery)
+          if (
+            !hasOwner &&
+            queryCollectionFetchStartedWithOwner.get(physicalQuery) &&
+            hasRetainedCanceledPhysicalAcquisition(physicalQuery) &&
+            physicalQuery.observers.every((observer) =>
+              queryCollectionObserverModes.has(observer),
+            )
+          ) {
+            // Query Core resumed a paused request after every Collection
+            // owner left; there was no provider call to abort at release.
+            throw new LoadSubsetOperationAbortedError()
+          }
+          // A data property lets providers inspect or clone request metadata.
+          // An external refetch with no live logical acquisition uses Query Core's
+          // own signal; it cannot inherit a released caller's old signal.
+          let fetchSignal: AbortSignal
+          if (hasOwner) {
+            // Query Core's lazy signal stays unread, so an ignoring provider
+            // can finish into its private cache after logical cancellation.
+            queryCollectionPhysicalFetchControllers.get(physicalQuery)?.abort()
+            const controller = new AbortController()
+            queryCollectionPhysicalFetchControllers.set(
+              physicalQuery,
+              controller,
+            )
+            abortUnownedPhysicalFetch(physicalQuery)
+            fetchSignal = controller.signal
+          } else {
+            // This Query Core fetch supersedes any old Collection-owned fetch.
+            // Its caller can later be joined without inheriting an old abort.
+            queryCollectionPhysicalFetchControllers.get(physicalQuery)?.abort()
+            queryCollectionPhysicalFetchControllers.delete(physicalQuery)
+            fetchSignal = context.signal
+          }
           const queryContext = Object.defineProperties(
             {} as typeof context,
             Object.getOwnPropertyDescriptors(context),
           )
-          const queryRequestOptions = { ...requestOptions }
-          if (requestOptions.signal !== undefined) {
-            Object.defineProperty(queryRequestOptions, `signal`, {
-              enumerable: true,
-              get: () => context.signal,
-            })
-          }
           queryContext.meta = {
             ...context.meta,
-            loadSubsetOptions: queryRequestOptions,
+            loadSubsetOptions: {
+              ...requestOptions,
+              signal: fetchSignal,
+            },
           }
           return queryFunction(queryContext)
         },
@@ -2156,7 +2397,9 @@ export function queryCollectionOptions(
         Array<any>,
         any
       >(queryClient, observerOptions)
+      queryCollectionObserverModes.set(localObserver, syncMode)
       const localQuery = localObserver.getCurrentQuery()
+      recordPhysicalAcquisition(acquisition, localQuery)
       trackOwnedCacheQuery(localQuery, hashedQueryKey)
       const resolvedQueryGcTime = queryClient.getQueryCache().find({
         queryKey: key,
@@ -2187,6 +2430,13 @@ export function queryCollectionOptions(
         hashedQueryKey,
         (queryRefCounts.get(hashedQueryKey) || 0) + 1,
       )
+
+      const restart = restartCanceledPhysicalFetch(
+        localObserver,
+        hashedQueryKey,
+        acquisition,
+      )
+      if (restart) return restart
 
       // Check if data already exists in QueryClient cache (persisted within gcTime from
       // a previous observer). This avoids creating unnecessary promises and subscription
@@ -2302,7 +2552,11 @@ export function queryCollectionOptions(
         subscribeToQuery(localObserver, hashedQueryKey)
       }
 
-      return readyPromise
+      return retryReleasedFetchFailure(
+        localObserver,
+        hashedQueryKey,
+        readyPromise,
+      )
     }
 
     type UpdateHandler = Parameters<QueryObserver[`subscribe`]>[0]
@@ -2387,6 +2641,16 @@ export function queryCollectionOptions(
       return validation.items
     }
 
+    const declineUnownedResult = (resultKey: QueryKey): boolean => {
+      const hashedQueryKey = hashKey(resultKey)
+      if (syncMode !== `on-demand` || hasLiveAcquisition(hashedQueryKey))
+        return false
+      // A fetched result may remain in Query cache without a Collection row
+      // owner. A later acquisition can apply that result if it is still the
+      // current physical fetch result.
+      return true
+    }
+
     const applySuccessfulResult = (
       queryKey: QueryKey,
       result: QueryObserverResult<any, any>,
@@ -2406,6 +2670,7 @@ export function queryCollectionOptions(
       if (collection.status === `cleaned-up` || signal?.aborted) {
         throw new LoadSubsetOperationAbortedError()
       }
+      if (declineUnownedResult(queryKey)) return true
 
       if (isMutationPublicationBlocked()) {
         applicationToken.settleRefetchAtFetchBoundary?.()
@@ -2778,6 +3043,7 @@ export function queryCollectionOptions(
         hashedQueryKey,
         validatedItems.length === 0,
       )
+      if (declineUnownedResult(queryKey)) return
       if (
         collection.status === `cleaned-up` ||
         resultApplicationControllers.get(hashedQueryKey) !== applicationToken
@@ -2938,6 +3204,9 @@ export function queryCollectionOptions(
         const observedQuery = observer?.getCurrentQuery()
         if (observer && observedQuery) {
           trackOwnedCacheQuery(observedQuery, hashedQueryKey)
+        }
+        if (syncMode === `on-demand` && !hasLiveAcquisition(hashedQueryKey)) {
+          return
         }
         // A direct cache write cannot establish fetched result authority or
         // clear a recorded fetch error.
@@ -3373,7 +3642,9 @@ export function queryCollectionOptions(
     }
 
     const cleanupQueryInternal = (hashedQueryKey: string) => {
-      const query = state.observers.get(hashedQueryKey)?.getCurrentQuery()
+      const observer = state.observers.get(hashedQueryKey)
+      const query = observer?.getCurrentQuery()
+      if (observer) queryCollectionObserverModes.delete(observer)
       unsubscribes.get(hashedQueryKey)?.()
       unsubscribes.delete(hashedQueryKey)
       unsubscribePendingReadyListeners(hashedQueryKey)
@@ -3541,6 +3812,7 @@ export function queryCollectionOptions(
         )
         unsubscribes.get(hashedQueryKey)?.()
         unsubscribes.delete(hashedQueryKey)
+        if (observer) queryCollectionObserverModes.delete(observer)
         state.observers.delete(hashedQueryKey)
         // Query Core may keep an empty-cache fetch alive without an observer.
         // A later lease can reuse that request, so keep its start position.
@@ -3576,6 +3848,9 @@ export function queryCollectionOptions(
 
         if (!trackedCacheQueries.has(event.query)) return
 
+        if (event.type === `observerRemoved`)
+          abortUnownedPhysicalFetch(event.query)
+
         if (event.type === `updated`) {
           if (event.action.type === `fetch`) {
             // Every Collection observing a shared Query records this physical
@@ -3584,6 +3859,14 @@ export function queryCollectionOptions(
             if (fetchStart === undefined) {
               fetchStart = ++nextQueryCollectionAuthorityPosition
               queryCollectionFetchActionStarts.set(event.action, fetchStart)
+              const hasOwner = hasLiveCollectionOwner(event.query)
+              queryCollectionFetchStartedWithOwner.set(event.query, hasOwner)
+              if (!hasOwner) {
+                queryCollectionPhysicalFetchControllers
+                  .get(event.query)
+                  ?.abort()
+                queryCollectionPhysicalFetchControllers.delete(event.query)
+              }
             }
             fetchStartGenerations.set(hashKey(event.query.queryKey), fetchStart)
             // Query Core can coalesce distinct logical subset keys into one
@@ -3630,7 +3913,12 @@ export function queryCollectionOptions(
                 retireFetchApplicationRecords(event.query, [fetchStart])
               })
             }
-          } else if (event.action.type === `error`) {
+          } else if (
+            event.action.type === `error` &&
+            event.query.state.fetchStatus === `idle`
+          ) {
+            if (isCancelledError(event.action.error))
+              queryCollectionPhysicalFetchControllers.get(event.query)?.abort()
             const fetchStart = queryCollectionCurrentFetchStarts.get(
               event.query,
             )
@@ -3642,8 +3930,10 @@ export function queryCollectionOptions(
             }
           } else if (
             event.action.type === `setState` &&
-            event.action.state.fetchStatus === `idle`
+            event.action.state.fetchStatus === `idle` &&
+            event.query.state.fetchStatus === `idle`
           ) {
+            queryCollectionPhysicalFetchControllers.get(event.query)?.abort()
             // Query Core uses a setState action, not an error action, when a
             // reverted cancellation restores the pre-fetch state. Reset also
             // reaches this terminal state. Neither path should retain causal
@@ -3672,6 +3962,7 @@ export function queryCollectionOptions(
           fetchStartGenerations.delete(hashedKey)
         }
         if (event.type === `removed`) {
+          queryCollectionPhysicalFetchControllers.get(event.query)?.abort()
           trackedCacheQueries.delete(event.query)
           // Only cleanup if this is OUR query (we track it)
           if (hashToQueryKey.has(hashedKey)) {
@@ -3691,7 +3982,12 @@ export function queryCollectionOptions(
 
     const cleanup = () => {
       if (activeSyncSession === syncSession) activeSyncSession = undefined
-      pendingStartupLoads.clear()
+      acquisitionsByHash.forEach((acquisitions) => {
+        acquisitions.forEach((acquisition) => {
+          releasePhysicalAcquisition(acquisition)
+        })
+      })
+      acquisitionsByHash.clear()
       ensureEagerSubscription = () => {}
       applyRefetchResultWhenUnsubscribed = () => false
       unsubscribeFromCollectionEvents()
@@ -3774,16 +4070,24 @@ export function queryCollectionOptions(
      * cancel the transport when no peer observer still owns it.
      */
     const unloadSubset = (options: LoadSubsetOptions) => {
-      // No observer lease exists until startup maintenance has finished.
-      const pending = pendingStartupLoads.get(options)
-      if (pending) {
-        pending.delete(pending.values().next().value!)
-        if (pending.size === 0) pendingStartupLoads.delete(options)
-        return
-      }
       // 1. Same predicates → 2. Same queryKey
       const key = generateQueryKeyFromOptions(options)
       const hashedQueryKey = hashKey(key)
+      const acquisitions = acquisitionsByHash.get(hashedQueryKey)
+      const candidates = [...(acquisitions ?? [])]
+      const exact = candidates.find((entry) => entry.options === options)
+      const equivalent = exact
+        ? []
+        : candidates.filter((entry) => entry.options.signal === options.signal)
+      if (equivalent.length > 1)
+        throw new Error(`Ambiguous Query Collection acquisition release`)
+      const acquisition = exact ?? equivalent[0]
+      if (!acquisition) return
+      acquisitions!.delete(acquisition)
+      if (acquisitions!.size === 0) acquisitionsByHash.delete(hashedQueryKey)
+      releasePhysicalAcquisition(acquisition)
+      // A request canceled during startup never acquired a Query observer.
+      if (!acquisition.physicalQuery) return
 
       // 3. Decrement refcount
       const currentCount = queryRefCounts.get(hashedQueryKey) || 0
@@ -3842,8 +4146,47 @@ export function queryCollectionOptions(
     // Create deduplicated loadSubset wrapper for non-eager modes
     // This prevents redundant snapshot requests when multiple concurrent
     // live queries request overlapping or subset predicates
-    const loadSubsetDedupe =
-      syncMode === `eager` ? undefined : createQueryFromOpts
+    const loadSubset = (
+      options: LoadSubsetOptions = {},
+    ): true | Promise<void> => {
+      const requestKey = generateQueryKeyFromOptions(options)
+      const hashedQueryKey = hashKey(requestKey)
+      const acquisition: QueryAcquisition = {
+        options,
+        queryKey: requestKey,
+        hashedQueryKey,
+      }
+      const acquisitions = acquisitionsByHash.get(hashedQueryKey) ?? new Set()
+      acquisitions.add(acquisition)
+      acquisitionsByHash.set(hashedQueryKey, acquisitions)
+      let result: true | Promise<void>
+      try {
+        result = createQueryFromOpts(options, queryFn, acquisition)
+      } catch (error) {
+        acquisitions.delete(acquisition)
+        if (acquisitions.size === 0) acquisitionsByHash.delete(hashedQueryKey)
+        releasePhysicalAcquisition(acquisition)
+        throw error
+      }
+      const signal = options.signal
+      if (!signal || result === true) return result
+      let abort = () => {}
+      const canceled = new Promise<never>((_, reject) => {
+        abort = () => reject(new LoadSubsetOperationAbortedError())
+        if (signal.aborted) abort()
+        else signal.addEventListener(`abort`, abort, { once: true })
+      })
+      return Promise.race([result, canceled])
+        .then(() => {
+          if (signal.aborted) throw new LoadSubsetOperationAbortedError()
+        })
+        .catch((error: unknown) => {
+          if (signal.aborted) throw new LoadSubsetOperationAbortedError()
+          throw error
+        })
+        .finally(() => signal.removeEventListener(`abort`, abort))
+    }
+    const loadSubsetDedupe = syncMode === `eager` ? undefined : loadSubset
 
     return {
       loadSubset: loadSubsetDedupe,
