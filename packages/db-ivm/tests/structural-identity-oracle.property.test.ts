@@ -23,6 +23,7 @@ import {
  * exactly when their specs denote equal values after normalization: -0 as 0,
  * every NaN as one value, object entries in key order, and holes kept.
  * `deep` and explicit one-element `array` nodes denote the same nested arrays.
+ * Symbol leaf indices denote stable symbol instances, not their descriptions.
  * Distinct RegExp objects whose lastIndex is NaN compare unequal because D2
  * compares headers with ===. The model shares no code with the hashing module; a sanity check also
  * compares it with `equalHashValues`.
@@ -33,10 +34,12 @@ import {
  * order, a non-enumerable symbol), and pairs built from two specs. Strings
  * and keys include every separator the identity uses and digits, so an
  * encoding that loses where one part ends fails law 2. Values include
- * enumerable symbol keys, Dates (also invalid), RegExps, Maps, Sets, small
+ * distinct symbols with the same description, enumerable symbol keys, Dates
+ * (also invalid), RegExps, Maps, Sets, small
  * binary values, holes, and nesting deeper than the identity's depth cap.
- * Pinned pairs cover the joins a random short string cannot build. The depth
- * cap bounds work and recursion, including on a cyclic value; it does not
+ * Pinned pairs cover joins a random short string cannot build, distinct symbols
+ * with the same description, and different object kinds with the same body.
+ * The depth cap bounds work and recursion, including on a cyclic value; it does not
  * decide equality, so raising it changes no law here.
  * Both generated pair grammars run fixed and fresh-seed campaigns. A replay
  * seed and path select the requested property without running the fixed one.
@@ -69,10 +72,11 @@ const LEAVES: ReadonlyArray<unknown> = [
   null,
   undefined,
   SYMBOL,
+  Symbol(`s`),
 ]
 // Every separator and tag the identity uses, plus digits.
 const textArbitrary = fc.string({
-  unit: fc.constantFrom(`a`, `|`, `=`, `:`, `"`, `#`, `[`, `{`, `1`, `2`),
+  unit: fc.constantFrom(`a`, `|`, `=`, `:`, `"`, `#`, `[`, `{`, `0`, `1`, `2`),
   maxLength: 4,
 })
 
@@ -214,7 +218,7 @@ function normal(spec: Spec): string | undefined {
         return Number.isNaN(value)
           ? `number:NaN`
           : `number:${value === 0 ? 0 : value}`
-      if (typeof value === `symbol`) return `symbol:s`
+      if (typeof value === `symbol`) return `symbol:${spec.i}`
       if (typeof value === `string`) return `string:${JSON.stringify(value)}`
       return `${typeof value}:${String(value)}`
     }
@@ -372,6 +376,49 @@ describe(`structuralIdentity`, () => {
       `adjacent nesting depths`,
       { k: `array`, items: [{ k: `deep`, depth: 5, v: { k: `leaf`, i: 3 } }] },
       { k: `deep`, depth: 5, v: { k: `leaf`, i: 3 } },
+    ],
+    [
+      `distinct symbols with the same description`,
+      { k: `leaf`, i: 10 },
+      { k: `leaf`, i: 11 },
+    ],
+    [
+      `a Map and Set with the same entry body`,
+      { k: `map`, v: { k: `leaf`, i: 0 } },
+      {
+        k: `set`,
+        v: {
+          k: `array`,
+          items: [
+            { k: `text`, s: `k` },
+            { k: `leaf`, i: 0 },
+          ],
+        },
+      },
+    ],
+    [
+      `a Map and object with the same entry body`,
+      { k: `map`, v: { k: `leaf`, i: 0 } },
+      {
+        k: `object`,
+        entries: [
+          [
+            `0`,
+            {
+              k: `array`,
+              items: [
+                { k: `text`, s: `k` },
+                { k: `leaf`, i: 0 },
+              ],
+            },
+          ],
+        ],
+      },
+    ],
+    [
+      `a Set and object with the same entry body`,
+      { k: `set`, v: { k: `leaf`, i: 0 } },
+      { k: `object`, entries: [[`0`, { k: `leaf`, i: 0 }]] },
     ],
   ] as Array<[string, Spec, Spec]>)(
     `agrees with D2 value identity for %s`,
