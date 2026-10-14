@@ -930,3 +930,54 @@ attribution-enabled Query Core source `877655c66`. TypeScript, changed-file
 ESLint, Prettier, and `git diff --check` passed. The custom Query-behavior
 receiving witness and compatible published Query Core release remain open
 under ORC-014 as assigned in the coverage map.
+
+## Held-refresh handoff and CodeRabbit review at `acecfc82c`
+
+The executable head is `acecfc82c237e4fa91dac1dd2e4dd2d161e576d5`,
+based on `c88a55187fe3305220bb1a5aab66f6edf54978ab`. The binary diff of
+`query.ts` and the two Query DB lifecycle oracles has SHA-256
+`60c4c209676350c310b4718ad47447b8edc5df9de7c551ff9e90cbe23a939522`.
+Production `query.ts` remains unchanged with SHA-256
+`f26ee7c89f68510c97ca8c1246def66bbe6326b8e33c4aa16d7d548d436fa827`.
+The load-lifecycle and ownership oracle hashes are, respectively,
+`1ce2a00c13d043b54c7e41b72bcfeedbc2d5dbe690ef8300559ea80215e958d4`
+and `460e6401c5c42b2886aa4b540d5b95a3e0d9cd8d954150d60eaada8db3f9ad5e`.
+
+The live-query architecture says a filtered acquisition pinned to an applied
+full Query keeps its lease after the original full view leaves. The existing
+held-fetch oracle released the full view before invalidation, so it could not
+reject an abort triggered only when that view left during a physical fetch.
+The revised oracle runs both release orders. In each, the filtered view retains
+`ready` and its old `a1` row, the source retains `a1`/`b1`, and one Query
+observer remains while the provider signal stays live. Releasing the final
+filtered owner then aborts the signal and prevents the late row from becoming
+public. A disposable mutant that aborts a fetching Query whenever its original
+full owner releases passed the old order and failed the new order at the live
+signal assertion. The reviewed production path passes both. The cleanup uses
+the calibrated failure-preserving helper from the prior follow-up.
+
+The 2026-10-13 22:50 UTC CodeRabbit review posted exactly two actionable
+comments. Its review body reported no additional findings. The table keeps
+their source order and distinguishes the reviewed code from this head.
+
+| ID | Claim and proposed fix | Evaluation and PR action | Durable value |
+| --- | --- | --- | --- |
+| CR-1, comment `4264883996`, Minor | Persisted final unload leaves `pendingRetainedRevalidations`; a same-turn replacement may reuse a revoked promise. Delete the map entry at final unload. | **Stale on this head.** The map and `shareRetainedRevalidation` existed at reviewed commit `5dec2995`; that old failure was not replayed independently. Merge `5874c7078` removed both. Current held-provider histories for same-turn reacquisition and aborted successor success/failure pass at pending outcome, public row, durable owner, and retention marker checkpoints. No map deletion applies now. | The accepted law remains: a replacement demand cannot settle from retired work, and the historical durable owner remains until its fresh result applies. `ownership-lifecycle.oracle.test.ts` owns this boundary. |
+| CR-2, comment `4264884017`, Major | The ownership oracle imports `createSingleRowRefProxy` from built `dist`; source `isRefProxy` sees a different private brand. Import from source. | **Confirmed on the reviewed commit; already fixed in merge `5874c7078`.** A direct probe reported source proxy `true`, built proxy `false` under source `isRefProxy`; `dist` is untracked. This follow-up asserts the source brand beside each relevant fixture. Switching only the constructor import back to `dist` in a disposable copy fails two focused histories at their fixture-premise assertions. Current source histories pass. | A proxy-identity oracle must prove its fixture reaches the intended same-instance classifier before judging Query identity or durable ownership. The coverage map records that premise. |
+
+CodeRabbit identified one real test-integrity issue and one plausible old
+lifecycle concern. Its proposed import change was correct; the map deletion is
+inapplicable after the merge. The review had useful signal and clear locations,
+but did not supply a runnable lifecycle counterexample. **Reviewer assessment:
+hire for review support**, with executable validation required before treating
+an async ownership warning as a confirmed bug.
+
+The Query DB suite passed 1,034 tests in 20 files against immutable
+attribution-enabled Query Core source `877655c66`. TypeScript, Prettier, and
+`git diff --check` passed. Changed-file ESLint reported no errors and ten
+pre-existing warnings in the large ownership oracle. The two CodeRabbit items
+are accounted for as one stale and one already fixed, with the fixture gap
+closed here. The custom Query behavior that invokes `queryFn` then throws
+before `fetchStarted` still leaves a public Query DB load pending; PR #2143
+owns that receiving repair. A compatible published Query Core release remains
+required before this integrated branch can claim release compatibility.
