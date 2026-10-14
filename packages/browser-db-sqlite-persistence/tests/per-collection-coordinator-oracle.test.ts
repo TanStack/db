@@ -3,7 +3,15 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setImmediate as nextTurn } from 'node:timers/promises'
 import { fc } from '@fast-check/vitest'
-import { IR, createCollection, whenSyncAccepted } from '@tanstack/db'
+import {
+  IR,
+  createCollection,
+  createLiveQueryCollection,
+  eq,
+  whenSyncAccepted,
+} from '@tanstack/db'
+import { QueryClient } from '@tanstack/query-core'
+import { queryCollectionOptions } from '@tanstack/query-db-collection'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BrowserCollectionCoordinator } from '../src/browser-coordinator'
 import {
@@ -4982,6 +4990,607 @@ describe(`sync-ingested write ownership oracle`, () => {
       ],
     ])
   })
+})
+
+/*
+Follower remote-demand settlement across real tabs
+==================================================
+
+Law and source: the applied-settlement law (law 7 in
+packages/db/src/query/live/ARCHITECTURE.md) for a follower tab. A follower
+routes on-demand demand it cannot serve to the elected owner. Its load, and so
+its live query's first ready, settles only when the rows the owner fetched for
+it are visible in the follower; if applying the owner's commit fails here, the
+load rejects and the follower's source enters error. The single-runtime lanes
+`persistence.follower-remote-demand` and `persistence.follower-generation-notice`
+in db-sqlite-persistence-core/tests/persisted-oracle.test.ts own the runtime
+mechanism with a coordinator double. This lane is their receiving witness
+across the real boundary: two tabs, each with its own real
+BrowserCollectionCoordinator over Node's real BroadcastChannel and Web Locks,
+and one real SQLite file opened by both tabs.
+
+Independent model: it knows only whether the owner's commit applies in the
+follower. While that apply is outstanding, the consumer has not settled. If it
+applies, the consumer settles successfully with the owner's row. If it fails,
+the consumer rejects without the row and the follower source is in error.
+
+Grammar: the owner's source is a receipt-awaiting custom source or a real
+Query Collection source, crossed with the placement of the owner's broadcast
+in the follower (direct, or queued while another subset's hydration holds the
+apply mutex), crossed with whether the follower's durable read of that commit
+succeeds, crossed with the consumer (a live query, or the follower's load).
+The driver holds or fails the first follower read whose rows contain the
+owner's row, and for the queued placement it holds the other subset's
+hydration read. It does not reorder the channel, which stays FIFO as in a
+browser. The custom source delivers each row once; a source that re-inserts
+an existing row on every ensure made the follower release and request its
+demand again without end, on main as well, and is outside this lane.
+
+Checkpoint and observations: once the owner's reply has reached the follower
+and the apply is still outstanding, whether the consumer has settled. After
+release: its outcome, the demanded rows it saw when it settled (first-ready
+rows, or rows at load settlement), and the follower source's status. A live
+query cannot show a load that succeeded after a failed apply, because the
+failure errors the source; the load consumer observes it directly.
+
+Calibration: main's persisted.ts (load settles at the reply) fails all 16
+histories at the checkpoint. Removing the follower's wait fails all 16.
+Removing the terminal check after the wait fails the 4 load histories whose
+apply fails. The Query Collection histories pass, so query-db's
+`whenSyncAccepted` wait resolves after the owner's broadcast under real
+persistence.
+
+Rotation: when only the follower's claim expires, it rotates into a
+generation no other tab joins and becomes that generation's owner. The
+rotation cell pins that its rows stay visible and new demand settles from its
+own source. Another tab never owns the rotated generation in this topology,
+so the elected-owner notice path has no receiving witness here.
+*/
+
+// Node's own BroadcastChannel and Web Locks, captured before any test installs
+// the controlled seams. This lane swaps them in for its body only.
+const nativeBroadcastChannel = globalThis.BroadcastChannel
+const nativeNavigator = globalThis.navigator
+
+function withNativeBrowserTransport<T>(body: () => Promise<T>): Promise<T> {
+  const controlledChannel = globalThis.BroadcastChannel
+  const controlledNavigator = globalThis.navigator
+  const define = (channel: unknown, navigator: unknown) => {
+    Object.defineProperty(globalThis, `BroadcastChannel`, {
+      value: channel,
+      writable: true,
+      configurable: true,
+    })
+    Object.defineProperty(globalThis, `navigator`, {
+      value: navigator,
+      writable: true,
+      configurable: true,
+    })
+  }
+  define(nativeBroadcastChannel, nativeNavigator)
+  return body().finally(() => define(controlledChannel, controlledNavigator))
+}
+
+type RealTabSource = `receipt` | `query-db`
+type RealTabPlacement = `direct` | `queued`
+type RealTabHistory = {
+  source: RealTabSource
+  placement: RealTabPlacement
+  apply: `ok` | `fails`
+  // A live query over the demand, or the follower Collection's load itself.
+  consumer: `live-query` | `load`
+}
+type RealTabRow = { id: string; group: string }
+
+function expectedRealTabFollower(history: RealTabHistory) {
+  const applied = history.apply === `ok`
+  return {
+    settledWhileApplyHeld: false,
+    settled: {
+      outcome: applied ? `fulfilled` : `rejected`,
+      rows: applied ? [`remote`] : undefined,
+      source: applied ? `ready` : `error`,
+    },
+  }
+}
+
+function createDeferredVoid() {
+  let resolve!: () => void
+  let reject!: (error: unknown) => void
+  const promise = new Promise<void>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  void promise.catch(() => undefined)
+  return { promise, resolve, reject }
+}
+
+// One tab: a real SQLite connection to the shared file, a real coordinator,
+// browser persistence, and the persisted on-demand Collection every tab
+// defines. Only the leader's source runs; a follower routes demand.
+function createRealTab(options: {
+  dbName: string
+  filename: string
+  source: RealTabSource
+  upstream: Map<string, RealTabRow>
+  holdUpstream?: () => Promise<void>
+  readGate?: (rows: ReadonlyArray<unknown>) => Promise<void>
+  now?: () => number
+  // Commit on every load: a newer version of a delivered row (`update`), or
+  // the same row inserted again (`reinsert`, an equal-value insert core
+  // reconciles as an update).
+  commitEachLoad?: `update` | `reinsert`
+}) {
+  const database = createWASQLiteTestDatabase({ filename: options.filename })
+  const gatedDatabase: BrowserWASQLiteDatabase = {
+    execute: async (sql, params) => {
+      const rows = await database.execute(sql, params)
+      if (options.readGate && /^\s*select/i.test(sql)) {
+        await options.readGate(rows)
+      }
+      return rows as never
+    },
+    close: () => database.close?.(),
+  }
+  const coordinator = new BrowserCollectionCoordinator({
+    dbName: options.dbName,
+  })
+  liveCoordinators.add(coordinator)
+  const persistence = createBrowserWASQLitePersistence({
+    database: gatedDatabase,
+    coordinator,
+    ...(options.now
+      ? { now: options.now, cacheGenerationClaimTtlMs: 10_000 }
+      : {}),
+  })
+  const upstreamRows = (where: unknown) => {
+    const wanted = JSON.stringify(where ?? null)
+    return Array.from(options.upstream.values()).filter((row) =>
+      wanted.includes(`"${row.id}"`),
+    )
+  }
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  const trace: Array<string> = []
+  let storageCollectionId: string | undefined
+  const setAdapter = coordinator.setAdapterForCollection.bind(coordinator)
+  coordinator.setAdapterForCollection = (collectionId, adapter, claimId) => {
+    if (claimId) storageCollectionId = collectionId
+    setAdapter(collectionId, adapter, claimId)
+  }
+  const ensure = coordinator.requestEnsureRemoteSubset.bind(coordinator)
+  coordinator.requestEnsureRemoteSubset = (collectionId, subset) => {
+    trace.push(`ensure`)
+    return ensure(collectionId, subset).finally(() =>
+      trace.push(`ensure-settled`),
+    )
+  }
+  const loadUpstream = async (where: unknown) => {
+    trace.push(`upstream`)
+    await options.holdUpstream?.()
+    return upstreamRows(where)
+  }
+  const delivered = new Set<string>()
+  let version = 0
+  const receiptSource: SyncConfig<RealTabRow, string> = {
+    sync: ({ begin, write, commit, markReady }) => {
+      markReady()
+      return {
+        loadSubset: async (subset) => {
+          if (options.commitEachLoad) {
+            const fresh = await loadUpstream(subset.where)
+            if (fresh.length === 0) return
+            begin()
+            for (const row of fresh) {
+              const delivered_ = delivered.has(row.id)
+              delivered.add(row.id)
+              if (options.commitEachLoad === `update` && delivered_) {
+                const next = { ...row, group: `v${++version}` }
+                options.upstream.set(row.id, next)
+                write({ type: `update`, value: next })
+              } else write({ type: `insert`, value: row })
+            }
+            await whenSyncAccepted(commit())
+            return
+          }
+          // Like a real source, deliver each upstream row version once.
+          const rows = (await loadUpstream(subset.where)).filter(
+            (row) => !delivered.has(row.id),
+          )
+          for (const row of rows) delivered.add(row.id)
+          if (rows.length === 0) return
+          begin()
+          for (const row of rows) write({ type: `insert`, value: row })
+          await whenSyncAccepted(commit())
+        },
+      }
+    },
+  }
+  const collection =
+    options.source === `receipt`
+      ? createCollection(
+          persistedCollectionOptions<RealTabRow, string>({
+            id: `real-tab-items`,
+            schemaVersion: 1,
+            persistence,
+            syncMode: `on-demand`,
+            getKey: (row) => row.id,
+            sync: receiptSource,
+          }),
+        )
+      : createCollection(
+          persistedCollectionOptions<RealTabRow, string>({
+            id: `real-tab-items`,
+            schemaVersion: 1,
+            persistence,
+            ...queryCollectionOptions<
+              RealTabRow,
+              unknown,
+              Array<string>,
+              string
+            >({
+              queryKey: [`real-tab-items`],
+              queryClient,
+              syncMode: `on-demand`,
+              getKey: (row) => row.id,
+              queryFn: (context) =>
+                loadUpstream(context.meta?.loadSubsetOptions?.where),
+            }),
+          }),
+        )
+  return {
+    coordinator,
+    collection,
+    trace,
+    storageCollectionId: () => storageCollectionId,
+    cleanup: async () => {
+      await collection.cleanup()
+      queryClient.clear()
+      coordinator.dispose()
+      liveCoordinators.delete(coordinator)
+      database.close?.()
+    },
+  }
+}
+
+function assertRealTabFollowerHistory(history: RealTabHistory): Promise<void> {
+  return withNativeBrowserTransport(() => runRealTabFollowerHistory(history))
+}
+
+async function runRealTabFollowerHistory(
+  history: RealTabHistory,
+): Promise<void> {
+  const directory = mkdtempSync(join(tmpdir(), `db-real-tab-follower-`))
+  const filename = join(directory, `tabs.sqlite`)
+  const dbName = `real-tab-follower-${Math.random().toString(36).slice(2)}`
+  const upstream = new Map<string, RealTabRow>([
+    [`remote`, { id: `remote`, group: `a` }],
+  ])
+  const applyGate = createDeferredVoid()
+  const hydrationGate = createDeferredVoid()
+  const upstreamGate = createDeferredVoid()
+  let gateApply = false
+  let applyReached = false
+  let hydrationReached = false
+  let gateHydration = false
+  let holdLeaderUpstream = false
+  const applyFailure = new Error(`follower apply read failed`)
+  const tabs: Array<ReturnType<typeof createRealTab>> = []
+  const queries: Array<{ cleanup: () => Promise<void> }> = []
+  try {
+    const leader = createRealTab({
+      dbName,
+      filename,
+      source: history.source,
+      upstream,
+      holdUpstream: () =>
+        holdLeaderUpstream ? upstreamGate.promise : Promise.resolve(),
+    })
+    tabs.push(leader)
+    leader.collection.startSyncImmediate()
+    await leader.collection.stateWhenReady()
+    const follower = createRealTab({
+      dbName,
+      filename,
+      source: history.source,
+      upstream,
+      readGate: async (rows) => {
+        if (gateHydration) {
+          gateHydration = false
+          hydrationReached = true
+          await hydrationGate.promise
+          return
+        }
+        if (gateApply && JSON.stringify(rows).includes(`remote`)) {
+          gateApply = false
+          applyReached = true
+          await applyGate.promise
+          if (history.apply === `fails`) throw applyFailure
+        }
+      },
+    })
+    tabs.push(follower)
+    follower.collection.startSyncImmediate()
+
+    await vi.waitFor(() => expect(follower.storageCollectionId()).toBeDefined())
+    gateApply = true
+    if (history.placement === `queued`) holdLeaderUpstream = true
+    // The consumer settles at first ready (live query) or when the load
+    // settles; `rows` are the demanded rows it sees at that moment.
+    let settledAt: { rows: Array<string> } | undefined
+    let outcome: Promise<`fulfilled` | `rejected`>
+    if (history.consumer === `live-query`) {
+      const query = createLiveQueryCollection((q) =>
+        q
+          .from({ item: follower.collection })
+          .where(({ item }) => eq(item.id, `remote`)),
+      )
+      queries.push(query)
+      query.onFirstReady(() => {
+        settledAt = { rows: query.toArray.map((row) => row.id).sort() }
+      })
+      outcome = query.preload().then(
+        () => `fulfilled` as const,
+        () => `rejected` as const,
+      )
+    } else {
+      outcome = Promise.resolve(
+        follower.collection._sync.loadSubset({
+          where: new IR.Func(`eq`, [
+            new IR.PropRef([`id`]),
+            new IR.Value(`remote`),
+          ]),
+        }),
+      ).then(
+        () => {
+          settledAt = {
+            rows: follower.collection.has(`remote`) ? [`remote`] : [],
+          }
+          return `fulfilled` as const
+        },
+        () => `rejected` as const,
+      )
+    }
+    if (history.placement === `queued`) {
+      // While the owner's upstream load is held, another subset's hydration
+      // takes the follower's apply mutex. The owner's broadcast then arrives
+      // queued behind it.
+      await vi.waitFor(
+        () => {
+          expect(follower.trace).toContain(`ensure`)
+          expect(leader.trace).toContain(`upstream`)
+        },
+        { timeout: 15_000 },
+      )
+      gateHydration = true
+      const other = createLiveQueryCollection((q) =>
+        q
+          .from({ item: follower.collection })
+          .where(({ item }) => eq(item.id, `other`)),
+      )
+      queries.push(other)
+      void other.preload().catch(() => undefined)
+      await vi.waitFor(() => expect(hydrationReached).toBe(true), {
+        timeout: 15_000,
+      })
+      holdLeaderUpstream = false
+      upstreamGate.resolve()
+    }
+    // Checkpoint: the owner's reply has reached the follower, and the apply
+    // of the owner's commit is still outstanding here: a direct broadcast's
+    // durable read is held, or a queued broadcast waits behind the held
+    // hydration. The model says the query has not reached first ready.
+    await vi.waitFor(
+      () => {
+        expect(
+          history.placement === `direct` ? applyReached : hydrationReached,
+        ).toBe(true)
+        expect(follower.trace).toContain(`ensure-settled`)
+      },
+      { timeout: 15_000 },
+    )
+    for (let turn = 0; turn < 20; turn++) await nextTurn()
+    const expected = expectedRealTabFollower(history)
+    expect(settledAt !== undefined).toBe(expected.settledWhileApplyHeld)
+    hydrationGate.resolve()
+    applyGate.resolve()
+    const settled = await outcome
+    await vi.waitFor(() =>
+      expect(follower.collection.status).toBe(expected.settled.source),
+    )
+    expect({
+      outcome: settled,
+      rows: settledAt?.rows,
+      source: follower.collection.status,
+    }).toEqual(expected.settled)
+  } finally {
+    hydrationGate.resolve()
+    applyGate.resolve()
+    upstreamGate.resolve()
+    for (const query of queries) await query.cleanup().catch(() => undefined)
+    for (const tab of tabs.reverse()) await tab.cleanup().catch(() => undefined)
+    rmSync(directory, { recursive: true, force: true })
+  }
+}
+
+describe(`follower remote-demand settlement across real tabs`, () => {
+  const histories: Array<RealTabHistory> = []
+  for (const source of [`receipt`, `query-db`] as const)
+    for (const placement of [`direct`, `queued`] as const)
+      for (const apply of [`ok`, `fails`] as const)
+        for (const consumer of [`live-query`, `load`] as const)
+          histories.push({ source, placement, apply, consumer })
+  it.each(histories)(
+    `settles a follower $consumer with the owner's rows: $source source, $placement, apply $apply`,
+    (history) => assertRealTabFollowerHistory(history),
+    20_000,
+  )
+
+  // Rotation across real tabs. When only the follower's cache claim expires,
+  // it rotates into a new generation that no other tab participates in, so
+  // it becomes that generation's owner and serves new demand from its own
+  // source. The model owes the same applied settlement there: the rows it
+  // already showed stay visible, and a new demand settles with its rows.
+  // This topology never routes to another tab's owner, so the
+  // elected-owner notice path stays covered by the single-runtime
+  // `persistence.follower-generation-notice` lane.
+  it(
+    `keeps a rotated follower's rows and serves its new demand from its own generation`,
+    () =>
+      withNativeBrowserTransport(async () => {
+        const directory = mkdtempSync(join(tmpdir(), `db-real-tab-rotation-`))
+        const filename = join(directory, `tabs.sqlite`)
+        const dbName = `real-tab-rotation-${Math.random().toString(36).slice(2)}`
+        const upstream = new Map<string, RealTabRow>([
+          [`remote`, { id: `remote`, group: `a` }],
+          [`other`, { id: `other`, group: `b` }],
+        ])
+        let followerNow = Date.now()
+        const tabs: Array<ReturnType<typeof createRealTab>> = []
+        const where = (id: string): LoadSubsetOptions => ({
+          where: new IR.Func(`eq`, [new IR.PropRef([`id`]), new IR.Value(id)]),
+        })
+        try {
+          const leader = createRealTab({
+            dbName,
+            filename,
+            source: `receipt`,
+            upstream,
+          })
+          tabs.push(leader)
+          leader.collection.startSyncImmediate()
+          await leader.collection.stateWhenReady()
+          const follower = createRealTab({
+            dbName,
+            filename,
+            source: `receipt`,
+            upstream,
+            now: () => followerNow,
+          })
+          tabs.push(follower)
+          follower.collection.startSyncImmediate()
+          await vi.waitFor(() =>
+            expect(follower.storageCollectionId()).toBeDefined(),
+          )
+          await follower.collection._sync.loadSubset(where(`remote`))
+          const original = follower.storageCollectionId()
+          expect(follower.coordinator.isLeader(original!)).toBe(false)
+          expect(follower.collection.has(`remote`)).toBe(true)
+
+          followerNow += 20_000
+          await follower.collection._sync.loadSubset(where(`other`))
+          const rotated = follower.storageCollectionId()
+          expect(rotated).not.toBe(original)
+          expect(follower.coordinator.isLeader(rotated!)).toBe(true)
+          expect({
+            remote: follower.collection.has(`remote`),
+            other: follower.collection.has(`other`),
+            status: follower.collection.status,
+          }).toEqual({ remote: true, other: true, status: `ready` })
+        } finally {
+          for (const tab of tabs.reverse())
+            await tab.cleanup().catch(() => undefined)
+          rmSync(directory, { recursive: true, force: true })
+        }
+      }),
+    30_000,
+  )
+})
+
+/*
+A leader source may commit on every load: a legal update with a new value, or
+an equal-value insert of a row it already delivered, which core reconciles as
+an update. A follower applies the leader's commit notice from durable rows.
+That apply must not release and request the follower's demand again: a new
+request makes the leader's source load and commit again, and the follower
+would never settle. The model: the follower's query is first ready with the
+leader's row, the follower sends at most two ensures (its demand, and at most
+one replay), and a later leader commit still reaches the follower with the
+leader's current value.
+*/
+describe(`follower stays bounded when the leader commits on every load`, () => {
+  it.each([`update`, `reinsert`] as const)(
+    `settles and stays bounded: commit on every load as $0`,
+    (commitEachLoad) =>
+      withNativeBrowserTransport(async () => {
+        const directory = mkdtempSync(join(tmpdir(), `db-real-tab-each-load-`))
+        const filename = join(directory, `tabs.sqlite`)
+        const dbName = `real-tab-each-load-${Math.random().toString(36).slice(2)}`
+        const upstream = new Map<string, RealTabRow>([
+          [`remote`, { id: `remote`, group: `a` }],
+        ])
+        const tabs: Array<ReturnType<typeof createRealTab>> = []
+        const queries: Array<{ cleanup: () => Promise<void> }> = []
+        const remote: LoadSubsetOptions = {
+          where: new IR.Func(`eq`, [
+            new IR.PropRef([`id`]),
+            new IR.Value(`remote`),
+          ]),
+        }
+        try {
+          const leader = createRealTab({
+            dbName,
+            filename,
+            source: `receipt`,
+            upstream,
+            commitEachLoad,
+          })
+          tabs.push(leader)
+          leader.collection.startSyncImmediate()
+          await leader.collection.stateWhenReady()
+          const follower = createRealTab({
+            dbName,
+            filename,
+            source: `receipt`,
+            upstream,
+            commitEachLoad,
+          })
+          tabs.push(follower)
+          follower.collection.startSyncImmediate()
+          await vi.waitFor(() =>
+            expect(follower.storageCollectionId()).toBeDefined(),
+          )
+          const items: Collection<RealTabRow, string> = follower.collection
+          const query = createLiveQueryCollection((q) =>
+            q.from({ item: items }).where(({ item }) => eq(item.id, `remote`)),
+          )
+          queries.push(query)
+          let rowsAtFirstReady: Array<string> | undefined
+          query.onFirstReady(() => {
+            rowsAtFirstReady = query.toArray.map((row) => row.id)
+          })
+          void query.preload().catch(() => undefined)
+          await vi.waitFor(() => expect(query.isReady()).toBe(true), {
+            timeout: 8_000,
+          })
+          expect(rowsAtFirstReady).toEqual([`remote`])
+          for (let turn = 0; turn < 200; turn++) await nextTurn()
+          const ensures = () =>
+            follower.trace.filter((entry) => entry === `ensure`).length
+          expect(ensures()).toBeLessThanOrEqual(2)
+
+          // A later leader commit still reaches the follower.
+          await leader.collection._sync.loadSubset(remote)
+          await vi.waitFor(
+            () =>
+              expect(follower.collection.get(`remote`)?.group).toBe(
+                upstream.get(`remote`)!.group,
+              ),
+            { timeout: 8_000 },
+          )
+          for (let turn = 0; turn < 200; turn++) await nextTurn()
+          expect(ensures()).toBeLessThanOrEqual(2)
+        } finally {
+          for (const query of queries)
+            await query.cleanup().catch(() => undefined)
+          for (const tab of tabs.reverse())
+            await tab.cleanup().catch(() => undefined)
+          rmSync(directory, { recursive: true, force: true })
+        }
+      }),
+    30_000,
+  )
 })
 
 describe(`coordinator fixture lifecycle`, () => {

@@ -3,7 +3,7 @@ id: QueryIR
 title: QueryIR
 ---
 
-Defined in: [packages/db/src/query/ir.ts:11](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L11)
+Defined in: [packages/db/src/query/ir.ts:13](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L13)
 
 ## Properties
 
@@ -13,7 +13,7 @@ Defined in: [packages/db/src/query/ir.ts:11](https://github.com/TanStack/db/blob
 optional distinct: true;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:21](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L21)
+Defined in: [packages/db/src/query/ir.ts:23](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L23)
 
 ***
 
@@ -23,7 +23,7 @@ Defined in: [packages/db/src/query/ir.ts:21](https://github.com/TanStack/db/blob
 optional fnHaving: (row) => any[];
 ```
 
-Defined in: [packages/db/src/query/ir.ts:27](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L27)
+Defined in: [packages/db/src/query/ir.ts:29](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L29)
 
 #### Parameters
 
@@ -43,7 +43,7 @@ Defined in: [packages/db/src/query/ir.ts:27](https://github.com/TanStack/db/blob
 optional fnSelect: (row) => any;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:25](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L25)
+Defined in: [packages/db/src/query/ir.ts:27](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L27)
 
 #### Parameters
 
@@ -63,7 +63,7 @@ Defined in: [packages/db/src/query/ir.ts:25](https://github.com/TanStack/db/blob
 optional fnWhere: (row) => any[];
 ```
 
-Defined in: [packages/db/src/query/ir.ts:26](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L26)
+Defined in: [packages/db/src/query/ir.ts:28](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L28)
 
 #### Parameters
 
@@ -83,7 +83,7 @@ Defined in: [packages/db/src/query/ir.ts:26](https://github.com/TanStack/db/blob
 from: From;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:12](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L12)
+Defined in: [packages/db/src/query/ir.ts:14](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L14)
 
 ***
 
@@ -93,7 +93,7 @@ Defined in: [packages/db/src/query/ir.ts:12](https://github.com/TanStack/db/blob
 optional groupBy: GroupBy;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:16](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L16)
+Defined in: [packages/db/src/query/ir.ts:18](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L18)
 
 ***
 
@@ -103,7 +103,7 @@ Defined in: [packages/db/src/query/ir.ts:16](https://github.com/TanStack/db/blob
 optional having: Where[];
 ```
 
-Defined in: [packages/db/src/query/ir.ts:17](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L17)
+Defined in: [packages/db/src/query/ir.ts:19](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L19)
 
 ***
 
@@ -113,7 +113,7 @@ Defined in: [packages/db/src/query/ir.ts:17](https://github.com/TanStack/db/blob
 optional join: Join;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:14](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L14)
+Defined in: [packages/db/src/query/ir.ts:16](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L16)
 
 ***
 
@@ -123,7 +123,7 @@ Defined in: [packages/db/src/query/ir.ts:14](https://github.com/TanStack/db/blob
 optional limit: number;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:19](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L19)
+Defined in: [packages/db/src/query/ir.ts:21](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L21)
 
 ***
 
@@ -133,7 +133,7 @@ Defined in: [packages/db/src/query/ir.ts:19](https://github.com/TanStack/db/blob
 optional offset: number;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:20](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L20)
+Defined in: [packages/db/src/query/ir.ts:22](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L22)
 
 ***
 
@@ -143,7 +143,7 @@ Defined in: [packages/db/src/query/ir.ts:20](https://github.com/TanStack/db/blob
 optional orderBy: OrderBy;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:18](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L18)
+Defined in: [packages/db/src/query/ir.ts:20](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L20)
 
 ***
 
@@ -153,7 +153,7 @@ Defined in: [packages/db/src/query/ir.ts:18](https://github.com/TanStack/db/blob
 optional select: Select;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:13](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L13)
+Defined in: [packages/db/src/query/ir.ts:15](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L15)
 
 ***
 
@@ -163,7 +163,7 @@ Defined in: [packages/db/src/query/ir.ts:13](https://github.com/TanStack/db/blob
 optional singleResult: true;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:22](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L22)
+Defined in: [packages/db/src/query/ir.ts:24](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L24)
 
 ***
 
@@ -173,4 +173,4 @@ Defined in: [packages/db/src/query/ir.ts:22](https://github.com/TanStack/db/blob
 optional where: Where[];
 ```
 
-Defined in: [packages/db/src/query/ir.ts:15](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L15)
+Defined in: [packages/db/src/query/ir.ts:17](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L17)

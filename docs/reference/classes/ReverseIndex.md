@@ -54,7 +54,7 @@ the original index's plain reversed walk, as earlier releases did.
 get keyCount(): number;
 ```
 
-Defined in: [packages/db/src/indexes/reverse-index.ts:110](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L110)
+Defined in: [packages/db/src/indexes/reverse-index.ts:114](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L114)
 
 ##### Returns
 
@@ -64,6 +64,30 @@ Defined in: [packages/db/src/indexes/reverse-index.ts:110](https://github.com/Ta
 
 ```ts
 IndexReader.keyCount
+```
+
+***
+
+### supportsOrderOptimization
+
+#### Get Signature
+
+```ts
+get supportsOrderOptimization(): boolean;
+```
+
+Defined in: [packages/db/src/indexes/reverse-index.ts:106](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L106)
+
+Whether a query can use this index for its declared ordered prefix.
+
+##### Returns
+
+`boolean`
+
+#### Implementation of
+
+```ts
+IndexReader.supportsOrderOptimization
 ```
 
 ***
@@ -102,7 +126,7 @@ IndexReader.supportsRangeOptimization
 canOptimizeRangeFor(value): boolean;
 ```
 
-Defined in: [packages/db/src/indexes/reverse-index.ts:106](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L106)
+Defined in: [packages/db/src/indexes/reverse-index.ts:110](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L110)
 
 Whether the live values in this index share the predicate operand's
 relational domain. Mixed domains can sort differently in the index and
@@ -168,7 +192,7 @@ Defined in: [packages/db/src/indexes/reverse-index.ts:39](https://github.com/Tan
 
 ##### options
 
-[`BTreeRangeQueryOptions`](../interfaces/BTreeRangeQueryOptions.md) = `{}`
+[`RangeQueryOptions`](../interfaces/RangeQueryOptions.md) = `{}`
 
 #### Returns
 

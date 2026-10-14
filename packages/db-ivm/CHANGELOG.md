@@ -1,5 +1,30 @@
 # @tanstack/db-ivm
 
+## 0.2.0
+
+### Minor Changes
+
+- Remove operators and helpers that `@tanstack/db` does not use. This is a breaking change for code that imports them from `@tanstack/db-ivm` directly: ([#2133](https://github.com/TanStack/db/pull/2133))
+
+  - `topK`, `topKWithIndex`, `orderBy`, `orderByWithIndex` and `orderByWithFractionalIndexBase`. Use `orderByWithFractionalIndex` or `groupedOrderByWithFractionalIndex`.
+  - `innerJoin`, `leftJoin`, `rightJoin`, `fullJoin` and `antiJoin`. Use `join(other, type)`. Its result values are typed as nullable for every join type, so code that used the precise `innerJoin` result type needs a cast or a null check.
+  - The `count`, `negate`, `debug`, `filterBy`, `keyBy`, `unkey` and `rekey` operators. The `count` aggregate in `groupByOperators` is unchanged.
+  - The never-implemented piped aggregates in `groupBy`. An aggregate must supply `preMap` and `reduce`; an object with only `pipe` now fails when the graph runs, where it was ignored before.
+
+  The package also no longer depends on `sorted-btree`, which only an internal B+ tree top-K used.
+
+### Patch Changes
+
+- Structural hashing now gives equal objects the same hash when two of their keys are distinct strings that locale collation ranks as equal, such as a precomposed `Å` and `A` followed by a combining ring. Before, the hash sorted keys with `localeCompare`, so the hash of such an object depended on the order its keys were inserted, and two equal rows could fail to consolidate in a live query. Keys now sort by UTF-16 code unit, which is a total order. This changes the digest of objects whose keys sort differently by code unit than by locale, for example `{ a: 1, B: 2 }`. Digests are per process, so no stored value depends on them. Hashing also writes whole 32-bit words to the hash stream, which makes hashing rows faster. The stream still hashes the same bytes. ([#2108](https://github.com/TanStack/db/pull/2108))
+
+- An ordered, limited live query or Effect filtered through a LEFT join no longer shows a later row in place of an earlier one. The query loads a bounded prefix of root rows, and a row inserted after that prefix could enter the query's input. When a row left the window without a root delete, for example because its joined row was deleted or inserted, or its join key changed, the later row filled the window while an earlier eligible row was never loaded. A window row after the loaded prefix no longer counts toward a full window, so the query loads the next page first. ([#2122](https://github.com/TanStack/db/pull/2122))
+
+  An ordered, limited query with a full, outer or cross join now reads its full source, as inner and right joins already did. A full join loaded a bounded prefix of root rows, so a joined row whose root match had not loaded yet looked unmatched and could take a place in the window.
+
+- `reduce`, `groupBy`, and the joins they feed do less work per changed key: a reduce whose key has at most one output before and after compares the two directly instead of building two maps, its state no longer keeps a per-key presence count that only joins read, and index reads build their result directly. Live queries with includes hydrate slightly faster. ([#2114](https://github.com/TanStack/db/pull/2114))
+
+- Aggregate queries hydrate and update faster. `groupBy` merges equal contributions to a group, and it used to find them by hashing every contribution. Each contribution now leads with an identity string built from its group key and its pre-aggregate values, and the reduce index merges contributions with equal identities without hashing them. D2 value identity (`equalHashValues`) defines the identity: two values get the same identity string exactly when D2 treats them as equal. Primitives, arrays, plain and class-instance objects, Dates, RegExps, Maps, Sets and Uint8Arrays get an identity. A contribution that holds anything else, a value nested more than four levels deep, or an object with an enumerable symbol key still goes through the structural hash. A grouped count or min over 10,000 rows hydrates about 2× faster. ([#2112](https://github.com/TanStack/db/pull/2112))
+
 ## 0.1.26
 
 ### Patch Changes
