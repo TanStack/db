@@ -382,6 +382,7 @@ it(`preserves raw result types through the actual driver reader`, () => {
     persistedError: undefined,
     isError: false,
     isEnabled: false,
+    errors: undefined,
   }
   const result = Object.fromEntries(
     Object.keys(raw).map((key) => [key, () => raw[key]]),
