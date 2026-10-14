@@ -326,6 +326,36 @@ describe(`structuralIdentity`, () => {
     )
   })
 
+  // Named replays of counterexamples the random campaign found. Nested `deep`
+  // nodes compose, so these specs build equal values; an empty text leaf and the
+  // leaf it shares a value with must also normalize alike.
+  it.each([
+    [
+      `nested deep nodes`,
+      { k: `deep`, depth: 6, v: { k: `leaf`, i: 3 } },
+      {
+        k: `deep`,
+        depth: 3,
+        v: { k: `deep`, depth: 3, v: { k: `leaf`, i: 3 } },
+      },
+    ],
+    [
+      `an empty string in a set`,
+      { k: `set`, v: { k: `text`, s: `` } },
+      { k: `set`, v: { k: `leaf`, i: 5 } },
+    ],
+  ] as Array<[string, Spec, Spec]>)(
+    `agrees with D2 value identity for %s`,
+    (_name, left, right) => {
+      expectAgreement(
+        left,
+        right,
+        build(left, () => false),
+        build(right, () => false),
+      )
+    },
+  )
+
   it(`agrees with D2 value identity for independent values`, () => {
     fc.assert(
       fc.property(specArbitrary, specArbitrary, (left, right) => {
