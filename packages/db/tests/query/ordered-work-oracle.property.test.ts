@@ -1,5 +1,5 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { beforeAll, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { localOnlyCollectionOptions } from '../../src/local-only.js'
 import { createDeferred } from '../../src/deferred.js'
@@ -4398,7 +4398,7 @@ describe(`ordered source work oracle`, () => {
  * sync adapter and its provider: it accepts each `loadSubset` call as a
  * physical acquisition, owns the model's source rows, and writes sync
  * transactions. A held request is a physical acquisition whose provider
- * answer is delayed until a `release` step. A served range is a model
+ * answer is delayed until a `answer` step. A served range is a model
  * abstraction: the prefix and boundary that one answer establishes, up to
  * the last order value a nonempty limited answer returned. A short answer
  * does not prove source exhaustion. The ledger is the model's record of the
@@ -4407,8 +4407,8 @@ describe(`ordered source work oracle`, () => {
  *
  * The provider answers each request from the rows: filtered with the
  * reference evaluator, sorted by the requested order, with the offset only
- * when there is no cursor, up to the limit. Its load fulfills once the
- * commit's applied receipt settles. A forwarding provider sends live changes
+ * when there is no cursor, up to the limit. Its load fulfills when the
+ * commit's applied receipt fulfills, and rejects if it rejects. A forwarding provider sends live changes
  * only for rows it sent or rows that match a subset it served; the rows law
  * holds after each step, and the work law bounds the rows it serves. A
  * refetching provider, like query-db-collection, sends nothing until a
@@ -4424,16 +4424,20 @@ describe(`ordered source work oracle`, () => {
  * A joined or anti-joined filter over an on-demand source must not request
  * the whole source at its initial load when the first window's worth of
  * source rows all pass the join and no boundary value is null or NaN, and
- * the rows each consumer (query or Effect) is served stay within the prefix,
- * its boundary ties and a refill, and the source's size.
+ * each consumer (query or Effect) is served at most the prefix, its
+ * boundary ties and a refill in total, so a repeated request for the same
+ * prefix counts against that bound, and at most the source's size in
+ * distinct rows.
  *
- * A holding provider answers a held request only at a `release` step, from
+ * A holding provider answers a held request only at an `answer` step, from
  * the rows at that moment, so live changes and other loads can arrive while
  * it is in flight. It counts a request as served only once it answers it.
- * Acquisition release aborts the request's signal and gives the adapter one
- * unload: a held request that is aborted or unloaded installs no rows, its
- * load fulfills, and it is never counted as served (cancellation is
- * cooperative, `LoadSubsetOptions.signal`). Every holding history ends by
+ * An abort (or an adapter unload) of a held request follows
+ * `LoadSubsetOptions.signal`: a cooperative provider installs none of its
+ * rows and its load fulfills at once; a provider that cannot cancel
+ * in-flight work (`late` cancellation) answers it anyway at its `answer`
+ * step, and its load fulfills after those rows become visible. Neither is
+ * counted as served. Every holding history ends by
  * answering all held requests, and every window-move promise it made must
  * then have fulfilled. While a load is in flight, the Collection must still
  * hold exactly the ledger, and a query and its peer either keep the window
@@ -4454,8 +4458,8 @@ describe(`ordered source work oracle`, () => {
  * publication must show the final window (#2131).
  *
  * A `move` step changes the first query's window with `setWindow`; its laws
- * then follow the moved window. On acquisition release, a refetching
- * provider's adapter unload drops the request and removes the rows that no
+ * then follow the moved window. On an adapter unload, a refetching
+ * provider drops the request and removes the rows that no
  * remaining request's last answer holds, as query-db-collection does. The
  * per-step work law applies only to forwarding, immediate, single-consumer
  * cases; it skips refetching, holding and peer cases, and move steps.
@@ -4463,7 +4467,7 @@ describe(`ordered source work oracle`, () => {
  * `offset + limit + 1` rows. Its rows law holds beside the first query's at
  * every checkpoint; the work laws count one consumer, so they do not apply
  * to those cases. A peer over a refetching provider is excluded from the
- * grammar until #2155 is fixed; a pinned `it.fails` replay keeps its trace.
+ * grammar until #2155 is fixed; a pinned replay expects its exact symptom.
  * Joined filters can match a row through several markers, by `dup`, so a
  * LEFT-joined filter and a full join keep one result row per matched
  * (row, marker) pair, and an anti-join keeps a row once.
@@ -4486,8 +4490,12 @@ type EagerCommand =
   | { type: `refetch` }
   // A holding provider answers its oldest held request; `drain` answers
   // every held request, including the ones answers start, until none is
-  // left. Any other provider skips both.
-  | { type: `release` }
+  // left. Any other provider skips both. (Not the glossary's acquisition
+  // release, which aborts and unloads.)
+  | { type: `answer` }
+  // Cleans up the peer while its loads may be held. Its acquisition
+  // release aborts each held request and gives the adapter an unload.
+  | { type: `release-peer` }
   | { type: `drain` }
   // Moves the first query's window with `setWindow`. The Effect and the peer
   // keep their windows.
@@ -4510,6 +4518,10 @@ type EagerCase = {
   // at that moment, so live changes can arrive while a load is in flight.
   // Initial loads answer immediately. Omitted means `immediate`.
   latency?: `immediate` | `held`
+  // What a holding provider does with an aborted or unloaded held request:
+  // `cooperative` installs none of its rows and fulfills at once; `late`
+  // cannot cancel it, so it answers it anyway. Omitted means `cooperative`.
+  cancellation?: `cooperative` | `late`
   // A second live query over the same sources, with its own window: the
   // first `offset + limit + 1` rows. Its window law holds beside the first
   // query's, and the work laws, which count one consumer, do not apply.
@@ -4602,7 +4614,7 @@ function eagerHistory(
       // Deletes the first visible row, so a repair runs on most histories.
       fc.constant({ type: `delete-visible` as const }),
       fc.constant({ type: `refetch` as const }),
-      fc.constant({ type: `release` as const }),
+      fc.constant({ type: `answer` as const }),
       fc.record({
         type: fc.constant(`move` as const),
         offset: fc.integer({ min: 0, max: 2 }),
@@ -4613,50 +4625,55 @@ function eagerHistory(
   )
 }
 
-const eagerCase: fc.Arbitrary<EagerCase> = fc
-  .record({
-    path: fc.constantFrom(
-      `sync` as const,
-      `local-only` as const,
-      `on-demand` as const,
-    ),
-    provider: fc.constantFrom(`forward` as const, `refetch` as const),
-    latency: fc.constantFrom(`immediate` as const, `held` as const),
-    // One case in four has a peer, so most cases keep the work laws.
-    peer: fc.oneof(
-      { weight: 3, arbitrary: fc.constant(false) },
-      { weight: 1, arbitrary: fc.constant(true) },
-    ),
-    filter: fc.constantFrom(
-      `source` as const,
-      `function` as const,
-      `joined` as const,
-      `anti-joined` as const,
-      `full-joined` as const,
-    ),
-    via: fc.constantFrom(`marker` as const, `link` as const),
-    indexed: fc.boolean(),
-    direction: fc.constantFrom(`asc` as const, `desc` as const),
-    nulls: fc.constantFrom(`first` as const, `last` as const),
-    terms: fc.constantFrom(1 as const, 2 as const),
-    limit: fc.integer({ min: 1, max: 3 }),
-    offset: fc.integer({ min: 0, max: 1 }),
-    initial: fc.uniqueArray(eagerRow, {
-      selector: (row) => row.id,
-      maxLength: 20,
-    }),
-    history: eagerHistory(1, 29),
-  })
-  // A peer over a refetching on-demand provider can keep a short joined
-  // window after a refetch (#2155). The grammar excludes only that pairing
-  // until the fix; a pinned replay keeps the trace.
-  .map((testCase) =>
-    testCase.path === `on-demand` &&
+// Every dimension, before the campaign exclusion below. Derived campaigns
+// start from this and apply the exclusion after their own maps.
+const eagerCaseBase: fc.Arbitrary<EagerCase> = fc.record({
+  path: fc.constantFrom(
+    `sync` as const,
+    `local-only` as const,
+    `on-demand` as const,
+  ),
+  provider: fc.constantFrom(`forward` as const, `refetch` as const),
+  latency: fc.constantFrom(`immediate` as const, `held` as const),
+  cancellation: fc.constantFrom(`cooperative` as const, `late` as const),
+  // One case in four has a peer, so most cases keep the work laws.
+  peer: fc.oneof(
+    { weight: 3, arbitrary: fc.constant(false) },
+    { weight: 1, arbitrary: fc.constant(true) },
+  ),
+  filter: fc.constantFrom(
+    `source` as const,
+    `function` as const,
+    `joined` as const,
+    `anti-joined` as const,
+    `full-joined` as const,
+  ),
+  via: fc.constantFrom(`marker` as const, `link` as const),
+  indexed: fc.boolean(),
+  direction: fc.constantFrom(`asc` as const, `desc` as const),
+  nulls: fc.constantFrom(`first` as const, `last` as const),
+  terms: fc.constantFrom(1 as const, 2 as const),
+  limit: fc.integer({ min: 1, max: 3 }),
+  offset: fc.integer({ min: 0, max: 1 }),
+  initial: fc.uniqueArray(eagerRow, {
+    selector: (row) => row.id,
+    maxLength: 20,
+  }),
+  history: eagerHistory(1, 29),
+})
+
+// A peer over a refetching on-demand provider can keep a short joined window
+// after a refetch (#2155). Each campaign excludes only that pairing, as its
+// last map, until the fix; a pinned replay keeps the trace.
+function withoutPeerRefetch(testCase: EagerCase): EagerCase {
+  return testCase.path === `on-demand` &&
     testCase.provider === `refetch` &&
     testCase.peer
-      ? { ...testCase, peer: false }
-      : testCase,
-  )
+    ? { ...testCase, peer: false }
+    : testCase
+}
+
+const eagerCase = eagerCaseBase.map(withoutPeerRefetch)
 
 // The premise of the joined-filter law: an indexed single-term plan whose
 // filter drops rows after the bounded read.
@@ -4698,7 +4715,7 @@ const eagerJoinedHistory: fc.Arbitrary<Array<EagerCommand>> = fc.array(
     }),
     fc.constant({ type: `delete-visible` as const }),
     fc.constant({ type: `refetch` as const }),
-    fc.constant({ type: `release` as const }),
+    fc.constant({ type: `answer` as const }),
     fc.record({
       type: fc.constant(`move` as const),
       offset: fc.integer({ min: 0, max: 2 }),
@@ -4712,7 +4729,7 @@ const eagerJoinedHistory: fc.Arbitrary<Array<EagerCommand>> = fc.array(
 // bounded prefix, then a window row leaving only through the join.
 const eagerJoinedCase: fc.Arbitrary<EagerCase> = fc
   .tuple(
-    eagerCase,
+    eagerCaseBase,
     fc.constantFrom(
       `joined` as const,
       `anti-joined` as const,
@@ -4733,6 +4750,7 @@ const eagerJoinedCase: fc.Arbitrary<EagerCase> = fc
     initial,
     history,
   }))
+  .map(withoutPeerRefetch)
 
 // The law's premise directly: eligible rows at distinct ranks, so the bounded
 // prefix leaves rows unsent; a fresh row that may land past the prefix; then
@@ -4767,6 +4785,7 @@ const eagerJoinedGapCase: fc.Arbitrary<EagerCase> = fc
       ...rest,
     ],
   }))
+  .map(withoutPeerRefetch)
 
 // The full-join law's premise: a window that can reach the null group, where
 // rootless rows and root rows with a null rank tie on the first order term.
@@ -4775,7 +4794,7 @@ const eagerJoinedGapCase: fc.Arbitrary<EagerCase> = fc
 // eligibility changes create and remove more.
 const eagerFullJoinCase: fc.Arbitrary<EagerCase> = fc
   .record({
-    base: eagerCase,
+    base: eagerCaseBase,
     fillers: fc.oneof(
       { weight: 3, arbitrary: fc.constant(0) },
       { weight: 1, arbitrary: fc.constant(EAGER_FILLER) },
@@ -4805,6 +4824,7 @@ const eagerFullJoinCase: fc.Arbitrary<EagerCase> = fc
     orphans,
     history,
   }))
+  .map(withoutPeerRefetch)
 
 // The in-flight premise: a holding on-demand provider, and a history that
 // first deletes a visible row, so the refill request is in flight while the
@@ -4812,7 +4832,7 @@ const eagerFullJoinCase: fc.Arbitrary<EagerCase> = fc
 // moment, between those changes.
 const eagerHeldCase: fc.Arbitrary<EagerCase> = fc
   .tuple(
-    eagerCase,
+    eagerCaseBase,
     // A change that lands while the refill is in flight: an eligible row
     // with an id no other command uses (40 to 49), so the forwarding
     // provider always sends it.
@@ -4825,7 +4845,11 @@ const eagerHeldCase: fc.Arbitrary<EagerCase> = fc
     fc.array(
       fc.oneof(
         { weight: 3, arbitrary: eagerHistory(1, 29).map(([first]) => first!) },
-        { weight: 2, arbitrary: fc.constant({ type: `release` as const }) },
+        { weight: 2, arbitrary: fc.constant({ type: `answer` as const }) },
+        {
+          weight: 1,
+          arbitrary: fc.constant({ type: `release-peer` as const }),
+        },
         {
           weight: 1,
           arbitrary: fc.constant({ type: `delete-visible` as const }),
@@ -4864,6 +4888,7 @@ const eagerHeldCase: fc.Arbitrary<EagerCase> = fc
       ...rest,
     ],
   }))
+  .map(withoutPeerRefetch)
 
 function isJoinedFilter({ filter }: EagerCase): boolean {
   return filter === `joined` || filter === `anti-joined`
@@ -4940,9 +4965,8 @@ function boundaryRanks(
     .map((row): number | null => row.rank)
 }
 
-// Per executed case, the steps that changed rows while a held load was in
-// flight, for the held campaign's reconstruction check.
-
+// Properties take this as their predicate, which must return nothing;
+// runEagerWindow also returns the held-load reach counts.
 async function checkEagerWindow(testCase: EagerCase): Promise<void> {
   await runEagerWindow(testCase)
 }
@@ -5089,6 +5113,9 @@ async function runEagerWindow(
   const heldRequests: Array<{
     options: LoadSubsetOptions
     resolve: () => void
+    // Aborted or unloaded, but answered anyway: its rows install and its
+    // load fulfills after they become visible.
+    abandoned?: boolean
   }> = []
   let holding = false
   const inFlight = () => heldRequests.length > 0
@@ -5102,13 +5129,21 @@ async function runEagerWindow(
   }
   // Read through a call, as `lagging` is: the write callbacks assign it.
   const changedInFlight = () => stepChangedInFlight
-  // A held request that is aborted or unloaded leaves the queue: the
-  // provider installs none of its rows and fulfills its load, as cooperative
-  // cancellation allows (LoadSubsetOptions.signal), and never records it as
-  // served.
+  const ledgerHasRoot = (rowId: number) =>
+    [...sent.values()].some((row) => (row.link ?? row.id) === rowId)
+  // An abort (or an adapter unload) of a held request. Cancellation is
+  // cooperative (LoadSubsetOptions.signal): a cooperative provider installs
+  // none of its rows and fulfills its load at once. A provider that cannot
+  // cancel in-flight work answers it anyway at its `answer` step, installing
+  // its rows, and fulfills the load after they become visible. Neither
+  // counts the request as served.
   const dropHeld = (options: LoadSubsetOptions): boolean => {
     const index = heldRequests.findIndex((entry) => entry.options === options)
     if (index === -1) return false
+    if (testCase.cancellation === `late`) {
+      heldRequests[index]!.abandoned = true
+      return true
+    }
     heldRequests.splice(index, 1)[0]!.resolve()
     return true
   }
@@ -5132,10 +5167,10 @@ async function runEagerWindow(
       fullSourceRequests++
     }
     if (!holding) return answer(options)
-    caseHeldRequests++
-    // Cancellation is cooperative (LoadSubsetOptions.signal): an aborted
-    // request installs no rows and its load fulfills.
+    // A request whose signal is already aborted starts no work: it installs
+    // no rows and its load fulfills.
     if (options.signal?.aborted) return true
+    caseHeldRequests++
     return new Promise((resolve) => {
       heldRequests.push({ options, resolve })
       options.signal?.addEventListener(`abort`, () => dropHeld(options))
@@ -5143,9 +5178,9 @@ async function runEagerWindow(
   }
   // Answers one held request from the current rows and fulfills its load
   // once the rows apply.
-  async function releaseOldest(): Promise<void> {
-    const { options, resolve } = heldRequests.shift()!
-    const applied = answer(options)
+  async function answerOldest(): Promise<void> {
+    const { options, resolve, abandoned } = heldRequests.shift()!
+    const applied = abandoned ? send(pageFor(options)) : answer(options)
     if (applied !== true) await applied
     resolve()
   }
@@ -5196,8 +5231,8 @@ async function runEagerWindow(
     if (endIndex === -1) throw new Error(`coverage sentinel missing`)
     return ordered.slice(0, endIndex).map((row) => rows.get(row.id)!)
   }
-  // On acquisition release, a refetching provider's adapter unload (like
-  // query-db-collection's) drops the request and removes the rows that no
+  // On an adapter unload, a refetching provider (like query-db-collection)
+  // drops the request and removes the rows that no
   // remaining request's last answer holds. It sends nothing new. A
   // forwarding provider keeps what it sent.
   function unload(options: LoadSubsetOptions): void {
@@ -5340,10 +5375,9 @@ async function runEagerWindow(
     const current = markersOf(rowId)
     if (matched === current.length > 0) return
     commits++
-    // A marker changes a result row only while its root row exists.
-    if ([...rows.values()].some((row) => (row.link ?? row.id) === rowId)) {
-      noteChange()
-    }
+    // A marker changes a result row only while the Collection holds a root
+    // row it matches (the ledger).
+    if (ledgerHasRoot(rowId)) noteChange()
     if (!matched) for (const { key } of current) markerModel.delete(key)
     await (
       matched
@@ -5427,12 +5461,14 @@ async function runEagerWindow(
     offset: 0,
     limit: testCase.offset + testCase.limit + 1,
   }
-  const peer = testCase.peer
+  let peer = testCase.peer
     ? createLiveQueryCollection({
         startSync: true,
         query: (q) => buildQuery(q, peerCase),
       })
     : undefined
+  // Read through a call: `release-peer` clears it inside the step loop.
+  const currentPeer = () => peer
   // An Effect runs the same joined query through its own graph loop, so the
   // window law must hold for both consumers. It holds its rows by result key.
   const effectRows = new Map<string | number, number>()
@@ -5544,9 +5580,10 @@ async function runEagerWindow(
       shown,
       `${label}: rows over the provider ledger`,
     )
-    if (peer) {
+    const ledgerPeer = currentPeer()
+    if (ledgerPeer) {
       expectEagerWindow(
-        visibleIds(peer),
+        visibleIds(ledgerPeer),
         modelRows(sent),
         peerCase,
         `${label}: peer rows over the provider ledger`,
@@ -5742,12 +5779,13 @@ async function runEagerWindow(
     for (const [step, generated] of history.entries()) {
       if (generated.type === `refetch` && !refetching) continue
       if (
-        (generated.type === `release` || generated.type === `drain`) &&
+        (generated.type === `answer` || generated.type === `drain`) &&
         !held
       ) {
         continue
       }
-      if (generated.type === `release` && !inFlight()) continue
+      if (generated.type === `answer` && !inFlight()) continue
+      if (generated.type === `release-peer` && !held) continue
       // Resolve a visible-row delete against the model's current window.
       const visibleId = eagerWindow(rows, shown)[0]
       if (generated.type === `delete-visible` && visibleId === undefined) {
@@ -5793,13 +5831,18 @@ async function runEagerWindow(
             },
           )
         }
-      } else if (command.type === `release`) {
-        await releaseOldest()
+      } else if (command.type === `release-peer`) {
+        const released = currentPeer()
+        if (!released) continue
+        peer = undefined
+        await released.cleanup()
+      } else if (command.type === `answer`) {
+        await answerOldest()
       } else if (command.type === `drain`) {
         commits = 0
         while (inFlight()) {
           commits++
-          await releaseOldest()
+          await answerOldest()
           await flushPromises()
         }
         // No load fails here, so every held move must settle successfully.
@@ -5841,7 +5884,7 @@ async function runEagerWindow(
       } else if (command.type === `dup`) {
         if (!(joined || fullJoin) || viaLink || !before) continue
         if (markersOf(before.link ?? before.id).length === 0) continue
-        noteChange()
+        if (ledgerHasRoot(before.link ?? before.id)) noteChange()
         await markers.insert(marker(before.link ?? before.id)).isPersisted
           .promise
       } else if (command.type === `touch`) {
@@ -5893,9 +5936,10 @@ async function runEagerWindow(
           shown,
           `in-flight rows after step ${step}`,
         )
-        if (peer) {
+        const inFlightPeer = currentPeer()
+        if (inFlightPeer) {
           expectInFlightWindow(
-            visibleIds(peer),
+            visibleIds(inFlightPeer),
             previousPeerShown,
             peerCase,
             `in-flight peer rows after step ${step}`,
@@ -5903,7 +5947,8 @@ async function runEagerWindow(
         }
       }
       previousShown = visibleIds()
-      previousPeerShown = peer ? visibleIds(peer) : []
+      const stepPeer = currentPeer()
+      previousPeerShown = stepPeer ? visibleIds(stepPeer) : []
       if (!lagging() && !inFlight()) {
         expectEagerWindow(
           visibleIds(),
@@ -5911,9 +5956,9 @@ async function runEagerWindow(
           shown,
           `rows after step ${step}`,
         )
-        if (peer) {
+        if (stepPeer) {
           expectEagerWindow(
-            visibleIds(peer),
+            visibleIds(stepPeer),
             modelRows(),
             peerCase,
             `peer rows after step ${step}`,
@@ -6012,7 +6057,7 @@ async function runEagerWindow(
     unsubscribe?.()
     await effect?.dispose()
     await query.cleanup()
-    await peer?.cleanup()
+    await currentPeer()?.cleanup()
     await source.cleanup()
     await markers.cleanup()
   }
@@ -6151,11 +6196,11 @@ describe(`eager indexed ordered windows`, () => {
 
   // A second live-query Collection over a refetched on-demand source keeps
   // a short joined window (#2155): after the refetch the peer shows ranks
-  // [0, 0] where the model shows [0, 0, 100]. Remove `.fails` with the fix.
-  it.fails(
-    `refills a peer's joined window after a refetch removes a tied row`,
-    async () => {
-      await checkEagerWindow({
+  // [0, 0] where the model shows [0, 0, 100]. Only that symptom satisfies
+  // this replay; when #2155 is fixed, flip it to expect the case to pass.
+  it(`keeps a peer's joined window short after a refetch removes a tied row (#2155)`, async () => {
+    await expect(
+      checkEagerWindow({
         path: `on-demand`,
         provider: `refetch`,
         latency: `immediate`,
@@ -6178,9 +6223,9 @@ describe(`eager indexed ordered windows`, () => {
           { type: `upsert`, id: 10, rank: 1, eligible: false },
           { type: `flip`, id: 0 },
         ],
-      })
-    },
-  )
+      }),
+    ).rejects.toThrow(/peer rows after step 2/)
+  })
 
   it(`publishes a full-join window that only loses a row`, async () => {
     // The delete leaves fewer result rows than the offset, so the window
@@ -6434,7 +6479,6 @@ describe(`eager indexed ordered windows`, () => {
       string,
       { heldChanges: number; heldRequests: number }
     >()
-    beforeAll(() => heldReach.clear())
 
     fcTest.prop([eagerHeldCase], { numRuns: runs, seed: HELD_SEED })(
       `keeps a window whose loads answer between live changes for a fixed seed`,
