@@ -3,7 +3,7 @@
     "file": "collection/lifecycle.ts",
     "literals": [
       "[TanStack DB] Collection \"",
-      "\" called markError() after its first ready. ",
+      "\" called markError() after Collection readiness. ",
       "Call reportError(error, { final: true }) instead; the status stays ready."
     ]
   },
