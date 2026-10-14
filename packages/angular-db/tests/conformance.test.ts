@@ -38,6 +38,7 @@ import {
 import { injectLiveQuery } from '../src/index'
 import { runSuite } from '../../db/tests/conformance/suite'
 import { makeLaggingSource } from '../../db/tests/conformance/lagging-source'
+import { makeHealthSource } from '../../db/tests/conformance/health-source'
 import { expectResultSurface } from '../../db/tests/conformance/result-laws'
 import { withScopeSetup } from '../../db/tests/conformance/scope-setup'
 import type {
@@ -233,6 +234,12 @@ const angularDriver: LiveQueryDriver = {
     makeLaggingSource<T>(
       createCollection,
       `conformance-angular-lagging-${sourceSeq++}`,
+    ),
+  makeHealthSource: <T extends { id: string }>(data: ReadonlyArray<T>) =>
+    makeHealthSource<T>(
+      createCollection,
+      `conformance-angular-health-${sourceSeq++}`,
+      data,
     ),
   makePrecreated,
   makeErrorSource,

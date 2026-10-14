@@ -27,6 +27,7 @@ import {
 import { useLiveQuery } from '../src/useLiveQuery.svelte.js'
 import { runSuite } from '../../db/tests/conformance/suite'
 import { makeLaggingSource } from '../../db/tests/conformance/lagging-source'
+import { makeHealthSource } from '../../db/tests/conformance/health-source'
 import { expectResultSurface } from '../../db/tests/conformance/result-laws'
 import type {
   ConformanceResult,
@@ -142,6 +143,7 @@ function makeHandle(getQuery: () => any, dispose: () => void): LiveQueryHandle {
         isPersistedReady: query?.isPersistedReady,
         persistedError: query?.persistedError,
         isError: query?.isError,
+        errors: query?.errors,
         // svelte-db exposes no `isEnabled`; derive it from status (status-derived).
         isEnabled: query?.status !== `disabled`,
       })
@@ -219,6 +221,12 @@ const svelteDriver: LiveQueryDriver = {
     makeLaggingSource<T>(
       createCollection,
       `conformance-svelte-lagging-${sourceSeq++}`,
+    ),
+  makeHealthSource: <T extends { id: string }>(data: ReadonlyArray<T>) =>
+    makeHealthSource<T>(
+      createCollection,
+      `conformance-svelte-health-${sourceSeq++}`,
+      data,
     ),
   makePrecreated,
   makeErrorSource,
