@@ -646,9 +646,26 @@ for this candidate.
 | ORC-013 boundary witness          | No-signal and signaled creators, one/both caller aborts, independent observer retained and removed, released successor with both provider outcomes, paused replacement with late F1 and resumed F2, paused outside-observer fetch, reentrant replacement, synchronous queryFn cancellation, two- and three-caller silent replacement, F2 terminal success and error before held F3, recursive fetch-event reentry with F2 success and error, an outside-observer F2 provider, same-value data, held and immediate stale F2 versus F3 direct-write schedules, an outside-observer-first F2/F3 success-and-failure pair, silent F1 followed by post-write F2 and held F3, earlier-observer manual and error reentry with held successors, same-reference manual cache-write control, eager Query removal, and zero-live-acquisition external refetch distinguish nearby ownership boundaries. |
 | ORC-014 controlled handoff        | Open for real network cancellation, mutation-phase external `cancelQueries()` settlement, and Query Core versions beyond the installed dependency.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 
-The [coverage map](../oracle-coverage.md) assigns the remaining raw
+The [coverage map](../oracle-coverage.md) assigns the remaining late-peer raw
 `_sync.loadSubset` creator-settlement question, external
 `queryClient.cancelQueries()` during a no-signal snapshot, mutation-phase
 utility-refetch cancellation, real network provider, option-selection orders,
 late outside-observer joins, direct `fetchQuery()` joins without a subscribed
 observer, and cleanup-fault witness. No general cancellation closure is claimed.
+
+## Independent review of the follow-up commit
+
+The follow-up commit `d145b16af4e801735102971cd90874ff8102041f`
+contains the frozen tracked diff
+`ff7e86ad0a83d46800c04a62171883d50cc27f1b7251f653b744becc2d8fd3f4`.
+The independent code review found no confirmed public counterexample in its
+production-equivalent candidate and passed a nested earlier-listener refetch
+probe. The independent oracle review found no remaining false green in the
+named controlled paths on the committed code. It killed a stale-F1 retained
+fulfillment mutant, an early exact-refetch fulfillment mutant at the held-F2
+checkpoint, and a false-success startup-release mutant at the `AbortError`
+assertion. This supplies the bounded independent verdict that was pending in
+the candidate table above; connected retention-before-F1, native persistence,
+real network cancellation, and mutation-phase external cancellation remain
+open in the coverage map. The Query Core minimum version remains unresolved
+until #12023 has a compatible published release.
