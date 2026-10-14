@@ -20887,32 +20887,39 @@ describe(`query collection ownership lifecycle`, () => {
   )
 
   /**
-   * A live demand begins while a historical owner's TTL is still valid. Its
-   * alias scan has not finished when that deadline passes, so the old edge
-   * remains the only durable claim until revalidation can replace it. The
-   * provider result is held to observe the Collection and live-query rows at
-   * the deadline and again after alias discovery, before result application.
-   * A failed scan leaves no acquired alias and permits the expired edge to
-   * retire.
+   * A live demand begins while a matching owner's TTL is still valid. Its
+   * metadata scan has not finished when that deadline passes, so a historical
+   * or current owner stays durable until revalidation can replace its result.
+   * The provider result is held to observe rows at the deadline and again
+   * after scan delivery, before application. A failed scan leaves no acquired
+   * claim and permits the expired edge to retire.
    */
-  it.each([{ scanOutcome: `success` }, { scanOutcome: `failure` }] as const)(
-    `settles a historical singleton owner after a live demand scans past its TTL, scan=$scanOutcome`,
-    async ({ scanOutcome }) => {
+  it.each(
+    ([`historical`, `current`] as const).flatMap((ownerKind) =>
+      ([`success`, `failure`] as const).map((scanOutcome) => ({
+        ownerKind,
+        scanOutcome,
+      })),
+    ),
+  )(
+    `settles a $ownerKind singleton owner after a live demand scans past its TTL, scan=$scanOutcome`,
+    async ({ ownerKind, scanOutcome }) => {
       vi.useFakeTimers()
       try {
         vi.setSystemTime(1_000)
-        const id = `singleton-alias-scan-crosses-ttl`
+        const id = `singleton-${ownerKind}-scan-crosses-ttl-${scanOutcome}`
         const oldHash = hashKey([id, legacySingletonCategoryDemandKey])
         const equality = { where: eq(new IR.PropRef([`category`]), `shared`) }
         const currentHash = hashKey([id, getLoadSubsetDemandKey(equality)])
-        const marker = `queryCollection:gc:${oldHash}`
+        const ownerHash = ownerKind === `historical` ? oldHash : currentHash
+        const marker = `queryCollection:gc:${ownerHash}`
         const storage = createOwnershipStorage({
           rows: new Map([[shared.id, shared]]),
           rowMetadata: new Map([
-            [shared.id, { queryCollection: { owners: { [oldHash]: true } } }],
+            [shared.id, { queryCollection: { owners: { [ownerHash]: true } } }],
           ]),
           collectionMetadata: new Map([
-            [marker, { queryHash: oldHash, mode: `ttl`, expiresAt: 1_050 }],
+            [marker, { queryHash: ownerHash, mode: `ttl`, expiresAt: 1_050 }],
           ]),
         })
         const scanRows = storage.adapter.scanRows!
@@ -20954,7 +20961,7 @@ describe(`query collection ownership lifecycle`, () => {
           expect(storedItems(storage)).toEqual([shared])
           expect(
             persistedOwners(storage.snapshot().rowMetadata, shared.id),
-          ).toEqual([oldHash])
+          ).toEqual([ownerHash])
           expect(storage.snapshot().collectionMetadata.has(marker)).toBe(true)
           expect(queryFn).toHaveBeenCalledTimes(0)
 
@@ -20978,7 +20985,7 @@ describe(`query collection ownership lifecycle`, () => {
           expect(storedItems(storage)).toEqual([shared])
           expect(
             persistedOwners(storage.snapshot().rowMetadata, shared.id),
-          ).toEqual([oldHash])
+          ).toEqual([ownerHash])
           expect(storage.snapshot().collectionMetadata.has(marker)).toBe(true)
 
           providerResult.resolve([shared])
