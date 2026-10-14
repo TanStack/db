@@ -32,6 +32,8 @@ export type RemoteSubsetObservation = {
   isLeader: boolean
   storageCollectionId?: string
   rows: Array<Item>
+  // The rows visible at the live query's first-ready transition.
+  rowsAtFirstReady?: Array<Item>
   upstreamLoads: number
   ensureRequests: Array<{
     collectionId: string
@@ -68,6 +70,7 @@ if (!databaseId || !itemId) throw new Error(`Missing oracle parameters`)
 let phase: RemoteSubsetObservation[`phase`] = `starting`
 let failure: string | undefined
 let upstreamLoads = 0
+let rowsAtFirstReady: Array<Item> | undefined
 let remoteSubsetPosts = 0
 let storageCollectionId: string | undefined
 const remoteSubsetPostFailures: Array<string> = []
@@ -87,6 +90,7 @@ window.__remoteSubsetProbe = {
     phase,
     ...(failure ? { failure } : {}),
     ...readRuntime(),
+    ...(rowsAtFirstReady ? { rowsAtFirstReady } : {}),
     upstreamLoads,
     ensureRequests: [...ensureRequests],
     remoteSubsetPosts,
@@ -219,6 +223,12 @@ try {
       .select(({ item }) => ({ id: item.id, label: item.label })),
   )
   cleanupTasks.unshift(() => live.cleanup())
+  live.onFirstReady(() => {
+    rowsAtFirstReady = [...live.values()].map(({ id, label }) => ({
+      id,
+      label,
+    }))
+  })
   readRuntime = () => ({
     isLeader: storageCollectionId
       ? coordinator.isLeader(storageCollectionId)
