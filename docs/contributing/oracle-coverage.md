@@ -600,7 +600,16 @@ equal peer acquired before first-owner release keeps the commit and both loads
 pending until the gate opens, then receives the row. Removing the application
 wait falsely fulfills the final-owner load before the gate; dropping the
 application signal lets its canceled commit publish the row afterward. These
-histories hold an in-memory wrapping sync, not a native persister.
+histories hold an in-memory wrapping sync, not a native persister. A second
+wrapping sync releases the first subscription from its `write()` callback,
+before `commit()` starts. Without a peer, the canceled load rejects and its
+row stays absent; with a peer, the row applies for that owner. A cache event
+also releases the final subscription while a direct-write merge holds a
+temporary Query observer listener. The fetched-only row leaves when its last
+acquisition lease does. A zero-lease listener on Query DB's observer is not an
+owner. These public-row assertions failed before the respective repairs.
+Release after commit acceptance while publication remains held has no witness
+in this owner.
 An applied direct cache patch permits reuse or one exact filtered revalidation
 for a new demand, but cannot trigger a redundant full request. The bounded
 history has no retry, invalidation, or explicit refetch; a duplicate filtered
