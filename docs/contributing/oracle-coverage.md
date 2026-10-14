@@ -807,6 +807,12 @@ The ownership oracle owns a further DB receiving witness after Query Core's
 attribution repair stabilizes: a custom Query behavior that omits
 `fetchSequence` and forwards Core's lazy signal getter. The current eager
 behavior witnesses do not combine those two inputs.
+The Query DB ownership oracle also owns a package-install receiving run against
+a published Query Core release with the attribution events and sequence API.
+The current peer range admits 5.90.20, which lacks that API. The release check
+must raise the peer minimum to the first attribution-capable published version,
+exclude 5.90.20, and run the same cancellation and ownership witnesses against
+the oldest allowed published version without a source override.
 Its real QueryClient witness loads ten disjoint on-demand subsets, then checks
 `writeUpsert`, `writeUpdate`, `writeDelete`, `writeInsert`, and a mixed
 `writeBatch`. After each accepted write it compares public live-query rows with

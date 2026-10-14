@@ -796,3 +796,27 @@ for the ownership oracle. A repeated Query DB run at that exact merged head
 passed 1,029 runtime tests in 20 files and typechecked against attribution
 source `877655c66`. This later record-only edit leaves those executed files
 unchanged.
+
+### Current-head ORC-001–014 disposition
+
+This table audits the executable files at `c274d5aff`, unchanged by the
+subsequent record-only commits. It supersedes the earlier table's scope and
+ORC-014 status for the integrated #2134/#2143 result. The fixed histories
+establish only the named schedules and checkpoints above.
+
+| Requirement | Current disposition |
+| --- | --- |
+| ORC-001 authority and limits | **Met within scope.** The live-query architecture's ownership and request-signal laws supply the contract; the exact histories and omitted schedules are stated above. |
+| ORC-002 independent judgment | **Met within scope.** The owner-edge model and caller/physical-fetch expectations do not use Query DB's ownership decisions; fixed historical key bytes do not come from the current encoder. |
+| ORC-003 literate responsibilities | **Met within scope.** The executable owners state their laws, models, fixed histories, real QueryClient and Collection paths, observations, and settlement cuts beside the checks. |
+| ORC-004 generated grammar controls | **N/A.** These additions are fixed, bounded histories; they claim no generated-history grammar. |
+| ORC-005 production path and observation | **Met for the named cuts.** Real Query Core and Query Collection paths reach provider-signal, caller-settlement, public-row, cache-row, and durable-owner comparisons where each law requires them. |
+| ORC-006 checker calibration | **Met for the named faults.** The pre-repair eager cancellation fails at F2's provider call; the pending-registration mutant fails at the second caller's outcome. Earlier identity and ownership mutants fail at their key, row, or marker comparisons. |
+| ORC-007 fixed/random replay | **N/A.** No important generated property is added to this bounded audit. |
+| ORC-008 stateful-model minimality | **Met for the changed owner-edge model.** Old/current owner edges remain separate because successful revalidation retires the old edge, while failure preserves it; a shared peer edge survives either transition. |
+| ORC-009 vocabulary mapping | **Met.** The model's owner edges map to exact persisted claims; caller outcomes, physical fetches, and Collection publication remain separate observations. |
+| ORC-010 failure fidelity and cleanup | **Partial.** The harness releases resources and retains ordinary cleanup diagnostics, but no injected simultaneous assertion-plus-cleanup failure proves that both reports survive. |
+| ORC-011 second formulation | **N/A to a new formulation.** No named fault shared by the independent owner model and production requires another semantic model in this audit; evaluator, fixed historical bytes, and SQLite restart provide separate checks of their stated premises. |
+| ORC-012 review evidence | **Met as a bounded audit.** The exact merge and formatter provenance, RED/GREEN checkpoints, relevant mutants, and unresolved receiving cells are recorded here and assigned in the coverage map. No universal schedule or release-compatibility closure is claimed. |
+| ORC-013 boundary witnesses | **Met within the finite matrix.** Eager pre-retryer cancellation and same-turn replacement distinguish stale-signal reuse; same-options reacquisition distinguishes deletion of a new pending registration; old/current and sole/shared owners distinguish migration errors. |
+| ORC-014 controlled-premise handoff | **Open in two receiving cells.** Real SQLite restart supplies the historical-owner premise. The coverage map still assigns a custom Query behavior that omits `fetchSequence` and forwards Core's lazy signal getter, and the current peer range still admits published Query Core 5.90.20 without the required attribution API. These need a receiving witness and a compatible published release, respectively. |
