@@ -1,8 +1,11 @@
 # Plan: final initial errors and the source health channel
 
-Status: planned, not started. Do this after #2126, #2127, and #2128 merge.
-It ships as one new pull request, because it is a breaking change and a
-significant product change. It replaces #2129.
+Status: implemented on `feat/source-health-channel`; the pull request is next.
+It ships as one pull request, because it is a breaking change and a
+significant product change. It replaces #2129. Later decisions (2026-10-14):
+a crashed Collection ends every live query and Effect above it; terminal local
+persistence failures crash; `request` stays the public phase name; a live
+query's Collection health includes its request errors.
 
 Branch: `feat/source-health-channel` (worktree
 `.worktrees/source-health-channel`).
