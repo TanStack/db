@@ -158,6 +158,80 @@ Use `queryOnce` for scripts, background tasks, data export, or AI/LLM context
 building. `findOne()` resolves to `undefined` when no rows match. For UI
 bindings and reactive updates, use live queries instead.
 
+### Querying available local rows
+
+Use `useLocalLiveQuery` when your application owns fetching and ingestion, or
+when a view must observe shared collection contents without requesting data:
+
+```tsx
+import { eq, useLocalLiveQuery } from '@tanstack/react-db'
+
+const result = useLocalLiveQuery((q) =>
+  q.from({ task: tasks }).where(({ task }) => eq(task.projectId, projectId)),
+)
+```
+
+This is equivalent to `useLiveQuery({ query, localOnly: true })`. The hook
+accepts a query callback or configuration object, including conditional queries
+that return `undefined` or `null`. Pass a query over an existing Collection
+rather than passing the Collection directly.
+
+The same capability is available in core:
+
+```ts
+const localTasks = createLiveQueryCollection({
+  localOnly: true,
+  query: (q) => q.from({ task: tasks }),
+})
+await localTasks.preload() // Evaluates memory; does not fetch source rows.
+```
+
+Local queries remain reactive to ingestion, optimistic mutations, and changes
+loaded by other consumers. They never initiate source sync or subset requests,
+including for joins, includes, window changes, and truncate replay. Explicit
+source startup (`startSync: true`, `preload()`, or another consumer) can still
+load data. When a source is another live-query Collection, you observe its
+published rows; its own loading policy remains in force.
+
+`isReady` means the local result is available, even if empty. It does not mean
+that the server result is complete. Source loading failures do not fail local
+queries; query evaluation errors and explicit source cleanup still do.
+
+For example, an application can combine a custom API search with local
+reactive evaluation. Here `tasks` is a Query Collection, and
+`fetchProjectTasks` is your API function:
+
+```tsx
+function useApiTasks(projectId: string) {
+  const request = useQuery({
+    queryKey: ['api-tasks', projectId],
+    queryFn: async () => {
+      const rows = await fetchProjectTasks(projectId)
+      tasks.startSyncImmediate()
+      tasks.utils.writeUpsert(rows)
+      return rows
+    },
+  })
+  const local = useLocalLiveQuery((q) =>
+    q.from({ task: tasks }).where(({ task }) => eq(task.projectId, projectId)),
+  )
+  return { ...local, isFetching: request.isFetching, fetchError: request.error }
+}
+```
+
+Use `useLiveInfiniteQuery(query, { pageSize: 20, localOnly: true })` to paginate
+available local rows. `fetchNextPage` expands the local window and `hasNextPage`
+describes the available rows. Manage server cursors and server exhaustion in
+your API fetcher. For a pre-created live-query Collection, set `localOnly` when
+creating it.
+
+Local and fetching queries have separate identities even with the same explicit
+`queryKey`. Changing `localOnly` on a hook configuration replaces its query;
+infinite queries also reset their pages. With a callback-returned configuration
+and legacy dependency arrays, include loading-policy changes in the dependencies,
+as with other captured configuration. Local queries create no adapter requests
+to deduplicate. Source row storage remains shared.
+
 ### Using with Frameworks
 
 In React, you can use the `useLiveQuery` hook:

@@ -131,6 +131,10 @@ export class CollectionConfigBuilder<
     return this.liveQueryCollection?._hasSubscriberOrPreload() ?? true
   }
 
+  get localOnly(): boolean {
+    return this.config.localOnly === true
+  }
+
   private windowFn: ((options: WindowOptions) => void) | undefined
   private readonly initialWindow: WindowOptions | undefined
   private currentWindow: WindowOptions | undefined
@@ -856,7 +860,7 @@ export class CollectionConfigBuilder<
       this.subscriptions,
       this.lazySourcesCallbacks,
       this.lazySources,
-      this.optimizableOrderByCollections,
+      this.localOnly ? undefined : this.optimizableOrderByCollections,
       (windowFn: (options: WindowOptions) => void) => {
         this.windowFn = windowFn
         // `setWindow` mutates the compiled top-K operator, which is replaced
@@ -1109,8 +1113,8 @@ export class CollectionConfigBuilder<
   ) {
     const { status } = event
 
-    // Handle error state - any source collection in error puts live query in error
-    if (status === `error`) {
+    // Local results remain usable when provider loading fails.
+    if (status === `error` && !this.localOnly) {
       this.erroredSourceIds.add(sourceId)
       this.setErrorState(
         devBuild() && process.env.NODE_ENV !== `production`
@@ -1214,6 +1218,7 @@ export class CollectionConfigBuilder<
   }
 
   private allRequiredSourcesReady() {
+    if (this.localOnly) return true
     return this.collectionSources.every(({ collection }) =>
       sourcePermitsInitialReadiness(collection),
     )
@@ -1287,7 +1292,7 @@ export class CollectionConfigBuilder<
 
       const subscription = collectionSubscriber.subscribe()
       this.subscriptions[sourceId] = subscription
-      if (subscription.isDeferringAcquisition()) {
+      if (!this.localOnly && subscription.isDeferringAcquisition()) {
         // No subscriber or preload yet: source reads stay local, and the
         // deferred provider work starts when the first one arrives.
         syncState.unsubscribeCallbacks.add(

@@ -721,6 +721,7 @@ function createHookInstance(dbClient: DbClient | undefined) {
     deps: null as Array<unknown> | null,
     config: null as unknown,
     client: dbClient,
+    localOnly: false,
     legacyUnhashableIdentity: [`legacy-unhashable`] as Array<unknown>,
     derivedIdentityProfiler: {
       renderCount: 0,
@@ -816,6 +817,19 @@ function useLiveQueryImpl(
     }
   }
 
+  const modeConfig =
+    typeof configOrQueryOrCollection === `function`
+      ? preparedQueryValue
+      : configOrQueryOrCollection
+  const localOnly =
+    modeConfig &&
+    typeof modeConfig === `object` &&
+    `localOnly` in modeConfig &&
+    modeConfig.localOnly === true
+  if (localOnly && streamIdentity !== undefined && queryKey) {
+    streamIdentity = [streamIdentity, `localOnly`]
+  }
+
   let queryHash: string | undefined
   if (streamIdentity !== undefined) {
     try {
@@ -898,7 +912,10 @@ function useLiveQueryImpl(
   const needsNewCollection =
     !instance.collection ||
     (inputIsCollection && instance.config !== configOrQueryOrCollection) ||
-    (!inputIsCollection && (instance.client !== dbClient || identityChanged))
+    (!inputIsCollection &&
+      (instance.client !== dbClient ||
+        instance.localOnly !== (localOnly === true) ||
+        identityChanged))
 
   if (needsNewCollection) {
     if (inputIsCollection) {
@@ -984,6 +1001,7 @@ function useLiveQueryImpl(
       instance.deps = [...identityDeps]
     }
     instance.client = dbClient
+    instance.localOnly = localOnly === true
     instance.queryHash = queryHash
     instance.suspenseKey = suspenseKey
     instance.identityError = identityError

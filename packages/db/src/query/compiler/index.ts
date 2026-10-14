@@ -380,7 +380,7 @@ function getCompilationValueIdentity(cache: QueryCache): ValueIdentity {
  * @param subscriptions Mapping of source aliases to CollectionSubscription instances
  * @param callbacks Mapping of source aliases to lazy loading callbacks
  * @param lazySources Set of source identities that should load data lazily
- * @param optimizableOrderByCollections Map of source IDs to order-by optimization info
+ * @param optimizableOrderByCollections Source loading plans; undefined disables provider order optimization
  * @param cache Optional cache for compiled subqueries (used internally for recursion)
  * @param queryMapping Optional lineage from optimized queries to user-defined queries
  * @returns A CompilationResult with the pipeline, source WHERE clauses, and alias metadata
@@ -392,7 +392,8 @@ type CompileQueryArgs = [
   subscriptions: Record<string, CollectionSubscription>,
   callbacks: Record<string, LazyCollectionCallbacks>,
   lazySources: Set<string>,
-  optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
+  optimizableOrderByCollections:
+    Record<string, OrderByOptimizationInfo> | undefined,
   setWindowFn: (windowFn: (options: WindowOptions) => void) => void,
   cache?: QueryCache,
   queryMapping?: QueryMapping,
@@ -1548,7 +1549,8 @@ function processFromClause(
   subscriptions: Record<string, CollectionSubscription>,
   callbacks: Record<string, LazyCollectionCallbacks>,
   lazySources: Set<string>,
-  optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
+  optimizableOrderByCollections:
+    Record<string, OrderByOptimizationInfo> | undefined,
   setWindowFn: (windowFn: (options: WindowOptions) => void) => void,
   cache: QueryCache,
   queryMapping: QueryMapping,
@@ -1709,7 +1711,8 @@ function processUnionAll(
   subscriptions: Record<string, CollectionSubscription>,
   callbacks: Record<string, LazyCollectionCallbacks>,
   lazySources: Set<string>,
-  optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
+  optimizableOrderByCollections:
+    Record<string, OrderByOptimizationInfo> | undefined,
   setWindowFn: (windowFn: (options: WindowOptions) => void) => void,
   cache: QueryCache,
   queryMapping: QueryMapping,
@@ -1880,7 +1883,8 @@ function processFrom(
   subscriptions: Record<string, CollectionSubscription>,
   callbacks: Record<string, LazyCollectionCallbacks>,
   lazySources: Set<string>,
-  optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
+  optimizableOrderByCollections:
+    Record<string, OrderByOptimizationInfo> | undefined,
   setWindowFn: (windowFn: (options: WindowOptions) => void) => void,
   cache: QueryCache,
   queryMapping: QueryMapping,

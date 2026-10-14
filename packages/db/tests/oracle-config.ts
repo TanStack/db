@@ -291,6 +291,13 @@ export function validateOraclePropertyRegistry(
 
 export const registeredOracleProperties = validateOraclePropertyRegistry([
   ...staticOracleProperties,
+  ...[`eager`, `on-demand`].flatMap((mode) =>
+    [false, true].flatMap((indexed) =>
+      [`window`, `join`, `include`].map(
+        (shape) => `local-live-query.${mode}.${indexed}.${shape}`,
+      ),
+    ),
+  ),
   ...publicationProperties,
   ...refinementProperties,
   ...paginationMatrixProperties,

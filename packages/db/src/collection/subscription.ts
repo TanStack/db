@@ -85,6 +85,7 @@ type CollectionSubscriptionOptions = {
    * subscriber or a preload in its current sync run.
    */
   deferAcquisition?: boolean
+  localOnly?: boolean
   /** Called once when deferred acquisition resumes. */
   onResumeAcquisition?: () => void
 }
@@ -263,6 +264,7 @@ export class CollectionSubscription
     this.collectionRestartCleanup = this.collection.on(
       `status:change`,
       ({ status }) => {
+        if (this.options.localOnly) return
         if (status !== `loading` && status !== `ready`) return
         const syncRunGeneration = this.collection._sync.getSyncRunGeneration()
         const replayState = this.truncateReplayState
@@ -293,7 +295,8 @@ export class CollectionSubscription
    * the on-demand demand that stayed detached while acquisition was deferred.
    */
   public resumeDeferredAcquisition(): void {
-    if (!this.defersAcquisition || this.unsubscribed) return
+    if (this.options.localOnly || !this.defersAcquisition || this.unsubscribed)
+      return
     // Start the source first: if its start throws, this subscription still
     // defers rather than claiming acquisition it never began.
     this.options.onResumeAcquisition?.()
@@ -1034,6 +1037,13 @@ export class CollectionSubscription
         syncRunGeneration: this.collection._sync.getSyncRunGeneration(),
       },
       acquisitionState: `starting`,
+    }
+    if (this.options.localOnly) {
+      // Retain snapshot selection for release/replay bookkeeping, but never
+      // establish an acquisition lease or a wait for provider readiness.
+      demand.acquisitionState = `detached`
+      this.subsetDemands.push(demand)
+      return { demand, result: true, started: false }
     }
     if (
       this.collection.status === `cleaned-up` ||

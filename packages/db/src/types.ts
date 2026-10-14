@@ -1123,6 +1123,8 @@ export interface SubscribeChangesOptions<
    * @internal
    */
   deferAcquisition?: boolean
+  /** Observe local rows permanently, without acquiring source data. @internal */
+  localOnly?: boolean
   /**
    * Listener for subscription status changes.
    * Registered BEFORE any snapshot is requested, ensuring no status transitions are missed.

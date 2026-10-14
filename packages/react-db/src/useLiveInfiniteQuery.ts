@@ -60,6 +60,8 @@ export type UseLiveInfiniteQueryConfig<_TContext extends Context> = {
   queryKey?: LiveQueryKey
   /** Override the nearest DbProvider for this query. */
   client?: DbClient
+  /** Paginate rows already available locally, without acquiring source data. */
+  localOnly?: boolean
   pageSize?: number
   /** First result-page label, not a server cursor or remote offset. */
   initialPageParam?: number
@@ -113,6 +115,7 @@ type InfiniteQueryRenderState = {
   inputCollection: Collection<any, any, any> | null
   inputQuery: unknown
   client: DbClient | undefined
+  localOnly: boolean
   identityMode: `collection` | `queryKey` | `legacyDeps` | `derived`
   dependencies: Array<unknown> | null
   pageSize: number
@@ -128,6 +131,7 @@ type InfiniteQueryRenderState = {
 
 type RenderedWindowCollection = {
   client: DbClient | undefined
+  localOnly: boolean
   dependencies: Array<unknown>
   collection: Collection<any, any, any>
   deferredCollections: Set<
@@ -141,11 +145,11 @@ type RenderedWindowCollection = {
  */
 function queryIdentityMatches(
   comparison: { changed: boolean; structurallyEqual: boolean },
-  sameClient: boolean,
+  sameConfiguration: boolean,
   usesLegacyDeps: boolean,
 ): boolean {
   return (
-    sameClient &&
+    sameConfiguration &&
     (usesLegacyDeps ? !comparison.changed : comparison.structurallyEqual)
   )
 }
@@ -169,7 +173,7 @@ export function useLiveInfiniteQuery<
   TUtils extends Record<string, any>,
 >(
   liveQueryCollection: Collection<TResult, TKey, TUtils> & NonSingleResult,
-  config: UseLiveInfiniteQueryConfig<any>,
+  config: Omit<UseLiveInfiniteQueryConfig<any>, `localOnly`>,
 ): UseLiveInfiniteQueryReturnWithCollection<TResult, TKey, TUtils>
 
 // Overload for query function
@@ -266,18 +270,30 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     }
   }
 
+  if (inputIsCollection && config.localOnly !== undefined) {
+    throw new Error(`Set localOnly when creating the live-query Collection.`)
+  }
   const usesLegacyDeps =
     !inputIsCollection && config.queryKey === undefined && deps !== undefined
   const dependencyComparison = compareLiveQueryWindowDependencies(
     committed?.dependencies,
     identityDeps,
   )
-  const sameClient = committed?.client === dbClient
+  const sameConfiguration =
+    committed !== null &&
+    committed.client === dbClient &&
+    committed.localOnly === (config.localOnly === true)
   const dependenciesChanged =
     !inputIsCollection &&
-    !queryIdentityMatches(dependencyComparison, sameClient, usesLegacyDeps)
+    !queryIdentityMatches(
+      dependencyComparison,
+      sameConfiguration,
+      usesLegacyDeps,
+    )
   const dependenciesStructurallyEqual =
-    usesLegacyDeps && sameClient && dependencyComparison.structurallyEqual
+    usesLegacyDeps &&
+    sameConfiguration &&
+    dependencyComparison.structurallyEqual
   const needsNewCollection =
     committed === null ||
     committed.inputKind !== inputKind ||
@@ -336,7 +352,8 @@ export function useLiveInfiniteQuery<TContext extends Context>(
             rendered.dependencies,
             identityDeps,
           ),
-          rendered.client === dbClient,
+          rendered.client === dbClient &&
+            rendered.localOnly === (config.localOnly === true),
           usesLegacyDeps,
         ) &&
         rendered.collection.status !== `cleaned-up` &&
@@ -366,6 +383,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
           // setWindow.
           collection = createLiveQueryCollection({
             query: input.query.limit(requiredLimit).offset(0),
+            localOnly: config.localOnly,
             gcTime: DEFAULT_GC_TIME_MS,
           })
           startInRender = true
@@ -398,6 +416,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     if (createdCollection) {
       renderedCollectionRef.current = {
         client: dbClient,
+        localOnly: config.localOnly === true,
         dependencies: [...identityDeps],
         collection,
         deferredCollections,
@@ -409,6 +428,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
       inputCollection: inputIsCollection ? collection : null,
       inputQuery: inputIsCollection ? null : queryFnOrCollection,
       client: dbClient,
+      localOnly: config.localOnly === true,
       identityMode,
       dependencies: inputIsCollection ? null : [...identityDeps],
       pageSize,

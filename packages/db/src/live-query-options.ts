@@ -180,6 +180,7 @@ export function getPreparedLiveQueryIdentity(value: unknown): unknown {
       [`getKey`, config.getKey],
       [`schema`, config.schema],
       [`singleResult`, config.singleResult === true],
+      ...(config.localOnly ? [[`localOnly`, true]] : []),
       [
         `defaultStringCollation`,
         getStringCollationIdentity(config.defaultStringCollation),
@@ -200,7 +201,15 @@ export function getLiveQueryHash(
       ? [`collection`, preparedValue.id]
       : [`derived`, getPreparedLiveQueryIdentity(preparedValue)]
 
-  return getStableValueHash(identity, `queryKey`)
+  const localOnly =
+    preparedValue &&
+    typeof preparedValue === `object` &&
+    `localOnly` in preparedValue &&
+    preparedValue.localOnly === true
+  return getStableValueHash(
+    localOnly && queryKey?.length ? [identity, `localOnly`] : identity,
+    `queryKey`,
+  )
 }
 
 /**

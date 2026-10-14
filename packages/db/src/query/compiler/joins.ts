@@ -224,7 +224,8 @@ export function processJoins(
   subscriptions: Record<string, CollectionSubscription>,
   callbacks: Record<string, LazyCollectionCallbacks>,
   lazySources: Set<string>,
-  optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
+  optimizableOrderByCollections:
+    Record<string, OrderByOptimizationInfo> | undefined,
   setWindowFn: (windowFn: (options: WindowOptions) => void) => void,
   rawQuery: QueryIR,
   localFrom: From,
@@ -290,7 +291,8 @@ function processJoin(
   subscriptions: Record<string, CollectionSubscription>,
   callbacks: Record<string, LazyCollectionCallbacks>,
   lazySources: Set<string>,
-  optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
+  optimizableOrderByCollections:
+    Record<string, OrderByOptimizationInfo> | undefined,
   setWindowFn: (windowFn: (options: WindowOptions) => void) => void,
   rawQuery: QueryIR,
   onCompileSubquery: CompileQueryFn,
@@ -622,7 +624,8 @@ function processJoinSource(
   subscriptions: Record<string, CollectionSubscription>,
   callbacks: Record<string, LazyCollectionCallbacks>,
   lazySources: Set<string>,
-  optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
+  optimizableOrderByCollections:
+    Record<string, OrderByOptimizationInfo> | undefined,
   setWindowFn: (windowFn: (options: WindowOptions) => void) => void,
   cache: QueryCache,
   queryMapping: QueryMapping,
