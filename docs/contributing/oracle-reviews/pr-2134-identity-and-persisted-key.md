@@ -798,12 +798,13 @@ passed 1,029 runtime tests in 20 files and typechecked against attribution
 source `877655c66`. This later record-only edit leaves those executed files
 unchanged.
 
-### Current-head ORC-001–014 disposition
+### Historical ORC-001–014 disposition at `c274d5aff`
 
 This table audits the executable files at `c274d5aff`, unchanged by the
-subsequent record-only commits. It supersedes the earlier table's scope and
-ORC-014 status for the integrated #2134/#2143 result. The fixed histories
-establish only the named schedules and checkpoints above.
+record-only commits immediately following that head. It superseded the earlier
+table's scope and ORC-014 status for the integrated #2134/#2143 result at that
+time. Later executable changes and their narrower dispositions appear below.
+The fixed histories establish only the named schedules and checkpoints above.
 
 | Requirement | Current disposition |
 | --- | --- |
@@ -1121,3 +1122,28 @@ TTL maintenance. The ownership oracle and SQLite receiving path retain those
 cells in the coverage map. Integration with subsequent Query Core changes
 requires a separate receiving run; the green result above is bound to
 `273eb2526`.
+
+### Latest executable ORC disposition at `7ebfb4dee`
+
+The earlier `c274d5aff` table is historical. This disposition covers the
+held-scan expiry additions through executable head `7ebfb4dee`, including the
+local cleanup calibration. It carries forward the unchanged identity and
+ownership laws only within the bounded histories stated above.
+
+| Requirement | Head-bound disposition |
+| --- | --- |
+| ORC-001–003 | **Met within scope.** Fixed old key bytes, the owner-edge rule, and the public retention contract supply independent judgment. Prose beside the histories identifies the real Query Collection path and the deadline, scan-delivery, and application cuts. |
+| ORC-004, 007 | **N/A.** The new controls are fixed finite schedules; no generated campaign or replay claim was added. |
+| ORC-005 | **Met for named cuts.** Public live-query preload reaches Query Collection and the controlled persistence adapter. After the storage scan releases its apply mutex, the tests compare source and live rows, durable rows and owners, marker presence, provider calls, and caller outcome at the relevant deadline and settlement cuts. |
+| ORC-006 | **Met for named faults.** Exact predecessor `bb12782f6` fails the unrelated-owner durable-row assertion. Wrong-alias and never-cleanup timer mutants fail public-row assertions. Omitting direct current-hash matching fails the permanent current-owner public-row assertion after scan delivery and a disposable probe's durable-row assertion at the deadline. Each failure reached the intended comparison; no setup failure or test-runner timeout was counted as a kill. |
+| ORC-008, 009 | **Unchanged.** Old and current owner edges stay distinct until result application or expiry. Model edges map to exact durable owner IDs; a pending demand is separate from its provider request and row claim. |
+| ORC-010 | **Met for the four held-scan histories, partial for the file.** Their local teardown attempts every release and preserves the comparison as `AggregateError.cause` beside cleanup errors. An injected comparison plus two failing releases checks that path and a third release attempt. The file-level afterEach aggregator has no simultaneous assertion-plus-cleanup injection in this audit. |
+| ORC-011 | **N/A to a new formulation.** No concrete semantic fault shared by this owner-edge model and production was identified. Fixed old bytes and the direct current key distinguish the tested owner identities. |
+| ORC-012, 013 | **Met as a bounded audit.** Historical/current, matching/unrelated, success/failure, unload/abort before and after the deadline, and one/two pending acquisitions distinguish the named wrong timer designs. The coverage map assigns remaining schedules. |
+| ORC-014 | **Open for the new timing boundary and release compatibility.** Prior real SQLite restart cases supply historical-owner storage premises; the new post-mutex held-delivery schedule uses a controlled adapter. Arbitrary host timing and a compatible published Query Core version still need receiving evidence. |
+
+At `7ebfb4dee`, 1,045 Query DB tests in 20 files pass against immutable
+attribution-enabled Query Core source `273eb2526`, and TypeScript passes with
+that source. Changed-file ESLint reports no errors, Prettier and
+`git diff --check` pass. This does not extend the green claim to later Query
+Core heads.
