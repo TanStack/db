@@ -7,10 +7,14 @@ import { localOnlyCollectionOptions } from '../../src/local-only.js'
 import {
   createLiveQueryCollection,
   eq,
+  inArray,
   materialize,
   toArray,
 } from '../../src/query/index.js'
+import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
+import { SetWindowRequiresOrderByError } from '../../src/errors.js'
 import type { Collection } from '../../src/collection/index.js'
+import type { LoadSubsetOptions } from '../../src/types.js'
 
 /**
  * # Does unrelated source size increase correlated include work?
@@ -598,51 +602,70 @@ describe(`includes deterministic work-counter oracle`, () => {
 /**
  * # Does a parent window bound include work?
  *
- * An ordered, limited parent query shows only the rows in its window. Law 12
- * of the live-query architecture (Work) says irrelevant rows must not
- * activate unrelated routes. A parent row that `limit` or `offset` drops is
- * irrelevant to the result, so its include must not load child rows. The
- * same holds with `distinct`, which reads every parent row before the window.
- * Only the parent's window answers `setWindow`; an include child's own
- * `orderBy` or `limit` must not take it over.
+ * An ordered parent query shows only the rows in its window. Law 12 of the
+ * live-query architecture (Work) says irrelevant rows must not activate
+ * unrelated routes. A parent row the window drops is irrelevant to the
+ * result, so its include must not load child rows: not before the window
+ * exists (a static parent filter must not seed demand), not with `distinct`,
+ * which reads every parent row before the window, and not after `setWindow`
+ * narrows a parent that has only an `orderBy`. Only the parent's window
+ * answers `setWindow`; an include child's own `orderBy` or `limit` must not
+ * take it over.
  *
  * ## Model
  *
  * Parents have a rank and a group; children and their include correlate by
- * group, so parents of one group share their children. The model sorts the
- * shown units by rank and takes the window. A unit is a parent, or, with
- * `distinct`, one distinct (rank, group) pair, because the selected values
- * then omit the parent id and parents with equal rank and group collapse.
- * Ranks can tie, so the comparison accepts any tied units at the window edge:
- * the rank sequence must match, every shown row must be a unit with that
- * rank, and no unit may appear twice. Each shown row must carry its group's
- * children in the include form under test:
+ * group, so parents of one group share their children, and every child has
+ * one grandchild. A parent filter may keep only some groups, by `eq` or
+ * `inArray` on the correlation field. The model sorts the shown units by rank
+ * and takes the window. A unit is a parent, or, with `distinct`, one
+ * distinct (rank, group) pair, because the selected values then omit the
+ * parent id and parents with equal rank and group collapse. Ranks can tie, so
+ * the comparison accepts any tied units at the window edge: the rank sequence
+ * must match, every shown row must be a unit with that rank, and no unit may
+ * appear twice. The parent is a page (`offset` and `limit`), a `findOne`
+ * with an `offset`, or an `orderBy` alone, whose window starts unbounded.
+ * Each shown row must carry its group's children in the include form under
+ * test:
  *
- * - `materialize`: every child, in any order;
+ * - `materialize` and `collection` (a child Collection): every child;
  * - `ordered`: every child by `n`, descending, with the child's own `orderBy`;
  * - `limited`: the first two of those, with the child's own `limit`;
- * - `nested`: every child with its own materialized grandchildren.
+ * - `findOne`: the first of those, or none;
+ * - `nested`: every child with its materialized grandchildren;
+ * - `limited-nested`: the first two children with their grandchildren.
  *
  * ## Work
  *
- * Work is counted as child rows the child Collection delivers to the query.
- * A step may deliver at most the children of the groups of the rows shown
- * before or after it, of the first unit after each window, and of every unit
- * tied with a window edge, plus one changed child. A query that routes even
- * one or two rows before the window to its include delivers extra groups and
- * fails, as does one that loads children for every parent before the window.
+ * The child source is local or on demand. Work is the child rows it delivers
+ * (local) or serves and forwards (on demand), and the grandchild rows the
+ * local grandchild source delivers. Preload may load only the children of the
+ * shown rows' groups and the grandchildren of the shown children. A step may
+ * load only the children of the rows that entered the window, the
+ * grandchildren of the children that entered an include, and one changed
+ * row. A query that routes the row after the window, every row tied with an
+ * edge, rows before the window, or rows a static filter names fails.
  *
  * ## Histories
  *
  * Histories insert parents (fresh, or copying an existing rank and group),
  * delete parents, move a parent's rank past every other rank, insert and
- * delete children, and move the parent window with `setWindow`. Indexes exist
- * before the live query starts, and every step settles before it is checked.
+ * delete children, and move the parent window with `setWindow` (not for a
+ * `findOne` parent). Indexes exist before the live query starts, and every
+ * step settles before it is checked.
  */
 type WindowParent = { id: string; rank: number; group: string }
 type WindowChild = { id: string; group: string; n: number }
 type WindowGrandchild = { id: string; childId: string }
-type ChildForm = `materialize` | `ordered` | `limited` | `nested`
+type ChildForm =
+  | `materialize`
+  | `collection`
+  | `ordered`
+  | `limited`
+  | `findOne`
+  | `nested`
+  | `limited-nested`
+type ParentForm = `page` | `findOne` | `orderOnly`
 
 type WindowCommand =
   | { type: `insert-parent`; copy: number | null }
@@ -659,6 +682,10 @@ type WindowCase = {
   copies: Array<{ pick: number; group: boolean }>
   childrenPerGroup: number
   childForm: ChildForm
+  childSource: `local` | `on-demand`
+  parentForm: ParentForm
+  // Groups a static parent filter keeps, by index; one uses `eq`.
+  parentFilter: Array<number> | null
   direction: `asc` | `desc`
   distinct: boolean
   offset: number
@@ -699,9 +726,25 @@ const windowCase: fc.Arbitrary<WindowCase> = fc
       childrenPerGroup: fc.integer({ min: 1, max: 3 }),
       childForm: fc.constantFrom(
         `materialize` as const,
+        `collection` as const,
         `ordered` as const,
         `limited` as const,
+        `findOne` as const,
         `nested` as const,
+        `limited-nested` as const,
+      ),
+      childSource: fc.constantFrom(`local` as const, `on-demand` as const),
+      parentForm: fc.constantFrom(
+        `page` as const,
+        `findOne` as const,
+        `orderOnly` as const,
+      ),
+      parentFilter: fc.option(
+        fc.uniqueArray(fc.nat({ max: parents - 1 }), {
+          minLength: 1,
+          maxLength: 6,
+        }),
+        { nil: null },
       ),
       direction: fc.constantFrom(`asc` as const, `desc` as const),
       distinct: fc.boolean(),
@@ -710,17 +753,24 @@ const windowCase: fc.Arbitrary<WindowCase> = fc
       history: fc.array(windowCommand, { maxLength: 8 }),
     }),
   )
+  // A findOne parent has one result row; `distinct` would not change it.
+  .map((testCase) =>
+    testCase.parentForm === `findOne`
+      ? { ...testCase, distinct: false }
+      : testCase,
+  )
 
 type WindowUnit = { key: string; rank: number; group: string }
 type ShownRow = { key: string; rank: number; group: string; kids: unknown }
+type ObservedKid = { id: string; grand?: Iterable<{ id: string }> }
 
 /** The rows the window may show: parents, or distinct (rank, group) pairs. */
 function windowUnits(
-  parents: ReadonlyMap<string, WindowParent>,
+  parents: Iterable<WindowParent>,
   distinct: boolean,
 ): Array<WindowUnit> {
   const units = new Map<string, WindowUnit>()
-  for (const parent of parents.values()) {
+  for (const parent of parents) {
     const key = distinct ? `${parent.rank}|${parent.group}` : parent.id
     units.set(key, { key, rank: parent.rank, group: parent.group })
   }
@@ -734,40 +784,128 @@ function modelKids(
   children: ReadonlyMap<string, WindowChild>,
   grandchildren: ReadonlyMap<string, WindowGrandchild>,
 ): unknown {
+  const grandOf = (childId: string) =>
+    [...grandchildren.values()]
+      .filter((grandchild) => grandchild.childId === childId)
+      .map((grandchild) => grandchild.id)
+      .sort()
   const rows = [...children.values()].filter((child) => child.group === group)
-  if (form === `materialize`) return rows.map((child) => child.id).sort()
+  const byN = rows.sort((left, right) => right.n - left.n)
+  if (form === `materialize` || form === `collection`) {
+    return rows.map((child) => child.id).sort()
+  }
   if (form === `nested`) {
     return rows
-      .map((child) => ({
-        id: child.id,
-        grand: [...grandchildren.values()]
-          .filter((grandchild) => grandchild.childId === child.id)
-          .map((grandchild) => grandchild.id)
-          .sort(),
-      }))
+      .map((child) => ({ id: child.id, grand: grandOf(child.id) }))
       .sort((left, right) => left.id.localeCompare(right.id))
   }
-  const ordered = rows
-    .sort((left, right) => right.n - left.n)
-    .map((child) => child.id)
+  if (form === `limited-nested`) {
+    return byN
+      .slice(0, 2)
+      .map((child) => ({ id: child.id, grand: grandOf(child.id) }))
+  }
+  if (form === `findOne`) return byN[0]?.id ?? null
+  const ordered = byN.map((child) => child.id)
   return form === `limited` ? ordered.slice(0, 2) : ordered
 }
 
 /** The include value a shown row carries, in the model's representation. */
 function observeKids(kids: unknown, form: ChildForm): unknown {
-  const rows = [...(kids as Iterable<{ id: string; grand?: unknown }>)]
-  if (form === `materialize`) return rows.map((row) => row.id).sort()
-  if (form === `nested`) {
-    return rows
-      .map((row) => ({
-        id: row.id,
-        grand: [...(row.grand as Iterable<{ id: string }>)]
-          .map((grandchild) => grandchild.id)
-          .sort(),
-      }))
-      .sort((left, right) => left.id.localeCompare(right.id))
+  if (form === `findOne`)
+    return (kids as { id: string } | undefined)?.id ?? null
+  const rows = [
+    ...(form === `collection`
+      ? (kids as { toArray: Array<ObservedKid> }).toArray
+      : (kids as Iterable<ObservedKid>)),
+  ]
+  if (form === `nested` || form === `limited-nested`) {
+    const withGrand = rows.map((row) => ({
+      id: row.id,
+      grand: [...(row.grand ?? [])].map((grandchild) => grandchild.id).sort(),
+    }))
+    return form === `nested`
+      ? withGrand.sort((left, right) => left.id.localeCompare(right.id))
+      : withGrand
   }
-  return rows.map((row) => row.id)
+  const ids = rows.map((row) => row.id)
+  return form === `materialize` || form === `collection` ? ids.sort() : ids
+}
+
+/**
+ * An on-demand child source. Its provider serves each load from the model's
+ * rows by the request's predicate, keeps a ledger of sent rows, and forwards
+ * a later change only for a sent row or a row a served predicate matches.
+ * `work` counts the rows it serves and forwards.
+ */
+function createOnDemandChildren(initial: Array<WindowChild>) {
+  const truth = new Map(initial.map((child) => [child.id, child]))
+  const sent = new Set<string>()
+  const wheres: Array<LoadSubsetOptions[`where`]> = []
+  let work = 0
+  let controls:
+    | {
+        begin: () => void
+        write: (message: {
+          type: `insert` | `delete`
+          value: WindowChild
+        }) => void
+        commit: () => unknown
+      }
+    | undefined
+  const matches = (where: LoadSubsetOptions[`where`], row: WindowChild) =>
+    where === undefined ||
+    evaluateReferenceExpression(
+      where as Parameters<typeof evaluateReferenceExpression>[0],
+      row,
+    ) === true
+  const collection = createCollection<WindowChild, string>({
+    id: `window-children-on-demand-${nextCollectionId++}`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        controls = { begin, write, commit }
+        markReady()
+        return {
+          loadSubset: (options) => {
+            wheres.push(options.where)
+            const page = [...truth.values()].filter(
+              (row) => !sent.has(row.id) && matches(options.where, row),
+            )
+            work += page.length
+            if (page.length === 0) return true
+            begin()
+            for (const row of page) {
+              sent.add(row.id)
+              write({ type: `insert`, value: { ...row } })
+            }
+            commit()
+            return true
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  return {
+    collection,
+    work: () => work,
+    change: (type: `insert` | `delete`, row: WindowChild) => {
+      if (type === `insert`) truth.set(row.id, row)
+      else truth.delete(row.id)
+      const forward =
+        type === `delete`
+          ? sent.delete(row.id)
+          : wheres.some((where) => matches(where, row))
+      if (!forward) return
+      if (type === `insert`) sent.add(row.id)
+      work++
+      controls!.begin()
+      controls!.write({ type, value: row })
+      controls!.commit()
+    },
+  }
 }
 
 async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
@@ -778,12 +916,15 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
   let nextChild = 0
   let nextGroup = testCase.groups
   const addChildren = (group: string, count: number) => {
+    const added: Array<WindowChild> = []
     for (let index = 0; index < count; index++) {
       const child = { id: `child-${nextChild}`, group, n: nextChild++ }
       children.set(child.id, child)
+      added.push(child)
       const grandchild = { id: `grand-${child.id}`, childId: child.id }
       grandchildren.set(grandchild.id, grandchild)
     }
+    return added
   }
   for (let group = 0; group < testCase.groups; group++) {
     addChildren(`group-${group}`, testCase.childrenPerGroup)
@@ -803,13 +944,25 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
     const parent = { id: `parent-copy-${index}`, rank: source.rank, group }
     parents.set(parent.id, parent)
   }
+  const filterGroups =
+    testCase.parentFilter &&
+    testCase.parentFilter.map((index) => `group-${index % testCase.groups}`)
+  const keptParents = () =>
+    [...parents.values()].filter(
+      (parent) => !filterGroups || filterGroups.includes(parent.group),
+    )
 
   const parentSource = createSourceCollection(`window-parents`, [
     ...parents.values(),
   ])
-  const childSource = createSourceCollection(`window-children`, [
-    ...children.values(),
-  ])
+  const onDemand =
+    testCase.childSource === `on-demand`
+      ? createOnDemandChildren([...children.values()])
+      : undefined
+  const childSource = (onDemand?.collection ??
+    createSourceCollection(`window-children`, [
+      ...children.values(),
+    ])) as unknown as Collection<WindowChild>
   const grandchildSource = createSourceCollection(`window-grandchildren`, [
     ...grandchildren.values(),
   ])
@@ -817,8 +970,8 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
   let primary: { error: unknown } | undefined
   try {
     await Promise.all(
-      [parentSource, childSource, grandchildSource].map((source) =>
-        source.preload(),
+      [parentSource, grandchildSource, ...(onDemand ? [] : [childSource])].map(
+        (source) => source.preload(),
       ),
     )
     parentSource.createIndex((row) => row.rank, { indexType: BTreeIndex })
@@ -826,65 +979,111 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
     grandchildSource.createIndex((row) => row.childId, {
       indexType: BTreeIndex,
     })
-    const childWork = countSourceWork(childSource)
+    const localChildWork = onDemand ? undefined : countSourceWork(childSource)
+    const childWork = () => onDemand?.work() ?? localChildWork!().delivered
+    const grandWork = countSourceWork(grandchildSource)
+    const changeChild = async (type: `insert` | `delete`, row: WindowChild) => {
+      if (onDemand) {
+        onDemand.change(type, row)
+        return
+      }
+      await (
+        type === `insert` ? childSource.insert(row) : childSource.delete(row.id)
+      ).isPersisted.promise
+    }
 
     const live = createLiveQueryCollection((q) => {
+      const grandOf = (childId: unknown) =>
+        materialize(
+          q
+            .from({ grandchild: grandchildSource })
+            .where(({ grandchild }) => eq(grandchild.childId, childId))
+            .select(({ grandchild }) => ({ id: grandchild.id })),
+        )
       const kidsOf = (group: unknown) => {
         const groupChildren = q
           .from({ child: childSource })
           .where(({ child }) => eq(child.group, group))
-        if (testCase.childForm === `materialize`) {
-          return materialize(
-            groupChildren.select(({ child }) => ({ id: child.id })),
-          )
+        const byN = groupChildren.orderBy(({ child }) => child.n, `desc`)
+        switch (testCase.childForm) {
+          case `materialize`:
+            return materialize(
+              groupChildren.select(({ child }) => ({ id: child.id })),
+            )
+          case `collection`:
+            return groupChildren.select(({ child }) => ({ id: child.id }))
+          case `nested`:
+            return materialize(
+              groupChildren.select(({ child }) => ({
+                id: child.id,
+                grand: grandOf(child.id),
+              })),
+            )
+          case `limited-nested`:
+            return toArray(
+              byN.limit(2).select(({ child }) => ({
+                id: child.id,
+                grand: grandOf(child.id),
+              })),
+            )
+          case `findOne`:
+            return materialize(
+              byN.select(({ child }) => ({ id: child.id })).findOne(),
+            )
+          case `limited`:
+            return toArray(
+              byN.limit(2).select(({ child }) => ({ id: child.id })),
+            )
+          case `ordered`:
+            return toArray(byN.select(({ child }) => ({ id: child.id })))
         }
-        if (testCase.childForm === `nested`) {
-          return materialize(
-            groupChildren.select(({ child }) => ({
-              id: child.id,
-              grand: materialize(
-                q
-                  .from({ grandchild: grandchildSource })
-                  .where(({ grandchild }) => eq(grandchild.childId, child.id))
-                  .select(({ grandchild }) => ({ id: grandchild.id })),
-              ),
-            })),
-          )
-        }
-        const ordered = groupChildren.orderBy(({ child }) => child.n, `desc`)
-        return toArray(
-          (testCase.childForm === `limited`
-            ? ordered.limit(2)
-            : ordered
-          ).select(({ child }) => ({ id: child.id })),
-        )
       }
-      const page = q
-        .from({ parent: parentSource })
-        .orderBy(({ parent }) => parent.rank, testCase.direction)
-        .offset(testCase.offset)
-        .limit(testCase.limit)
-      return testCase.distinct
-        ? page
+      const parentRows = q.from({ parent: parentSource })
+      const filtered = !filterGroups
+        ? parentRows
+        : parentRows.where(({ parent }) =>
+            filterGroups.length === 1
+              ? eq(parent.group, filterGroups[0])
+              : inArray(parent.group, filterGroups),
+          )
+      const ordered = filtered.orderBy(
+        ({ parent }) => parent.rank,
+        testCase.direction,
+      )
+      const windowed =
+        testCase.parentForm === `orderOnly`
+          ? ordered
+          : ordered.offset(testCase.offset).limit(testCase.limit)
+      const selected = testCase.distinct
+        ? windowed
             .select(({ parent }) => ({
               rank: parent.rank,
               group: parent.group,
               kids: kidsOf(parent.group),
             }))
             .distinct()
-        : page.select(({ parent }) => ({
+        : windowed.select(({ parent }) => ({
             id: parent.id,
             rank: parent.rank,
             group: parent.group,
             kids: kidsOf(parent.group),
           }))
+      return testCase.parentForm === `findOne`
+        ? (selected.findOne() as unknown as typeof selected)
+        : selected
     })
     cleanupLive = () => live.cleanup()
 
-    let shown = { offset: testCase.offset, limit: testCase.limit }
+    let shown =
+      testCase.parentForm === `orderOnly`
+        ? { offset: 0, limit: Number.POSITIVE_INFINITY }
+        : {
+            offset: testCase.offset,
+            limit: testCase.parentForm === `findOne` ? 1 : testCase.limit,
+          }
     const sign = testCase.direction === `asc` ? 1 : -1
     const sortedUnits = () =>
-      windowUnits(parents, testCase.distinct).sort(
+      windowUnits(keptParents(), testCase.distinct).sort(
         (left, right) => sign * (left.rank - right.rank),
       )
     const shownRows = (): Array<ShownRow> =>
@@ -930,37 +1129,40 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
       ).toBe(actual.length)
       return actual
     }
-    // Groups a step may load: the shown rows, the first unit after the
-    // window, and every unit tied with a window edge.
-    const edgeGroups = (window: { offset: number; limit: number }) => {
-      const units = sortedUnits()
-      const edge = units.slice(window.offset, window.offset + window.limit + 1)
-      const edgeRanks = new Set(
-        [edge[0], edge.at(-1)].flatMap((unit) => (unit ? [unit.rank] : [])),
-      )
-      return [...edge, ...units.filter((unit) => edgeRanks.has(unit.rank))].map(
-        (unit) => unit.group,
-      )
-    }
-    const childrenOf = (groups: Iterable<string>) => {
-      const set = new Set(groups)
-      return [...children.values()].filter((child) => set.has(child.group))
+    const childrenOf = (rows: Iterable<ShownRow>) => {
+      const groups = new Set([...rows].map((row) => row.group))
+      return [...children.values()].filter((child) => groups.has(child.group))
         .length
     }
+    // Children whose grandchildren an include shows, by id.
+    const shownKids = (rows: Iterable<ShownRow>) =>
+      new Set(
+        [...rows].flatMap((row) =>
+          testCase.childForm === `nested` ||
+          testCase.childForm === `limited-nested`
+            ? (row.kids as Array<{ id: string }>).map((kid) => kid.id)
+            : [],
+        ),
+      )
+    const grandchildrenOf = (kids: ReadonlySet<string>) =>
+      [...grandchildren.values()].filter((grandchild) =>
+        kids.has(grandchild.childId),
+      ).length
 
     await live.preload()
+    await new Promise((resolve) => setTimeout(resolve, 0))
     let before = expectWindow(`rows after preload`)
-    let windowBefore = shown
-    expect(
-      childWork().delivered,
-      `child rows delivered by preload`,
-    ).toBeLessThanOrEqual(
-      childrenOf([...before.map((row) => row.group), ...edgeGroups(shown)]),
+    expect(childWork(), `child rows loaded by preload`).toBeLessThanOrEqual(
+      childrenOf(before),
     )
+    expect(
+      grandWork().delivered,
+      `grandchild rows loaded by preload`,
+    ).toBeLessThanOrEqual(grandchildrenOf(shownKids(before)))
 
     for (const [step, command] of testCase.history.entries()) {
-      const deliveredBefore = childWork().delivered
-      const edgeBefore = edgeGroups(windowBefore)
+      const childBefore = childWork()
+      const grandBefore = grandWork().delivered
       const ids = [...parents.keys()]
       const childIds = [...children.keys()]
       if (command.type === `insert-parent`) {
@@ -970,14 +1172,10 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
             : parents.get(ids[command.copy % ids.length]!)!
         const group = source?.group ?? `group-${nextGroup++}`
         if (!source) {
-          addChildren(group, testCase.childrenPerGroup)
-          await childSource.insert(
-            [...children.values()].filter((child) => child.group === group),
-          ).isPersisted.promise
+          const added = addChildren(group, testCase.childrenPerGroup)
+          for (const child of added) await changeChild(`insert`, child)
           await grandchildSource.insert(
-            [...grandchildren.values()].filter(
-              (grandchild) => children.get(grandchild.childId)?.group === group,
-            ),
+            added.map((child) => grandchildren.get(`grand-${child.id}`)!),
           ).isPersisted.promise
         }
         const parent = {
@@ -1013,31 +1211,37 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
           n: nextChild++,
         }
         children.set(child.id, child)
-        await childSource.insert(child).isPersisted.promise
+        await changeChild(`insert`, child)
       } else if (command.type === `delete-child`) {
         if (childIds.length === 0) continue
-        const id = childIds[command.pick % childIds.length]!
-        children.delete(id)
-        await childSource.delete(id).isPersisted.promise
+        const child = children.get(childIds[command.pick % childIds.length]!)!
+        children.delete(child.id)
+        await changeChild(`delete`, child)
       } else {
+        if (testCase.parentForm === `findOne`) continue
         shown = { offset: command.offset, limit: command.limit }
         const settled = live.utils.setWindow(shown)
         if (settled !== true) await settled
       }
       await new Promise((resolve) => setTimeout(resolve, 0))
       const after = expectWindow(`rows after step ${step}`)
-      expect(
-        childWork().delivered - deliveredBefore,
-        `child rows delivered by step ${step}`,
-      ).toBeLessThanOrEqual(
-        childrenOf([
-          ...[...before, ...after].map((row) => row.group),
-          ...edgeBefore,
-          ...edgeGroups(shown),
-        ]) + 1,
+      const beforeKeys = new Set(before.map((row) => row.key))
+      const entered = after.filter((row) => !beforeKeys.has(row.key))
+      const kidsBefore = shownKids(before)
+      const kidsEntered = new Set(
+        [...shownKids(after)].filter((kid) => !kidsBefore.has(kid)),
       )
+      // A fresh parent's group is new, so its children load only through
+      // the parent, if it enters the window.
+      expect(
+        childWork() - childBefore,
+        `child rows loaded by step ${step}`,
+      ).toBeLessThanOrEqual(childrenOf(entered) + 1)
+      expect(
+        grandWork().delivered - grandBefore,
+        `grandchild rows loaded by step ${step}`,
+      ).toBeLessThanOrEqual(grandchildrenOf(kidsEntered) + 1)
       before = after
-      windowBefore = shown
     }
   } catch (error) {
     primary = { error }
@@ -1055,57 +1259,122 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
   }
 }
 
+const pinnedWindowCase: WindowCase = {
+  parents: 8,
+  groups: 8,
+  copies: [],
+  childrenPerGroup: 2,
+  childForm: `materialize`,
+  childSource: `local`,
+  parentForm: `page`,
+  parentFilter: null,
+  direction: `asc`,
+  distinct: false,
+  offset: 0,
+  limit: 2,
+  history: [],
+}
+
 describe(`includes work under an ordered parent window`, () => {
   it.each([false, true])(
     `loads children only for a late page's parents (distinct=%s)`,
     (distinct) =>
       checkWindowedIncludeWork({
+        ...pinnedWindowCase,
         parents: 40,
         groups: 40,
-        copies: [],
         childrenPerGroup: 3,
-        childForm: `materialize`,
         direction: `desc`,
         distinct,
         offset: 20,
-        limit: 2,
         history: [{ type: `move`, offset: 10, limit: 3 }],
       }),
   )
 
-  it.each([`ordered`, `limited`, `nested`] as const)(
+  it.each([`ordered`, `limited`, `limited-nested`] as const)(
     `moves the parent window, not the %s child's`,
     (childForm) =>
       checkWindowedIncludeWork({
-        parents: 8,
-        groups: 8,
-        copies: [],
-        childrenPerGroup: 2,
+        ...pinnedWindowCase,
         childForm,
-        direction: `asc`,
-        distinct: false,
-        offset: 0,
-        limit: 2,
         history: [{ type: `move`, offset: 3, limit: 2 }],
       }),
   )
 
   it(`collapses parents whose selected values match under distinct`, () =>
     checkWindowedIncludeWork({
-      parents: 8,
-      groups: 8,
+      ...pinnedWindowCase,
       copies: [
         { pick: 1, group: true },
         { pick: 2, group: false },
       ],
-      childrenPerGroup: 2,
-      childForm: `materialize`,
-      direction: `asc`,
       distinct: true,
-      offset: 0,
       limit: 3,
       history: [{ type: `insert-parent`, copy: 3 }],
     }))
+
+  it(`seeds no child demand from a static parent filter`, () =>
+    checkWindowedIncludeWork({
+      ...pinnedWindowCase,
+      childSource: `on-demand`,
+      parentFilter: [0, 1, 2, 3, 4],
+      offset: 3,
+      limit: 1,
+    }))
+
+  it(`stops routing rows that setWindow drops from an orderBy-only parent`, () =>
+    checkWindowedIncludeWork({
+      ...pinnedWindowCase,
+      childrenPerGroup: 3,
+      parentForm: `orderOnly`,
+      history: [
+        { type: `move`, offset: 0, limit: 2 },
+        { type: `insert-parent`, copy: null },
+      ],
+    }))
+
+  it(`loads one page of children for a findOne parent`, () =>
+    checkWindowedIncludeWork({
+      ...pinnedWindowCase,
+      childForm: `findOne`,
+      parentForm: `findOne`,
+      offset: 5,
+    }))
+
+  // An include child's orderBy gives the parent no window to move, so an
+  // unordered parent rejects setWindow instead of moving the child windows.
+  it(`rejects setWindow on an unordered parent with an ordered child`, async () => {
+    const parentSource = createSourceCollection(`unordered-parents`, [
+      { id: `parent-0`, group: `group-0` },
+    ])
+    const childSource = createSourceCollection(`unordered-children`, [
+      { id: `child-0`, group: `group-0`, n: 0 },
+    ])
+    const live = createLiveQueryCollection((q) =>
+      q.from({ parent: parentSource }).select(({ parent }) => ({
+        id: parent.id,
+        kids: toArray(
+          q
+            .from({ child: childSource })
+            .where(({ child }) => eq(child.group, parent.group))
+            .orderBy(({ child }) => child.n)
+            .limit(1),
+        ),
+      })),
+    )
+    try {
+      await live.preload()
+      expect(() => live.utils.setWindow({ offset: 0, limit: 1 })).toThrow(
+        SetWindowRequiresOrderByError,
+      )
+    } finally {
+      await runCleanups([
+        () => live.cleanup(),
+        () => parentSource.cleanup(),
+        () => childSource.cleanup(),
+      ])
+    }
+  })
 
   for (const campaign of campaigns(2137, `includes-work.ordered-window`)) {
     fcTest.prop([windowCase], campaign.options)(
