@@ -417,8 +417,8 @@ This also applies to derived arrays such as `select: (response) => response.data
 
 The `meta` option allows you to pass additional metadata to your query function. By default, Query Collections automatically include `loadSubsetOptions` in the meta object, which contains filtering, sorting, and pagination options for on-demand queries.
 
-`loadSubsetOptions` is request-scoped. Query functions can read it through
-`ctx.meta`, but it is excluded when Query metadata is serialized for SSR.
+`loadSubsetOptions` carries the requested subset. Query functions can read it
+through `ctx.meta`, but it is excluded when Query metadata is serialized for SSR.
 Hydrated Query metadata therefore does not contain the server request options;
 new on-demand requests supply their own options. Other enumerable `meta`
 properties retain TanStack Query's normal dehydration behavior.
@@ -428,7 +428,11 @@ Do not edit expression nodes, ordering options, Dates, byte arrays, or membershi
 arrays. Build separate API parameters instead. Core retains request data without
 cloning it; changing submitted data can make the request disagree with its cache
 key. To change a query constant, supply a new value rather than mutating the old
-one. Cancellation through the request's `AbortSignal` remains supported.
+one. Use `ctx.signal` for the provider call. When a subset request supplies a
+signal, `ctx.meta.loadSubsetOptions.signal` follows the physical Query fetch.
+Releasing one acquisition does not abort a fetch that another acquisition
+still owns. If the provider ignores the signal, Query Core may let the fetch
+finish into cache after the final owner releases.
 
 ### Type-Safe Meta Access
 

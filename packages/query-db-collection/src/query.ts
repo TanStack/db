@@ -2127,7 +2127,22 @@ export function queryCollectionOptions(
               directWriteGeneration,
             ),
           )
-          return queryFunction(context)
+          const queryContext = Object.defineProperties(
+            {} as typeof context,
+            Object.getOwnPropertyDescriptors(context),
+          )
+          const queryRequestOptions = { ...requestOptions }
+          if (requestOptions.signal !== undefined) {
+            Object.defineProperty(queryRequestOptions, `signal`, {
+              enumerable: true,
+              get: () => context.signal,
+            })
+          }
+          queryContext.meta = {
+            ...context.meta,
+            loadSubsetOptions: queryRequestOptions,
+          }
+          return queryFunction(queryContext)
         },
         meta: extendedMeta,
         structuralSharing: true,

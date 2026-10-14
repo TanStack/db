@@ -272,3 +272,77 @@ row assertion. The storage fixture supports a fixed-order finite prefix for
 this witness. Offset, ordering, and cursor migration have key-level checks but
 still need durable receiving histories; arbitrary old key shapes remain outside
 the finite grammar.
+
+## Independent design attack after `77b43ecc4`
+
+The initial ownership oracle missed two boundaries. A marker for the old
+literal-proxy path `other` must survive successful revalidation of `category`.
+A path-erasing matcher mutant passed all 378 prior ownership tests; the new
+two-path durable-marker witness rejects it at the metadata comparison. The
+four-case public preload history also shows that releasing the creator of a
+shared equality/singleton-IN fetch aborts its surviving peer on `77b43ecc4`.
+The original implementation fails both creator-release cases at the survivor's
+preload; the other two cases pass. A primary ownership-oracle witness now
+crosses the same two-owner release order and checks the surviving public row.
+
+A proposed lazy physical-Query metadata signal made the four shared-fetch
+cases pass, but it broke a separate legal history. A sole public
+`requestSnapshot({ where, signal })` may abort its caller signal before the
+owner calls `releaseSnapshot`. Core retains that acquisition and marks its
+signal aborted. With the proposed physical signal, the provider still sees a
+live signal and can publish a late row after caller cancellation. The original
+code passes the sole-abort signal check, but another scratch history shows
+that an ignoring provider can still publish a late row on that original code.
+The prototype fails the signal and public-row checkpoints. Two Collections
+sharing one Query also reproduce premature metadata abort on the original
+code when the creator cleans up. A retry after the first fetch aborts can restore the survivor's
+rows, but the architecture also requires already-shared work to remain alive
+while another owner needs it. The retry does not meet that work law.
+
+The signal repair is **open**. A compatible design must cover sole abort while
+owned, first-owner release with a surviving peer, final release, late peer
+arrival, and shared Queries across Collections. No composite owner-aware
+signal has passed that grammar. The physical-signal code and related docs in
+the local worktree are an uncommitted prototype and must not be published as
+the completed #2134 repair.
+
+The local primary oracle now drives a filtered public `requestSnapshot` with a
+caller signal through abort while its acquisition lease remains retained. It
+captures the load result and waits for settlement. The provider reads both the
+metadata and Query Core signals but ignores cancellation and returns a late
+row. On the physical-signal prototype, the comparison fails with
+`{ aborted: false, outcome: 'fulfilled', publicRow: true }` instead of
+`{ aborted: true, outcome: 'AbortError', publicRow: false }`. On the original
+code, a separate scratch probe observed
+the signal abort but still found the late public row. Query Core may keep the
+result in cache; the sync adapter must not install request-scoped rows after
+cancellation. This follows the adapter signal contract in `types.ts` and the
+stale-demand law in the live-query architecture. The provider's refusal to
+cancel does not grant it Collection row ownership.
+
+An independent reviewer found a false-green route in that sole-abort witness:
+an isolated mutant discarded the late provider row but fulfilled the aborted
+load as an empty baseline. The prior signal and row checks passed. The
+load-subset transaction refinement oracle requires `AbortError` at every
+adapter cut of an aborted load, including before a write. Adding the caller
+outcome to the same post-provider comparison rejects that mutant at settlement.
+The local physical-signal prototype fails all three observations together:
+the metadata signal stays live, the load fulfills, and the row becomes public.
+
+A second public history creates two source Collections backed by one QueryClient
+and one physical Query. It proves that both Query observers have joined before
+the first source's live query retires, then requires the original provider
+signal to remain live, one provider call total, and the surviving live query
+to receive the row. The physical-signal prototype passes this bounded case;
+the original first-owner signal behavior failed an isolated cross-Collection
+probe. Explicit cleanup of the first source Collection is outside this witness
+because that API can cancel shared Query keys. A late peer after sole abort and
+two separately aborted logical signals were the next boundaries. The
+primary oracle now crosses one or both public snapshot callers aborting while
+their acquisition leases remain retained. One signal-ignoring provider response
+serves the physical Query. The both-aborted branch requires two `AbortError`
+outcomes and no public row; the local physical-signal prototype instead
+fulfills both and publishes the row. The targeted runtime check fails at the
+combined outcome and row comparison with no type errors. A peer that arrives
+after sole abort still needs a public receiving history before an owner-aware
+composite can claim closure.

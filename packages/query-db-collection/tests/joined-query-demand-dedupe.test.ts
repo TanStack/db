@@ -6,6 +6,7 @@ import {
   createLiveQueryCollection,
   eq,
   extractSimpleComparisons,
+  getLoadSubsetDemandKey,
 } from '@tanstack/db'
 import { queryCollectionOptions } from '../src/query'
 import type { QueryFunctionContext } from '@tanstack/query-core'
@@ -177,3 +178,80 @@ for (const firstOwner of [`joined`, `direct`] as const) {
     })
   }
 }
+
+it.each(
+  ([`joined`, `direct`] as const).flatMap((firstOwner) =>
+    ([`joined`, `direct`] as const).map((retiredOwner) => ({
+      firstOwner,
+      retiredOwner,
+    })),
+  ),
+)(
+  `keeps the surviving equality or singleton owner when $firstOwner loads first and $retiredOwner retires`,
+  async ({ firstOwner, retiredOwner }) => {
+    const parents = createParentSource([1])
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    let finish!: (rows: Array<{ id: number; parentId: number }>) => void
+    const queryFn = vi.fn((context: QueryFunctionContext) => {
+      return new Promise<Array<{ id: number; parentId: number }>>(
+        (resolve, reject) => {
+          finish = resolve
+          const requestSignal = context.meta?.loadSubsetOptions?.signal
+          if (!requestSignal) throw new Error(`expected request signal`)
+          requestSignal.addEventListener(`abort`, () => {
+            reject(new Error(`shared fetch aborted`))
+          })
+        },
+      )
+    })
+    const children = createCollection(
+      queryCollectionOptions({
+        id: `joined-inflight-child-${sequence++}`,
+        queryClient: client,
+        queryKey: [`joined-inflight-child`],
+        queryFn,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+      }),
+    )
+    cleanups.push(() => client.clear())
+    cleanups.push(() => children.cleanup())
+    const loadSubset = vi.spyOn(children._sync, `loadSubset`)
+    const direct = createLiveQueryCollection((q) =>
+      q.from({ child: children }).where(({ child }) => eq(child.parentId, 1)),
+    )
+    cleanups.push(() => direct.cleanup())
+    const joined = createJoin(parents, children)
+    const owners = { direct, joined }
+    const secondOwner = firstOwner === `direct` ? `joined` : `direct`
+    const outcome = (promise: Promise<unknown>) =>
+      promise.then(
+        () => ({ ok: true as const }),
+        (error: unknown) => ({ ok: false as const, error }),
+      )
+    const firstLoad = outcome(owners[firstOwner].preload())
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(1))
+    const secondLoad = outcome(owners[secondOwner].preload())
+    await vi.waitFor(() => expect(loadSubset).toHaveBeenCalledTimes(2))
+    // Equal demand keys and one provider call check the dedupe work promise.
+    expect(getLoadSubsetDemandKey(loadSubset.mock.calls[0]![0])).toBe(
+      getLoadSubsetDemandKey(loadSubset.mock.calls[1]![0]),
+    )
+    await owners[retiredOwner].cleanup()
+    expect(queryFn).toHaveBeenCalledTimes(1)
+    finish([{ id: 10, parentId: 1 }])
+    const surviving = retiredOwner === firstOwner ? secondOwner : firstOwner
+    // The surviving preload and public row check the independent ownership law.
+    const result = await (surviving === firstOwner ? firstLoad : secondLoad)
+    expect(result).toEqual({ ok: true })
+    expect(
+      surviving === `joined`
+        ? joined.toArray.map((row) => row.child?.id)
+        : direct.toArray.map((row) => row.id),
+    ).toEqual([10])
+  },
+)

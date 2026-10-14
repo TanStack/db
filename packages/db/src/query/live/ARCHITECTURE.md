@@ -1473,6 +1473,11 @@ Row ownership in `@tanstack/query-db-collection` is separate. Eager retention,
 active query acquisition, and persisted retention are distinct owner tokens.
 The live-query graph publishes coherent rows but does not own query-db cache or
 listener lifetime.
+When query-db acquisitions share a physical Query, releasing one acquisition
+must leave work needed by another active acquisition alive. A query function
+that reads `meta.loadSubsetOptions.signal` receives the physical Query fetch
+signal. If it consumes that signal, Query Core can cancel the fetch after its
+last observer releases; a function that ignores it may finish into Query cache.
 
 ### Pooled live queries
 

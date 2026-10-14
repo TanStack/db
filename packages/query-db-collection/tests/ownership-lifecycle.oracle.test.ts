@@ -12529,6 +12529,376 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   /**
+   * A shared physical Query fetch must remain owned while either live query
+   * still needs its result. The reference is the set {first, second}: retiring
+   * one owner leaves the other entitled to the provider's row. The four legal
+   * histories choose acquisition order and which owner retires before the
+   * provider settles. Both preloads use the public live-query path; the
+   * provider consumes the signal exposed with its subset request. At provider
+   * settlement we compare the survivor's preload and public row with that
+   * independent owner-set rule. The provider-call count confirms that this
+   * history actually exercised shared work.
+   */
+  it.each(
+    ([`first`, `second`] as const).flatMap((firstOwner) =>
+      ([`first`, `second`] as const).map((retiredOwner) => ({
+        firstOwner,
+        retiredOwner,
+      })),
+    ),
+  )(
+    `keeps a signal-consuming shared fetch for its surviving live-query owner ($firstOwner, $retiredOwner retires)`,
+    async ({ firstOwner, retiredOwner }) => {
+      const id = `shared-live-signal-${firstOwner}-${retiredOwner}`
+      const queryClient = createQueryClient()
+      let finish: ((items: Array<Item>) => void) | undefined
+      let initialFetchSignal: AbortSignal | undefined
+      const queryFn = vi.fn(
+        (context: QueryFunctionContext) =>
+          new Promise<Array<Item>>((resolve, reject) => {
+            finish = resolve
+            const signal = context.meta?.loadSubsetOptions?.signal
+            if (!signal) throw new Error(`Expected subset request signal`)
+            initialFetchSignal ??= signal
+            if (signal.aborted) {
+              reject(new Error(`Shared fetch started with an aborted signal`))
+              return
+            }
+            signal.addEventListener(
+              `abort`,
+              () => reject(new Error(`Shared fetch aborted`)),
+              { once: true },
+            )
+          }),
+      )
+      const source = createCollection(
+        queryCollectionOptions<Item>({
+          id,
+          queryClient,
+          queryKey: [id],
+          queryFn,
+          getKey: (item) => item.id,
+          syncMode: `on-demand`,
+        }),
+      )
+      const makeOwner = () =>
+        createLiveQueryCollection((q) =>
+          q
+            .from({ item: source })
+            .where(({ item }) => eq(item.category, `shared`)),
+        )
+      const owners = { first: makeOwner(), second: makeOwner() }
+      cleanups.push(async () => {
+        finish?.([shared])
+        await Promise.all([owners.first.cleanup(), owners.second.cleanup()])
+        await source.cleanup()
+        queryClient.clear()
+      })
+      const loadSubset = vi.spyOn(source._sync, `loadSubset`)
+      const outcome = (load: Promise<unknown>) =>
+        load.then(
+          () => ({ ok: true as const }),
+          (error: unknown) => ({ ok: false as const, error }),
+        )
+
+      const firstLoad = outcome(owners[firstOwner].preload())
+      await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(1))
+      const secondOwner = firstOwner === `first` ? `second` : `first`
+      const secondLoad = outcome(owners[secondOwner].preload())
+      await vi.waitFor(() => expect(loadSubset).toHaveBeenCalledTimes(2))
+      expect(queryFn).toHaveBeenCalledTimes(1)
+
+      await owners[retiredOwner].cleanup()
+      expect(initialFetchSignal?.aborted).toBe(false)
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      finish?.([shared])
+      const survivor = retiredOwner === `first` ? `second` : `first`
+      const survivingLoad = survivor === firstOwner ? firstLoad : secondLoad
+      expect(await survivingLoad).toEqual({ ok: true })
+      expect(owners[survivor].toArray.map((item) => item.id)).toEqual([
+        shared.id,
+      ])
+      expect(queryFn).toHaveBeenCalledTimes(1)
+    },
+  )
+
+  /**
+   * Aborting a sole snapshot request cancels its request-scoped work even
+   * before the subscription releases its acquisition lease. The reference
+   * has one logical owner whose request signal is now aborted: a later
+   * provider result cannot add a public row or fulfill that caller's load.
+   * The load-subset transaction refinement oracle specifies AbortError at
+   * every adapter cut of an aborted load. The controlled provider reads both
+   * signals but deliberately ignores cancellation and resolves after abort.
+   * Compare the caller result and Collection row after that response settles.
+   * This history does not decide whether Query Core retains the provider
+   * result in its private cache.
+   */
+  it(`does not publish a late row after a sole snapshot request aborts`, async () => {
+    const id = `sole-snapshot-request-abort`
+    const queryClient = createQueryClient()
+    let finish: ((items: Array<Item>) => void) | undefined
+    let requestSignal: AbortSignal | undefined
+    let loadOutcome: Promise<string> | undefined
+    const queryFn = vi.fn(
+      (context: QueryFunctionContext) =>
+        new Promise<Array<Item>>((resolve) => {
+          requestSignal = context.meta?.loadSubsetOptions?.signal
+          void context.signal.aborted
+          finish = resolve
+        }),
+    )
+    const source = createCollection(
+      queryCollectionOptions<Item>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+      }),
+    )
+    const subscription = source.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    cleanups.push(async () => {
+      finish?.([])
+      subscription.unsubscribe()
+      await source.cleanup()
+      queryClient.clear()
+    })
+    await source.stateWhenReady()
+    const controller = new AbortController()
+    expect(
+      subscription.requestSnapshot({
+        where: eq(new IR.PropRef([`category`]), `shared`),
+        signal: controller.signal,
+        onLoadSubsetResult: (result) => {
+          loadOutcome = Promise.resolve(result).then(
+            () => `fulfilled` as const,
+            (error: unknown) =>
+              error instanceof Error ? error.name : `unknown rejection`,
+          )
+        },
+      }),
+    ).toBe(true)
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(1))
+    expect(loadOutcome).toBeDefined()
+    expect(requestSignal?.aborted).toBe(false)
+    controller.abort()
+    await Promise.resolve()
+    const aborted = requestSignal?.aborted
+    const late: Item = { id: `late`, category: `shared`, name: `Late` }
+    finish?.([late])
+    const outcome = await loadOutcome
+    await vi.waitFor(() => expect(queryClient.isFetching()).toBe(0))
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    expect({ aborted, outcome, publicRow: source.has(late.id) }).toEqual({
+      aborted: true,
+      outcome: `AbortError`,
+      publicRow: false,
+    })
+  })
+
+  /**
+   * Two public snapshot requests can share one provider fetch while retaining
+   * separate caller signals. The independent request rule permits a row only
+   * for a caller whose signal remains live; an aborted load rejects with
+   * AbortError. Hold one signal-ignoring provider response while one or both
+   * callers abort, without releasing either acquisition lease. Compare each
+   * callback result and the public Collection after the response settles.
+   * A physical Query observer count cannot stand in for live request owners.
+   */
+  it.each([
+    { name: `one caller aborts`, abortPeer: false },
+    { name: `both callers abort`, abortPeer: true },
+  ])(
+    `keeps shared snapshot outcomes separate when $name`,
+    async ({ abortPeer }) => {
+      const id = `shared-snapshot-request-abort-${abortPeer}`
+      const queryClient = createQueryClient()
+      const row: Item = { id: `row`, category: `shared`, name: `Row` }
+      let finish: ((items: Array<Item>) => void) | undefined
+      const queryFn = vi.fn(
+        () =>
+          new Promise<Array<Item>>((resolve) => {
+            finish = resolve
+          }),
+      )
+      const source = createCollection(
+        queryCollectionOptions<Item>({
+          id,
+          queryClient,
+          queryKey: [id],
+          queryFn,
+          getKey: (item) => item.id,
+          syncMode: `on-demand`,
+          startSync: true,
+        }),
+      )
+      const first = source.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+      const peer = source.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+      cleanups.push(async () => {
+        finish?.([])
+        first.unsubscribe()
+        peer.unsubscribe()
+        await source.cleanup()
+        queryClient.clear()
+      })
+      const where = eq(new IR.PropRef([`category`]), `shared`)
+      const controller = new AbortController()
+      const peerController = new AbortController()
+      let firstLoad: Promise<void> | undefined
+      let peerLoad: Promise<void> | undefined
+      expect(
+        first.requestSnapshot({
+          where,
+          signal: controller.signal,
+          onLoadSubsetResult: (result) => {
+            firstLoad = Promise.resolve(result).then(() => undefined)
+            void firstLoad.catch(() => undefined)
+          },
+        }),
+      ).toBe(true)
+      await vi.waitFor(() => expect(queryFn).toHaveBeenCalledOnce())
+      expect(
+        peer.requestSnapshot({
+          where,
+          signal: peerController.signal,
+          onLoadSubsetResult: (result) => {
+            peerLoad = Promise.resolve(result).then(() => undefined)
+            void peerLoad.catch(() => undefined)
+          },
+        }),
+      ).toBe(true)
+      expect(firstLoad).toBeDefined()
+      expect(peerLoad).toBeDefined()
+      expect(queryFn).toHaveBeenCalledOnce()
+
+      controller.abort()
+      if (abortPeer) peerController.abort()
+      finish?.([row])
+      const settlements = await Promise.allSettled([firstLoad, peerLoad])
+      expect({
+        outcomes: settlements.map((result) => {
+          if (result.status === `fulfilled`) return `fulfilled`
+          const reason: unknown = result.reason
+          return reason instanceof Error ? reason.name : `unknown rejection`
+        }),
+        publicRow: source.has(row.id),
+        providerCalls: queryFn.mock.calls.length,
+      }).toEqual({
+        outcomes: [`AbortError`, abortPeer ? `AbortError` : `fulfilled`],
+        publicRow: !abortPeer,
+        providerCalls: 1,
+      })
+    },
+  )
+
+  /**
+   * Two Collections can own one physical Query through the same QueryClient.
+   * The small owner-set reference leaves the second Collection entitled to
+   * the held result after the first live query cleans up. The provider
+   * consumes the exposed request signal. Both public live queries acquire
+   * before either releases; after first cleanup, the signal must remain live
+   * and the second live query must receive the provider's row. This bounded
+   * history does not cover a peer that arrives after cancellation.
+   */
+  it(`keeps a shared fetch alive after the first source's live query retires`, async () => {
+    const queryClient = createQueryClient()
+    const queryKey = [`cross-collection-shared-fetch`]
+    let finish: ((items: Array<Item>) => void) | undefined
+    let requestSignal: AbortSignal | undefined
+    const queryFn = vi.fn(
+      (context: QueryFunctionContext) =>
+        new Promise<Array<Item>>((resolve, reject) => {
+          finish = resolve
+          const signal = context.meta?.loadSubsetOptions?.signal
+          if (!signal) throw new Error(`Expected subset request signal`)
+          requestSignal = signal
+          if (signal.aborted) {
+            reject(new Error(`Shared fetch started aborted`))
+            return
+          }
+          signal.addEventListener(
+            `abort`,
+            () => reject(new Error(`Shared fetch aborted`)),
+            { once: true },
+          )
+        }),
+    )
+    const makeSource = (id: string) =>
+      createCollection(
+        queryCollectionOptions<Item>({
+          id,
+          queryClient,
+          queryKey,
+          queryFn,
+          getKey: (item) => item.id,
+          syncMode: `on-demand`,
+        }),
+      )
+    const firstSource = makeSource(`cross-collection-first`)
+    const secondSource = makeSource(`cross-collection-second`)
+    const makeLive = (source: typeof firstSource) =>
+      createLiveQueryCollection((q) =>
+        q
+          .from({ item: source })
+          .where(({ item }) => eq(item.category, `shared`)),
+      )
+    const first = makeLive(firstSource)
+    const second = makeLive(secondSource)
+    cleanups.push(async () => {
+      finish?.([])
+      await Promise.all([
+        first.cleanup(),
+        second.cleanup(),
+        firstSource.cleanup(),
+        secondSource.cleanup(),
+      ])
+      queryClient.clear()
+    })
+    const secondLoadSubset = vi.spyOn(secondSource._sync, `loadSubset`)
+    const firstLoad = first.preload()
+    void firstLoad.catch(() => undefined)
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(1))
+    const secondLoad = second.preload()
+    await vi.waitFor(() => expect(secondLoadSubset).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() =>
+      expect(
+        queryClient
+          .getQueryCache()
+          .findAll({ queryKey })
+          .map((query) => query.getObserversCount()),
+      ).toEqual([2]),
+    )
+    expect(queryFn).toHaveBeenCalledTimes(1)
+
+    await first.cleanup()
+    const signalAfterFirstRelease = requestSignal?.aborted
+    finish?.([shared])
+    const survivingOutcome = await secondLoad.then(
+      () => `fulfilled` as const,
+      () => `rejected` as const,
+    )
+    expect({
+      signalAfterFirstRelease,
+      survivingOutcome,
+      publicRows: second.toArray.map((item) => item.id),
+    }).toEqual({
+      signalAfterFirstRelease: false,
+      survivingOutcome: `fulfilled`,
+      publicRows: [shared.id],
+    })
+    expect(queryFn).toHaveBeenCalledTimes(1)
+    await Promise.allSettled([firstLoad])
+  })
+
+  /**
    * Final unload revokes the pending physical acquisition. A same-turn new
    * demand must start fresh work rather than inherit that revoked settlement.
    */
@@ -12992,6 +13362,56 @@ describe(`query collection ownership lifecycle`, () => {
       expect(storage.snapshot().collectionMetadata.size).toBe(0)
     },
   )
+
+  /**
+   * Old literal proxy paths remain distinguishable even though old objects
+   * with the same path do not. Revalidating category must retire its old
+   * marker, while an old marker for other is still a separate demand. The
+   * controlled store supplies both valid old markers and an empty source
+   * result; compare exact durable metadata after the load applies.
+   */
+  it(`keeps a historical marker for a different literal proxy path`, async () => {
+    const id = `empty-proxy-marker-other-path`
+    const otherKey = legacyProxyCategoryEqualityDemandKey.replace(
+      `"value":{"type":"ref","path":[["string","category"]]}`,
+      `"value":{"type":"ref","path":[["string","other"]]}`,
+    )
+    const otherMember = createSingleRowRefProxy<{
+      category: string
+      other: string
+    }>().other
+    const otherDemand: LoadSubsetOptions = {
+      where: new IR.Func(`eq`, [
+        new IR.PropRef([`category`]),
+        new IR.Value(otherMember),
+      ]),
+    }
+    expect(getLegacyLoadSubsetDemandKey(otherDemand)).toBe(otherKey)
+    const matchingHash = hashKey([id, legacyProxyCategoryEqualityDemandKey])
+    const otherHash = hashKey([id, otherKey])
+    const storage = createOwnershipStorage({
+      rows: new Map(),
+      rowMetadata: new Map(),
+      collectionMetadata: new Map(
+        [matchingHash, otherHash].map((hash) => [
+          `queryCollection:gc:${hash}`,
+          { queryHash: hash, mode: `until-revalidated` },
+        ]),
+      ),
+    })
+    const { collection, queryFn } = createPersistedOwnershipFixture(
+      id,
+      storage,
+      [],
+    )
+    queryFn.mockResolvedValue([])
+    await collection.stateWhenReady()
+    await collection._sync.loadSubset(proxyCategorySubset(`eq`))
+    expect(queryFn).toHaveBeenCalledTimes(1)
+    expect([...storage.snapshot().collectionMetadata.keys()]).toEqual([
+      `queryCollection:gc:${otherHash}`,
+    ])
+  })
 
   it(`preserves historical empty proxy markers when revalidation fails`, async () => {
     const id = `empty-proxy-markers-failed-fetch`
