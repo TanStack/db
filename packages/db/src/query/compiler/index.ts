@@ -100,6 +100,7 @@ import type {
   UnionAll,
 } from '../ir.js'
 import type { LazyCollectionCallbacks } from './joins.js'
+import type { IStreamBuilder, KeyValue } from '@tanstack/db-ivm'
 import type { Collection } from '../../collection/index.js'
 import type {
   KeyedStream,
@@ -680,78 +681,59 @@ function compileQueryInternal(
     fieldName: string
     getRouting: (nsRow: any) => IncludeRouting
   }> = []
-  for (const { sourceAlias, include } of sourceIncludes) {
-    const projectedPaths =
-      query.select != null
-        ? findProjectedSourceIncludePaths(
-            query.select,
-            sourceAlias,
-            include.resultPath,
-          )
-        : query.fnSelect && !materializeSelectInput
-          ? []
-          : [
-              {
-                path: [sourceAlias, ...include.resultPath],
-                guards: [],
-              },
-            ]
-
-    if (projectedPaths.length === 0) {
-      continue
-    }
-
-    for (const { path: resultPath, guards } of projectedPaths) {
+  // Includes inherited from a source or a QueryRef route by the tag their
+  // compiled rows already carry, at each path the select projects them to.
+  const inheritedIncludes = [
+    ...sourceIncludes.map(({ sourceAlias, include }) => ({
+      include,
+      keyPrefix: `${sourceAlias}.`,
+      paths:
+        query.select != null
+          ? findProjectedIncludePaths(query.select, [
+              sourceAlias,
+              ...include.resultPath,
+            ])
+          : query.fnSelect && !materializeSelectInput
+            ? []
+            : [{ path: [sourceAlias, ...include.resultPath], guards: [] }],
+      route: (nsRow: any) =>
+        nsRow[sourceAlias]?.[INCLUDES_ROUTING]?.[include.fieldName],
+    })),
+    ...(query.select ? directIncludes : []).map((include) => ({
+      include,
+      keyPrefix: ``,
+      paths: findProjectedIncludePaths(query.select!, include.resultPath),
+      route: (nsRow: any) => nsRow[INCLUDES_ROUTING]?.[include.fieldName],
+    })),
+  ]
+  for (const { include, keyPrefix, paths, route } of inheritedIncludes) {
+    for (const { path: resultPath, guards } of paths) {
       const fieldName = getUniqueIncludesRoutingKey(
-        `${sourceAlias}.${resultPath.join(`.`)}`,
+        keyPrefix + resultPath.join(`.`),
         includesRoutingFns,
       )
-      includesResults.push({
-        ...include,
-        fieldName,
-        resultPath,
-      })
+      includesResults.push({ ...include, fieldName, resultPath })
       includesRoutingFns.push({
         fieldName,
-        getRouting: compileGuardedRouting(
-          guards,
-          (nsRow) =>
-            nsRow[sourceAlias]?.[INCLUDES_ROUTING]?.[include.fieldName],
-        ),
+        getRouting: compileGuardedRouting(guards, route),
       })
-    }
-  }
-  if (query.select && directIncludes.length > 0) {
-    for (const include of directIncludes) {
-      const projectedPaths = findProjectedResultIncludePaths(
-        query.select,
-        include.resultPath,
-      )
-
-      for (const { path: resultPath, guards } of projectedPaths) {
-        const fieldName = getUniqueIncludesRoutingKey(
-          resultPath.join(`.`),
-          includesRoutingFns,
-        )
-        includesResults.push({
-          ...include,
-          fieldName,
-          resultPath,
-        })
-        includesRoutingFns.push({
-          fieldName,
-          getRouting: compileGuardedRouting(
-            guards,
-            (nsRow) => nsRow[INCLUDES_ROUTING]?.[include.fieldName],
-          ),
-        })
-      }
     }
   }
   const selectHasAggregates =
     query.select !== undefined && containsAggregate(query.select)
-  // Includes compile once the query knows whether a window feeds them.
-  const deferredIncludes: Array<(windowRows: any) => void> = []
+  // An ordered parent with limit or offset routes its includes from the rows
+  // its window shows, so a row the window drops loads no children (law 12).
+  // Those includes compile after the window; every other include compiles here.
+  // A single-result query must expose only its first row when another query
+  // consumes it as a QueryRef, before the outer join or filter runs.
+  const resultLimit = query.singleResult
+    ? Math.min(query.limit ?? 1, 1)
+    : query.limit
+  const hasOrderBy = (query.orderBy?.length ?? 0) > 0
+  const parentHasWindow =
+    (hasOrderBy || !!query.singleResult) &&
+    (resultLimit !== undefined || query.offset !== undefined)
+  const deferredIncludes: Array<(windowRows: WindowRows) => void> = []
   if (query.select) {
     const includesEntries = extractIncludesFromSelect(query.select)
     // A nested include has one Collection per row, not one value per group,
@@ -766,7 +748,6 @@ function compileQueryInternal(
     if (includesEntries.length > 0) {
       query = { ...query, select: { ...query.select } }
     }
-    const parentRows = pipeline
     for (const { key, path, subquery, guards } of includesEntries) {
       const fieldName = getUniqueIncludesRoutingKey(key, includesRoutingFns)
       // Branch parent pipeline: map to [correlationValue, parentContext]
@@ -791,15 +772,12 @@ function compileQueryInternal(
             ? projectParentContext(nsRow, compiledProjections, valueIdentity)
             : null,
       }))
-      // A windowed parent routes only the rows its window shows, so a row
-      // that limit or offset drops loads no children (law 12).
-      deferredIncludes.push((windowRows: any) => {
-        let parentKeys: any = (windowRows ?? parentRows).pipe(
-          map(([, value]: any) => {
-            const routing: IncludeRouting = windowRows
-              ? (value[0].$selected?.[INCLUDES_ROUTING]?.[fieldName] ??
-                INACTIVE_ROUTE)
-              : getRouting(value)
+      const compileInclude = (windowRows?: WindowRows) => {
+        const routes = windowRows
+          ? windowRows.pipe(map(([, [row]]) => getRouting(row)))
+          : pipeline.pipe(map(([, row]) => getRouting(row)))
+        let parentKeys: any = routes.pipe(
+          map((routing: IncludeRouting) => {
             return (
               routing.active
                 ? [routing.correlationKey, routing.parentContext]
@@ -923,7 +901,8 @@ function compileQueryInternal(
             callbacks,
             lazySources,
             optimizableOrderByCollections,
-            setWindowFn,
+            // Only the query's own window operator answers setWindow.
+            ignoreChildWindow,
             cache,
             queryMapping,
             parentKeys,
@@ -953,7 +932,9 @@ function compileQueryInternal(
           materialization: subquery.materialization,
           scalarField: subquery.scalarField,
         })
-      })
+      }
+      if (parentHasWindow) deferredIncludes.push(compileInclude)
+      else compileInclude()
 
       includesRoutingFns.push({ fieldName, getRouting })
 
@@ -1239,12 +1220,6 @@ function compileQueryInternal(
     ]
   }
 
-  // A single-result query must expose only its first row when another query
-  // consumes it as a QueryRef, before the outer join or filter runs.
-  const resultLimit = query.singleResult
-    ? Math.min(query.limit ?? 1, 1)
-    : query.limit
-  const hasOrderBy = (query.orderBy?.length ?? 0) > 0
   if (
     !hasOrderBy &&
     (query.limit !== undefined || query.offset !== undefined)
@@ -1252,7 +1227,7 @@ function compileQueryInternal(
     throw new LimitOffsetRequireOrderByError()
   }
   let resultPipeline: ResultStream
-  let windowRows: any
+  let windowRows: WindowRows | undefined
   if (hasOrderBy || query.singleResult) {
     // When in includes mode with limit/offset, use grouped ordering so that
     // the limit is applied per parent (per correlation key), not globally.
@@ -1291,8 +1266,7 @@ function compileQueryInternal(
       query.offset,
       includesGroupKeyFn,
     )
-    if (resultLimit !== undefined || query.offset !== undefined)
-      windowRows = ordered
+    if (parentHasWindow) windowRows = ordered
     resultPipeline = ordered.pipe(
       map(([key, [row, orderByIndex]]) => finalizeRow(key, row, orderByIndex)),
     ) as ResultStream
@@ -1302,7 +1276,7 @@ function compileQueryInternal(
     ) as ResultStream
   }
 
-  for (const compileInclude of deferredIncludes) compileInclude(windowRows)
+  for (const compileInclude of deferredIncludes) compileInclude(windowRows!)
 
   // Cache the result before returning (use original query as key)
   const compilationResult: CompilationResult = {
@@ -2158,22 +2132,6 @@ function getFirstFromAlias(from: QueryIR[`from`]): string {
   return getFromSources(from)[0]?.alias ?? ``
 }
 
-function findProjectedSourceIncludePaths(
-  select: Record<string, any>,
-  sourceAlias: string,
-  sourcePath: Array<string>,
-): Array<ProjectedSourceIncludePath> {
-  const targetPath = [sourceAlias, ...sourcePath]
-  return findProjectedIncludePaths(select, targetPath)
-}
-
-function findProjectedResultIncludePaths(
-  select: Record<string, any>,
-  resultPath: Array<string>,
-): Array<ProjectedSourceIncludePath> {
-  return findProjectedIncludePaths(select, resultPath)
-}
-
 function findProjectedIncludePaths(
   select: Record<string, any>,
   targetPath: Array<string>,
@@ -2614,11 +2572,11 @@ type IncludeRouting = {
   parentContext: Record<string, any> | null
 }
 
-const INACTIVE_ROUTE: IncludeRouting = {
-  active: false,
-  correlationKey: undefined,
-  parentContext: null,
-}
+/** Rows an ordered window shows, with their fractional order index. */
+type WindowRows = IStreamBuilder<KeyValue<unknown, [NamespacedRow, string]>>
+
+/** An include child's top-K never owns the live query's setWindow. */
+const ignoreChildWindow = () => {}
 
 /**
  * Compiles a select-branch guard set once and resolves the include route only

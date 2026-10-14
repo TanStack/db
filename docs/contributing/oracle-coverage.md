@@ -156,7 +156,13 @@ model, and child rows delivered must stay within the children of the shown
 parents plus one parent's headroom. On main, a late page delivered 96 child
 rows for a bound of 9, and 180 with `distinct`. A compiler that routes
 includes from rows before the window fails it, and one that routes none fails
-its rows law.
+its rows law. Child forms vary over `materialize`, a child `orderBy`, a child
+`limit`, and nested includes; a child that takes over `setWindow` fails after
+the first window move, and a router that adds the two rows before the window
+fails the work bound. `distinct` cases collapse parents with equal rank and
+group, and copied ranks tie at the window edge. Limits: includes inherited from
+a `from` subquery and inputs to `fn.select` still route from every row before
+the window, and this owner does not generate them.
 
 Three Ordered acquisition companions own distinct controlled cuts:
 `packages/db/tests/query/load-subset-replay-refinement-oracle.test.ts` checks

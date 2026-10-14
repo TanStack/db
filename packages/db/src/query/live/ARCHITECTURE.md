@@ -1503,12 +1503,16 @@ units. Queries without includes retain their original pipeline unless a joined
 custom-key query needs contributor reduction. Inline materialization must not
 create recursive Collection machinery.
 
-An ordered parent with `limit` or `offset` routes its includes from the rows
-its window shows, not from every row that reaches the window. A parent row the
-window drops, including every row `distinct` reads before the window, therefore
-activates no route and demands no child rows. Moving the window moves the
-routes in the same graph run. Queries without a window route from their rows
-after `where`, as before.
+An ordered parent with `limit` or `offset` routes the includes in its own
+`select` (Collection-valued, `toArray`, `materialize`, and `findOne` children)
+from the rows its window shows, not from every row that reaches the window. A
+parent row the window drops, including every row `distinct` reads before the
+window, therefore activates no route and demands no child rows. Moving the
+window moves the routes in the same graph run, and only the parent's window
+answers `setWindow`; an include child's own `orderBy` or `limit` never does.
+Queries without a window compile and route their includes as before. Includes
+inherited from a source subquery and inputs to `fn.select` still route from
+every row before the window (a recorded limit).
 
 ## Normative laws
 
