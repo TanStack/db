@@ -30,10 +30,9 @@ import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
  * includes every request needed for the first window: an ordinary ordered
  * request, a requiresFullSource plan's first full-source request, and a
  * full-source fallback when the ordered boundary cannot be expressed. Promise
- * settlement remains asynchronous. This does not
- * make a successful request prove source exhaustion or broader coverage, and it
- * does not change explicit window, work after initial publication, repair,
- * replay, or framework render-time contracts.
+ * settlement remains asynchronous. The cut proves neither source exhaustion
+ * nor broader source coverage. It does not govern explicit window moves, work
+ * after initial publication, repair, replay, or framework render timing.
  *
  * Ordered acquisition has six independent control dimensions: acquisition
  * path, delivery time, window change, provider-response outcome, sync run, and
