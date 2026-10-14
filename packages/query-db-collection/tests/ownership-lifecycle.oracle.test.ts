@@ -1402,8 +1402,7 @@ function createPersistedOwnershipFixture(
   serverRows: Array<Item>,
   syncMode: `eager` | `on-demand` = `on-demand`,
   retentionOrConfigureClient:
-    | number
-    | ((queryClient: QueryClient) => void) = Number.POSITIVE_INFINITY,
+    number | ((queryClient: QueryClient) => void) = Number.POSITIVE_INFINITY,
   configureClient?: (queryClient: QueryClient) => void,
 ) {
   const queryClient = createQueryClient()
