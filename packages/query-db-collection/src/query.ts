@@ -2122,7 +2122,12 @@ export function queryCollectionOptions(
               // observer.refetch hides from this exact-demand caller.
               let physical =
                 capture.promise ?? observer.getCurrentQuery().promise
-              if (!physical) throw new Error(`Query refetch started no fetch`)
+              if (!physical) {
+                // Behavior setup can reject before Core installs a retryer.
+                // Its observer promise retains the original setup error.
+                await fetch
+                throw new Error(`Query refetch started no fetch`)
+              }
               let cancellation = await (capture.cancellation ??
                 observeCancellation(physical))
               while (cancellation?.silent) {
@@ -4612,7 +4617,23 @@ export function queryCollectionOptions(
         // silent replacement into the successor's result. Its own retryer
         // promise retains which happened to this call's physical fetch.
         let activeFetch = capture.promise ?? query.promise
-        if (!activeFetch) throw new Error(`Query refetch started no fetch`)
+        if (!activeFetch) {
+          // Consume the observer call before reporting a missing retryer: a
+          // behavior setup failure rejects here with its original error.
+          const setupResult = await fetch
+          if (setupResult.isError) {
+            if (
+              // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Recovery can start while the observer call is pending.
+              scopedRecoveryPending ||
+              recoveryEpoch !== scopedRecoveryEpoch ||
+              activeSyncSession !== syncSession
+            )
+              throw new CancelledError()
+            applyRefetchResultWhenUnsubscribed(hashedQueryKey, setupResult)
+            return setupResult
+          }
+          throw new Error(`Query refetch started no fetch`)
+        }
         let fetchCancellation =
           capture.cancellation ?? observeCancellation(activeFetch)
         startingResult = queryObserver.getCurrentResult()

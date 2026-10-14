@@ -30,6 +30,9 @@ import type { LoadSubsetOptions, SyncMetadataApi } from '@tanstack/db'
  * direct write, an explicit subset refetch waits for a request that started
  * later than that write, even if an empty-cache request was already running.
  * A later refetch failure retains the last ready snapshot.
+ * A behavior that fails before Query Core installs a fetch still settles its
+ * requesting load or refetch with that exact error, whether or not it invoked
+ * the source first. A discarded source value never becomes a Collection row.
  *
  * Small identity forms and lifecycle histories drive a real QueryClient and
  * Collection. The oracle records query calls, values, request options, abort
@@ -1240,6 +1243,174 @@ async function expectInitialQueryFailureStatus(): Promise<void> {
   } finally {
     await live.cleanup()
     await collection.cleanup()
+    queryClient.clear()
+    loggedError.mockRestore()
+  }
+}
+
+/**
+ * The reference for a failed setup has no accepted source response: an eager
+ * queryFn call is work, not a successful fetch. The legal history starts with
+ * QueryClient's public behavior default and throws during onFetch, before or
+ * after invoking the source but before Query Core installs a fetch. The direct
+ * adapter and live query paths observe initial settlement; the two explicit
+ * refetch paths observe the same failure after a ready snapshot. A utility
+ * refetch without throwOnError reports the error in its result. At each promise
+ * settlement, the exact setup error is owed and only previously accepted rows
+ * may remain. The before-source case is a control for relying solely on Query
+ * Core's source-start event. Public change batches reject even a transient
+ * publication of the discarded row, not only a wrong final snapshot.
+ */
+async function expectEagerBehaviorSetupFailureSettles(
+  path:
+    | `direct`
+    | `live-query`
+    | `subset-refetch`
+    | `utility-refetch`
+    | `utility-refetch-soft`,
+  source: `before` | `after`,
+): Promise<void> {
+  const queryClient = createQueryClient()
+  const id = `load-subset-eager-setup-${path}-${source}-${collectionSequence++}`
+  const setupError = new Error(`behavior setup failed`)
+  const loggedError = vi.spyOn(console, `error`).mockImplementation(() => {})
+  const refetchPath = path.includes(`refetch`)
+  let fetches = 0
+  const fetchEvents: Array<`fetchStarted` | `fetchSourceStarted`> = []
+  const unsubscribeCache = queryClient.getQueryCache().subscribe((event) => {
+    if (event.type === `fetchStarted` || event.type === `fetchSourceStarted`)
+      fetchEvents.push(event.type)
+  })
+  const queryFn = vi.fn(() => [{ id: fetches === 1 ? `cached` : `discarded` }])
+  queryClient.setQueryDefaults([id], {
+    behavior: {
+      onFetch(context) {
+        fetches++
+        if (!refetchPath || fetches > 1) {
+          if (source === `after`) context.fetchFn()
+          throw setupError
+        }
+      },
+    },
+  })
+  const collection = createCollection(
+    queryCollectionOptions<Row>({
+      id,
+      queryClient,
+      queryKey: [id],
+      queryFn,
+      getKey: (row) => row.id,
+      startSync: true,
+      syncMode: `on-demand`,
+      retry: false,
+    }),
+  )
+  const publishedRows: Array<string> = []
+  const rowSubscription = collection.subscribeChanges(
+    (batch) => {
+      for (const change of batch) publishedRows.push(change.value.id)
+    },
+    { includeInitialState: false },
+  )
+  const live =
+    path === `live-query`
+      ? createLiveQueryCollection((query) =>
+          query.from({ row: collection }).select(({ row }) => ({ id: row.id })),
+        )
+      : undefined
+  const initialRequest: LoadSubsetOptions = {}
+  const refetchRequest: LoadSubsetOptions = { refetch: true }
+  try {
+    if (refetchPath) {
+      await collection._sync.loadSubset(initialRequest)
+      expect(collection.toArray.map((row) => row.id)).toEqual([`cached`])
+    }
+
+    if (path === `utility-refetch-soft`) {
+      const result = await collection.utils.refetch()
+      expect(result).toHaveLength(1)
+      expect(result[0]?.isError).toBe(true)
+      expect(result[0]?.error).toBe(setupError)
+    } else {
+      const operation =
+        path === `live-query`
+          ? live!.preload()
+          : path === `utility-refetch`
+            ? collection.utils.refetch({ throwOnError: true })
+            : collection._sync.loadSubset(
+                path === `subset-refetch` ? refetchRequest : initialRequest,
+              )
+      await expect(operation).rejects.toBe(setupError)
+    }
+    expect(queryFn).toHaveBeenCalledTimes(
+      Number(refetchPath) + Number(source === `after`),
+    )
+    expect(
+      fetchEvents.filter((event) => event === `fetchStarted`),
+    ).toHaveLength(Number(refetchPath))
+    expect(
+      fetchEvents.filter((event) => event === `fetchSourceStarted`),
+    ).toHaveLength(Number(refetchPath) + Number(source === `after`))
+    expect(collection.utils.lastError).toBe(setupError)
+    expect(loggedError).toHaveBeenCalled()
+    expect(collection.toArray.map((row) => row.id)).toEqual(
+      refetchPath ? [`cached`] : [],
+    )
+    expect(publishedRows).not.toContain(`discarded`)
+    if (live) expect(live.toArray).toEqual([])
+  } finally {
+    if (refetchPath) collection._sync.unloadSubset(initialRequest)
+    if (path === `subset-refetch`) collection._sync.unloadSubset(refetchRequest)
+    if (path === `direct`) collection._sync.unloadSubset(initialRequest)
+    rowSubscription.unsubscribe()
+    await live?.cleanup()
+    await collection.cleanup()
+    unsubscribeCache()
+    queryClient.clear()
+    loggedError.mockRestore()
+  }
+}
+
+/**
+ * A provider rejection after an installed fetch is the neighboring history.
+ * It has both fetch-start events and still rejects the on-demand acquisition
+ * with the provider's exact error. This distinguishes the missing-retryer
+ * setup boundary above from an ordinary Query fetch failure.
+ */
+async function expectInstalledFetchFailureSettles(): Promise<void> {
+  const queryClient = createQueryClient()
+  const id = `load-subset-installed-fetch-error-${collectionSequence++}`
+  const providerError = new Error(`provider failed`)
+  const loggedError = vi.spyOn(console, `error`).mockImplementation(() => {})
+  const fetchEvents: Array<`fetchStarted` | `fetchSourceStarted`> = []
+  const unsubscribeCache = queryClient.getQueryCache().subscribe((event) => {
+    if (event.type === `fetchStarted` || event.type === `fetchSourceStarted`)
+      fetchEvents.push(event.type)
+  })
+  const collection = createCollection(
+    queryCollectionOptions<Row>({
+      id,
+      queryClient,
+      queryKey: [id],
+      queryFn: () => Promise.reject(providerError),
+      getKey: (row) => row.id,
+      startSync: true,
+      syncMode: `on-demand`,
+      retry: false,
+    }),
+  )
+  const request: LoadSubsetOptions = {}
+  try {
+    await expect(collection._sync.loadSubset(request)).rejects.toBe(
+      providerError,
+    )
+    expect(fetchEvents).toEqual([`fetchStarted`, `fetchSourceStarted`])
+    expect(collection.utils.lastError).toBe(providerError)
+    expect(collection.toArray).toEqual([])
+  } finally {
+    collection._sync.unloadSubset(request)
+    await collection.cleanup()
+    unsubscribeCache()
     queryClient.clear()
     loggedError.mockRestore()
   }
@@ -2500,6 +2671,10 @@ describe(`loadSubset lifecycle oracle`, () => {
     },
   )
 
+  it(`rejects an installed on-demand fetch with its provider error`, async () => {
+    await expectInstalledFetchFailureSettles()
+  })
+
   it(`avoids redundant fetches for a filtered demand after a direct write`, async () => {
     await expectFilteredDemandAfterDirectWriteAvoidsRedundantFetch()
   })
@@ -3044,6 +3219,24 @@ describe(`loadSubset lifecycle oracle`, () => {
   it(`reports an initial query failure and recovers after a successful refetch`, async () => {
     await expectInitialQueryFailureStatus()
   })
+
+  it.each([
+    { path: `direct`, source: `before` },
+    { path: `direct`, source: `after` },
+    { path: `live-query`, source: `before` },
+    { path: `live-query`, source: `after` },
+    { path: `subset-refetch`, source: `before` },
+    { path: `subset-refetch`, source: `after` },
+    { path: `utility-refetch`, source: `before` },
+    { path: `utility-refetch`, source: `after` },
+    { path: `utility-refetch-soft`, source: `before` },
+    { path: `utility-refetch-soft`, source: `after` },
+  ] as const)(
+    `settles a $path operation when behavior setup fails $source invoking its source`,
+    async ({ path, source }) => {
+      await expectEagerBehaviorSetupFailureSettles(path, source)
+    },
+  )
 
   it(`reports an initial failure to a dependent created after the source failed`, async () => {
     await expectLateDependentObservesInitialFailure()

@@ -7,3 +7,5 @@ across cancellation, reuse, and out-of-order source results. Wait for an
 applied source result before settling retained persisted ownership, and reject
 opaque persister results that cannot prove revalidation. Reject a canceled
 exact snapshot refetch instead of fulfilling from prior cached data.
+Preserve a Query behavior's setup error when it rejects before installing a
+physical fetch, and keep any eager source result out of Collection rows.

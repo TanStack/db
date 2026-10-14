@@ -573,6 +573,20 @@ keeps its own rows and owner; and final release removes them. A pending full
 request does not establish filtered coverage; the filtered demand may wait for
 its application or request its exact scope. The settled-full witness
 fails on the original implementation at the provider-call checkpoint.
+The same owner checks a public `QueryClient` behavior that throws during fetch
+setup, both before and after invoking `queryFn`. Direct on-demand loads and
+live-query preloads reject with the exact setup error. Exact subset refetches
+and throwing utility refetches reject with that error; nonthrowing utility
+refetches return an error result. The oracle checks that a source value invoked
+before the throw does not publish and that no installed fetch-start event was
+reported for the failed setup. A neighboring provider rejection checks the
+ordinary installed-fetch path and its two start events. The setup histories
+rely on Query Core reporting a terminal observer error for setup failure. The
+installed Query Core version does not
+provide that signal; published-version compatibility remains open until the
+attribution repair is released and the peer range is raised. Concurrent
+cleanup, replacement, and nested behavior reentry during setup remain outside
+these receiving histories.
 It checks that the provider sees a live physical fetch signal when the first
 full acquisition releases but a narrower acquisition still owns the Query.
 Another held-fetch cut releases the final filtered owner during full Query
