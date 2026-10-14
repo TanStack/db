@@ -5019,11 +5019,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
   }
   function answer(options: LoadSubsetOptions): true | Promise<void> {
     const page = pageFor(options)
-    if (
-      options.orderBy &&
-      options.limit !== undefined &&
-      page.length > 0
-    ) {
+    if (options.orderBy && options.limit !== undefined && page.length > 0) {
       rangeEnds.set(options, { ...page.at(-1)! })
     }
     served += page.length
