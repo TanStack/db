@@ -1070,3 +1070,51 @@ tests in 20 files against immutable attribution-enabled Query Core source
 errors; its 12 warnings are outside the changed lines. The coverage map keeps
 overlapping acquisitions, cancellation during the scan, and other expiry
 orders open for review.
+
+## Expiry progress and pending-demand retirement at `18089e931`
+
+The preceding repair protected the matching historical owner by awaiting its
+metadata scan inside serial retention maintenance. An independent code review
+found that this also blocked an unrelated owner's TTL cleanup. A second review
+history retired or aborted the waiting demand after its timer fired; it still
+left cleanup waiting for scan delivery. These are valid acquisition histories,
+so the expiry law needs both protection of an active matching claim and timely
+retirement of owners with no such claim.
+
+The revised expiry path snapshots demands pending at the deadline and matches
+each to the owner by its direct current hash or a recognized historical alias.
+It waits outside the retention queue. A matching demand's unload or abort wakes
+that wait; a later acquisition cannot prolong this wait. Scan
+settlement wakes it as well. The pending-demand listener is removed when the
+wait ends. At the subsequent maintenance cut, the timer identity and current
+marker are rechecked before durable cleanup.
+
+The oracle now delays *delivery* of the metadata scan to Query Collection
+after the persistence scan releases its apply mutex. This permits another TTL
+cleanup to commit while discovery remains held. Its independent owner-edge
+model compares public source and live-query rows, durable rows and exact owner
+IDs, retention markers, provider calls, and caller outcome. The added finite
+matrix covers an unrelated owner expiring during the held matching scan;
+matching demand unload and signal abort on both sides of the timer deadline;
+and two equivalent acquisitions where the first retires after the deadline
+while the second still claims the row. The existing scan-crossing history now
+also seeds a current-format owner, on both successful and failed scan paths,
+so the direct-key classifier branch has a permanent witness.
+
+The unrelated-owner history fails on exact predecessor `bb12782f6` at the
+durable-row checkpoint and passes at `18089e931`. An independent oracle review
+also killed wrong-alias matching and never-cleanup timer mutants at intended
+owner/marker comparisons. A disposable mutant that omits the direct current
+hash branch fails the new current-owner history at the 1,050 durable-row
+checkpoint. These are assertion kills after the production path reached the
+deadline; none relies on timeout as a verdict.
+
+At executable head `18089e931`, all 1,044 Query DB tests in 20 files pass
+against immutable attribution-enabled Query Core source `273eb2526`. TypeScript
+passes with that source. Changed-file ESLint reports zero errors and 12
+warnings outside changed lines; Prettier and `git diff --check` pass. The
+installed Query Core version still lacks required attribution fields, so this
+is not a published-release compatibility claim. The controlled schedules do
+not cover arbitrary overlaps among multiple scans, provider application, and
+TTL maintenance. The ownership oracle and SQLite receiving path retain those
+cells in the coverage map.

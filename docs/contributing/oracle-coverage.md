@@ -1047,13 +1047,17 @@ the adapter's singleton-IN demand shape. Custom query-key functions, other
 key-format changes, cross-version finite-TTL-to-infinite retention policy,
 arbitrary nested predicates, proxy-owned rows across a cold restart,
 signal-ignoring public remount, and overlapping application schedules remain
-open. A held historical-alias metadata scan now crosses a finite TTL during
-public live-query preload. The success history keeps the restored row public
-and durable until the provider result replaces its owner; the failed-scan
-control lets the expired row and marker retire without a provider request. The
-old implementation deletes the row before the held provider result. Other
-expiry/alias-scan orders, including overlapping acquisitions and cancellation,
-remain open. The old encoder distinguished a literal proxy from a genuine row
+open. A held metadata scan now crosses a finite TTL during public live-query
+preload for both a historical alias and a current-key owner. The successful
+scan keeps the restored row public and durable until the provider result
+applies; the failed-scan control lets the expired row and marker retire without
+a provider request. The old implementation deleted the historical row before
+the held provider result. A post-storage-scan delivery gate also checks that an
+unrelated owner expires at its deadline, and that unloading or aborting the
+matching demand before or after expiry wakes cleanup without waiting for scan
+delivery. Two equivalent acquisitions check that releasing one after expiry
+does not retire the surviving peer's owner. Arbitrary overlapping scans and
+provider application schedules remain open. The old encoder distinguished a literal proxy from a genuine row
 reference, but collapsed distinct literal proxies with the same path. The
 accepted migration policy retires that ambiguous old key when a matching proxy
 demand succeeds. The
