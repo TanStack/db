@@ -1936,8 +1936,10 @@ class PersistedCollectionRuntime<
       // are not visible, so the load must not settle successfully.
       this.throwIfTerminal()
     } catch (error) {
-      // A load that fails releases the acquisition the owner granted it.
-      this.unloadSubset(options)
+      // A terminal runtime releases the acquisition the owner granted the
+      // load. Otherwise, as after a failed ensure, the demand retries.
+      if (this.getCurrentTerminalFailure()) this.unloadSubset(options)
+      else this.queueRemoteSubsetEnsure(options)
       throw error
     }
   }
@@ -4588,26 +4590,24 @@ class PersistedCollectionRuntime<
     // of both local and remote mutations. The seq dedup in
     // processCommittedTxUnsafe prevents double-processing of our own writes.
     if (isTxCommittedPayload(payload)) {
-      // While the claim is expired, keep the commit until renewal or rotation
-      // decides this generation; a renewed generation still owes its rows.
-      if (claimExpired || this.isHydratingNow()) {
-        this.queuedTxCommitted.push({
-          txCommitted: payload,
-          lifecycleGeneration,
-          storageCollectionId: message.collectionId,
-        })
-        if (claimExpired) this.scheduleCacheClaimRecovery(lifecycleGeneration)
-        return
+      // Commits apply in arrival order through the queue. While the claim is
+      // expired, keep them until renewal or rotation decides this generation;
+      // a renewed generation still owes its rows. A hydration flushes the
+      // queue when it ends.
+      this.queuedTxCommitted.push({
+        txCommitted: payload,
+        lifecycleGeneration,
+        storageCollectionId: message.collectionId,
+      })
+      if (claimExpired) {
+        this.scheduleCacheClaimRecovery(lifecycleGeneration)
+      } else if (!this.isHydratingNow()) {
+        void this.applyMutex
+          .run(() => this.flushQueuedTxCommittedUnsafe())
+          .catch((error) => {
+            this.markTerminalFailure(error, lifecycleGeneration)
+          })
       }
-
-      void this.applyMutex
-        .run(() => {
-          if (message.collectionId !== this.storageCollectionId) return
-          return this.processCommittedTxUnsafe(payload, lifecycleGeneration)
-        })
-        .catch((error) => {
-          this.markTerminalFailure(error, lifecycleGeneration)
-        })
       return
     }
 
@@ -4673,16 +4673,6 @@ class PersistedCollectionRuntime<
     lifecycleGeneration = this.lifecycleGeneration,
   ): Promise<void> {
     if (lifecycleGeneration !== this.lifecycleGeneration) return
-    if (this.hasExpiredCacheClaim()) {
-      // Keep the commit for the generation that claim recovery decides.
-      this.queuedTxCommitted.unshift({
-        txCommitted,
-        lifecycleGeneration,
-        storageCollectionId: this.storageCollectionId,
-      })
-      this.scheduleCacheClaimRecovery(lifecycleGeneration)
-      return
-    }
     if (this.resetTermFence !== undefined) {
       if (txCommitted.term <= this.resetTermFence) {
         // This payload could have been committed before the schema reset.

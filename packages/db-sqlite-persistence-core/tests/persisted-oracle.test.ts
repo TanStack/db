@@ -26034,15 +26034,25 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
    * replies, as the built-in coordinator does; the two-tab OPFS suite is the
    * receiving witness for the browser transport.
    *
+   * A separate cell lets the claim lapse after the owner's row applied, so
+   * the follower's renewal at the reply fails transiently. That is not claim
+   * loss: the load rejects as after a failed ensure, and the demand stays
+   * active and retries instead of releasing the owner's acquisition.
+   *
    * Known gap (#2139): a rotated follower never ends scoped recovery, so the
    * owner's row never becomes visible in the rotated placement. Its cells are
-   * pinned as failing, and the generated histories omit that placement.
+   * pinned as failing, and the generated histories omit that placement. A
+   * rotation that starts while a load waits for the owner's commits is also
+   * outside this lane and tracked there.
    */
   type FollowerRemoteDemandHistory = {
     placement: `direct` | `queued` | `rotated` | `expired`
     apply: `ok` | `fails`
     // A live query over the demand, or the follower's load itself.
     consumer: `live-query` | `load`
+    // The owner's row applies, then the claim lapses before the reply and
+    // the follower's first renewal fails transiently.
+    renewal?: `fails-at-reply`
   }
   type FollowerRow = { id: string; group: string }
 
@@ -26090,6 +26100,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     })
     const rotated = history.placement === `rotated`
     const expiring = history.placement === `expired`
+    const renewalFailsAtReply = history.renewal === `fails-at-reply`
+    let failRenewal = false
     let now = 1_000_000
     const adapter: PersistenceAdapter = {
       loadSubset: async () => {
@@ -26118,6 +26130,28 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
             renewCacheGenerationClaim: async () => now + 10_000,
             rotateCacheGeneration: async () => {
               throw new Error(`an expired history must not rotate`)
+            },
+            releaseCacheGenerationClaim: async () => {},
+          }
+        : {}),
+      ...(renewalFailsAtReply
+        ? {
+            getCacheGenerationNow: () => now,
+            claimCacheGeneration: async () => ({
+              storageCollectionId: storageId,
+              claimId: `follower-demand-claim`,
+              expiresAtMs: now + 10_000,
+            }),
+            // A transient storage error, not a lost claim.
+            renewCacheGenerationClaim: async () => {
+              if (failRenewal) {
+                failRenewal = false
+                throw new Error(`transient renewal failure`)
+              }
+              return now + 10_000
+            },
+            rotateCacheGeneration: async () => {
+              throw new Error(`a transient renewal failure must not rotate`)
             },
             releaseCacheGenerationClaim: async () => {},
           }
@@ -26192,6 +26226,13 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           ts: Date.now(),
           payload,
         })
+        if (renewalFailsAtReply) {
+          // Let the owner's row apply here before the claim lapses.
+          for (let i = 0; i < 5; i++)
+            await new Promise((resolve) => setTimeout(resolve, 0))
+          now += 20_000
+          failRenewal = true
+        }
       },
       // Rotation legitimately releases the previous generation's
       // acquisition, so only the current generation's releases count.
@@ -26420,6 +26461,58 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   // that follows replaces rows in place. A node elected leader that still
   // routes demand through the coordinator truncates and replays as the
   // leader does; this follower-only cell does not exercise that path.
+  // A renewal that fails after the owner replied does not establish claim
+  // loss. The load cannot confirm its rows, so it rejects, as a failed ensure
+  // does; the demand stays active and retries, so the owner's acquisition
+  // is kept. The model predicts the rejected load, no release, one retried
+  // ensure, the owner's row still visible, and a healthy source.
+  it(`keeps a follower's demand when a renewal fails transiently at its reply`, async () => {
+    const errors = vi.spyOn(console, `error`).mockImplementation(() => {})
+    const warnings = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    const tab = createFollowerTab({
+      placement: `direct`,
+      apply: `ok`,
+      consumer: `load`,
+      renewal: `fails-at-reply`,
+    })
+    try {
+      tab.releaseApply()
+      let outcome: `pending` | `fulfilled` | `rejected` = `pending`
+      const settled = Promise.resolve(
+        tab.source._sync.loadSubset({
+          where: new IR.Func(`eq`, [
+            new IR.PropRef([`group`]),
+            new IR.Value(`a`),
+          ]),
+        }),
+      ).then(
+        () => (outcome = `fulfilled`),
+        () => (outcome = `rejected`),
+      )
+      await within(settled, 1_000)
+      for (let i = 0; i < 5; i++)
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      // Checkpoint: the load settled and any retry has run.
+      expect({
+        outcome,
+        releases: tab.releases(),
+        ensures: tab.ensures(),
+        rows: Array.from(tab.source.values()).map((row) => row.id),
+        status: tab.source.status === `error` ? `error` : `healthy`,
+      }).toEqual({
+        outcome: `rejected`,
+        releases: 0,
+        ensures: 2,
+        rows: [`remote`],
+        status: `healthy`,
+      })
+    } finally {
+      await tab.source.cleanup()
+      errors.mockRestore()
+      warnings.mockRestore()
+    }
+  })
+
   it(`a follower requests its demand again after the owner resets, once`, async () => {
     const errors = vi.spyOn(console, `error`).mockImplementation(() => {})
     const warnings = vi.spyOn(console, `warn`).mockImplementation(() => {})
