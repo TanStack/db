@@ -1170,17 +1170,16 @@ export class CollectionConfigBuilder<
   ) {
     const { status } = event
 
-    // A source's initial error is final for its attempt. Before this query's
-    // first ready it is this query's gate error, for every shape. After it,
-    // the source node shows the error and this query keeps its rows.
+    // A source in error ends this query's sync run, for every shape. Before
+    // initial-query readiness it is an initial error. After it, a source can
+    // reach error only by crashing, and a query cannot keep serving rows from
+    // a Collection that cannot serve reads.
     if (status === `error`) {
-      if (this.liveQueryCollection?.status !== `ready`) {
-        this.transitionToError(
-          devBuild() && process.env.NODE_ENV !== `production`
-            ? `Source collection '${collectionId}' entered error state`
-            : codedMessage(172, { collectionId }),
-        )
-      }
+      this.transitionToError(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `Source collection '${collectionId}' entered error state`
+          : codedMessage(172, { collectionId }),
+      )
       return
     }
 
@@ -1264,10 +1263,10 @@ export class CollectionConfigBuilder<
         : message,
     )
 
-    // These are query failures or contract violations, such as a source
-    // cleaned up under this query, so they end the query even after ready.
-    // A source's own failure after this query's first ready, and a failed
-    // request, are health metadata and never reach here.
+    // These are query failures, crashed sources, or contract violations such
+    // as a source cleaned up under this query, so they end the query even
+    // after initial-query readiness. A source's health error and a request
+    // error are health metadata and never reach here.
     this.liveQueryCollection?._lifecycle.crash(error ?? new Error(message))
   }
 
