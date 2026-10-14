@@ -3,6 +3,7 @@ import { compileQuery } from '../compiler/index.js'
 import {
   LoadSubsetOperationAbortedError,
   MissingAliasInputsError,
+  SetWindowFindOneLimitError,
   SetWindowReentrancyError,
   SetWindowRequiresOrderByError,
 } from '../../errors.js'
@@ -58,9 +59,14 @@ export type LiveQueryCollectionUtils = UtilsRecord & {
   /** Most recent subset-load failure observed by this live query. */
   readonly lastSubsetError: unknown | undefined
   /**
-   * Sets the offset and limit of an ordered query.
-   * Is a no-op if the query is not ordered.
+   * Sets the offset and limit of the query's window. A query has a window
+   * when it has an `orderBy` or is a `findOne`. A `findOne` keeps its compiled
+   * limit (1, or 0 for `.limit(0).findOne()`), and only an ordered `findOne`
+   * can move its offset.
    *
+   * @throws `SetWindowRequiresOrderByError` if the query has no window, or an
+   * unordered `findOne` would move its offset.
+   * @throws `SetWindowFindOneLimitError` if a `findOne` would change its limit.
    * @returns `true` if no subset loading was triggered, or `Promise<void>` that resolves when the subset has been loaded
    */
   setWindow: (options: WindowOptions) => true | Promise<void>
@@ -295,17 +301,15 @@ export class CollectionConfigBuilder<
     if (!windowFn) {
       throw new SetWindowRequiresOrderByError()
     }
-    // A findOne's window keeps its compiled limit; only its offset moves.
-    if (
-      this.query.singleResult &&
-      options.limit !== undefined &&
-      options.limit !== this.initialWindow!.limit
-    ) {
-      throw new Error(
-        devBuild() && process.env.NODE_ENV !== `production`
-          ? `setWindow() cannot change the limit of a findOne() query`
-          : codedMessage(244),
+    // A findOne keeps its compiled limit, and only an ordered one moves.
+    if (this.query.singleResult) {
+      if (!this.query.orderBy?.length && (options.offset ?? 0) !== 0)
+        throw new SetWindowRequiresOrderByError()
+      if (
+        (options.limit ?? this.initialWindow!.limit) !==
+        this.initialWindow!.limit
       )
+        throw new SetWindowFindOneLimitError()
     }
     if (
       this.activeWindowOperation ||
@@ -1323,8 +1327,8 @@ export class CollectionConfigBuilder<
         lazyCallbacks.setDemand = (plan, keys) =>
           collectionSubscriber.setDemand(subscription, plan, keys)
         for (const plan of lazyCallbacks.plans ?? []) {
-          // A window requested before start can drop the rows a static
-          // filter names, so their children wait for the window.
+          // A window requested before start with a nonzero offset can drop
+          // the rows a static filter names, so it gets no static demand.
           if (plan.initialKeys.size > 0 && !this.currentWindow?.offset) {
             lazyCallbacks.setDemand(plan, plan.initialKeys)
           }

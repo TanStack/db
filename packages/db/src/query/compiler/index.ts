@@ -2445,15 +2445,15 @@ function replaceIncludesInSelectValue(
   path: Array<string>,
   replacement: ValClass,
 ): { value: any; replaced: boolean } {
-  if (path.length === 0) {
-    return replaceIncludesValue(value, replacement)
+  if (path.length === 0 && value instanceof IncludesSubquery) {
+    return { value: replacement, replaced: true }
   }
 
   if (value instanceof ConditionalSelect) {
     return replaceIncludesInConditionalSelect(value, path, replacement)
   }
 
-  if (!isNestedSelectObject(value)) {
+  if (path.length === 0 || !isNestedSelectObject(value)) {
     return { value, replaced: false }
   }
 
@@ -2469,21 +2469,6 @@ function replaceIncludesInSelectValue(
     },
     replaced: true,
   }
-}
-
-function replaceIncludesValue(
-  value: any,
-  replacement: ValClass,
-): { value: any; replaced: boolean } {
-  if (value instanceof IncludesSubquery) {
-    return { value: replacement, replaced: true }
-  }
-
-  if (value instanceof ConditionalSelect) {
-    return replaceIncludesInConditionalSelect(value, [], replacement)
-  }
-
-  return { value, replaced: false }
 }
 
 function replaceIncludesInConditionalSelect(

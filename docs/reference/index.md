@@ -93,6 +93,7 @@ title: "@tanstack/db"
 - [SchemaMustBeSynchronousError](classes/SchemaMustBeSynchronousError.md)
 - [SchemaValidationError](classes/SchemaValidationError.md)
 - [SerializationError](classes/SerializationError.md)
+- [SetWindowFindOneLimitError](classes/SetWindowFindOneLimitError.md)
 - [SetWindowReentrancyError](classes/SetWindowReentrancyError.md)
 - [SetWindowRequiresOrderByError](classes/SetWindowRequiresOrderByError.md)
 - [SortedMap](classes/SortedMap.md)

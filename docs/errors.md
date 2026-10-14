@@ -897,7 +897,7 @@ Internal error: compiler returned aliases without inputs: alias1, alias2. This i
 Development builds show the full message. For example:
 
 ```text
-setWindow() can only be called on collections with an ORDER BY clause or findOne(). Add .orderBy() to your query to enable window movement.
+setWindow() can only move a window on a query with an ORDER BY clause. Add .orderBy() to your query to enable window movement.
 ```
 
 <a id="error-85"></a>
@@ -978,6 +978,16 @@ Development builds show the full message. For example:
 
 ```text
 A Collection already tracks an unsettled transaction with id "tx-1". Give each transaction a unique id.
+```
+
+<a id="error-244"></a>
+
+## Error 244: `SetWindowFindOneLimitError`
+
+Development builds show the full message. For example:
+
+```text
+setWindow() cannot change the limit of a findOne() query. Move only its offset.
 ```
 
 ## Other errors and log messages
@@ -2458,14 +2468,4 @@ Development builds show this message, with `${...}` replaced by values:
 
 ```text
 An ordered window row has no include route
-```
-
-<a id="error-244"></a>
-
-## Error 244: `query/live/collection-config-builder.ts`
-
-Development builds show this message, with `${...}` replaced by values:
-
-```text
-setWindow() cannot change the limit of a findOne() query
 ```
