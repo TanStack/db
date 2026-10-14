@@ -777,3 +777,22 @@ package still permits published Query Core 5.90.20 through its peer range,
 while the reviewed source requires attribution APIs available only in the
 unpublished Core source used for these tests. Release compatibility remains
 open until a compatible Core version is published and declared.
+
+### CI formatter provenance and repeated receiving run
+
+After the review of `5874c7078`, CI bot commit
+`c0341dce590f96d179f090f455e03c438f7c6989` changed only the layout of
+two `query.ts` expressions and one oracle union type. The normal merge
+`c274d5aff5743a64f63f6c2ac30b759127899d44` has parents
+`0b7829ec527000b5908b3aa3b6e7ec89e7e9595b` (this review record) and
+`c0341dce590f96d179f090f455e03c438f7c6989`. The binary source/test diff
+from `5874c7078` to `c274d5aff` has SHA-256
+`76cd79e3f5214c4e19eb06b28e8b77b8c9c51d885b2210984782b314153fac2f`;
+its inspected changes are formatting only. At `c274d5aff`, raw SHA-256 is
+`ccf06c6858b47c72bf51ab4a8d98608a88b0e7f4818a613725e23c7f67368125`
+for `query.ts` and
+`d984c02e45696c594cb57c948dc7d038573714bc2c7e0de2b809bd1d2956a85d`
+for the ownership oracle. A repeated Query DB run at that exact merged head
+passed 1,029 runtime tests in 20 files and typechecked against attribution
+source `877655c66`. This later record-only edit leaves those executed files
+unchanged.
