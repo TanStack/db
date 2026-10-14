@@ -4398,7 +4398,7 @@ describe(`ordered source work oracle`, () => {
  * sync adapter and its provider: it accepts each `loadSubset` call as a
  * physical acquisition, owns the model's source rows, and writes sync
  * transactions. A held request is a physical acquisition whose provider
- * answer is delayed until a `answer` step. A served range is a model
+ * answer is delayed until an `answer` step. A served range is a model
  * abstraction: the prefix and boundary that one answer establishes, up to
  * the last order value a nonempty limited answer returned. A short answer
  * does not prove source exhaustion. The ledger is the model's record of the
@@ -4863,7 +4863,9 @@ const eagerHeldCase: fc.Arbitrary<EagerCase> = fc
     path: `on-demand` as const,
     // A forwarding provider sends the delete, and an indexed source filter
     // or a joined filter refills from the provider, so the refill is a held
-    // request. An unindexed source filter issues no held request.
+    // request. An unindexed source filter issues no held request. With the
+    // provider pinned, this campaign needs no peer exclusion (#2155 concerns
+    // only a refetching provider).
     provider: `forward` as const,
     filter:
       testCase.filter === `function` || testCase.filter === `full-joined`
@@ -4888,7 +4890,6 @@ const eagerHeldCase: fc.Arbitrary<EagerCase> = fc
       ...rest,
     ],
   }))
-  .map(withoutPeerRefetch)
 
 function isJoinedFilter({ filter }: EagerCase): boolean {
   return filter === `joined` || filter === `anti-joined`
@@ -4972,9 +4973,12 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
 }
 
 /** Runs one case and returns its held-load reach counts. */
-async function runEagerWindow(
-  testCase: EagerCase,
-): Promise<{ heldChanges: number; heldRequests: number }> {
+async function runEagerWindow(testCase: EagerCase): Promise<{
+  heldChanges: number
+  heldRequests: number
+  abortedHeld: number
+  lateAnswers: number
+}> {
   const joined = isJoinedFilter(testCase)
   const fullJoin = testCase.filter === `full-joined`
   const viaLink = joined && testCase.via === `link`
@@ -5113,9 +5117,10 @@ async function runEagerWindow(
   const heldRequests: Array<{
     options: LoadSubsetOptions
     resolve: () => void
+    reject: (error: unknown) => void
     // Aborted or unloaded, but answered anyway: its rows install and its
     // load fulfills after they become visible.
-    abandoned?: boolean
+    answeredAfterAbort?: boolean
   }> = []
   let holding = false
   const inFlight = () => heldRequests.length > 0
@@ -5124,6 +5129,11 @@ async function runEagerWindow(
   let stepChangedInFlight = false
   let caseHeldChanges = 0
   let caseHeldRequests = 0
+  // Held requests aborted or unloaded while in flight, each counted once
+  // (an acquisition release both aborts and unloads), and the ones a late
+  // provider answered anyway.
+  const abortedRequests = new Set<LoadSubsetOptions>()
+  let lateAnswers = 0
   const noteChange = () => {
     if (holding && inFlight()) stepChangedInFlight = true
   }
@@ -5140,8 +5150,9 @@ async function runEagerWindow(
   const dropHeld = (options: LoadSubsetOptions): boolean => {
     const index = heldRequests.findIndex((entry) => entry.options === options)
     if (index === -1) return false
+    abortedRequests.add(options)
     if (testCase.cancellation === `late`) {
-      heldRequests[index]!.abandoned = true
+      heldRequests[index]!.answeredAfterAbort = true
       return true
     }
     heldRequests.splice(index, 1)[0]!.resolve()
@@ -5171,18 +5182,28 @@ async function runEagerWindow(
     // no rows and its load fulfills.
     if (options.signal?.aborted) return true
     caseHeldRequests++
-    return new Promise((resolve) => {
-      heldRequests.push({ options, resolve })
+    return new Promise((resolve, reject) => {
+      heldRequests.push({ options, resolve, reject })
       options.signal?.addEventListener(`abort`, () => dropHeld(options))
     })
   }
   // Answers one held request from the current rows and fulfills its load
   // once the rows apply.
+  // The held load fulfills when the applied receipt fulfills, and rejects
+  // if it rejects.
   async function answerOldest(): Promise<void> {
-    const { options, resolve, abandoned } = heldRequests.shift()!
-    const applied = abandoned ? send(pageFor(options)) : answer(options)
-    if (applied !== true) await applied
-    resolve()
+    const { options, resolve, reject, answeredAfterAbort } =
+      heldRequests.shift()!
+    if (answeredAfterAbort) lateAnswers++
+    const applied = answeredAfterAbort
+      ? send(pageFor(options))
+      : answer(options)
+    try {
+      if (applied !== true) await applied
+      resolve()
+    } catch (error) {
+      reject(error)
+    }
   }
   // A request counts as served once it is answered.
   function answer(options: LoadSubsetOptions): true | Promise<void> {
@@ -6052,7 +6073,12 @@ async function runEagerWindow(
       }
     }
     expect(runaway, `loading reached a fixed point by the end`).toBe(false)
-    return { heldChanges: caseHeldChanges, heldRequests: caseHeldRequests }
+    return {
+      heldChanges: caseHeldChanges,
+      heldRequests: caseHeldRequests,
+      abortedHeld: abortedRequests.size,
+      lateAnswers,
+    }
   } finally {
     unsubscribe?.()
     await effect?.dispose()
@@ -6198,7 +6224,7 @@ describe(`eager indexed ordered windows`, () => {
   // a short joined window (#2155): after the refetch the peer shows ranks
   // [0, 0] where the model shows [0, 0, 100]. Only that symptom satisfies
   // this replay; when #2155 is fixed, flip it to expect the case to pass.
-  it(`keeps a peer's joined window short after a refetch removes a tied row (#2155)`, async () => {
+  it(`keeps a peer's joined window short after a refetch removes a tied row`, async () => {
     await expect(
       checkEagerWindow({
         path: `on-demand`,
@@ -6224,7 +6250,9 @@ describe(`eager indexed ordered windows`, () => {
           { type: `flip`, id: 0 },
         ],
       }),
-    ).rejects.toThrow(/peer rows after step 2/)
+    ).rejects.toThrow(
+      `peer rows after step 2: expected [ +0, +0 ] to deeply equal [ +0, +0, 100 ]`,
+    )
   })
 
   it(`publishes a full-join window that only loses a row`, async () => {
@@ -6477,7 +6505,7 @@ describe(`eager indexed ordered windows`, () => {
     // case, so a rerun of the same case (or a shrink) adds no entry.
     const heldReach = new Map<
       string,
-      { heldChanges: number; heldRequests: number }
+      Awaited<ReturnType<typeof runEagerWindow>>
     >()
 
     fcTest.prop([eagerHeldCase], { numRuns: runs, seed: HELD_SEED })(
@@ -6518,6 +6546,16 @@ describe(`eager indexed ordered windows`, () => {
         ),
         `held cases with a held request but no in-flight change`,
       ).toEqual([])
+      // `release-peer` aborts held requests: at one times the run count, 5
+      // are aborted in flight and a late provider answers 1 anyway.
+      expect(
+        reach.reduce((sum, count) => sum + count.abortedHeld, 0),
+        `held requests aborted while in flight`,
+      ).toBeGreaterThanOrEqual(3)
+      expect(
+        reach.reduce((sum, count) => sum + count.lateAnswers, 0),
+        `aborted held requests a late provider answered`,
+      ).toBeGreaterThanOrEqual(1)
     })
   })
 
