@@ -1,5 +1,5 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { localOnlyCollectionOptions } from '../../src/local-only.js'
 import { createDeferred } from '../../src/deferred.js'
@@ -4783,12 +4783,14 @@ const eagerFullJoinCase: fc.Arbitrary<EagerCase> = fc
 const eagerHeldCase: fc.Arbitrary<EagerCase> = fc
   .tuple(
     eagerCase,
-    // A change that lands while the refill is in flight: an upsert of a
-    // fresh row, which always writes.
+    // A change that lands while the refill is in flight: an eligible row
+    // with an id no other command uses (40 to 49), so the forwarding
+    // provider always sends it.
     eagerRowOf(9).map((row) => ({
       type: `upsert` as const,
       ...row,
-      id: row.id + 20,
+      id: row.id + 40,
+      eligible: true,
     })),
     fc.array(
       fc.oneof(
@@ -4910,11 +4912,15 @@ function boundaryRanks(
 
 // Per executed case, the steps that changed rows while a held load was in
 // flight, for the held campaign's reconstruction check.
-const heldChangesPerCase: Array<{ changes: number; requests: number }> = []
-let lastCaseHeldChanges = 0
-let lastCaseHeldRequests = 0
 
 async function checkEagerWindow(testCase: EagerCase): Promise<void> {
+  await runEagerWindow(testCase)
+}
+
+/** Runs one case and returns its held-load reach counts. */
+async function runEagerWindow(
+  testCase: EagerCase,
+): Promise<{ heldChanges: number; heldRequests: number }> {
   const joined = isJoinedFilter(testCase)
   const fullJoin = testCase.filter === `full-joined`
   const viaLink = joined && testCase.via === `link`
@@ -4995,6 +5001,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
   // separately).
   let served = 0
   const servedBy = new Map<unknown, number>()
+  const servedIdsBy = new Map<unknown, Set<number>>()
   // The requests the provider has served. A request without a predicate
   // covers every row.
   const servedRequests: Array<LoadSubsetOptions> = []
@@ -5065,8 +5072,10 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
   }
   // Read through a call, as `lagging` is: the write callbacks assign it.
   const changedInFlight = () => stepChangedInFlight
-  // A held request that the loader aborts or unloads leaves the queue
-  // unanswered: it is never served or recorded.
+  // A held request that the loader aborts or unloads leaves the queue: the
+  // provider installs none of its rows and settles its load, as cooperative
+  // cancellation allows (LoadSubsetOptions.signal), and never records it as
+  // served.
   const dropHeld = (options: LoadSubsetOptions): boolean => {
     const index = heldRequests.findIndex((entry) => entry.options === options)
     if (index === -1) return false
@@ -5094,6 +5103,9 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
     }
     if (!holding) return answer(options)
     caseHeldRequests++
+    // Cancellation is cooperative (LoadSubsetOptions.signal): an aborted
+    // request installs no rows and its load settles.
+    if (options.signal?.aborted) return true
     return new Promise((resolve) => {
       heldRequests.push({ options, resolve })
       options.signal?.addEventListener(`abort`, () => dropHeld(options))
@@ -5120,6 +5132,9 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       options.subscription,
       (servedBy.get(options.subscription) ?? 0) + page.length,
     )
+    const ids = servedIdsBy.get(options.subscription) ?? new Set<number>()
+    for (const row of page) ids.add(row.id)
+    servedIdsBy.set(options.subscription, ids)
     return send(page)
   }
   // A refetch keeps every served ordered range whole, as the LoadSubset
@@ -5209,7 +5224,6 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
   // it writes nothing for any other row. A refetching provider writes
   // nothing until its next refetch.
   const sourceWrite = (type: `insert` | `update` | `delete`, value: Row) => {
-    noteChange()
     if (refetching) {
       stale = true
       return
@@ -5222,6 +5236,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
     ) {
       return
     }
+    noteChange()
     if (type === `delete`) sent.delete(value.id)
     else sent.set(value.id, { ...value })
     syncControls!.begin()
@@ -5294,7 +5309,10 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
     const current = markersOf(rowId)
     if (matched === current.length > 0) return
     commits++
-    noteChange()
+    // A marker changes a result row only while its root row exists.
+    if ([...rows.values()].some((row) => (row.link ?? row.id) === rowId)) {
+      noteChange()
+    }
     if (!matched) for (const { key } of current) markerModel.delete(key)
     await (
       matched
@@ -5556,6 +5574,9 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       )
     }
     expectProviderLedger(`initial`)
+    expect(runaway, `loading reached a fixed point at the initial load`).toBe(
+      false,
+    )
     if (effect) {
       await flushPromises()
       expectEagerWindow(
@@ -5603,19 +5624,21 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
         ).toBe(0)
         // A bounded but oversized read also fails: each consumer (the query
         // and its Effect load separately) receives at most the prefix, its
-        // boundary ties, and a refill, and never more than the source holds.
-        const consumerBound = Math.min(
-          prefixBound(
-            prefix.map((row): number | null => row.rank).slice(-2),
-            window,
-          ),
-          rows.size,
+        // boundary ties, and a refill, and never more distinct rows than the
+        // source holds.
+        const consumerBound = prefixBound(
+          prefix.map((row): number | null => row.rank).slice(-2),
+          window,
         )
-        for (const consumerServed of servedBy.values()) {
+        for (const [consumer, consumerServed] of servedBy) {
           expect(
             consumerServed,
             `rows one consumer is served by the initial load of a proven prefix`,
           ).toBeLessThanOrEqual(consumerBound)
+          expect(
+            servedIdsBy.get(consumer)!.size,
+            `distinct rows one consumer is served by the initial load`,
+          ).toBeLessThanOrEqual(Math.min(consumerBound, rows.size))
         }
       }
     }
@@ -5952,8 +5975,8 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
         ).toBeLessThanOrEqual(bound)
       }
     }
-    lastCaseHeldChanges = caseHeldChanges
-    lastCaseHeldRequests = caseHeldRequests
+    expect(runaway, `loading reached a fixed point by the end`).toBe(false)
+    return { heldChanges: caseHeldChanges, heldRequests: caseHeldRequests }
   } finally {
     unsubscribe?.()
     await effect?.dispose()
@@ -6339,38 +6362,55 @@ describe(`eager indexed ordered windows`, () => {
     checkEagerWindow,
   )
 
-  const HELD_SEED = 2081
-  fcTest.prop([eagerHeldCase], { numRuns: runs, seed: HELD_SEED })(
-    `keeps a window whose loads answer between live changes for a fixed seed`,
-    async (testCase) => {
-      await checkEagerWindow(testCase)
-      heldChangesPerCase.push({
-        changes: lastCaseHeldChanges,
-        requests: lastCaseHeldRequests,
-      })
-    },
-  )
+  describe(`held loads for a fixed seed`, () => {
+    const HELD_SEED = 2081
+    // Reach counts of the cases the fixed-seed property executes, keyed by
+    // case, so a rerun of the same case (or a shrink) adds no entry.
+    const heldReach = new Map<
+      string,
+      { heldChanges: number; heldRequests: number }
+    >()
+    beforeAll(() => heldReach.clear())
 
-  // Reconstruction: every case the fixed-seed held campaign just executed
-  // changed rows while a load was in flight. The property records the count
-  // per case, so this reads it without running the campaign again.
-  it(`changes rows while held loads are in flight in every held case that issues one`, () => {
-    expect(
-      heldChangesPerCase.length,
-      `held cases recorded by the fixed-seed campaign`,
-    ).toBe(runs)
-    // A case whose deletes refill from rows the query already holds issues
-    // no held request; at one times the run count, 35 of 40 cases issue one.
-    expect(
-      heldChangesPerCase.filter((count) => count.requests > 0).length,
-      `held cases that issue a held request`,
-    ).toBeGreaterThanOrEqual(Math.ceil(runs * 0.75))
-    expect(
-      heldChangesPerCase.filter(
-        (count) => count.requests > 0 && count.changes === 0,
-      ),
-      `held cases with a held request but no in-flight change`,
-    ).toEqual([])
+    fcTest.prop([eagerHeldCase], { numRuns: runs, seed: HELD_SEED })(
+      `keeps a window whose loads answer between live changes for a fixed seed`,
+      async (testCase) => {
+        heldReach.set(fc.stringify(testCase), await runEagerWindow(testCase))
+      },
+    )
+
+    // Reconstruction: the fixed-seed property records each executed case's
+    // reach, so this reads it without running the campaign again. Sampling
+    // the arbitrary with the same seed and run count yields those cases.
+    it(`changes rows while held loads are in flight in every held case that issues one`, (context) => {
+      if (heldReach.size === 0) {
+        // The property did not run (a name filter excluded it).
+        context.skip()
+      }
+      const executed = new Set(
+        fc
+          .sample(fc.tuple(eagerHeldCase), { numRuns: runs, seed: HELD_SEED })
+          .map(([testCase]) => fc.stringify(testCase)),
+      )
+      expect(
+        [...executed].filter((key) => !heldReach.has(key)),
+        `executed held cases without recorded reach`,
+      ).toEqual([])
+      const reach = [...executed].map((key) => heldReach.get(key)!)
+      // A case whose deletes refill from rows the query already holds
+      // issues no held request; at one times the run count, 35 of 40 cases
+      // issue one.
+      expect(
+        reach.filter((count) => count.heldRequests > 0).length,
+        `held cases that issue a held request`,
+      ).toBeGreaterThanOrEqual(Math.ceil(runs * 0.75))
+      expect(
+        reach.filter(
+          (count) => count.heldRequests > 0 && count.heldChanges === 0,
+        ),
+        `held cases with a held request but no in-flight change`,
+      ).toEqual([])
+    })
   })
 
   fcTest.prop(
