@@ -1103,11 +1103,12 @@ so the direct-key classifier branch has a permanent witness.
 
 The unrelated-owner history fails on exact predecessor `bb12782f6` at the
 durable-row checkpoint and passes at `18089e931`. An independent oracle review
-also killed wrong-alias matching and never-cleanup timer mutants at intended
-owner/marker comparisons. A disposable mutant that omits the direct current
-hash branch fails the new current-owner history at the 1,050 durable-row
-checkpoint. These are assertion kills after the production path reached the
-deadline; none relies on timeout as a verdict.
+also killed wrong-alias matching and never-cleanup timer mutants at public-row
+comparisons. A disposable mutant that omits the direct current-hash branch
+fails the permanent current-owner history at public rows after scan delivery;
+a separate probe fails the same mutant at the 1,050 durable-row checkpoint.
+These are assertion kills after the production path reached the deadline; none
+relies on timeout as a verdict.
 
 At executable head `18089e931`, all 1,044 Query DB tests in 20 files pass
 against immutable attribution-enabled Query Core source `273eb2526`. TypeScript
