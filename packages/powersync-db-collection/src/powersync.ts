@@ -325,7 +325,16 @@ function createPowerSyncCollectionConfig<
    */
   const sync: SyncConfig<OutputType, string> = {
     sync: (params) => {
-      const { begin, write, collection, commit, markReady, markError } = params
+      const {
+        begin,
+        write,
+        collection,
+        commit,
+        markReady,
+        markError,
+        reportError,
+        reportHealthy,
+      } = params
       const abortController = new AbortController()
 
       let disposeTracking:
@@ -810,7 +819,17 @@ function createPowerSyncCollectionConfig<
               reconciledTrackingRevision = revision
               // Replacing the trigger alone is not recovery: its baseline
               // writes must also be applied before the source is ready again.
-              if (collection.status === `error`) markReady()
+              if (collection.status === `error`) {
+                // After markError, recovery requires cleanup() then preload().
+                // Do nothing here; the error stays final.
+              } else if (collection.status === `loading`) {
+                // Before initial-query readiness, move to ready
+                markReady()
+              } else if (collection.status === `ready`) {
+                // After initial-query readiness, a successful rebuild reports
+                // recovery through Collection health.
+                reportHealthy()
+              }
             }
           }
         }
@@ -823,7 +842,15 @@ function createPowerSyncCollectionConfig<
               .catch((error) => {
                 // A rebuild may already have removed every active diff trigger.
                 // Do not leave healthy consumers ready against a stale source.
-                if (!stopped) markError(error)
+                if (!stopped) {
+                  if (collection.status === `loading`) {
+                    // Initial load failure is final for the attempt
+                    markError(error)
+                  } else {
+                    // Post-ready failures are reported as health issues
+                    reportError(error, { final: false })
+                  }
+                }
                 throw error
               })
               .finally(() => {

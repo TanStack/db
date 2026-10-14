@@ -431,6 +431,11 @@ class QueryCollectionUtilsImpl implements QueryCollectionUtils {
   }
 
   // Getters for error state
+  // These track query-level errors (per query, not per collection). They are
+  // separate from Collection.health. When status is ready, query errors appear
+  // only in health; when status is error, they appear here too as the initial
+  // load failed. After ready, a failed query fetch sets health as a request
+  // error and keeps the last ready data while tracking in lastError/errorCount.
   public get lastError() {
     return this.state.lastError
   }
@@ -1147,8 +1152,17 @@ export function queryCollectionOptions(
         )
       }
     }
-    const { begin, write, commit, markReady, markError, collection, metadata } =
-      params
+    const {
+      begin,
+      write,
+      commit,
+      markReady,
+      markError,
+      reportError,
+      reportHealthy,
+      collection,
+      metadata,
+    } = params
     const persistence =
       metadata === undefined
         ? null
@@ -2673,7 +2687,15 @@ export function queryCollectionOptions(
             if (unownedDirectWritePositions.get(key) === position)
               unownedDirectWritePositions.delete(key)
           })
-          if (!signal?.aborted) markReady()
+          if (!signal?.aborted) {
+            // A successful refetch after an initial load failure does not revive
+            // the Collection. The failure is final; recovery needs cleanup() then
+            // preload(). After initial-query readiness, successful results report
+            // health recovery in trackResultApplication.
+            if (collection.status !== `error`) {
+              markReady()
+            }
+          }
         }
         const accepted = whenSyncAccepted(applied)
         if (accepted === true) finishApplication()
@@ -2756,11 +2778,16 @@ export function queryCollectionOptions(
       void application.then(
         () => {
           if (finish()) {
+            const hadError = failedResultApplications.has(hashedQueryKey)
             failedResultApplications.delete(hashedQueryKey)
             // Applying cached data during a fetch does not establish recovery.
             if (!isFetching && applicationErrorRevision === errorRevision) {
               state.lastError = undefined
               state.errorCount = 0
+              // Report recovery after a problem if the collection is ready
+              if (hadError && collection.status === `ready`) {
+                reportHealthy()
+              }
             }
           }
         },
@@ -2774,6 +2801,10 @@ export function queryCollectionOptions(
             `[QueryCollection] Error applying query ${String(hashToQueryKey.get(hashedQueryKey))}:`,
             error,
           )
+          // Report post-ready failures as health issues (not final)
+          if (collection.status === `ready`) {
+            reportError(error, { final: false })
+          }
           if (collection.status === `loading`) {
             markError(error)
           }
@@ -3149,6 +3180,9 @@ export function queryCollectionOptions(
           // snapshot available while utils expose the error.
           if (collection.status === `loading`) {
             markError(result.error)
+          } else if (collection.status === `ready`) {
+            // Report post-ready failures as health issues (not final)
+            reportError(result.error, { final: false })
           }
         }
       }
