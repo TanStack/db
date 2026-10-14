@@ -4448,8 +4448,8 @@ describe(`ordered source work oracle`, () => {
  * Effect is not checked while a load is in flight. A campaign fixed to that
  * premise uses a forwarding provider and an indexed source filter or a
  * joined filter that refills from it, deletes three visible rows, then
- * upserts an eligible row with an unshared id; a reconstruction check reads
- * the fixed-seed campaign's per-case counts and requires every case that
+ * upserts an eligible row with an unshared id; a reconstruction check, in
+ * the same test as the fixed-seed campaign, reads its per-case counts and requires every case that
  * issues a held request to change rows while it is in flight. Loading must
  * reach a fixed point: past a request budget the provider rejects and
  * records it, and every checkpoint asserts it did not. A bounded step makes
@@ -4514,7 +4514,7 @@ type EagerCase = {
   // means `forward`.
   provider?: `forward` | `refetch`
   // When an on-demand provider answers a load. `immediate` answers within
-  // the request. `held` answers only at a `release` command, from the rows
+  // the request. `held` answers only at an `answer` or `drain` step, from the rows
   // at that moment, so live changes can arrive while a load is in flight.
   // Initial loads answer immediately. Omitted means `immediate`.
   latency?: `immediate` | `held`
@@ -4977,6 +4977,7 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
   heldChanges: number
   heldRequests: number
   abortedHeld: number
+  cooperativeCancels: number
   lateAnswers: number
 }> {
   const joined = isJoinedFilter(testCase)
@@ -5134,6 +5135,9 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
   // provider answered anyway.
   const abortedRequests = new Set<LoadSubsetOptions>()
   let lateAnswers = 0
+  // Held requests a cooperative provider cancelled (once each: the unload
+  // after an abort finds the request already gone).
+  let cooperativeCancels = 0
   const noteChange = () => {
     if (holding && inFlight()) stepChangedInFlight = true
   }
@@ -5155,6 +5159,7 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
       heldRequests[index]!.answeredAfterAbort = true
       return true
     }
+    cooperativeCancels++
     heldRequests.splice(index, 1)[0]!.resolve()
     return true
   }
@@ -6080,6 +6085,7 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
       heldChanges: caseHeldChanges,
       heldRequests: caseHeldRequests,
       abortedHeld: abortedRequests.size,
+      cooperativeCancels,
       lateAnswers,
     }
   } finally {
@@ -6502,68 +6508,55 @@ describe(`eager indexed ordered windows`, () => {
     checkEagerWindow,
   )
 
-  describe(`held loads for a fixed seed`, () => {
+  // The fixed-seed held campaign and its reconstruction run in one test, so
+  // the reach check always reads the cases that test just executed. Reach is
+  // keyed by case, so a shrink run adds no entry.
+  it(`keeps a window whose loads answer between live changes for a fixed seed`, async () => {
     const HELD_SEED = 2081
-    // Reach counts of the cases the fixed-seed property executes, keyed by
-    // case, so a rerun of the same case (or a shrink) adds no entry.
     const heldReach = new Map<
       string,
       Awaited<ReturnType<typeof runEagerWindow>>
     >()
-
-    fcTest.prop([eagerHeldCase], { numRuns: runs, seed: HELD_SEED })(
-      `keeps a window whose loads answer between live changes for a fixed seed`,
-      async (testCase) => {
+    await fc.assert(
+      fc.asyncProperty(eagerHeldCase, async (testCase) => {
         heldReach.set(fc.stringify(testCase), await runEagerWindow(testCase))
-      },
+      }),
+      { numRuns: runs, seed: HELD_SEED },
     )
-
-    // Reconstruction: the fixed-seed property records each executed case's
-    // reach, so this reads it without running the campaign again. Sampling
-    // the arbitrary with the same seed and run count yields those cases.
-    it(`changes rows while held loads are in flight in every held case that issues one`, (context) => {
-      if (heldReach.size === 0) {
-        // The property did not run (a name filter excluded it).
-        context.skip()
-      }
-      const executed = new Set(
-        fc
-          .sample(fc.tuple(eagerHeldCase), { numRuns: runs, seed: HELD_SEED })
-          .map(([testCase]) => fc.stringify(testCase)),
-      )
-      expect(
-        [...executed].filter((key) => !heldReach.has(key)),
-        `executed held cases without recorded reach`,
-      ).toEqual([])
-      const reach = [...executed].map((key) => heldReach.get(key)!)
-      // A case whose deletes refill from rows the query already holds
-      // issues no held request; at one times the run count, 35 of 40 cases
-      // issue one.
-      expect(
-        reach.filter((count) => count.heldRequests > 0).length,
-        `held cases that issue a held request`,
-      ).toBeGreaterThanOrEqual(Math.ceil(runs * 0.75))
-      expect(
-        reach.filter(
-          (count) => count.heldRequests > 0 && count.heldChanges === 0,
-        ),
-        `held cases with a held request but no in-flight change`,
-      ).toEqual([])
-      // `release-peer` aborts held requests: at one times the run count, 5
-      // are aborted in flight; a late provider answers 1 anyway and a
-      // cooperative one cancels 4.
-      expect(
-        reach.reduce(
-          (sum, count) => sum + count.abortedHeld - count.lateAnswers,
-          0,
-        ),
-        `held requests a cooperative provider cancelled`,
-      ).toBeGreaterThanOrEqual(3)
-      expect(
-        reach.reduce((sum, count) => sum + count.lateAnswers, 0),
-        `aborted held requests a late provider answered`,
-      ).toBeGreaterThanOrEqual(1)
-    })
+    // Reconstruction: sampling the arbitrary with the same seed and run
+    // count yields the executed cases.
+    const executed = new Set(
+      fc
+        .sample(eagerHeldCase, { numRuns: runs, seed: HELD_SEED })
+        .map((testCase) => fc.stringify(testCase)),
+    )
+    expect(
+      [...executed].filter((key) => !heldReach.has(key)),
+      `executed held cases without recorded reach`,
+    ).toEqual([])
+    const reach = [...executed].map((key) => heldReach.get(key)!)
+    // A case whose deletes refill from rows the query already holds issues
+    // no held request; at one times the run count, 35 of 40 cases issue one.
+    expect(
+      reach.filter((count) => count.heldRequests > 0).length,
+      `held cases that issue a held request`,
+    ).toBeGreaterThanOrEqual(Math.ceil(runs * 0.75))
+    expect(
+      reach.filter(
+        (count) => count.heldRequests > 0 && count.heldChanges === 0,
+      ),
+      `held cases with a held request but no in-flight change`,
+    ).toEqual([])
+    // `release-peer` aborts held requests: at one times the run count, a
+    // cooperative provider cancels 4 and a late provider answers 1 anyway.
+    expect(
+      reach.reduce((sum, count) => sum + count.cooperativeCancels, 0),
+      `held requests a cooperative provider cancelled`,
+    ).toBeGreaterThanOrEqual(3)
+    expect(
+      reach.reduce((sum, count) => sum + count.lateAnswers, 0),
+      `aborted held requests a late provider answered`,
+    ).toBeGreaterThanOrEqual(1)
   })
 
   fcTest.prop(
