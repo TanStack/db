@@ -1,8 +1,8 @@
 # Query DB physical Query ownership review
 
-Reviewed executable head: `8827c3633`, including the merge of current main at
+Reviewed executable head: `29ce0d2bf`, including the merge of current main at
 `d01357442`. The production repair commits are `1c4d6084a`, `2459bd94c`,
-and `5bc47aab4`. Baseline:
+`5bc47aab4`, and `29ce0d2bf`. Baseline:
 `91cefa260` (`origin/main` when the branch started). This record reviews the
 replacement for PR #2143 against published Query Core 5.90.20. The accepted
 scope gives Query DB ownership of the Query it creates. An acquisition releases
@@ -29,6 +29,7 @@ the bounded ownership model and its TLA+ abstraction.
 | A later invoked query function wins an overlapping fetched row while ownership remains continuous. | A cache callback reverses fetch-call acceptance and query-function invocation. The older result settles last. | The earlier action-order stamp leaves the wrong public value. The invocation-order check rejects it after both results settle. |
 | A fresh response can replace an older persisted direct value. | Release the original acquisition, accept a direct write, restart from storage, then apply a fresh shared response. | Comparing only the persisted baseline misses the accepted row. The native SQLite restart witness failed before the result-application repair and passed after it. |
 | A public cleanup or final unsubscribe during observer installation leaves no Query observer after the last Collection owner leaves. | A synchronous Query-cache `added` notification cleans up the Collection during Query construction, before the provider starts. Fetch notifications also clean up from cached or uncached readiness, add another public subscriber during cached or uncached installation, or remove the final subscriber during cached installation. | A late observer installation or overwritten unsubscribe leaves the old Query observed. The cleanup cases require the exact cache entry to be absent at cleanup settlement; the fetch-notification cases also check after the held provider resolves. |
+| Query success cannot settle a pending load before its Collection result commit is accepted. Final owner release before acceptance cancels both the load and the write; a remaining peer keeps them live. | An in-memory wrapping sync holds `commit()` after one Query result. The history releases the final subscription, cleans up the Collection, or adds a peer before first-owner release. It observes the native public load promises and rows before and after opening the gate. | Removing the application wait fulfills a canceled load before the gate. Omitting commit cancellation publishes an unowned row after the gate. Canceling on first-owner release rejects a peer that still owns the Query. |
 
 The primary production path is `queryCollectionOptions` through real
 `Collection._sync.loadSubset` and `unloadSubset`, Query observers, and result
@@ -67,20 +68,31 @@ The cached final-subscriber witness checks the slot's release path without
 explicit Collection cleanup. The new cleanup witnesses
 preserve a primary assertion failure as the cause when cleanup also fails and
 report each cleanup step separately.
+The held-commit witness fails on the original waiter after final release: its
+load fulfills before the gate with no row. Keeping the waiter registered until
+application settlement rejects that outcome. Removing the final-release commit
+abort then publishes the row after the gate; canceling at first-owner release
+instead rejects the live peer. Passing the per-result application signal to a
+wrapping commit also canceled valid persistence work when a newer result
+replaced the old one; two cache-rotation oracles caught that. The repair uses a
+Query-owner commit signal, and all three held-commit histories pass. The native
+SQLite retained-scan regression now expects a pending load to reject after
+its last owner unloads.
 
-After merging `origin/main`, the Query DB package passed 830 unit tests and
-127 E2E tests. Its TypeScript check and package build passed. Changed-file
-ESLint had zero errors and two warnings. Prettier and `git diff --check`
-passed. The E2E run used local builds of `offline-transactions` and
+At `29ce0d2bf`, the Query DB package passed 833 unit tests and 127 E2E tests.
+Its TypeScript check and package build passed. Changed-file ESLint had zero
+errors and 20 existing warnings across the source and touched test files.
+Prettier and `git diff --check` passed. The E2E run used local builds of `offline-transactions` and
 `electric-db-collection`.
 
 This evidence covers the bounded static-key full-source path, equal filtered
 peers, two Collection owners of one Query, held fetches, the named persisted
-restart states, and the named ordering reversal. The
+restart states, the named ordering reversal, and the held in-memory commit cut. The
 [coverage map](../oracle-coverage.md) retains arbitrary predicate containment,
 function-built keys, TTL retention, other persisted startup histories, real
 network cancellation, and cross-Collection option selection beyond installed
-Query Core 5.90.20 as separate receiving work. No claim here assigns a Query DB
+Query Core 5.90.20 as separate receiving work. The TLA+ lease model does not
+include Collection result acceptance. No claim here assigns a Query DB
 lease to an unrelated same-key Query Core caller.
 
 ## Oracle guide audit
@@ -91,13 +103,13 @@ lease to an unrelated same-key Query Core caller.
 | ORC-002 independent judgment | The small lease model chooses expected ownership from accepted acquisitions. Persisted expected rows come from authored source snapshots, not Query DB's owner classifier. |
 | ORC-003 literate responsibilities | Each owner states its law before test mechanics and places model, legal history, production path, observations, and checkpoint beside the checks. |
 | ORC-004 grammar controls | The design grammar gives reconstruction, ablation, adjacent forms, and exclusions for the bounded lease and signal model. The changed production oracles use fixed history matrices. |
-| ORC-005 path and observation | Real Collection and Query Core paths reach the named provider, release, result-application, public-row, and durable-row checkpoints. The controlled fixtures do not prove a real network provider's timing. |
-| ORC-006 checker calibration | Hash-release and per-acquisition-abort TLA+ weakenings fail their invariants. The markerless, action-order, unmatched-release, premature exact-release, premature readiness, and skipped application-wait production controls fail at their intended assertions. |
+| ORC-005 path and observation | Real Collection and Query Core paths reach the named provider, release, result-application, public-row, and durable-row checkpoints. The held-commit fixture checks native public load promises and rows on each side of commit acceptance. The controlled fixtures do not prove a real network provider's timing. |
+| ORC-006 checker calibration | Hash-release and per-acquisition-abort TLA+ weakenings fail their invariants. The markerless, action-order, unmatched-release, premature exact-release, premature readiness, and skipped application-wait production controls fail at their intended assertions. The held-commit witness separately rejects an omitted application wait, omitted final-release commit abort, and first-owner commit cancellation. |
 | ORC-007 fixed and random replay | No changed test claims an important random generated property. The TLA+ model enumerates a bounded state space without seeds or shrink paths. |
 | ORC-008 model state | The design grammar retains separate logical owners and physical leases because equal predicates can route to different Queries. It retains signal consumption because final release differs when the provider ignores the signal. |
 | ORC-009 vocabulary | The design grammar maps its `eligible` abstraction to current applied coverage. It splits equal old and new acquisitions by time and maps them to the glossary's acquisition and observer leases. |
-| ORC-010 failure and cleanup | The six new public cleanup histories run every cleanup step and preserve the primary mismatch as the cause of an `AggregateError` when cleanup also fails. A dual-fault control checks the cause, named secondary error, and final cleanup step. Older fixed lifecycle witnesses still use `finally`; a throwing cleanup can mask their primary assertion or skip later releases. The coverage map keeps that harness repair open. The TLA+ runs completed with invariant verdicts; no reduction failure was used as product evidence. |
+| ORC-010 failure and cleanup | The six observer-installation and three held-commit public histories run every cleanup step and preserve the primary mismatch as the cause of an `AggregateError` when cleanup also fails. A dual-fault control checks the cause, named secondary error, and final cleanup step. Older fixed lifecycle witnesses still use `finally`; a throwing cleanup can mask their primary assertion or skip later releases. The coverage map keeps that harness repair open. The TLA+ runs completed with invariant verdicts; no reduction failure was used as product evidence. |
 | ORC-011 second formulation | The lease and signal TLA+ model is structurally separate from the Query DB production path. The persistent-row and fetched-value claims use independent authored snapshots and reentrant invocation order. |
-| ORC-012 review evidence | This record binds the claim, controls, validation, and remaining cells to executable head `8827c3633`, with production repair commits `1c4d6084a`, `2459bd94c`, and `5bc47aab4`. |
-| ORC-013 boundary witness | Applied versus pending/failed full results, Query success versus deferred refresh versus held Collection commit, first versus final owner release, marker versus markerless owner, acceptance versus invocation order, Query-cache `added` versus `fetch` reentry, and cached versus uncached reentrant observer installation distinguish nearby wrong rules. |
+| ORC-012 review evidence | This record binds the claim, controls, validation, and remaining cells to executable head `29ce0d2bf`, with production repair commits `1c4d6084a`, `2459bd94c`, `5bc47aab4`, and `29ce0d2bf`. |
+| ORC-013 boundary witness | Applied versus pending/failed full results, Query success versus deferred refresh versus held Collection commit, first versus final owner release, release before versus after commit acceptance, peer present versus absent, marker versus markerless owner, acceptance versus invocation order, Query-cache `added` versus `fetch` reentry, and cached versus uncached reentrant observer installation distinguish nearby wrong rules. |
 | ORC-014 controlled-premise handoff | Provider and storage fixture claims stop at those boundaries. Native SQLite covers the stated direct-value restart; real network cancellation and additional host paths stay open in the coverage map. |
