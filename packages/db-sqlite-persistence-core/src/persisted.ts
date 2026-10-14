@@ -1872,10 +1872,17 @@ class PersistedCollectionRuntime<
 
     this.syncErrorReported = true
     this.reportedSyncError = error
-    try {
-      markError(error)
-    } catch {
-      // Reporting must not replace the original asynchronous failure.
+    // Terminal local persistence failures crash the Collection, like IndexedDB
+    // closure does. Upstream (wrapped sync adapter) failures after readiness
+    // stay health metadata through reportError.
+    if (this.terminalFailure && this.collection?._lifecycle.hasBeenReady) {
+      this.collection._lifecycle.crash(error)
+    } else {
+      try {
+        markError(error)
+      } catch {
+        // Reporting must not replace the original asynchronous failure.
+      }
     }
     return error
   }
@@ -2011,17 +2018,7 @@ class PersistedCollectionRuntime<
       this.remoteEnsureRetryTimer = null
     }
     this.rejectQueuedHydrationTransactions(error)
-    // Terminal local persistence failures crash the Collection, like IndexedDB
-    // closure does. This stops admitting new work and makes status `error` even
-    // after readiness. Upstream (wrapped sync adapter) failures after readiness
-    // stay health metadata through reportError.
-    if (this.collection) {
-      try {
-        this.collection._lifecycle.crash(error)
-      } catch {
-        // Crash must not replace the original asynchronous failure.
-      }
-    }
+    this.reportSyncError(error)
     return error
   }
 
