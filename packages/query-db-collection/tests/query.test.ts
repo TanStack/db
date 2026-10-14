@@ -878,16 +878,19 @@ describe(`QueryCollection`, () => {
       })
 
       try {
+        // An unload releases the exact acquisition, even when another caller
+        // requests the same semantic subset while this result is queued.
+        const demand = {}
         transaction.mutate(() =>
           collection.insert({ id: `local`, name: `Local` }),
         )
-        collection._sync.loadSubset({})
+        collection._sync.loadSubset(demand)
         queryResult.resolve([{ id: `first`, name: `First` }])
         await flushPromises()
 
         queryClient.setQueryData(queryKey, [{ id: `second`, name: `Second` }])
         await flushPromises()
-        collection._sync.unloadSubset({})
+        collection._sync.unloadSubset(demand)
 
         persistence.resolve()
         await transaction.isPersisted.promise
@@ -7688,15 +7691,30 @@ describe(`QueryCollection`, () => {
             }),
         },
       })
-      const load = collection._sync.loadSubset({})
+      const demand = {}
+      const load = collection._sync.loadSubset(demand)
+      void Promise.resolve(load).catch(() => undefined)
       await vi.waitFor(() => {
         expect(scanPersistedRows).toHaveBeenCalledOnce()
         expect(scanPersistedRows).toHaveBeenCalledWith()
       })
+      const whileScanHeld = await Promise.race([
+        Promise.resolve(load).then(
+          () => `fulfilled`,
+          () => `rejected`,
+        ),
+        new Promise<`pending`>((resolve) =>
+          setTimeout(() => resolve(`pending`), 0),
+        ),
+      ])
+      expect(whileScanHeld).toBe(`pending`)
 
-      collection._sync.unloadSubset({})
+      collection._sync.unloadSubset(demand)
       persistedScan.resolve([])
-      await load
+      // The last owner retired while startup retention work was pending.
+      await expect(Promise.resolve(load)).rejects.toMatchObject({
+        name: `AbortError`,
+      })
       await flushPromises()
 
       expect(collection.has(item.id)).toBe(false)

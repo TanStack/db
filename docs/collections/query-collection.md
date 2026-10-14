@@ -212,11 +212,11 @@ Some TanStack Query fields are owned or reinterpreted by Query Collection and ar
 
 `placeholderData` is intentionally unsupported. TanStack Query treats placeholder data as observer-local presentation state rather than cached Query data. Materializing it would expose temporary UI data as collection-wide normalized rows. Render placeholders in the consuming UI instead.
 
-### Eager request cancellation with `QueryFunctionContext.signal`
+### Request Cancellation
 
-For an eager collection, TanStack Query passes an `AbortSignal` to `queryFn`
-through the query function context. Forward `ctx.signal` to `fetch` or another
-abortable client to make the request cancellable:
+For an eager collection, TanStack Query passes an `AbortSignal` through the
+query function context. Forward `ctx.signal` to `fetch` or another abortable
+client:
 
 ```typescript
 const todosCollection = createCollection(
@@ -247,9 +247,8 @@ tracking before removing it from the Query cache:
 await todosCollection.cleanup()
 ```
 
-For an eager collection, TanStack Query aborts `ctx.signal` when the final
-observer leaves after `queryFn` has read it. A client that honors the signal
-stops its request; a client that ignores it may continue after cleanup.
+The eager request is aborted when its client consumes `ctx.signal`. A client
+that ignores the signal may continue its request after collection cleanup.
 
 An unloaded on-demand subset is no longer tracked. A later explicit collection
 cleanup does not revisit its Query key.
@@ -259,11 +258,11 @@ other consumers using the same exact Query keys. On-demand collection cleanup
 releases its acquisitions and preserves a Query while another Collection or
 independent Query Core observer owns it.
 
-On-demand subset unloading releases that acquisition without explicitly
-calling `queryClient.cancelQueries()`. For an on-demand provider, pass
-`ctx.meta.loadSubsetOptions.signal` to the abortable client. That signal aborts
-when the final live owner leaves during the fetch. If the provider ignores it,
-the result may remain in Query cache until `gcTime`.
+For on-demand collections, forward `ctx.meta?.loadSubsetOptions?.signal` to the
+provider. Releasing the final acquisition aborts that physical signal while a
+fetch is in flight, unless another Collection acquisition, eager Collection, or
+independent Query Core observer still owns the fetch. If the provider ignores
+the signal, the request may finish and remain cached until `gcTime`.
 
 ### Using with `queryOptions(...)`
 
@@ -430,19 +429,18 @@ Do not edit expression nodes, ordering options, Dates, byte arrays, or membershi
 arrays. Build separate API parameters instead. Core retains request data without
 cloning it; changing submitted data can make the request disagree with its cache
 key. To change a query constant, supply a new value rather than mutating the old
-one. For an on-demand provider call, use
-`ctx.meta.loadSubsetOptions.signal`. It is a native `AbortSignal` data property
-for each fetch serving a live on-demand acquisition, including one whose first
-caller supplied no signal. Releasing one acquisition does not abort a fetch
-that another live acquisition, eager Collection observer, or independent Query
-Core observer still owns. Its signal aborts when the final live owner leaves
-during the fetch. If the provider ignores the signal, Query Core may let the
-fetch finish into cache, but its rows cannot enter the Collection without a
-live owner. A later on-demand acquisition can apply a fresh fetched cache
-result before its load settles. An external Query Core refetch with no live on-demand
-acquisition exposes Query Core's own signal in the same metadata property and
-may settle into Query cache, even if an aborted caller retains its acquisition
-lease. Use `ctx.signal` for eager calls.
+one. For on-demand requests, use `ctx.meta.loadSubsetOptions.signal` for the
+provider call. It is a native signal for the physical Query fetch, present even
+when the first acquisition has no caller signal. A peer that joins after fetch
+start shares it. For a fetch started by a Collection acquisition, releasing one
+acquisition does not abort work another acquisition still owns; the signal
+aborts when every acquisition cancels or releases while the fetch is in flight.
+When Query Core refetches a retained Query after every Collection acquisition
+releases or aborts, the metadata carries Query Core's signal and that
+independent result can enter Query cache.
+`ctx.signal` remains Query Core's transport signal for eager queries. If an
+on-demand provider ignores its physical signal, Query Core may let the fetch
+finish into cache after the final Collection owner releases.
 
 ### Type-Safe Meta Access
 
@@ -945,13 +943,12 @@ const postsCollection = createCollection(
     queryFn: async (ctx): Promise<Array<Post>> => {
       const { where, orderBy, offset = 0, limit } = ctx.meta?.loadSubsetOptions ?? {}
       const signal = ctx.meta?.loadSubsetOptions?.signal
-      if (!signal) throw new Error('Expected on-demand request signal')
       const skip = offset % serverPageSize
       let page: number | null = Math.floor(offset / serverPageSize)
       const gathered: Array<Post> = []
 
       while (page !== null && (limit === undefined || gathered.length < skip + limit)) {
-        signal.throwIfAborted()
+        signal?.throwIfAborted()
         const response: { rows: Array<Post>; nextPage: number | null } =
           await api.listPosts({
             page,
@@ -1016,7 +1013,6 @@ const postsCollection = createCollection(
     queryFn: async (ctx) => {
       const { where, orderBy, offset = 0, limit } = ctx.meta?.loadSubsetOptions ?? {}
       const signal = ctx.meta?.loadSubsetOptions?.signal
-      if (!signal) throw new Error('Expected on-demand request signal')
 
       // Translate every filter and sort, or reject unsupported expressions.
       // This stable, serializable value identifies one ordered result sequence.
@@ -1240,12 +1236,14 @@ inserted row belongs in a scoped result or which row replaces a deleted item
 in a limited window. A new direct insert has no inferred subset owner and
 survives subset unload.
 
-Fetch order applies per key. A fetch started before an accepted direct write
-cannot undo that write's claimed keys; a fetch started later may reconcile or
-replace them. While a row remains continuously owned by at least one loaded
-subset, if overlapping subset fetches both return that key, the later-started
-successful fetch controls its Collection value even when the older request
-settles last. Once all owners release the row, reacquiring a subset projects
+Fetch order applies per key. A Query fetch reserves its position when the fetch
+is accepted, before its `queryFn` runs. A direct write reserves its position
+when called. An accepted fetch before the write cannot undo the write's claimed
+keys; a fetch accepted later may reconcile or replace them. Between overlapping
+successful fetched results, the later first `queryFn` invocation controls a
+continuously owned row even if that result settles first. Retries stay within
+their original accepted fetch and retain its first source invocation position.
+Once all owners release the row, reacquiring a subset projects
 that Query's retained cache entry under the usual `staleTime` and `gcTime`
 rules. A cache patch is not a successful fetch: it does not clear a recorded
 Query error, pending invalidation, or staleness.
@@ -1305,6 +1303,25 @@ All direct write methods are available on `collection.utils`:
 ## QueryFn and Predicate Push-Down
 
 When using `syncMode: 'on-demand'`, the collection automatically pushes down query predicates (where clauses, orderBy, limit, and offset) to your `queryFn`. This allows you to fetch only the data needed for each specific query, rather than fetching the entire dataset.
+
+With a static `queryKey`, an active, successfully applied request for the
+entire source can also serve later filtered or windowed live queries without
+another `queryFn` call. The full Query stays active until those queries release
+their demand. Retained persisted ownership needs a new authoritative response
+before a narrower acquisition settles: either an exact subset response or a
+complete full-source response. In either case, the fetch must start after
+retention is recorded and its rows must apply before settlement. An older or
+unfinished request cannot revalidate that ownership. `refetch: true` still
+fetches the exact requested subset. Function-built
+`queryKey` values keep their own cache identity and do not use this reuse path.
+A custom Query persister may return data unrelated to a `queryFn` invocation.
+When Query Core cannot identify the returned result as source-backed, a
+retained persisted acquisition rejects and keeps its retention marker. Use a
+Query without that persister for the revalidation request.
+Your `queryFn` must return the complete requested result, including every row
+for an unbounded request.
+Refetching a narrower subset does not invalidate a still-active full Query;
+refresh the full Query when you need a new source-wide snapshot.
 
 ### How LoadSubsetOptions Are Passed
 

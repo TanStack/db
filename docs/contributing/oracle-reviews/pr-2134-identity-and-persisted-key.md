@@ -568,3 +568,144 @@ old Query's actual fetch rejection starts one retry. The retry checks that the
 rejection is the Query's current error, so an application failure remains a
 failure. A fresh oracle review should challenge this code weight and each
 state distinction before closure.
+
+## Premerge Collection cleanup and outside-observer handoff (Query Core 5.90.20)
+
+The accepted signal law follows the Query Collection cancellation guide and
+the acquisition/transport distinction in the project glossary. Collection
+cleanup releases its own acquisition leases. An independent Query Core observer
+can keep the same physical fetch alive, so its provider metadata signal stays
+live until the last physical owner leaves or Query Core terminates that fetch.
+The cleaned-up Collection cannot apply the late result. A later outside-only
+refetch uses Query Core's signal, not the former Collection fetch's controller.
+
+The prior ownership histories stopped at final subset unload or cleaned up one
+Collection while another Collection still owned the Query. They did not end the
+*last* Collection sync run with a held provider response and an independent
+Query Core observer. The production cache listener was removed at that cut,
+leaving no observer-removal notification to abort the private provider signal.
+The new ownership histories hold the response across cleanup, release one or
+the final outside observer, cancel or remove the Query, and replace F1 with a
+different outside query function while F2 remains held. They observe the
+provider signal before response settlement, the retired load's outcome, public
+rows, and, for a historical owner, durable row/owner/marker metadata after the
+late cache result. The persisted-baseline load may settle `ready` at cleanup;
+its late result still has no authority to change that Collection's rows or
+durable owner. This is a bounded result for that fixture, not a general claim
+that every canceled load fulfills.
+
+Query Core's silent, nonreverting cancellation emits no QueryCache event in the
+installed 5.90.20 version. The owner now observes the current physical Query
+promise's `CancelledError` without reading Query Core's lazy signal. A
+temporary QueryCache listener handles the remaining outside-observer release
+and Query removal after Collection cleanup, and releases itself when its
+controller aborts or its fetch settles. The listener belongs to the held F1;
+it does not abort a replacement F2. The installed Query Core behavior permits
+an abort-ignoring provider whose `context.signal` was never read to populate
+Query cache after Collection cleanup; the oracle's rowless-Collection check is
+the product boundary, while its cache assertion characterizes that specific
+controlled provider path.
+
+Calibration used frozen pre-repair diff
+`7c7f2dd6d9902e611ceadbd5da593167e0a58a5e3b5d41bfb26415a7976495a1e0bffeba2f9`.
+Before the handoff repair, the held outside-observer history failed because
+the provider signal remained live after final release. On the frozen diff,
+the silent-cancellation history failed with Query
+Core's signal aborted and the provider signal live. A neighboring active
+Collection history exposed the same missing notification. The distinct
+outside-query-function replacement history caught an additional leak: after
+F1 was canceled and F2 started, one temporary cache listener remained until a
+later cache event. Removing the controller's abort-listener cleanup as a
+hostile mutant reproduced that leak at the held-F2 listener-count assertion;
+restoring it yielded zero. These failures reached the intended signal or
+listener checkpoint, not a setup timeout.
+
+The full Query DB run passed 891 runtime and 538 type tests in 20 files each,
+for 1,429 tests in 40 files. A separate TypeScript check passed on the repaired
+worktree. The coverage map records the exercised boundaries.
+Other Query Core versions, custom query functions beyond the replacement
+history, and arbitrary cleanup/refetch schedules remain outside this claim.
+
+### Reentrant success and terminal durability follow-up
+
+Fresh code and oracle reviewers examined full diff
+`d96fb6256d40053510668f69525a33a561db2dc18d237806fa18a906c1ec7f61`
+against base `5dec299528c02bac3d462d2a83f39905ac2f80be`. The code reviewer
+reproduced a held F1 succeeding after cleanup while an outside observer's
+synchronous success callback started held F2. Query Core called the observer
+before its cache listener. The handoff listener inspected the shared Query's
+current `fetchStatus`, saw F2 fetching, and stayed subscribed until F2 ended.
+The earlier replacement test canceled F1; its promise-rejection path detached
+the listener, so it did not cover successful reentry.
+
+The new ownership history drives that exact order through a real QueryClient,
+holds F2, and compares the temporary listener count while F2 is pending. It
+failed on the reviewed implementation with one retained listener and no type
+errors. The repair attaches detachment to F1's captured Query promise, rather
+than the shared Query's later state. The focused history then passed. The full
+suite exposed a second issue in the repair: a promise settlement and cache
+event could both call `stop`, making the instrumented unsubscribe count `-1`
+in the preexisting replacement history. An idempotent `stop` repaired that
+double release; the full Query DB run passed 1,431 tests in 40 files, including
+type tests.
+
+The oracle reviewer found that the historical late-result test previously
+compared durable state after observing Query cache data. Query Core writes
+cache data before observer notification and fetch settlement, so that cut
+could miss later Collection application. The revised history awaits F1's
+physical promise, the outside observer's successful result, and QueryCache's
+nonmanual success event. It then lets the event's queued application work
+enter the controlled persistence adapter, awaits every started commit, and
+compares the number of commits after cleanup with public rows, durable row,
+exact historical owner, and retention marker. This reaches the terminal
+Query/observer and known-adapter-write boundary for the exercised history.
+No separate delayed late-application mutant was executed, so arbitrary later
+timer-scheduled work remains outside this calibration.
+
+For ORC-012, the current executable code/test delta from base
+`5dec299528c02bac3d462d2a83f39905ac2f80be` is identified by SHA-256
+`b4a458827864acd7dda61dbdb8d934e9bdca043928145519df47bf47fcec1ae0`
+over `git diff --binary -- packages/query-db-collection/src/query.ts
+packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts`.
+This excludes the review record itself so its identifier does not change when
+the record is appended. The new F1-success history has a RED listener-count
+failure and a GREEN repair at the held-F2 checkpoint; the historical durable
+assertion has a later terminal checkpoint but no independent late-write mutant
+kill. These are bounded claims, not universal cleanup-schedule coverage.
+
+## Integration with Query Core fetch attribution and PR #2143
+
+The merge with #2143 at `8048b906bc8b31e976b53d9030ac381a8eb77f2a`
+replaced the earlier physical-acquisition implementation described above with
+sequence-scoped physical fetch operations. The preceding results remain an
+audit of earlier review cuts; the integrated tests use Query Core attribution
+source `877655c66`, whose `fetchCancelled` event identifies even a silent
+nonreverting cancellation. The published 5.90.20 package lacks that API, so
+the current peer range does not yet describe a runnable released combination.
+
+The integration restored the cleanup/outside-observer histories, including
+held F1 success that starts outside F2 synchronously, and the same-turn eager
+F1/outside-F2 signal witness. All 13 restored cases passed. A separate eager
+behavior invokes F1's query function before Query Core installs its retryer.
+On the merged pre-repair code, silent cancellation aborted F1's metadata
+signal but a later acquisition never invoked F2; the test failed at its second
+provider-call checkpoint. Recording Core cancellation on F1's physical
+operation makes that caller start F2 and apply its row. The same-turn outside
+F2 witness remains green, so F1's cancellation does not abort its successor.
+
+Startup retention maintenance exposed a separate pending-token ownership gap.
+The old completion could delete a new pending set when the same options object
+was released and acquired again before maintenance settled. The new history
+requires the first caller's `AbortError` and the second caller's applied row.
+A mutant that deletes the map entry without checking its set identity failed
+at the second caller's outcome (`AbortError` instead of `ready`); the repaired
+path passes. The literal-proxy tests now import the same DB source instance as
+Query Collection, removing a cross-copy test artifact from the earlier setup.
+
+The integrated Query DB runtime suite passed 1,029 tests in 20 files, and the
+package typecheck passed, both against the attribution source. The executable
+source/test diff from #2143 head hashes to SHA-256
+`008e8d39e808eb66e32e0c7cb6c5076c016920f9cfb85dfdf85da04cd851671e`.
+These checks cover the named static-key, Query Core observer, and controlled
+persistence histories; they do not establish arbitrary custom behaviors or a
+published Query Core integration.

@@ -4,19 +4,17 @@ import { describe, expect, it } from 'vitest'
 import {
   consolidate,
   filter,
-  fullJoin,
   groupBy,
   groupByOperators,
   groupedOrderByWithFractionalIndex,
-  innerJoin,
-  leftJoin,
+  join,
   map,
-  negate,
-  orderBy,
+  orderByWithFractionalIndex,
   reduce,
-  rightJoin,
-  topK,
 } from '../src/operators/index.js'
+import { StreamBuilder } from '../src/d2.js'
+import { DifferenceStreamWriter, LinearUnaryOperator } from '../src/graph.js'
+import { MultiSet } from '../src/multiset.js'
 import {
   assertBinaryIncrementalization,
   assertUnaryIncrementalization,
@@ -25,7 +23,57 @@ import {
   weightedStateArbitrary,
   weightedTransitions,
 } from './incrementalization-law-oracle.js'
-import type { Weighted } from './incrementalization-law-oracle.js'
+import type {
+  IncrementalizationReach,
+  Weighted,
+} from './incrementalization-law-oracle.js'
+import type { IStreamBuilder, KeyValue, PipedOperator } from '../src/types.js'
+
+// An inner join matches only present rows, so neither side of its output is
+// null.
+function innerJoined<K, V1, V2>(
+  right: IStreamBuilder<KeyValue<K, V2>>,
+): PipedOperator<KeyValue<K, V1>, KeyValue<K, [V1, V2]>> {
+  return join(right, `inner`) as unknown as PipedOperator<
+    KeyValue<K, V1>,
+    KeyValue<K, [V1, V2]>
+  >
+}
+
+// The window operators annotate each row with a fractional index. These laws
+// compare rows only, so the index is dropped from the output.
+function withoutIndex<K, V>() {
+  return map(([key, [value]]: [K, [V, string]]) => [key, value] as [K, V])
+}
+
+// A fault for the promotion law: a window that forwards a removal but drops
+// the rows entering in the same message, as a top-K that forgets to promote
+// the next row would.
+class WithoutPromotionOperator<T> extends LinearUnaryOperator<T, T> {
+  inner(collection: MultiSet<T>): MultiSet<T> {
+    const changes = collection.getInner()
+    return changes.some(([, weight]) => weight < 0)
+      ? new MultiSet(changes.filter(([, weight]) => weight < 0))
+      : collection
+  }
+}
+
+function withoutPromotion<T>(): PipedOperator<T, T> {
+  return (stream: IStreamBuilder<T>): IStreamBuilder<T> => {
+    const output = new StreamBuilder<T>(
+      stream.graph,
+      new DifferenceStreamWriter<T>(),
+    )
+    stream.graph.addOperator(
+      new WithoutPromotionOperator<T>(
+        stream.graph.getNextOperatorId(),
+        stream.connectReader(),
+        output.writer,
+      ),
+    )
+    return output
+  }
+}
 
 /**
  * # Does incremental execution equal full recomputation?
@@ -57,7 +105,11 @@ import type { Weighted } from './incrementalization-law-oracle.js'
  * batch even when adjacent worlds match. Binary worlds vary independently so
  * matching and unmatched keys can coexist. Ordered worlds contain 0-8 unique
  * keys 0-7 and distinct ranks -20..20; that constraint makes each split prefix
- * a legal unique-row relation. The named witnesses below reconstruct empty,
+ * a legal unique-row relation. Most ordered steps edit the previous world by
+ * one removal or insertion, so a window row leaves while the next row stays,
+ * and a reconstruction check counts those promotions over the executed fixed
+ * campaign. Each generated campaign also sums the checker's delivery counts
+ * and requires split delivery to take more steps than an unsplit run. The named witnesses below reconstruct empty,
  * repeated, replacement, presence-flip, falsey-extrema, and window-boundary
  * cases even if a fixed/random campaign misses them. Removing multiplicity
  * loses duplicate-weight cases; removing independent binary sides loses
@@ -168,6 +220,54 @@ function campaignParameters(campaign: (typeof generatedCampaigns)[number]) {
   }
 }
 
+/**
+ * Reach of one generated campaign. The checker delivers every logical batch
+ * twice: as one atomic batch, and as legal one-row steps. The split law says
+ * something only when some batch actually took several steps, so a generator
+ * or checker change that stopped splitting would leave it vacuous while every
+ * comparison still passed. Each campaign therefore sums the checker's own
+ * delivery counts over the histories it ran, and requires one atomic delivery
+ * per checkpoint and more split deliveries than an unsplit run makes: one per
+ * unary checkpoint, and two per binary checkpoint, whose split path always
+ * sends each side on its own.
+ */
+class CampaignReach {
+  private atomicCheckpoints = 0
+  private atomicDeliveries = 0
+  private splitCheckpoints = 0
+  private splitDeliveries = 0
+  private unsplitDeliveries = 0
+
+  unary: typeof assertUnaryIncrementalization = (law) =>
+    this.add(assertUnaryIncrementalization(law), 1)
+
+  binary: typeof assertBinaryIncrementalization = (law) =>
+    this.add(assertBinaryIncrementalization(law), 2)
+
+  expectBothDeliveries(): void {
+    expect(this.atomicCheckpoints, `atomic checkpoints`).toBeGreaterThan(0)
+    expect(this.atomicDeliveries, `one atomic delivery per checkpoint`).toBe(
+      this.atomicCheckpoints,
+    )
+    expect(
+      this.splitDeliveries,
+      `split deliveries beyond an unsplit run`,
+    ).toBeGreaterThan(this.unsplitDeliveries)
+  }
+
+  private add(
+    reach: IncrementalizationReach,
+    inputs: 1 | 2,
+  ): IncrementalizationReach {
+    this.unsplitDeliveries += inputs * reach.splitCheckpoints
+    this.atomicCheckpoints += reach.atomicCheckpoints
+    this.atomicDeliveries += reach.atomicDeliveries
+    this.splitCheckpoints += reach.splitCheckpoints
+    this.splitDeliveries += reach.splitDeliveries
+    return reach
+  }
+}
+
 const CANCELLATION_ROW: Keyed = [99, 99]
 const keyedPolicy = jsonLawValuePolicy<Keyed>()
 const joinPolicy = jsonLawValuePolicy<JoinOutput>()
@@ -180,8 +280,9 @@ const uniqueRowSplitDomain = {
 }
 
 /**
- * The model observes relation membership and multiplicity. Plain `orderBy`
- * exposes selected members, not their sequence indices. Publication timing and
+ * The model observes relation membership and multiplicity. The ordered
+ * window operators also annotate each selected member with a fractional
+ * index, which these laws drop before comparing. Publication timing and
  * SQL meaning are separate contracts.
  *
  * Normal runs pair a stable campaign with a new random seed. Replay variables
@@ -387,21 +488,6 @@ function groupedTextExtrema(
   })
 }
 
-function topTwo(input: Weighted<Keyed>): Weighted<Keyed> {
-  const groups = new Map<number, Array<[number, number]>>()
-  for (const [[key, value], weight] of keyedIdentity(input)) {
-    const values = groups.get(key) ?? []
-    values.push([value, weight])
-    groups.set(key, values)
-  }
-  return [...groups].flatMap(([key, values]) =>
-    values
-      .sort(([left], [right]) => left - right)
-      .slice(0, 2)
-      .map(([value, weight]) => [[key, value] as Keyed, weight] as const),
-  )
-}
-
 const orderedWorld = fc
   .uniqueArray(
     fc.tuple(fc.integer({ min: 0, max: 7 }), fc.integer({ min: -20, max: 20 })),
@@ -409,6 +495,69 @@ const orderedWorld = fc
   )
   .filter((rows) => new Set(rows.map(([, rank]) => rank)).size === rows.length)
   .map((rows): Weighted<Keyed> => rows.map((row) => [row, 1]))
+
+// Independent worlds rarely share rows, so a window row seldom leaves while
+// the next row stays to be promoted. Most ordered steps therefore edit the
+// previous world: they remove one row or insert one with an unused key and
+// rank. A fresh world still replaces the relation now and then.
+type OrderedStep =
+  | { type: `fresh`; world: Weighted<Keyed> }
+  | { type: `remove`; pick: number }
+  | { type: `insert`; row: Keyed }
+const orderedHistory: fc.Arbitrary<Array<Weighted<Keyed>>> = fc
+  .tuple(
+    orderedWorld,
+    fc.array(
+      fc.oneof(
+        {
+          weight: 1,
+          arbitrary: orderedWorld.map((world) => ({
+            type: `fresh` as const,
+            world,
+          })),
+        },
+        {
+          weight: 2,
+          arbitrary: fc.nat(7).map((pick) => ({
+            type: `remove` as const,
+            pick,
+          })),
+        },
+        {
+          weight: 2,
+          arbitrary: fc
+            .tuple(
+              fc.integer({ min: 0, max: 7 }),
+              fc.integer({ min: -20, max: 20 }),
+            )
+            .map((row) => ({ type: `insert` as const, row })),
+        },
+      ),
+      { minLength: 1, maxLength: 6 },
+    ),
+  )
+  .map(([initial, steps]) => {
+    const worlds = [initial]
+    for (const step of steps as Array<OrderedStep>) {
+      const previous = worlds.at(-1)!
+      if (step.type === `fresh`) {
+        worlds.push(step.world)
+      } else if (step.type === `remove`) {
+        worlds.push(
+          previous.filter(
+            (_, index) => index !== step.pick % Math.max(previous.length, 1),
+          ),
+        )
+      } else {
+        const [key, rank] = step.row
+        const unused = previous.every(
+          ([[otherKey, otherRank]]) => otherKey !== key && otherRank !== rank,
+        )
+        worlds.push(unused ? [...previous, [step.row, 1]] : previous)
+      }
+    }
+    return worlds
+  })
 
 function firstThree(input: Weighted<Keyed>): Weighted<Keyed> {
   return keyedIdentity(input)
@@ -436,8 +585,9 @@ function firstTwoPerParity(input: Weighted<Keyed>): Weighted<Keyed> {
 
 describe(`DBSP incrementalization laws`, () => {
   it.each(generatedCampaigns)(
-    `checks consolidate, reduce, and grouped top-K against full recomputation ($name campaign)`,
+    `checks consolidate, reduce, and groupBy against full recomputation ($name campaign)`,
     async (campaign) => {
+      const reach = new CampaignReach()
       await fc.assert(
         fc.asyncProperty(
           fc.array(weightedWorld, { minLength: 2, maxLength: 7 }),
@@ -446,7 +596,7 @@ describe(`DBSP incrementalization laws`, () => {
             // Graph delivery and every observation within a history stay synchronous.
             await setImmediate()
             const batches = transitions(worlds)
-            assertUnaryIncrementalization({
+            reach.unary({
               name: `consolidate`,
               initial: worlds[0]!,
               batches,
@@ -455,7 +605,7 @@ describe(`DBSP incrementalization laws`, () => {
               build: (input) => input.pipe(consolidate()),
               evaluate: keyedIdentity,
             })
-            assertUnaryIncrementalization({
+            reach.unary({
               name: `reduce`,
               initial: worlds[0]!,
               batches,
@@ -478,7 +628,7 @@ describe(`DBSP incrementalization laws`, () => {
                 ),
               evaluate: summed,
             })
-            assertUnaryIncrementalization({
+            reach.unary({
               name: `groupBy reduction`,
               initial: worlds[0]!,
               batches,
@@ -495,7 +645,7 @@ describe(`DBSP incrementalization laws`, () => {
                 ),
               evaluate: groupedAggregates,
             })
-            assertUnaryIncrementalization({
+            reach.unary({
               name: `groupBy mean alone`,
               initial: worlds[0]!,
               batches,
@@ -509,7 +659,7 @@ describe(`DBSP incrementalization laws`, () => {
                 ),
               evaluate: groupedMean,
             })
-            assertUnaryIncrementalization({
+            reach.unary({
               name: `groupBy string extrema`,
               initial: worlds[0]!,
               batches,
@@ -534,26 +684,18 @@ describe(`DBSP incrementalization laws`, () => {
                 ),
               evaluate: groupedTextExtrema,
             })
-            assertUnaryIncrementalization({
-              name: `top-K`,
-              initial: worlds[0]!,
-              batches,
-              inputPolicy: keyedPolicy,
-              outputPolicy: keyedPolicy,
-              build: (input) =>
-                input.pipe(topK((left, right) => left - right, { limit: 2 })),
-              evaluate: topTwo,
-            })
           },
         ),
         campaignParameters(campaign),
       )
+      reach.expectBothDeliveries()
     },
   )
 
   it.each(generatedCampaigns)(
     `checks simultaneous binary join deltas and split delivery ($name campaign)`,
     async (campaign) => {
+      const reach = new CampaignReach()
       await fc.assert(
         fc.asyncProperty(
           fc.array(fc.tuple(weightedWorld, weightedWorld), {
@@ -577,7 +719,7 @@ describe(`DBSP incrementalization laws`, () => {
                 CANCELLATION_ROW,
               ),
             }))
-            assertBinaryIncrementalization({
+            reach.binary({
               name: `inner join`,
               initialLeft: worlds[0]!.left,
               initialRight: worlds[0]!.right,
@@ -585,10 +727,10 @@ describe(`DBSP incrementalization laws`, () => {
               leftPolicy: keyedPolicy,
               rightPolicy: keyedPolicy,
               outputPolicy: joinPolicy,
-              build: (left, right) => left.pipe(innerJoin(right)),
+              build: (left, right) => left.pipe(innerJoined(right)),
               evaluate: joined,
             })
-            assertBinaryIncrementalization({
+            reach.binary({
               name: `full outer join`,
               initialLeft: worlds[0]!.left,
               initialRight: worlds[0]!.right,
@@ -596,10 +738,10 @@ describe(`DBSP incrementalization laws`, () => {
               leftPolicy: keyedPolicy,
               rightPolicy: keyedPolicy,
               outputPolicy: outerJoinPolicy,
-              build: (left, right) => left.pipe(fullJoin(right)),
+              build: (left, right) => left.pipe(join(right, `full`)),
               evaluate: fullJoined,
             })
-            assertBinaryIncrementalization({
+            reach.binary({
               name: `left outer join`,
               initialLeft: worlds[0]!.left,
               initialRight: worlds[0]!.right,
@@ -607,10 +749,10 @@ describe(`DBSP incrementalization laws`, () => {
               leftPolicy: keyedPolicy,
               rightPolicy: keyedPolicy,
               outputPolicy: outerJoinPolicy,
-              build: (left, right) => left.pipe(leftJoin(right)),
+              build: (left, right) => left.pipe(join(right, `left`)),
               evaluate: leftJoined,
             })
-            assertBinaryIncrementalization({
+            reach.binary({
               name: `right outer join`,
               initialLeft: worlds[0]!.left,
               initialRight: worlds[0]!.right,
@@ -618,10 +760,10 @@ describe(`DBSP incrementalization laws`, () => {
               leftPolicy: keyedPolicy,
               rightPolicy: keyedPolicy,
               outputPolicy: outerJoinPolicy,
-              build: (left, right) => left.pipe(rightJoin(right)),
+              build: (left, right) => left.pipe(join(right, `right`)),
               evaluate: rightJoined,
             })
-            assertBinaryIncrementalization({
+            reach.binary({
               name: `join then grouped reduction`,
               initialLeft: worlds[0]!.left,
               initialRight: worlds[0]!.right,
@@ -631,7 +773,7 @@ describe(`DBSP incrementalization laws`, () => {
               outputPolicy: keyedPolicy,
               build: (left, right) =>
                 left.pipe(
-                  innerJoin(right),
+                  innerJoined(right),
                   map(([key, [leftValue, rightValue]]) => [
                     key,
                     leftValue * rightValue,
@@ -655,51 +797,90 @@ describe(`DBSP incrementalization laws`, () => {
         ),
         campaignParameters(campaign),
       )
+      reach.expectBothDeliveries()
     },
   )
 
   it.each(generatedCampaigns)(
     `checks global ordering and window membership ($name campaign)`,
     async (campaign) => {
+      const reach = new CampaignReach()
       await fc.assert(
-        fc.asyncProperty(
-          fc.array(orderedWorld, { minLength: 2, maxLength: 7 }),
-          async (worlds) => {
-            await setImmediate()
-            assertUnaryIncrementalization({
-              name: `orderBy`,
-              initial: worlds[0]!,
-              batches: transitions(worlds),
-              inputPolicy: keyedPolicy,
-              outputPolicy: keyedPolicy,
-              splitDomain: uniqueRowSplitDomain,
-              build: (input) =>
-                input.pipe(orderBy((rank) => rank, { limit: 3 })),
-              evaluate: firstThree,
-            })
-            assertUnaryIncrementalization({
-              name: `grouped orderBy`,
-              initial: worlds[0]!,
-              batches: transitions(worlds),
-              inputPolicy: keyedPolicy,
-              outputPolicy: keyedPolicy,
-              splitDomain: uniqueRowSplitDomain,
-              build: (input) =>
-                input.pipe(
-                  groupedOrderByWithFractionalIndex((rank) => rank, {
-                    groupKeyFn: (key) => key % 2,
-                    limit: 2,
-                  }),
-                  map(([key, [rank]]) => [key, rank] as Keyed),
-                ),
-              evaluate: firstTwoPerParity,
-            })
-          },
-        ),
+        fc.asyncProperty(orderedHistory, async (worlds) => {
+          await setImmediate()
+          reach.unary({
+            name: `ordered window`,
+            initial: worlds[0]!,
+            batches: transitions(worlds),
+            inputPolicy: keyedPolicy,
+            outputPolicy: keyedPolicy,
+            splitDomain: uniqueRowSplitDomain,
+            build: (input) =>
+              input.pipe(
+                orderByWithFractionalIndex((rank) => rank, { limit: 3 }),
+                withoutIndex(),
+              ),
+            evaluate: firstThree,
+          })
+          reach.unary({
+            name: `grouped orderBy`,
+            initial: worlds[0]!,
+            batches: transitions(worlds),
+            inputPolicy: keyedPolicy,
+            outputPolicy: keyedPolicy,
+            splitDomain: uniqueRowSplitDomain,
+            build: (input) =>
+              input.pipe(
+                groupedOrderByWithFractionalIndex((rank) => rank, {
+                  groupKeyFn: (key) => key % 2,
+                  limit: 2,
+                }),
+                map(([key, [rank]]) => [key, rank] as Keyed),
+              ),
+            evaluate: firstTwoPerParity,
+          })
+        }),
         campaignParameters(campaign),
       )
+      reach.expectBothDeliveries()
     },
   )
+
+  // Reconstruction: the fixed ordered campaign reaches promotion. Sampling
+  // its arbitrary with its seed and run count yields exactly the histories it
+  // executes. A promotion is a transition after which a window holds a row
+  // that the previous world held, unchanged, outside the window: a removal
+  // or displacement promoted it. Only a window that already holds its limit
+  // can promote, so worlds too small to fill it would lose this law while
+  // every comparison still passed.
+  it(`generates ordered histories that promote retained rows`, () => {
+    const promotions = { global: 0, perParity: 0 }
+    const promoted = (
+      window: (rows: Weighted<Keyed>) => Weighted<Keyed>,
+      previous: Weighted<Keyed>,
+      next: Weighted<Keyed>,
+    ) => {
+      const before = new Set(window(previous).map(([row]) => String(row)))
+      const held = new Set(previous.map(([row]) => String(row)))
+      return window(next).some(
+        ([row]) => held.has(String(row)) && !before.has(String(row)),
+      )
+    }
+    for (const [worlds] of fc.sample(fc.tuple(orderedHistory), {
+      seed: FIXED_SEED,
+      numRuns: RUNS,
+    })) {
+      for (const [index, next] of worlds.slice(1).entries()) {
+        const previous = worlds[index]!
+        if (promoted(firstThree, previous, next)) promotions.global++
+        if (promoted(firstTwoPerParity, previous, next)) promotions.perParity++
+      }
+    }
+    // At 100 runs: 25 global and 21 per-parity promotions; independent
+    // worlds alone gave 2 and 2.
+    expect(promotions.global).toBeGreaterThanOrEqual(10)
+    expect(promotions.perParity).toBeGreaterThanOrEqual(10)
+  })
 
   it(`replays empty, duplicate, replacement, cancellation, and presence-flip cells`, () => {
     const unaryReach = assertUnaryIncrementalization({
@@ -743,7 +924,7 @@ describe(`DBSP incrementalization laws`, () => {
       leftPolicy: keyedPolicy,
       rightPolicy: keyedPolicy,
       outputPolicy: outerJoinPolicy,
-      build: (left, right) => left.pipe(fullJoin(right)),
+      build: (left, right) => left.pipe(join(right, `full`)),
       evaluate: fullJoined,
     })
     expect(binaryReach).toEqual({
@@ -840,7 +1021,11 @@ describe(`DBSP incrementalization laws`, () => {
       inputPolicy: keyedPolicy,
       outputPolicy: keyedPolicy,
       splitDomain: uniqueRowSplitDomain,
-      build: (input) => input.pipe(orderBy((rank) => rank, { limit: 0 })),
+      build: (input) =>
+        input.pipe(
+          orderByWithFractionalIndex((rank) => rank, { limit: 0 }),
+          withoutIndex(),
+        ),
       evaluate: () => [],
     })
 
@@ -855,27 +1040,34 @@ describe(`DBSP incrementalization laws`, () => {
       inputPolicy: keyedPolicy,
       outputPolicy: keyedPolicy,
       splitDomain: uniqueRowSplitDomain,
-      build: (input) => input.pipe(orderBy((rank) => rank, { limit: 1 })),
+      build: (input) =>
+        input.pipe(
+          orderByWithFractionalIndex((rank) => rank, { limit: 1 }),
+          withoutIndex(),
+        ),
       evaluate: (input) => firstThree(input).slice(0, 1),
     })
 
-    // At two same-key values, limit 2 retains both. The third value crosses
-    // the boundary; a wrong limit of 3 would leak it at checkpoint 1. Removing
-    // the first value then requires the third to enter the retained relation.
-    const topKBoundary = assertUnaryIncrementalization({
-      name: `top-K boundary and promotion`,
+    // At two values, limit 2 retains both. The third value lands past the
+    // boundary; a wrong limit of 3 would leak it at checkpoint 1. Removing the
+    // first value then requires the third to enter the window.
+    const promotion = assertUnaryIncrementalization({
+      name: `ordered window boundary and promotion`,
       initial: [
-        [[0, 1], 1],
-        [[0, 2], 1],
+        [[0, 1] as Keyed, 1],
+        [[1, 2] as Keyed, 1],
       ],
-      batches: [[[[0, 3], 1]], [[[0, 1], -1]]],
+      batches: [[[[2, 3] as Keyed, 1]], [[[0, 1] as Keyed, -1]]],
       inputPolicy: keyedPolicy,
       outputPolicy: keyedPolicy,
       build: (input) =>
-        input.pipe(topK((left, right) => left - right, { limit: 2 })),
-      evaluate: topTwo,
+        input.pipe(
+          orderByWithFractionalIndex((rank) => rank, { limit: 2 }),
+          withoutIndex(),
+        ),
+      evaluate: (input) => firstThree(input).slice(0, 2),
     })
-    expect(topKBoundary).toEqual({
+    expect(promotion).toEqual({
       atomicCheckpoints: 3,
       atomicDeliveries: 3,
       splitCheckpoints: 3,
@@ -913,7 +1105,7 @@ describe(`DBSP incrementalization laws`, () => {
     ).toThrow(/no unit ordering with legal split-delivery prefixes/)
   })
 
-  it(`rejects omitted, sign-flipped, wrong-member, wrong-window, wrong-limit, and truthiness-filtered output`, () => {
+  it(`rejects omitted, sign-flipped, wrong-member, wrong-window, wrong-limit, missing-promotion, and truthiness-filtered output`, () => {
     expect(() =>
       assertUnaryIncrementalization({
         name: `omitted output fault`,
@@ -932,7 +1124,13 @@ describe(`DBSP incrementalization laws`, () => {
         batches: [],
         inputPolicy: keyedPolicy,
         outputPolicy: keyedPolicy,
-        build: (input) => input.pipe(negate()),
+        // A reduce that negates every multiplicity flips the sign of each row.
+        build: (input) =>
+          input.pipe(
+            reduce((values) =>
+              values.map(([value, weight]) => [value, -weight] as const),
+            ),
+          ),
         evaluate: keyedIdentity,
       }),
     ).toThrow(/output delta diverged/)
@@ -962,30 +1160,75 @@ describe(`DBSP incrementalization laws`, () => {
         outputPolicy: keyedPolicy,
         build: (input) =>
           input.pipe(
-            orderBy((rank) => rank, {
+            orderByWithFractionalIndex((rank) => rank, {
               comparator: (left, right) => right - left,
               limit: 3,
             }),
+            withoutIndex(),
           ),
         evaluate: firstThree,
       }),
     ).toThrow(/output delta diverged/)
     expect(() =>
       assertUnaryIncrementalization({
-        name: `wrong top-K limit fault`,
+        name: `wrong window limit fault`,
         initial: [
-          [[0, 1], 1],
-          [[0, 2], 1],
-          [[0, 3], 1],
+          [[0, 1] as Keyed, 1],
+          [[1, 2] as Keyed, 1],
+          [[2, 3] as Keyed, 1],
         ],
         batches: [],
         inputPolicy: keyedPolicy,
         outputPolicy: keyedPolicy,
         build: (input) =>
-          input.pipe(topK((left, right) => left - right, { limit: 3 })),
-        evaluate: topTwo,
+          input.pipe(
+            orderByWithFractionalIndex((rank) => rank, { limit: 3 }),
+            withoutIndex(),
+          ),
+        evaluate: (input) => firstThree(input).slice(0, 2),
       }),
     ).toThrow(/output delta diverged at checkpoint 0/)
+    // On the promotion history, the same wrong limit agrees with the model
+    // until the third value arrives past the boundary.
+    expect(() =>
+      assertUnaryIncrementalization({
+        name: `wrong promotion limit fault`,
+        initial: [
+          [[0, 1] as Keyed, 1],
+          [[1, 2] as Keyed, 1],
+        ],
+        batches: [[[[2, 3] as Keyed, 1]], [[[0, 1] as Keyed, -1]]],
+        inputPolicy: keyedPolicy,
+        outputPolicy: keyedPolicy,
+        build: (input) =>
+          input.pipe(
+            orderByWithFractionalIndex((rank) => rank, { limit: 3 }),
+            withoutIndex(),
+          ),
+        evaluate: (input) => firstThree(input).slice(0, 2),
+      }),
+    ).toThrow(/output delta diverged at checkpoint 1/)
+    // A window that removes the first value without promoting the third
+    // agrees with the model until the removal.
+    expect(() =>
+      assertUnaryIncrementalization({
+        name: `missing promotion fault`,
+        initial: [
+          [[0, 1] as Keyed, 1],
+          [[1, 2] as Keyed, 1],
+        ],
+        batches: [[[[2, 3] as Keyed, 1]], [[[0, 1] as Keyed, -1]]],
+        inputPolicy: keyedPolicy,
+        outputPolicy: keyedPolicy,
+        build: (input) =>
+          input.pipe(
+            orderByWithFractionalIndex((rank) => rank, { limit: 2 }),
+            withoutPromotion(),
+            withoutIndex(),
+          ),
+        evaluate: (input) => firstThree(input).slice(0, 2),
+      }),
+    ).toThrow(/output delta diverged at checkpoint 2/)
 
     const truthinessMinimum = {
       preMap: ([, value]: Keyed): number | undefined => value,

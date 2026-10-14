@@ -1,5 +1,22 @@
 # @tanstack/db-sqlite-persistence-core
 
+## 0.4.9
+
+### Patch Changes
+
+- Recover persisted on-demand Electric and Query collections after cache claim loss by rotating their SQLite cache and reloading active subsets. Fence retired provider work and expired claims, preserve warm runs on their claimed cache generation, and forward claim lifetime options through SQLite host factories. Require explicit eager or claim-bound managed targets for SQLite adapter data operations, and forward them through Electron IPC protocol v6. Bare collection IDs no longer work at this lower-level adapter boundary. ([#2069](https://github.com/TanStack/db/pull/2069))
+
+- Reject reuse of mutable persisted and LocalStorage sync options across Collections while keeping DbClient materializations independent. Pass fresh options to each direct `createCollection(...)`; DbClient descriptors remain reusable. Keep on-demand peer reloads and schema resets scoped to active demand and previously visible rows. Refresh or delete visible rows from durable evidence without replacing unconfirmed DbClient hydration rows or metadata. Resolve targeted peer updates from storage when their notice cannot distinguish a replacing insert from a partial update. ([#2096](https://github.com/TanStack/db/pull/2096))
+
+- In a follower tab, an on-demand load that the leader fetches now settles only after the follower applies the leader's committed rows. Before, the leader's reply could settle the load while the follower was still applying the broadcast commit, so a live query in the follower tab could first be ready without those rows. A follower load now rejects, and releases its acquisition, when the leader's broadcast commit fails to apply in the follower, instead of settling without rows. ([#2128](https://github.com/TanStack/db/pull/2128))
+
+  A follower now replaces its rows in place when it applies the leader's commits, instead of replaying its demand to a leader that commits again on every load. It also requests its demand again after the leader resets the collection, instead of showing an empty ready result. If its cache claim renewal fails transiently while a load waits for the leader's rows, the load rejects and the demand is retried, as after a failed request to the leader.
+
+  Any persisted collection, not only a follower, now keeps commit notices that arrive while its cache claim is expired and applies them in arrival order once the claim is renewed or rotated; before, they were dropped. A commit that fails to apply from the queue now makes the collection fail, as a commit applied when it arrives already did.
+
+- Updated dependencies [[`cda9d6a`](https://github.com/TanStack/db/commit/cda9d6a731e93777f1c8bfdab7d9e22f70e80dc6), [`2f928e6`](https://github.com/TanStack/db/commit/2f928e6f240adb8874a6537905000009a2e9b53f), [`dfec42e`](https://github.com/TanStack/db/commit/dfec42e4a78ef609f9aa2f2c0f863a1e4f1ae1e3), [`1a65c2c`](https://github.com/TanStack/db/commit/1a65c2c63db9ad14c08d35b09d0081ecc121fbfc), [`1b4ee8d`](https://github.com/TanStack/db/commit/1b4ee8d57168978847687e75dbc1c33ddb935ed3), [`bbbf017`](https://github.com/TanStack/db/commit/bbbf017ef5b3884515295a4225faacdfd814499e), [`bc6f30e`](https://github.com/TanStack/db/commit/bc6f30e716aeb26c13b6a0e9ba00a27edc72a4d7), [`fade2e2`](https://github.com/TanStack/db/commit/fade2e24cfb9922b9b172f96194f7b6246731f50), [`bbe9327`](https://github.com/TanStack/db/commit/bbe9327ce90ab587ee6ef24e0030f79291f3057d), [`b34a579`](https://github.com/TanStack/db/commit/b34a579762b36dd49a89e11eacd7788f1df89453), [`6fa60aa`](https://github.com/TanStack/db/commit/6fa60aa7ada4d418f85cd745c9eea0af3de0efb4), [`f84387c`](https://github.com/TanStack/db/commit/f84387cd8220e8603dc24a99fe4881fa4cd5ddcd), [`be4a3d6`](https://github.com/TanStack/db/commit/be4a3d642c6d292150f7ff4e041442338e5a2de2), [`0dc696a`](https://github.com/TanStack/db/commit/0dc696a64901973d8025cb1a40af34c68c856855), [`fd13e3c`](https://github.com/TanStack/db/commit/fd13e3cc9d3302e7598a78ac8f49d06dbbde7e08)]:
+  - @tanstack/db@0.14.0
+
 ## 0.4.8
 
 ### Patch Changes

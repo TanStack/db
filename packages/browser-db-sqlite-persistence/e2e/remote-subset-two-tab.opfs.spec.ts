@@ -23,6 +23,48 @@ async function observe(page: Page): Promise<RemoteSubsetObservation> {
   return page.evaluate(() => window.__remoteSubsetProbe!.observe())
 }
 
+/**
+ * A follower's load settles only after the leader's rows show in the follower
+ * (ARCHITECTURE.md law 7). Here the follower requests an ID that the leader has
+ * not loaded, so the follower's rows can arrive only through the leader's
+ * committed broadcast. The check reads the rows at the follower live query's
+ * first-ready transition.
+ */
+test(`a follower is first ready with rows the leader fetched for it`, async ({
+  context,
+}) => {
+  const databaseId = `rs-${crypto.randomUUID()}`
+  const pages: Array<Page> = []
+  try {
+    const leader = await context.newPage()
+    pages.push(leader)
+    await leader.goto(
+      `/e2e/remote-subset-two-tab.opfs.html?databaseId=${databaseId}&itemId=leader-item`,
+    )
+    const first = await observe(leader)
+    if (first.phase === `failed`) throw new Error(first.failure)
+    expect(first.isLeader).toBe(true)
+
+    const follower = await context.newPage()
+    pages.push(follower)
+    await follower.goto(
+      `/e2e/remote-subset-two-tab.opfs.html?databaseId=${databaseId}&itemId=follower-item`,
+    )
+    const second = await observe(follower)
+    if (second.phase === `failed`) throw new Error(second.failure)
+    expect(second.isLeader).toBe(false)
+    expect(second.upstreamLoads).toBe(0)
+    expect(second.rowsAtFirstReady).toEqual([
+      { id: `follower-item`, label: `Item follower-item` },
+    ])
+  } finally {
+    for (const page of pages.reverse()) {
+      await page.evaluate(() => window.__remoteSubsetProbe?.cleanup())
+      await page.close()
+    }
+  }
+})
+
 test(`two real OPFS tabs transport a filtered subset without a clone retry`, async ({
   context,
 }) => {

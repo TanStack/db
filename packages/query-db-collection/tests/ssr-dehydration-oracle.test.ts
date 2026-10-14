@@ -29,10 +29,9 @@ import type { LoadSubsetOptions } from '@tanstack/db'
  * an available request signal. These forms isolate the unsupported values and
  * adjacent request shapes. After successful loading, the driver dehydrates the cache
  * and passes it to `crossSerializeStream`, as the router integration does.
- * The check observes
- * the retained row, reconstructed stream payload, and Query Core hydration
- * from that payload. This partial oracle does not run TanStack Start or prove
- * that a browser Collection resumes the query.
+ * The check observes the retained row, reconstructed stream payload, and
+ * Query Core hydration from that payload. This partial oracle does not run
+ * TanStack Start or prove that a browser Collection resumes the query.
  *
  * Review: ORC-001–003 and ORC-005 are supplied by the law, fixed forms, real
  * entry points, and cache/stream observations above. The original production
