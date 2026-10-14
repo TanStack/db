@@ -1477,6 +1477,16 @@ Row ownership in `@tanstack/query-db-collection` is separate. Eager retention,
 active query acquisition, and persisted retention are distinct owner tokens.
 The live-query graph publishes coherent rows but does not own query-db cache or
 listener lifetime.
+For a static on-demand Query key, an active, applied full-source Query may own
+a later narrower acquisition. Query DB pins that acquisition to the full Query
+until its final release, including after the original full-source demand ends.
+An incomplete or failed full-source request does not establish this coverage;
+an explicit subset refetch retains its exact Query key. Function-built keys
+retain their caller-defined cache identity.
+The initial full fetch keeps its acquisition's signal in request metadata.
+When narrower acquisitions share its Query, later fetches give `queryFn` the
+Query fetch signal in `meta.loadSubsetOptions.signal`: releasing the original
+full acquisition cannot abort work still owned by those narrower acquisitions.
 
 ### Pooled live queries
 

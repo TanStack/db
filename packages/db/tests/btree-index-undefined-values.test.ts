@@ -110,83 +110,14 @@ describe(`BTreeIndex - Issue #1186: Infinite loop with undefined indexed values`
 })
 
 /**
- * Direct unit tests for BTreeIndex undefined value handling.
- * Tests the sentinel mechanism that distinguishes "start from beginning"
- * (no from parameter) from "the key is literally undefined".
+ * Direct BTreeIndex tests for observations outside the direct-index oracle:
+ * internal ordering and storage, custom-comparator arguments, and the public
+ * live-query path above.
  */
 describe(`BTreeIndex - undefined value handling`, () => {
   function createIndex(propName: string): BTreeIndex<string> {
     return new BTreeIndex<string>(1, new PropRef([propName]), `test_index`)
   }
-
-  describe(`take vs takeFromStart`, () => {
-    it(`should distinguish take(n, undefined) from takeFromStart(n)`, () => {
-      const index = createIndex(`value`)
-      index.add(`a`, { value: undefined })
-      index.add(`b`, { value: 1 })
-      index.add(`c`, { value: 2 })
-
-      const fromStart = index.takeFromStart(3)
-      expect(fromStart).toHaveLength(3)
-
-      // take(n, undefined) returns items AFTER undefined (smallest value)
-      const afterUndefined = index.take(3, undefined)
-      expect(afterUndefined).toEqual([`b`, `c`])
-    })
-
-    it(`should distinguish takeReversed(n, undefined) from takeReversedFromEnd(n)`, () => {
-      const index = createIndex(`value`)
-      index.add(`a`, { value: undefined })
-      index.add(`b`, { value: 1 })
-      index.add(`c`, { value: 2 })
-
-      const fromEnd = index.takeReversedFromEnd(3)
-      expect(fromEnd).toHaveLength(3)
-
-      // Since undefined is smallest, nothing comes before it
-      const beforeUndefined = index.takeReversed(3, undefined)
-      expect(beforeUndefined).toHaveLength(0)
-    })
-  })
-
-  describe(`multiple undefined values`, () => {
-    it(`should store and retrieve multiple items with undefined indexed values`, () => {
-      const index = createIndex(`priority`)
-      index.add(`a`, { priority: undefined })
-      index.add(`b`, { priority: undefined })
-      index.add(`c`, { priority: undefined })
-
-      expect(index.takeFromStart(10)).toEqual([`a`, `b`, `c`])
-
-      const undefinedItems = index.equalityLookup(undefined)
-      expect(undefinedItems.size).toBe(3)
-    })
-
-    it(`should correctly remove items with undefined values`, () => {
-      const index = createIndex(`priority`)
-      index.add(`a`, { priority: undefined })
-      index.add(`b`, { priority: undefined })
-
-      index.remove(`a`, { priority: undefined })
-
-      const remaining = index.equalityLookup(undefined)
-      expect(remaining.size).toBe(1)
-      expect(remaining).toContain(`b`)
-    })
-
-    it(`should iterate past multiple undefined values correctly`, () => {
-      const index = createIndex(`value`)
-      index.add(`undef1`, { value: undefined })
-      index.add(`undef2`, { value: undefined })
-      index.add(`undef3`, { value: undefined })
-      index.add(`one`, { value: 1 })
-      index.add(`two`, { value: 2 })
-
-      // Start from undefined, should get items after all undefined values
-      const afterUndefined = index.take(10, undefined)
-      expect(afterUndefined).toEqual([`one`, `two`])
-    })
-  })
 
   describe(`ordering of undefined relative to other values`, () => {
     it(`should sort undefined before numbers with default comparator`, () => {
@@ -208,82 +139,6 @@ describe(`BTreeIndex - undefined value handling`, () => {
       index.add(`str2`, { name: `banana` })
 
       expect(orderedEntriesArray(index)[0]![0]).toBe(undefined)
-    })
-
-    it(`should handle mixed undefined and null values`, () => {
-      const index = createIndex(`value`)
-      index.add(`null1`, { value: null })
-      index.add(`undef1`, { value: undefined })
-      index.add(`num1`, { value: 1 })
-
-      const nullItems = index.equalityLookup(null)
-      const undefItems = index.equalityLookup(undefined)
-
-      expect(nullItems.size).toBe(1)
-      expect(nullItems).toContain(`null1`)
-      expect(undefItems.size).toBe(1)
-      expect(undefItems).toContain(`undef1`)
-    })
-  })
-
-  describe(`rangeQuery with undefined bounds`, () => {
-    it(`should distinguish explicit undefined from vs no from`, () => {
-      const index = createIndex(`value`)
-      index.add(`undef`, { value: undefined })
-      index.add(`one`, { value: 1 })
-      index.add(`two`, { value: 2 })
-      index.add(`three`, { value: 3 })
-
-      const withExplicitFrom = index.rangeQuery({
-        from: undefined,
-        to: 2,
-        fromInclusive: true,
-        toInclusive: true,
-      })
-      expect(withExplicitFrom.size).toBe(3)
-      expect(withExplicitFrom).toContain(`undef`)
-      expect(withExplicitFrom).toContain(`one`)
-      expect(withExplicitFrom).toContain(`two`)
-
-      const withoutFrom = index.rangeQuery({ to: 2, toInclusive: true })
-      expect(withoutFrom.size).toBe(3)
-    })
-
-    it(`should not drop the minimum key when an upper-only range is exclusive on the (absent) lower bound`, () => {
-      // When no `from` bound is provided, `fromInclusive` must not cause the
-      // smallest key to be excluded: there is no lower bound to exclude
-      // against. Only an explicitly provided exclusive lower bound should
-      // drop its boundary value.
-      const index = createIndex(`value`)
-      index.add(`a`, { value: 1 })
-      index.add(`b`, { value: 5 })
-      index.add(`c`, { value: 10 })
-
-      const result = index.rangeQuery({ to: 10, fromInclusive: false })
-
-      expect(result.size).toBe(3)
-      expect(result).toContain(`a`)
-      expect(result).toContain(`b`)
-      expect(result).toContain(`c`)
-    })
-
-    it(`should handle range query from undefined to undefined`, () => {
-      const index = createIndex(`value`)
-      index.add(`a`, { value: undefined })
-      index.add(`b`, { value: undefined })
-      index.add(`c`, { value: 1 })
-
-      const justUndefined = index.rangeQuery({
-        from: undefined,
-        to: undefined,
-        fromInclusive: true,
-        toInclusive: true,
-      })
-
-      expect(justUndefined.size).toBe(2)
-      expect(justUndefined).toContain(`a`)
-      expect(justUndefined).toContain(`b`)
-      expect(justUndefined).not.toContain(`c`)
     })
   })
 
@@ -316,90 +171,6 @@ describe(`BTreeIndex - undefined value handling`, () => {
       const ordered = orderedEntriesArray(index)
       expect(ordered[0]![0]).toBe(1)
       expect(ordered[1]![0]).toBe(undefined)
-    })
-  })
-
-  describe(`equalityLookup with undefined`, () => {
-    it(`should find items with undefined indexed value`, () => {
-      const index = createIndex(`status`)
-      index.add(`a`, { status: `active` })
-      index.add(`b`, { status: undefined })
-      index.add(`c`, { status: `inactive` })
-      index.add(`d`, { status: undefined })
-
-      const undefinedItems = index.equalityLookup(undefined)
-      expect(undefinedItems.size).toBe(2)
-      expect(undefinedItems).toContain(`b`)
-      expect(undefinedItems).toContain(`d`)
-    })
-
-    it(`should return empty set when no undefined values exist`, () => {
-      const index = createIndex(`value`)
-      index.add(`a`, { value: 1 })
-      index.add(`b`, { value: 2 })
-
-      expect(index.equalityLookup(undefined).size).toBe(0)
-    })
-  })
-
-  describe(`inArrayLookup with undefined`, () => {
-    it(`should handle undefined in inArrayLookup`, () => {
-      const index = createIndex(`value`)
-      index.add(`undef`, { value: undefined })
-      index.add(`one`, { value: 1 })
-      index.add(`two`, { value: 2 })
-      index.add(`three`, { value: 3 })
-
-      const result = index.inArrayLookup([undefined, 1])
-      expect(result.size).toBe(2)
-      expect(result).toContain(`undef`)
-      expect(result).toContain(`one`)
-    })
-
-    it(`should handle inArrayLookup with only undefined`, () => {
-      const index = createIndex(`value`)
-      index.add(`undef1`, { value: undefined })
-      index.add(`undef2`, { value: undefined })
-      index.add(`one`, { value: 1 })
-
-      const result = index.inArrayLookup([undefined])
-      expect(result.size).toBe(2)
-      expect(result).toContain(`undef1`)
-      expect(result).toContain(`undef2`)
-    })
-  })
-
-  describe(`update operation with undefined`, () => {
-    it(`should update item from defined to undefined value`, () => {
-      const index = createIndex(`value`)
-      index.add(`a`, { value: 1 })
-
-      index.update(`a`, { value: 1 }, { value: undefined })
-
-      expect(index.equalityLookup(1).size).toBe(0)
-      expect(index.equalityLookup(undefined).size).toBe(1)
-      expect(index.equalityLookup(undefined)).toContain(`a`)
-    })
-
-    it(`should update item from undefined to defined value`, () => {
-      const index = createIndex(`value`)
-      index.add(`a`, { value: undefined })
-
-      index.update(`a`, { value: undefined }, { value: 1 })
-
-      expect(index.equalityLookup(undefined).size).toBe(0)
-      expect(index.equalityLookup(1).size).toBe(1)
-      expect(index.equalityLookup(1)).toContain(`a`)
-    })
-
-    it(`should update item from undefined to undefined (same value)`, () => {
-      const index = createIndex(`value`)
-      index.add(`a`, { value: undefined })
-
-      index.update(`a`, { value: undefined }, { value: undefined })
-
-      expect(index.equalityLookup(undefined).size).toBe(1)
-      expect(index.equalityLookup(undefined)).toContain(`a`)
     })
   })
 

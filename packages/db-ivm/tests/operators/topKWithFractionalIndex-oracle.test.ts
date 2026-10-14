@@ -1,15 +1,11 @@
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import fc from 'fast-check'
 import * as hashing from '../../src/hashing/index.js'
 import { D2 } from '../../src/d2.js'
 import { MultiSet } from '../../src/multiset.js'
 import { topKWithFractionalIndex } from '../../src/operators/topKWithFractionalIndex.js'
 import { groupedTopKWithFractionalIndex } from '../../src/operators/groupedTopKWithFractionalIndex.js'
-import {
-  loadBTree,
-  topKWithFractionalIndexBTree,
-} from '../../src/operators/topKWithFractionalIndexBTree.js'
-import { leftJoin, map, output } from '../../src/operators/index.js'
+import { join, map, output } from '../../src/operators/index.js'
 import {
   MessageTracker,
   assertOnlyKeysAffected,
@@ -71,10 +67,6 @@ function verifyOrder(results: Array<any>, expectedOrder: Array<string>) {
   expect(sortedByIndex).toEqual(expectedOrder)
 }
 
-beforeAll(async () => {
-  await loadBTree()
-})
-
 afterEach(() => vi.restoreAllMocks())
 
 const groupedWindow: typeof topKWithFractionalIndex = (comparator, options) =>
@@ -85,7 +77,6 @@ const groupedWindow: typeof topKWithFractionalIndex = (comparator, options) =>
 
 describe.each([
   { name: `array`, topK: topKWithFractionalIndex },
-  { name: `BTree`, topK: topKWithFractionalIndexBTree },
   { name: `grouped array`, topK: groupedWindow },
 ])('Generated fractional $name windows', ({ topK }) => {
   it.each([409036, undefined])(
@@ -121,7 +112,7 @@ describe.each([
             }
             const graph = new D2()
             const input = graph.newInput<[number, Row]>()
-            const rows = new TopKRelation<number, string>()
+            const rows = new TopKRelation<number>()
             const values = new Map<number, string>([[1, `0`]])
             const live = new Map([[1, make(1, `0`)]])
             input.pipe(
@@ -208,10 +199,10 @@ describe.each([
             const graph = new D2()
             const left = graph.newInput<[number, string]>()
             const right = graph.newInput<[number, string]>()
-            const rows = new TopKRelation<number, string>()
+            const rows = new TopKRelation<number>()
             const matches = new Map<number, string>()
             left.pipe(
-              leftJoin(right),
+              join(right, `left`),
               map(
                 ([id, [fallback, matched]]) =>
                   [id, { id, value: matched ?? fallback }] as [
@@ -307,7 +298,7 @@ describe.each([
             type Row = { id: number; value: string }
             const graph = new D2()
             const input = graph.newInput<[number, Row]>()
-            const relation = new TopKRelation<number, string>()
+            const relation = new TopKRelation<number>()
             const source = new Map<number, Row>()
             const projected = mapped
               ? input.pipe(
@@ -412,14 +403,12 @@ describe.each([
 })
 
 describe(`Operators`, () => {
-  describe.each([
-    [`with array`, { topK: topKWithFractionalIndex }],
-    [`with B+ tree`, { topK: topKWithFractionalIndexBTree }],
-  ])(`TopKWithFractionalIndex operator %s`, (_name, { topK }) => {
+  describe(`TopKWithFractionalIndex operator`, () => {
+    const topK = topKWithFractionalIndex
     it(`should assign fractional indices to sorted elements`, () => {
       const graph = new D2()
       const input = graph.newInput<[number, { id: number; value: string }]>()
-      const tracker = new TopKMessageTracker<number, string>()
+      const tracker = new TopKMessageTracker<number>()
 
       input.pipe(
         topK((a, b) => a.value.localeCompare(b.value)),
@@ -506,7 +495,7 @@ describe(`Operators`, () => {
     it(`should support duplicate ordering keys`, () => {
       const graph = new D2()
       const input = graph.newInput<[number, { id: number; value: string }]>()
-      const tracker = new TopKMessageTracker<number, string>()
+      const tracker = new TopKMessageTracker<number>()
 
       input.pipe(
         topK((a, b) => a.value.localeCompare(b.value)),
@@ -627,7 +616,7 @@ describe(`Operators`, () => {
     it(`should handle limit and offset correctly`, () => {
       const graph = new D2()
       const input = graph.newInput<[number, { id: number; value: string }]>()
-      const tracker = new TopKMessageTracker<number, string>()
+      const tracker = new TopKMessageTracker<number>()
 
       input.pipe(
         topK((a, b) => a.value.localeCompare(b.value), {
@@ -713,7 +702,7 @@ describe(`Operators`, () => {
     it(`should handle elements moving positions correctly`, () => {
       const graph = new D2()
       const input = graph.newInput<[number, { id: number; value: string }]>()
-      const tracker = new TopKMessageTracker<number, string>()
+      const tracker = new TopKMessageTracker<number>()
 
       input.pipe(
         topK((a, b) => a.value.localeCompare(b.value)),
@@ -798,7 +787,7 @@ describe(`Operators`, () => {
     it(`should maintain lexicographic order through multiple updates`, () => {
       const graph = new D2()
       const input = graph.newInput<[number, { id: number; value: string }]>()
-      const tracker = new TopKMessageTracker<number, string>()
+      const tracker = new TopKMessageTracker<number>()
 
       input.pipe(
         topK((a, b) => a.value.localeCompare(b.value)),
@@ -901,7 +890,7 @@ describe(`Operators`, () => {
     it(`should maintain correct order when cycling through multiple changes`, () => {
       const graph = new D2()
       const input = graph.newInput<[number, { id: number; value: string }]>()
-      const tracker = new TopKMessageTracker<number, string>()
+      const tracker = new TopKMessageTracker<number>()
 
       input.pipe(
         topK((a, b) => a.value.localeCompare(b.value)),
@@ -1009,7 +998,7 @@ describe(`Operators`, () => {
       const graph = new D2()
       const input = graph.newInput<[number, { id: number; value: string }]>()
       const allMessages: Array<any> = []
-      const relation = new TopKRelation<number, string>()
+      const relation = new TopKRelation<number>()
 
       input.pipe(
         topK((a, b) => a.value.localeCompare(b.value)),
@@ -1103,7 +1092,7 @@ describe(`Operators`, () => {
       const graph = new D2()
       const input = graph.newInput<[number, { id: number; value: string }]>()
       const allMessages: Array<any> = []
-      const relation = new TopKRelation<number, string>()
+      const relation = new TopKRelation<number>()
 
       input.pipe(
         topK((a, b) => a.value.localeCompare(b.value)),

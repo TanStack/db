@@ -8,7 +8,7 @@ import {
   topKBatch,
 } from './topKState.js'
 import { TopKArray, createKeyedComparator } from './topKArray.js'
-import type { IndexedValue, TopK } from './topKArray.js'
+import type { IndexedValue } from './topKArray.js'
 import type { DifferenceStreamReader } from '../graph.js'
 import type { IStreamBuilder, PipedOperator } from '../types.js'
 
@@ -61,18 +61,6 @@ export class GroupedTopKWithFractionalIndexOperator<
     options.setWindowFn?.(this.#moveTopK.bind(this))
   }
 
-  /**
-   * Creates a new TopK data structure for a group.
-   * Can be overridden in subclasses to use different implementations (e.g., B+ tree).
-   */
-  protected createTopK(
-    offset: number,
-    limit: number,
-    comparator: (a: [K, T], b: [K, T]) => number,
-  ): TopK<[K, T]> {
-    return new TopKArray(offset, limit, comparator)
-  }
-
   #getTotalSize(): number {
     let size = 0
     for (const state of this.#groupStates.values()) {
@@ -84,8 +72,9 @@ export class GroupedTopKWithFractionalIndexOperator<
   #getOrCreateGroupState(groupKey: unknown): TopKState<K, T> {
     let state = this.#groupStates.get(groupKey)
     if (!state) {
-      const topK = this.createTopK(this.#offset, this.#limit, this.#comparator)
-      state = new TopKState(topK)
+      state = new TopKState(
+        new TopKArray(this.#offset, this.#limit, this.#comparator),
+      )
       this.#groupStates.set(groupKey, state)
     }
     return state

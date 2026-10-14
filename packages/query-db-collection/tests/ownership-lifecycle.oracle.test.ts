@@ -11869,6 +11869,82 @@ describe(`query collection ownership lifecycle`, () => {
     )
   })
 
+  /**
+   * A retained subset owner cannot be settled by acquiring a different Query
+   * key. The independent source model has one `detail` row in durable storage;
+   * the current complete source keeps, omits, or moves it out of that subset.
+   * After a full-source result applies, acquiring the retained subset must
+   * reconcile its old owner and remove its revalidation marker. Compare public
+   * and durable rows at that acquisition's settlement, before any explicit
+   * refetch. The unchanged and moved cases guard against deleting a row still
+   * owned by the full source.
+   */
+  it.each([{ name: `omitted` }, { name: `unchanged` }, { name: `moved` }])(
+    `settles a retained $name subset after a complete full-source result`,
+    async ({ name }) => {
+      const id = `retained-subset-after-full-${name}`
+      const oldRow: Item = {
+        id: `detail-row`,
+        category: `detail`,
+        name: `Original`,
+      }
+      const subset = categorySubset(`detail`)
+      const subsetHash = hashKey([id, getLoadSubsetDemandKey(subset)])
+      const retentionKey = `queryCollection:gc:${subsetHash}`
+      const storage = createOwnershipStorage({
+        rows: new Map([[oldRow.id, oldRow]]),
+        rowMetadata: new Map([
+          [oldRow.id, { queryCollection: { owners: { [subsetHash]: true } } }],
+        ]),
+        collectionMetadata: new Map([
+          [retentionKey, { queryHash: subsetHash, mode: `until-revalidated` }],
+        ]),
+      })
+      const currentSource: Array<Item> =
+        name === `omitted`
+          ? []
+          : name === `unchanged`
+            ? [oldRow]
+            : [{ ...oldRow, category: `list`, name: `Moved` }]
+      const { collection } = createPersistedOwnershipFixture(
+        id,
+        storage,
+        currentSource,
+      )
+
+      await collection.stateWhenReady()
+      await collection._sync.loadSubset({})
+      await collection._sync.loadSubset(subset)
+
+      expect({
+        publicRows: collection.toArray.map(
+          ({ id: rowId, category, name: rowName }) => ({
+            id: rowId,
+            category,
+            name: rowName,
+          }),
+        ),
+        durableRows: storedItems(storage),
+        retentionPending: storage
+          .snapshot()
+          .collectionMetadata.has(retentionKey),
+      }).toEqual({
+        publicRows: currentSource,
+        durableRows: currentSource,
+        retentionPending: false,
+      })
+      if (name === `moved`) {
+        expect(
+          persistedOwners(storage.snapshot().rowMetadata, oldRow.id),
+        ).toEqual([hashKey([id])])
+      }
+      if (name === `unchanged`) {
+        collection._sync.unloadSubset({})
+        expect(rows(collection)).toEqual([oldRow.id])
+      }
+    },
+  )
+
   it(`emits metadata for every owner of rows shared by overlapping queries`, async () => {
     const metadata: MetadataRecorder = { rows: new Map(), writes: [] }
     const { collection } = createOwnershipFixture({
@@ -13201,6 +13277,15 @@ it(`does not restart a released Query acquisition after cache rotation`, async (
 // holds the completed real-adapter scan so the check observes the fresh row
 // both before and after the stale maintenance continuation is released.
 it(`does not delete a fresh Query row from an old retention scan`, async () => {
+  // The old retention scan must start after the Collection is ready, however
+  // long startup takes. Startup cleans up an entry that has already expired,
+  // and that would hold the scan inside startup. So the entry expires a minute
+  // out on a fake clock that advances with real time, and the test moves the
+  // clock past it only after readiness.
+  vi.useFakeTimers({
+    toFake: [`setTimeout`, `clearTimeout`, `Date`],
+    shouldAdvanceTime: true,
+  })
   const id = `query-cache-claim-held-retention`
   const oldRow: Item = { id: `same`, category: `active`, name: `Old` }
   const freshRow: Item = { ...oldRow, name: `Fresh` }
@@ -13249,7 +13334,7 @@ it(`does not delete a fresh Query row from an old retention scan`, async () => {
           metadata.collection.set(`queryCollection:gc:${queryHash}`, {
             queryHash,
             mode: `ttl`,
-            expiresAt: Date.now() + 50,
+            expiresAt: Date.now() + 60_000,
           })
           params.commit()
           return originalSync({
@@ -13275,6 +13360,7 @@ it(`does not delete a fresh Query row from an old retention scan`, async () => {
     }),
   )
   cleanups.push(async () => {
+    vi.useRealTimers()
     releaseOldScan.resolve()
     await collection.cleanup()
     queryClient.clear()
@@ -13282,6 +13368,8 @@ it(`does not delete a fresh Query row from an old retention scan`, async () => {
   })
 
   await collection.stateWhenReady()
+  expect(scans).toBe(0)
+  await vi.advanceTimersByTimeAsync(60_001)
   await scanEntered.promise
   now += 10_001
   await collection._sync.loadSubset(subset)

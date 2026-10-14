@@ -429,6 +429,14 @@ arrays. Build separate API parameters instead. Core retains request data without
 cloning it; changing submitted data can make the request disagree with its cache
 key. To change a query constant, supply a new value rather than mutating the old
 one. Cancellation through the request's `AbortSignal` remains supported.
+Use `ctx.signal` for the provider call. A sole acquisition's first fetch keeps
+its supplied `loadSubsetOptions.signal`. Once acquisitions or Collections share
+a Query, later fetches expose the Query fetch signal there because the
+acquisition that installed the query function can release first. If a peer
+joins during a fetch and that original signal aborts, a provider rejection with
+its abort reason or an `AbortError` gets one retry with the live Query signal
+while the peer still owns the Query. An unrelated `AbortError` raised after the
+same abort has no distinguishable cause and can also get that one retry.
 
 ### Type-Safe Meta Access
 
@@ -1287,6 +1295,19 @@ All direct write methods are available on `collection.utils`:
 ## QueryFn and Predicate Push-Down
 
 When using `syncMode: 'on-demand'`, the collection automatically pushes down query predicates (where clauses, orderBy, limit, and offset) to your `queryFn`. This allows you to fetch only the data needed for each specific query, rather than fetching the entire dataset.
+
+With a static `queryKey`, an active, successfully applied request for the
+entire source can also serve later filtered or windowed live queries without
+another `queryFn` call. The full Query stays active until those queries release
+their demand. A narrower scope with retained persisted ownership makes an
+exact-scope `queryFn` call to revalidate its rows and owners. An unfinished
+full request does not provide this coverage, and
+`refetch: true` still fetches the exact requested subset. Function-built
+`queryKey` values keep their own cache identity and do not use this reuse path.
+Your `queryFn` must return the complete requested result, including every row
+for an unbounded request.
+Refetching a narrower subset does not invalidate a still-active full Query;
+refresh the full Query when you need a new source-wide snapshot.
 
 ### How LoadSubsetOptions Are Passed
 

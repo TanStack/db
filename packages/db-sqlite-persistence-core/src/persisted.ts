@@ -1747,9 +1747,13 @@ class PersistedCollectionRuntime<
     // release its turn before checking the claim and rotating the cache.
     queueMicrotask(() => {
       if (lifecycleGeneration !== this.lifecycleGeneration) return
-      void this.ensureCacheClaimActive().catch((error) => {
-        this.markTerminalFailure(error, lifecycleGeneration)
-      })
+      void this.ensureCacheClaimActive()
+        .then(() =>
+          this.applyMutex.run(() => this.flushQueuedTxCommittedUnsafe()),
+        )
+        .catch((error) => {
+          this.markTerminalFailure(error, lifecycleGeneration)
+        })
     })
   }
 
@@ -1913,6 +1917,31 @@ class PersistedCollectionRuntime<
             : receipt,
       ),
     )
+  }
+
+  // An ensure reply settles a follower's load (law 7). A source's loadSubset
+  // must await every commit receipt that establishes its result, so the
+  // leader broadcasts those commits before it replies on the same channel.
+  // They are already queued on the apply mutex; settle after they show here.
+  private async applyLeaderCommitsBeforeReply(
+    options: LoadSubsetOptions,
+  ): Promise<void> {
+    try {
+      // Commits kept while the claim was expired apply after it is active.
+      if (this.hasExpiredCacheClaim() || this.cacheClaimRecovery) {
+        await this.ensureCacheClaimActive()
+      }
+      await this.applyMutex.run(() => this.flushQueuedTxCommittedUnsafe())
+      // A broadcast that failed to apply made the runtime terminal; its rows
+      // are not visible, so the load must not settle successfully.
+      this.throwIfTerminal()
+    } catch (error) {
+      // A terminal runtime releases the acquisition the owner granted the
+      // load. Otherwise, as after a failed ensure, the demand retries.
+      if (this.getCurrentTerminalFailure()) this.unloadSubset(options)
+      else this.queueRemoteSubsetEnsure(options)
+      throw error
+    }
   }
 
   private clearSyncControls(): void {
@@ -2740,6 +2769,7 @@ class PersistedCollectionRuntime<
               this.storageCollectionId,
               rotatedOptions,
             ))
+          await this.applyLeaderCommitsBeforeReply(options)
         }
         return
       }
@@ -2793,6 +2823,7 @@ class PersistedCollectionRuntime<
         this.queueRemoteSubsetEnsure(options)
         throw error
       }
+      await this.applyLeaderCommitsBeforeReply(options)
       return
     }
 
@@ -3692,6 +3723,7 @@ class PersistedCollectionRuntime<
   private replaceCollectionSnapshot(
     rows: Array<{ key: TKey; value: T; metadata?: unknown }>,
     collectionMetadata: Array<{ key: string; value: unknown }>,
+    replayDemand: boolean,
   ): SyncAppliedReceipt {
     if (
       !this.syncControls.begin ||
@@ -3709,10 +3741,18 @@ class PersistedCollectionRuntime<
       ),
     )
     const rowKeys = new Set(rows.map((row) => row.key))
+    // A truncate replays the Collection's demand. A follower routes that
+    // demand to its leader, whose source loads and commits again, so a
+    // follower replaces its rows in place, except after a reset, which owes
+    // the replay.
+    const followsLeader =
+      this.canRouteRemoteDemandThroughCoordinator() &&
+      !this.persistence.coordinator.isLeader(this.storageCollectionId)
+    const truncate = hydratedKeys.size === 0 && (replayDemand || !followsLeader)
 
     return this.withInternalApply(() => {
       this.syncControls.begin?.()
-      if (hydratedKeys.size === 0) {
+      if (truncate) {
         this.syncControls.truncate?.()
       } else {
         for (const key of base?.keys() ?? []) {
@@ -3728,7 +3768,7 @@ class PersistedCollectionRuntime<
 
       for (const row of rows) {
         if (hydratedKeys.has(row.key)) continue
-        if (hydratedKeys.size > 0 && base?.has(row.key)) {
+        if (!truncate && base?.has(row.key)) {
           // Remove stale fields before applying a complete persisted row in
           // the default partial-update mode, without truncating seed keys.
           this.syncControls.write?.({ type: `delete`, key: row.key })
@@ -4537,38 +4577,37 @@ class PersistedCollectionRuntime<
     if (this.getCurrentTerminalFailure()) {
       return
     }
-    if (this.hasExpiredCacheClaim()) {
-      void this.ensureCacheClaimActive().catch((error) => {
-        this.markTerminalFailure(error)
-      })
-      return
-    }
-
     const { payload } = message
     const lifecycleGeneration = this.lifecycleGeneration
     const isSelf = message.senderId === this.persistence.coordinator.getNodeId()
+    const claimExpired = this.hasExpiredCacheClaim()
+    if (claimExpired && !isTxCommittedPayload(payload)) {
+      this.scheduleCacheClaimRecovery(lifecycleGeneration)
+      return
+    }
 
     // Allow tx:committed from self — the coordinator produces these on behalf
     // of both local and remote mutations. The seq dedup in
     // processCommittedTxUnsafe prevents double-processing of our own writes.
     if (isTxCommittedPayload(payload)) {
-      if (this.isHydratingNow()) {
-        this.queuedTxCommitted.push({
-          txCommitted: payload,
-          lifecycleGeneration,
-          storageCollectionId: message.collectionId,
-        })
-        return
+      // Commits apply in arrival order through the queue. While the claim is
+      // expired, keep them until renewal or rotation decides this generation;
+      // a renewed generation still owes its rows. A hydration flushes the
+      // queue when it ends.
+      this.queuedTxCommitted.push({
+        txCommitted: payload,
+        lifecycleGeneration,
+        storageCollectionId: message.collectionId,
+      })
+      if (claimExpired) {
+        this.scheduleCacheClaimRecovery(lifecycleGeneration)
+      } else if (!this.isHydratingNow()) {
+        void this.applyMutex
+          .run(() => this.flushQueuedTxCommittedUnsafe())
+          .catch((error) => {
+            this.markTerminalFailure(error, lifecycleGeneration)
+          })
       }
-
-      void this.applyMutex
-        .run(() => {
-          if (message.collectionId !== this.storageCollectionId) return
-          return this.processCommittedTxUnsafe(payload, lifecycleGeneration)
-        })
-        .catch((error) => {
-          this.markTerminalFailure(error, lifecycleGeneration)
-        })
       return
     }
 
@@ -4606,15 +4645,26 @@ class PersistedCollectionRuntime<
 
   private async flushQueuedTxCommittedUnsafe(): Promise<void> {
     while (this.queuedTxCommitted.length > 0) {
+      // Claim recovery flushes the queue once the generation is decided.
+      if (this.hasExpiredCacheClaim()) {
+        this.scheduleCacheClaimRecovery(this.lifecycleGeneration)
+        return
+      }
       const queued = this.queuedTxCommitted.shift()
       if (!queued) {
         continue
       }
       if (queued.storageCollectionId !== this.storageCollectionId) continue
-      await this.processCommittedTxUnsafe(
-        queued.txCommitted,
-        queued.lifecycleGeneration,
-      )
+      // A queued commit has left the queue, so a failure must be terminal,
+      // as it is for a commit applied when it arrives.
+      try {
+        await this.processCommittedTxUnsafe(
+          queued.txCommitted,
+          queued.lifecycleGeneration,
+        )
+      } catch (error) {
+        throw this.markTerminalFailure(error, queued.lifecycleGeneration)
+      }
     }
   }
 
@@ -4623,10 +4673,6 @@ class PersistedCollectionRuntime<
     lifecycleGeneration = this.lifecycleGeneration,
   ): Promise<void> {
     if (lifecycleGeneration !== this.lifecycleGeneration) return
-    if (this.hasExpiredCacheClaim()) {
-      this.scheduleCacheClaimRecovery(lifecycleGeneration)
-      return
-    }
     if (this.resetTermFence !== undefined) {
       if (txCommitted.term <= this.resetTermFence) {
         // This payload could have been committed before the schema reset.
@@ -4906,10 +4952,13 @@ class PersistedCollectionRuntime<
     }
 
     if (lifecycleGeneration !== this.lifecycleGeneration) return
+    // A reset replays demand: the owner's reset rows return only when the
+    // follower requests its demand again.
     await this.reloadActiveSubsetsUnsafe(
       adapter,
       false,
       this.syncMode === `eager`,
+      true,
     )
   }
 
@@ -5064,6 +5113,7 @@ class PersistedCollectionRuntime<
     adapter: HydrationPersistenceAdapter,
     skipUnchangedReplace = false,
     restoreResetBaseline = false,
+    replayDemand = false,
   ): Promise<void> {
     if (this.scopedRecovery) {
       this.refreshScopedSubsets()
@@ -5217,6 +5267,7 @@ class PersistedCollectionRuntime<
             metadata: row.metadata,
           })),
           collectionMetadata,
+          replayDemand,
         )
         await whenSyncAccepted(applied)
       }

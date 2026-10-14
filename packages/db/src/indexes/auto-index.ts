@@ -1,4 +1,5 @@
 import { DEFAULT_COMPARE_OPTIONS } from '../utils'
+import { indexableOperations } from '../query/builder/functions.js'
 import { hasVirtualPropPath } from '../virtual-props'
 import { codedWarning, devBuild } from '../error-message.js'
 import { checkCollectionSizeForIndex, isDevModeEnabled } from './index-registry'
@@ -21,7 +22,6 @@ export function ensureIndexForField<
   fieldPath: Array<string>,
   collection: CollectionImpl<T, TKey, any, any, any>,
   compareOptions?: CompareOptions,
-  compareFn?: (a: any, b: any) => number,
 ) {
   if (hasVirtualPropPath(fieldPath)) {
     return
@@ -69,7 +69,7 @@ export function ensureIndexForField<
       },
       {
         name: `auto:${fieldPath.join(`.`)}`,
-        options: { compareFn, compareOptions: compareOpts },
+        options: { compareOptions: compareOpts },
       },
     )
   } catch (error) {
@@ -123,8 +123,7 @@ function extractIndexableExpressions(
     }
 
     // Check if this is a supported operation
-    const supportedOperations = [`eq`, `gt`, `gte`, `lt`, `lte`, `in`]
-    if (!supportedOperations.includes(func.name)) {
+    if (!indexableOperations.includes(func.name)) {
       return
     }
 

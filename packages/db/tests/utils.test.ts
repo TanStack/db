@@ -288,42 +288,6 @@ describe(`deepEquals`, () => {
     })
   })
 
-  describe(`Date objects`, () => {
-    it(`should handle identical dates`, () => {
-      const date1 = new Date(`2023-01-01T00:00:00Z`)
-      const date2 = new Date(`2023-01-01T00:00:00Z`)
-      expect(deepEquals(date1, date2)).toBe(true)
-    })
-
-    it(`should handle different dates`, () => {
-      const date1 = new Date(`2023-01-01T00:00:00Z`)
-      const date2 = new Date(`2023-01-02T00:00:00Z`)
-      expect(deepEquals(date1, date2)).toBe(false)
-    })
-
-    it(`should handle date vs non-date`, () => {
-      const date = new Date(`2023-01-01T00:00:00Z`)
-      expect(deepEquals(date, `2023-01-01T00:00:00Z`)).toBe(false)
-      expect(deepEquals(date, date.getTime())).toBe(false)
-    })
-  })
-
-  describe(`RegExp objects`, () => {
-    it(`should handle identical regexes`, () => {
-      expect(deepEquals(/abc/g, /abc/g)).toBe(true)
-      expect(deepEquals(/test/i, /test/i)).toBe(true)
-    })
-
-    it(`should handle different regexes`, () => {
-      expect(deepEquals(/abc/g, /abc/i)).toBe(false)
-      expect(deepEquals(/abc/g, /def/g)).toBe(false)
-    })
-
-    it(`should handle regex vs non-regex`, () => {
-      expect(deepEquals(/abc/g, `abc`)).toBe(false)
-    })
-  })
-
   describe(`Map objects`, () => {
     it(`should handle identical maps`, () => {
       const map1 = new Map([

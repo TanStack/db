@@ -781,6 +781,11 @@ export function queryCollectionOptions(
     typeof queryKey === `function`
       ? (queryKey({}) as unknown as QueryKey)
       : (queryKey as unknown as QueryKey)
+  const fullSourceKey =
+    syncMode === `on-demand` && typeof queryKey !== `function`
+      ? baseKey
+      : undefined
+  const fullSourceHash = fullSourceKey && hashKey(fullSourceKey)
 
   /**
    * Validates that a derived query key extends the base key prefix.
@@ -1039,6 +1044,9 @@ export function queryCollectionOptions(
   // 2. Uses existing machinery (queryToRows map) to find rows that query loaded
   // 3. Decrements refcount and GCs rows where count reaches 0
   const queryRefCounts = new Map<string, number>()
+  // A completed full-source Query can own narrower demands without a second
+  // transport. Pin each demand to its chosen Query until its final release.
+  const fullSourceDependents = new Map<string, number>()
 
   // Eager startup holds one reference until cleanup. Cache removal detaches
   // observation, not that ownership or its rows.
@@ -1882,9 +1890,48 @@ export function queryCollectionOptions(
         })
       }
 
-      // Generate key using common function
-      const key = generateQueryKeyFromOptions(opts)
-      const hashedQueryKey = hashKey(key)
+      const requestedKey = generateQueryKeyFromOptions(opts)
+      const requestedHash = hashKey(requestedKey)
+      const fullObserver =
+        fullSourceHash === undefined
+          ? undefined
+          : state.observers.get(fullSourceHash)
+      const hasFullSourceDependent = fullSourceDependents.has(requestedHash)
+      if (hasFullSourceDependent && fullObserver === undefined) {
+        throw new Error(`A full-source dependent lost its Query observer`)
+      }
+      const fullQuery = fullObserver?.getCurrentQuery()
+      const fullResult = fullObserver?.getCurrentResult()
+      const appliedFullResult =
+        fullResult !== undefined &&
+        getRecordedResultApplicationSettlement(fullSourceHash!, fullResult) !==
+          undefined
+      const retainedRequestedEntry = metadata?.collection.get(
+        `${QUERY_COLLECTION_GC_PREFIX}${requestedHash}`,
+      )
+      const requestedScopeNeedsRevalidation =
+        parsePersistedQueryRetentionEntry(
+          retainedRequestedEntry,
+          requestedHash,
+        ) !== undefined
+      // Existing dependents keep their original observer lease even if an
+      // explicit refetch creates an exact Query for the same requested scope.
+      const sharesFullSource =
+        !opts.refetch &&
+        fullSourceKey !== undefined &&
+        fullSourceHash !== requestedHash &&
+        (hasFullSourceDependent ||
+          (!requestedScopeNeedsRevalidation &&
+            !state.observers.has(requestedHash) &&
+            (queryRefCounts.get(fullSourceHash!) ?? 0) > 0 &&
+            fullResult?.isSuccess === true &&
+            fullQuery?.state.fetchStatus === `idle` &&
+            hasCurrentCacheGenerationFetch(fullQuery) &&
+            !pendingResultApplications.has(fullSourceHash!) &&
+            !failedResultApplications.has(fullSourceHash!) &&
+            appliedFullResult))
+      const key = sharesFullSource ? fullSourceKey : requestedKey
+      const hashedQueryKey = sharesFullSource ? fullSourceHash! : requestedHash
       const {
         subscription: _subscription,
         refetch: _refetch,
@@ -1898,9 +1945,12 @@ export function queryCollectionOptions(
         configurable: true,
         writable: true,
       })
-      const retainedEntry = metadata?.collection.get(
-        `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,
-      )
+      const retainedEntry =
+        hashedQueryKey === requestedHash
+          ? retainedRequestedEntry
+          : metadata?.collection.get(
+              `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,
+            )
       if (
         parsePersistedQueryRetentionEntry(retainedEntry, hashedQueryKey) !==
         undefined
@@ -1918,6 +1968,12 @@ export function queryCollectionOptions(
           hashedQueryKey,
           (queryRefCounts.get(hashedQueryKey) || 0) + 1,
         )
+        if (sharesFullSource) {
+          fullSourceDependents.set(
+            requestedHash,
+            (fullSourceDependents.get(requestedHash) ?? 0) + 1,
+          )
+        }
 
         // Get the current result and return based on its state
         const observer = state.observers.get(hashedQueryKey)!
@@ -1982,6 +2038,10 @@ export function queryCollectionOptions(
         queryKey: key,
         queryFn: (context: Parameters<typeof queryFunction>[0]) => {
           const logicalHash = hashKey(context.queryKey)
+          const physicalQuery = queryClient.getQueryCache().find({
+            queryKey: context.queryKey,
+            exact: true,
+          })
           fetchStartGenerations.set(
             logicalHash,
             Math.max(
@@ -1989,7 +2049,67 @@ export function queryCollectionOptions(
               directWriteGeneration,
             ),
           )
-          return queryFunction(context)
+          // A shared Query can outlive the acquisition that installed this
+          // queryFn. Use the Query signal for shared fetches, but preserve its
+          // lazy getter so an ignoring provider does not cause Query Core to
+          // cancel an unobserved fetch.
+          const queryWithSharedSignal = () => {
+            const sharedContext = Object.defineProperties(
+              {} as typeof context,
+              Object.getOwnPropertyDescriptors(context),
+            )
+            sharedContext.meta = {
+              ...context.meta,
+              loadSubsetOptions: {
+                ...requestOptions,
+                get signal() {
+                  return context.signal
+                },
+              },
+            }
+            return queryFunction(sharedContext)
+          }
+          if (
+            (queryRefCounts.get(logicalHash) ?? 0) > 1 ||
+            (physicalQuery?.getObserversCount() ?? 0) > 1 ||
+            (hashedQueryKey === fullSourceHash && fullSourceDependents.size) ||
+            requestOptions.signal?.aborted
+          ) {
+            return queryWithSharedSignal()
+          }
+          const recoverReleasedSignal = (error: unknown) => {
+            // A peer can acquire the Query after this request starts with the
+            // first acquisition's signal. Retry only that signal's rejection
+            // or an AbortError while the same physical Query still has a live
+            // owner. A fresh AbortError has no provider provenance, so this
+            // bounded retry can also include an unrelated AbortError.
+            const isAbortError =
+              typeof error === `object` &&
+              error !== null &&
+              `name` in error &&
+              error.name === `AbortError`
+            if (
+              !requestOptions.signal?.aborted ||
+              (error !== requestOptions.signal.reason && !isAbortError) ||
+              !physicalQuery ||
+              physicalQuery.getObserversCount() === 0 ||
+              queryClient.getQueryCache().find({
+                queryKey: context.queryKey,
+                exact: true,
+              }) !== physicalQuery ||
+              physicalQuery.state.fetchStatus !== `fetching`
+            ) {
+              throw error
+            }
+            return queryWithSharedSignal()
+          }
+          try {
+            return Promise.resolve(queryFunction(context)).catch(
+              recoverReleasedSignal,
+            )
+          } catch (error) {
+            return recoverReleasedSignal(error)
+          }
         },
         meta: extendedMeta,
         structuralSharing: true,
@@ -3465,6 +3585,7 @@ export function queryCollectionOptions(
     const cleanup = () => {
       if (activeSyncSession === syncSession) activeSyncSession = undefined
       pendingStartupLoads.clear()
+      fullSourceDependents.clear()
       ensureEagerSubscription = () => {}
       applyRefetchResultWhenUnsubscribed = () => false
       unsubscribeFromCollectionEvents()
@@ -3555,8 +3676,16 @@ export function queryCollectionOptions(
         return
       }
       // 1. Same predicates → 2. Same queryKey
-      const key = generateQueryKeyFromOptions(options)
-      const hashedQueryKey = hashKey(key)
+      const requestedHash = hashKey(generateQueryKeyFromOptions(options))
+      const dependentCount = options.refetch
+        ? undefined
+        : fullSourceDependents.get(requestedHash)
+      if (dependentCount !== undefined) {
+        if (dependentCount === 1) fullSourceDependents.delete(requestedHash)
+        else fullSourceDependents.set(requestedHash, dependentCount - 1)
+      }
+      const hashedQueryKey =
+        dependentCount === undefined ? requestedHash : fullSourceHash!
 
       // 3. Decrement refcount
       const currentCount = queryRefCounts.get(hashedQueryKey) || 0
