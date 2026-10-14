@@ -728,9 +728,11 @@ type WindowCase = {
   overshoot?: number
   // A `findOne` parent skips its `offset` when false. Omitted means true.
   findOneOffset?: boolean
-  // A window `setWindow` requests before the live query starts (not for a
-  // `findOne` parent).
+  // A window `setWindow` requests before the live query starts.
   startWindow?: { offset: number; limit: number } | null
+  // A static child filter on the grandchild correlation field (the child
+  // id), by index into the initial children; the include keeps only those.
+  childFilter?: Array<number> | null
 }
 
 const windowCommand: fc.Arbitrary<WindowCommand> = fc.oneof(
@@ -799,6 +801,10 @@ const windowCase: fc.Arbitrary<WindowCase> = fc
         }),
         { nil: null },
       ),
+      childFilter: fc.option(
+        fc.uniqueArray(fc.nat({ max: 200 }), { minLength: 1, maxLength: 4 }),
+        { nil: null },
+      ),
     }),
   )
   // A findOne parent has one result row; `distinct` would not change it.
@@ -829,9 +835,13 @@ function windowUnits(
 function modelKids(
   group: string,
   form: ChildForm,
-  children: ReadonlyMap<string, WindowChild>,
+  allChildren: ReadonlyMap<string, WindowChild>,
   grandchildren: ReadonlyMap<string, WindowGrandchild>,
+  kept: ReadonlySet<string> | undefined,
 ): unknown {
+  const children = new Map(
+    [...allChildren].filter(([id]) => !kept || kept.has(id)),
+  )
   const grandOf = (childId: string) =>
     [...grandchildren.values()]
       .filter((grandchild) => grandchild.childId === childId)
@@ -955,7 +965,12 @@ function createOnDemandChildren(initial: Array<WindowChild>) {
   }
 }
 
-async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
+/**
+ * Runs one case and returns how many forward window moves its work bound
+ * checked strictly, the reach a generated campaign must show.
+ */
+async function checkWindowedIncludeWork(testCase: WindowCase): Promise<number> {
+  let strictForwardMoves = 0
   const parents = new Map<string, WindowParent>()
   const children = new Map<string, WindowChild>()
   const grandchildren = new Map<string, WindowGrandchild>()
@@ -991,6 +1006,14 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
     const parent = { id: `parent-copy-${index}`, rank: source.rank, group }
     parents.set(parent.id, parent)
   }
+  const initialChildIds = [...children.keys()]
+  const keptChildren = testCase.childFilter
+    ? new Set(
+        testCase.childFilter.map(
+          (index) => initialChildIds[index % initialChildIds.length]!,
+        ),
+      )
+    : undefined
   const filterGroups =
     testCase.parentFilter &&
     testCase.parentFilter.map((index) => `group-${index % testCase.groups}`)
@@ -1066,9 +1089,16 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
             .select(({ grandchild }) => ({ id: grandchild.id })),
         )
       const kidsOf = (group: unknown) => {
-        const groupChildren = q
+        const inGroup = q
           .from({ child: childSource })
           .where(({ child }) => eq(child.group, group))
+        const groupChildren = keptChildren
+          ? inGroup.where(({ child }) =>
+              keptChildren.size === 1
+                ? eq(child.id, [...keptChildren][0])
+                : inArray(child.id, [...keptChildren]),
+            )
+          : inGroup
         const byN = groupChildren.orderBy(({ child }) => child.n, `desc`)
         switch (testCase.childForm) {
           case `materialize`:
@@ -1154,10 +1184,12 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
           : { offset: testCase.offset, limit: testCase.limit }
     // A window requested before the live query starts replaces the compiled
     // one before its first load.
-    const startWindow =
-      testCase.parentForm === `findOne` ? undefined : testCase.startWindow
+    // A findOne's window always shows one row.
+    const windowFor = (window: { offset: number; limit: number }) =>
+      testCase.parentForm === `findOne` ? { ...window, limit: 1 } : window
+    const startWindow = testCase.startWindow
     const startSettled = startWindow ? live.utils.setWindow(startWindow) : true
-    if (startWindow) shown = startWindow
+    if (startWindow) shown = windowFor(startWindow)
     const sign = testCase.direction === `asc` ? 1 : -1
     const sortedUnits = () =>
       windowUnits(keptParents(), testCase.distinct).sort(
@@ -1197,7 +1229,13 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
           unit!.group,
         ])
         expect(row.kids, `${label}: ${row.key} include`).toEqual(
-          modelKids(row.group, testCase.childForm, children, grandchildren),
+          modelKids(
+            row.group,
+            testCase.childForm,
+            children,
+            grandchildren,
+            keptChildren,
+          ),
         )
       }
       expect(
@@ -1230,6 +1268,7 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
     if (startSettled !== true) await startSettled
     await new Promise((resolve) => setTimeout(resolve, 0))
     let before = expectWindow(`rows after preload`)
+    expect(live.utils.getWindow(), `window after preload`).toEqual(shown)
     const preloadLoads = Math.max(0, parentBatches - 1)
     expect(childWork(), `child rows loaded by preload`).toBeLessThanOrEqual(
       workBound(childrenOf(before), preloadLoads),
@@ -1302,14 +1341,15 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
         children.delete(child.id)
         await changeChild(`delete`, child)
       } else {
-        if (testCase.parentForm === `findOne`) continue
         windowBefore = shown
-        shown = { offset: command.offset, limit: command.limit }
-        const settled = live.utils.setWindow(shown)
+        const requested = { offset: command.offset, limit: command.limit }
+        shown = windowFor(requested)
+        const settled = live.utils.setWindow(requested)
         if (settled !== true) await settled
       }
       await new Promise((resolve) => setTimeout(resolve, 0))
       const after = expectWindow(`rows after step ${step}`)
+      expect(live.utils.getWindow(), `window after step ${step}`).toEqual(shown)
       const beforeKeys = new Set(before.map((row) => row.key))
       const shownGroups = new Set(before.map((row) => row.group))
       // A step may newly load only the groups of rows that entered the
@@ -1333,11 +1373,10 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
       const stepLoads = Math.max(0, parentBatches - batchesBefore - parentWrite)
       if (
         command.type === `move` &&
-        testCase.parentForm !== `findOne` &&
         command.offset > (windowBefore?.offset ?? 0) &&
-        (stepLoads === 0 || testCase.overshoot !== undefined)
+        (stepLoads === 0 || testCase.overshoot === 0)
       ) {
-        windowReach.strictForwardMoves++
+        strictForwardMoves++
       }
       // Child rows the step writes reach a local subscription whether or not
       // their group is loaded, so each counts once: a fresh parent's group,
@@ -1371,6 +1410,7 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
       )
       before = after
     }
+    return strictForwardMoves
   } catch (error) {
     primary = { error }
     throw error
@@ -1391,9 +1431,10 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
 // reconstruction check below counts them.
 const WINDOW_RUNS = 60
 
-// Forward window moves whose step the work bound checks strictly, counted
-// across this file's runs for the reach witness below.
-const windowReach = { strictForwardMoves: 0 }
+/** A pinned case: its strict forward-move tally is not reach evidence. */
+async function expectWindowedIncludeWork(testCase: WindowCase): Promise<void> {
+  await checkWindowedIncludeWork(testCase)
+}
 
 const pinnedWindowCase: WindowCase = {
   parents: 8,
@@ -1415,7 +1456,7 @@ describe(`includes work under an ordered parent window`, () => {
   it.each([false, true])(
     `loads children only for a late page's parents (distinct=%s)`,
     (distinct) =>
-      checkWindowedIncludeWork({
+      expectWindowedIncludeWork({
         ...pinnedWindowCase,
         parents: 40,
         groups: 40,
@@ -1430,7 +1471,7 @@ describe(`includes work under an ordered parent window`, () => {
   it.each([`ordered`, `limited`, `limited-nested`] as const)(
     `moves the parent window, not the %s child's`,
     (childForm) =>
-      checkWindowedIncludeWork({
+      expectWindowedIncludeWork({
         ...pinnedWindowCase,
         childForm,
         history: [{ type: `move`, offset: 3, limit: 2 }],
@@ -1438,7 +1479,7 @@ describe(`includes work under an ordered parent window`, () => {
   )
 
   it(`collapses parents whose selected values match under distinct`, () =>
-    checkWindowedIncludeWork({
+    expectWindowedIncludeWork({
       ...pinnedWindowCase,
       copies: [
         { pick: 1, group: true },
@@ -1450,7 +1491,7 @@ describe(`includes work under an ordered parent window`, () => {
     }))
 
   it(`seeds no child demand from a static parent filter`, () =>
-    checkWindowedIncludeWork({
+    expectWindowedIncludeWork({
       ...pinnedWindowCase,
       childSource: `on-demand`,
       parentFilter: [0, 1, 2, 3, 4],
@@ -1461,7 +1502,7 @@ describe(`includes work under an ordered parent window`, () => {
   // On demand, a group's children arrive only through a load, so a fresh
   // parent past the narrowed window must not load them.
   it(`stops routing rows that setWindow drops from an orderBy-only parent`, () =>
-    checkWindowedIncludeWork({
+    expectWindowedIncludeWork({
       ...pinnedWindowCase,
       childrenPerGroup: 3,
       childSource: `on-demand`,
@@ -1473,7 +1514,7 @@ describe(`includes work under an ordered parent window`, () => {
     }))
 
   it(`loads one page of children for a findOne parent`, () =>
-    checkWindowedIncludeWork({
+    expectWindowedIncludeWork({
       ...pinnedWindowCase,
       childForm: `findOne`,
       parentForm: `findOne`,
@@ -1518,13 +1559,26 @@ describe(`includes work under an ordered parent window`, () => {
   // A window requested before start can drop rows a static filter names,
   // so the static seed must not load their children.
   it(`seeds no static child demand under a window requested before start`, () =>
-    checkWindowedIncludeWork({
+    expectWindowedIncludeWork({
       ...pinnedWindowCase,
       childForm: `ordered`,
       childSource: `on-demand`,
       parentForm: `orderOnly`,
       parentFilter: [0, 1, 2, 3, 4, 5],
       startWindow: { offset: 0, limit: 1 },
+    }))
+
+  // A child's static filter names a child whose parent the window drops, so
+  // its grandchild demand must wait for the window too.
+  it(`seeds no grandchild demand below a windowed parent`, () =>
+    expectWindowedIncludeWork({
+      ...pinnedWindowCase,
+      parents: 10,
+      groups: 10,
+      childrenPerGroup: 1,
+      childForm: `nested`,
+      limit: 1,
+      childFilter: [5],
     }))
 
   // Forward moves load more parent rows, so the generated campaigns cannot
@@ -1537,7 +1591,7 @@ describe(`includes work under an ordered parent window`, () => {
   ] as const)(
     `moves the window forward strictly (%s children, distinct=%s)`,
     (childSource, distinct) =>
-      checkWindowedIncludeWork({
+      expectWindowedIncludeWork({
         ...pinnedWindowCase,
         parents: 40,
         groups: 40,
@@ -1649,7 +1703,7 @@ describe(`includes work under an ordered parent window`, () => {
     ],
   ]
   it.each(transient)(`bounds a transient top-K row: %s`, (_, testCase) =>
-    checkWindowedIncludeWork({ ...testCase, overshoot: 1 }),
+    expectWindowedIncludeWork({ ...testCase, overshoot: 1 }),
   )
 
   // The same replays fail when no overshoot is allowed, so each one reaches
@@ -1713,19 +1767,28 @@ describe(`includes work under an ordered parent window`, () => {
     `includes-work.ordered-window`,
     WINDOW_RUNS,
   )) {
-    fcTest.prop([windowCase], campaign.options)(
+    // Reach witness: the campaign's own runs must check some forward
+    // window moves strictly. A failing run throws before the tally is read,
+    // so shrinking never counts.
+    it(
       `a parent window bounds child loading (${campaign.name})`,
-      checkWindowedIncludeWork,
+      async () => {
+        let strictForwardMoves = 0
+        await fc.assert(
+          fc.asyncProperty(windowCase, async (testCase) => {
+            strictForwardMoves += await checkWindowedIncludeWork(testCase)
+          }),
+          campaign.options,
+        )
+        expect(
+          strictForwardMoves,
+          `strictly checked forward moves`,
+        ).toBeGreaterThan(0)
+      },
       // Each run builds its own Collections; allow time per run.
       oracleRuns(WINDOW_RUNS) * 100,
     )
   }
-
-  // Reach witness: the pinned forward moves add eight strictly checked moves;
-  // the generated campaigns must add more.
-  it(`checks some generated forward moves strictly`, () => {
-    expect(windowReach.strictForwardMoves).toBeGreaterThan(8)
-  })
 })
 
 /**
@@ -1828,6 +1891,65 @@ describe(`static include demand and setWindow ownership`, () => {
       expect(calls).toEqual([`parent`, `child`])
     } finally {
       releaseParent()
+      await runCleanups([
+        () => live.cleanup(),
+        () => parents.cleanup(),
+        () => children.cleanup(),
+      ])
+    }
+  })
+
+  // A findOne with limit 0 shows no row, so the one named row's child must
+  // not load.
+  it(`starts no child acquisition for a findOne with limit 0`, async () => {
+    const calls: Array<string> = []
+    const onDemand = <T extends { id: string }>(name: string, rows: Array<T>) =>
+      createCollection<T, string>({
+        id: `limit-zero-${name}-${nextCollectionId++}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => {
+                calls.push(name)
+                begin()
+                for (const value of rows) write({ type: `insert`, value })
+                commit()
+                return true
+              },
+            }
+          },
+        },
+      })
+    const parents = onDemand(`parent`, [{ id: `parent-1` }])
+    const children = onDemand(`child`, [
+      { id: `child-1`, parentId: `parent-1` },
+    ])
+    const live = createLiveQueryCollection({
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ parent: parents })
+          .where(({ parent }) => eq(parent.id, `parent-1`))
+          .select(({ parent }) => ({
+            id: parent.id,
+            kids: toArray(
+              q
+                .from({ child: children })
+                .where(({ child }) => eq(child.parentId, parent.id)),
+            ),
+          }))
+          .limit(0)
+          .findOne(),
+    })
+    try {
+      await live.toArrayWhenReady()
+      expect(calls).not.toContain(`child`)
+      expect(live.toArray).toEqual([])
+    } finally {
       await runCleanups([
         () => live.cleanup(),
         () => parents.cleanup(),
