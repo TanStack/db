@@ -24,6 +24,7 @@ import type {
   Context,
   DbClient,
   DeferredLiveQueryCollections,
+  ErrorTreeNode,
   GetResult,
   InferResultType,
   InitialQueryBuilder,
@@ -67,6 +68,7 @@ export interface UseLiveQueryReturn<T extends object, TData = Array<T>> {
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
+  errors: ErrorTreeNode | undefined
 }
 
 type InferConditionalResultType<TContext extends Context> =
@@ -100,6 +102,7 @@ export interface UseLiveQueryReturnWithCollection<
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
+  errors: ErrorTreeNode | undefined
 }
 
 type MaybeGetter<T> = T | (() => T)

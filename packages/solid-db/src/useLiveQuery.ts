@@ -23,6 +23,7 @@ import type {
   Collection,
   CollectionStatus,
   Context,
+  ErrorTreeNode,
   GetResult,
   InferResultType,
   InitialQueryBuilder,
@@ -128,6 +129,7 @@ export function useLiveQuery<TContext extends Context>(
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
+  errors: ErrorTreeNode | undefined
 }
 
 // Overload 1b: Accept query function that can return undefined/null
@@ -152,6 +154,7 @@ export function useLiveQuery<TContext extends Context>(
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
+  errors: ErrorTreeNode | undefined
 }
 
 /**
@@ -214,6 +217,7 @@ export function useLiveQuery<TContext extends Context>(
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
+  errors: ErrorTreeNode | undefined
 }
 
 /**
@@ -277,6 +281,7 @@ export function useLiveQuery<
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
+  errors: ErrorTreeNode | undefined
 }
 
 // Overload 3b: Accept pre-created live query collection with singleResult: true
@@ -305,6 +310,7 @@ export function useLiveQuery<
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
+  errors: ErrorTreeNode | undefined
 }
 
 // Implementation - use function overloads to infer the actual collection type
