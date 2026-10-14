@@ -1925,15 +1925,44 @@ function createElectricSync<T extends Row<unknown>>(
     // Abort controller for the stream - wraps the signal if provided
     const abortController = new AbortController()
     let cleanupAbortedStream = false
-    const forwardExternalAbort = () => abortController.abort()
+    // A final initial failure decides its waiting loads. A cleanup that a
+    // status listener runs inside that failure must not relabel it.
+    let initialSyncFailedFinally = false
+    // Once the first up-to-date is committed, its acceptance alone decides
+    // the initial sync: the Collection becomes ready when the snapshot is
+    // accepted, whatever errors, retries, or give-ups arrive meanwhile, and
+    // fails if the acceptance fails.
+    let firstSnapshotCommitted = false
+    // Cleanup, including a cache rotation's retirement, ends this session's
+    // claim on readiness; a replacement session decides it.
+    let sessionCleanedUp = false
+    const failInitialSync = (cause: unknown) => {
+      if (firstSnapshotCommitted) return
+      initialSyncFailedFinally = true
+      markError(cause)
+    }
+    const settleFirstSnapshot = (isBuffering: boolean, failure?: unknown) => {
+      if (sessionCleanedUp || collection.status !== `loading`) return
+      if (failure !== undefined) {
+        initialSyncFailedFinally = true
+        markError(failure)
+      } else if (isActiveLifecycle()) {
+        wrappedMarkReady(isBuffering, streamErrorVersion)
+      } else markReady()
+    }
+    // An external abort stops the source for good. Before the first ready,
+    // that is the final initial failure; cleanup aborts internally instead.
+    const forwardExternalAbort = () => {
+      const fails = isActiveLifecycle() && collection.status === `loading`
+      abortController.abort()
+      if (fails) failInitialSync(new StreamAbortedError(collectionId))
+    }
 
     if (shapeOptions.signal) {
       shapeOptions.signal.addEventListener(`abort`, forwardExternalAbort, {
         once: true,
       })
-      if (shapeOptions.signal.aborted) {
-        abortController.abort()
-      }
+      if (shapeOptions.signal.aborted) forwardExternalAbort()
     }
 
     abortController.signal.addEventListener(`abort`, () => {
@@ -1961,42 +1990,32 @@ function createElectricSync<T extends Row<unknown>>(
       signal: abortController.signal,
       onError: async (errorParams) => {
         if (!isActiveLifecycle() || abortController.signal.aborted) return
-        rejectFullSnapshot(errorParams)
         streamErrorVersion++
         // Note that Electric sends a 409 error on a `must-refetch` message, but the
         // ShapeStream handled this and it will not reach this handler, therefor
         // this handler will not run for a `must-refetch`.
-        const initialSyncFailed = collection.status === `loading`
-        if (initialSyncFailed) {
-          markError(errorParams)
+        // A stream error fails waiting loads and the initial sync only when no
+        // retry follows. A retry that succeeds is a success: waiting loads
+        // settle on the snapshot it establishes.
+        // Waiting loads and readiness waits reject with the same cause.
+        const fail = (cause: unknown) => {
+          rejectFullSnapshot(cause)
+          if (collection.status === `loading`) failInitialSync(cause)
         }
 
         if (shapeOptions.onError) {
-          // A progressive stream follows the same snapshot outside its
-          // buffered sync, so a retry must renew it as well.
-          const mayRetryFullSnapshot =
-            tracksFullSnapshot &&
-            !hasReceivedUpToDate &&
-            isActiveLifecycle() &&
-            !abortController.signal.aborted
-          if (mayRetryFullSnapshot) {
-            // Retire old acquisitions but admit new ones while the user's
-            // asynchronous retry decision is pending.
-            resetFullSnapshot()
-          }
-          const rejectPendingRetry = rejectFullSnapshot
           let retry: Awaited<ReturnType<typeof shapeOptions.onError>>
           try {
             retry = await shapeOptions.onError(errorParams)
           } catch (error) {
-            if (mayRetryFullSnapshot) rejectPendingRetry(error)
+            fail(error)
             throw error
           }
-          if (mayRetryFullSnapshot && (!retry || typeof retry !== `object`)) {
-            rejectPendingRetry(errorParams)
-          }
+          if (!retry || typeof retry !== `object`) fail(errorParams)
           return retry
         } else {
+          const initialSyncFailed = collection.status === `loading`
+          fail(errorParams)
           console.error(
             `An error occurred while syncing collection: ${collection.id}, \n` +
               (initialSyncFailed
@@ -2606,9 +2625,18 @@ function createElectricSync<T extends Row<unknown>>(
         const readyErrorVersion = streamErrorVersion
         // Readiness counts accepted rows.
         const accepted = whenSyncAccepted(applied)
+        const firstSnapshot =
+          commitPoint === `up-to-date` && collection.status === `loading`
         if (commitPoint === `up-to-date`) resolveFullSnapshot(applied)
         if (accepted === true) {
           wrappedMarkReady(wasBufferingInitialSync, readyErrorVersion)
+        } else if (firstSnapshot) {
+          firstSnapshotCommitted = true
+          void accepted.then(
+            () => settleFirstSnapshot(wasBufferingInitialSync),
+            (error: unknown) =>
+              settleFirstSnapshot(wasBufferingInitialSync, error),
+          )
         } else {
           void accepted.then(
             () => wrappedMarkReady(wasBufferingInitialSync, readyErrorVersion),
@@ -2679,9 +2707,16 @@ function createElectricSync<T extends Row<unknown>>(
         processMessages(messages)
       },
       (error) => {
-        // The SDK rejected the retry decision or exhausted its retry loop.
-        // In that case no provider batch will settle the renewed gate.
+        // The SDK gave up: it rejected the retry decision or exhausted its
+        // retry loop. No provider batch will settle the gate, and before the
+        // first ready this is the source's final initial failure.
         rejectFullSnapshot(error)
+        if (
+          isActiveLifecycle() &&
+          !abortController.signal.aborted &&
+          collection.status === `loading`
+        )
+          failInitialSync(error)
       },
     )
 
@@ -2715,7 +2750,9 @@ function createElectricSync<T extends Row<unknown>>(
     return {
       loadSubset: loadSubsetDedupe?.loadSubset,
       cleanup: () => {
-        if (!abortController.signal.aborted) cleanupAbortedStream = true
+        sessionCleanedUp = true
+        if (!abortController.signal.aborted && !initialSyncFailedFinally)
+          cleanupAbortedStream = true
         shapeOptions.signal?.removeEventListener(`abort`, forwardExternalAbort)
         // Unsubscribe from the stream
         unsubscribeStream()

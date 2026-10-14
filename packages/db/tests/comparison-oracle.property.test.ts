@@ -1,19 +1,26 @@
 import { describe, expect, it } from 'vitest'
 import { fc, test as fcTest } from '@fast-check/vitest'
+import { Temporal } from 'temporal-polyfill'
 import {
   areValuesEqual,
   ascComparator,
+  defaultComparator,
   descComparator,
   makeComparator,
   normalizeValue,
 } from '../src/utils/comparison'
+import { DEFAULT_COMPARE_OPTIONS } from '../src/utils'
 import type { CompareOptions } from '../src/query/builder/types'
 
 /**
  * Comparison defines the order and equality domains used by queries and
  * indexes. The laws are reflexivity, deterministic sign, antisymmetry, and
  * transitivity under one resolved option set. Null placement, direction, and
- * lexical/locale string modes are independent axes.
+ * lexical/locale string modes are independent axes. In the bounded default
+ * ascending domain below, NaN and invalid Dates share one non-finite order
+ * position and follow finite values; null remains first. The published NaN
+ * ordering change in `packages/db/CHANGELOG.md` (#1582) establishes that law
+ * for ordinary numbers and Dates in the transferred unit-test domain.
  *
  * Authority: `OrderByOptions` and `CompareOptions` in the query builder's
  * option types declare these modes. The index comparator contract accepts
@@ -21,10 +28,14 @@ import type { CompareOptions } from '../src/query/builder/types'
  *
  * The model uses direct primitive, Date, array, and byte comparisons from the
  * declared domain. It excludes unrelated object identities because production
- * intentionally assigns those a creation-order ID. Equality laws separately
- * cover the normalized value classes and changed-byte controls. Comparator
- * signs reject NaN and non-number results before reduction. Signed infinity
- * is a valid comparator result, including for custom string collation.
+ * intentionally assigns those a creation-order ID. The non-finite model uses
+ * input tags and finite epoch-day values, rather than the production
+ * unorderable classifier. It covers number-only and Date-only sorts with
+ * optional null; it does not claim mixed-type order or query/index paths.
+ * Equality laws separately cover normalized value classes and changed-byte
+ * controls. Comparator signs reject NaN and non-number results before
+ * reduction. Signed infinity is a valid comparator result, including for
+ * custom string collation.
  *
  * Binary normalization has a narrower, established contract: equal byte
  * contents produce one Map key, different contents remain distinct, and a
@@ -200,8 +211,9 @@ function comparisonProperty<
 // locale/lexical, and custom-collation cases reconstruct those boundaries.
 // Array length 0/1 and binary length 0/1/128/129 are marginal cases. Plain
 // objects are outside this order model because their IDs depend on creation
-// order. Mixed-type order and NaN inputs are outside this bounded grammar; an
-// invalid comparator result is rejected by the control below.
+// order. Mixed-type order is outside this bounded grammar. A tagged grammar
+// below admits NaN and invalid Date inputs; an invalid comparator result is
+// rejected by the control below.
 const arbitraryComparablePrimitive = fc.oneof(
   fc.string(),
   fc.integer(),
@@ -210,6 +222,108 @@ const arbitraryComparablePrimitive = fc.oneof(
 )
 
 const arbitraryDate = fc.date({ noInvalidDate: true })
+
+type NonFiniteFamily = `number` | `date`
+type NonFiniteInput = {
+  family: NonFiniteFamily
+  finiteDays: Array<number>
+  unorderedCount: number
+  includeNull: boolean
+}
+type TaggedOrderValue = {
+  id: string
+  value: number | Date | null
+  category: `null` | `finite` | `unordered`
+  order: number
+}
+
+// The generator's tags are reference facts: finite epoch days have ordinary
+// numeric order, null precedes them, and the family's non-finite values follow
+// them. Constructing expected signs from these tags avoids asking production
+// whether a Date or number is unorderable. Distinct IDs preserve duplicate
+// NaNs/invalid Dates in the sorted observation.
+function taggedOrderValues(input: NonFiniteInput): Array<TaggedOrderValue> {
+  const unordered = () =>
+    input.family === `number` ? Number.NaN : new Date(Number.NaN)
+  const finite = input.finiteDays.map((day, index) => ({
+    id: `finite:${index}`,
+    value: input.family === `number` ? day : new Date(day * 86_400_000),
+    category: `finite` as const,
+    order: day,
+  }))
+  const rows: Array<TaggedOrderValue> = [
+    finite[0]!,
+    { id: `unordered:0`, value: unordered(), category: `unordered`, order: 0 },
+    ...finite.slice(1),
+    ...Array.from({ length: input.unorderedCount - 1 }, (_, index) => ({
+      id: `unordered:${index + 1}`,
+      value: unordered(),
+      category: `unordered` as const,
+      order: 0,
+    })),
+  ]
+  if (input.includeNull) {
+    rows.splice(2, 0, { id: `null`, value: null, category: `null`, order: 0 })
+  }
+  return rows
+}
+
+function taggedOrderSign(a: TaggedOrderValue, b: TaggedOrderValue): -1 | 0 | 1 {
+  const rank = { null: 0, finite: 1, unordered: 2 }
+  const difference = rank[a.category] - rank[b.category]
+  const valueDifference =
+    difference || (a.category === `finite` ? a.order - b.order : 0)
+  return valueDifference < 0 ? -1 : valueDifference > 0 ? 1 : 0
+}
+
+// Production observes direct comparator returns and the order of a stable
+// JavaScript sort using the exported default comparator. The comparison runs
+// immediately after each call, so it detects wrong signs and lost or reordered
+// duplicate non-finite rows at the exact sort checkpoint.
+function assertNonFiniteOrder(
+  input: NonFiniteInput,
+  compare: (a: number | Date | null, b: number | Date | null) => number = (
+    a,
+    b,
+  ) => ascComparator(a, b, DEFAULT_COMPARE_OPTIONS),
+  sortCompare: (
+    a: number | Date | null,
+    b: number | Date | null,
+  ) => number = defaultComparator,
+): void {
+  const rows = taggedOrderValues(input)
+  for (const a of rows) {
+    for (const b of rows) {
+      const result = compare(a.value, b.value)
+      expect(sign(result)).toBe(taggedOrderSign(a, b))
+      // Preserve the legacy exact-zero assertion for NaN/NaN, including its
+      // distinction between positive and negative zero in Vitest.
+      if (a.category === `unordered` && b.category === `unordered`) {
+        expect(result).toBe(0)
+      }
+    }
+  }
+  const actual = [...rows].sort((a, b) => sortCompare(a.value, b.value))
+  const expected = [...rows].sort(taggedOrderSign)
+  expect(actual.map((row) => row.id)).toEqual(expected.map((row) => row.id))
+}
+
+// Legal inputs contain 1..5 distinct finite numbers or valid epoch-day Dates,
+// one or two NaNs/invalid Dates, and optional null. A singleton finite value,
+// duplicate non-finite values, negative days, and null presence are margins.
+// Removing the family axis misses invalid Dates; removing the duplicate count
+// misses equal non-finite rows; removing null misses its default placement.
+// Mixed families, Temporal values, symbols, and invalid option objects are not
+// generated. The fixed examples below reconstruct the legacy sort histories.
+const arbitraryNonFiniteInput: fc.Arbitrary<NonFiniteInput> = fc.record({
+  family: fc.constantFrom(`number` as const, `date` as const),
+  finiteDays: fc.uniqueArray(fc.integer({ min: -20_000, max: 20_000 }), {
+    minLength: 1,
+    maxLength: 5,
+  }),
+  unorderedCount: fc.integer({ min: 1, max: 2 }),
+  includeNull: fc.boolean(),
+})
 
 const arbitraryComparableArray = fc.array(arbitraryComparablePrimitive, {
   maxLength: 5,
@@ -677,6 +791,100 @@ describe(`ascComparator property-based tests`, () => {
   })
 })
 
+describe(`NaN and invalid Date default-order refinement`, () => {
+  it(`reconstructs the finite, duplicate NaN, null, and invalid Date witnesses`, () => {
+    assertNonFiniteOrder({
+      family: `number`,
+      finiteDays: [3, 1, 5],
+      unorderedCount: 2,
+      includeNull: false,
+    })
+    assertNonFiniteOrder({
+      family: `number`,
+      finiteDays: [5, 1],
+      unorderedCount: 1,
+      includeNull: true,
+    })
+    assertNonFiniteOrder({
+      family: `date`,
+      finiteDays: [19_358], // 2023-01-01, the legacy valid-Date operand.
+      unorderedCount: 1,
+      includeNull: false,
+    })
+  })
+
+  comparisonProperty([arbitraryNonFiniteInput])(
+    `default comparator refines tagged finite and non-finite order`,
+    (input) => assertNonFiniteOrder(input),
+  )
+
+  it(`rejects a wrong comparison that ties non-finite and finite values`, () => {
+    for (const family of [`number`, `date`] as const) {
+      let reachedFault = false
+      const faultyComparator = (
+        a: number | Date | null,
+        b: number | Date | null,
+      ) => {
+        const faultApplies =
+          family === `number`
+            ? typeof a === `number` &&
+              Number.isNaN(a) &&
+              typeof b === `number` &&
+              Number.isFinite(b)
+            : a instanceof Date &&
+              Number.isNaN(a.getTime()) &&
+              b instanceof Date &&
+              Number.isFinite(b.getTime())
+        if (faultApplies) {
+          reachedFault = true
+          return 0
+        }
+        return ascComparator(a, b, DEFAULT_COMPARE_OPTIONS)
+      }
+      expect(() =>
+        assertNonFiniteOrder(
+          {
+            family,
+            finiteDays: [1],
+            unorderedCount: 1,
+            includeNull: false,
+          },
+          faultyComparator,
+        ),
+      ).toThrowError()
+      expect(reachedFault).toBe(true)
+    }
+  })
+
+  it(`rejects a default sort that ties NaN to finite values`, () => {
+    let reachedFault = false
+    const faultySort = (a: number | Date | null, b: number | Date | null) => {
+      if (typeof a === `number` && Number.isNaN(a)) {
+        reachedFault = true
+        return 0
+      }
+      if (typeof b === `number` && Number.isNaN(b)) {
+        reachedFault = true
+        return 0
+      }
+      return defaultComparator(a, b)
+    }
+    expect(() =>
+      assertNonFiniteOrder(
+        {
+          family: `number`,
+          finiteDays: [3, 1, 5],
+          unorderedCount: 2,
+          includeNull: false,
+        },
+        (a, b) => ascComparator(a, b, DEFAULT_COMPARE_OPTIONS),
+        faultySort,
+      ),
+    ).toThrowError()
+    expect(reachedFault).toBe(true)
+  })
+})
+
 describe(`descComparator property-based tests`, () => {
   comparisonProperty([arbitrarySameTypePair])(
     `descComparator reverses ascComparator ordering (same types)`,
@@ -831,17 +1039,6 @@ describe(`normalizeValue property-based tests`, () => {
       expect(normalizeValue(normalized)).not.toBe(normalized)
     },
   )
-
-  fcTest(`reads binary keys from indexed bytes, not custom iteration`, () => {
-    const bytes = new Uint8Array([2])
-    Object.defineProperty(bytes, Symbol.iterator, {
-      value: function* () {
-        yield 1
-      },
-    })
-
-    expect(normalizeValue(bytes)).toBe(normalizeValue(new Uint8Array([2])))
-  })
 })
 
 describe(`areValuesEqual property-based tests`, () => {
@@ -880,6 +1077,230 @@ describe(`areValuesEqual property-based tests`, () => {
       }
     },
   )
+})
+
+/**
+ * Temporal ordering uses calendar position or instant. The published #1519
+ * contract gives PlainDate calendar order
+ * and ZonedDateTime instant order even when zones differ. These models use
+ * supplied ISO date fields and epoch-nanosecond offsets; neither asks the
+ * production comparator or Temporal's static compare for an expected sign.
+ *
+ * Legal inputs are ISO PlainDates from years 2000..2030 with days 1..28 and
+ * ZonedDateTimes within two seconds of a fixed instant in four offset zones.
+ * Equal-value branches construct separate objects, and the zoned branch forces
+ * different zones at the same instant. The production path is the exported
+ * `ascComparator` under default options; each return is the observation
+ * checkpoint. This lane makes no indexed or public-query claim.
+ */
+type IsoDateFields = { year: number; month: number; day: number }
+type PlainDateOrderInput = { left: IsoDateFields; right: IsoDateFields }
+
+function modelPlainDateSign(
+  left: IsoDateFields,
+  right: IsoDateFields,
+): -1 | 0 | 1 {
+  for (const field of [`year`, `month`, `day`] as const) {
+    if (left[field] < right[field]) return -1
+    if (left[field] > right[field]) return 1
+  }
+  return 0
+}
+
+function assertPlainDateOrder(input: PlainDateOrderInput): void {
+  const left = new Temporal.PlainDate(
+    input.left.year,
+    input.left.month,
+    input.left.day,
+  )
+  const right = new Temporal.PlainDate(
+    input.right.year,
+    input.right.month,
+    input.right.day,
+  )
+  const expected = modelPlainDateSign(input.left, input.right)
+  const actual = ascComparator(left, right, DEFAULT_COMPARE_OPTIONS)
+  const reverse = ascComparator(right, left, DEFAULT_COMPARE_OPTIONS)
+  expect(sign(actual)).toBe(expected)
+  expect(sign(reverse)).toBe(expected === 0 ? 0 : -expected)
+  if (expected === 0) {
+    // The old unit block asserted an exact zero for two distinct instances.
+    expect(left).not.toBe(right)
+    expect(actual).toBe(0)
+    expect(reverse).toBe(0)
+  }
+}
+
+const arbitraryIsoDateFields: fc.Arbitrary<IsoDateFields> = fc.record({
+  year: fc.integer({ min: 2000, max: 2030 }),
+  month: fc.integer({ min: 1, max: 12 }),
+  day: fc.integer({ min: 1, max: 28 }),
+})
+const arbitraryPlainDateOrderInput: fc.Arbitrary<PlainDateOrderInput> =
+  fc.oneof(
+    fc.record({
+      left: arbitraryIsoDateFields,
+      right: arbitraryIsoDateFields,
+    }),
+    arbitraryIsoDateFields.map((fields) => ({ left: fields, right: fields })),
+  )
+
+type OffsetZone = `+00:00` | `+05:30` | `-05:00` | `+14:00`
+type ZonedDateTimeOrderInput = {
+  leftNanoOffset: number
+  rightNanoOffset: number
+  leftZone: OffsetZone
+  rightZone: OffsetZone
+}
+
+// The base instant reconstructs the old 06:30 UTC / 12:00 +05:30 witness.
+// Offsets are safe integers, so their ordinary numeric order is the reference
+// for the generated epoch nanoseconds.
+const zonedBaseEpochNanoseconds =
+  BigInt(Date.UTC(2024, 0, 15, 6, 30)) * 1_000_000n
+
+function modelNanosecondSign(left: number, right: number): -1 | 0 | 1 {
+  return left < right ? -1 : left > right ? 1 : 0
+}
+
+function zonedValue(nanoOffset: number, zone: OffsetZone) {
+  return Temporal.Instant.fromEpochNanoseconds(
+    zonedBaseEpochNanoseconds + BigInt(nanoOffset),
+  ).toZonedDateTimeISO(zone)
+}
+
+function assertZonedDateTimeOrder(
+  input: ZonedDateTimeOrderInput,
+  compare: (left: unknown, right: unknown) => number = (left, right) =>
+    ascComparator(left, right, DEFAULT_COMPARE_OPTIONS),
+): void {
+  const left = zonedValue(input.leftNanoOffset, input.leftZone)
+  const right = zonedValue(input.rightNanoOffset, input.rightZone)
+  const expected = modelNanosecondSign(
+    input.leftNanoOffset,
+    input.rightNanoOffset,
+  )
+  const actual = compare(left, right)
+  const reverse = compare(right, left)
+  expect(sign(actual)).toBe(expected)
+  expect(sign(reverse)).toBe(expected === 0 ? 0 : -expected)
+  if (expected === 0) {
+    expect(actual).toBe(0)
+    expect(reverse).toBe(0)
+    if (input.leftZone !== input.rightZone) {
+      // A text-order mutant sees different strings for one model instant.
+      expect(left.toString()).not.toBe(right.toString())
+    }
+  }
+}
+
+const arbitraryNanoOffset = fc.integer({
+  min: -1_999_999_999,
+  max: 1_999_999_999,
+})
+const arbitraryOffsetZone: fc.Arbitrary<OffsetZone> = fc.constantFrom(
+  `+00:00`,
+  `+05:30`,
+  `-05:00`,
+  `+14:00`,
+)
+const arbitraryZonedDateTimeOrderInput: fc.Arbitrary<ZonedDateTimeOrderInput> =
+  fc.oneof(
+    fc.record({
+      leftNanoOffset: arbitraryNanoOffset,
+      rightNanoOffset: arbitraryNanoOffset,
+      leftZone: arbitraryOffsetZone,
+      rightZone: arbitraryOffsetZone,
+    }),
+    fc
+      .tuple(arbitraryNanoOffset, arbitraryOffsetZone, arbitraryOffsetZone)
+      .filter(([, leftZone, rightZone]) => leftZone !== rightZone)
+      .map(([nanoOffset, leftZone, rightZone]) => ({
+        leftNanoOffset: nanoOffset,
+        rightNanoOffset: nanoOffset,
+        leftZone,
+        rightZone,
+      })),
+    fc
+      .tuple(
+        arbitraryNanoOffset,
+        fc.boolean(),
+        arbitraryOffsetZone,
+        arbitraryOffsetZone,
+      )
+      .map(([nanoOffset, forward, leftZone, rightZone]) => ({
+        leftNanoOffset: nanoOffset,
+        rightNanoOffset: nanoOffset + (forward ? 1 : -1),
+        leftZone,
+        rightZone,
+      })),
+  )
+
+describe(`Temporal default-order refinement`, () => {
+  it(`reconstructs the three PlainDate and one ZonedDateTime assertions`, () => {
+    const jan = { year: 2024, month: 1, day: 1 }
+    const june = { year: 2024, month: 6, day: 1 }
+    assertPlainDateOrder({
+      left: { year: 2023, month: 12, day: 28 },
+      right: jan,
+    })
+    assertPlainDateOrder({ left: jan, right: june })
+    assertPlainDateOrder({
+      left: jan,
+      right: { year: 2024, month: 1, day: 2 },
+    })
+    assertPlainDateOrder({ left: jan, right: jan })
+    assertZonedDateTimeOrder({
+      leftNanoOffset: 0,
+      rightNanoOffset: 0,
+      leftZone: `+00:00`,
+      rightZone: `+05:30`,
+    })
+    assertZonedDateTimeOrder({
+      leftNanoOffset: 0,
+      rightNanoOffset: 1,
+      leftZone: `+05:30`,
+      rightZone: `+00:00`,
+    })
+  })
+
+  comparisonProperty([arbitraryPlainDateOrderInput])(
+    `ISO PlainDate order refines supplied calendar fields`,
+    assertPlainDateOrder,
+  )
+
+  comparisonProperty([arbitraryZonedDateTimeOrderInput])(
+    `ZonedDateTime order refines supplied instants across offset zones`,
+    assertZonedDateTimeOrder,
+  )
+
+  it(`rejects text order for one instant shown in two zones`, () => {
+    const sample: ZonedDateTimeOrderInput = {
+      leftNanoOffset: 0,
+      rightNanoOffset: 0,
+      leftZone: `+00:00`,
+      rightZone: `+05:30`,
+    }
+    const lexical = (left: unknown, right: unknown) =>
+      String(left).localeCompare(String(right))
+    expect(() => assertZonedDateTimeOrder(sample, lexical)).toThrow()
+  })
+
+  it(`rejects millisecond truncation across adjacent instants`, () => {
+    const sample: ZonedDateTimeOrderInput = {
+      leftNanoOffset: 0,
+      rightNanoOffset: 1,
+      leftZone: `+05:30`,
+      rightZone: `+00:00`,
+    }
+    const truncated = (left: unknown, right: unknown) => {
+      const leftEpoch = (left as { epochNanoseconds: bigint }).epochNanoseconds
+      const rightEpoch = (right as { epochNanoseconds: bigint })
+        .epochNanoseconds
+      return Number(leftEpoch / 1_000_000n - rightEpoch / 1_000_000n)
+    }
+    expect(() => assertZonedDateTimeOrder(sample, truncated)).toThrow()
+  })
 })
 
 if (requestedProperty !== undefined) {

@@ -1,4 +1,5 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
+import { Temporal } from 'temporal-polyfill'
 import { describe, expect, it, vi } from 'vitest'
 import {
   BTreeIndex,
@@ -572,6 +573,89 @@ async function verifyGeneratedHistory({
 }
 
 describe(`change-event history oracle`, () => {
+  // Published #1519 keeps equivalent Duration forms distinct for query `eq`.
+  // Under #1901's change-message reconstruction law, a source replacement
+  // that changes the Duration's intrinsic fields must reach the consumer's
+  // mirror as well as the public row. This two-step history inserts one second,
+  // then replaces it with 1000 milliseconds. The reference Map applies that
+  // valid write despite the shared display text; at the update commit, both
+  // public observations must reflect the second value.
+  // This witness covers ordinary same-realm Durations, not altered objects or
+  // a requirement to suppress events for a separately allocated equal copy.
+  it(`publishes a Duration field change to the Collection and change-message consumer`, async () => {
+    interface DurationRow extends Record<string, unknown> {
+      id: number
+      duration: Temporal.Duration
+    }
+    let sync!: Parameters<SyncConfig<DurationRow, number>[`sync`]>[0]
+    const collection = createCollection<DurationRow, number>({
+      id: `duration-field-change-history`,
+      getKey: (row) => row.id,
+      startSync: true,
+      sync: {
+        sync: (actions) => {
+          sync = actions
+          actions.markReady()
+        },
+      },
+    })
+
+    await runWithCleanup(
+      async () => {
+        await collection.stateWhenReady()
+        const first = {
+          id: 1,
+          duration: Temporal.Duration.from({ seconds: 1 }),
+        }
+        const second = {
+          id: 1,
+          duration: Temporal.Duration.from({ milliseconds: 1000 }),
+        }
+        expect(first.duration.toString()).toBe(second.duration.toString())
+        sync.begin()
+        sync.write({ type: `insert`, value: first })
+        expect(sync.commit()).toBe(true)
+
+        // The model applies each valid source write to a plain keyed Map.
+        // A subscriber maintains an independent mirror from public messages.
+        const expected = new Map<number, DurationRow>([[1, first]])
+        const mirror = new Map(expected)
+        const received: Array<ChangeMessage<DurationRow, number>> = []
+        const subscription = collection.subscribeChanges(
+          (changes) => {
+            received.push(...changes)
+            for (const change of changes) {
+              if (change.type === `delete`) mirror.delete(change.key)
+              else mirror.set(change.key, change.value)
+            }
+          },
+          { includeInitialState: false },
+        )
+        try {
+          expected.set(1, second)
+          sync.begin()
+          sync.write({ type: `update`, value: second })
+          expect(sync.commit()).toBe(true)
+
+          const expectedFields = [0, 1000]
+          const fields = (row: DurationRow | undefined) => [
+            row?.duration.seconds,
+            row?.duration.milliseconds,
+          ]
+          expect(fields(expected.get(1))).toEqual(expectedFields)
+          expect(fields(collection.state.get(1))).toEqual(expectedFields)
+          expect(received.map((message) => message.type)).toEqual([`update`])
+          expect(fields(received[0]?.previousValue)).toEqual([1, 0])
+          expect(fields(received[0]?.value)).toEqual(expectedFields)
+          expect(fields(mirror.get(1))).toEqual(expectedFields)
+        } finally {
+          subscription.unsubscribe()
+        }
+      },
+      () => collection.cleanup(),
+    )
+  })
+
   it(`preserves each key's causal messages within a deferred callback`, async () => {
     const rounds: ReadonlyArray<ReadonlyArray<Op>> = [
       [

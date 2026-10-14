@@ -32,7 +32,7 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [
     `db/tests/index-update-oracle.property.test.ts`,
     `index-update`,
-    `reference-model exact-identity custom-comparator`,
+    `reference-model nullish-membership exact-identity custom-comparator`,
   ],
   [
     `db/tests/cursor-oracle.property.test.ts`,
@@ -265,6 +265,10 @@ const indexReplayTestNames = new Map([
   [
     `index-update.reference-model`,
     `matches a reference model across valid operation sequences \\(seed undefined\\)`,
+  ],
+  [
+    `index-update.nullish-membership`,
+    `refines nullish membership histories \\(seed undefined\\)`,
   ],
   [
     `index-update.exact-identity`,

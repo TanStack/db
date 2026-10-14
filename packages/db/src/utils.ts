@@ -9,6 +9,20 @@ interface TypedArray {
   [index: number]: number
 }
 
+export const durationFields = [
+  `years`,
+  `months`,
+  `weeks`,
+  `days`,
+  `hours`,
+  `minutes`,
+  `seconds`,
+  `milliseconds`,
+  `microseconds`,
+  `nanoseconds`,
+] as const
+export type DurationFields = Record<(typeof durationFields)[number], number>
+
 /**
  * Deep equality function that compares two values recursively
  * Handles primitives, objects, arrays, Date, RegExp, Map, Set, TypedArrays, and Temporal objects
@@ -262,6 +276,16 @@ export function deepEqualsInternal(
 
     // If they're different Temporal types, they're not equal
     if (aTag !== bTag) return false
+
+    // Duration identity preserves its fields, even when toString normalizes
+    // different units to the same elapsed time.
+    if (aTag === `Temporal.Duration`) {
+      const durationA = a as unknown as DurationFields
+      const durationB = b as unknown as DurationFields
+      return durationFields.every(
+        (field) => durationA[field] === durationB[field],
+      )
+    }
 
     // Use Temporal's built-in equals method if available
     if (typeof a.equals === `function`) {

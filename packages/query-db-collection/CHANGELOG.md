@@ -1,5 +1,26 @@
 # @tanstack/query-db-collection
 
+## 1.4.4
+
+### Patch Changes
+
+- Recover persisted on-demand Electric and Query collections after cache claim loss by rotating their SQLite cache and reloading active subsets. Fence retired provider work and expired claims, preserve warm runs on their claimed cache generation, and forward claim lifetime options through SQLite host factories. Require explicit eager or claim-bound managed targets for SQLite adapter data operations, and forward them through Electron IPC protocol v6. Bare collection IDs no longer work at this lower-level adapter boundary. ([#2069](https://github.com/TanStack/db/pull/2069))
+
+- Prevent direct writes from automatically refetching active Query subsets. On-demand writes patch changed keys already present in active raw arrays or directly selected response arrays, except when the Query is shared with another Collection. Eager writes patch representable rows in a shared Query cache, so Collections using the same Query project those edits. In both modes, cache patches preserve Query error, invalidation, and freshness state; an idle eager cache seed moves from pending to success without advancing its freshness timestamp. Direct writes no longer clear a prior fetch error or mark stale data fresh. Older in-flight or queued results cannot undo an accepted write, and derived cache responses are not replayed over it on resubscribe. A later-started successful subset fetch controls a shared row's value over an older request that settles afterward. Callers choose when to request current server rows; a complete matching on-demand result can remove an omitted ownerless direct row. Query Core 5.90.15 or later is required for post-write refetch replacement and error-state recovery. ([#2065](https://github.com/TanStack/db/pull/2065))
+
+  An eager Collection that later joins a Query patched by another eager Collection projects the cached edit without starting a request, including when disabled. An on-demand Collection still revalidates an unverified cache edit before accepting it for a subset. A fresh persisted Collection refetches on a cached-row collision when it cannot recover the order of its stored direct write and that Query result.
+  Inactive Query entries under the Collection key prefix may be removed after a direct write. A physical Query whose stored key is outside that prefix remains in the cache, even when a custom hash aliases it with a Collection key; callers can explicitly evict or refetch that entry.
+
+- A completed, active full-source Query Collection load can now serve later ([#2135](https://github.com/TanStack/db/pull/2135))
+  filtered or windowed live queries when the collection uses a static query key.
+  The narrower queries retain the full Query until their final owner releases,
+  so the original full view can unmount without dropping their rows or stopping
+  later invalidation updates. Incomplete full loads and explicit subset refetches
+  keep their own request paths. A narrower scope with retained persisted ownership
+  makes an exact request to revalidate its rows and owners.
+- Updated dependencies [[`cda9d6a`](https://github.com/TanStack/db/commit/cda9d6a731e93777f1c8bfdab7d9e22f70e80dc6), [`2f928e6`](https://github.com/TanStack/db/commit/2f928e6f240adb8874a6537905000009a2e9b53f), [`dfec42e`](https://github.com/TanStack/db/commit/dfec42e4a78ef609f9aa2f2c0f863a1e4f1ae1e3), [`1a65c2c`](https://github.com/TanStack/db/commit/1a65c2c63db9ad14c08d35b09d0081ecc121fbfc), [`1b4ee8d`](https://github.com/TanStack/db/commit/1b4ee8d57168978847687e75dbc1c33ddb935ed3), [`bbbf017`](https://github.com/TanStack/db/commit/bbbf017ef5b3884515295a4225faacdfd814499e), [`bc6f30e`](https://github.com/TanStack/db/commit/bc6f30e716aeb26c13b6a0e9ba00a27edc72a4d7), [`fade2e2`](https://github.com/TanStack/db/commit/fade2e24cfb9922b9b172f96194f7b6246731f50), [`bbe9327`](https://github.com/TanStack/db/commit/bbe9327ce90ab587ee6ef24e0030f79291f3057d), [`b34a579`](https://github.com/TanStack/db/commit/b34a579762b36dd49a89e11eacd7788f1df89453), [`6fa60aa`](https://github.com/TanStack/db/commit/6fa60aa7ada4d418f85cd745c9eea0af3de0efb4), [`f84387c`](https://github.com/TanStack/db/commit/f84387cd8220e8603dc24a99fe4881fa4cd5ddcd), [`be4a3d6`](https://github.com/TanStack/db/commit/be4a3d642c6d292150f7ff4e041442338e5a2de2), [`0dc696a`](https://github.com/TanStack/db/commit/0dc696a64901973d8025cb1a40af34c68c856855), [`fd13e3c`](https://github.com/TanStack/db/commit/fd13e3cc9d3302e7598a78ac8f49d06dbbde7e08)]:
+  - @tanstack/db@0.14.0
+
 ## 1.4.3
 
 ### Patch Changes

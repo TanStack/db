@@ -1,6 +1,34 @@
 import { describe, expect, it, vi } from 'vitest'
+import { Temporal } from 'temporal-polyfill'
 import { BasicIndex } from '../src/indexes/basic-index'
 import { PropRef } from '../src/query/ir'
+
+describe(`BasicIndex ordered read work`, () => {
+  it(`does not reserialize admitted Temporal values while reading`, () => {
+    const index = new BasicIndex<number>(1, new PropRef([`value`]))
+    for (let key = 0; key < 64; key++) {
+      index.add(key, {
+        value: Temporal.Instant.fromEpochNanoseconds(BigInt(key)),
+      })
+    }
+
+    const toString = vi.spyOn(Temporal.Instant.prototype, `toString`)
+    let range = new Set<number>()
+    let ordered: Array<number> = []
+    let stringifyCalls = 0
+    try {
+      range = index.rangeQuery({})
+      ordered = index.takeFromStart(64)
+      stringifyCalls = toString.mock.calls.length
+    } finally {
+      toString.mockRestore()
+    }
+
+    expect(range.size).toBe(64)
+    expect(ordered).toEqual(Array.from({ length: 64 }, (_, key) => key))
+    expect(stringifyCalls).toBe(0)
+  })
+})
 
 describe(`BasicIndex removal work`, () => {
   it.each([1, 4])(

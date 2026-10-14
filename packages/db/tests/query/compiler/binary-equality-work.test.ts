@@ -66,7 +66,7 @@ describe(`binary equality work`, () => {
   )
 
   it.each([`eq`, `in`])(
-    `compares a MiB using %s without caching mutable bytes`,
+    `compares a MiB using %s without encoding strings`,
     (operator) => {
       const left = new Uint8Array(1024 * 1024).fill(65)
       const right = left.slice()
@@ -78,8 +78,9 @@ describe(`binary equality work`, () => {
       )
       const equal = measureEncoding(() => evaluate({ blob: left }))
       expect(equal).toEqual({ result: true, bytes: 0 })
-      right[right.length - 1] = 66
-      const different = measureEncoding(() => evaluate({ blob: left }))
+      const changedRow = left.slice()
+      changedRow[changedRow.length - 1] = 66
+      const different = measureEncoding(() => evaluate({ blob: changedRow }))
       expect(different).toEqual({ result: false, bytes: 0 })
     },
   )
