@@ -614,11 +614,13 @@ describe(`includes deterministic work-counter oracle`, () => {
  *
  * A static parent filter (`eq` or `inArray` on the correlation field) may
  * create child demand before the window runs only when no window can drop the
- * rows it names: neither the query nor an enclosing query has a window, or
- * the query is a `findOne` that shows one row, with no `offset` and no window
- * requested before start, for one named correlation value. Any other window can drop them, including one `setWindow`
- * requests later, so the static demand must wait for the window. A `findOne`'s
- * window is `{ offset, limit: 1 }`, and `setWindow` keeps its limit at 1.
+ * rows it names: no enclosing query has a window, no window requested before
+ * start has a nonzero offset, and either the query has no window or it is a
+ * `findOne` that shows one row, with no `offset`, for one named correlation
+ * value. Any other window can drop them, including one `setWindow` requests
+ * later, so the static demand must wait for the window. A `findOne` window
+ * keeps its compiled limit (1, or 0 for `.limit(0).findOne()`): `setWindow`
+ * may move its offset and throws for any other limit.
  *
  * ## Model
  *
