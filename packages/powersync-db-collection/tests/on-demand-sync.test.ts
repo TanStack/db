@@ -2698,6 +2698,8 @@ describe(`On-Demand Sync Mode`, () => {
         commit,
         markReady: vi.fn(),
         markError: vi.fn(),
+        reportError: vi.fn(),
+        reportHealthy: vi.fn(),
         truncate: vi.fn(),
       } as never)
       const loadSubset =
@@ -3282,7 +3284,16 @@ describe(`On-Demand Sync Mode`, () => {
             .spyOn(db.triggers, `createDiffTrigger`)
             .mockRejectedValueOnce(new Error(`release rebuild failed`))
           collection._sync.unloadSubset(first)
-          await vi.waitFor(() => expect(collection.status).toBe(`error`))
+          // The outage keeps the rows and the ready status. The adapter retries
+          // the rebuild, so it reports a health error that is not final.
+          await vi.waitFor(() =>
+            expect(collection.health.error).toMatchObject({
+              phase: `sync`,
+              final: false,
+              message: `release rebuild failed`,
+            }),
+          )
+          expect(collection.status).toBe(`ready`)
           if (change === `delete` || change === `release-last`) {
             await db.execute(`DELETE FROM products WHERE id = 'retained'`)
           } else if (change === `predicate exit`) {
@@ -3296,7 +3307,9 @@ describe(`On-Demand Sync Mode`, () => {
             await vi.waitFor(() =>
               expect(trigger.mock.calls.length).toBeGreaterThan(1),
             )
-          await vi.waitFor(() => expect(collection.status).toBe(`ready`))
+          // A rebuild whose baseline applied reports healthy again.
+          await vi.waitFor(() => expect(collection.health.isError).toBe(false))
+          expect(collection.status).toBe(`ready`)
           expect([...collection.keys()]).toEqual(
             change === `unchanged` ? [`retained`] : [],
           )

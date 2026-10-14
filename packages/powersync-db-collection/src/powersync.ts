@@ -742,6 +742,8 @@ function createPowerSyncCollectionConfig<
 
         // One reconciliation owns every queued revision so callers cannot
         // settle against a stale trigger configuration.
+        // Set while a failed rebuild may have left the source untracked.
+        let trackingOutage = false
         const reconcileTracking = async (): Promise<void> => {
           while (!stopped && reconciledTrackingRevision !== trackingRevision) {
             const revision = trackingRevision
@@ -756,12 +758,11 @@ function createPowerSyncCollectionConfig<
               if (!isCurrent()) return
 
               const active = activeWhereExpressions()
-              // Tracking was absent during an error. Positive baseline rows
+              // Tracking was absent during an outage. Positive baseline rows
               // alone cannot reveal deletes or predicate exits from that gap.
-              const missing =
-                collection.status === `error`
-                  ? new Set(collection.keys())
-                  : undefined
+              const missing = trackingOutage
+                ? new Set(collection.keys())
+                : undefined
               if (active.length > 0) {
                 const combinedWhere =
                   active.length === 1
@@ -817,17 +818,10 @@ function createPowerSyncCollectionConfig<
             await Promise.all(appliedReceipts)
             if (isCurrent()) {
               reconciledTrackingRevision = revision
-              // Replacing the trigger alone is not recovery: its baseline
-              // writes must also be applied before the source is ready again.
-              if (collection.status === `error`) {
-                // After markError, recovery requires cleanup() then preload().
-                // Do nothing here; the error stays final.
-              } else if (collection.status === `loading`) {
-                // Before initial-query readiness, move to ready
-                markReady()
-              } else if (collection.status === `ready`) {
-                // After initial-query readiness, a successful rebuild reports
-                // recovery through Collection health.
+              // Replacing the trigger alone does not restore change tracking:
+              // its baseline writes must also apply before sync works again.
+              if (trackingOutage) {
+                trackingOutage = false
                 reportHealthy()
               }
             }
@@ -840,19 +834,15 @@ function createPowerSyncCollectionConfig<
           while (!stopped && reconciledTrackingRevision !== trackingRevision) {
             await (rebuildPromise ??= reconcileTracking()
               .catch((error) => {
-                // A rebuild may already have removed every active diff trigger.
-                // Do not leave healthy consumers ready against a stale source.
-                if (!stopped) {
-                  if (collection.status === `loading`) {
-                    // Initial load failure is final for the attempt
-                    markError(error)
-                  } else if (collection.status === `ready`) {
-                    // Post-ready failures are reported as health issues (not final;
-                    // the adapter may retry on new demand or automatic reconciliation)
-                    reportError(error, { final: false })
-                  }
-                  // Other statuses (error, idle, cleaned-up) don't report
-                }
+                // A rebuild may already have removed every active diff trigger,
+                // so rows can grow stale. Later demand rebuilds again, so after
+                // Collection readiness this is a health error that is not final.
+                if (stopped) {
+                  // Cleanup owns the outcome.
+                } else if (collection.status === `ready`) {
+                  trackingOutage = true
+                  reportError(error, { final: false })
+                } else markError(error)
                 throw error
               })
               .finally(() => {
