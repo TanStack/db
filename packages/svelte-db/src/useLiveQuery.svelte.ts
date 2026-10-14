@@ -463,6 +463,7 @@ export function useLiveQuery(
   let status = $state(initialSnapshot.status)
   let persistedStatus = $state(initialSnapshot.persistedStatus)
   let persistedError = $state.raw<unknown>(initialSnapshot.persistedError)
+  let errors = $state.raw<ErrorTreeNode | undefined>(initialSnapshot.errors)
 
   const syncFromObserver = (
     observer: LiveQueryObserver<any, any>,
@@ -472,6 +473,7 @@ export function useLiveQuery(
     status = snapshot.status as CollectionStatus
     persistedStatus = snapshot.persistedStatus
     persistedError = snapshot.persistedError
+    errors = snapshot.errors
     untrack(() => {
       if (changes && changes.length > 0) {
         for (const change of changes) {
@@ -573,6 +575,9 @@ export function useLiveQuery(
     },
     get isCleanedUp() {
       return status === `cleaned-up`
+    },
+    get errors() {
+      return errors
     },
   }
 }

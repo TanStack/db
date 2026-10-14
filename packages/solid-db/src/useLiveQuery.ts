@@ -378,6 +378,7 @@ export function useLiveQuery(
   const [persistedStatus, setLocalStatus] =
     createSignal<LiveQueryPersistedStatus>(`unavailable`)
   const [persistedError, setLocalError] = createSignal<unknown>(undefined)
+  const [errors, setErrors] = createSignal<ErrorTreeNode | undefined>(undefined)
 
   // Helper to sync data array from collection in correct order
   const syncDataFromCollection = (
@@ -428,6 +429,7 @@ export function useLiveQuery(
         return []
       }
       setStatus(currentCollection.status)
+      setErrors(currentCollection.errors)
       try {
         const observer = createLiveQueryObserver(currentCollection)
         localWaitObserver = observer
@@ -453,6 +455,7 @@ export function useLiveQuery(
         }
         syncDataFromCollection(currentCollection)
         setStatus(currentCollection.status)
+        setErrors(currentCollection.errors)
       })
       return data
     },
@@ -469,6 +472,7 @@ export function useLiveQuery(
       setStatus(`disabled` as const)
       setLocalStatus(`unavailable`)
       setLocalError(undefined)
+      setErrors(undefined)
       state.clear()
       rowsByKey.clear()
       rowsCollection = undefined
@@ -517,6 +521,7 @@ export function useLiveQuery(
           setStatus(snapshot.status)
           setLocalStatus(snapshot.persistedStatus)
           setLocalError(snapshot.persistedError)
+          setErrors(snapshot.errors)
         })
       },
     )
@@ -529,6 +534,7 @@ export function useLiveQuery(
       setStatus(snapshot.status)
       setLocalStatus(snapshot.persistedStatus)
       setLocalError(snapshot.persistedError)
+      setErrors(snapshot.errors)
     })
 
     onCleanup(() => {
@@ -609,6 +615,11 @@ export function useLiveQuery(
     isCleanedUp: {
       get() {
         return status() === `cleaned-up`
+      },
+    },
+    errors: {
+      get() {
+        return errors()
       },
     },
   })

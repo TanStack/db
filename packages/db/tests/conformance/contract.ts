@@ -113,6 +113,8 @@ export interface ConformanceResult {
   persistedError?: unknown
   isError: boolean
   isEnabled: boolean
+  /** Error tree for the query and its dependencies (post-readiness health). */
+  errors?: any
 }
 
 /** A query-builder callback, e.g. `(q) => q.from({ items: source.collection })`. */

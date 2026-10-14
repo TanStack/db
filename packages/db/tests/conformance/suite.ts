@@ -1054,9 +1054,66 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           // boundary to catch), rather than exposing a readable flag.
           expect(() => h.current()).toThrow()
         } else {
-          expect(h.current().status).toBe(`error`)
-          expect(h.current().isError).toBe(true)
+          const result = h.current()
+          expect(result.status).toBe(`error`)
+          expect(result.isError).toBe(true)
+          // Health law: initial gate error surfaces in errors tree
+          expect(result.errors).toBeDefined()
+          expect(result.errors?.hasErrors).toBe(true)
         }
+        h.unmount()
+      },
+    )
+
+    scenario(
+      `health-initial-gate-error`,
+      `initial-gate error surfaces in errors tree hasErrors`,
+      async () => {
+        const source = driver.makeErrorSource()
+        const h = driver.mountCollection(source.collection)
+        await h.flush()
+
+        if (driver.errorSurface !== `throw`) {
+          // Initial-gate error: isError true and errors tree reflects it
+          expect(h.current().isError).toBe(true)
+          expect(h.current().errors?.hasErrors).toBe(true)
+          // Tree should have root node when collection itself is in error
+          expect(h.current().errors?.isError).toBe(true)
+        }
+        h.unmount()
+      },
+    )
+
+    scenario(
+      `health-errors-stable-identity`,
+      `errors tree keeps stable identity when unchanged across renders`,
+      async () => {
+        const source = driver.makeSource(SEED)
+        const h = driver.mount((q) =>
+          q
+            .from({ items: source.collection })
+            .select(({ items }: any) => items),
+        )
+        await h.flush()
+
+        // Ready state: errors should be defined but hasErrors false
+        expect(h.current().errors).toBeDefined()
+        expect(h.current().errors?.hasErrors).toBe(false)
+
+        const firstErrors = h.current().errors
+        // Trigger a render without changing data
+        await h.flush()
+
+        // Stable identity: same object when unchanged
+        expect(h.current().errors).toBe(firstErrors)
+
+        // Mutate data
+        source.insert({ id: `999`, name: `New`, age: 50, team: `z` })
+        await h.flush()
+
+        // After data change, errors object might or might not be new,
+        // but hasErrors should still be false (no error)
+        expect(h.current().errors?.hasErrors).toBe(false)
         h.unmount()
       },
     )
@@ -1098,7 +1155,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
     )
 
     it(`registers every distinct scenario without whole-test waivers`, () => {
-      expect(registry.size).toBe(32)
+      expect(registry.size).toBe(35)
     })
   })
 }

@@ -361,5 +361,6 @@ export function useLiveSuspenseQuery(
     state: result.state,
     data: result.data,
     collection: result.collection,
+    errors: result.errors,
   }
 }
