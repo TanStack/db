@@ -295,6 +295,18 @@ export class CollectionConfigBuilder<
     if (!windowFn) {
       throw new SetWindowRequiresOrderByError()
     }
+    // A findOne's window keeps its compiled limit; only its offset moves.
+    if (
+      this.query.singleResult &&
+      options.limit !== undefined &&
+      options.limit !== this.initialWindow!.limit
+    ) {
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `setWindow() cannot change the limit of a findOne() query`
+          : codedMessage(244),
+      )
+    }
     if (
       this.activeWindowOperation ||
       this.isGraphRunning ||
@@ -311,7 +323,7 @@ export class CollectionConfigBuilder<
       this.currentWindow ?? this.settledWindow ?? this.initialWindow
     const requestedWindow: WindowOptions = {
       offset: options.offset ?? baseWindow?.offset,
-      limit: this.query.singleResult ? 1 : (options.limit ?? baseWindow?.limit),
+      limit: options.limit ?? baseWindow?.limit,
     }
     const sourceRecovery = this.pendingSourceRecovery()
     if (sourceRecovery) {
@@ -1313,7 +1325,7 @@ export class CollectionConfigBuilder<
         for (const plan of lazyCallbacks.plans ?? []) {
           // A window requested before start can drop the rows a static
           // filter names, so their children wait for the window.
-          if (plan.initialKeys.size > 0 && !this.currentWindow) {
+          if (plan.initialKeys.size > 0 && !this.currentWindow?.offset) {
             lazyCallbacks.setDemand(plan, plan.initialKeys)
           }
         }

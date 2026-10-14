@@ -928,5 +928,10 @@
     "file": "query/compiler/index.ts",
     "template": "An ordered window row has no include route",
     "literals": ["An ordered window row has no include route"]
+  },
+  "244": {
+    "file": "query/live/collection-config-builder.ts",
+    "template": "setWindow() cannot change the limit of a findOne() query",
+    "literals": ["setWindow() cannot change the limit of a findOne() query"]
   }
 }

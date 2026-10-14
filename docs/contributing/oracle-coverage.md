@@ -164,12 +164,15 @@ executed fixed cases for each premise, and every checkpoint asserts
 a relational model. Preload may load only the children of the shown rows'
 groups, and a step only those of rows that entered the window and were not
 shown before it. A static filter creates demand before the window runs only
-when neither the query nor an enclosing query has a window, no window was
-requested before start, or the query is a `findOne` that shows one row, with
-no `offset`, for one named correlation value. Pinned witnesses show each case
+when no enclosing query has a window, no window requested before start has a
+nonzero offset, and either the query has no window or it is a `findOne` that
+shows one row, with no `offset`, for one named correlation value. Pinned witnesses show each case
 the rule closes: a window requested before start (12 child rows for a bound of
-2 before the rule), grandchild demand below a windowed parent, and a `findOne`
-with `limit(0)`. A `findOne` detail page with on-demand parent and child starts
+2 before the rule), grandchild demand below a windowed parent, a `findOne` with
+`limit(0)`, and a `findOne` moved past its one named value before start; a
+detail page whose window before start is at offset 0 still starts its child
+acquisition attempt at once. A `findOne` window keeps its compiled limit, and a
+focused test requires `setWindow` to throw for any other limit. A `findOne` detail page with on-demand parent and child starts
 its child acquisition attempt beside its parent's. On main, a late page
 delivered 120 child rows for a bound of 9. Routers that add the row after the
 window fail the generated campaigns; routers that add every row in an edge tie

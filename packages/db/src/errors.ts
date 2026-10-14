@@ -1128,7 +1128,7 @@ export class SetWindowRequiresOrderByError extends QueryCompilationError {
   constructor() {
     super(
       devBuild() && process.env.NODE_ENV !== `production`
-        ? `setWindow() can only be called on collections with an ORDER BY clause. ` +
+        ? `setWindow() can only be called on collections with an ORDER BY clause or findOne(). ` +
             `Add .orderBy() to your query to enable window movement.`
         : codedMessage(84),
     )

@@ -2493,10 +2493,7 @@ function replaceIncludesInConditionalSelect(
 ): { value: ConditionalSelect; replaced: boolean } {
   let replaced = false
   const branches = conditional.branches.map((branch) => {
-    const result =
-      path.length === 0
-        ? replaceIncludesValue(branch.value, replacement)
-        : replaceIncludesInSelectValue(branch.value, path, replacement)
+    const result = replaceIncludesInSelectValue(branch.value, path, replacement)
     if (!result.replaced) {
       return branch
     }
@@ -2506,14 +2503,11 @@ function replaceIncludesInConditionalSelect(
 
   let defaultValue = conditional.defaultValue
   if (conditional.defaultValue !== undefined) {
-    const result =
-      path.length === 0
-        ? replaceIncludesValue(conditional.defaultValue, replacement)
-        : replaceIncludesInSelectValue(
-            conditional.defaultValue,
-            path,
-            replacement,
-          )
+    const result = replaceIncludesInSelectValue(
+      conditional.defaultValue,
+      path,
+      replacement,
+    )
     if (result.replaced) {
       replaced = true
       defaultValue = result.value

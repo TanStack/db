@@ -897,7 +897,7 @@ Internal error: compiler returned aliases without inputs: alias1, alias2. This i
 Development builds show the full message. For example:
 
 ```text
-setWindow() can only be called on collections with an ORDER BY clause. Add .orderBy() to your query to enable window movement.
+setWindow() can only be called on collections with an ORDER BY clause or findOne(). Add .orderBy() to your query to enable window movement.
 ```
 
 <a id="error-85"></a>
@@ -2458,4 +2458,14 @@ Development builds show this message, with `${...}` replaced by values:
 
 ```text
 An ordered window row has no include route
+```
+
+<a id="error-244"></a>
+
+## Error 244: `query/live/collection-config-builder.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+setWindow() cannot change the limit of a findOne() query
 ```

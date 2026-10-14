@@ -226,7 +226,7 @@
     "Internal error: compiler returned aliases without inputs: alias1, alias2. This indicates a bug in query compilation. Please report this issue."
   ],
   "SetWindowRequiresOrderByError": [
-    "setWindow() can only be called on collections with an ORDER BY clause. Add .orderBy() to your query to enable window movement."
+    "setWindow() can only be called on collections with an ORDER BY clause or findOne(). Add .orderBy() to your query to enable window movement."
   ],
   "SetWindowReentrancyError": [
     "setWindow() cannot run reentrantly. Wait for the current window operation to return before starting another one."
