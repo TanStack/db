@@ -212,11 +212,11 @@ Some TanStack Query fields are owned or reinterpreted by Query Collection and ar
 
 `placeholderData` is intentionally unsupported. TanStack Query treats placeholder data as observer-local presentation state rather than cached Query data. Materializing it would expose temporary UI data as collection-wide normalized rows. Render placeholders in the consuming UI instead.
 
-### Request Cancellation with `QueryFunctionContext.signal`
+### Request Cancellation
 
-TanStack Query passes an `AbortSignal` to `queryFn` through the query function
-context. Forward `ctx.signal` to `fetch` or another abortable client to make the
-request cancellable:
+For an eager collection, TanStack Query passes an `AbortSignal` through the
+query function context. Forward `ctx.signal` to `fetch` or another abortable
+client:
 
 ```typescript
 const todosCollection = createCollection(
@@ -246,9 +246,8 @@ currently tracking before removing it from the Query cache:
 await todosCollection.cleanup()
 ```
 
-The underlying request is aborted only when its client consumes `ctx.signal`.
-A client that ignores the signal may continue its request even though the
-collection has been cleaned up.
+The eager request is aborted when its client consumes `ctx.signal`. A client
+that ignores the signal may continue its request after collection cleanup.
 
 An unloaded on-demand subset is no longer tracked. A later explicit collection
 cleanup does not revisit its Query key.
@@ -256,12 +255,11 @@ cleanup does not revisit its Query key.
 Query cache entries are shared within a `QueryClient`. Explicit cleanup can
 affect other consumers using the same exact Query keys.
 
-On-demand subset unloading does not explicitly call
-`queryClient.cancelQueries()`. It removes the subset's Query observer. If this
-was the final observer and the query function consumed `ctx.signal`, TanStack
-Query aborts the request. If the signal was ignored, or another observer still
-uses the same exact Query key, the request may finish and remain cached until
-`gcTime`.
+For on-demand collections, forward `ctx.meta?.loadSubsetOptions?.signal` to the
+provider. Releasing the final acquisition aborts that physical signal while a
+fetch is in flight, unless another Collection acquisition, eager Collection, or
+independent Query Core observer still owns the fetch. If the provider ignores
+the signal, the request may finish and remain cached until `gcTime`.
 
 ### Using with `queryOptions(...)`
 
@@ -428,11 +426,18 @@ Do not edit expression nodes, ordering options, Dates, byte arrays, or membershi
 arrays. Build separate API parameters instead. Core retains request data without
 cloning it; changing submitted data can make the request disagree with its cache
 key. To change a query constant, supply a new value rather than mutating the old
-one. Use `ctx.signal` for the provider call. When a subset request supplies a
-signal, `ctx.meta.loadSubsetOptions.signal` follows the physical Query fetch.
-Releasing one acquisition does not abort a fetch that another acquisition
-still owns. If the provider ignores the signal, Query Core may let the fetch
-finish into cache after the final owner releases.
+one. For on-demand requests, use `ctx.meta.loadSubsetOptions.signal` for the
+provider call. It is a native signal for the physical Query fetch, present even
+when the first acquisition has no caller signal. A peer that joins after fetch
+start shares it. For a fetch started by a Collection acquisition, releasing one
+acquisition does not abort work another acquisition still owns; the signal
+aborts when every acquisition cancels or releases while the fetch is in flight.
+When Query Core refetches a retained Query after every Collection acquisition
+releases or aborts, the metadata carries Query Core's signal and that
+independent result can enter Query cache.
+`ctx.signal` remains Query Core's transport signal for eager queries. If an
+on-demand provider ignores its physical signal, Query Core may let the fetch
+finish into cache after the final Collection owner releases.
 
 ### Type-Safe Meta Access
 
@@ -934,19 +939,20 @@ const postsCollection = createCollection(
     getKey: (post: Post) => post.id,
     queryFn: async (ctx): Promise<Array<Post>> => {
       const { where, orderBy, offset = 0, limit } = ctx.meta?.loadSubsetOptions ?? {}
+      const signal = ctx.meta?.loadSubsetOptions?.signal
       const skip = offset % serverPageSize
       let page: number | null = Math.floor(offset / serverPageSize)
       const gathered: Array<Post> = []
 
       while (page !== null && (limit === undefined || gathered.length < skip + limit)) {
-        ctx.signal.throwIfAborted()
+        signal?.throwIfAborted()
         const response: { rows: Array<Post>; nextPage: number | null } =
           await api.listPosts({
             page,
             pageSize: serverPageSize,
             where,
             orderBy,
-            signal: ctx.signal,
+            signal,
           })
         gathered.push(...response.rows)
         page = response.nextPage
@@ -1003,6 +1009,7 @@ const postsCollection = createCollection(
     getKey: (post: Post) => post.id,
     queryFn: async (ctx) => {
       const { where, orderBy, offset = 0, limit } = ctx.meta?.loadSubsetOptions ?? {}
+      const signal = ctx.meta?.loadSubsetOptions?.signal
 
       // Translate every filter and sort, or reject unsupported expressions.
       // This stable, serializable value identifies one ordered result sequence.
@@ -1021,7 +1028,7 @@ const postsCollection = createCollection(
         },
       })
 
-      return pager.read({ offset, limit }, ctx.signal)
+      return pager.read({ offset, limit }, signal)
     },
   }),
 )
@@ -1226,12 +1233,14 @@ inserted row belongs in a scoped result or which row replaces a deleted item
 in a limited window. A new direct insert has no inferred subset owner and
 survives subset unload.
 
-Fetch order applies per key. A fetch started before an accepted direct write
-cannot undo that write's claimed keys; a fetch started later may reconcile or
-replace them. While a row remains continuously owned by at least one loaded
-subset, if overlapping subset fetches both return that key, the later-started
-successful fetch controls its Collection value even when the older request
-settles last. Once all owners release the row, reacquiring a subset projects
+Fetch order applies per key. A Query fetch reserves its position when the fetch
+is accepted, before its `queryFn` runs. A direct write reserves its position
+when called. An accepted fetch before the write cannot undo the write's claimed
+keys; a fetch accepted later may reconcile or replace them. Between overlapping
+successful fetched results, the later first `queryFn` invocation controls a
+continuously owned row even if that result settles first. Retries stay within
+their original accepted fetch and retain its first source invocation position.
+Once all owners release the row, reacquiring a subset projects
 that Query's retained cache entry under the usual `staleTime` and `gcTime`
 rules. A cache patch is not a successful fetch: it does not clear a recorded
 Query error, pending invalidation, or staleness.
@@ -1302,6 +1311,10 @@ retention is recorded and its rows must apply before settlement. An older or
 unfinished request cannot revalidate that ownership. `refetch: true` still
 fetches the exact requested subset. Function-built
 `queryKey` values keep their own cache identity and do not use this reuse path.
+A custom Query persister may return data unrelated to a `queryFn` invocation.
+When Query Core cannot identify the returned result as source-backed, a
+retained persisted acquisition rejects and keeps its retention marker. Use a
+Query without that persister for the revalidation request.
 Your `queryFn` must return the complete requested result, including every row
 for an unbounded request.
 Refetching a narrower subset does not invalidate a still-active full Query;

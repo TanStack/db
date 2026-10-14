@@ -1,10 +1,12 @@
 import {
   CancelledError,
+  InfiniteQueryObserver,
   QueryClient,
   QueryObserver,
   focusManager,
   hashKey,
   isCancelledError,
+  onlineManager,
 } from '@tanstack/query-core'
 import {
   IR,
@@ -79,8 +81,7 @@ import type { QueryCollectionUtils } from '../src/query.js'
  * result; it does not classify arrays, select wrappers, Query states, or sync
  * transactions. The action grammar covers multiple public refetch operations,
  * immediate results, valid empty results, invalid shapes, eager recovery,
- * overlapping defer generations, replacement results, cleanup retirement, and
- * same-result subscriber reentry with a controlled nested applied receipt.
+ * overlapping defer generations, replacement results, and cleanup retirement.
  * The production driver crosses eager and on-demand ownership. It observes
  * public promise settlement and public rows at the settlement checkpoint.
  * The model does not track Query fetch counters or observer scheduling.
@@ -97,7 +98,8 @@ import type { QueryCollectionUtils } from '../src/query.js'
  * Known omissions: this result-settlement refinement does not model accepted-
  * result generations or the diff-free application signal requested by #1828.
  * Transport failure and cache replacement remain owned by the existing Query
- * lifecycle histories in this file.
+ * lifecycle histories in this file. Same-result subscriber reentry with a
+ * legally held core applied receipt still needs a receiving history.
  * Direct write receipts have a separate boundary: a Query Collection write
  * settles when its sync commit applies. The controlled persisted-owner history
  * below holds that commit after the initial fetch, then checks the returned
@@ -378,9 +380,6 @@ async function runCleanups(): Promise<void> {
  * - `QueryCacheWorkModel` treats Query ownership as the only edge authorizing
  *   Collection cache-listener work. The driver subtracts Query Core's own
  *   microtask baseline before comparing that bounded diagnostic.
- * - `FetchRecordLifecycleModel` gives a terminally cancelled fetch no live
- *   causal record. The driver observes retained state as extra cleanup work at
- *   the next fetch without using production record classification.
  *
  * Results skipped before application because refresh is deferred, or because a
  * manual-write snapshot is unchanged, are outside this accepted-result model.
@@ -914,18 +913,6 @@ function observeQueryCacheWork(model: QueryCacheWorkModel): {
   }
 }
 
-type FetchRecordLifecycleModel = {
-  state: `active` | `cancelled`
-}
-
-function observeFetchRecordSuccessorWork(model: FetchRecordLifecycleModel): {
-  extraCleanupMicrotasks: number
-} {
-  return {
-    extraCleanupMicrotasks: model.state === `active` ? 1 : 0,
-  }
-}
-
 type MutationHandlerKind = `insert` | `update` | `delete`
 type HandlerCollectionAccessPath = `parameter` | `mutation-alias`
 type HandlerCollectionOperation = `refetch` | `clearError`
@@ -1351,8 +1338,10 @@ function createPersistedOwnershipFixture(
   storage: ReturnType<typeof createOwnershipStorage>,
   serverRows: Array<Item>,
   syncMode: `eager` | `on-demand` = `on-demand`,
+  configureClient?: (queryClient: QueryClient) => void,
 ) {
   const queryClient = createQueryClient()
+  configureClient?.(queryClient)
   const providerRows = structuredClone(serverRows)
   const queryFn = vi.fn((context: QueryFunctionContext) =>
     Promise.resolve(
@@ -3180,78 +3169,6 @@ describe(`query collection ownership lifecycle`, () => {
     expect(ownedQueryMutant).not.toEqual(model)
   })
 
-  it(`does not defer reverted fetch record retirement to a successor fetch`, async () => {
-    const measureSuccessorFetchMicrotasks = async (
-      cancelFirst: boolean,
-    ): Promise<number> => {
-      const id = `cancelled-fetch-record-${cancelFirst}`
-      const initial = { ...shared, name: `Initial` }
-      const authoritative = { ...shared, name: `Authoritative` }
-      const cancelledResult = createDeferred<Array<Item>>()
-      const queryClient = createQueryClient()
-      const queryFn = vi.fn<() => Promise<Array<Item>>>()
-      queryFn.mockResolvedValueOnce([initial])
-      if (cancelFirst) queryFn.mockReturnValueOnce(cancelledResult.promise)
-      queryFn.mockResolvedValue([authoritative])
-      const collection = createCollection(
-        queryCollectionOptions<Item>({
-          id,
-          queryClient,
-          queryKey: [id],
-          queryFn,
-          getKey: (item) => item.id,
-          syncMode: `eager`,
-          startSync: true,
-        }),
-      )
-
-      try {
-        await collection.stateWhenReady()
-        if (cancelFirst) {
-          const cancelledRefetch = collection.utils.refetch({
-            throwOnError: true,
-          })
-          await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
-          await queryClient.cancelQueries({ queryKey: [id], exact: true })
-          await cancelledRefetch
-          for (let turn = 0; turn < 5; turn++) await Promise.resolve()
-        }
-
-        const nativeQueueMicrotask = globalThis.queueMicrotask
-        let scheduledMicrotasks = 0
-        const queueMicrotaskSpy = vi
-          .spyOn(globalThis, `queueMicrotask`)
-          .mockImplementation((callback) => {
-            scheduledMicrotasks++
-            nativeQueueMicrotask(callback)
-          })
-        try {
-          await collection.utils.refetch({ throwOnError: true })
-          for (let turn = 0; turn < 5; turn++) await Promise.resolve()
-          return scheduledMicrotasks
-        } finally {
-          queueMicrotaskSpy.mockRestore()
-        }
-      } finally {
-        cancelledResult.resolve([authoritative])
-        await collection.cleanup()
-        queryClient.clear()
-      }
-    }
-
-    const baseline = await measureSuccessorFetchMicrotasks(false)
-    const afterCancellation = await measureSuccessorFetchMicrotasks(true)
-    const expected = observeFetchRecordSuccessorWork({ state: `cancelled` })
-    const retainedRecordMutant = observeFetchRecordSuccessorWork({
-      state: `active`,
-    })
-
-    expect({
-      extraCleanupMicrotasks: afterCancellation - baseline,
-    }).toEqual(expected)
-    expect(retainedRecordMutant).not.toEqual(expected)
-  })
-
   it.each(handlerCollectionHistoryGrammar)(
     `preserves $handlerKind handler identity through $accessPath $operation`,
     async (history) => {
@@ -3723,159 +3640,6 @@ describe(`query collection ownership lifecycle`, () => {
       rowCount: collection.size,
     })
   })
-
-  it.each([`fulfilled`, `rejected`] as const)(
-    `keeps a same-result reentrant $receiptOutcome receipt attached to its refetch`,
-    async (receiptOutcome) => {
-      const id = `same-result-reentrant-application`
-      const initial = { ...shared, name: `Initial` }
-      const updated = { ...shared, name: `Updated` }
-      const applicationFailure = new Error(`Reentrant application failed`)
-      const reentrantApplication = createDeferred<void>()
-      const reentrantApplicationStarted = createDeferred<void>()
-      const queryClient = createQueryClient()
-      const queryFn = vi
-        .fn<() => Promise<Array<Item>>>()
-        .mockResolvedValueOnce([initial])
-        .mockResolvedValueOnce([updated])
-      const baseOptions = queryCollectionOptions<Item>({
-        id,
-        queryClient,
-        queryKey: [id],
-        queryFn,
-        getKey: (item) => item.id,
-        startSync: true,
-      })
-      const originalSync = baseOptions.sync
-      let commitDepth = 0
-      let holdReentrantApplication = false
-      let reentrantCommitCount = 0
-      const collection = createCollection({
-        ...baseOptions,
-        sync: {
-          sync: (params: Parameters<typeof originalSync.sync>[0]) =>
-            originalSync.sync({
-              ...params,
-              commit: (signal) => {
-                commitDepth++
-                try {
-                  const applied = params.commit(signal)
-                  if (holdReentrantApplication && commitDepth > 1) {
-                    reentrantCommitCount++
-                    reentrantApplicationStarted.resolve(undefined)
-                    return Promise.resolve(
-                      applied === true ? undefined : applied,
-                    ).then(() => reentrantApplication.promise)
-                  }
-                  return applied
-                } finally {
-                  commitDepth--
-                }
-              },
-            }),
-        },
-      })
-      const consoleError =
-        receiptOutcome === `rejected`
-          ? vi.spyOn(console, `error`).mockImplementation(() => {})
-          : undefined
-      let subscription = collection.subscribeChanges(() => {}, {
-        includeInitialState: false,
-      })
-      cleanups.push(async () => {
-        consoleError?.mockRestore()
-        reentrantApplication.resolve(undefined)
-        subscription.unsubscribe()
-        await collection.cleanup()
-        queryClient.clear()
-      })
-
-      await collection.stateWhenReady()
-      let reentered = false
-      const publications: Array<
-        Array<{ type: string; name: string; previousName?: string }>
-      > = []
-      subscription.unsubscribe()
-      subscription = collection.subscribeChanges(
-        (batch) => {
-          if (batch.length > 0) {
-            publications.push(
-              batch.map((change) => ({
-                type: change.type,
-                name: change.value.name,
-                ...(change.type === `update`
-                  ? { previousName: change.previousValue?.name }
-                  : {}),
-              })),
-            )
-          }
-          if (reentered || collection.get(shared.id)?.name !== updated.name)
-            return
-          reentered = true
-          // Dropping the last subscriber and immediately adding another makes
-          // Query DB apply this observer's exact current result again while the
-          // outer synchronous commit is still delivering its change.
-          subscription.unsubscribe()
-          subscription = collection.subscribeChanges(() => {}, {
-            includeInitialState: false,
-          })
-        },
-        { includeInitialState: false },
-      )
-      holdReentrantApplication = true
-      let model = createRefetchCallSettlementModel([`query`], true)
-      model = reduceRefetchCallSettlement(model, {
-        type: `accept-application`,
-        queryId: `query`,
-        applicationId: `reentrant-application`,
-      })
-      model = reduceRefetchCallSettlement(model, {
-        type: `settle-fetch`,
-        queryId: `query`,
-        outcome: `fulfilled`,
-      })
-      let refetchOutcome: RefetchApplicationOutcome = `pending`
-      const refetch = collection.utils.refetch({ throwOnError: true }).then(
-        (result) => {
-          refetchOutcome = `resolved`
-          return result
-        },
-        (error: unknown) => {
-          refetchOutcome = `rejected`
-          throw error
-        },
-      )
-      void refetch.catch(() => undefined)
-
-      await reentrantApplicationStarted.promise
-      for (let turn = 0; turn < 20; turn++) await Promise.resolve()
-      expect(reentered).toBe(true)
-      expect(reentrantCommitCount).toBe(1)
-      expect(queryFn).toHaveBeenCalledTimes(2)
-      expect(refetchOutcome).toBe(observeRefetchCallSettlement(model).refetch)
-      expect(publications).toEqual([
-        [{ type: `update`, name: `Updated`, previousName: `Initial` }],
-      ])
-
-      if (receiptOutcome === `fulfilled`) {
-        reentrantApplication.resolve(undefined)
-        await expect(refetch).resolves.toHaveLength(1)
-      } else {
-        reentrantApplication.reject(applicationFailure)
-        await expect(refetch).rejects.toBe(applicationFailure)
-      }
-      model = reduceRefetchCallSettlement(model, {
-        type: `settle-application`,
-        applicationId: `reentrant-application`,
-        outcome: receiptOutcome,
-      })
-      expect(refetchOutcome).toBe(observeRefetchCallSettlement(model).refetch)
-      expect(collection.get(shared.id)?.name).toBe(updated.name)
-      expect(publications).toEqual([
-        [{ type: `update`, name: `Updated`, previousName: `Initial` }],
-      ])
-    },
-  )
 
   it.each([
     {
@@ -6968,6 +6732,69 @@ describe(`query collection ownership lifecycle`, () => {
     },
   )
 
+  /**
+   * A queryFn may remove its physical Query before observer.refetch() returns.
+   * That retires F1 and cancels its caller, even if a mounted eager observer
+   * reattaches to a new Query and starts F2 in the same stack. F2's later row
+   * belongs to that new Query; it cannot fulfill the retired caller.
+   */
+  it(`cancels an eager refetch whose queryFn synchronously removes its Query`, async () => {
+    type Row = { id: string; name: string }
+    const id = `synchronous-eager-query-removal`
+    const queryClient = createQueryClient()
+    const old = createDeferred<Array<Row>>()
+    const fresh = createDeferred<Array<Row>>()
+    let calls = 0
+    const queryFn = vi.fn(() => {
+      calls++
+      if (calls === 1) return Promise.resolve([{ id: `x`, name: `before` }])
+      if (calls === 2) {
+        queryClient.removeQueries({ queryKey: [id], exact: true })
+        return old.promise
+      }
+      return fresh.promise
+    })
+    const source = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (row) => row.id,
+        syncMode: `eager`,
+        startSync: true,
+        retry: false,
+      }),
+    )
+    const subscription = source.subscribeChanges(() => {})
+    cleanups.push(async () => {
+      old.resolve([{ id: `x`, name: `old` }])
+      fresh.resolve([{ id: `x`, name: `new` }])
+      subscription.unsubscribe()
+      await source.cleanup()
+      queryClient.clear()
+    })
+    await source.stateWhenReady()
+    const refetch = source.utils.refetch({ throwOnError: true })
+    void refetch.catch(() => undefined)
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(3))
+    const outcome = await Promise.race([
+      refetch.then(
+        () => `fulfilled`,
+        (error: unknown) =>
+          isCancelledError(error) ? `CancelledError` : `other rejection`,
+      ),
+      new Promise<string>((resolve) => setTimeout(() => resolve(`pending`), 0)),
+    ])
+    expect(outcome).toBe(`CancelledError`)
+
+    fresh.resolve([{ id: `x`, name: `new` }])
+    await vi.waitFor(() => expect(source.get(`x`)?.name).toBe(`new`))
+    old.resolve([{ id: `x`, name: `old` }])
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    expect(source.get(`x`)?.name).toBe(`new`)
+  })
+
   it.each(
     [0, Number.POSITIVE_INFINITY].flatMap((staleTime) =>
       [false, true].map((customHash) => ({ staleTime, customHash })),
@@ -9695,9 +9522,11 @@ describe(`query collection ownership lifecycle`, () => {
 
   /**
    * Two distinct on-demand Queries can return the same row. For that row, a
-   * successfully applied physical fetch takes its position when it starts:
-   * the latest such fetch supplies the value, even when an older fetch settles
-   * afterward. An older result still claims its own subset, so releasing the
+   * successfully applied physical fetch takes its row position at first
+   * provider invocation: the latest such fetch supplies the value, even when
+   * an older fetch settles afterward. In this grammar provider invocation
+   * follows fetch acceptance without an intervening operation. An older
+   * result still claims its own subset, so releasing the
    * newer subset does not discard the row or revert its value. An accepted
    * direct write participates in the same order for the key it changes.
    *
@@ -9834,9 +9663,12 @@ describe(`query collection ownership lifecycle`, () => {
       await vi.waitFor(() =>
         expect(queryFn).toHaveBeenCalledTimes(existingOwner ? 2 : 1),
       )
+      const olderPhysicalStart = queryClient.getQueryCache().currentSequence
 
+      let directPhysicalPosition: number | undefined
       if (directWrite === `between`) {
         await collection.utils.writeUpdate(manual)
+        directPhysicalPosition = queryClient.getQueryCache().currentSequence
         acceptWrite()
         expectPublicRow()
       }
@@ -9846,6 +9678,11 @@ describe(`query collection ownership lifecycle`, () => {
       await vi.waitFor(() =>
         expect(queryFn).toHaveBeenCalledTimes(existingOwner ? 3 : 2),
       )
+      const newerPhysicalStart = queryClient.getQueryCache().currentSequence
+      if (directPhysicalPosition !== undefined) {
+        expect(olderPhysicalStart).toBeLessThan(directPhysicalPosition)
+        expect(directPhysicalPosition).toBeLessThan(newerPhysicalStart)
+      }
       expect(
         queryClient.getQueryCache().findAll({ queryKey: [id] }),
       ).toHaveLength(2)
@@ -9913,6 +9750,88 @@ describe(`query collection ownership lifecycle`, () => {
       }
     },
   )
+
+  /**
+   * A retry belongs to its first source invocation. F1 first invokes its
+   * provider and fails while focus is lost; Query Core holds its retry. F2
+   * then supplies x through a different legal subset. When focus returns,
+   * F1's stale retry may complete its own Query, but cannot take a new row
+   * position and replace F2's continuously owned public row. The independent
+   * model is just the invocation order F1, F2, F1 retry: F2 is latest. Real
+   * Query Core retries and Collection application form the receiving path;
+   * compare public and F2 cache rows after both demand promises settle.
+   */
+  it(`keeps a later overlapping source row when an older fetch retries`, async () => {
+    type Row = { id: string; category: string; name: string }
+    const id = `overlapping-retry-source-order`
+    const queryClient = createQueryClient()
+    queryClient.mount()
+    const fresh: Row = { id: `x`, category: `a`, name: `F2` }
+    const stale: Row = { id: `x`, category: `a`, name: `F1 retry` }
+    const invokedKeys: Array<string> = []
+    const queryFn = vi.fn((context: QueryFunctionContext) => {
+      invokedKeys.push(hashKey(context.queryKey))
+      if (invokedKeys.length === 1) {
+        focusManager.setFocused(false)
+        return Promise.reject(new Error(`F1 first attempt failed`))
+      }
+      return Promise.resolve([invokedKeys.length === 2 ? fresh : stale])
+    })
+    const collection = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        networkMode: `always`,
+        retry: 1,
+        retryDelay: 0,
+      }),
+    )
+    const a = { where: eq(new IR.PropRef([`category`]), `a`) }
+    const b = { where: eq(new IR.PropRef([`id`]), `x`) }
+    const aLoad = Promise.resolve(collection._sync.loadSubset(a))
+    void aLoad.catch(() => undefined)
+    cleanups.push(async () => {
+      focusManager.setFocused(true)
+      await Promise.allSettled([aLoad])
+      collection._sync.unloadSubset(a)
+      collection._sync.unloadSubset(b)
+      await collection.cleanup()
+      queryClient.unmount()
+      focusManager.setFocused(undefined)
+      queryClient.clear()
+    })
+
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledOnce())
+    const firstQuery = queryClient
+      .getQueryCache()
+      .findAll({ queryKey: [id] })[0]!
+    await vi.waitFor(() => expect(firstQuery.state.fetchStatus).toBe(`paused`))
+    await collection._sync.loadSubset(b)
+    expect(invokedKeys).toHaveLength(2)
+    expect(invokedKeys[0]).not.toBe(invokedKeys[1])
+    expect(collection.get(`x`)?.name).toBe(`F2`)
+    const secondQuery = queryClient
+      .getQueryCache()
+      .findAll({ queryKey: [id] })
+      .find((query) => query.queryHash === invokedKeys[1])!
+
+    focusManager.setFocused(true)
+    await aLoad
+    expect(invokedKeys).toEqual([
+      invokedKeys[0],
+      invokedKeys[1],
+      invokedKeys[0],
+    ])
+    expect({
+      publicRow: collection.get(`x`)?.name,
+      f2Cache: (secondQuery.state.data as Array<Row>)[0]?.name,
+    }).toEqual({ publicRow: `F2`, f2Cache: `F2` })
+  })
 
   /**
    * A fresh Collection instance is a separate receiving boundary for the
@@ -10667,6 +10586,44 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   /**
+   * A provider may abort its caller synchronously before returning a rejected
+   * Query promise. The adapter's load promise rejects with AbortError, while
+   * its abandoned Query result still needs a rejection observer. This history
+   * reaches the real QueryClient path; Vitest reports an unhandled rejection if
+   * the result promise is dropped at the post-call abort checkpoint.
+   */
+  it(`observes a Query rejection after a synchronous caller abort`, async () => {
+    const id = `synchronous-provider-abort`
+    const queryClient = createQueryClient()
+    const caller = new AbortController()
+    const source = createCollection(
+      queryCollectionOptions<{ id: string }>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn: () => {
+          caller.abort()
+          return Promise.reject(new Error(`provider failed after abort`))
+        },
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+      }),
+    )
+    const request = { signal: caller.signal }
+    cleanups.push(async () => {
+      source._sync.unloadSubset(request)
+      await source.cleanup()
+      queryClient.clear()
+    })
+
+    const load = source._sync.loadSubset(request)
+    expect(load).toBeInstanceOf(Promise)
+    await expect(load).rejects.toMatchObject({ name: `AbortError` })
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+  })
+
+  /**
    * Two snapshot acquisitions can share one physical Query fetch. The small
    * reference keeps separate outcomes for each acquisition: aborting the first
    * request does not retire its lease or cancel a live peer's work, but the
@@ -10762,6 +10719,3390 @@ describe(`query collection ownership lifecycle`, () => {
       providerCalls: 1,
     })
   })
+
+  /**
+   * A filtered acquisition can borrow an applied full Query, while an
+   * explicit refetch of the same predicate owns a separate exact Query. The
+   * reference has two physical leases: releasing the borrowed one cannot
+   * retire the exact one. The held provider's signal and its public row after
+   * settlement distinguish exact acquisition routing from a hash-only release.
+   */
+  it(`keeps an exact refetch alive when a same-predicate full-source dependent releases`, async () => {
+    type Row = { id: string; group: string }
+    const id = `mixed-full-and-exact-routes`
+    const queryClient = createQueryClient()
+    const held = createDeferred<Array<Row>>()
+    const where = eq(new IR.PropRef([`group`]), `a`)
+    const initial = [{ id: `a1`, group: `a` }]
+    let calls = 0
+    let exactSignal: AbortSignal | undefined
+    const queryFn = vi.fn((context: QueryFunctionContext) => {
+      calls++
+      if (calls === 1) return Promise.resolve(initial)
+      const options = context.meta?.loadSubsetOptions
+      const descriptor = Object.getOwnPropertyDescriptor(options, `signal`)
+      expect(descriptor).toMatchObject({
+        enumerable: true,
+      })
+      expect(descriptor).toHaveProperty(`value`)
+      exactSignal = options?.signal
+      expect(exactSignal).toBeInstanceOf(AbortSignal)
+      return held.promise
+    })
+    const source = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+      }),
+    )
+    const full = source.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    const borrowed = source.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    const exact = source.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    cleanups.push(async () => {
+      held.resolve([])
+      full.unsubscribe()
+      borrowed.unsubscribe()
+      exact.unsubscribe()
+      await source.cleanup()
+      queryClient.clear()
+    })
+    let fullLoad: Promise<unknown> | undefined
+    expect(
+      full.requestSnapshot({
+        onLoadSubsetResult: (result) => {
+          fullLoad = Promise.resolve(result)
+        },
+      }),
+    ).toBe(true)
+    await fullLoad
+    expect(source.has(`a1`)).toBe(true)
+
+    let borrowedLoad: Promise<unknown> | undefined
+    expect(
+      borrowed.requestSnapshot({
+        where,
+        onLoadSubsetResult: (result) => {
+          borrowedLoad = Promise.resolve(result)
+        },
+      }),
+    ).toBe(true)
+    await borrowedLoad
+    expect(calls).toBe(1)
+
+    let exactLoad: Promise<unknown> | undefined
+    expect(
+      exact.requestSnapshot({
+        where,
+        refetch: true,
+        onLoadSubsetResult: (result) => {
+          exactLoad = Promise.resolve(result)
+          void exactLoad.catch(() => undefined)
+        },
+      }),
+    ).toBe(true)
+    await vi.waitFor(() => expect(calls).toBe(2))
+    borrowed.releaseSnapshot(where)
+    expect(exactSignal?.aborted).toBe(false)
+
+    held.resolve([...initial, { id: `a2`, group: `a` }])
+    await exactLoad
+    expect(source.has(`a2`)).toBe(true)
+  })
+
+  /**
+   * A new caller after the sole prior request aborts needs fresh work. The
+   * first provider ignores cancellation and resolves late; its old row must
+   * remain absent while the successor waits for its own row. The provider
+   * calls, caller outcomes, and rows distinguish a fresh fetch from attaching
+   * the successor to the already canceled physical request.
+   */
+  it(`starts a fresh fetch for a caller arriving after a sole abort`, async () => {
+    type Row = { id: string; group: string }
+    const id = `successor-after-sole-abort`
+    const queryClient = createQueryClient()
+    const old = { id: `old`, group: `a` }
+    const fresh = { id: `fresh`, group: `a` }
+    const firstResponse = createDeferred<Array<Row>>()
+    const secondResponse = createDeferred<Array<Row>>()
+    const signals: Array<AbortSignal | undefined> = []
+    const queryFn = vi.fn((context: QueryFunctionContext) => {
+      signals.push(context.meta?.loadSubsetOptions?.signal)
+      return signals.length === 1
+        ? firstResponse.promise
+        : secondResponse.promise
+    })
+    const source = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+      }),
+    )
+    const first = source.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    const successor = source.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    cleanups.push(async () => {
+      firstResponse.resolve([])
+      secondResponse.resolve([])
+      first.unsubscribe()
+      successor.unsubscribe()
+      await source.cleanup()
+      queryClient.clear()
+    })
+    const where = eq(new IR.PropRef([`group`]), `a`)
+    const firstAbort = new AbortController()
+    let firstLoad: Promise<string> | undefined
+    expect(
+      first.requestSnapshot({
+        where,
+        signal: firstAbort.signal,
+        onLoadSubsetResult: (result) => {
+          firstLoad = Promise.resolve(result).then(
+            () => `fulfilled`,
+            (error: unknown) =>
+              error instanceof Error ? error.name : `unknown rejection`,
+          )
+        },
+      }),
+    ).toBe(true)
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledOnce())
+    firstAbort.abort()
+    expect(await firstLoad).toBe(`AbortError`)
+
+    let successorLoad: Promise<void> | undefined
+    expect(
+      successor.requestSnapshot({
+        where,
+        onLoadSubsetResult: (result) => {
+          successorLoad = Promise.resolve(result).then(() => undefined)
+          void successorLoad.catch(() => undefined)
+        },
+      }),
+    ).toBe(true)
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+    let successorSettled = false
+    void successorLoad!.then(() => {
+      successorSettled = true
+    })
+    firstResponse.resolve([old])
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    expect({ successorSettled, oldRow: source.has(old.id) }).toEqual({
+      successorSettled: false,
+      oldRow: false,
+    })
+    secondResponse.resolve([fresh])
+    await successorLoad
+    expect({
+      firstSignalAborted: signals[0]?.aborted,
+      secondSignalAborted: signals[1]?.aborted,
+      oldRow: source.has(old.id),
+      freshRow: source.has(fresh.id),
+    }).toEqual({
+      firstSignalAborted: true,
+      secondSignalAborted: false,
+      oldRow: false,
+      freshRow: true,
+    })
+  })
+
+  /**
+   * Releasing an aborted acquisition leaves a still-running physical fetch.
+   * A provider that ignores cancellation may fulfill and serve the successor
+   * without a second call. If it rejects after observing the aborted signal,
+   * the successor needs fresh work. These two authored outcomes distinguish
+   * result reuse from inheriting an old caller's cancellation failure.
+   */
+  it.each([`fulfills`, `rejects`] as const)(
+    `settles a released successor when the aborted provider %s`,
+    async (oldOutcome) => {
+      type Row = { id: string }
+      const id = `released-abort-rejection-successor`
+      const queryClient = createQueryClient()
+      const old = createDeferred<Array<Row>>()
+      const fresh = createDeferred<Array<Row>>()
+      const queryFn = vi.fn(() =>
+        queryFn.mock.calls.length === 1 ? old.promise : fresh.promise,
+      )
+      const source = createCollection(
+        queryCollectionOptions<Row>({
+          id,
+          queryClient,
+          queryKey: [id],
+          queryFn,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          startSync: true,
+          retry: false,
+        }),
+      )
+      const caller = new AbortController()
+      const first = { signal: caller.signal }
+      const successor = {}
+      cleanups.push(async () => {
+        old.resolve([])
+        fresh.resolve([])
+        source._sync.unloadSubset(first)
+        source._sync.unloadSubset(successor)
+        await source.cleanup()
+        queryClient.clear()
+      })
+      const firstLoad = Promise.resolve(source._sync.loadSubset(first))
+      void firstLoad.catch(() => undefined)
+      await vi.waitFor(() => expect(queryFn).toHaveBeenCalledOnce())
+      caller.abort()
+      source._sync.unloadSubset(first)
+
+      const successorLoad = Promise.resolve(source._sync.loadSubset(successor))
+      void successorLoad.catch(() => undefined)
+      expect(queryFn).toHaveBeenCalledOnce()
+      if (oldOutcome === `fulfills`) {
+        old.resolve([{ id: `old` }])
+        await successorLoad
+        expect(queryFn).toHaveBeenCalledOnce()
+        expect(source.has(`old`)).toBe(true)
+      } else {
+        old.reject(new DOMException(`Aborted`, `AbortError`))
+        await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+        fresh.resolve([{ id: `fresh` }])
+        await successorLoad
+        expect(source.has(`fresh`)).toBe(true)
+      }
+    },
+  )
+
+  /**
+   * A Query Core observer can join a Collection-driven fetch without making
+   * a Collection acquisition. It independently owns that Query's result.
+   * Aborting the sole Collection caller rejects that caller and leaves its
+   * public rows empty, while the provider signal stays live for the outside
+   * observer. One held response must reach Query cache and the outside view.
+   */
+  it.each([`stays`, `leaves`] as const)(
+    `keeps a held provider for an independent Query observer that %s`,
+    async (outsideLifetime) => {
+      type Row = { id: string }
+      const id = `outside-observer-held-fetch-${outsideLifetime}`
+      const queryClient = createQueryClient()
+      const held = createDeferred<Array<Row>>()
+      const caller = new AbortController()
+      const providerSignals: Array<AbortSignal | undefined> = []
+      const queryFn = vi.fn((context: QueryFunctionContext) => {
+        const providerSignal = context.meta?.loadSubsetOptions?.signal
+        providerSignals.push(providerSignal)
+        return new Promise<Array<Row>>((resolve, reject) => {
+          providerSignal?.addEventListener(
+            `abort`,
+            () => reject(new DOMException(`Aborted`, `AbortError`)),
+            { once: true },
+          )
+          void held.promise.then(resolve, reject)
+        })
+      })
+      const source = createCollection(
+        queryCollectionOptions<Row>({
+          id,
+          queryClient,
+          queryKey: [id],
+          queryFn,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          startSync: true,
+          retry: false,
+        }),
+      )
+      const subscription = source.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+      const outside = new QueryObserver(queryClient, {
+        queryKey: [id],
+        queryFn: () => Promise.resolve([{ id: `wrong-fetch` }]),
+        enabled: false,
+      })
+      const cleanupResources: { outsideRelease?: () => void } = {}
+      cleanups.push(async () => {
+        held.resolve([])
+        cleanupResources.outsideRelease?.()
+        subscription.unsubscribe()
+        await source.cleanup()
+        queryClient.clear()
+      })
+      let callerOutcome: Promise<string> | undefined
+      expect(
+        subscription.requestSnapshot({
+          signal: caller.signal,
+          onLoadSubsetResult: (result) => {
+            callerOutcome = Promise.resolve(result).then(
+              () => `fulfilled`,
+              (error: unknown) =>
+                error instanceof Error ? error.name : `unknown rejection`,
+            )
+          },
+        }),
+      ).toBe(true)
+      await vi.waitFor(() => expect(queryFn).toHaveBeenCalledOnce())
+      cleanupResources.outsideRelease = outside.subscribe(() => {})
+      expect(
+        queryClient
+          .getQueryCache()
+          .find({ queryKey: [id] })
+          ?.getObserversCount(),
+      ).toBe(2)
+      caller.abort()
+      expect(await callerOutcome).toBe(`AbortError`)
+      expect(providerSignals[0]?.aborted).toBe(false)
+      expect(queryFn).toHaveBeenCalledOnce()
+
+      if (outsideLifetime === `leaves`) {
+        cleanupResources.outsideRelease()
+        cleanupResources.outsideRelease = undefined
+        expect(providerSignals[0]?.aborted).toBe(true)
+        held.resolve([{ id: `shared` }])
+        await vi.waitFor(() =>
+          expect(queryClient.getQueryState([id])?.status).toBe(`error`),
+        )
+        expect(queryClient.getQueryData([id])).toBeUndefined()
+      } else {
+        held.resolve([{ id: `shared` }])
+        await vi.waitFor(() =>
+          expect(outside.getCurrentResult().data).toEqual([{ id: `shared` }]),
+        )
+        expect(queryClient.getQueryData([id])).toEqual([{ id: `shared` }])
+      }
+      expect(queryFn).toHaveBeenCalledOnce()
+      expect(source.has(`shared`)).toBe(false)
+    },
+  )
+
+  /**
+   * Two Collections can share one physical Query, so the successor may not
+   * find the canceled acquisition in its own observer map. A retained aborted
+   * caller leaves F1 without a live owner. The new Collection's first public
+   * snapshot must start F2, remain pending through F1's ignored late row, and
+   * settle with F2's row. The reference is the two caller lifetimes and two
+   * authored responses, independent of either Collection's local route map.
+   */
+  it(`restarts a canceled physical fetch for a successor Collection`, async () => {
+    type Row = { id: string }
+    const id = `cross-collection-late-successor`
+    const queryClient = createQueryClient()
+    const old = createDeferred<Array<Row>>()
+    const fresh = createDeferred<Array<Row>>()
+    const signals: Array<AbortSignal | undefined> = []
+    const queryFn = vi.fn((context: QueryFunctionContext) => {
+      signals.push(context.meta?.loadSubsetOptions?.signal)
+      return signals.length === 1 ? old.promise : fresh.promise
+    })
+    const makeSource = (suffix: string) =>
+      createCollection(
+        queryCollectionOptions<Row>({
+          id: `${id}-${suffix}`,
+          queryClient,
+          queryKey: [id],
+          queryFn,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          startSync: true,
+          staleTime: Infinity,
+        }),
+      )
+    const first = makeSource(`first`)
+    const firstSubscription = first.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    const caller = new AbortController()
+    const cleanupResources: {
+      successor?: ReturnType<typeof makeSource>
+      successorSubscription?: ReturnType<typeof first.subscribeChanges>
+    } = {}
+    cleanups.push(async () => {
+      old.resolve([])
+      fresh.resolve([])
+      firstSubscription.unsubscribe()
+      cleanupResources.successorSubscription?.unsubscribe()
+      await cleanupResources.successor?.cleanup()
+      await first.cleanup()
+      queryClient.clear()
+    })
+    let firstOutcome: Promise<string> | undefined
+    expect(
+      firstSubscription.requestSnapshot({
+        signal: caller.signal,
+        onLoadSubsetResult: (result) => {
+          firstOutcome = Promise.resolve(result).then(
+            () => `fulfilled`,
+            (error: unknown) =>
+              error instanceof Error ? error.name : `unknown rejection`,
+          )
+        },
+      }),
+    ).toBe(true)
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledOnce())
+    caller.abort()
+    expect(await firstOutcome).toBe(`AbortError`)
+    expect(signals[0]?.aborted).toBe(true)
+
+    const successor = makeSource(`successor`)
+    const successorSubscription = successor.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    cleanupResources.successor = successor
+    cleanupResources.successorSubscription = successorSubscription
+    let successorOutcome = `pending`
+    let successorLoad: Promise<void> | undefined
+    expect(
+      successorSubscription.requestSnapshot({
+        onLoadSubsetResult: (result) => {
+          successorLoad = Promise.resolve(result).then(() => {
+            successorOutcome = `fulfilled`
+          })
+          void successorLoad.catch(() => undefined)
+        },
+      }),
+    ).toBe(true)
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+    expect(successorOutcome).toBe(`pending`)
+    old.resolve([{ id: `old` }])
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    expect({ outcome: successorOutcome, oldRow: successor.has(`old`) }).toEqual(
+      {
+        outcome: `pending`,
+        oldRow: false,
+      },
+    )
+    fresh.resolve([{ id: `fresh` }])
+    await successorLoad
+    expect({
+      outcome: successorOutcome,
+      oldRow: successor.has(`old`),
+      freshRow: successor.has(`fresh`),
+    }).toEqual({ outcome: `fulfilled`, oldRow: false, freshRow: true })
+  })
+
+  /**
+   * A direct loader can start an on-demand fetch without a caller signal.
+   * A later public snapshot may join that physical Query. Once the first
+   * lease releases and the snapshot aborts, no live acquisition remains: the
+   * provider's physical signal must abort and its late row must stay absent.
+   * The no-signal creator and signaled late peer distinguish this history from
+   * choosing signal behavior only when the fetch starts.
+   */
+  it(`cancels a fetch started without a signal after its late peer aborts`, async () => {
+    type Row = { id: string }
+    const id = `no-signal-creator-late-peer`
+    const queryClient = createQueryClient()
+    const response = createDeferred<Array<Row>>()
+    let providerSignal: AbortSignal | undefined
+    const queryFn = vi.fn((context: QueryFunctionContext) => {
+      providerSignal = context.meta?.loadSubsetOptions?.signal
+      return response.promise
+    })
+    const source = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+      }),
+    )
+    const firstDemand: LoadSubsetOptions = {}
+    const firstLoad = source._sync.loadSubset(firstDemand)
+    if (firstLoad !== true) void firstLoad.catch(() => undefined)
+    const peer = source.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    cleanups.push(async () => {
+      response.resolve([])
+      source._sync.unloadSubset(firstDemand)
+      peer.unsubscribe()
+      await source.cleanup()
+      queryClient.clear()
+    })
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledOnce())
+    expect(providerSignal).toBeInstanceOf(AbortSignal)
+
+    const peerAbort = new AbortController()
+    let peerOutcome: Promise<string> | undefined
+    expect(
+      peer.requestSnapshot({
+        signal: peerAbort.signal,
+        onLoadSubsetResult: (result) => {
+          peerOutcome = Promise.resolve(result).then(
+            () => `fulfilled`,
+            (error: unknown) =>
+              error instanceof Error ? error.name : `unknown rejection`,
+          )
+        },
+      }),
+    ).toBe(true)
+    expect(queryFn).toHaveBeenCalledOnce()
+    source._sync.unloadSubset(firstDemand)
+    expect(providerSignal?.aborted).toBe(false)
+    peerAbort.abort()
+    expect(await peerOutcome).toBe(`AbortError`)
+    expect(providerSignal?.aborted).toBe(true)
+
+    response.resolve([{ id: `late` }])
+    if (firstLoad !== true) await firstLoad.catch(() => undefined)
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    expect(source.has(`late`)).toBe(false)
+  })
+
+  /**
+   * Query Core can run the queryFn installed by a direct loader without a
+   * request signal
+   * while another Collection owns the same physical Query through a public
+   * snapshot. The physical signal still belongs to the fetch. Releasing the
+   * closure owner cannot abort the surviving Collection's held provider call.
+   */
+  it(`supplies a physical signal through a no-signal Collection queryFn`, async () => {
+    type Row = { id: string }
+    const id = `foreign-no-signal-queryfn`
+    const queryClient = createQueryClient()
+    const held = createDeferred<Array<Row>>()
+    let calls = 0
+    let fetchOwner: `A` | `B` | undefined
+    let providerSignal: AbortSignal | undefined
+    let signalDescriptor: PropertyDescriptor | undefined
+    const makeSource = (owner: `A` | `B`) =>
+      createCollection(
+        queryCollectionOptions<Row>({
+          id: `${id}-${owner}`,
+          queryClient,
+          queryKey: [id],
+          queryFn: (context) => {
+            calls++
+            if (calls === 1) return Promise.resolve([{ id: `old` }])
+            fetchOwner = owner
+            providerSignal = context.meta?.loadSubsetOptions?.signal
+            signalDescriptor = Object.getOwnPropertyDescriptor(
+              context.meta?.loadSubsetOptions,
+              `signal`,
+            )
+            return held.promise
+          },
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          startSync: true,
+        }),
+      )
+    const sourceB = makeSource(`B`)
+    const subscription = sourceB.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    let loadB: Promise<unknown> | undefined
+    expect(
+      subscription.requestSnapshot({
+        onLoadSubsetResult: (result) => {
+          loadB = Promise.resolve(result)
+        },
+      }),
+    ).toBe(true)
+    await loadB
+    const sourceA = makeSource(`A`)
+    const demandA = {}
+    await sourceA._sync.loadSubset(demandA)
+    cleanups.push(async () => {
+      held.resolve([])
+      sourceA._sync.unloadSubset(demandA)
+      subscription.unsubscribe()
+      await sourceA.cleanup()
+      await sourceB.cleanup()
+      queryClient.clear()
+    })
+
+    const invalidation = queryClient.invalidateQueries({ queryKey: [id] })
+    await vi.waitFor(() => expect(calls).toBe(2))
+    expect(fetchOwner).toBe(`A`)
+    expect(signalDescriptor).toHaveProperty(`value`, providerSignal)
+    expect(providerSignal).toBeInstanceOf(AbortSignal)
+    sourceA._sync.unloadSubset(demandA)
+    expect(providerSignal?.aborted).toBe(false)
+    held.resolve([{ id: `new` }])
+    await invalidation
+    await vi.waitFor(() => expect(sourceB.has(`new`)).toBe(true))
+  })
+
+  /**
+   * An eager Collection can join an on-demand Collection's in-flight Query.
+   * The eager Collection has an independent observer lease. Aborting the
+   * on-demand caller rejects that caller, but leaves the physical provider
+   * signal live so the eager preload can apply the held row. The reference is
+   * one provider response and one surviving owner; compare both public
+   * Collections and the provider signal before and after settlement.
+   */
+  it(`keeps a shared on-demand fetch for an eager peer after caller abort`, async () => {
+    type Row = { id: string }
+    const id = `mixed-mode-held-fetch`
+    const queryClient = createQueryClient()
+    const held = createDeferred<Array<Row>>()
+    const caller = new AbortController()
+    let providerSignal: AbortSignal | undefined
+    const onDemandFn = vi.fn((context: QueryFunctionContext) => {
+      providerSignal = context.meta?.loadSubsetOptions?.signal
+      return held.promise
+    })
+    const onDemand = createCollection(
+      queryCollectionOptions<Row>({
+        id: `${id}-on-demand`,
+        queryClient,
+        queryKey: [id],
+        queryFn: onDemandFn,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+      }),
+    )
+    const subscription = onDemand.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    const cleanupResources: { eager?: Collection<Row> } = {}
+    cleanups.push(async () => {
+      held.resolve([{ id: `held` }])
+      subscription.unsubscribe()
+      await cleanupResources.eager?.cleanup()
+      await onDemand.cleanup()
+      queryClient.clear()
+    })
+    let canceledLoad: Promise<string> | undefined
+    expect(
+      subscription.requestSnapshot({
+        signal: caller.signal,
+        onLoadSubsetResult: (result) => {
+          canceledLoad = Promise.resolve(result).then(
+            () => `fulfilled`,
+            (error: unknown) =>
+              error instanceof Error ? error.name : `unknown rejection`,
+          )
+        },
+      }),
+    ).toBe(true)
+    await vi.waitFor(() => expect(onDemandFn).toHaveBeenCalledOnce())
+    const eager = createCollection(
+      queryCollectionOptions<Row>({
+        id: `${id}-eager`,
+        queryClient,
+        queryKey: [id],
+        queryFn: () => Promise.resolve([{ id: `wrong-fetch` }]),
+        getKey: (row) => row.id,
+        syncMode: `eager`,
+        startSync: true,
+      }),
+    )
+    cleanupResources.eager = eager
+    const eagerReady = eager.preload()
+    expect(
+      queryClient
+        .getQueryCache()
+        .find({ queryKey: [id] })
+        ?.getObserversCount(),
+    ).toBe(2)
+    caller.abort()
+    expect(await canceledLoad).toBe(`AbortError`)
+    expect(providerSignal?.aborted).toBe(false)
+
+    held.resolve([{ id: `held` }])
+    await eagerReady
+    expect({
+      providerAborted: providerSignal?.aborted,
+      eagerRow: eager.has(`held`),
+      canceledRow: onDemand.has(`held`),
+      cache: queryClient.getQueryData([id]),
+    }).toEqual({
+      providerAborted: false,
+      eagerRow: true,
+      canceledRow: false,
+      cache: [{ id: `held` }],
+    })
+  })
+
+  /**
+   * Query Core can replace an in-flight on-demand fetch by selecting an eager
+   * observer's queryFn for the same physical Query. Replacement ends the old
+   * physical fetch, so its metadata signal must abort even while both
+   * Collection leases remain. An ignored old response must not displace the
+   * eager result in Query cache or either public Collection.
+   */
+  it(`aborts an on-demand provider signal when eager refetch replaces it`, async () => {
+    type Row = { id: string; owner: string }
+    const id = `mixed-mode-replaced-fetch`
+    const queryClient = createQueryClient()
+    const old = createDeferred<Array<Row>>()
+    let calls = 0
+    let oldSignal: AbortSignal | undefined
+    const onDemand = createCollection(
+      queryCollectionOptions<Row>({
+        id: `${id}-on-demand`,
+        queryClient,
+        queryKey: [id],
+        queryFn: (context) => {
+          calls++
+          if (calls === 1)
+            return Promise.resolve([{ id: `x`, owner: `initial` }])
+          oldSignal = context.meta?.loadSubsetOptions?.signal
+          return old.promise
+        },
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        staleTime: Infinity,
+      }),
+    )
+    const request = { signal: new AbortController().signal }
+    await onDemand._sync.loadSubset(request)
+    const cleanupResources: {
+      eager?: Collection<Row>
+      firstInvalidation?: Promise<void>
+    } = {}
+    cleanups.push(async () => {
+      old.resolve([{ id: `x`, owner: `old` }])
+      await cleanupResources.firstInvalidation?.catch(() => undefined)
+      onDemand._sync.unloadSubset(request)
+      await cleanupResources.eager?.cleanup()
+      await onDemand.cleanup()
+      queryClient.clear()
+    })
+    const firstInvalidation = queryClient.invalidateQueries({
+      queryKey: [id],
+      exact: true,
+    })
+    cleanupResources.firstInvalidation = firstInvalidation
+    await vi.waitFor(() => expect(calls).toBe(2))
+    expect(oldSignal?.aborted).toBe(false)
+    const eager = createCollection(
+      queryCollectionOptions<Row>({
+        id: `${id}-eager`,
+        queryClient,
+        queryKey: [id],
+        queryFn: () => Promise.resolve([{ id: `x`, owner: `eager` }]),
+        getKey: (row) => row.id,
+        syncMode: `eager`,
+        startSync: true,
+        staleTime: Infinity,
+      }),
+    )
+    cleanupResources.eager = eager
+    await vi.waitFor(() =>
+      expect(
+        queryClient
+          .getQueryCache()
+          .find({ queryKey: [id] })
+          ?.getObserversCount(),
+      ).toBe(2),
+    )
+    await queryClient.invalidateQueries({ queryKey: [id], exact: true })
+    expect(oldSignal?.aborted).toBe(true)
+    expect(queryClient.getQueryData([id])).toEqual([
+      { id: `x`, owner: `eager` },
+    ])
+    old.resolve([{ id: `x`, owner: `old` }])
+    await firstInvalidation
+    await vi.waitFor(() => expect(onDemand.get(`x`)?.owner).toBe(`eager`))
+    expect(eager.get(`x`)?.owner).toBe(`eager`)
+  })
+
+  /**
+   * Query Core replaces a fetch when refetch starts, before it calls the next
+   * provider. If the replacement pauses offline, F1 has already lost result
+   * authority. Its metadata signal must abort at that replacement boundary,
+   * without waiting for F2's provider to run on reconnect.
+   */
+  it(`aborts a replaced provider while the next fetch is paused`, async () => {
+    type Row = { id: string }
+    const id = `paused-replacement-signal`
+    const queryClient = createQueryClient()
+    const held = createDeferred<Array<Row>>()
+    const signals: Array<AbortSignal | undefined> = []
+    const queryFn = vi.fn((context: QueryFunctionContext) => {
+      signals.push(context.meta?.loadSubsetOptions?.signal)
+      if (signals.length === 1) return Promise.resolve([{ id: `initial` }])
+      if (signals.length === 2) return held.promise
+      return Promise.resolve([{ id: `replacement` }])
+    })
+    const source = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        retry: false,
+      }),
+    )
+    const request = {}
+    const pending: { first?: Promise<void>; second?: Promise<void> } = {}
+    cleanups.push(async () => {
+      onlineManager.setOnline(true)
+      held.resolve([])
+      await queryClient.cancelQueries({ queryKey: [id], exact: true })
+      await Promise.allSettled([pending.first, pending.second])
+      source._sync.unloadSubset(request)
+      await source.cleanup()
+      queryClient.clear()
+    })
+    await source._sync.loadSubset(request)
+    pending.first = queryClient.refetchQueries({ queryKey: [id], exact: true })
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+    expect(signals[1]?.aborted).toBe(false)
+
+    onlineManager.setOnline(false)
+    pending.second = queryClient.refetchQueries({ queryKey: [id], exact: true })
+    await vi.waitFor(() =>
+      expect(queryClient.getQueryState([id])?.fetchStatus).toBe(`paused`),
+    )
+    expect(queryFn).toHaveBeenCalledTimes(2)
+    expect(signals[1]?.aborted).toBe(true)
+    held.resolve([{ id: `old` }])
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    expect(queryClient.getQueryData([id])).toEqual([{ id: `initial` }])
+    expect(source.has(`old`)).toBe(false)
+
+    onlineManager.setOnline(true)
+    await pending.second
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(3))
+    expect(queryClient.getQueryData([id])).toEqual([{ id: `replacement` }])
+    expect(source.has(`replacement`)).toBe(true)
+  })
+
+  /**
+   * Query Core notifies observers before cache subscribers. An outside
+   * observer can start F2 synchronously from F1's cancellation notification.
+   * The old terminal event must not abort F2's newly installed provider
+   * signal. Compare the two signals before F2 resolves, then its cache row.
+   */
+  it(`keeps a reentrant replacement fetch alive after old cancellation`, async () => {
+    type Row = { id: string }
+    const id = `reentrant-cancel-replacement`
+    const queryClient = createQueryClient()
+    const old = createDeferred<Array<Row>>()
+    const fresh = createDeferred<Array<Row>>()
+    const signals: Array<AbortSignal | undefined> = []
+    const queryFn = vi.fn((context: QueryFunctionContext) => {
+      signals.push(context.meta?.loadSubsetOptions?.signal)
+      return signals.length === 1 ? old.promise : fresh.promise
+    })
+    const source = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        retry: false,
+      }),
+    )
+    const request = {}
+    const firstLoad = Promise.resolve(source._sync.loadSubset(request))
+    void firstLoad.catch(() => undefined)
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledOnce())
+    const query = queryClient.getQueryCache().find({ queryKey: [id] })!
+    const outside = new QueryObserver(queryClient, {
+      queryKey: [id],
+      queryFn: query.options.queryFn!,
+      enabled: false,
+      retry: false,
+      notifyOnChangeProps: `all`,
+    })
+    let armed = false
+    let restarted: Promise<unknown> | undefined
+    const releaseOutside = outside.subscribe((result) => {
+      if (armed && result.fetchStatus === `idle` && !restarted) {
+        restarted = outside.refetch({ throwOnError: true })
+        void restarted.catch(() => undefined)
+      }
+    })
+    cleanups.push(async () => {
+      old.resolve([])
+      fresh.resolve([])
+      releaseOutside()
+      source._sync.unloadSubset(request)
+      await source.cleanup()
+      queryClient.clear()
+    })
+    armed = true
+    await queryClient.cancelQueries({ queryKey: [id], exact: true })
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+    expect({ old: signals[0]?.aborted, fresh: signals[1]?.aborted }).toEqual({
+      old: true,
+      fresh: false,
+    })
+
+    fresh.resolve([{ id: `new` }])
+    await restarted
+    expect(queryClient.getQueryData([id])).toEqual([{ id: `new` }])
+    expect(source.has(`new`)).toBe(true)
+  })
+
+  /**
+   * At the public application boundary, a canceled utility refetch cannot
+   * fulfill from the success that preceded its own fetch. Query Core may
+   * revert F1 to that old result after external cancellation. The caller
+   * rejects with AbortError; an ignored late provider response cannot publish.
+   */
+  it(`rejects an externally canceled utility refetch with AbortError`, async () => {
+    type Row = { id: string }
+    const id = `external-cancel-utility-refetch`
+    const queryClient = createQueryClient()
+    const held = createDeferred<Array<Row>>()
+    const queryFn = vi.fn(() =>
+      queryFn.mock.calls.length === 1
+        ? Promise.resolve([{ id: `before` }])
+        : held.promise,
+    )
+    const source = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        retry: false,
+      }),
+    )
+    const request = {}
+    cleanups.push(async () => {
+      held.resolve([{ id: `late` }])
+      source._sync.unloadSubset(request)
+      await source.cleanup()
+      queryClient.clear()
+    })
+    await source._sync.loadSubset(request)
+    expect(source.has(`before`)).toBe(true)
+    const refetch = source.utils.refetch({ throwOnError: true })
+    void refetch.catch(() => undefined)
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+
+    await queryClient.cancelQueries({ queryKey: [id], exact: true })
+    await expect(refetch).rejects.toMatchObject({ name: `AbortError` })
+    held.resolve([{ id: `late` }])
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    expect(source.has(`before`)).toBe(true)
+    expect(source.has(`late`)).toBe(false)
+  })
+
+  /**
+   * An outside Query observer can synchronously start F2 when Query Core
+   * announces F1's cancellation. F2 may succeed before the original utility
+   * refetch A resumes. Its success belongs to the outside observer; it cannot
+   * certify A's canceled F1. The same rule holds after a direct cache write.
+   * Compare A's rejection with F2's Query cache and public Collection row.
+   */
+  it.each([
+    {
+      history: `distinct replacement`,
+      withWrite: false,
+      replacementName: `replacement`,
+    },
+    {
+      history: `intervening direct write`,
+      withWrite: true,
+      replacementName: `replacement`,
+    },
+    {
+      history: `same-value replacement`,
+      withWrite: false,
+      replacementName: `before`,
+    },
+  ])(
+    `rejects a canceled utility refetch before a reentrant $history`,
+    async ({ withWrite, replacementName }) => {
+      type Row = { id: string; name: string }
+      const id = `external-cancel-reentrant-refetch-${replacementName}-${withWrite}`
+      const queryClient = createQueryClient()
+      const old = createDeferred<Array<Row>>()
+      const replacement = createDeferred<Array<Row>>()
+      let calls = 0
+      const queryFn = vi.fn(() => {
+        calls++
+        if (calls === 1) return Promise.resolve([{ id: `x`, name: `before` }])
+        if (calls === 2) return old.promise
+        return replacement.promise
+      })
+      const source = createCollection(
+        queryCollectionOptions<Row>({
+          id,
+          queryClient,
+          queryKey: [id],
+          queryFn,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          startSync: true,
+          staleTime: Infinity,
+          retry: false,
+        }),
+      )
+      const request = {}
+      await source._sync.loadSubset(request)
+      const query = queryClient.getQueryCache().find({ queryKey: [id] })!
+      const outside = new QueryObserver(queryClient, {
+        queryKey: [id],
+        queryFn: query.options.queryFn!,
+        enabled: false,
+        retry: false,
+        notifyOnChangeProps: `all`,
+      })
+      let armed = false
+      let restarted: Promise<unknown> | undefined
+      const releaseOutside = outside.subscribe((result) => {
+        if (armed && result.fetchStatus === `idle` && !restarted) {
+          restarted = outside.refetch({ throwOnError: true })
+          void restarted.catch(() => undefined)
+        }
+      })
+      cleanups.push(async () => {
+        old.resolve([{ id: `x`, name: `old` }])
+        replacement.resolve([{ id: `x`, name: replacementName }])
+        releaseOutside()
+        source._sync.unloadSubset(request)
+        await source.cleanup()
+        queryClient.clear()
+      })
+      const refetch = source.utils.refetch({ throwOnError: true })
+      void refetch.catch(() => undefined)
+      await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+      if (withWrite) await source.utils.writeUpdate({ id: `x`, name: `manual` })
+      armed = true
+      await queryClient.cancelQueries({ queryKey: [id], exact: true })
+      await expect(refetch).rejects.toMatchObject({ name: `AbortError` })
+      if (withWrite) expect(source.get(`x`)?.name).toBe(`manual`)
+      replacement.resolve([{ id: `x`, name: replacementName }])
+      await restarted
+      old.resolve([{ id: `x`, name: `old` }])
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect({
+        providerCalls: calls,
+        cache: queryClient.getQueryData([id]),
+        publicRow: source.get(`x`)?.name,
+      }).toEqual({
+        providerCalls: 3,
+        cache: [{ id: `x`, name: replacementName }],
+        publicRow: replacementName,
+      })
+    },
+  )
+
+  /**
+   * A direct write during an ordinary held refetch does not cancel that
+   * fetch. The utility call stays pending until the response applies, while
+   * the accepted local write keeps its later per-key authority. The returned
+   * observer result may reflect that cache patch. This control rejects a
+   * guard that treats every intervening write as cancellation.
+   */
+  it(`fulfills an uncanceled utility refetch across a direct write`, async () => {
+    type Row = { id: string; name: string }
+    const id = `direct-write-during-utility-refetch`
+    const queryClient = createQueryClient()
+    const held = createDeferred<Array<Row>>()
+    let calls = 0
+    const queryFn = vi.fn(() =>
+      ++calls === 1
+        ? Promise.resolve([{ id: `x`, name: `before` }])
+        : held.promise,
+    )
+    const source = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        retry: false,
+      }),
+    )
+    const request = {}
+    cleanups.push(async () => {
+      held.resolve([])
+      source._sync.unloadSubset(request)
+      await source.cleanup()
+      queryClient.clear()
+    })
+    await source._sync.loadSubset(request)
+    const refetch = source.utils.refetch({ throwOnError: true })
+    void refetch.catch(() => undefined)
+    let settled = false
+    void refetch.finally(() => (settled = true)).catch(() => undefined)
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+    await source.utils.writeUpdate({ id: `x`, name: `manual` })
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    expect(settled).toBe(false)
+    held.resolve([{ id: `x`, name: `remote` }])
+
+    await expect(refetch).resolves.toHaveLength(1)
+    expect({ providerCalls: calls, publicRow: source.get(`x`)?.name }).toEqual({
+      providerCalls: 2,
+      publicRow: `manual`,
+    })
+  })
+
+  /**
+   * A second utility refetch can silently replace the first fetch. Both
+   * callers then follow the replacement and return its applied result. The
+   * held first response and two returned data values distinguish this from
+   * reusing the first fetch's stale result record.
+   */
+  it(`returns the replacement result to overlapping utility refetch callers`, async () => {
+    type Row = { id: string; name: string }
+    const id = `overlapping-utility-refetch-results`
+    const queryClient = createQueryClient()
+    const firstResponse = createDeferred<Array<Row>>()
+    const secondResponse = createDeferred<Array<Row>>()
+    let calls = 0
+    const queryFn = vi.fn(() => {
+      calls++
+      if (calls === 1) return Promise.resolve([{ id: `x`, name: `before` }])
+      return calls === 2 ? firstResponse.promise : secondResponse.promise
+    })
+    const source = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        retry: false,
+      }),
+    )
+    const request = {}
+    cleanups.push(async () => {
+      firstResponse.resolve([])
+      secondResponse.resolve([])
+      source._sync.unloadSubset(request)
+      await source.cleanup()
+      queryClient.clear()
+    })
+    await source._sync.loadSubset(request)
+    const first = source.utils.refetch({ throwOnError: true })
+    void first.catch(() => undefined)
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+    const second = source.utils.refetch({ throwOnError: true })
+    void second.catch(() => undefined)
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(3))
+    firstResponse.resolve([{ id: `x`, name: `old` }])
+    secondResponse.resolve([{ id: `x`, name: `new` }])
+
+    const [firstResults, secondResults] = await Promise.all([first, second])
+    expect({
+      first: firstResults[0]?.data,
+      second: secondResults[0]?.data,
+      cache: queryClient.getQueryData([id]),
+      publicRow: source.get(`x`)?.name,
+    }).toEqual({
+      first: [{ id: `x`, name: `new` }],
+      second: [{ id: `x`, name: `new` }],
+      cache: [{ id: `x`, name: `new` }],
+      publicRow: `new`,
+    })
+  })
+
+  /**
+   * A provider may cancel F1 synchronously while its queryFn is running. An
+   * outside observer can start F2 from that cancellation before the original
+   * refetch call returns. A's obligation is still F1: external cancellation
+   * rejects A before F2 settles. F2 remains free to publish its own response.
+   */
+  it(`rejects a utility refetch canceled synchronously inside its queryFn`, async () => {
+    type Row = { id: string; name: string }
+    const id = `synchronous-queryfn-utility-cancellation`
+    const queryClient = createQueryClient()
+    const old = createDeferred<Array<Row>>()
+    const fresh = createDeferred<Array<Row>>()
+    let calls = 0
+    const queryFn = vi.fn(() => {
+      calls++
+      if (calls === 1) return Promise.resolve([{ id: `x`, name: `before` }])
+      if (calls === 2) {
+        void queryClient.cancelQueries({ queryKey: [id], exact: true })
+        return old.promise
+      }
+      return fresh.promise
+    })
+    const source = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        retry: false,
+      }),
+    )
+    const request = {}
+    await source._sync.loadSubset(request)
+    const query = queryClient.getQueryCache().find({ queryKey: [id] })!
+    const outside = new QueryObserver(queryClient, {
+      queryKey: [id],
+      queryFn: query.options.queryFn!,
+      enabled: false,
+      retry: false,
+      notifyOnChangeProps: `all`,
+    })
+    let armed = false
+    let restarted: Promise<unknown> | undefined
+    const releaseOutside = outside.subscribe((result) => {
+      if (armed && result.fetchStatus === `idle` && !restarted) {
+        restarted = outside.refetch({ throwOnError: true })
+        void restarted.catch(() => undefined)
+      }
+    })
+    cleanups.push(async () => {
+      old.resolve([{ id: `x`, name: `old` }])
+      fresh.resolve([{ id: `x`, name: `new` }])
+      releaseOutside()
+      source._sync.unloadSubset(request)
+      await source.cleanup()
+      queryClient.clear()
+    })
+
+    armed = true
+    const refetch = source.utils.refetch({ throwOnError: true })
+    void refetch.catch(() => undefined)
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(3))
+    const outcome = await Promise.race([
+      refetch.then(
+        () => `fulfilled`,
+        (error: unknown) =>
+          error instanceof Error ? error.name : `unknown rejection`,
+      ),
+      new Promise<string>((resolve) => setTimeout(() => resolve(`pending`), 0)),
+    ])
+    expect(outcome).toBe(`AbortError`)
+    expect(queryClient.getQueryData([id])).toEqual([
+      { id: `x`, name: `before` },
+    ])
+    fresh.resolve([{ id: `x`, name: `new` }])
+    await restarted
+    old.resolve([{ id: `x`, name: `old` }])
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    expect({
+      cache: queryClient.getQueryData([id]),
+      publicRow: source.get(`x`)?.name,
+    }).toEqual({ cache: [{ id: `x`, name: `new` }], publicRow: `new` })
+  })
+
+  /**
+   * Silent replacement can happen repeatedly: B replaces A's F1 with F2,
+   * then C replaces F2 with F3. All three callers follow F3, wait while it is
+   * held, and return its applied rows. F1 and F2 have no remaining authority
+   * even if their providers ignore cancellation and reply later.
+   */
+  it.each([false, true])(
+    `follows a three-refetch replacement chain with throwOnError=%s`,
+    async (throwOnError) => {
+      type Row = { id: string; name: string }
+      const id = `three-utility-refetches-${throwOnError}`
+      const queryClient = createQueryClient()
+      const responses = Array.from({ length: 3 }, () =>
+        createDeferred<Array<Row>>(),
+      )
+      let calls = 0
+      const queryFn = vi.fn(() => {
+        calls++
+        return calls === 1
+          ? Promise.resolve([{ id: `x`, name: `before` }])
+          : responses[calls - 2]!.promise
+      })
+      const source = createCollection(
+        queryCollectionOptions<Row>({
+          id,
+          queryClient,
+          queryKey: [id],
+          queryFn,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          startSync: true,
+          retry: false,
+        }),
+      )
+      const request = {}
+      cleanups.push(async () => {
+        for (const response of responses) response.resolve([])
+        source._sync.unloadSubset(request)
+        await source.cleanup()
+        queryClient.clear()
+      })
+      await source._sync.loadSubset(request)
+      const outcomes: Array<string> = []
+      const refetch = (name: string) => {
+        const call = source.utils.refetch({ throwOnError })
+        void call.then(
+          () => outcomes.push(name),
+          () => outcomes.push(`${name}-rejected`),
+        )
+        return call
+      }
+      const first = refetch(`A`)
+      await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+      const second = refetch(`B`)
+      await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(3))
+      const third = refetch(`C`)
+      await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(4))
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect(outcomes).toEqual([])
+
+      for (const [index, name] of [`old-1`, `old-2`].entries()) {
+        responses[index]!.resolve([{ id: `x`, name }])
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        expect({
+          outcomes,
+          cache: queryClient.getQueryData([id]),
+          publicRow: source.get(`x`)?.name,
+        }).toEqual({
+          outcomes: [],
+          cache: [{ id: `x`, name: `before` }],
+          publicRow: `before`,
+        })
+      }
+
+      responses[2]!.resolve([{ id: `x`, name: `new` }])
+      const results = await Promise.all([first, second, third])
+      expect({
+        results: results.map(([result]) => result?.data),
+        cache: queryClient.getQueryData([id]),
+        publicRow: source.get(`x`)?.name,
+      }).toEqual({
+        results: Array.from({ length: 3 }, () => [{ id: `x`, name: `new` }]),
+        cache: [{ id: `x`, name: `new` }],
+        publicRow: `new`,
+      })
+    },
+  )
+
+  /**
+   * Rejection has a presence independent of its value. If F2 fails after
+   * replacing F1, both `throwOnError` callers reject with the exact provider
+   * reason, including a falsy value. The old successful row remains public.
+   */
+  it.each([null, new Error(`provider failed`)] as const)(
+    `rejects a silently replaced utility refetch for provider error %s`,
+    async (reason) => {
+      type Row = { id: string; name: string }
+      const id = `replacement-provider-error-${String(reason)}`
+      const queryClient = createQueryClient()
+      const firstResponse = createDeferred<Array<Row>>()
+      const secondResponse = createDeferred<Array<Row>>()
+      let calls = 0
+      const queryFn = vi.fn(() => {
+        calls++
+        if (calls === 1) return Promise.resolve([{ id: `x`, name: `before` }])
+        return calls === 2 ? firstResponse.promise : secondResponse.promise
+      })
+      const source = createCollection(
+        queryCollectionOptions<Row>({
+          id,
+          queryClient,
+          queryKey: [id],
+          queryFn,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          startSync: true,
+          retry: false,
+        }),
+      )
+      const request = {}
+      cleanups.push(async () => {
+        firstResponse.resolve([])
+        secondResponse.resolve([])
+        source._sync.unloadSubset(request)
+        await source.cleanup()
+        queryClient.clear()
+      })
+      await source._sync.loadSubset(request)
+      const first = source.utils.refetch({ throwOnError: true })
+      void first.catch(() => undefined)
+      await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+      const second = source.utils.refetch({ throwOnError: true })
+      void second.catch(() => undefined)
+      await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(3))
+      secondResponse.reject(reason)
+      const outcomes = await Promise.allSettled([first, second])
+      expect(outcomes).toEqual([
+        { status: `rejected`, reason },
+        { status: `rejected`, reason },
+      ])
+      firstResponse.resolve([{ id: `x`, name: `old` }])
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect(source.get(`x`)?.name).toBe(`before`)
+    },
+  )
+
+  /**
+   * F2 success terminates A's and B's replacement obligation. A cache
+   * subscriber may synchronously start a new held F3 from that success event,
+   * but F3 is C's independent obligation. Compare A/B's returned F2 rows and
+   * C's pending state before releasing F3, including when F3 has equal data.
+   * A subscriber registered before Collection must have the same result as
+   * one registered afterward: notification order cannot reassign F2 to F3.
+   */
+  it.each(
+    ([`distinct`, `same-value`] as const).flatMap((variant) =>
+      ([`before`, `after`] as const).map((registration) => ({
+        variant,
+        registration,
+      })),
+    ),
+  )(
+    `stops a silent replacement chain at F2 success before $variant F3, subscriber $registration Collection`,
+    async ({ variant, registration }) => {
+      type Row = { id: string; name: string }
+      const id = `terminal-f2-before-f3-${variant}-${registration}`
+      const queryClient = createQueryClient()
+      let third: Promise<unknown> | undefined
+      const subscribeForF2 = () =>
+        queryClient.getQueryCache().subscribe((event) => {
+          if (
+            event.type === `updated` &&
+            event.action.type === `success` &&
+            event.action.data?.[0]?.name === `F2` &&
+            !third
+          ) {
+            launchThird()
+          }
+        })
+      let unsubscribe = () => {}
+      if (registration === `before`) unsubscribe = subscribeForF2()
+      const responses = Array.from({ length: 3 }, () =>
+        createDeferred<Array<Row>>(),
+      )
+      let calls = 0
+      const queryFn = vi.fn(() => {
+        calls++
+        return calls === 1
+          ? Promise.resolve([{ id: `x`, name: `before` }])
+          : responses[calls - 2]!.promise
+      })
+      const source = createCollection(
+        queryCollectionOptions<Row>({
+          id,
+          queryClient,
+          queryKey: [id],
+          queryFn,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          startSync: true,
+          retry: false,
+        }),
+      )
+      const request = {}
+      cleanups.push(async () => {
+        for (const response of responses) response.resolve([])
+        source._sync.unloadSubset(request)
+        await source.cleanup()
+        queryClient.clear()
+      })
+      await source._sync.loadSubset(request)
+      const outcomes = new Map<string, string>()
+      const refetch = (name: string) => {
+        const call = source.utils.refetch({ throwOnError: true })
+        void call.then(
+          ([result]) => outcomes.set(name, result?.data?.[0]?.name),
+          (error: unknown) =>
+            outcomes.set(
+              name,
+              error instanceof Error ? error.name : `unknown rejection`,
+            ),
+        )
+        return call
+      }
+      const launchThird = () => {
+        third = refetch(`C`)
+      }
+      const first = refetch(`A`)
+      await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+      const second = refetch(`B`)
+      await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(3))
+      if (registration === `after`) unsubscribe = subscribeForF2()
+      cleanups.push(() => Promise.resolve(unsubscribe()))
+      responses[0]!.resolve([{ id: `x`, name: `F1` }])
+      responses[1]!.resolve([{ id: `x`, name: `F2` }])
+      await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(4))
+      await vi.waitFor(() => expect(outcomes.has(`A`)).toBe(true))
+      await vi.waitFor(() => expect(outcomes.has(`B`)).toBe(true))
+      expect({
+        A: outcomes.get(`A`),
+        B: outcomes.get(`B`),
+        C: outcomes.get(`C`),
+        publicRow: source.get(`x`)?.name,
+      }).toEqual({ A: `F2`, B: `F2`, C: undefined, publicRow: `F2` })
+
+      responses[2]!.resolve([
+        { id: `x`, name: variant === `same-value` ? `F2` : `F3` },
+      ])
+      await Promise.all([first, second, third])
+      unsubscribe()
+      expect({
+        C: outcomes.get(`C`),
+        cache: queryClient.getQueryData([id]),
+        publicRow: source.get(`x`)?.name,
+      }).toEqual({
+        C: variant === `same-value` ? `F2` : `F3`,
+        cache: [{ id: `x`, name: variant === `same-value` ? `F2` : `F3` }],
+        publicRow: variant === `same-value` ? `F2` : `F3`,
+      })
+    },
+  )
+
+  /**
+   * F2 failure also ends A's and B's replacement obligation. A cache listener
+   * registered first can start held F3 from the error notification. With the
+   * default refetch option, A and B return F2's error result before F3 ends;
+   * F3's later success belongs only to C. A null reason checks that failure
+   * presence is independent of the reason's truthiness.
+   */
+  it.each([new Error(`F2 failed`), null] as const)(
+    `returns a failed F2 result before reentrant F3 for reason %s`,
+    async (reason) => {
+      type Row = { id: string; name: string }
+      const id = `failed-f2-before-f3-${String(reason)}`
+      const queryClient = createQueryClient()
+      const responses = Array.from({ length: 3 }, () =>
+        createDeferred<Array<Row>>(),
+      )
+      let calls = 0
+      let third: Promise<unknown> | undefined
+      const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
+        if (
+          event.type === `updated` &&
+          event.action.type === `error` &&
+          event.action.error === reason &&
+          !third
+        ) {
+          launchThird()
+        }
+      })
+      const queryFn = vi.fn(() => {
+        calls++
+        return calls === 1
+          ? Promise.resolve([{ id: `x`, name: `before` }])
+          : responses[calls - 2]!.promise
+      })
+      const source = createCollection(
+        queryCollectionOptions<Row>({
+          id,
+          queryClient,
+          queryKey: [id],
+          queryFn,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          startSync: true,
+          retry: false,
+        }),
+      )
+      const request = {}
+      cleanups.push(async () => {
+        for (const response of responses) response.resolve([])
+        unsubscribe()
+        source._sync.unloadSubset(request)
+        await source.cleanup()
+        queryClient.clear()
+      })
+      await source._sync.loadSubset(request)
+      const outcomes = new Map<
+        string,
+        Awaited<ReturnType<typeof source.utils.refetch>>
+      >()
+      const refetch = (name: string) => {
+        const call = source.utils.refetch()
+        void call.then(
+          (results) => outcomes.set(name, results),
+          () => undefined,
+        )
+        return call
+      }
+      const launchThird = () => {
+        third = refetch(`C`)
+        void third.catch(() => undefined)
+      }
+      const first = refetch(`A`)
+      await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+      const second = refetch(`B`)
+      await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(3))
+      responses[0]!.resolve([{ id: `x`, name: `old` }])
+      responses[1]!.reject(reason)
+      await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(4))
+      await Promise.all([first, second])
+      expect({
+        A: {
+          status: outcomes.get(`A`)?.[0]?.status,
+          error: outcomes.get(`A`)?.[0]?.error,
+        },
+        B: {
+          status: outcomes.get(`B`)?.[0]?.status,
+          error: outcomes.get(`B`)?.[0]?.error,
+        },
+        C: outcomes.get(`C`),
+        publicRow: source.get(`x`)?.name,
+      }).toEqual({
+        A: { status: `error`, error: reason },
+        B: { status: `error`, error: reason },
+        C: undefined,
+        publicRow: `before`,
+      })
+      responses[2]!.resolve([{ id: `x`, name: `new` }])
+      await third
+      expect({
+        C: outcomes.get(`C`)?.[0]?.data,
+        cache: queryClient.getQueryData([id]),
+        publicRow: source.get(`x`)?.name,
+      }).toEqual({
+        C: [{ id: `x`, name: `new` }],
+        cache: [{ id: `x`, name: `new` }],
+        publicRow: `new`,
+      })
+    },
+  )
+
+  /**
+   * The public direct-write law orders a fetch when Query Core accepts it,
+   * even if offline pause delays provider invocation. The model has one
+   * accepted fetch followed by one accepted write to x. The real QueryClient
+   * pauses that fetch, invokes its provider after the write, then settles it.
+   * Cache, public row, and publication trace are checked at the write and
+   * fetch checkpoints. A queryFn-time clock would publish the stale row.
+   */
+  it(`keeps an accepted direct row when a paused earlier fetch invokes its provider later`, async () => {
+    type Row = { id: string; name: string }
+    const id = `paused-fetch-before-direct-write`
+    const queryClient = createQueryClient()
+    queryClient.mount()
+    const stale = createDeferred<Array<Row>>()
+    const queryFn = vi
+      .fn<() => Promise<Array<Row>>>()
+      .mockResolvedValueOnce([{ id: `x`, name: `initial` }])
+      .mockImplementationOnce(() => stale.promise)
+    const source = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        retry: false,
+      }),
+    )
+    const request = {}
+    const publications: Array<string> = []
+    const subscription = source.subscribeChanges(
+      (batch) => {
+        for (const change of batch) {
+          if (change.key === `x`) publications.push(change.value.name)
+        }
+      },
+      { includeInitialState: false },
+    )
+    const pending: { promise?: Promise<unknown> } = {}
+    cleanups.push(async () => {
+      onlineManager.setOnline(true)
+      stale.resolve([{ id: `x`, name: `stale` }])
+      await Promise.allSettled([pending.promise])
+      subscription.unsubscribe()
+      source._sync.unloadSubset(request)
+      await source.cleanup()
+      queryClient.unmount()
+      queryClient.clear()
+    })
+
+    // Model: fetch acceptance precedes the write call. Provider invocation
+    // after reconnect does not reserve a second position for that fetch.
+    await source._sync.loadSubset(request)
+    onlineManager.setOnline(false)
+    pending.promise = source.utils.refetch({ throwOnError: true })
+    await vi.waitFor(() =>
+      expect(queryClient.getQueryState([id])?.fetchStatus).toBe(`paused`),
+    )
+    const accepted = queryClient
+      .getQueryCache()
+      .find({ queryKey: [id] })!.fetchSequence!
+    expect(queryFn).toHaveBeenCalledOnce()
+    const write = source.utils.writeUpdate({ id: `x`, name: `local` })
+    const written = queryClient.getQueryCache().currentSequence
+    expect(accepted).toBeLessThan(written)
+    await write
+    expect({ row: source.get(`x`)?.name, publications }).toEqual({
+      row: `local`,
+      publications: [`initial`, `local`],
+    })
+
+    onlineManager.setOnline(true)
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+    stale.resolve([{ id: `x`, name: `stale` }])
+    await pending.promise
+    expect({
+      cache: queryClient.getQueryData([id]),
+      row: source.get(`x`)?.name,
+      publications,
+    }).toEqual({
+      cache: [{ id: `x`, name: `local` }],
+      row: `local`,
+      publications: [`initial`, `local`],
+    })
+  })
+
+  /**
+   * An accepted fetch can complete without an observed provider call. The
+   * built-in infinite-query no-next-page path returns its old cached page.
+   * That cache response has no new source authority over a later direct write.
+   * The model keeps the direct row; the real shared Query exercises this path
+   * through fetchNextPage. Provider-call count proves the boundary, and the
+   * public row and publication trace reject a stale replay.
+   */
+  it(`keeps a direct row when an infinite no-next-page fetch reuses cached data`, async () => {
+    type Row = { id: string; name: string }
+    const id = `infinite-no-next-page-direct-write`
+    const queryClient = createQueryClient()
+    const initial = { id: `x`, name: `initial` }
+    const cached = { pages: [[initial]], pageParams: [0] }
+    queryClient.setQueryData([id], cached)
+    const collectionQueryFn = vi.fn(async () => cached)
+    const source = createCollection(
+      queryCollectionOptions({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn: collectionQueryFn,
+        select: (response: typeof cached) => response.pages.flat(),
+        getKey: (row: Row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+      }),
+    )
+    const request = {}
+    const publications: Array<string> = []
+    const subscription = source.subscribeChanges(
+      (batch) => {
+        for (const change of batch) {
+          if (change.key === `x`) publications.push(change.value.name)
+        }
+      },
+      { includeInitialState: false },
+    )
+    await source._sync.loadSubset(request)
+    const provider = vi.fn(async () => [initial])
+    const outside = new InfiniteQueryObserver(queryClient, {
+      queryKey: [id],
+      queryFn: provider,
+      initialPageParam: 0,
+      getNextPageParam: () => undefined,
+      enabled: false,
+      staleTime: Infinity,
+    })
+    const releaseOutside = outside.subscribe(() => {})
+    const sourceEvents: Array<number> = []
+    const releaseCache = queryClient.getQueryCache().subscribe((event) => {
+      if (event.type === `fetchSourceStarted`)
+        sourceEvents.push(event.sourceSequence)
+    })
+    cleanups.push(async () => {
+      releaseCache()
+      releaseOutside()
+      subscription.unsubscribe()
+      source._sync.unloadSubset(request)
+      await source.cleanup()
+      queryClient.clear()
+    })
+
+    await source.utils.writeUpdate({ id: `x`, name: `local` })
+    expect({ row: source.get(`x`)?.name, publications }).toEqual({
+      row: `local`,
+      publications: [`initial`, `local`],
+    })
+    await outside.fetchNextPage()
+    expect({
+      providerCalls: provider.mock.calls.length,
+      collectionCalls: collectionQueryFn.mock.calls.length,
+      sourceEvents,
+      row: source.get(`x`)?.name,
+      publications,
+    }).toEqual({
+      providerCalls: 0,
+      collectionCalls: 0,
+      sourceEvents: [],
+      row: `local`,
+      publications: [`initial`, `local`],
+    })
+  })
+
+  /**
+   * A custom Query persister can invoke queryFn speculatively, then return an
+   * unrelated older cache value. Invocation proves that source work started;
+   * it does not prove that the returned value came from that source. The
+   * reference keeps the newer accepted direct row when that opaque cache
+   * value arrives. QueryClient defaults are the public route by which this
+   * persister reaches the eager Collection's real Query observer. Compare
+   * the cache, public row, and publication trace after refetch settles.
+   */
+  it(`keeps a direct row when a persister discards a speculative source result`, async () => {
+    type Row = { id: string; name: string }
+    const id = `speculative-persister-direct-write`
+    const queryClient = createQueryClient()
+    const cached: Array<Row> = [{ id: `x`, name: `stale-cache` }]
+    const queryFn = vi
+      .fn<() => Promise<Array<Row>>>()
+      .mockResolvedValueOnce([{ id: `x`, name: `initial` }])
+      .mockResolvedValueOnce([{ id: `x`, name: `fresh-source` }])
+    let fetches = 0
+    queryClient.setQueryDefaults([id], {
+      persister: (runSource, context) => {
+        fetches++
+        if (fetches === 1) return runSource(context)
+        void runSource(context)
+        return Promise.resolve(cached)
+      },
+    })
+    const source = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (row) => row.id,
+        syncMode: `eager`,
+        startSync: true,
+        retry: false,
+      }),
+    )
+    const publications: Array<string> = []
+    const subscription = source.subscribeChanges(
+      (batch) => {
+        for (const change of batch) {
+          if (change.key === `x`) publications.push(change.value.name)
+        }
+      },
+      { includeInitialState: false },
+    )
+    cleanups.push(async () => {
+      subscription.unsubscribe()
+      await source.cleanup()
+      queryClient.clear()
+    })
+
+    await source.preload()
+    await source.utils.writeUpdate({ id: `x`, name: `local` })
+    expect({ row: source.get(`x`)?.name, publications }).toEqual({
+      row: `local`,
+      publications: [`initial`, `local`],
+    })
+
+    const refetched = await source.utils.refetch({ throwOnError: true })
+    expect(refetched[0]?.isSuccess).toBe(true)
+    expect(fetches).toBe(2)
+    expect({
+      calls: queryFn.mock.calls.length,
+      row: source.get(`x`)?.name,
+      publications,
+    }).toEqual({
+      calls: 2,
+      row: `local`,
+      publications: [`initial`, `local`],
+    })
+    expect(queryClient.getQueryData([id])).toEqual([{ id: `x`, name: `local` }])
+  })
+
+  /**
+   * Query Core emits a fetch event before invoking its provider. A cache
+   * listener can start B during A's fetch event, so B's provider F2 starts
+   * before A's provider F3. Each uncanceled caller owns its own result: B
+   * settles at F2 while F3 is held, and A settles only after F3 applies.
+   * An F2 failure is a distinct terminal outcome, not A's stale F0 row.
+   */
+  it.each([`success`, `error`] as const)(
+    `keeps recursive fetch-event refetch results attached to their callers after F2 %s`,
+    async (caseName) => {
+      type Row = { id: string; name: string }
+      const id = `recursive-fetch-event-${caseName}`
+      const queryClient = createQueryClient()
+      const second = createDeferred<Array<Row>>()
+      const third = createDeferred<Array<Row>>()
+      const failure = new Error(`F2 failed`)
+      let calls = 0
+      const queryFn = vi.fn(() => {
+        calls++
+        if (calls === 1) return Promise.resolve([{ id: `x`, name: `F0` }])
+        return calls === 2 ? second.promise : third.promise
+      })
+      const source = createCollection(
+        queryCollectionOptions<Row>({
+          id,
+          queryClient,
+          queryKey: [id],
+          queryFn,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          startSync: true,
+          retry: false,
+        }),
+      )
+      const request = {}
+      await source._sync.loadSubset(request)
+      let nested:
+        Promise<Awaited<ReturnType<typeof source.utils.refetch>>> | undefined
+      let armed = true
+      const releaseCache = queryClient.getQueryCache().subscribe((event) => {
+        if (
+          armed &&
+          event.type === `updated` &&
+          event.action.type === `fetch`
+        ) {
+          armed = false
+          nested = source.utils.refetch({ throwOnError: true })
+          void nested.catch(() => undefined)
+        }
+      })
+      cleanups.push(async () => {
+        second.resolve([])
+        third.resolve([])
+        releaseCache()
+        source._sync.unloadSubset(request)
+        await source.cleanup()
+        queryClient.clear()
+      })
+      const outer = source.utils.refetch({ throwOnError: true })
+      void outer.catch(() => undefined)
+      await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(3))
+      let outerSettled = false
+      void outer
+        .finally(() => {
+          outerSettled = true
+        })
+        .catch(() => undefined)
+      if (caseName === `success`) {
+        second.resolve([{ id: `x`, name: `F2` }])
+        const inner = await nested!
+        expect({
+          inner: inner[0]?.data,
+          outerSettled,
+          cache: queryClient.getQueryData([id]),
+          publicRow: source.get(`x`)?.name,
+        }).toEqual({
+          inner: [{ id: `x`, name: `F2` }],
+          outerSettled: false,
+          cache: [{ id: `x`, name: `F2` }],
+          publicRow: `F2`,
+        })
+      } else {
+        second.reject(failure)
+        await expect(nested).rejects.toBe(failure)
+        expect({ outerSettled, publicRow: source.get(`x`)?.name }).toEqual({
+          outerSettled: false,
+          publicRow: `F0`,
+        })
+      }
+      third.resolve([{ id: `x`, name: `F3` }])
+      const returned = await outer
+      expect({
+        result: returned[0]?.data,
+        cache: queryClient.getQueryData([id]),
+        publicRow: source.get(`x`)?.name,
+      }).toEqual({
+        result: [{ id: `x`, name: `F3` }],
+        cache: [{ id: `x`, name: `F3` }],
+        publicRow: `F3`,
+      })
+    },
+  )
+
+  /**
+   * In the same recursive Query Core path, A's query function starts after
+   * B/F2 even though A's fetch operation was accepted first. If A/F3 settles
+   * before F2, F2's later completion cannot replace F3's row. The reference
+   * rule compares source invocation order for two fetched results and checks
+   * each public refetch caller separately. This is the reverse settlement
+   * order of the adjacent F2-first history.
+   */
+  it(`keeps the later source start after recursive F3 settles before F2`, async () => {
+    type Row = { id: string; name: string }
+    const id = `recursive-fetch-event-reverse-settlement`
+    const queryClient = createQueryClient()
+    const second = createDeferred<Array<Row>>()
+    const third = createDeferred<Array<Row>>()
+    let calls = 0
+    const queryFn = vi.fn(() => {
+      calls++
+      if (calls === 1) return Promise.resolve([{ id: `x`, name: `F0` }])
+      return calls === 2 ? second.promise : third.promise
+    })
+    const source = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        retry: false,
+      }),
+    )
+    const request = {}
+    await source._sync.loadSubset(request)
+    let nested:
+      Promise<Awaited<ReturnType<typeof source.utils.refetch>>> | undefined
+    let armed = true
+    const releaseCache = queryClient.getQueryCache().subscribe((event) => {
+      if (armed && event.type === `updated` && event.action.type === `fetch`) {
+        armed = false
+        nested = source.utils.refetch({ throwOnError: true })
+        void nested.catch(() => undefined)
+      }
+    })
+    cleanups.push(async () => {
+      second.resolve([])
+      third.resolve([])
+      releaseCache()
+      source._sync.unloadSubset(request)
+      await source.cleanup()
+      queryClient.clear()
+    })
+
+    const outer = source.utils.refetch({ throwOnError: true })
+    void outer.catch(() => undefined)
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(3))
+    third.resolve([{ id: `x`, name: `F3` }])
+    const outerResult = await outer
+    expect({
+      outer: outerResult[0]?.data,
+      cache: queryClient.getQueryData([id]),
+      publicRow: source.get(`x`)?.name,
+    }).toEqual({
+      outer: [{ id: `x`, name: `F3` }],
+      cache: [{ id: `x`, name: `F3` }],
+      publicRow: `F3`,
+    })
+
+    second.resolve([{ id: `x`, name: `F2` }])
+    const innerResult = await nested
+    expect({
+      inner: innerResult?.[0]?.data,
+      cache: queryClient.getQueryData([id]),
+      publicRow: source.get(`x`)?.name,
+    }).toEqual({
+      inner: [{ id: `x`, name: `F2` }],
+      cache: [{ id: `x`, name: `F3` }],
+      publicRow: `F3`,
+    })
+  })
+
+  /**
+   * This is the direct-write neighbor of the recursive fetch-event history.
+   * A accepts its fetch operation, then its cache notification starts B/F2.
+   * F2's query function starts before A/F3's. Call a direct write either
+   * before or after B is accepted; its position is reserved at the call even
+   * if its commit applies after B's query function starts. When both fetch
+   * operations precede that call, neither result may undo the accepted write.
+   * When B follows it, B may replace the write, but A cannot displace B even
+   * though A's query function starts later.
+   * The adjacent no-write history still allows F3 to become the final fetched
+   * value after F2. Compare cache, public rows, and publications at both
+   * settlements; these histories distinguish the write fence from fetched-
+   * result order.
+   */
+  it.each([`before B`, `after B`] as const)(
+    `orders a direct write %s across recursive fetch-event refetches`,
+    async (writeOrder) => {
+      type Row = { id: string; name: string }
+      const id = `recursive-fetch-event-direct-write-${writeOrder}`
+      const queryClient = createQueryClient()
+      const second = createDeferred<Array<Row>>()
+      const third = createDeferred<Array<Row>>()
+      let calls = 0
+      const queryFn = vi.fn(() => {
+        calls++
+        if (calls === 1) return Promise.resolve([{ id: `x`, name: `F0` }])
+        return calls === 2 ? second.promise : third.promise
+      })
+      const source = createCollection(
+        queryCollectionOptions<Row>({
+          id,
+          queryClient,
+          queryKey: [id],
+          queryFn,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          startSync: true,
+          retry: false,
+        }),
+      )
+      const request = {}
+      const publications: Array<string> = []
+      const subscription = source.subscribeChanges(
+        (batch) => {
+          for (const change of batch) {
+            if (change.key === `x`) publications.push(change.value.name)
+          }
+        },
+        { includeInitialState: false },
+      )
+      await source._sync.loadSubset(request)
+      let nested:
+        Promise<Awaited<ReturnType<typeof source.utils.refetch>>> | undefined
+      let write: Promise<void> | undefined
+      let armed = true
+      const releaseCache = queryClient.getQueryCache().subscribe((event) => {
+        if (
+          armed &&
+          event.type === `updated` &&
+          event.action.type === `fetch`
+        ) {
+          armed = false
+          if (writeOrder === `before B`) {
+            write = source.utils.writeUpdate({ id: `x`, name: `local` })
+            void write.catch(() => undefined)
+          }
+          nested = source.utils.refetch({ throwOnError: true })
+          void nested.catch(() => undefined)
+          if (writeOrder === `after B`) {
+            write = source.utils.writeUpdate({ id: `x`, name: `local` })
+            void write.catch(() => undefined)
+          }
+        }
+      })
+      cleanups.push(async () => {
+        second.resolve([])
+        third.resolve([])
+        releaseCache()
+        subscription.unsubscribe()
+        source._sync.unloadSubset(request)
+        await source.cleanup()
+        queryClient.clear()
+      })
+
+      const outer = source.utils.refetch({ throwOnError: true })
+      void outer.catch(() => undefined)
+      await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(3))
+      await write
+      expect({
+        cache: queryClient.getQueryData([id]),
+        publicRow: source.get(`x`)?.name,
+        publications,
+      }).toEqual({
+        cache: [{ id: `x`, name: `local` }],
+        publicRow: `local`,
+        publications: [`F0`, `local`],
+      })
+
+      second.resolve([{ id: `x`, name: `F2` }])
+      await nested
+      expect({
+        cache: queryClient.getQueryData([id]),
+        publicRow: source.get(`x`)?.name,
+        publications,
+      }).toEqual(
+        writeOrder === `before B`
+          ? {
+              cache: [{ id: `x`, name: `F2` }],
+              publicRow: `F2`,
+              publications: [`F0`, `local`, `F2`],
+            }
+          : {
+              cache: [{ id: `x`, name: `local` }],
+              publicRow: `local`,
+              publications: [`F0`, `local`],
+            },
+      )
+
+      third.resolve([{ id: `x`, name: `F3` }])
+      await outer
+      expect({
+        cache: queryClient.getQueryData([id]),
+        publicRow: source.get(`x`)?.name,
+        publications,
+      }).toEqual(
+        writeOrder === `before B`
+          ? {
+              cache: [{ id: `x`, name: `F2` }],
+              publicRow: `F2`,
+              publications: [`F0`, `local`, `F2`],
+            }
+          : {
+              cache: [{ id: `x`, name: `local` }],
+              publicRow: `local`,
+              publications: [`F0`, `local`],
+            },
+      )
+    },
+  )
+
+  /**
+   * A shared Query can run a provider supplied by an outside QueryObserver.
+   * Its F2 success still belongs to A's silent replacement, even if a cache
+   * listener registered before this Collection starts an independent C/F3
+   * before this Collection receives F2's success notification. C must wait
+   * for and return F3, with F2 visible while F3 is held.
+   */
+  it(`keeps an outside observer's F2 result separate from reentrant F3`, async () => {
+    type Row = { id: string; name: string }
+    const id = `outside-provider-f2-reentry`
+    const queryClient = createQueryClient()
+    const first = createDeferred<Array<Row>>()
+    const second = createDeferred<Array<Row>>()
+    const third = createDeferred<Array<Row>>()
+    let thirdCall: Promise<void> | undefined
+    let thirdName: string | undefined
+    const releaseCache = queryClient.getQueryCache().subscribe((event) => {
+      if (
+        event.type === `updated` &&
+        event.action.type === `success` &&
+        event.action.data?.[0]?.name === `F2` &&
+        !thirdCall
+      ) {
+        thirdCall = source.utils
+          .refetch({ throwOnError: true })
+          .then(([result]) => {
+            thirdName = result?.data?.[0]?.name
+          })
+        void thirdCall.catch(() => undefined)
+      }
+    })
+    let sourceCalls = 0
+    const source = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn: () => {
+          sourceCalls++
+          if (sourceCalls === 1)
+            return Promise.resolve([{ id: `x`, name: `F0` }])
+          return sourceCalls === 2 ? first.promise : third.promise
+        },
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        retry: false,
+      }),
+    )
+    const request = {}
+    await source._sync.loadSubset(request)
+    const outside = new QueryObserver(queryClient, {
+      queryKey: [id],
+      queryFn: () => second.promise,
+      enabled: false,
+      retry: false,
+      notifyOnChangeProps: `all`,
+    })
+    const releaseOutside = outside.subscribe(() => {})
+    cleanups.push(async () => {
+      first.resolve([])
+      second.resolve([])
+      third.resolve([])
+      releaseOutside()
+      releaseCache()
+      source._sync.unloadSubset(request)
+      await source.cleanup()
+      queryClient.clear()
+    })
+    const firstCall = source.utils.refetch({ throwOnError: true })
+    void firstCall.catch(() => undefined)
+    await vi.waitFor(() => expect(sourceCalls).toBe(2))
+    const outsideCall = outside.refetch({ throwOnError: true })
+    void outsideCall.catch(() => undefined)
+    second.resolve([{ id: `x`, name: `F2` }])
+    await vi.waitFor(() => expect(sourceCalls).toBe(3))
+    let thirdSettled = false
+    void thirdCall!
+      .finally(() => {
+        thirdSettled = true
+      })
+      .catch(() => undefined)
+    const [firstResult, outsideResult] = await Promise.all([
+      firstCall,
+      outsideCall,
+    ])
+    expect({
+      A: firstResult[0]?.data,
+      B: outsideResult.data,
+      C: thirdSettled,
+      cache: queryClient.getQueryData([id]),
+      publicRow: source.get(`x`)?.name,
+    }).toEqual({
+      A: [{ id: `x`, name: `F2` }],
+      B: [{ id: `x`, name: `F2` }],
+      C: false,
+      cache: [{ id: `x`, name: `F2` }],
+      publicRow: `F2`,
+    })
+    third.resolve([{ id: `x`, name: `F3` }])
+    first.resolve([{ id: `x`, name: `ignored F1` }])
+    await thirdCall!
+    expect({
+      C: thirdName,
+      cache: queryClient.getQueryData([id]),
+      publicRow: source.get(`x`)?.name,
+    }).toEqual({
+      C: `F3`,
+      cache: [{ id: `x`, name: `F3` }],
+      publicRow: `F3`,
+    })
+  })
+
+  /**
+   * A fetch started before an accepted direct write cannot replace that row.
+   * An outside observer supplies stale F2. Its cache success notification
+   * starts fresh F3 in a listener registered before this Collection, so this
+   * Collection sees F3's fetch event before F2's success event. The held cut
+   * must retain the direct row in cache and public rows. An immediate F3
+   * response also must not briefly publish F2 between local and fresh. A
+   * same-reference cache write in that first listener can transiently leave
+   * the cache at F2's value while F3 is held; it cannot publish that value
+   * over the accepted direct Collection row.
+   */
+  it.each([
+    { schedule: `held`, sameReferenceWrite: false },
+    { schedule: `immediate`, sameReferenceWrite: false },
+    { schedule: `held`, sameReferenceWrite: true },
+  ] as const)(
+    `keeps a direct row across an outside F2 success and reentrant $schedule F3 (same-reference write: $sameReferenceWrite)`,
+    async ({ schedule, sameReferenceWrite }) => {
+      type Row = { id: string; value: string }
+      const id = `outside-stale-reentrant-${schedule}-${sameReferenceWrite}`
+      const queryClient = createQueryClient()
+      const second = createDeferred<Array<Row>>()
+      const third = createDeferred<Array<Row>>()
+      let armed = false
+      let thirdCall: Promise<unknown> | undefined
+      const releaseCache = queryClient.getQueryCache().subscribe((event) => {
+        if (
+          armed &&
+          event.type === `updated` &&
+          event.action.type === `success` &&
+          !event.action.manual
+        ) {
+          armed = false
+          if (sameReferenceWrite)
+            queryClient.setQueryData([id], event.action.data)
+          thirdCall = outside.refetch({ throwOnError: true })
+          void thirdCall.catch(() => undefined)
+        }
+      })
+      const source = createCollection(
+        queryCollectionOptions<Row>({
+          id,
+          queryClient,
+          queryKey: [id],
+          queryFn: () => Promise.resolve([{ id: `x`, value: `initial` }]),
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          startSync: true,
+          retry: false,
+        }),
+      )
+      const request = {}
+      await source._sync.loadSubset(request)
+      const publications: Array<string> = []
+      const subscription = source.subscribeChanges(
+        (batch) => {
+          for (const change of batch) {
+            if (change.key === `x`) publications.push(change.value.value)
+          }
+        },
+        { includeInitialState: false },
+      )
+      let outsideCalls = 0
+      const outside = new QueryObserver(queryClient, {
+        queryKey: [id],
+        queryFn: () => {
+          outsideCalls++
+          return outsideCalls === 1 ? second.promise : third.promise
+        },
+        enabled: false,
+        retry: false,
+        notifyOnChangeProps: `all`,
+      })
+      const releaseOutside = outside.subscribe(() => {})
+      cleanups.push(async () => {
+        second.resolve([])
+        third.resolve([])
+        releaseOutside()
+        releaseCache()
+        subscription.unsubscribe()
+        source._sync.unloadSubset(request)
+        await source.cleanup()
+        queryClient.clear()
+      })
+      const secondCall = outside.refetch({ throwOnError: true })
+      await vi.waitFor(() => expect(outsideCalls).toBe(1))
+      await source.utils.writeUpdate({ id: `x`, value: `local` })
+      expect({
+        cache: queryClient.getQueryData([id]),
+        publicRow: source.get(`x`)?.value,
+      }).toEqual({
+        cache: [{ id: `x`, value: `local` }],
+        publicRow: `local`,
+      })
+      if (schedule === `immediate`) third.resolve([{ id: `x`, value: `fresh` }])
+      armed = true
+      second.resolve([{ id: `x`, value: `initial` }])
+      await secondCall
+      await vi.waitFor(() => expect(outsideCalls).toBe(2))
+      if (schedule === `held`) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        expect({
+          publicRow: source.get(`x`)?.value,
+          publications,
+        }).toEqual({
+          publicRow: `local`,
+          publications: [`local`],
+        })
+        if (!sameReferenceWrite)
+          expect(queryClient.getQueryData([id])).toEqual([
+            { id: `x`, value: `local` },
+          ])
+        third.resolve([{ id: `x`, value: `fresh` }])
+      }
+      await thirdCall
+      await vi.waitFor(() => expect(source.get(`x`)?.value).toBe(`fresh`))
+      expect({
+        cache: queryClient.getQueryData([id]),
+        publicRow: source.get(`x`)?.value,
+        publications,
+      }).toEqual({
+        cache: [{ id: `x`, value: `fresh` }],
+        publicRow: `fresh`,
+        publications: [`local`, `fresh`],
+      })
+    },
+  )
+
+  /**
+   * An outside QueryObserver registered before this Collection receives F2's
+   * success callback first. It may start F3 before this Collection observes
+   * F2's terminal result. F2 began before an accepted direct write, so its
+   * stale row cannot replace that write in either the public Collection or
+   * the Query cache while F3 is held. A failed F3 cannot legitimize F2.
+   * Compare both rows at the held and terminal cuts; a fresh F3 may replace
+   * them only when it succeeds.
+   */
+  it.each([`success`, `failure`] as const)(
+    `preserves a direct row when an earlier outside observer starts F3 and F3 ends with %s`,
+    async (outcome) => {
+      type Row = { id: string; value: string }
+      const id = `outside-observer-first-direct-write-${outcome}`
+      const queryClient = createQueryClient()
+      const second = createDeferred<Array<Row>>()
+      const third = createDeferred<Array<Row>>()
+      const failure = new Error(`F3 failed`)
+      let armed = false
+      let outsideCalls = 0
+      let thirdCall: Promise<unknown> | undefined
+      const outside = new QueryObserver(queryClient, {
+        queryKey: [id],
+        queryFn: () => {
+          outsideCalls++
+          return outsideCalls === 1 ? second.promise : third.promise
+        },
+        enabled: false,
+        retry: false,
+        notifyOnChangeProps: `all`,
+      })
+      const releaseOutside = outside.subscribe((result) => {
+        if (
+          armed &&
+          result.isSuccess &&
+          !result.isFetching &&
+          result.data[0]?.value === `stale`
+        ) {
+          armed = false
+          thirdCall = outside.refetch({ throwOnError: true })
+          void thirdCall.catch(() => undefined)
+        }
+      })
+      const source = createCollection(
+        queryCollectionOptions<Row>({
+          id,
+          queryClient,
+          queryKey: [id],
+          queryFn: () => Promise.resolve([{ id: `x`, value: `initial` }]),
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          startSync: true,
+          retry: false,
+        }),
+      )
+      const request = {}
+      const publications: Array<string> = []
+      const subscription = source.subscribeChanges(
+        (batch) => {
+          for (const change of batch) {
+            if (change.key === `x`) publications.push(change.value.value)
+          }
+        },
+        { includeInitialState: false },
+      )
+      cleanups.push(async () => {
+        second.resolve([])
+        third.resolve([])
+        releaseOutside()
+        subscription.unsubscribe()
+        source._sync.unloadSubset(request)
+        await source.cleanup()
+        queryClient.clear()
+      })
+
+      await source._sync.loadSubset(request)
+      expect(outsideCalls).toBe(0)
+      const secondCall = outside.refetch({ throwOnError: true })
+      await vi.waitFor(() => expect(outsideCalls).toBe(1))
+      await source.utils.writeUpdate({ id: `x`, value: `local` })
+      expect({
+        cache: queryClient.getQueryData([id]),
+        publicRow: source.get(`x`)?.value,
+      }).toEqual({
+        cache: [{ id: `x`, value: `local` }],
+        publicRow: `local`,
+      })
+
+      armed = true
+      second.resolve([{ id: `x`, value: `stale` }])
+      await secondCall
+      await vi.waitFor(() => expect(outsideCalls).toBe(2))
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect({
+        cache: queryClient.getQueryData([id]),
+        publicRow: source.get(`x`)?.value,
+        publications,
+      }).toEqual({
+        cache: [{ id: `x`, value: `local` }],
+        publicRow: `local`,
+        publications: [`initial`, `local`],
+      })
+
+      if (outcome === `success`) {
+        third.resolve([{ id: `x`, value: `fresh` }])
+        await thirdCall
+      } else {
+        third.reject(failure)
+        await expect(thirdCall).rejects.toBe(failure)
+      }
+      await vi.waitFor(() =>
+        expect(
+          queryClient.getQueryCache().find({ queryKey: [id] })?.state
+            .fetchStatus,
+        ).toBe(`idle`),
+      )
+      expect({
+        cache: queryClient.getQueryData([id]),
+        publicRow: source.get(`x`)?.value,
+        publications,
+      }).toEqual(
+        outcome === `success`
+          ? {
+              cache: [{ id: `x`, value: `fresh` }],
+              publicRow: `fresh`,
+              publications: [`initial`, `local`, `fresh`],
+            }
+          : {
+              cache: [{ id: `x`, value: `local` }],
+              publicRow: `local`,
+              publications: [`initial`, `local`],
+            },
+      )
+    },
+  )
+
+  /**
+   * F1 is silently canceled by F2 after a direct write. F1 has no terminal
+   * cache action, so it must leave the pending physical-fetch queue. F2 starts
+   * after the write and may replace the local row. The earlier outside
+   * observer starts held F3 from F2's success callback, making the F2 cache
+   * action the only reliable boundary for that result. Compare cache and
+   * public rows before F3, after F3, and after the ignored late F1 response.
+   */
+  it(`lets a post-write F2 replace the direct row after silent F1 cancellation`, async () => {
+    type Row = { id: string; value: string }
+    const id = `outside-observer-silent-then-reentrant`
+    const queryClient = createQueryClient()
+    const first = createDeferred<Array<Row>>()
+    const second = createDeferred<Array<Row>>()
+    const third = createDeferred<Array<Row>>()
+    let armed = false
+    let outsideCalls = 0
+    let thirdCall: Promise<unknown> | undefined
+    const outside = new QueryObserver(queryClient, {
+      queryKey: [id],
+      queryFn: () => {
+        outsideCalls++
+        return outsideCalls === 1
+          ? first.promise
+          : outsideCalls === 2
+            ? second.promise
+            : third.promise
+      },
+      enabled: false,
+      retry: false,
+      notifyOnChangeProps: `all`,
+    })
+    const releaseOutside = outside.subscribe((result) => {
+      if (
+        armed &&
+        result.isSuccess &&
+        !result.isFetching &&
+        result.data[0]?.value === `newer`
+      ) {
+        armed = false
+        thirdCall = outside.refetch({ throwOnError: true })
+        void thirdCall.catch(() => undefined)
+      }
+    })
+    const source = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn: () => Promise.resolve([{ id: `x`, value: `initial` }]),
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        retry: false,
+      }),
+    )
+    const request = {}
+    const publications: Array<string> = []
+    const subscription = source.subscribeChanges(
+      (batch) => {
+        for (const change of batch) {
+          if (change.key === `x`) publications.push(change.value.value)
+        }
+      },
+      { includeInitialState: false },
+    )
+    cleanups.push(async () => {
+      first.resolve([])
+      second.resolve([])
+      third.resolve([])
+      releaseOutside()
+      subscription.unsubscribe()
+      source._sync.unloadSubset(request)
+      await source.cleanup()
+      queryClient.clear()
+    })
+
+    await source._sync.loadSubset(request)
+    const firstCall = outside.refetch({ throwOnError: true })
+    void firstCall.catch(() => undefined)
+    await vi.waitFor(() => expect(outsideCalls).toBe(1))
+    await source.utils.writeUpdate({ id: `x`, value: `local` })
+    const secondCall = outside.refetch({ throwOnError: true })
+    await vi.waitFor(() => expect(outsideCalls).toBe(2))
+    armed = true
+    second.resolve([{ id: `x`, value: `newer` }])
+    await secondCall
+    await vi.waitFor(() => expect(outsideCalls).toBe(3))
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    expect({
+      cache: queryClient.getQueryData([id]),
+      publicRow: source.get(`x`)?.value,
+      publications,
+    }).toEqual({
+      cache: [{ id: `x`, value: `newer` }],
+      publicRow: `newer`,
+      publications: [`initial`, `local`, `newer`],
+    })
+
+    third.resolve([{ id: `x`, value: `latest` }])
+    await thirdCall
+    first.resolve([{ id: `x`, value: `obsolete` }])
+    await firstCall.catch(() => undefined)
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    expect({
+      cache: queryClient.getQueryData([id]),
+      publicRow: source.get(`x`)?.value,
+      publications,
+    }).toEqual({
+      cache: [{ id: `x`, value: `latest` }],
+      publicRow: `latest`,
+      publications: [`initial`, `local`, `newer`, `latest`],
+    })
+  })
+
+  /**
+   * Fetch authority follows the physical fetch start, even when an earlier
+   * observer starts the next fetch before this Collection receives the prior
+   * Query action. The adjacent histories form this action-order matrix:
+   *
+   * | preceding action | reentrant listener | relative to write | held successor |
+   * | success | cache or outside observer | F2 before write | local |
+   * | error | outside observer | F3 before write | local |
+   * | manual success | outside observer | F2 after write | F2 |
+   * | silent cancellation | direct refetch | F2 after write | F2 |
+   *
+   * The model uses only authored fetch start order and the accepted direct
+   * write. Query cache event delivery order is not a source of authority.
+   * Manual cache data is not a fetched result; its earlier observer starts F2
+   * and silently cancels F1 before this Collection receives that manual action.
+   * At held F3, F2's post-write row must be in both Query cache and the public
+   * Collection. Its later F3 and ignored F1 responses check that F2's claim
+   * was real, not a transient cache accident.
+   */
+  it(`applies post-write F2 after an earlier observer reenters from a manual cache write`, async () => {
+    type Row = { id: string; value: string }
+    const id = `outside-observer-manual-then-reentrant`
+    const queryClient = createQueryClient()
+    const first = createDeferred<Array<Row>>()
+    const second = createDeferred<Array<Row>>()
+    const third = createDeferred<Array<Row>>()
+    let armManual = false
+    let armThird = false
+    let outsideCalls = 0
+    let secondCall: Promise<unknown> | undefined
+    let thirdCall: Promise<unknown> | undefined
+    const outside = new QueryObserver(queryClient, {
+      queryKey: [id],
+      queryFn: () => {
+        outsideCalls++
+        return outsideCalls === 1
+          ? first.promise
+          : outsideCalls === 2
+            ? second.promise
+            : third.promise
+      },
+      enabled: false,
+      retry: false,
+      notifyOnChangeProps: `all`,
+    })
+    const releaseOutside = outside.subscribe((result) => {
+      if (armManual && result.isSuccess && result.data[0]?.value === `manual`) {
+        armManual = false
+        secondCall = outside.refetch({ throwOnError: true })
+        void secondCall.catch(() => undefined)
+      }
+      if (
+        armThird &&
+        result.isSuccess &&
+        !result.isFetching &&
+        result.data[0]?.value === `newer`
+      ) {
+        armThird = false
+        thirdCall = outside.refetch({ throwOnError: true })
+        void thirdCall.catch(() => undefined)
+      }
+    })
+    const source = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn: () => Promise.resolve([{ id: `x`, value: `initial` }]),
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        retry: false,
+      }),
+    )
+    const request = {}
+    const publications: Array<string> = []
+    const subscription = source.subscribeChanges(
+      (batch) => {
+        for (const change of batch) {
+          if (change.key === `x`) publications.push(change.value.value)
+        }
+      },
+      { includeInitialState: false },
+    )
+    cleanups.push(async () => {
+      first.resolve([])
+      second.resolve([])
+      third.resolve([])
+      releaseOutside()
+      subscription.unsubscribe()
+      source._sync.unloadSubset(request)
+      await source.cleanup()
+      queryClient.clear()
+    })
+
+    await source._sync.loadSubset(request)
+    const firstCall = outside.refetch({ throwOnError: true })
+    void firstCall.catch(() => undefined)
+    await vi.waitFor(() => expect(outsideCalls).toBe(1))
+    await source.utils.writeUpdate({ id: `x`, value: `local` })
+    armManual = true
+    queryClient.setQueryData([id], [{ id: `x`, value: `manual` }])
+    await vi.waitFor(() => expect(outsideCalls).toBe(2))
+    expect({
+      cache: queryClient.getQueryData([id]),
+      publicRow: source.get(`x`)?.value,
+      publications,
+    }).toEqual({
+      cache: [{ id: `x`, value: `manual` }],
+      publicRow: `local`,
+      publications: [`initial`, `local`],
+    })
+
+    armThird = true
+    second.resolve([{ id: `x`, value: `newer` }])
+    await secondCall
+    await vi.waitFor(() => expect(outsideCalls).toBe(3))
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    expect({
+      cache: queryClient.getQueryData([id]),
+      publicRow: source.get(`x`)?.value,
+      publications,
+    }).toEqual({
+      cache: [{ id: `x`, value: `newer` }],
+      publicRow: `newer`,
+      publications: [`initial`, `local`, `newer`],
+    })
+
+    third.resolve([{ id: `x`, value: `latest` }])
+    await thirdCall
+    first.resolve([{ id: `x`, value: `obsolete` }])
+    await firstCall.catch(() => undefined)
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    expect({
+      cache: queryClient.getQueryData([id]),
+      publicRow: source.get(`x`)?.value,
+      publications,
+    }).toEqual({
+      cache: [{ id: `x`, value: `latest` }],
+      publicRow: `latest`,
+      publications: [`initial`, `local`, `newer`, `latest`],
+    })
+  })
+
+  /**
+   * A manual cache update can start F1 in an earlier outside observer before
+   * this Collection sees the manual action. F1 starts before the direct write;
+   * its later success is stale even when that observer starts held F2 during
+   * F1's terminal notification. A same-reference manual update is still a
+   * manual action, despite no change in row identity. The independent model
+   * compares authored fetch starts with the accepted write, never cache-event
+   * delivery order. Public rows, cache rows, and the publication trace are
+   * checked while F2 is held and after F2 succeeds or fails.
+   */
+  it.each([
+    { sameReference: false, outcome: `success` },
+    { sameReference: false, outcome: `failure` },
+    { sameReference: true, outcome: `success` },
+    { sameReference: true, outcome: `failure` },
+  ] as const)(
+    `keeps a direct row after a manual update starts an older fetch ($sameReference, $outcome)`,
+    async ({ sameReference, outcome }) => {
+      type Row = { id: string; value: string }
+      const id = `manual-starts-older-fetch-${sameReference}-${outcome}`
+      const queryClient = createQueryClient()
+      const first = createDeferred<Array<Row>>()
+      const second = createDeferred<Array<Row>>()
+      const secondError = new Error(`F2 failed`)
+      let calls = 0
+      let armManual = false
+      let armSecond = false
+      let firstCall: Promise<unknown> | undefined
+      let secondCall: Promise<unknown> | undefined
+      const manualValue = sameReference ? `initial` : `seed`
+      const outside = new QueryObserver(queryClient, {
+        queryKey: [id],
+        queryFn: () => (++calls === 1 ? first.promise : second.promise),
+        enabled: false,
+        retry: false,
+        notifyOnChangeProps: `all`,
+      })
+      const releaseOutside = outside.subscribe((result) => {
+        if (
+          armManual &&
+          result.isSuccess &&
+          result.data[0]?.value === manualValue
+        ) {
+          armManual = false
+          firstCall = outside.refetch({ throwOnError: true })
+          void firstCall.catch(() => undefined)
+        }
+        if (
+          armSecond &&
+          result.isSuccess &&
+          !result.isFetching &&
+          result.data[0]?.value === `stale`
+        ) {
+          armSecond = false
+          secondCall = outside.refetch({ throwOnError: true })
+          void secondCall.catch(() => undefined)
+        }
+      })
+      const source = createCollection(
+        queryCollectionOptions<Row>({
+          id,
+          queryClient,
+          queryKey: [id],
+          queryFn: () => Promise.resolve([{ id: `x`, value: `initial` }]),
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          startSync: true,
+          retry: false,
+        }),
+      )
+      const request = {}
+      const publications: Array<string> = []
+      const subscription = source.subscribeChanges(
+        (batch) => {
+          for (const change of batch) {
+            if (change.key === `x`) publications.push(change.value.value)
+          }
+        },
+        { includeInitialState: false },
+      )
+      cleanups.push(async () => {
+        first.resolve([])
+        second.resolve([])
+        releaseOutside()
+        subscription.unsubscribe()
+        source._sync.unloadSubset(request)
+        await source.cleanup()
+        queryClient.clear()
+      })
+
+      await source._sync.loadSubset(request)
+      armManual = true
+      const manualRows = sameReference
+        ? queryClient.getQueryData<Array<Row>>([id])!
+        : [{ id: `x`, value: `seed` }]
+      queryClient.setQueryData([id], manualRows, {
+        updatedAt: Date.now() + 1000,
+      })
+      await vi.waitFor(() => expect(calls).toBe(1))
+      await source.utils.writeUpdate({ id: `x`, value: `local` })
+      armSecond = true
+      first.resolve([{ id: `x`, value: `stale` }])
+      await firstCall
+      await vi.waitFor(() => expect(calls).toBe(2))
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect({
+        cache: queryClient.getQueryData([id]),
+        publicRow: source.get(`x`)?.value,
+        publications,
+      }).toEqual({
+        cache: [{ id: `x`, value: `local` }],
+        publicRow: `local`,
+        publications: sameReference
+          ? [`initial`, `local`]
+          : [`initial`, `seed`, `local`],
+      })
+
+      if (outcome === `success`) {
+        second.resolve([{ id: `x`, value: `fresh` }])
+        await secondCall
+      } else {
+        second.reject(secondError)
+        await expect(secondCall).rejects.toBe(secondError)
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect({
+        cache: queryClient.getQueryData([id]),
+        publicRow: source.get(`x`)?.value,
+        publications,
+      }).toEqual(
+        outcome === `success`
+          ? {
+              cache: [{ id: `x`, value: `fresh` }],
+              publicRow: `fresh`,
+              publications: sameReference
+                ? [`initial`, `local`, `fresh`]
+                : [`initial`, `seed`, `local`, `fresh`],
+            }
+          : {
+              cache: [{ id: `x`, value: `local` }],
+              publicRow: `local`,
+              publications: sameReference
+                ? [`initial`, `local`]
+                : [`initial`, `seed`, `local`],
+            },
+      )
+    },
+  )
+
+  /**
+   * Query Core can notify an earlier observer of F1's fetching state before
+   * invoking F1's query function. That observer starts F2, whose query function
+   * runs first, then calls a direct write; F1's query function runs after the
+   * write. Both fetch operations were accepted before the write, even though
+   * their query functions straddle it. Neither result may displace the direct
+   * row. This distinguishes operation-start authority from query-function
+   * invocation order. Check cache, public row, and every publication while
+   * F1 is held and after its success or failure.
+   */
+  it.each([`success`, `failure`] as const)(
+    `keeps a direct row across nested fetch operations despite delayed F1 %s`,
+    async (outcome) => {
+      type Row = { id: string; value: string }
+      const id = `nested-fetch-start-before-write-${outcome}`
+      const queryClient = createQueryClient()
+      const inner = createDeferred<Array<Row>>()
+      const outer = createDeferred<Array<Row>>()
+      const outerError = new Error(`F1 failed`)
+      let calls = 0
+      let armed = false
+      let innerCall: Promise<unknown> | undefined
+      let write: Promise<void> | undefined
+      const outside = new QueryObserver(queryClient, {
+        queryKey: [id],
+        queryFn: () => (++calls === 1 ? inner.promise : outer.promise),
+        enabled: false,
+        retry: false,
+        notifyOnChangeProps: `all`,
+      })
+      const releaseOutside = outside.subscribe((result) => {
+        if (armed && result.isFetching) {
+          armed = false
+          innerCall = outside.refetch({ throwOnError: true })
+          void innerCall.catch(() => undefined)
+          write = source.utils.writeUpdate({ id: `x`, value: `local` })
+          void write.catch(() => undefined)
+        }
+      })
+      const source = createCollection(
+        queryCollectionOptions<Row>({
+          id,
+          queryClient,
+          queryKey: [id],
+          queryFn: () => Promise.resolve([{ id: `x`, value: `initial` }]),
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          startSync: true,
+          retry: false,
+        }),
+      )
+      const request = {}
+      const publications: Array<string> = []
+      const subscription = source.subscribeChanges(
+        (batch) => {
+          for (const change of batch) {
+            if (change.key === `x`) publications.push(change.value.value)
+          }
+        },
+        { includeInitialState: false },
+      )
+      cleanups.push(async () => {
+        inner.resolve([])
+        outer.resolve([])
+        releaseOutside()
+        subscription.unsubscribe()
+        source._sync.unloadSubset(request)
+        await source.cleanup()
+        queryClient.clear()
+      })
+
+      await source._sync.loadSubset(request)
+      armed = true
+      const outerCall = outside.refetch({ throwOnError: true })
+      void outerCall.catch(() => undefined)
+      await vi.waitFor(() => expect(calls).toBe(2))
+      await write
+      expect({
+        cache: queryClient.getQueryData([id]),
+        publicRow: source.get(`x`)?.value,
+        publications,
+      }).toEqual({
+        cache: [{ id: `x`, value: `local` }],
+        publicRow: `local`,
+        publications: [`initial`, `local`],
+      })
+
+      inner.resolve([{ id: `x`, value: `stale` }])
+      await innerCall
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect({
+        cache: queryClient.getQueryData([id]),
+        publicRow: source.get(`x`)?.value,
+        publications,
+      }).toEqual({
+        cache: [{ id: `x`, value: `local` }],
+        publicRow: `local`,
+        publications: [`initial`, `local`],
+      })
+
+      if (outcome === `success`) {
+        outer.resolve([{ id: `x`, value: `fresh` }])
+        await outerCall
+      } else {
+        outer.reject(outerError)
+        await expect(outerCall).rejects.toBe(outerError)
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect({
+        cache: queryClient.getQueryData([id]),
+        publicRow: source.get(`x`)?.value,
+        publications,
+      }).toEqual({
+        cache: [{ id: `x`, value: `local` }],
+        publicRow: `local`,
+        publications: [`initial`, `local`],
+      })
+    },
+  )
+
+  /**
+   * Query Core announces a newly accepted fetch before invoking its query
+   * function. An earlier cache listener can make a direct write during that
+   * announcement. The fetch operation already exists at the write boundary;
+   * its delayed provider result cannot undo the accepted row. The comparison
+   * uses public Collection rows, the Query cache, and the publication trace
+   * after the write and after the held result settles.
+   */
+  it(`keeps a direct row written by an earlier fetch-action cache listener`, async () => {
+    type Row = { id: string; value: string }
+    const id = `cache-fetch-listener-direct-write`
+    const queryClient = createQueryClient()
+    const held = createDeferred<Array<Row>>()
+    let armed = false
+    let write: Promise<void> | undefined
+    let fetchActions = 0
+    const releaseCache = queryClient.getQueryCache().subscribe((event) => {
+      if (armed && event.type === `updated` && event.action.type === `fetch`) {
+        armed = false
+        fetchActions++
+        write = source.utils.writeUpdate({ id: `x`, value: `local` })
+        void write.catch(() => undefined)
+      }
+    })
+    let providerCalls = 0
+    const outside = new QueryObserver(queryClient, {
+      queryKey: [id],
+      queryFn: () => {
+        providerCalls++
+        return held.promise
+      },
+      enabled: false,
+      retry: false,
+      notifyOnChangeProps: `all`,
+    })
+    const releaseOutside = outside.subscribe(() => {})
+    const source = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn: () => Promise.resolve([{ id: `x`, value: `initial` }]),
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        retry: false,
+      }),
+    )
+    const request = {}
+    const publications: Array<string> = []
+    const subscription = source.subscribeChanges(
+      (batch) => {
+        for (const change of batch) {
+          if (change.key === `x`) publications.push(change.value.value)
+        }
+      },
+      { includeInitialState: false },
+    )
+    cleanups.push(async () => {
+      held.resolve([])
+      releaseCache()
+      releaseOutside()
+      subscription.unsubscribe()
+      source._sync.unloadSubset(request)
+      await source.cleanup()
+      queryClient.clear()
+    })
+
+    await source._sync.loadSubset(request)
+    armed = true
+    const outsideCall = outside.refetch({ throwOnError: true })
+    void outsideCall.catch(() => undefined)
+    await vi.waitFor(() => expect(providerCalls).toBe(1))
+    expect(fetchActions).toBe(1)
+    await write
+    expect({
+      cache: queryClient.getQueryData([id]),
+      publicRow: source.get(`x`)?.value,
+      publications,
+    }).toEqual({
+      cache: [{ id: `x`, value: `local` }],
+      publicRow: `local`,
+      publications: [`initial`, `local`],
+    })
+
+    held.resolve([{ id: `x`, value: `stale` }])
+    await outsideCall
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    expect({
+      cache: queryClient.getQueryData([id]),
+      publicRow: source.get(`x`)?.value,
+      publications,
+    }).toEqual({
+      cache: [{ id: `x`, value: `local` }],
+      publicRow: `local`,
+      publications: [`initial`, `local`],
+    })
+  })
+
+  /**
+   * F2's error has no data update, but its action is still in flight when an
+   * earlier outside observer starts F3. F3 starts before the direct write and
+   * returns stale data after it. That result cannot borrow F4's later start
+   * position merely because the observer starts F4 before this Collection
+   * receives F3's success action. Compare cache, public row, and publication
+   * trace while F4 is held and after either F4 outcome.
+   */
+  it.each([`success`, `failure`] as const)(
+    `keeps a direct row across outside error and success reentry before F4 %s`,
+    async (outcome) => {
+      type Row = { id: string; value: string }
+      const id = `outside-error-success-reentry-${outcome}`
+      const queryClient = createQueryClient()
+      const second = createDeferred<Array<Row>>()
+      const third = createDeferred<Array<Row>>()
+      const fourth = createDeferred<Array<Row>>()
+      const secondError = new Error(`F2 failed`)
+      const fourthError = new Error(`F4 failed`)
+      let outsideCalls = 0
+      let armThird = false
+      let armFourth = false
+      let thirdCall: Promise<unknown> | undefined
+      let fourthCall: Promise<unknown> | undefined
+      const outside = new QueryObserver(queryClient, {
+        queryKey: [id],
+        queryFn: () => {
+          outsideCalls++
+          return outsideCalls === 1
+            ? second.promise
+            : outsideCalls === 2
+              ? third.promise
+              : fourth.promise
+        },
+        enabled: false,
+        retry: false,
+        notifyOnChangeProps: `all`,
+      })
+      const releaseOutside = outside.subscribe((result) => {
+        if (
+          armThird &&
+          result.isError &&
+          !result.isFetching &&
+          result.error === secondError
+        ) {
+          armThird = false
+          thirdCall = outside.refetch({ throwOnError: true })
+          void thirdCall.catch(() => undefined)
+        }
+        if (
+          armFourth &&
+          result.isSuccess &&
+          !result.isFetching &&
+          result.data[0]?.value === `stale`
+        ) {
+          armFourth = false
+          fourthCall = outside.refetch({ throwOnError: true })
+          void fourthCall.catch(() => undefined)
+        }
+      })
+      const source = createCollection(
+        queryCollectionOptions<Row>({
+          id,
+          queryClient,
+          queryKey: [id],
+          queryFn: () => Promise.resolve([{ id: `x`, value: `initial` }]),
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          startSync: true,
+          retry: false,
+        }),
+      )
+      const request = {}
+      const publications: Array<string> = []
+      const subscription = source.subscribeChanges(
+        (batch) => {
+          for (const change of batch) {
+            if (change.key === `x`) publications.push(change.value.value)
+          }
+        },
+        { includeInitialState: false },
+      )
+      cleanups.push(async () => {
+        second.resolve([])
+        third.resolve([])
+        fourth.resolve([])
+        releaseOutside()
+        subscription.unsubscribe()
+        source._sync.unloadSubset(request)
+        await source.cleanup()
+        queryClient.clear()
+      })
+
+      await source._sync.loadSubset(request)
+      armThird = true
+      const secondCall = outside.refetch({ throwOnError: true })
+      void secondCall.catch(() => undefined)
+      await vi.waitFor(() => expect(outsideCalls).toBe(1))
+      second.reject(secondError)
+      await expect(secondCall).rejects.toBe(secondError)
+      await vi.waitFor(() => expect(outsideCalls).toBe(2))
+      await source.utils.writeUpdate({ id: `x`, value: `local` })
+      armFourth = true
+      third.resolve([{ id: `x`, value: `stale` }])
+      await thirdCall
+      await vi.waitFor(() => expect(outsideCalls).toBe(3))
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect({
+        cache: queryClient.getQueryData([id]),
+        publicRow: source.get(`x`)?.value,
+        publications,
+      }).toEqual({
+        cache: [{ id: `x`, value: `local` }],
+        publicRow: `local`,
+        publications: [`initial`, `local`],
+      })
+
+      if (outcome === `success`) {
+        fourth.resolve([{ id: `x`, value: `fresh` }])
+        await fourthCall
+      } else {
+        fourth.reject(fourthError)
+        await expect(fourthCall).rejects.toBe(fourthError)
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect({
+        cache: queryClient.getQueryData([id]),
+        publicRow: source.get(`x`)?.value,
+        publications,
+      }).toEqual(
+        outcome === `success`
+          ? {
+              cache: [{ id: `x`, value: `fresh` }],
+              publicRow: `fresh`,
+              publications: [`initial`, `local`, `fresh`],
+            }
+          : {
+              cache: [{ id: `x`, value: `local` }],
+              publicRow: `local`,
+              publications: [`initial`, `local`],
+            },
+      )
+    },
+  )
 
   /**
    * One physical Query may use the query function supplied by a different
@@ -11008,6 +14349,356 @@ describe(`query collection ownership lifecycle`, () => {
     await collection._sync.loadSubset({})
     expect(collection.get(`x`)?.name).toBe(`after`)
     expect(queryFn).toHaveBeenCalledTimes(1)
+  })
+
+  /**
+   * A Query observer may outlive its Collection subset lease, or the caller
+   * may abort while retaining that lease. QueryClient invalidation then owns
+   * a physical fetch with no live Collection acquisition. The provider's
+   * signal must remain live for that independent Query work. Query cache
+   * receives the new row; the Collection's old public row cannot adopt it.
+   */
+  it.each([
+    { creator: `released no-signal creator`, withSignal: false, release: true },
+    {
+      creator: `released aborted-signal creator`,
+      withSignal: true,
+      release: true,
+    },
+    {
+      creator: `retained aborted-signal creator`,
+      withSignal: true,
+      release: false,
+    },
+  ])(
+    `lets an external refetch finish with a $creator`,
+    async ({ withSignal, release }) => {
+      type Row = { id: string; name: string }
+      const id = `external-zero-live-refetch-${withSignal}-${release}`
+      const queryClient = createQueryClient()
+      let calls = 0
+      const queryFn = vi.fn((context: QueryFunctionContext) => {
+        calls++
+        if (calls === 1) return Promise.resolve([{ id: `x`, name: `before` }])
+        const options = context.meta?.loadSubsetOptions
+        const signal = options?.signal
+        expect(
+          Object.getOwnPropertyDescriptor(options!, `signal`),
+        ).toMatchObject({
+          enumerable: true,
+          value: signal,
+        })
+        expect(signal).toBeInstanceOf(AbortSignal)
+        signal!.throwIfAborted()
+        return Promise.resolve([{ id: `x`, name: `after` }])
+      })
+      const collection = createCollection(
+        queryCollectionOptions<Row>({
+          id,
+          queryClient,
+          queryKey: [id],
+          queryFn,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          startSync: true,
+          staleTime: Number.POSITIVE_INFINITY,
+        }),
+      )
+      let releaseListener = () => {}
+      const reacquired = {}
+      cleanups.push(async () => {
+        collection._sync.unloadSubset(reacquired)
+        releaseListener()
+        await collection.cleanup()
+        queryClient.clear()
+      })
+
+      const caller = new AbortController()
+      const request: LoadSubsetOptions = withSignal
+        ? { signal: caller.signal }
+        : {}
+      await collection._sync.loadSubset(request)
+      const query = queryClient.getQueryCache().find({ queryKey: [id] })!
+      releaseListener = query.observers[0]!.subscribe(() => {})
+      if (release) collection._sync.unloadSubset(request)
+      if (withSignal) caller.abort()
+      expect(collection.get(`x`)?.name).toBe(`before`)
+
+      await queryClient.invalidateQueries({ queryKey: [id], exact: true })
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(query.state.data).toEqual([{ id: `x`, name: `after` }])
+      expect(collection.get(`x`)?.name).toBe(`before`)
+
+      // The external result did not acquire Collection row ownership. A later
+      // Collection acquisition must apply it or fetch newer data before it may
+      // report success; the old public row is not a settled snapshot for it.
+      await collection._sync.loadSubset(reacquired)
+      expect(collection.get(`x`)?.name).toBe(`after`)
+    },
+  )
+
+  /**
+   * Query Core may pause an acquisition-driven fetch while offline before it
+   * invokes the provider. If that sole caller aborts while its lease remains,
+   * reconnect cannot turn the canceled acquisition into a fresh provider
+   * request. The public caller rejects at abort; after reconnect, no row may
+   * enter Query cache or the Collection. An external Query Core observer's
+   * independent refetch after release is covered above.
+   */
+  it(`does not start a paused on-demand fetch after its sole caller aborts`, async () => {
+    type Row = { id: string }
+    const id = `paused-caller-abort`
+    const queryClient = createQueryClient()
+    queryClient.mount()
+    onlineManager.setOnline(false)
+    const caller = new AbortController()
+    const queryFn = vi.fn(() => Promise.resolve<Array<Row>>([{ id: `late` }]))
+    const source = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        networkMode: `online`,
+        startSync: true,
+      }),
+    )
+    const subscription = source.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    cleanups.push(async () => {
+      onlineManager.setOnline(true)
+      subscription.unsubscribe()
+      await source.cleanup()
+      queryClient.clear()
+      queryClient.unmount()
+    })
+    let load: Promise<string> | undefined
+    expect(
+      subscription.requestSnapshot({
+        signal: caller.signal,
+        onLoadSubsetResult: (result) => {
+          load = Promise.resolve(result).then(
+            () => `fulfilled`,
+            (error: unknown) =>
+              error instanceof Error ? error.name : `unknown rejection`,
+          )
+        },
+      }),
+    ).toBe(true)
+    const query = queryClient.getQueryCache().find({ queryKey: [id] })!
+    expect(query.state.fetchStatus).toBe(`paused`)
+    expect(queryFn).not.toHaveBeenCalled()
+    caller.abort()
+    expect(await load).toBe(`AbortError`)
+
+    onlineManager.setOnline(true)
+    await vi.waitFor(() => expect(query.state.fetchStatus).toBe(`idle`))
+    expect({
+      providerCalls: queryFn.mock.calls.length,
+      cache: query.state.data,
+      publicRow: source.has(`late`),
+    }).toEqual({ providerCalls: 0, cache: undefined, publicRow: false })
+  })
+
+  /**
+   * An independent Query Core observer can own a paused physical Query even
+   * after the sole Collection acquisition aborts. On reconnect, its provider
+   * receives a live metadata signal and its result reaches Query cache. The
+   * canceled Collection caller still rejects and owns no public row. This
+   * checks the observer's right to start work, not just an abort event.
+   */
+  it(`starts a paused Query fetch for an independent observer after caller abort`, async () => {
+    type Row = { id: string }
+    const id = `paused-outside-observer-after-abort`
+    const queryClient = createQueryClient()
+    queryClient.mount()
+    onlineManager.setOnline(false)
+    const caller = new AbortController()
+    const providerSignals: Array<AbortSignal | undefined> = []
+    const queryFn = vi.fn((context: QueryFunctionContext) => {
+      const options = context.meta?.loadSubsetOptions
+      const signal = options?.signal
+      expect(Object.getOwnPropertyDescriptor(options, `signal`)).toMatchObject({
+        enumerable: true,
+        value: signal,
+      })
+      providerSignals.push(signal)
+      signal?.throwIfAborted()
+      return Promise.resolve<Array<Row>>([{ id: `outside` }])
+    })
+    const source = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        networkMode: `online`,
+        startSync: true,
+        retry: false,
+      }),
+    )
+    const subscription = source.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    const outside = new QueryObserver(queryClient, {
+      queryKey: [id],
+      queryFn: () => Promise.resolve([{ id: `wrong` }]),
+      enabled: false,
+    })
+    let releaseOutside = () => {}
+    cleanups.push(async () => {
+      onlineManager.setOnline(true)
+      releaseOutside()
+      subscription.unsubscribe()
+      await source.cleanup()
+      queryClient.clear()
+      queryClient.unmount()
+    })
+    let load: Promise<string> | undefined
+    expect(
+      subscription.requestSnapshot({
+        signal: caller.signal,
+        onLoadSubsetResult: (result) => {
+          load = Promise.resolve(result).then(
+            () => `fulfilled`,
+            (error: unknown) =>
+              error instanceof Error ? error.name : `unknown rejection`,
+          )
+        },
+      }),
+    ).toBe(true)
+    const query = queryClient.getQueryCache().find({ queryKey: [id] })!
+    expect(query.state.fetchStatus).toBe(`paused`)
+    expect(queryFn).not.toHaveBeenCalled()
+    releaseOutside = outside.subscribe(() => {})
+    caller.abort()
+    expect(await load).toBe(`AbortError`)
+
+    onlineManager.setOnline(true)
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledOnce())
+    await vi.waitFor(() =>
+      expect(queryClient.getQueryData([id])).toEqual([{ id: `outside` }]),
+    )
+    expect(providerSignals[0]?.aborted).toBe(false)
+    expect(outside.getCurrentResult().data).toEqual([{ id: `outside` }])
+    expect(source.has(`outside`)).toBe(false)
+  })
+
+  /**
+   * Query Core can cancel the old Collection fetch and start an independent
+   * external fetch on the same physical Query. A later Collection caller
+   * borrows F2 without canceling it or starting F3. F2's Query Core signal
+   * remains live, and its result applies to the new public acquisition. This
+   * distinguishes the current fetch from an aborted controller left by F1.
+   */
+  it(`lets a new Collection caller join a live external Query fetch`, async () => {
+    type Row = { id: string }
+    const id = `external-fetch-new-caller`
+    const queryClient = createQueryClient()
+    const old = createDeferred<Array<Row>>()
+    const external = createDeferred<Array<Row>>()
+    const caller = new AbortController()
+    const collectionFn = vi.fn(() => old.promise)
+    const source = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn: collectionFn,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        staleTime: Infinity,
+      }),
+    )
+    const first = source.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    const cleanupResources: {
+      successor?: ReturnType<typeof source.subscribeChanges>
+    } = {}
+    cleanups.push(async () => {
+      old.resolve([])
+      external.resolve([])
+      first.unsubscribe()
+      cleanupResources.successor?.unsubscribe()
+      await source.cleanup()
+      queryClient.clear()
+    })
+    let firstOutcome: Promise<string> | undefined
+    expect(
+      first.requestSnapshot({
+        signal: caller.signal,
+        onLoadSubsetResult: (result) => {
+          firstOutcome = Promise.resolve(result).then(
+            () => `fulfilled`,
+            (error: unknown) =>
+              error instanceof Error ? error.name : `unknown rejection`,
+          )
+        },
+      }),
+    ).toBe(true)
+    await vi.waitFor(() => expect(collectionFn).toHaveBeenCalledOnce())
+    caller.abort()
+    expect(await firstOutcome).toBe(`AbortError`)
+    await queryClient.cancelQueries({ queryKey: [id], exact: true })
+
+    let externalSignal: AbortSignal | undefined
+    const externalLoad = queryClient.fetchQuery({
+      queryKey: [id],
+      queryFn: (context) => {
+        externalSignal = context.signal
+        return external.promise
+      },
+      staleTime: 0,
+    })
+    void externalLoad.catch(() => undefined)
+    await vi.waitFor(() => expect(externalSignal).toBeInstanceOf(AbortSignal))
+    const successor = source.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    cleanupResources.successor = successor
+    let successorOutcome = `pending`
+    let successorLoad: Promise<void> | undefined
+    expect(
+      successor.requestSnapshot({
+        onLoadSubsetResult: (result) => {
+          successorLoad = Promise.resolve(result).then(() => {
+            successorOutcome = `fulfilled`
+          })
+          void successorLoad.catch(() => undefined)
+        },
+      }),
+    ).toBe(true)
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    expect({
+      externalAborted: externalSignal?.aborted,
+      successorOutcome,
+      collectionCalls: collectionFn.mock.calls.length,
+    }).toEqual({
+      externalAborted: false,
+      successorOutcome: `pending`,
+      collectionCalls: 1,
+    })
+
+    external.resolve([{ id: `external` }])
+    await Promise.all([externalLoad, successorLoad])
+    expect({
+      externalAborted: externalSignal?.aborted,
+      successorOutcome,
+      publicRow: source.has(`external`),
+      cache: queryClient.getQueryData([id]),
+    }).toEqual({
+      externalAborted: false,
+      successorOutcome: `fulfilled`,
+      publicRow: true,
+      cache: [{ id: `external` }],
+    })
   })
 
   /**
@@ -11369,6 +15060,173 @@ describe(`query collection ownership lifecycle`, () => {
     expect(queryFn).toHaveBeenCalledTimes(requestCount)
     if (writeAfterStart) expect(collection.has(shared.id)).toBe(false)
     await Promise.allSettled([initialLoad, reacquiredLoad])
+  })
+
+  /**
+   * A public snapshot request with `refetch: true` owes a new exact-demand
+   * source result. Query Core can cancel held F1 and revert its cache to F0.
+   * The reference permits rejection or a later F2 application, but F0 cannot
+   * fulfill the refetch. The real subscription callback exposes the adapter's
+   * promise. Compare its outcome and public row after external cancellation;
+   * if it remains pending, hold F2 and require its row before fulfillment.
+   */
+  it(`does not fulfill a canceled exact snapshot refetch from prior Query data`, async () => {
+    const id = `canceled-exact-snapshot-refetch`
+    const before = { ...shared, name: `Before` }
+    const late = { ...shared, name: `Canceled F1` }
+    const fresh = { ...shared, name: `Fresh F2` }
+    const heldF1 = createDeferred<Array<Item>>()
+    const heldF2 = createDeferred<Array<Item>>()
+    const { collection, queryClient, queryFn } = createOwnershipFixture({
+      id,
+      results: [[before]],
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    cleanups.push(() => {
+      heldF1.resolve([late])
+      heldF2.resolve([fresh])
+      subscription.unsubscribe()
+      return Promise.resolve()
+    })
+    const where = categoryIn(`shared`)
+    let initial: Promise<unknown> | undefined
+    expect(
+      subscription.requestSnapshot({
+        where,
+        onLoadSubsetResult: (result) => {
+          initial = Promise.resolve(result)
+        },
+      }),
+    ).toBe(true)
+    await initial
+    expect(collection.get(before.id)?.name).toBe(before.name)
+
+    queryFn
+      .mockImplementationOnce(() => heldF1.promise)
+      .mockImplementationOnce(() => heldF2.promise)
+    let refetch: Promise<unknown> | undefined
+    expect(
+      subscription.requestSnapshot({
+        where,
+        refetch: true,
+        onLoadSubsetResult: (result) => {
+          refetch = Promise.resolve(result)
+          void refetch.catch(() => undefined)
+        },
+      }),
+    ).toBe(true)
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+    const queryKey = [id, getLoadSubsetDemandKey({ where })]
+    await queryClient.cancelQueries({ queryKey, exact: true })
+    const atCancellation = await Promise.race([
+      refetch!.then(
+        () => `fulfilled`,
+        () => `rejected`,
+      ),
+      new Promise<`pending`>((resolve) =>
+        setTimeout(() => resolve(`pending`), 0),
+      ),
+    ])
+    expect(atCancellation).not.toBe(`fulfilled`)
+    expect(collection.get(before.id)?.name).toBe(before.name)
+
+    heldF1.resolve([late])
+    if (atCancellation === `pending`) {
+      await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(3))
+      heldF2.resolve([fresh])
+      await refetch
+      expect(collection.get(fresh.id)?.name).toBe(fresh.name)
+    } else {
+      await expect(refetch).rejects.toBeDefined()
+      expect(collection.get(before.id)?.name).toBe(before.name)
+    }
+    subscription.releaseSnapshot(where)
+  })
+
+  /**
+   * Silent replacement is the neighboring legal history. When a second exact
+   * snapshot refetch replaces held F1, both public callers may fulfill only
+   * after F2 applies. F1's late provider response has no row authority. This
+   * distinguishes external cancellation from Query Core's replacement path.
+   */
+  it(`settles silently replaced exact snapshot refetches from the applied successor`, async () => {
+    const id = `replaced-exact-snapshot-refetch`
+    const before = { ...shared, name: `Before` }
+    const stale = { ...shared, name: `Replaced F1` }
+    const fresh = { ...shared, name: `Fresh F2` }
+    const heldF1 = createDeferred<Array<Item>>()
+    const heldF2 = createDeferred<Array<Item>>()
+    const { collection, queryFn } = createOwnershipFixture({
+      id,
+      results: [[before]],
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    cleanups.push(() => {
+      heldF1.resolve([stale])
+      heldF2.resolve([fresh])
+      subscription.unsubscribe()
+      return Promise.resolve()
+    })
+    const where = categoryIn(`shared`)
+    let initial: Promise<unknown> | undefined
+    expect(
+      subscription.requestSnapshot({
+        where,
+        onLoadSubsetResult: (result) => {
+          initial = Promise.resolve(result)
+        },
+      }),
+    ).toBe(true)
+    await initial
+    expect(collection.get(before.id)?.name).toBe(before.name)
+
+    queryFn
+      .mockImplementationOnce(() => heldF1.promise)
+      .mockImplementationOnce(() => heldF2.promise)
+    const refetch = () => {
+      let result: Promise<unknown> | undefined
+      expect(
+        subscription.requestSnapshot({
+          where,
+          refetch: true,
+          onLoadSubsetResult: (load) => {
+            result = Promise.resolve(load)
+            void result.catch(() => undefined)
+          },
+        }),
+      ).toBe(true)
+      return result!
+    }
+    const first = refetch()
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+    const second = refetch()
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(3))
+    expect(collection.get(before.id)?.name).toBe(before.name)
+    const whileF2Held = await Promise.all(
+      [first, second].map((caller) =>
+        Promise.race([
+          caller.then(
+            () => `fulfilled`,
+            () => `rejected`,
+          ),
+          new Promise<`pending`>((resolve) =>
+            setTimeout(() => resolve(`pending`), 0),
+          ),
+        ]),
+      ),
+    )
+    expect(whileF2Held).toEqual([`pending`, `pending`])
+    heldF2.resolve([fresh])
+    await Promise.all([first, second])
+    expect(collection.get(fresh.id)?.name).toBe(fresh.name)
+    heldF1.resolve([stale])
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    expect(collection.get(fresh.id)?.name).toBe(fresh.name)
+    subscription.releaseSnapshot(where)
   })
 
   /**
@@ -12334,6 +16192,356 @@ describe(`query collection ownership lifecycle`, () => {
         collection._sync.unloadSubset(fullRequest)
         expect(rows(collection)).toEqual([oldRow.id])
       }
+    },
+  )
+
+  /**
+   * A retained marker requires an applied authoritative source result before
+   * its acquisition can fulfill. A custom Query persister may call queryFn yet
+   * return a different value, so Query Core leaves its result provenance
+   * unknown. The independent model therefore permits explicit rejection but
+   * never successful settlement with the old durable owner still pending.
+   * Cold and seeded Query caches drive the initial-wait and explicit-refetch
+   * paths. The persister either forwards the source result or invokes the
+   * source speculatively and returns unrelated cached rows. Direct adapter
+   * load and public live-query preload compare the load outcome, Query cache,
+   * public row, durable row, and marker after Query reports success.
+   */
+  it.each([
+    { path: `direct`, cache: `cold`, result: `source` },
+    { path: `live-query`, cache: `cold`, result: `source` },
+    { path: `direct`, cache: `seeded`, result: `source` },
+    { path: `live-query`, cache: `seeded`, result: `source` },
+    { path: `direct`, cache: `cold`, result: `unrelated` },
+    { path: `live-query`, cache: `cold`, result: `unrelated` },
+    { path: `direct`, cache: `seeded`, result: `unrelated` },
+    { path: `live-query`, cache: `seeded`, result: `unrelated` },
+  ] as const)(
+    `does not settle a retained owner from an opaque $result persister result through $path load with $cache cache`,
+    async ({ path, cache, result }) => {
+      const id = `retained-opaque-persister-${path}-${cache}-${result}`
+      const queryHash = hashKey([id])
+      const retentionKey = `queryCollection:gc:${queryHash}`
+      const durableRow = { ...shared, name: `Durable` }
+      const sourceRow = { ...shared, name: `Source` }
+      const unrelatedRow = { ...shared, name: `Unrelated cache` }
+      const storage = createOwnershipStorage({
+        rows: new Map([[durableRow.id, durableRow]]),
+        rowMetadata: new Map([
+          [
+            durableRow.id,
+            { queryCollection: { owners: { [queryHash]: true } } },
+          ],
+        ]),
+        collectionMetadata: new Map([
+          [retentionKey, { queryHash, mode: `until-revalidated` }],
+        ]),
+      })
+      const { collection, queryClient, queryFn } =
+        createPersistedOwnershipFixture(
+          id,
+          storage,
+          [sourceRow],
+          `on-demand`,
+          (client) => {
+            client.setDefaultOptions({
+              queries: {
+                gcTime: Number.POSITIVE_INFINITY,
+                retry: false,
+                staleTime: Number.POSITIVE_INFINITY,
+                persister: (runSource, context) => {
+                  if (result === `source`) return runSource(context)
+                  void runSource(context)
+                  return Promise.resolve([unrelatedRow])
+                },
+              },
+            })
+            if (cache === `seeded`) client.setQueryData([id], [durableRow])
+          },
+        )
+
+      await collection.stateWhenReady()
+      const live =
+        path === `live-query`
+          ? createLiveQueryCollection((query) =>
+              query.from({ row: collection }).select(({ row }) => ({
+                id: row.id,
+                name: row.name,
+              })),
+            )
+          : undefined
+      if (live) cleanups.push(() => live.cleanup())
+      const load =
+        path === `direct` ? collection._sync.loadSubset({}) : live!.preload()
+      await expect(load).rejects.toThrow(/revalidat|provenance/i)
+      expect(queryFn).toHaveBeenCalledOnce()
+      expect(queryClient.getQueryData([id])).toEqual([
+        result === `source` ? sourceRow : unrelatedRow,
+      ])
+      expect(collection.get(sourceRow.id)?.name).toBe(durableRow.name)
+      if (live)
+        expect(live.toArray.every((row) => row.name !== sourceRow.name)).toBe(
+          true,
+        )
+      expect(storedItems(storage)).toEqual([durableRow])
+      expect(storage.snapshot().collectionMetadata.has(retentionKey)).toBe(true)
+    },
+  )
+
+  /**
+   * A retained owner requires a newly applied source response. A manual
+   * Query cache edit during a held physical fetch can make an observer report
+   * success, but it cannot release the durable owner or its marker. The
+   * reference has two terminal outcomes: a source-backed result replaces the
+   * durable row, while a persister result with unknown provenance rejects.
+   * Both direct load and public live-query preload cross this observer
+   * checkpoint. The held-fetch assertion distinguishes either outcome from
+   * an early, false ready state.
+   */
+  it.each([
+    { path: `direct`, result: `source` },
+    { path: `live-query`, result: `source` },
+    { path: `direct`, result: `opaque` },
+    { path: `live-query`, result: `opaque` },
+  ] as const)(
+    `waits for a retained owner's $result result after a manual cache edit through $path load`,
+    async ({ path, result }) => {
+      const id = `retained-manual-edit-${path}-${result}`
+      const queryHash = hashKey([id])
+      const retentionKey = `queryCollection:gc:${queryHash}`
+      const durableRow = { ...shared, name: `Durable` }
+      const manualRow = { ...shared, name: `Manual cache` }
+      const sourceRow = { ...shared, name: `Source` }
+      const storage = createOwnershipStorage({
+        rows: new Map([[durableRow.id, durableRow]]),
+        rowMetadata: new Map([
+          [
+            durableRow.id,
+            { queryCollection: { owners: { [queryHash]: true } } },
+          ],
+        ]),
+        collectionMetadata: new Map([
+          [retentionKey, { queryHash, mode: `until-revalidated` }],
+        ]),
+      })
+      const queryClient = createQueryClient()
+      if (result === `opaque`)
+        queryClient.setQueryDefaults([id], {
+          persister: (runSource, context) => runSource(context),
+        })
+      const started = createDeferred<void>()
+      const held = createDeferred<Array<Item>>()
+      const queryFn = vi.fn(() => {
+        started.resolve()
+        return held.promise
+      })
+      const collection = createCollection(
+        persistedCollectionOptions<
+          Item,
+          string | number,
+          never,
+          QueryCollectionUtils<Item, string | number, Item, unknown>
+        >({
+          ...queryCollectionOptions<Item>({
+            id,
+            queryClient,
+            queryKey: [id],
+            queryFn,
+            getKey: (item) => item.id,
+            syncMode: `on-demand`,
+            persistedGcTime: Number.POSITIVE_INFINITY,
+            startSync: true,
+          }),
+          persistence: { adapter: storage.adapter },
+        }),
+      )
+      let cleanupLive = async (): Promise<void> => {}
+      cleanups.push(async () => {
+        held.resolve([sourceRow])
+        await cleanupLive()
+        await collection.cleanup()
+        queryClient.clear()
+      })
+      await collection.stateWhenReady()
+      const live =
+        path === `live-query`
+          ? createLiveQueryCollection((query) =>
+              query.from({ row: collection }).select(({ row }) => ({
+                id: row.id,
+                name: row.name,
+              })),
+            )
+          : undefined
+      if (live) cleanupLive = () => live.cleanup()
+      const load = Promise.resolve(
+        path === `direct` ? collection._sync.loadSubset({}) : live!.preload(),
+      )
+      void load.catch(() => undefined)
+      await started.promise
+      queryClient.setQueryData([id], [manualRow])
+      const beforeSource = await Promise.race([
+        load.then(
+          () => `fulfilled`,
+          () => `rejected`,
+        ),
+        new Promise<`pending`>((resolve) =>
+          setTimeout(() => resolve(`pending`), 0),
+        ),
+      ])
+      expect(beforeSource).toBe(`pending`)
+      expect(collection.get(durableRow.id)?.name).toBe(durableRow.name)
+      expect(storedItems(storage)).toEqual([durableRow])
+      expect(storage.snapshot().collectionMetadata.has(retentionKey)).toBe(true)
+
+      held.resolve([sourceRow])
+      if (result === `opaque`) {
+        await expect(load).rejects.toThrow(/revalidat|provenance/i)
+        expect(collection.get(durableRow.id)?.name).toBe(durableRow.name)
+        expect(storedItems(storage)).toEqual([durableRow])
+        expect(storage.snapshot().collectionMetadata.has(retentionKey)).toBe(
+          true,
+        )
+      } else {
+        await load
+        expect(collection.get(sourceRow.id)?.name).toBe(sourceRow.name)
+        expect(storedItems(storage)).toEqual([sourceRow])
+        expect(storage.snapshot().collectionMetadata.has(retentionKey)).toBe(
+          false,
+        )
+      }
+      expect(queryFn).toHaveBeenCalledOnce()
+    },
+  )
+
+  /**
+   * A cold retained owner cannot use an outside fetch that began before its
+   * durable row and marker became visible to the Collection. The outside
+   * observer starts held F1 before the persisted Collection is constructed.
+   * F2 is also held, so the first terminal cut compares the acquisition
+   * promise, public and durable rows, and marker before F2 can apply. Direct
+   * load and public live-query preload reach the same Collection boundary.
+   */
+  it.each([`direct`, `live-query`] as const)(
+    `waits for a later source result after a cold retained owner joins an outside fetch through $path load`,
+    async (path) => {
+      const id = `retained-cold-outside-${path}`
+      const queryHash = hashKey([id])
+      const retentionKey = `queryCollection:gc:${queryHash}`
+      const durableRow = { ...shared, name: `Durable` }
+      const oldRow = { ...shared, name: `F1 source` }
+      const freshRow = { ...shared, name: `F2 source` }
+      const queryClient = createQueryClient()
+      const oldFetch = createDeferred<Array<Item>>()
+      const freshFetch = createDeferred<Array<Item>>()
+      const freshStarted = createDeferred<void>()
+      const outsideFn = vi.fn(() => oldFetch.promise)
+      const outside = new QueryObserver(queryClient, {
+        queryKey: [id],
+        queryFn: outsideFn,
+        retry: false,
+      })
+      const unsubscribeOutside = outside.subscribe(() => {})
+      await vi.waitFor(() => expect(outsideFn).toHaveBeenCalledOnce())
+      const storage = createOwnershipStorage({
+        rows: new Map([[durableRow.id, durableRow]]),
+        rowMetadata: new Map([
+          [
+            durableRow.id,
+            { queryCollection: { owners: { [queryHash]: true } } },
+          ],
+        ]),
+        collectionMetadata: new Map([
+          [retentionKey, { queryHash, mode: `until-revalidated` }],
+        ]),
+      })
+      const freshFn = vi.fn(() => {
+        freshStarted.resolve()
+        return freshFetch.promise
+      })
+      const collection = createCollection(
+        persistedCollectionOptions<
+          Item,
+          string | number,
+          never,
+          QueryCollectionUtils<Item, string | number, Item, unknown>
+        >({
+          ...queryCollectionOptions<Item>({
+            id,
+            queryClient,
+            queryKey: [id],
+            queryFn: freshFn,
+            getKey: (item) => item.id,
+            syncMode: `on-demand`,
+            persistedGcTime: Number.POSITIVE_INFINITY,
+            startSync: true,
+          }),
+          persistence: { adapter: storage.adapter },
+        }),
+      )
+      let cleanupLive = async (): Promise<void> => {}
+      cleanups.push(async () => {
+        oldFetch.resolve([oldRow])
+        freshFetch.resolve([freshRow])
+        await cleanupLive()
+        unsubscribeOutside()
+        await collection.cleanup()
+        queryClient.clear()
+      })
+      await collection.stateWhenReady()
+      const live =
+        path === `live-query`
+          ? createLiveQueryCollection((query) =>
+              query.from({ row: collection }).select(({ row }) => ({
+                id: row.id,
+                name: row.name,
+              })),
+            )
+          : undefined
+      if (live) cleanupLive = () => live.cleanup()
+      const load = Promise.resolve(
+        path === `direct` ? collection._sync.loadSubset({}) : live!.preload(),
+      )
+      void load.catch(() => undefined)
+      await vi.waitFor(() =>
+        expect(
+          queryClient
+            .getQueryCache()
+            .find({ queryKey: [id] })
+            ?.getObserversCount(),
+        ).toBeGreaterThan(1),
+      )
+      oldFetch.resolve([oldRow])
+      const afterF1 = await Promise.race([
+        load.then(
+          () => `fulfilled`,
+          () => `rejected`,
+        ),
+        freshStarted.promise.then(() => `f2-started`),
+      ])
+      expect(afterF1).toBe(`f2-started`)
+      const beforeF2 = await Promise.race([
+        load.then(
+          () => `fulfilled`,
+          () => `rejected`,
+        ),
+        new Promise<`pending`>((resolve) =>
+          setTimeout(() => resolve(`pending`), 0),
+        ),
+      ])
+      expect(beforeF2).toBe(`pending`)
+      expect(collection.get(durableRow.id)?.name).toBe(durableRow.name)
+      expect(storedItems(storage)).toEqual([durableRow])
+      expect(storage.snapshot().collectionMetadata.has(retentionKey)).toBe(true)
+      freshFetch.resolve([freshRow])
+      await load
+      expect(freshFn).toHaveBeenCalledOnce()
+      expect(queryClient.getQueryData([id])).toEqual([freshRow])
+      expect(collection.get(freshRow.id)?.name).toBe(freshRow.name)
+      if (live) expect(live.toArray[0]?.name).toBe(freshRow.name)
+      expect(storedItems(storage)).toEqual([freshRow])
+      expect(storage.snapshot().collectionMetadata.has(retentionKey)).toBe(
+        false,
+      )
     },
   )
 
