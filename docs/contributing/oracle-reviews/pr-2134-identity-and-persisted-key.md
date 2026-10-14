@@ -709,3 +709,71 @@ source/test diff from #2143 head hashes to SHA-256
 These checks cover the named static-key, Query Core observer, and controlled
 persistence histories; they do not establish arbitrary custom behaviors or a
 published Query Core integration.
+
+## ORC-012 audit of the reviewed merge head
+
+The reviewed executable head is merge commit
+`5874c70781fcb9488f88bc661f39cc0f2e7217e8`, with parents
+`5dec299528c02bac3d462d2a83f39905ac2f80be` (#2134) and
+`8048b906bc8b31e976b53d9030ac381a8eb77f2a` (#2143). SHA-256 of the
+raw file bytes at that head identifies the two executed owners:
+
+| File | SHA-256 at `5874c7078` |
+| --- | --- |
+| `packages/query-db-collection/src/query.ts` | `94374cb34cd00c34e545ec06b050ec1b95bd7339087ec37e6a0886995ee97057` |
+| `packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts` | `40407533156b5699d27f9e1f69bde425b067c2922249c447a7b557f385ec8b30` |
+
+The SHA-256 of `git diff --binary <parent> 5874c7078 --` for those two paths
+is `7c4231f9763a27bbfe84048364660e038cbfce1f7f26f4901dc600321a5d394f`
+from the #2134 parent and
+`008e8d39e808eb66e32e0c7cb6c5076c016920f9cfb85dfdf85da04cd851671e`
+from the #2143 parent. The second value is the earlier integration-section
+diff hash. The file hashes bind that diff to the exact merge result.
+
+The accepted law is the Query Collection request-signal and ownership promise
+in the guide and live-query architecture: each live acquisition keeps its
+physical work, cancellation ends its own caller outcome, and a later fetch
+cannot inherit an older fetch's signal or source authority. The oracle uses
+real Query Core observers and Query Collections, controlled held providers,
+and the public `requestSnapshot` and Collection row boundaries. Its fixed
+history grammar covers caller abort and release, silent Core cancellation,
+outside-observer replacement, Collection cleanup, and startup retention
+maintenance. The checkpoints distinguish provider metadata signals, caller
+settlement, public rows, Query cache rows, and durable owner metadata where
+that boundary applies.
+
+- The eager `QueryBehavior.onFetch` witness invokes F1's query function while
+  its Query still reports `idle`, then silently cancels F1 and acquires F2.
+  On the merged pre-repair implementation, F1's metadata signal aborted but
+  the second provider call never occurred. At the reviewed head, F1's signal
+  is aborted, F2 is invoked, the replacement caller settles `ready`, and its
+  row is public before the ignored F1 response is released.
+- The same-turn outside-observer witness starts held F2 from an eager F1
+  before F1's retryer exists. The premerge #2134 candidate failed at F1's
+  still-live metadata signal after F2 replaced it. At this head, F1's signal
+  aborts while F2 is held; F2 then settles into Query cache. This witness
+  checks the outside cache result, while the adjacent public snapshot and
+  successor histories check Collection rows and caller outcomes.
+- The public `requestSnapshot` signal matrix crosses a provider that observes
+  abort and one that ignores it. Before release, both canceled callers reject
+  with `AbortError` and neither late row becomes public. A separate successor
+  history holds the ignored F1 response: its canceled caller rejects, F2's
+  provider signal stays live, F1's row remains absent, and F2's row appears
+  only after the successor load settles. The cleanup histories check the
+  remaining outside observer's signal, Query cache, public row absence, and
+  exact durable historical owner after terminal F1.
+- Reusing one options object during startup maintenance exercises a different
+  ownership transition. The old call rejects with `AbortError`; the new call
+  settles `ready` and publishes its row. A mutant that deletes the new pending
+  registration when the old callback runs fails at the second caller's
+  `AbortError` outcome. The reviewed implementation passes that same cut.
+
+This is a bounded RED/GREEN account for the named histories and public
+checkpoints. The ownership oracle is assigned the next DB receiving witness:
+a custom Query behavior that omits `fetchSequence` and forwards Query Core's
+lazy signal getter after the Core attribution repair stabilizes. The existing
+eager-behavior cases do not exercise that combination. The current Query DB
+package still permits published Query Core 5.90.20 through its peer range,
+while the reviewed source requires attribution APIs available only in the
+unpublished Core source used for these tests. Release compatibility remains
+open until a compatible Core version is published and declared.

@@ -803,6 +803,10 @@ aborted F1 but left that acquisition waiting on it; the added eager-behavior
 history failed at F2's provider-call checkpoint. A separate same-turn outside
 F2 replacement checks F1's aborted signal before F2 settles. These are fixed
 Query Core schedules, not arbitrary custom-behavior interleavings.
+The ownership oracle owns a further DB receiving witness after Query Core's
+attribution repair stabilizes: a custom Query behavior that omits
+`fetchSequence` and forwards Core's lazy signal getter. The current eager
+behavior witnesses do not combine those two inputs.
 Its real QueryClient witness loads ten disjoint on-demand subsets, then checks
 `writeUpsert`, `writeUpdate`, `writeDelete`, `writeInsert`, and a mixed
 `writeBatch`. After each accepted write it compares public live-query rows with
