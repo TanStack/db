@@ -126,9 +126,10 @@ export function rxdbCollectionOptions(
   type SyncParams = Parameters<SyncConfig<Row, string>[`sync`]>[0]
   const sync: SyncConfig<Row, Key> = {
     sync: (params: SyncParams) => {
-      const { begin, write, commit, markReady, markError, collection } = params
+      const { begin, write, commit, markReady, markError, reportError, reportHealthy, collection } = params
 
       let initialFetchComplete = false
+      let hasHealthError = false
       async function initialFetch() {
         /**
          * RxDB stores a last-write-time
@@ -274,6 +275,11 @@ export function rxdbCollectionOptions(
 
         if (!isCleanedUp()) {
           markReady()
+          // Report Collection health recovery if we've recovered from a health error
+          if (hasHealthError && collection.status === `ready`) {
+            hasHealthError = false
+            reportHealthy()
+          }
         }
       }
 
@@ -281,6 +287,10 @@ export function rxdbCollectionOptions(
         stopOngoingFetch()
         if (collection.status === `loading`) {
           markError(error)
+        } else if (collection.status === `ready`) {
+          // Post-readiness fetch failure: sync adapter is giving up
+          hasHealthError = true
+          reportError(error, { final: true })
         }
       })
 

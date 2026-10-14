@@ -185,8 +185,9 @@ export function trailBaseCollectionOptions<
   type SyncParams = Parameters<SyncConfig<TItem, TKey>[`sync`]>[0]
   const sync = {
     sync: (params: SyncParams) => {
-      const { begin, write, commit, markReady, markError, collection } = params
+      const { begin, write, commit, markReady, markError, reportError, reportHealthy, collection } = params
       let cancelled = false
+      let hasHealthError = false
       let periodicCleanupTask: ReturnType<typeof setInterval> | undefined
       const cleanup = () => {
         cancelled = true
@@ -422,10 +423,16 @@ export function trailBaseCollectionOptions<
               if (eventReader === subscribedReader) eventReader = undefined
             })
             .catch((error: unknown) => {
-              if (!cancelled && collection.status === `loading`) {
-                markError(error)
-              } else if (!cancelled) {
-                console.error(`TrailBase subscription failed`, error)
+              if (!cancelled) {
+                if (collection.status === `loading`) {
+                  markError(error)
+                } else if (collection.status === `ready`) {
+                  // Post-readiness stream failure: sync adapter is giving up
+                  hasHealthError = true
+                  reportError(error, { final: true })
+                } else {
+                  console.error(`TrailBase subscription failed`, error)
+                }
               }
             })
           listening = true
@@ -442,14 +449,24 @@ export function trailBaseCollectionOptions<
             markReady()
           }
         } catch (error) {
-          // An abandoned startup must not cancel a replacement session's reader.
+          // An abandoned startup must not cancel a replacement provider session's reader.
           if (cancelled) return
           settleListener({ error })
           cancelEventReader()
           if (collection.status === `loading`) {
             markError(error)
+          } else if (collection.status === `ready`) {
+            // Post-readiness stream failure: sync adapter is giving up
+            hasHealthError = true
+            reportError(error, { final: true })
           }
           return
+        }
+
+        // Report Collection health recovery if listener settled successfully after a health error
+        if (hasHealthError && collection.status === `ready`) {
+          hasHealthError = false
+          reportHealthy()
         }
 
         // Lastly, start a periodic cleanup task that will be removed when the

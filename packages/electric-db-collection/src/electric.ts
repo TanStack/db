@@ -1759,6 +1759,8 @@ function createElectricSync<T extends Row<unknown>>(
       commit: commitSyncTransaction,
       markReady,
       markError,
+      reportError,
+      reportHealthy,
       truncate,
       collection,
       metadata,
@@ -1896,6 +1898,7 @@ function createElectricSync<T extends Row<unknown>>(
     // Wrap markReady to wait for test hook in progressive mode
     let progressiveReadyGate: Promise<void> | null = null
     let streamErrorVersion = 0
+    let hasHealthError = false
     const wrappedMarkReady = (
       isBuffering: boolean,
       expectedErrorVersion = streamErrorVersion,
@@ -1919,6 +1922,12 @@ function createElectricSync<T extends Row<unknown>>(
       } else {
         // No hook, not buffering, or already past first up-to-date
         markReady()
+      }
+
+      // Report Collection health recovery if we've recovered from a health error
+      if (hasHealthError && collection.status === `ready`) {
+        hasHealthError = false
+        reportHealthy()
       }
     }
 
@@ -2653,7 +2662,16 @@ function createElectricSync<T extends Row<unknown>>(
               streamErrorVersion++
               unsubscribeStream()
               abortController.abort()
-              if (collection.status !== `error`) markError(error)
+              if (collection.status !== `error`) {
+                if (collection.status === `ready`) {
+                  // Post-readiness transaction failure: sync adapter is giving up
+                  hasHealthError = true
+                  reportError(error, { final: true })
+                } else {
+                  // Pre-readiness failure
+                  markError(error)
+                }
+              }
             },
           )
         }
