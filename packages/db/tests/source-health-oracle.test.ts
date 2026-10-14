@@ -4,16 +4,16 @@
  * A Collection answers two questions on two separate axes:
  *
  * - **The gate (`status`)** says whether the data can be shown yet. It is
- *   decided only by the initial sync of a sync attempt. While a source retries
- *   it stays `loading`. When the source gives up before its first ready
- *   (`markError`), the attempt fails for good: the status is `error`, and a
- *   later `markReady()` in the same attempt is a contract violation that
+ *   decided only by the initial sync of a sync run. While the sync adapter retries
+ *   it stays `loading`. When the sync adapter gives up before Collection readiness
+ *   (`markError`), the sync run fails for good: the status is `error`, and a
+ *   later `markReady()` in the same sync run is a contract violation that
  *   throws. Only a restart (`cleanup()`, then a new preload or subscriber)
- *   begins a new attempt.
+ *   begins a new sync run.
  * - **Health** says whether the data is still kept up to date. It is metadata
- *   after the first ready: `reportError(error, { final })` records a problem,
- *   `reportHealthy()` clears a non-final one, and `markError()` after ready is
- *   a final problem. The status and the rows do not change. Only the source
+ *   after Collection readiness: `reportError(error, { final })` records a problem,
+ *   `reportHealthy()` clears a non-final one, and `markError()` after Collection readiness is
+ *   a final problem. The status and the rows do not change. Only the sync adapter
  *   clears its problem, and nothing clears a final problem except a restart.
  *
  * A live query exposes both axes for everything it depends on through
@@ -38,29 +38,29 @@
  * IndexedDB oracles own that case.
  *
  * A live query's own gate follows its sources: it becomes ready when every
- * source is ready, and a source that fails before the query's first ready
- * fails the query's attempt, whatever the query's shape. After the query's
- * first ready, its sources can only report health, and the query keeps its
+ * Collection is ready, and a Collection that fails before the query's initial-query readiness
+ * fails the query's sync run, whatever the query's shape. After the query's
+ * initial-query readiness, its sources can only report health, and the query keeps its
  * status and rows.
  *
  * ## The model
  *
- * The model keeps, for each source, its gate and its health problem (none,
+ * The model keeps, for each Collection, its gate and its health problem (none,
  * non-final, or final), with a serial for each reported problem. It derives
- * each live query's gate from its sources, using only the rules above, and
+ * each live query's gate from its Collections, using only the rules above, and
  * the include's parent rows from whether `B` synced its row while the
- * attempt was running. It builds the expected tree from those facts. It does
+ * sync run was running. It builds the expected tree from those facts. It does
  * not read production state.
  *
  * ## The history grammar
  *
- * Steps act on source `A` or `B`: `ready` writes the source's row and calls
+ * Steps act on Collection `A` or `B`: `ready` writes the Collection's row and calls
  * `markReady()`; `fail` calls `markError()`; `report` and `reportFinal` call
  * `reportError()`; `healthy` calls `reportHealthy()`. `restart` cleans up the
- * live query and every source, then preloads the live query again. Every step
+ * live query and every Collection, then preloads the live query again. Every step
  * is issued in every state. The model predicts its outcome, including a throw
- * for `markReady()` after `markError()`, and for a health report before the
- * first ready. Six shapes cross the grammar: a direct source, a join, a
+ * for `markReady()` after `markError()`, and for a health report before
+ * Collection readiness. Six shapes cross the grammar: a direct Collection, a join, a
  * self-join of one Collection under two aliases, a nested live query, an
  * include child that materializes a Collection per parent row, and a pooled
  * live query over a nested live query.
@@ -75,23 +75,23 @@
  * that no `health:change` shows a status that `status:change` has not
  * announced, and that each `status:change` is followed at once by
  * `health:change`. When the expected tree changed, the last event must show
- * the current tree. Request lanes check that a lazy load or a root source's
- * load that fails after the first ready is a request error on the query's
+ * the current tree. Request lanes check that a lazy load or a root Collection's
+ * load that fails after initial-query readiness is a request error on the query's
  * node, and that it clears. Effect lanes check the Effect's gate and its
  * request errors after the gate.
  *
  * ## Limits
  *
- * Sources are eager, so a live query cannot become ready while a source is
- * still loading. The on-demand case, where a source can fail its initial sync
+ * Collections are eager, so a live query cannot become ready while a Collection is
+ * still loading. The on-demand case, where a Collection can fail its initial sync
  * after the live query is ready, is not generated here. Per-row child
  * Collections are rolled up, not nodes, and no grammar step fails one; the
  * include-instances lane fails one and checks the roll-up, the relay, and
  * that two includes under one alias count separately. An Effect's request
- * error clears on a later successful load of the same source; release of
+ * error clears on a later successful load of the same Collection; release of
  * only the failed demand is not exercised. Pooled histories do not restart: a pooled view ends for good when
- * its source is cleaned up. The ordering check reads the observed query
- * only, not its sources.
+ * its Collection is cleaned up. The ordering check reads the observed query
+ * only, not its Collections.
  */
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
@@ -212,7 +212,7 @@ function applyModel(shape: Shape, model: Model, step: Step): `ok` | `throws` {
       else source.gate = `ready`
       break
     case `fail`:
-      // Before the first ready the attempt fails; after it, a final problem.
+      // Before Collection readiness the sync run fails; after it, a final problem.
       if (source.gate !== `ready`) source.gate = `error`
       else if (!source.problem?.final)
         source.problem = { final: true, serial: ++model.serial }
@@ -686,7 +686,7 @@ const restart: Step = { kind: `restart` }
 
 // Named histories, one per distinction the law draws.
 const namedHistories: Record<string, ReadonlyArray<Step>> = {
-  'a non-final problem clears when the source reports healthy': [
+  'a non-final problem clears when the sync adapter reports healthy': [
     on(`ready`, `A`),
     on(`ready`, `B`),
     on(`report`, `A`),
@@ -701,24 +701,24 @@ const namedHistories: Record<string, ReadonlyArray<Step>> = {
     on(`ready`, `A`),
     on(`ready`, `B`),
   ],
-  'markError after the first ready is final health': [
+  'markError after Collection readiness is final health': [
     on(`ready`, `A`),
     on(`ready`, `B`),
     on(`fail`, `A`),
     on(`healthy`, `A`),
   ],
-  'an initial error is final for its attempt': [
+  'an initial error is final for its sync run': [
     on(`fail`, `A`),
     on(`ready`, `A`),
     on(`ready`, `B`),
   ],
-  'a restart recovers an attempt that failed': [
+  'a restart recovers a sync run that failed': [
     on(`fail`, `A`),
     restart,
     on(`ready`, `A`),
     on(`ready`, `B`),
   ],
-  'a health report before the first ready throws': [
+  'a health report before Collection readiness throws': [
     on(`report`, `A`),
     on(`healthy`, `B`),
     on(`ready`, `A`),

@@ -926,11 +926,11 @@
   },
   "243": {
     "file": "collection/lifecycle.ts",
-    "template": "${operation}() reports a problem after the first ready, but Collection \"${this.id}\" is ${this.status}. Before the first ready, retry without reporting, or call markError() when the source gives up.",
+    "template": "${operation}() reports a problem after Collection readiness, but Collection \"${this.id}\" is ${this.status}. Before Collection readiness, retry without reporting, or call markError() when the sync adapter gives up.",
     "literals": [
-      "() reports a problem after the first ready, but Collection \"",
+      "() reports a problem after Collection readiness, but Collection \"",
       "\" is ",
-      ". Before the first ready, retry without reporting, or call markError() when the source gives up."
+      ". Before Collection readiness, retry without reporting, or call markError() when the sync adapter gives up."
     ]
   },
   "244": {
