@@ -627,10 +627,13 @@ result reusable by a fast remount. A historical-owner history therefore accepts
 either the ignored-abort result or a new fetch after a same-turn reacquisition,
 while requiring the successor to remain pending and the old owner durable
 until an applicable result arrives. A neighboring persisted history aborts the
-first caller and unloads its lease after its provider starts. Even when the
-replacement demand applies an empty result, the first caller must reject with
-`AbortError` while that replacement result is still held; old durable ownership
-stays intact until replacement application.
+first caller and unloads its lease after its provider starts. Every replacement
+provider attempt stays held after the first caller rejects with `AbortError`.
+At that checkpoint, the replacement load remains pending and the public row,
+durable row, historical owner, and retention marker remain. An applied empty
+replacement result retires them; failed replacement work preserves them. The
+controlled fixture holds all attempts because Query Core may start a third
+attempt after cancellation; holding only the second gave a false RED.
 A later external refetch supersedes a
 canceled Collection fetch, and reacquisition applies its newer cached result
 before load settlement. A second successor history lets that external fetch
