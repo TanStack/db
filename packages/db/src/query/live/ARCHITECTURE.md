@@ -1479,10 +1479,11 @@ until its final release, including after the original full-source demand ends.
 An incomplete or failed full-source request does not establish this coverage;
 an explicit subset refetch retains its exact Query key. Function-built keys
 retain their caller-defined cache identity.
-The initial full fetch keeps its acquisition's signal in request metadata.
-When narrower acquisitions share its Query, later fetches give `queryFn` the
-Query fetch signal in `meta.loadSubsetOptions.signal`: releasing the original
-full acquisition cannot abort work still owned by those narrower acquisitions.
+When a subset request supplies a signal, `queryFn` receives the physical Query
+fetch signal in `meta.loadSubsetOptions.signal`. Releasing the original full
+acquisition cannot abort work still owned by narrower acquisitions. A provider
+that consumes the signal can stop after the last observer releases; a provider
+that ignores it may finish into Query cache.
 
 ### Pooled live queries
 

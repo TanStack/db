@@ -169,5 +169,129 @@ both variants at the immediate public-row assertion. Discovering old aliases
 from markers alone fails only the markerless variant; the marked control
 passes. The #2134 versioned review records the independent oracle challenge
 and full evidence. The test permits either an exact request or safe
-reconciliation from the applied full result, so the guide's current exact
-request behavior is not an oracle requirement.
+reconciliation from the applied full result, so exact request scope is not an
+oracle requirement.
+
+The follow-up law review found that exact request scope was stronger than the
+retained-owner obligation. A complete full fetch started after retention and
+applied before acquisition can also reconcile a current subset owner; an older
+full result cannot. The matrix now permits either post-retention provider scope
+and checks public and durable rows, owners, and markers at settlement and
+release. A companion history first applies a fresh full result with a row
+outside the subset, then acquires the subset and checks that the outside row
+keeps only its full Query owner through a later invalidation. Explicit refetch
+remains exact. The current adapter still uses an exact request for retained
+current-key owners.
+
+Removing the retained-revalidation gate in a scratch production mutant made
+all eight stale-full matrix cases fail at the acquisition comparison. The
+mutant reused the older full result, left the old detail row public and
+durable with its subset owner and marker, and skipped the new provider call.
+The unchanged implementation passed the 347-test ownership suite and the
+Query DB type check. The new fresh-full history accepts an exact revalidation
+after the full result; it does not prove that the current adapter can skip it.
+A separate full-payload mutant sent an unfiltered result into an exact Query;
+the fresh-full history rejected it at the list-only row's owner comparison.
+The matrix allows extra successful provider attempts when their scopes are
+valid, because this guide sets no one-transport bound.
+An isolated full-route probe retired the old owner after the newly applied
+complete full result and let the later subset share that full Query. The
+fresh-full history passed; this fixture-specific probe is not a general
+production repair.
+
+A held-old-exact timing probe began an exact fetch, retired its owner into
+persisted retention, then acquired the same scope while that fetch was still
+pending. The acquisition stayed pending through the old response; a later
+exact response applied before its owner and marker retired. Two freshness-gate
+mutants also passed because this path started the later request for another
+reason. This timing remains open in the ownership oracle. The guide states
+that both exact and full revalidation require a fetch started after retention.
+
+## Signal and cancellation design attack
+
+The local physical-Query signal prototype passes the shared-owner histories,
+but fails a legal sole public `requestSnapshot({ where, signal })` cancellation.
+The caller can abort while its acquisition remains owned. The prototype leaves
+the metadata signal live and can apply a late provider row. The previous
+`#2135` fallback has a different failure on that same public path: after the
+provider rejects `AbortError`, it mistakes the creator's own retained observer
+for a surviving peer and starts a second provider call. The physical-only
+patch and the old retry are both insufficient. This signal repair remains
+uncommitted and requires a cross-Collection owner-aware cancellation oracle.
+
+A separate public `utils.refetch({ throwOnError: true })` probe fulfilled with
+the previous Query result after external `queryClient.cancelQueries()` canceled
+its pending fetch. An isolated prototype rejected `AbortError` and passed 398
+related tests, but the guide promises `AbortError` for application cancellation
+and does not clearly specify external QueryClient fetch cancellation. The
+cancel-A/start-B race is also untested. This is a bounded finding and a
+contract decision, not closure of the broader cancellation class.
+
+The direct-adapter same-options-object mixed-route diagnostic is red, but core
+subscriptions create a distinct options object for each acquisition and pass
+that same object to release. Its public receiving path has not been shown to
+fail. The load-lifecycle oracle now states that identity premise instead of
+adding route state for a direct-only ambiguous release.
+
+## Public oracle challenge after the local prototype
+
+The primary ownership oracle now drives `requestSnapshot({ where, signal })`
+through caller abort with the acquisition lease still retained. A provider
+that observes the metadata signal finds it live on the physical-signal
+prototype. A provider that ignores cancellation returns a late row, which the
+adapter installs publicly before `releaseSnapshot`. Both are red at their
+named comparisons. The comparison also requires each aborted load to reject
+with `AbortError`, as the load-subset transaction refinement oracle specifies
+for every adapter cut. Both currently fulfill on the physical-signal prototype.
+Query Collection is the sync adapter bound by the
+request-scoped cancellation law in `types.ts`; a user query function may still
+finish into Query cache, but its aborted request cannot install a Collection
+row. A cross-Collection held-fetch witness verifies two observers share one
+Query and the survivor receives the same provider response when one live query
+retires. It passes the prototype and does not exercise explicit source
+Collection cleanup, which can cancel a shared key.
+
+A separate sole-snapshot history has a signal-honoring provider that rejects
+`AbortError` on caller abort. The old `#2135` retry path starts a second request
+with no peer and fulfills the load; this deterministic public witness passes
+on the PR base and fails on `3502d3eca` in isolated scratch runs. On the local
+physical-signal prototype, it fails earlier because the metadata signal does
+not abort. Another public history lets two snapshot acquisitions share one
+held Query. After the first caller aborts, the peer receives the row but the
+aborted caller's load also fulfills. That settlement defect reproduces on the
+PR base, so it is adjacent in-scope debt rather than a regression introduced
+by #2135. A second branch aborts both callers while their leases remain
+retained. After the ignored-signal provider returns one row, the local
+physical-signal prototype fulfills both loads and publishes the row. The
+primary oracle expects two `AbortError` rejections and no public row at that
+checkpoint. This branch distinguishes logical request ownership from Query
+observer count. Its targeted runtime check fails at the combined outcome and
+row comparison with no type errors; a peer arriving after sole abort remains
+outside this grammar.
+
+An isolated hostile design supplies per-caller abort rejection but cancels the
+physical Query only when its local owner and observer counts suggest no peer.
+It passes the sole-abort, one-live-peer, and cross-Collection controls. When
+both callers abort while their leases remain, both reject with `AbortError`,
+but the late row still becomes public. The new branch rejects that mutant at
+its public-row comparison, with one provider call. The focused scratch run had
+five passes and one intended assertion failure. Scratch dependency links
+prevented a valid typecheck there, so this is runtime calibration; the shared
+candidate's focused typecheck reports no errors. The mutant is not a repair.
+
+Fresh review also found two false-green assertions in the retained-owner
+tests. When one provider call serves two equal live-query preloads, the second
+must fulfill; the test now checks it. Failed exact revalidation must not
+recover by reusing the older full result. The recovery history now holds a
+new provider response and checks the old public row, durable row, and marker
+while the load remains pending, then checks retirement after application.
+Both corrected focused cases pass on the local candidate. Hostile mutants for
+these two corrections also fail at their intended checkpoints in an isolated
+checkout. One mutant rejects the joining preload after its peer's shared
+provider call succeeds; the second-settlement assertion rejects it. A second
+mutant fulfills a recovery acquisition before its held fresh response applies;
+the pending-settlement assertion rejects it. A third clears the retained marker
+in a valid storage transaction while that response is held; the pending
+metadata comparison rejects it. The unchanged focused tests pass. The marker
+mutant used a valid transaction because a direct metadata deletion violates
+the persistence boundary and would be setup failure, not calibration.

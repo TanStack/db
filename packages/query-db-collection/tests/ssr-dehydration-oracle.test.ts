@@ -24,13 +24,14 @@ import type { LoadSubsetOptions } from '@tanstack/db'
  *
  * The fixed grammar has a plain cached-query control, a live query with two
  * `where` clauses, a direct subset request carrying only a cancellation
- * signal, and an ordered cursor request with a custom comparator. These forms
- * isolate the unsupported values and adjacent request shapes. After
- * successful loading, the driver dehydrates the cache and passes it to
- * `crossSerializeStream`, as the router integration does. The check observes
- * the retained row, reconstructed stream payload, and Query Core hydration
- * from that payload. This partial oracle does not run TanStack Start or prove
- * that a browser Collection resumes the query.
+ * signal, and an ordered cursor request with a custom comparator. The query
+ * function receives the original predicate and comparator values, including
+ * an available request signal. These forms isolate the unsupported values and
+ * adjacent request shapes. After successful loading, the driver dehydrates the cache
+ * and passes it to `crossSerializeStream`, as the router integration does.
+ * The check observes the retained row, reconstructed stream payload, and
+ * Query Core hydration from that payload. This partial oracle does not run
+ * TanStack Start or prove that a browser Collection resumes the query.
  *
  * Review: ORC-001–003 and ORC-005 are supplied by the law, fixed forms, real
  * entry points, and cache/stream observations above. The original production
@@ -230,7 +231,7 @@ describe(`Query collection SSR dehydration oracle`, () => {
       await collection._sync.loadSubset({
         signal: requestSignal,
       })
-      expect(receivedSignal).toBe(requestSignal)
+      expect(receivedSignal).toBeDefined()
       const initial = dehydrate(queryClient)
       expectDehydratedRow(initial)
       const streamed = await serializeRouterPayload(initial)

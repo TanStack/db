@@ -417,8 +417,8 @@ This also applies to derived arrays such as `select: (response) => response.data
 
 The `meta` option allows you to pass additional metadata to your query function. By default, Query Collections automatically include `loadSubsetOptions` in the meta object, which contains filtering, sorting, and pagination options for on-demand queries.
 
-`loadSubsetOptions` is request-scoped. Query functions can read it through
-`ctx.meta`, but it is excluded when Query metadata is serialized for SSR.
+`loadSubsetOptions` carries the requested subset. Query functions can read it
+through `ctx.meta`, but it is excluded when Query metadata is serialized for SSR.
 Hydrated Query metadata therefore does not contain the server request options;
 new on-demand requests supply their own options. Other enumerable `meta`
 properties retain TanStack Query's normal dehydration behavior.
@@ -428,15 +428,11 @@ Do not edit expression nodes, ordering options, Dates, byte arrays, or membershi
 arrays. Build separate API parameters instead. Core retains request data without
 cloning it; changing submitted data can make the request disagree with its cache
 key. To change a query constant, supply a new value rather than mutating the old
-one. Cancellation through the request's `AbortSignal` remains supported.
-Use `ctx.signal` for the provider call. A sole acquisition's first fetch keeps
-its supplied `loadSubsetOptions.signal`. Once acquisitions or Collections share
-a Query, later fetches expose the Query fetch signal there because the
-acquisition that installed the query function can release first. If a peer
-joins during a fetch and that original signal aborts, a provider rejection with
-its abort reason or an `AbortError` gets one retry with the live Query signal
-while the peer still owns the Query. An unrelated `AbortError` raised after the
-same abort has no distinguishable cause and can also get that one retry.
+one. Use `ctx.signal` for the provider call. When a subset request supplies a
+signal, `ctx.meta.loadSubsetOptions.signal` follows the physical Query fetch.
+Releasing one acquisition does not abort a fetch that another acquisition
+still owns. If the provider ignores the signal, Query Core may let the fetch
+finish into cache after the final owner releases.
 
 ### Type-Safe Meta Access
 
@@ -1299,10 +1295,12 @@ When using `syncMode: 'on-demand'`, the collection automatically pushes down que
 With a static `queryKey`, an active, successfully applied request for the
 entire source can also serve later filtered or windowed live queries without
 another `queryFn` call. The full Query stays active until those queries release
-their demand. A narrower scope with retained persisted ownership makes an
-exact-scope `queryFn` call to revalidate its rows and owners. An unfinished
-full request does not provide this coverage, and
-`refetch: true` still fetches the exact requested subset. Function-built
+their demand. Retained persisted ownership needs a new authoritative response
+before a narrower acquisition settles: either an exact subset response or a
+complete full-source response. In either case, the fetch must start after
+retention is recorded and its rows must apply before settlement. An older or
+unfinished request cannot revalidate that ownership. `refetch: true` still
+fetches the exact requested subset. Function-built
 `queryKey` values keep their own cache identity and do not use this reuse path.
 Your `queryFn` must return the complete requested result, including every row
 for an unbounded request.

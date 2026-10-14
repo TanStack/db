@@ -1036,17 +1036,36 @@ export function queryCollectionOptions(
   //
   // Lifecycle:
   // - Increment: when createQueryFromOpts creates or reuses an observer
-  // - Decrement: when subscription.unsubscribe() passes predicates to collection._sync.unloadSubset()
+  // - Decrement: when subscription.unsubscribe() releases its acquisition options
   // - Reset: when cleanupQuery() is triggered by TanStack Query's cache GC
   //
   // When refcount reaches 0, unloadSubset():
-  // 1. Computes the same queryKey from the predicates
+  // 1. Looks up the Query chosen when those options acquired a lease
   // 2. Uses existing machinery (queryToRows map) to find rows that query loaded
   // 3. Decrements refcount and GCs rows where count reaches 0
   const queryRefCounts = new Map<string, number>()
   // A completed full-source Query can own narrower demands without a second
   // transport. Pin each demand to its chosen Query until its final release.
   const fullSourceDependents = new Map<string, number>()
+  let acquisitionRoutes = new WeakMap<
+    LoadSubsetOptions,
+    Array<{ requestedHash: string; physicalHash: string }>
+  >()
+  const recordAcquisitionRoute = (
+    options: LoadSubsetOptions,
+    requestedHash: string,
+    physicalHash: string,
+  ): void => {
+    const routes = acquisitionRoutes.get(options) ?? []
+    routes.push({ requestedHash, physicalHash })
+    acquisitionRoutes.set(options, routes)
+    if (physicalHash === fullSourceHash && requestedHash !== fullSourceHash) {
+      fullSourceDependents.set(
+        requestedHash,
+        (fullSourceDependents.get(requestedHash) ?? 0) + 1,
+      )
+    }
+  }
 
   // Eager startup holds one reference until cleanup. Cache removal detaches
   // observation, not that ownership or its rows.
@@ -1175,6 +1194,17 @@ export function queryCollectionOptions(
     let startupRetentionSettled = false
     const pendingStartupLoads = new Map<LoadSubsetOptions, Set<object>>()
     const retainedQueriesPendingRevalidation = new Set<string>()
+    const retainedRevalidationStarts = new Map<string, number>()
+    const awaitingRetainedFetchSuccess = new WeakSet<object>()
+    const hasFreshRetainedFetch = (hash: string, query: AnyQuery): boolean => {
+      const requiredStart = retainedRevalidationStarts.get(hash)
+      return (
+        requiredStart === undefined ||
+        ((queryCollectionSuccessfulFetchStarts.get(query) ?? 0) >
+          requiredStart &&
+          queryCollectionSuccessfulFetchData.get(query) === query.state.data)
+      )
+    }
     const observedErrorUpdates = new WeakMap<AnyQuery, number>()
     let errorRevision = 0
     const failedResultApplications = new Map<string, unknown>()
@@ -1708,12 +1738,7 @@ export function queryCollectionOptions(
       }
     }
 
-    /**
-     * Generate a consistent query key from LoadSubsetOptions.
-     * CRITICAL: Must use identical logic in both createQueryFromOpts and unloadSubset
-     * so that refcount increment/decrement operations target the same hashedQueryKey.
-     * Inconsistent keys would cause refcount leaks and prevent proper cleanup.
-     */
+    /** Generate the semantic Query key when a subset acquires a lease. */
     const generateQueryKeyFromOptions = (opts: LoadSubsetOptions): QueryKey => {
       if (typeof queryKey === `function`) {
         // Refetch starts another acquisition for the same semantic demand. It
@@ -1775,6 +1800,7 @@ export function queryCollectionOptions(
     const refetchAndWaitForApplication = async (
       observer: QueryObserver<Array<any>, any, Array<any>, Array<any>, any>,
       hashedQueryKey: string,
+      joinFreshRetainedFetch = false,
     ): Promise<void> =>
       new Promise<void>((resolve, reject) => {
         let active = true
@@ -1801,15 +1827,31 @@ export function queryCollectionOptions(
           for (;;) {
             if (!active) return
             try {
-              await observer.refetch({ throwOnError: true })
+              const query = observer.getCurrentQuery()
+              const retainedStart =
+                retainedRevalidationStarts.get(hashedQueryKey)
+              const joinsRetainedFetch =
+                joinFreshRetainedFetch &&
+                retainedStart !== undefined &&
+                query.state.fetchStatus === `fetching` &&
+                (queryCollectionCurrentFetchStarts.get(query) ?? 0) >
+                  retainedStart
+              await observer.refetch({
+                throwOnError: true,
+                cancelRefetch: !joinsRetainedFetch,
+              })
             } catch (error) {
               const fetchStart = queryCollectionCurrentFetchStarts.get(
                 observer.getCurrentQuery(),
               )
+              const retainedStart =
+                retainedRevalidationStarts.get(hashedQueryKey)
               if (
-                requiredCacheGenerationFetchStart === undefined ||
-                fetchStart === undefined ||
-                fetchStart > requiredCacheGenerationFetchStart
+                (requiredCacheGenerationFetchStart === undefined ||
+                  (fetchStart !== undefined &&
+                    fetchStart > requiredCacheGenerationFetchStart)) &&
+                (retainedStart === undefined ||
+                  (fetchStart !== undefined && fetchStart > retainedStart))
               ) {
                 throw error
               }
@@ -1824,13 +1866,17 @@ export function queryCollectionOptions(
             await new Promise<void>((resume) => queueMicrotask(resume))
             // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Cancellation can run while the refetch or microtask is pending.
             if (!active) return
-            if (hasCurrentCacheGenerationFetch(observer.getCurrentQuery())) {
+            if (
+              hasCurrentCacheGenerationFetch(observer.getCurrentQuery()) &&
+              hasFreshRetainedFetch(hashedQueryKey, observer.getCurrentQuery())
+            ) {
               break
             }
           }
           if (
             waitsForDeferredApplication ||
-            !hasCurrentCacheGenerationFetch(observer.getCurrentQuery())
+            !hasCurrentCacheGenerationFetch(observer.getCurrentQuery()) ||
+            !hasFreshRetainedFetch(hashedQueryKey, observer.getCurrentQuery())
           ) {
             await waitForQueryReadyAndApplied(observer, hashedQueryKey)
             return
@@ -1852,7 +1898,7 @@ export function queryCollectionOptions(
       const queryEnabled =
         typeof enabled === `function` ? enabled(query) : enabled !== false
       if (queryEnabled)
-        return refetchAndWaitForApplication(observer, hashedQueryKey)
+        return refetchAndWaitForApplication(observer, hashedQueryKey, true)
 
       // An explicit utility refetch can still start this disabled Query. Until
       // then, neither a locally edited cache nor an old cache generation may
@@ -1865,7 +1911,8 @@ export function queryCollectionOptions(
           current.state.dataUpdateCount > cachedVersion &&
           queryCollectionSuccessfulFetchVersions.get(current) ===
             current.state.dataUpdateCount &&
-          hasCurrentCacheGenerationFetch(current)
+          hasCurrentCacheGenerationFetch(current) &&
+          hasFreshRetainedFetch(hashedQueryKey, current)
         )
       })
     }
@@ -1920,9 +1967,9 @@ export function queryCollectionOptions(
         !opts.refetch &&
         fullSourceKey !== undefined &&
         fullSourceHash !== requestedHash &&
+        !requestedScopeNeedsRevalidation &&
         (hasFullSourceDependent ||
-          (!requestedScopeNeedsRevalidation &&
-            !state.observers.has(requestedHash) &&
+          (!state.observers.has(requestedHash) &&
             (queryRefCounts.get(fullSourceHash!) ?? 0) > 0 &&
             fullResult?.isSuccess === true &&
             fullQuery?.state.fetchStatus === `idle` &&
@@ -1956,6 +2003,11 @@ export function queryCollectionOptions(
         undefined
       ) {
         retainedQueriesPendingRevalidation.add(hashedQueryKey)
+        if (!retainedRevalidationStarts.has(hashedQueryKey))
+          retainedRevalidationStarts.set(
+            hashedQueryKey,
+            nextQueryCollectionAuthorityPosition,
+          )
       }
       cancelPersistedRetentionExpiry(hashedQueryKey)
 
@@ -1968,12 +2020,7 @@ export function queryCollectionOptions(
           hashedQueryKey,
           (queryRefCounts.get(hashedQueryKey) || 0) + 1,
         )
-        if (sharesFullSource) {
-          fullSourceDependents.set(
-            requestedHash,
-            (fullSourceDependents.get(requestedHash) ?? 0) + 1,
-          )
-        }
+        recordAcquisitionRoute(opts, requestedHash, hashedQueryKey)
 
         // Get the current result and return based on its state
         const observer = state.observers.get(hashedQueryKey)!
@@ -1998,7 +2045,10 @@ export function queryCollectionOptions(
           return refetchOrWaitForEnabledQuery(observer, hashedQueryKey)
         }
 
-        if (!hasCurrentCacheGenerationFetch(observer.getCurrentQuery())) {
+        if (
+          !hasCurrentCacheGenerationFetch(observer.getCurrentQuery()) ||
+          retainedQueriesPendingRevalidation.has(hashedQueryKey)
+        ) {
           return refetchOrWaitForEnabledQuery(observer, hashedQueryKey)
         }
 
@@ -2038,10 +2088,6 @@ export function queryCollectionOptions(
         queryKey: key,
         queryFn: (context: Parameters<typeof queryFunction>[0]) => {
           const logicalHash = hashKey(context.queryKey)
-          const physicalQuery = queryClient.getQueryCache().find({
-            queryKey: context.queryKey,
-            exact: true,
-          })
           fetchStartGenerations.set(
             logicalHash,
             Math.max(
@@ -2049,67 +2095,23 @@ export function queryCollectionOptions(
               directWriteGeneration,
             ),
           )
-          // A shared Query can outlive the acquisition that installed this
-          // queryFn. Use the Query signal for shared fetches, but preserve its
-          // lazy getter so an ignoring provider does not cause Query Core to
-          // cancel an unobserved fetch.
-          const queryWithSharedSignal = () => {
-            const sharedContext = Object.defineProperties(
-              {} as typeof context,
-              Object.getOwnPropertyDescriptors(context),
-            )
-            sharedContext.meta = {
-              ...context.meta,
-              loadSubsetOptions: {
-                ...requestOptions,
-                get signal() {
-                  return context.signal
-                },
-              },
-            }
-            return queryFunction(sharedContext)
+          if (requestOptions.signal === undefined) return queryFunction(context)
+          // Query Core owns the physical fetch across equivalent acquisitions.
+          // Keep its signal lazy so an ignoring provider does not consume it.
+          const queryContext = Object.defineProperties(
+            {} as typeof context,
+            Object.getOwnPropertyDescriptors(context),
+          )
+          const queryRequestOptions = { ...requestOptions }
+          Object.defineProperty(queryRequestOptions, `signal`, {
+            enumerable: true,
+            get: () => context.signal,
+          })
+          queryContext.meta = {
+            ...context.meta,
+            loadSubsetOptions: queryRequestOptions,
           }
-          if (
-            (queryRefCounts.get(logicalHash) ?? 0) > 1 ||
-            (physicalQuery?.getObserversCount() ?? 0) > 1 ||
-            (hashedQueryKey === fullSourceHash && fullSourceDependents.size) ||
-            requestOptions.signal?.aborted
-          ) {
-            return queryWithSharedSignal()
-          }
-          const recoverReleasedSignal = (error: unknown) => {
-            // A peer can acquire the Query after this request starts with the
-            // first acquisition's signal. Retry only that signal's rejection
-            // or an AbortError while the same physical Query still has a live
-            // owner. A fresh AbortError has no provider provenance, so this
-            // bounded retry can also include an unrelated AbortError.
-            const isAbortError =
-              typeof error === `object` &&
-              error !== null &&
-              `name` in error &&
-              error.name === `AbortError`
-            if (
-              !requestOptions.signal?.aborted ||
-              (error !== requestOptions.signal.reason && !isAbortError) ||
-              !physicalQuery ||
-              physicalQuery.getObserversCount() === 0 ||
-              queryClient.getQueryCache().find({
-                queryKey: context.queryKey,
-                exact: true,
-              }) !== physicalQuery ||
-              physicalQuery.state.fetchStatus !== `fetching`
-            ) {
-              throw error
-            }
-            return queryWithSharedSignal()
-          }
-          try {
-            return Promise.resolve(queryFunction(context)).catch(
-              recoverReleasedSignal,
-            )
-          } catch (error) {
-            return recoverReleasedSignal(error)
-          }
+          return queryFunction(queryContext)
         },
         meta: extendedMeta,
         structuralSharing: true,
@@ -2154,6 +2156,7 @@ export function queryCollectionOptions(
         hashedQueryKey,
         (queryRefCounts.get(hashedQueryKey) || 0) + 1,
       )
+      recordAcquisitionRoute(opts, requestedHash, hashedQueryKey)
 
       // Check if data already exists in QueryClient cache (persisted within gcTime from
       // a previous observer). This avoids creating unnecessary promises and subscription
@@ -2198,7 +2201,8 @@ export function queryCollectionOptions(
             hashedQueryKey,
             foreignDirectPatch ||
               unverifiedCacheEdit ||
-              unknownPersistedRowOrder
+              unknownPersistedRowOrder ||
+              retainedQueriesPendingRevalidation.has(hashedQueryKey)
               ? {
                   data: localQuery.state.data,
                   version: localQuery.state.dataUpdateCount,
@@ -2213,7 +2217,8 @@ export function queryCollectionOptions(
           unpatchedCacheVersions.has(localQuery) ||
           foreignDirectPatch ||
           unverifiedCacheEdit ||
-          unknownPersistedRowOrder
+          unknownPersistedRowOrder ||
+          retainedQueriesPendingRevalidation.has(hashedQueryKey)
         ) {
           return opts.refetch
             ? refetchAndWaitForApplication(localObserver, hashedQueryKey)
@@ -2387,6 +2392,20 @@ export function queryCollectionOptions(
           currentQuery.state.data
           ? queryCollectionSuccessfulFetchStarts.get(currentQuery)
           : undefined
+      const newItemsMap = new Map<string | number, any>()
+      newItemsArray.forEach((item) => {
+        const key = getKey(item)
+        const acceptedPosition = acceptedRowPositions.get(key)
+        newItemsMap.set(
+          key,
+          cachedRemoteFetchStart !== undefined &&
+            acceptedPosition !== undefined &&
+            acceptedPosition > cachedRemoteFetchStart &&
+            currentSyncedItems.has(key)
+            ? currentSyncedItems.get(key)
+            : item,
+        )
+      })
       if (syncMode === `eager`) {
         // A new complete snapshot replaces direct rows without subset owners.
         // Hydrated rows with no claim are not necessarily this Query's rows.
@@ -2430,25 +2449,12 @@ export function queryCollectionOptions(
             } catch {
               return
             }
+            if (newItemsMap.has(key)) return
             previouslyOwnedRows.add(key)
           })
         }
       }
 
-      const newItemsMap = new Map<string | number, any>()
-      newItemsArray.forEach((item) => {
-        const key = getKey(item)
-        const acceptedPosition = acceptedRowPositions.get(key)
-        newItemsMap.set(
-          key,
-          cachedRemoteFetchStart !== undefined &&
-            acceptedPosition !== undefined &&
-            acceptedPosition > cachedRemoteFetchStart &&
-            currentSyncedItems.has(key)
-            ? currentSyncedItems.get(key)
-            : item,
-        )
-      })
       const settledDirectPositions = new Map<string | number, number>()
       const removedRows = new Set<string | number>()
 
@@ -2631,6 +2637,7 @@ export function queryCollectionOptions(
         applicationToken.rollback = undefined
         transactionActive = false
         retainedQueriesPendingRevalidation.delete(hashedQueryKey)
+        retainedRevalidationStarts.delete(hashedQueryKey)
         cancelPersistedRetentionExpiry(hashedQueryKey)
 
         // Readiness counts accepted rows; the application, which settles a
@@ -3085,6 +3092,26 @@ export function queryCollectionOptions(
               queryKey,
               exact: true,
             })
+            if (query && !hasFreshRetainedFetch(hashedQueryKey, query)) {
+              // Observer callbacks precede the cache success event that
+              // records a physical fetch's position.
+              if (
+                !result.isFetching &&
+                !awaitingRetainedFetchSuccess.has(result) &&
+                (queryCollectionCurrentFetchStarts.get(query) ?? 0) >
+                  (retainedRevalidationStarts.get(hashedQueryKey) ?? 0)
+              ) {
+                awaitingRetainedFetchSuccess.add(result)
+                queueMicrotask(() => {
+                  if (
+                    state.observers.get(hashedQueryKey)?.getCurrentQuery() ===
+                    query
+                  )
+                    handleQueryResult(result)
+                })
+              }
+              return
+            }
             if (query?.state.dataUpdateCount === 0) {
               // Initial data seeds Query state without a fetch. It must not
               // satisfy persistence retention that lasts until revalidation.
@@ -3306,6 +3333,7 @@ export function queryCollectionOptions(
       unsubscribePendingReadyListeners(hashedQueryKey)
       cancelPersistedRetentionExpiry(hashedQueryKey)
       retainedQueriesPendingRevalidation.delete(hashedQueryKey)
+      retainedRevalidationStarts.delete(hashedQueryKey)
       invalidatePendingResultApplication(hashedQueryKey)
 
       const nextOwnersByRow = removeQueryOwnership(hashedQueryKey)
@@ -3586,6 +3614,8 @@ export function queryCollectionOptions(
       if (activeSyncSession === syncSession) activeSyncSession = undefined
       pendingStartupLoads.clear()
       fullSourceDependents.clear()
+      acquisitionRoutes = new WeakMap()
+      retainedRevalidationStarts.clear()
       ensureEagerSubscription = () => {}
       applyRefetchResultWhenUnsubscribed = () => false
       unsubscribeFromCollectionEvents()
@@ -3648,8 +3678,8 @@ export function queryCollectionOptions(
      * Called when a live query subscription unsubscribes (via collection._sync.unloadSubset()).
      *
      * Flow:
-     * 1. Receives the same predicates that were passed to loadSubset
-     * 2. Computes the queryKey using generateQueryKeyFromOptions (same logic as loadSubset)
+     * 1. Receives the options object for the acquisition being released
+     * 2. Finds the physical Query chosen by that acquisition
      * 3. Decrements refcount
      * 4. If refcount reaches 0:
      *    - Checks hasListeners() to detect invalidateQueries cycles
@@ -3675,17 +3705,19 @@ export function queryCollectionOptions(
         if (pending.size === 0) pendingStartupLoads.delete(options)
         return
       }
-      // 1. Same predicates → 2. Same queryKey
-      const requestedHash = hashKey(generateQueryKeyFromOptions(options))
-      const dependentCount = options.refetch
-        ? undefined
-        : fullSourceDependents.get(requestedHash)
-      if (dependentCount !== undefined) {
+      const routes = acquisitionRoutes.get(options)
+      if (!routes?.length) return
+      const { requestedHash, physicalHash: hashedQueryKey } = routes.pop()!
+      if (routes.length === 0) acquisitionRoutes.delete(options)
+      if (
+        hashedQueryKey === fullSourceHash &&
+        requestedHash !== fullSourceHash
+      ) {
+        const dependentCount = fullSourceDependents.get(requestedHash)
         if (dependentCount === 1) fullSourceDependents.delete(requestedHash)
-        else fullSourceDependents.set(requestedHash, dependentCount - 1)
+        else if (dependentCount !== undefined)
+          fullSourceDependents.set(requestedHash, dependentCount - 1)
       }
-      const hashedQueryKey =
-        dependentCount === undefined ? requestedHash : fullSourceHash!
 
       // 3. Decrement refcount
       const currentCount = queryRefCounts.get(hashedQueryKey) || 0
@@ -3726,6 +3758,7 @@ export function queryCollectionOptions(
       queryToRows.clear()
       rowToQueries.clear()
       retainedQueriesPendingRevalidation.clear()
+      retainedRevalidationStarts.clear()
       directWriteKeyGenerations.clear()
       unownedDirectWritePositions.clear()
       acceptedRowPositions.clear()
