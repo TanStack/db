@@ -1849,6 +1849,18 @@ type ProcessCommand =
   | { kind: `cleanup`; slot: ProcessSlot }
   | { kind: `restart`; slot: ProcessSlot }
 
+/**
+ * After Collection readiness, an Electric sync adapter that gives up reports a
+ * final health error. Status and rows stay, and only a restart recovers; the
+ * reset resume state is what lets that restart refetch.
+ */
+function expectGaveUpAfterReadiness(
+  collection: Collection<OracleRow, string | number>,
+) {
+  expect(collection.status).toBe(`ready`)
+  expect(collection.health.error).toMatchObject({ phase: `sync`, final: true })
+}
+
 type ProcessRuntime = {
   collection: Collection<OracleRow, string | number>
   subscriber?: (messages: Array<Message<OracleRow>>) => void
@@ -1858,7 +1870,12 @@ type ProcessRuntime = {
   resumeAvailable: boolean
   requiresCompleteResume: boolean
   resettingSnapshot: boolean
+  // Electric reaches Collection readiness at its first up-to-date. Only a
+  // delivered snapshot or batch carries one, so the model records it there.
+  reachedReadiness: boolean
   terminalError: boolean
+  // A give-up after readiness is a final health error, not status `error`.
+  terminalAfterReadiness: boolean
   active: boolean
   retired: boolean
   preloads: Array<ObservedPreload>
@@ -2415,7 +2432,9 @@ async function runProcessGrammar(
       resumeAvailable: false,
       requiresCompleteResume: false,
       resettingSnapshot: false,
+      reachedReadiness: false,
       terminalError: false,
+      terminalAfterReadiness: false,
       active: false,
       retired: false,
       preloads: [],
@@ -2437,6 +2456,7 @@ async function runProcessGrammar(
     runtime.subscriber = subscriber
     runtime.requiresCompleteResume = runtime.resumeAvailable
     runtime.resettingSnapshot = false
+    runtime.reachedReadiness = false
     runtime.terminalError = false
     runtime.active = true
     runtime.retired = false
@@ -2449,7 +2469,11 @@ async function runProcessGrammar(
         : []
       expect(rowsFromCollection(runtime.collection)).toEqual(expected)
       if (runtime.terminalError) {
-        expect(runtime.collection.status).toBe(`error`)
+        if (runtime.terminalAfterReadiness) {
+          expectGaveUpAfterReadiness(runtime.collection)
+        } else {
+          expect(runtime.collection.status).toBe(`error`)
+        }
       }
       if (!runtime.active && runtime.retired) {
         expect(runtime.collection.status).toBe(`cleaned-up`)
@@ -2524,6 +2548,7 @@ async function runProcessGrammar(
       runtime.resumeAvailable = false
       runtime.requiresCompleteResume = false
       runtime.resettingSnapshot = false
+      runtime.reachedReadiness = false
       runtime.terminalError = false
       return `cleaned up`
     }
@@ -2566,6 +2591,7 @@ async function runProcessGrammar(
       applyReferenceBatch(runtime.reference, messages)
       runtime.resettingSnapshot = false
       runtime.resumeAvailable = true
+      runtime.reachedReadiness = true
       return `delivered: snapshot`
     }
 
@@ -2595,6 +2621,7 @@ async function runProcessGrammar(
     runtime.subscriber(messages)
     if (invalidResume) {
       runtime.terminalError = true
+      runtime.terminalAfterReadiness = runtime.reachedReadiness
       runtime.resumeAvailable = false
       runtime.retiredSubscriber = runtime.subscriber
       return `delivered: invalid resume`
@@ -2602,6 +2629,7 @@ async function runProcessGrammar(
     applyReferenceBatch(runtime.reference, messages)
     runtime.resettingSnapshot = false
     runtime.resumeAvailable = true
+    runtime.reachedReadiness = true
     if (txidOutcome) {
       await expect(txidOutcome).resolves.toBe(true)
       runtime.seenTxids.add(command.txid)
@@ -4212,7 +4240,7 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
             ])
             for (const batch of partition) trace.subscriber(batch)
 
-            expect(trace.collection.status).toBe(`error`)
+            expectGaveUpAfterReadiness(trace.collection)
             expect(trace.collection.get(id)).toEqual(
               expect.objectContaining({ stable: `stable-${id}` }),
             )
@@ -4306,7 +4334,7 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
         trace.subscriber([change(`insert`, 1, `complete`), upToDate])
         for (const batch of partition) trace.subscriber(batch)
 
-        expect(trace.collection.status).toBe(`error`)
+        expectGaveUpAfterReadiness(trace.collection)
         expect(trace.collection.get(1)).toEqual(
           expect.objectContaining({ stable: `stable-1` }),
         )

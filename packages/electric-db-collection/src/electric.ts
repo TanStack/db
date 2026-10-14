@@ -2321,11 +2321,13 @@ function createElectricSync<T extends Row<unknown>>(
       streamErrorVersion++
       unsubscribeStream()
       abortController.abort()
-      markError(
-        new Error(
-          `Electric resume state referenced an unseen row; a full snapshot is required`,
-        ),
+      const error = new Error(
+        `Electric resume state referenced an unseen row; a full snapshot is required`,
       )
+      // The stream stops here, so after Collection readiness it is a final
+      // health error; only a restart refetches the snapshot.
+      if (collection.status === `ready`) reportError(error, { final: true })
+      else markError(error)
     }
 
     const processMessages = (messages: Array<Message<T>>): void => {
