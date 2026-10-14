@@ -638,13 +638,16 @@ describe(`includes deterministic work-counter oracle`, () => {
  * ## Work
  *
  * The child source is local or on demand. Work is the child rows it delivers
- * (local) or serves and forwards (on demand), and the grandchild rows the
+ * (local) or its loads serve (on demand), and the grandchild rows the
  * local grandchild source delivers. Preload may load only the children of the
  * shown rows' groups and the grandchildren of the shown children. A step may
  * load only the children of the rows that entered the window, the
- * grandchildren of the children that entered an include, and one changed
- * row. A query that routes the row after the window, every row tied with an
- * edge, rows before the window, or rows a static filter names fails.
+ * grandchildren of the children that entered an include, and the rows the
+ * step itself writes, which a local subscription receives whether or not
+ * their group is loaded. An on-demand child arrives only through a load, so
+ * that path shows routing even for rows the step writes. A query that routes
+ * the row after the window, every row tied with an edge, rows before the
+ * window, rows `setWindow` dropped, or rows a static filter names fails.
  *
  * ## Histories
  *
@@ -835,7 +838,7 @@ function observeKids(kids: unknown, form: ChildForm): unknown {
  * An on-demand child source. Its provider serves each load from the model's
  * rows by the request's predicate, keeps a ledger of sent rows, and forwards
  * a later change only for a sent row or a row a served predicate matches.
- * `work` counts the rows it serves and forwards.
+ * `work` counts the rows its loads serve, not forwarded changes.
  */
 function createOnDemandChildren(initial: Array<WindowChild>) {
   const truth = new Map(initial.map((child) => [child.id, child]))
@@ -900,7 +903,6 @@ function createOnDemandChildren(initial: Array<WindowChild>) {
           : wheres.some((where) => matches(where, row))
       if (!forward) return
       if (type === `insert`) sent.add(row.id)
-      work++
       controls!.begin()
       controls!.write({ type, value: row })
       controls!.commit()
@@ -1231,16 +1233,28 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
       const kidsEntered = new Set(
         [...shownKids(after)].filter((kid) => !kidsBefore.has(kid)),
       )
-      // A fresh parent's group is new, so its children load only through
-      // the parent, if it enters the window.
+      // Child rows the step writes reach a local subscription whether or not
+      // their group is loaded, so each counts once: a fresh parent's group,
+      // or one inserted or deleted child.
+      // The grandchild source is always local; a fresh group writes one
+      // grandchild per child.
+      const freshGroup =
+        command.type === `insert-parent` && command.copy === null
+          ? testCase.childrenPerGroup
+          : 0
+      const written = onDemand
+        ? 0
+        : command.type === `insert-child` || command.type === `delete-child`
+          ? 1
+          : freshGroup
       expect(
         childWork() - childBefore,
         `child rows loaded by step ${step}`,
-      ).toBeLessThanOrEqual(childrenOf(entered) + 1)
+      ).toBeLessThanOrEqual(childrenOf(entered) + written)
       expect(
         grandWork().delivered - grandBefore,
         `grandchild rows loaded by step ${step}`,
-      ).toBeLessThanOrEqual(grandchildrenOf(kidsEntered) + 1)
+      ).toBeLessThanOrEqual(grandchildrenOf(kidsEntered) + freshGroup)
       before = after
     }
   } catch (error) {
@@ -1322,10 +1336,13 @@ describe(`includes work under an ordered parent window`, () => {
       limit: 1,
     }))
 
+  // On demand, a group's children arrive only through a load, so a fresh
+  // parent past the narrowed window must not load them.
   it(`stops routing rows that setWindow drops from an orderBy-only parent`, () =>
     checkWindowedIncludeWork({
       ...pinnedWindowCase,
       childrenPerGroup: 3,
+      childSource: `on-demand`,
       parentForm: `orderOnly`,
       history: [
         { type: `move`, offset: 0, limit: 2 },
