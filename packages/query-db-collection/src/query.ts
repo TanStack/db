@@ -2355,20 +2355,20 @@ export function queryCollectionOptions(
         ) !== undefined
       // Existing dependents keep their original observer lease even if an
       // explicit refetch creates an exact Query for the same requested scope.
+      // A new acquisition still needs current applied full-source coverage.
       const sharesFullSource =
         !opts.refetch &&
         fullSourceKey !== undefined &&
         fullSourceHash !== requestedHash &&
         !requestedScopeNeedsRevalidation &&
-        (hasFullSourceDependent ||
-          (!state.observers.has(requestedHash) &&
-            (queryRefCounts.get(fullSourceHash!) ?? 0) > 0 &&
-            fullResult?.isSuccess === true &&
-            fullQuery?.state.fetchStatus === `idle` &&
-            hasCurrentCacheGenerationFetch(fullQuery) &&
-            !pendingResultApplications.has(fullSourceHash!) &&
-            !failedResultApplications.has(fullSourceHash!) &&
-            appliedFullResult))
+        !state.observers.has(requestedHash) &&
+        (queryRefCounts.get(fullSourceHash!) ?? 0) > 0 &&
+        fullResult?.isSuccess === true &&
+        fullQuery?.state.fetchStatus === `idle` &&
+        hasCurrentCacheGenerationFetch(fullQuery) &&
+        !pendingResultApplications.has(fullSourceHash!) &&
+        !failedResultApplications.has(fullSourceHash!) &&
+        appliedFullResult
       const key = sharesFullSource ? fullSourceKey : requestedKey
       const hashedQueryKey = sharesFullSource ? fullSourceHash! : requestedHash
       const {
@@ -4637,6 +4637,7 @@ export function queryCollectionOptions(
         queryObserver.getCurrentResult()
       try {
         cancelPreWriteFetch(query, hashedQueryKey)
+        const previousFetchSequence = query.fetchSequence
         const capture: RefetchCapture = { query }
         const previousCapture = activeRefetchCapture
         activeRefetchCapture = capture
@@ -4653,9 +4654,15 @@ export function queryCollectionOptions(
         // silent replacement into the successor's result. Its own retryer
         // promise retains which happened to this call's physical fetch.
         let activeFetch = capture.promise ?? query.promise
-        if (!activeFetch) {
+        if (
+          !activeFetch ||
+          (capture.fetchStart === undefined &&
+            query === capture.query &&
+            query.fetchSequence !== previousFetchSequence)
+        ) {
           // Consume the observer call before reporting a missing retryer: a
-          // behavior setup failure rejects here with its original error.
+          // behavior setup failure rejects here with its original error. An
+          // old canceled retryer can still occupy query.promise.
           const setupResult = await fetch
           if (setupResult.isError) {
             if (

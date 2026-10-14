@@ -683,3 +683,84 @@ public checkpoints. The earlier independent code review covers the repair
 commit named above; the post-merge oracle review covers the pushed head. The
 remaining paths and the unpublished Query Core dependency keep the broader
 readiness claim open.
+
+## Independent review of the setup-failure follow-up
+
+The pushed head `12a7d3f4d9c90b242c6dc9500b74308ca667fecf` has tracked
+diff SHA-256 `5e74b4987efdd1c6e62cb181327f67f8bbaa39b594015cdb8bcde9c03859c616`
+relative to `origin/main`. Against frozen Query Core `273eb2526`, the full
+Query DB suite passed 948 tests in 19 files. The follow-up's retained-owner
+matrix rejects a setup error without retry for full and exact-subset scopes,
+cold and warm Query caches, and setup before or after source invocation. Its
+deferred-source history checks provider signal abort on final release and no
+late Collection row or final Query-cache value. Package TypeScript with a Core
+source alias, Prettier, and changed-file ESLint passed; ESLint reported two
+existing `no-shadow` warnings.
+
+An independent code reviewer found two legal histories that this head missed.
+After a successful full result serves one filtered dependent, a failed full
+refresh leaves that existing dependent on its observer lease. A *new* equal
+filtered demand incorrectly inherits the full Query's error because
+`hasFullSourceDependent` bypasses the current full-result eligibility gate. A
+disposable public subscription witness failed at the provider-scope and caller
+outcome comparison. The primary load-lifecycle oracle now carries the same
+history through public live-query preload: it checks an exact filtered call,
+the new rows, and ownership after the old leases release. Removing the bypass
+made that witness pass. The original implementation is the hostile control.
+
+The reviewer also found that an overlapping utility refetch can report its
+predecessor's silent `CancelledError` when the new behavior setup throws before
+installing a retryer. Both `throwOnError` modes are RED in a new primary-oracle
+history against Core `273eb2526`: the throwing call rejects with the wrong
+error, and the soft call rejects instead of returning an error result. The
+history checks exact error identity, source-call count, retained public and
+Query-cache rows, and absence of a late row. Query Core #12023 is repairing
+direct-successor promise attribution for this schedule. The Query DB receiving
+history remains RED until it is run against an immutable compatible Core head;
+no Query DB workaround is claimed here.
+
+An independent oracle reviewer killed two setup-failure mutants at their
+intended comparisons: removing the terminal-signal abort failed the provider
+signal assertion, and removing the subscription-start guard made four cold
+retained-owner cases falsely fulfill. A persisted live-query setup-failure
+probe also passed. The reviewer found one false green: a hostile implementation
+briefly cached a discarded deferred-source row, then evicted it before the
+final cache read, and both prior deferred-source cases passed. A Query-cache
+success-event recorder killed that mutant at the transient-cache checkpoint.
+The recorder now also covers the direct, live-query, exact-refetch, and utility
+setup-failure matrix. This distinguishes transient cache publication from final
+cache state without changing the promised law.
+
+The first repair and all unaffected Query DB tests pass against frozen Core:
+90 lifecycle tests excluding the two overlapping utility cases, plus 859
+tests in the other 18 files. The two RED receiving cases and the unpublished
+Core dependency keep the exact-head readiness claim open. The coverage map
+continues to assign external cancellation, arbitrary Query Core scheduling,
+and native persisted startup to separate receiving witnesses.
+
+## Query DB follow-up candidate before the next exact-head review
+
+The candidate removes the full-dependent shortcut for new acquisitions. The
+existing dependent keeps its observer lease after a failed full refresh, but a
+new equal filtered demand requests its exact scope. The candidate also checks
+the physical fetch sequence when an overlapping utility refetch has no new
+fetch-start event. It then reads the replacement observer call's setup error
+instead of its predecessor's canceled retryer.
+
+Against frozen Query Core `273eb2526`, all 951 Query DB tests pass in 19 files.
+The package TypeScript check with a Core source alias, Prettier, and `git diff
+--check` pass. Changed-file ESLint reports zero errors and 12 warnings, all
+outside edited lines. A disposable copy with only the new utility sequence
+guard removed fails both overlapping setup-error cases at their terminal
+checks: the throwing call receives `CancelledError` instead of the exact setup
+error, and the soft call rejects instead of returning an error result. The
+control command and output are in `/private/tmp/pr2143-no-guard-mutant.log`.
+
+The ownership oracle previously required an outside `fetchQuery` waiter to
+remain pending after another caller canceled its fetch. Query Core may reject
+that raw waiter immediately. The candidate removes this unsupported timing
+check and keeps the final cancellation, successor utility result, and public
+row comparisons. The revised history passes against the read-only exact Core
+`371b1f49e` archive. Its full Query DB suite reports 949 passed and two failed
+reset/cache-version cases. Core #12023 owns those receiving failures. This
+candidate needs a fresh compatible Core run and independent review after push.

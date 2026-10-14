@@ -573,6 +573,11 @@ keeps its own rows and owner; and final release removes them. A pending full
 request does not establish filtered coverage; the filtered demand may wait for
 its application or request its exact scope. The settled-full witness
 fails on the original implementation at the provider-call checkpoint.
+If a later full refresh fails, an existing filtered dependent keeps its full
+observer lease and prior rows. A new equal filtered demand instead requests its
+exact scope. The failed-full witness checks the new provider scope and outcome,
+both dependent views, and rows after the old leases release; restoring the old
+dependent-map shortcut fails at the new caller's outcome and scope comparison.
 The same owner checks a public `QueryClient` behavior that throws during fetch
 setup, both before and after invoking `queryFn`. Direct on-demand loads and
 live-query preloads reject with the exact setup error. Exact subset refetches
@@ -580,7 +585,9 @@ and throwing utility refetches reject with that error; nonthrowing utility
 refetches return an error result. A deferred source invoked before the throw
 cannot publish a Collection row or Query cache value, whether it resolves
 before or after final release. The oracle checks public change batches and
-requires the pending provider's physical signal to abort on final release.
+Query-cache success events, including a transient discarded row that later
+eviction would hide from the final cache read. It requires the pending
+provider's physical signal to abort on final release.
 It also checks that no installed fetch-start event was reported for the failed
 setup. A neighboring provider rejection checks the ordinary installed-fetch
 path and its two start events. The ownership oracle crosses retained full and
@@ -591,6 +598,13 @@ both before- and after-source failure. The setup histories rely on Query Core
 reporting a terminal observer error for setup failure. The installed Query Core
 version does not provide that signal; published-version compatibility remains
 open until the attribution repair is released and the peer range is raised.
+An overlapping utility-refetch setup-failure history checks exact error
+identity for throwing and soft calls while an older retryer remains installed.
+Both cases pass against frozen Core `273eb2526` with the Query DB guard. Removing
+that guard makes the throwing caller receive its predecessor's silent
+`CancelledError` and makes the soft caller reject instead of returning an error
+result. Query Core #12023 owns the upstream fetch attribution contract; rerun
+these receiving cases against its next immutable head.
 Concurrent cleanup, replacement, and nested behavior reentry during setup
 remain outside these receiving histories. A behavior-authored silent or revert
 `CancelledError` without a successor has no terminal Query Core observer event;
@@ -662,13 +676,13 @@ implementation fulfilled before eligible application and fails the public
 promise comparison. The reverse retention-before-F1 order needs a connected
 Collection that records the marker before F1 starts. This cold history does
 not establish whether F1 may revalidate in that order.
-These tests do not prove every provider returns a complete full source,
-arbitrary observer-option selection, or the policy for a new equal demand after
-failed revalidation. A separate metadata signal belongs to each physical Query
-fetch started by a Collection acquisition and remains a data property when the
-provider inspects or clones request options. Query Core's lazy transport signal
-remains unread when that provider ignores cancellation, so its cache can retain
-the result without making an aborted acquisition successful. A refetch with no
+These tests do not prove every provider returns a complete full source or
+arbitrary observer-option selection. A separate metadata signal belongs to each
+physical Query fetch started by a Collection acquisition. It remains a data
+property when the provider inspects or clones request options. Query Core's
+lazy transport signal remains unread when that provider ignores cancellation,
+so its cache can retain the result without making an aborted acquisition
+successful. A refetch with no
 live Collection acquisition, owned by a retained Query Core observer, instead
 receives Query Core's live signal as a metadata data property. A released
 no-signal creator, a released aborted-signal creator, and a retained aborted-

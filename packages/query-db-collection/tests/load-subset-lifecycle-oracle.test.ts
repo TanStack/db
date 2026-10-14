@@ -198,6 +198,103 @@ async function expectActiveFullSourceServesFilteredDemand(): Promise<void> {
 }
 
 /**
+ * The first filtered acquisition borrows an applied full result and keeps its
+ * observer lease after that Query's later refresh fails. The failed refresh
+ * establishes no coverage for a new caller. The reference therefore leaves
+ * the first lease on the full Query but starts one exact filtered acquisition
+ * for the new caller. Public live-query preload, provider scopes, source rows,
+ * and final release distinguish that rule from routing every equal caller
+ * through the existing dependent lease.
+ */
+async function expectFailedFullRefreshStartsExactNewDemand(): Promise<void> {
+  const queryClient = createQueryClient()
+  const id = `failed-full-source-new-demand-${collectionSequence++}`
+  const requests: Array<`full` | `filtered`> = []
+  const failure = new Error(`full refresh failed`)
+  const collection = createCollection(
+    queryCollectionOptions<Row>({
+      id,
+      queryClient,
+      queryKey: [id],
+      queryFn: (context) => {
+        const scope =
+          context.meta?.loadSubsetOptions?.where === undefined
+            ? `full`
+            : `filtered`
+        requests.push(scope)
+        if (requests.length === 2) return Promise.reject(failure)
+        return Promise.resolve(
+          scope === `full`
+            ? [
+                { id: `a1`, group: `a` },
+                { id: `b1`, group: `b` },
+              ]
+            : [
+                { id: `a1`, group: `a` },
+                { id: `a2`, group: `a` },
+              ],
+        )
+      },
+      getKey: (row) => row.id,
+      startSync: true,
+      syncMode: `on-demand`,
+    }),
+  )
+  const makeFiltered = () =>
+    createLiveQueryCollection((query) =>
+      query
+        .from({ row: collection })
+        .where(({ row }) => eq(row.group, `a`))
+        .select(({ row }) => ({ id: row.id })),
+    )
+  const full = createLiveQueryCollection((query) =>
+    query.from({ row: collection }).select(({ row }) => ({ id: row.id })),
+  )
+  const firstFiltered = makeFiltered()
+  const nextFiltered = makeFiltered()
+  try {
+    await full.preload()
+    await firstFiltered.preload()
+    expect(requests).toEqual([`full`])
+    expect(firstFiltered.toArray.map((row) => row.id)).toEqual([`a1`])
+
+    await queryClient.refetchQueries({ queryKey: [id], exact: true })
+    expect(requests).toEqual([`full`, `full`])
+    expect(collection.toArray.map((row) => row.id).sort()).toEqual([`a1`, `b1`])
+    expect(firstFiltered.toArray.map((row) => row.id)).toEqual([`a1`])
+
+    const outcome = await nextFiltered.preload().then(
+      () => `fulfilled` as const,
+      (error: unknown) => error,
+    )
+    expect({ outcome, requests }).toEqual({
+      outcome: `fulfilled`,
+      requests: [`full`, `full`, `filtered`],
+    })
+    expect(nextFiltered.toArray.map((row) => row.id).sort()).toEqual([
+      `a1`,
+      `a2`,
+    ])
+    expect(firstFiltered.toArray.map((row) => row.id).sort()).toEqual([
+      `a1`,
+      `a2`,
+    ])
+
+    await full.cleanup()
+    await firstFiltered.cleanup()
+    expect(collection.toArray.map((row) => row.id).sort()).toEqual([`a1`, `a2`])
+    await nextFiltered.cleanup()
+    await vi.waitFor(() => expect(collection.size).toBe(0))
+  } finally {
+    await nextFiltered.cleanup()
+    await firstFiltered.cleanup()
+    await full.cleanup()
+    await collection.cleanup()
+    queryClient.clear()
+  }
+}
+
+/**
  * An in-flight full request has not established complete source coverage.
  * The filtered view may request its exact scope or wait for the full result;
  * without its own result it cannot settle before the full rows apply. This is
@@ -1258,8 +1355,9 @@ async function expectInitialQueryFailureStatus(): Promise<void> {
  * refetch without throwOnError reports the error in its result. At each promise
  * settlement, the exact setup error is owed and only previously accepted rows
  * may remain. The before-source case is a control for relying solely on Query
- * Core's source-start event. Public change batches reject even a transient
- * publication of the discarded row, not only a wrong final snapshot.
+ * Core's source-start event. Public change batches and Query-cache success
+ * events reject even a transient publication of the discarded row, not only a
+ * wrong final snapshot.
  */
 async function expectEagerBehaviorSetupFailureSettles(
   path:
@@ -1277,9 +1375,16 @@ async function expectEagerBehaviorSetupFailureSettles(
   const refetchPath = path.includes(`refetch`)
   let fetches = 0
   const fetchEvents: Array<`fetchStarted` | `fetchSourceStarted`> = []
+  const cachedRows: Array<string> = []
   const unsubscribeCache = queryClient.getQueryCache().subscribe((event) => {
     if (event.type === `fetchStarted` || event.type === `fetchSourceStarted`)
       fetchEvents.push(event.type)
+    if (event.type === `updated` && event.action.type === `success`) {
+      const data: unknown = event.action.data
+      if (Array.isArray(data)) {
+        for (const row of data as Array<Row>) cachedRows.push(row.id)
+      }
+    }
   })
   const queryFn = vi.fn(() => [{ id: fetches === 1 ? `cached` : `discarded` }])
   queryClient.setQueryDefaults([id], {
@@ -1324,6 +1429,7 @@ async function expectEagerBehaviorSetupFailureSettles(
     if (refetchPath) {
       await collection._sync.loadSubset(initialRequest)
       expect(collection.toArray.map((row) => row.id)).toEqual([`cached`])
+      expect(cachedRows).toContain(`cached`)
     }
 
     if (path === `utility-refetch-soft`) {
@@ -1357,6 +1463,7 @@ async function expectEagerBehaviorSetupFailureSettles(
       refetchPath ? [`cached`] : [],
     )
     expect(publishedRows).not.toContain(`discarded`)
+    expect(cachedRows).not.toContain(`discarded`)
     if (live) expect(live.toArray).toEqual([])
   } finally {
     if (refetchPath) collection._sync.unloadSubset(initialRequest)
@@ -1368,6 +1475,117 @@ async function expectEagerBehaviorSetupFailureSettles(
     unsubscribeCache()
     queryClient.clear()
     loggedError.mockRestore()
+  }
+}
+
+/**
+ * A utility refetch may start while its predecessor's provider is pending.
+ * The new call cancels that physical fetch, then behavior setup throws before
+ * Query Core installs a replacement retryer. The reference attributes the
+ * terminal setup error to the new call; its predecessor's silent cancellation
+ * cannot become the new caller's error. The public utility result or rejection
+ * must carry the exact setup error, and the aborted predecessor cannot publish
+ * a late row. The existing single-refetch cases do not leave an older retryer
+ * installed at this checkpoint.
+ */
+async function expectOverlappingUtilitySetupFailure(
+  throwOnError: boolean,
+): Promise<void> {
+  const queryClient = createQueryClient()
+  const id = `overlapping-utility-setup-${throwOnError}-${collectionSequence++}`
+  const setupError = new Error(`replacement behavior setup failed`)
+  const pendingSource = createDeferred<Array<Row>>()
+  const sourceStarted = createDeferred<void>()
+  let setupCount = 0
+  let sourceCount = 0
+  let fetchStarts = 0
+  const publishedRows: Array<string> = []
+  const cachedRows: Array<string> = []
+  const unsubscribeCache = queryClient.getQueryCache().subscribe((event) => {
+    if (event.type === `fetchStarted`) fetchStarts++
+    if (event.type === `updated` && event.action.type === `success`) {
+      const data: unknown = event.action.data
+      if (Array.isArray(data)) {
+        for (const row of data as Array<Row>) cachedRows.push(row.id)
+      }
+    }
+  })
+  queryClient.setQueryDefaults([id], {
+    behavior: {
+      onFetch() {
+        if (++setupCount === 3) throw setupError
+      },
+    },
+  })
+  const collection = createCollection(
+    queryCollectionOptions<Row>({
+      id,
+      queryClient,
+      queryKey: [id],
+      queryFn: () => {
+        sourceCount++
+        if (sourceCount === 1) return Promise.resolve([{ id: `initial` }])
+        if (sourceCount === 2) {
+          sourceStarted.resolve()
+          return pendingSource.promise
+        }
+        return Promise.resolve([{ id: `unexpected` }])
+      },
+      getKey: (row) => row.id,
+      startSync: true,
+      syncMode: `on-demand`,
+    }),
+  )
+  const rowSubscription = collection.subscribeChanges(
+    (batch) => {
+      for (const change of batch) publishedRows.push(change.value.id)
+    },
+    { includeInitialState: false },
+  )
+  const request: LoadSubsetOptions = {}
+  let firstRefetch: Promise<unknown> | undefined
+  try {
+    await collection._sync.loadSubset(request)
+    expect(cachedRows).toContain(`initial`)
+    firstRefetch = collection.utils.refetch({ throwOnError: true })
+    void firstRefetch.catch(() => undefined)
+    await sourceStarted.promise
+
+    const outcome = await collection.utils.refetch({ throwOnError }).then(
+      (results) => ({ kind: `result` as const, results }),
+      (error: unknown) => ({ kind: `rejected` as const, error }),
+    )
+    if (throwOnError) {
+      expect(outcome).toEqual({ kind: `rejected`, error: setupError })
+    } else {
+      expect(outcome.kind).toBe(`result`)
+      if (outcome.kind === `result`) {
+        expect(outcome.results).toHaveLength(1)
+        expect(outcome.results[0]?.isError).toBe(true)
+        expect(outcome.results[0]?.error).toBe(setupError)
+      }
+    }
+    expect(setupCount).toBe(3)
+    expect(sourceCount).toBe(2)
+    expect(fetchStarts).toBe(2)
+    expect(collection.toArray.map((row) => row.id)).toEqual([`initial`])
+
+    pendingSource.resolve([{ id: `stale` }])
+    await firstRefetch.catch(() => undefined)
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    expect(collection.toArray.map((row) => row.id)).toEqual([`initial`])
+    expect(queryClient.getQueryData([id])).toEqual([{ id: `initial` }])
+    expect(publishedRows).not.toContain(`stale`)
+    expect(publishedRows).not.toContain(`unexpected`)
+    expect(cachedRows).not.toContain(`stale`)
+    expect(cachedRows).not.toContain(`unexpected`)
+  } finally {
+    pendingSource.resolve([])
+    collection._sync.unloadSubset(request)
+    rowSubscription.unsubscribe()
+    await collection.cleanup()
+    unsubscribeCache()
+    queryClient.clear()
   }
 }
 
@@ -1421,8 +1639,9 @@ async function expectInstalledFetchFailureSettles(): Promise<void> {
  * provider's promise can remain pending after the requesting load rejects.
  * The physical signal belongs to that abandoned source work. The reference
  * requires final acquisition release to abort work still pending, and never
- * accepts its late value as a Query cache or Collection row. Resolving before
- * and after final release checks both owned and retired observation cuts.
+ * accepts its late value as a Query cache or Collection row. Cache events
+ * detect a transient write even if a later eviction hides it. Resolving
+ * before and after final release checks both owned and retired observation cuts.
  * This distinguishes setup failure from the installed-fetch rejection above.
  */
 async function expectFailedSetupDiscardsDeferredSource(
@@ -1458,6 +1677,15 @@ async function expectFailedSetupDiscardsDeferredSource(
   )
   const request: LoadSubsetOptions = {}
   const publishedRows: Array<string> = []
+  const cachedRows: Array<string> = []
+  const unsubscribeCache = queryClient.getQueryCache().subscribe((event) => {
+    if (event.type === `updated` && event.action.type === `success`) {
+      const data: unknown = event.action.data
+      if (Array.isArray(data)) {
+        for (const row of data as Array<Row>) cachedRows.push(row.id)
+      }
+    }
+  })
   const rowSubscription = collection.subscribeChanges(
     (batch) => {
       for (const change of batch) publishedRows.push(change.value.id)
@@ -1479,6 +1707,7 @@ async function expectFailedSetupDiscardsDeferredSource(
     expect(collection.toArray).toEqual([])
     expect(queryClient.getQueryData([id])).toBeUndefined()
     expect(publishedRows).toEqual([])
+    expect(cachedRows).not.toContain(`discarded`)
     if (release === `after`) {
       collection._sync.unloadSubset(request)
       released = true
@@ -1488,6 +1717,7 @@ async function expectFailedSetupDiscardsDeferredSource(
     held.resolve([])
     rowSubscription.unsubscribe()
     await collection.cleanup()
+    unsubscribeCache()
     queryClient.clear()
   }
 }
@@ -2733,6 +2963,10 @@ describe(`loadSubset lifecycle oracle`, () => {
     await expectActiveFullSourceServesFilteredDemand()
   })
 
+  it(`starts an exact new filtered acquisition after its borrowed full Query fails`, async () => {
+    await expectFailedFullRefreshStartsExactNewDemand()
+  })
+
   it(`does not treat an unfinished full-source Query as filtered coverage`, async () => {
     await expectPendingFullSourceNeedsAppliedEvidence()
   })
@@ -3311,6 +3545,13 @@ describe(`loadSubset lifecycle oracle`, () => {
     `settles a $path operation when behavior setup fails $source invoking its source`,
     async ({ path, source }) => {
       await expectEagerBehaviorSetupFailureSettles(path, source)
+    },
+  )
+
+  it.each([true, false])(
+    `attributes overlapping utility setup failure to the new call, throwOnError=%s`,
+    async (throwOnError) => {
+      await expectOverlappingUtilitySetupFailure(throwOnError)
     },
   )
 

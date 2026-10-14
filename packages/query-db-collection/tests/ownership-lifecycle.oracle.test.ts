@@ -10337,9 +10337,10 @@ describe(`query collection ownership lifecycle`, () => {
    * refetch callers follow the successor, as Query Core does for its own
    * `cancelRefetch` path. The reference is the successor's applied row at
    * both public refetch settlements. A raw QueryClient `fetchQuery` waiter
-   * holds the retryer promise instead and may receive `CancelledError`; that
-   * is Query Core's separate boundary. Holding the first fetch distinguishes
-   * a synchronous replacement from a cancellation awaited before replacement.
+   * holds the retryer promise instead and may receive `CancelledError` as soon
+   * as replacement cancels it; that is Query Core's separate boundary. Holding
+   * the first fetch distinguishes synchronous replacement from cancellation
+   * awaited before replacement.
    */
   it(`settles overlapping explicit refetch callers on the replacement`, async () => {
     type Row = { id: string; name: string }
@@ -10400,7 +10401,6 @@ describe(`query collection ownership lifecycle`, () => {
     const later = collection.utils.refetch({ throwOnError: true })
     await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(3))
     expect(earlierOutcome).toBe(`pending`)
-    expect(externalOutcome).toBe(`pending`)
     replacement.resolve([{ id: `x`, name: `Server` }])
     await later
     expect(await earlier).toEqual({ outcome: `resolved`, row: `Server` })
