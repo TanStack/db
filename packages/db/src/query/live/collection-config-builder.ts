@@ -186,12 +186,16 @@ export class CollectionConfigBuilder<
       query: config.query,
       requireObjectResult: true,
     })
-    this.initialWindow = this.query.orderBy?.length
-      ? {
-          offset: this.query.offset ?? 0,
-          limit: this.query.limit ?? Infinity,
-        }
-      : undefined
+    // A findOne's window shows at most one row.
+    this.initialWindow =
+      this.query.orderBy?.length || this.query.singleResult
+        ? {
+            offset: this.query.offset ?? 0,
+            limit: this.query.singleResult
+              ? Math.min(this.query.limit ?? 1, 1)
+              : (this.query.limit ?? Infinity),
+          }
+        : undefined
     this.settledWindow = this.initialWindow
     this.collections = extractCollectionsFromQuery(this.query)
     this.collectionSources = extractCollectionSources(this.query)
@@ -307,7 +311,7 @@ export class CollectionConfigBuilder<
       this.currentWindow ?? this.settledWindow ?? this.initialWindow
     const requestedWindow: WindowOptions = {
       offset: options.offset ?? baseWindow?.offset,
-      limit: options.limit ?? baseWindow?.limit,
+      limit: this.query.singleResult ? 1 : (options.limit ?? baseWindow?.limit),
     }
     const sourceRecovery = this.pendingSourceRecovery()
     if (sourceRecovery) {
@@ -1307,7 +1311,9 @@ export class CollectionConfigBuilder<
         lazyCallbacks.setDemand = (plan, keys) =>
           collectionSubscriber.setDemand(subscription, plan, keys)
         for (const plan of lazyCallbacks.plans ?? []) {
-          if (plan.initialKeys.size > 0) {
+          // A window requested before start can drop the rows a static
+          // filter names, so their children wait for the window.
+          if (plan.initialKeys.size > 0 && !this.currentWindow) {
             lazyCallbacks.setDemand(plan, plan.initialKeys)
           }
         }

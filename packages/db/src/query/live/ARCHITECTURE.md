@@ -1504,20 +1504,21 @@ custom-key query needs contributor reduction. Inline materialization must not
 create recursive Collection machinery.
 
 A query has a window when it has an `orderBy` or is a `findOne`, with or
-without `limit`; a `findOne` window is `{ offset, limit: 1 }`. Only its own
-top-K answers `setWindow`; a top-K inside a `from` or joined subquery or an
-include child never does, so a query without a window rejects `setWindow`. A
-windowed query adds route relations for the includes in its own `select` only
-from the rows its window shows, so a row the window drops activates no bucket
-and creates no demand. Any window can drop rows, including one `setWindow`
-requests later on an `orderBy`-only query, so a static parent filter creates
-child demand before the window runs only when the query has no window, or is a
-`findOne` with no `offset` over one named row. Within one graph run, an
-index-backed top-K can briefly hold a row outside its settled window until its
-ordered acquisition refills the window, and that row's children may load (a
-recorded limit, #2151; the public snapshot stays correct). Includes inherited
-from a `from` subquery and inputs to `fn.select` still route from every row
-before the window (a recorded limit).
+without `limit`; a `findOne` window is `{ offset, limit: 1 }`, and `setWindow`
+keeps its limit at 1. Only its own top-K answers `setWindow`; a top-K inside a
+`from` or joined subquery or an include child never does, so a query without a
+window rejects `setWindow`. A windowed query adds route relations for the
+includes in its own `select` only from the rows its window shows, so a row the
+window drops activates no bucket and creates no demand. Any requested window
+can drop rows, including one `setWindow` requests later on an `orderBy`-only
+query, so a static filter creates child demand before the window runs only
+when neither the query nor an enclosing query has a window, or the query is a
+`findOne` that shows one row, with no `offset` and no window requested
+before start, for one named correlation value. Within one graph run, an index-backed top-K can briefly hold a row
+outside the window it shows once its ordered acquisition completes, and that
+row's children may load (a recorded limit, #2151; the public snapshot stays
+correct). Includes inherited from a `from` subquery and inputs to `fn.select`
+still route from every row before the window (a recorded limit).
 
 ## Normative laws
 

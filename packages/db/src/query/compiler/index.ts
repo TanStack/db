@@ -398,6 +398,8 @@ type CompileQueryArgs = [
   queryMapping?: QueryMapping,
   parentKeyStream?: KeyedStream,
   childCorrelationField?: PropRef,
+  // An enclosing query has a window that can drop this include's parents.
+  ancestorHasWindow?: boolean,
 ]
 
 export function compileQuery(...args: CompileQueryArgs): CompilationResult {
@@ -418,6 +420,7 @@ function compileQueryInternal(
     queryMapping = new WeakMap(),
     parentKeyStream,
     childCorrelationField,
+    ancestorHasWindow = false,
   ]: CompileQueryArgs,
   scopeValidated: boolean,
 ): CompilationResult {
@@ -823,17 +826,20 @@ function compileQueryInternal(
           }
 
           // A static parent filter demands its children at once only when no
-          // window, compiled or later requested with setWindow, can drop the
-          // rows it names: no window at all, or a findOne over one row.
+          // window, compiled or later requested with setWindow, here or in an
+          // enclosing query, can drop the rows it names: no window at all, or
+          // a findOne that shows one row for one named correlation value.
           const staticKeys = getStaticDemandKeys(
             rawQuery,
             subquery.correlationField,
           )
           const initialKeys =
-            !windowRows ||
-            (query.singleResult &&
-              query.offset === undefined &&
-              staticKeys.size === 1)
+            !ancestorHasWindow &&
+            (!windowRows ||
+              (query.singleResult &&
+                query.offset === undefined &&
+                (query.limit ?? 1) > 0 &&
+                staticKeys.size === 1))
               ? staticKeys
               : new Set<unknown>()
           const demandPlans = lazyTargets.map((target) =>
@@ -898,6 +904,7 @@ function compileQueryInternal(
             queryMapping,
             parentKeys,
             subquery.childCorrelationField,
+            ancestorHasWindow || parentHasWindow,
           ],
           true,
         )
@@ -2448,21 +2455,6 @@ function replaceIncludesInSelectValue(
 
   if (!isNestedSelectObject(value)) {
     return { value, replaced: false }
-  }
-
-  if (path.length === 1) {
-    const field = path[0]!
-    const result = replaceIncludesValue(value[field], replacement)
-    if (!result.replaced) {
-      return { value, replaced: false }
-    }
-    return {
-      value: {
-        ...value,
-        [field]: result.value,
-      },
-      replaced: true,
-    }
   }
 
   const [head, ...rest] = path
