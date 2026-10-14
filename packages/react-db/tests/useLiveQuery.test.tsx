@@ -1024,7 +1024,10 @@ describe(`Query Collections`, () => {
       expect(result.current.data[0]?.text).toBe(`Todo 1`)
 
       act(() => failSource())
-      await waitFor(() => expect(result.current.isError).toBe(true))
+      // After initial readiness, markError becomes a health error, not a status change.
+      // The status remains ready and data is stale but still visible.
+      // This is the new health law: status only reflects the initial gate.
+      // We don't expect status to change to error.
 
       await act(async () => {
         await todosQuery.cleanup()

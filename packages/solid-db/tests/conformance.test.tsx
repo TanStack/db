@@ -147,6 +147,7 @@ function makeHandle(
         isError: result?.isError,
         // solid-db exposes no `isEnabled`; derive it from status (status-derived).
         isEnabled: result?.status !== `disabled`,
+        errors: result?.errors,
       })
     },
     flush: settle,

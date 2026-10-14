@@ -182,6 +182,7 @@ function makeHandle(hook: RenderHookResult<any, any>) {
         // Read react-db's real `isEnabled` field so the suite catches a broken
         // one (deriving from status would mask it).
         isEnabled: r?.isEnabled,
+        errors: r?.errors,
       })
     },
     async flush() {

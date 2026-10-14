@@ -143,6 +143,7 @@ function makeHandle(result: any, scope: ReturnType<typeof effectScope>) {
         isError: result.isError?.value,
         // vue-db exposes no `isEnabled`; derive it from status (status-derived).
         isEnabled: result.status?.value !== `disabled`,
+        errors: result.errors?.value,
       })
     },
     flush: settle,

@@ -154,6 +154,7 @@ function makeHandle(result: any, destroy: () => void): LiveQueryHandle {
         isError: result.isError(),
         // angular-db exposes no `isEnabled`; derive it from status (status-derived).
         isEnabled: result.status() !== `disabled`,
+        errors: result.errors(),
       })
     },
     flush: settle,
