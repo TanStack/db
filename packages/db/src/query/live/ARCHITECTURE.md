@@ -1511,7 +1511,8 @@ window rejects `setWindow`. A windowed query routes the includes in its own
 route. A static parent filter seeds child demand only when no `limit`,
 `offset`, or `findOne` over several named rows can drop those rows. Within one
 graph run, an index-backed top-K can briefly hold a row outside its settled
-window until its loader refills it, and that row's children may load. Includes
+window until its loader refills it, and that row's children may load (a
+recorded limit, #2151; published rows stay correct). Includes
 inherited from a `from` subquery and inputs to `fn.select` still route from
 every row before the window (a recorded limit).
 

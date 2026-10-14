@@ -638,16 +638,29 @@ describe(`includes deterministic work-counter oracle`, () => {
  * ## Work
  *
  * The child source is local or on demand. Work is the child rows it delivers
- * (local) or its loads serve (on demand), and the grandchild rows the
- * local grandchild source delivers. Preload may load only the children of the
- * shown rows' groups and the grandchildren of the shown children. A step may
- * load only the children of the rows that entered the window, the
- * grandchildren of the children that entered an include, and the rows the
- * step itself writes, which a local subscription receives whether or not
- * their group is loaded. An on-demand child arrives only through a load, so
- * that path shows routing even for rows the step writes. A query that routes
- * the row after the window, every row tied with an edge, rows before the
- * window, rows `setWindow` dropped, or rows a static filter names fails.
+ * (local) or its loads serve (on demand), and the grandchild rows the local
+ * grandchild source delivers. Preload may load only the children of the shown
+ * rows' groups and the grandchildren of the shown children. A step may newly
+ * load only the groups of rows that entered the window and were not shown
+ * before it, the grandchildren of children that entered an include, and the
+ * rows the step itself writes, which a local subscription receives whether or
+ * not their group is loaded. An on-demand child arrives only through a load,
+ * so that path shows routing even for rows the step writes. A query that
+ * routes the row after the window, every row tied with an edge, rows before
+ * the window, rows `setWindow` dropped, or rows a static filter names fails.
+ *
+ * ## Recorded limit: transient top-K rows (#2151)
+ *
+ * While an index-backed parent top-K refills its window within one graph run,
+ * after a held row moves out, a tie at the window edge loads, or the window
+ * moves, it can briefly hold a row outside the settled window, and that row's
+ * children load. The published rows stay correct. The harness sees such a
+ * checkpoint by counting the change batches the parent Collection delivers to
+ * the query: more than the initial load at preload, or more than the step's
+ * own parent write, means the ordered loader acquired more rows. The generated
+ * campaigns skip the work bound at those checkpoints only (about 2.5% of
+ * them) and still check the rows. Replays pin every known trace and allow
+ * exactly the one extra child row each shows.
  *
  * ## Histories
  *
@@ -694,6 +707,9 @@ type WindowCase = {
   offset: number
   limit: number
   history: Array<WindowCommand>
+  // A replay of a known transient top-K row: the extra child rows it may load
+  // at a checkpoint where the parent's ordered loader had not settled.
+  overshoot?: number
 }
 
 const windowCommand: fc.Arbitrary<WindowCommand> = fc.oneof(
@@ -984,6 +1000,24 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
     const localChildWork = onDemand ? undefined : countSourceWork(childSource)
     const childWork = () => onDemand?.work() ?? localChildWork!().delivered
     const grandWork = countSourceWork(grandchildSource)
+    // Change batches the parent Collection delivers to the query. More than
+    // the step's own parent write (or, at preload, the initial load) means
+    // the ordered loader acquired more rows: a refill or a tie load.
+    let parentBatches = 0
+    const subscribeParents = parentSource.subscribeChanges.bind(parentSource)
+    parentSource.subscribeChanges = (callback, options) =>
+      subscribeParents((changes) => {
+        if (changes.length > 0) parentBatches++
+        callback(changes)
+      }, options)
+    // A checkpoint's work bound, or none where the generated campaign
+    // cannot bound a transient top-K row; a replay allows its overshoot.
+    const workBound = (bound: number, loads: number) =>
+      loads === 0
+        ? bound
+        : testCase.overshoot === undefined
+          ? Number.POSITIVE_INFINITY
+          : bound + testCase.overshoot
     const changeChild = async (type: `insert` | `delete`, row: WindowChild) => {
       if (onDemand) {
         onDemand.change(type, row)
@@ -1154,22 +1188,21 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
     await live.preload()
     await new Promise((resolve) => setTimeout(resolve, 0))
     let before = expectWindow(`rows after preload`)
-    // Parents inserted or moved by a step, which live changes deliver to the
-    // parent's top-K even outside its loaded prefix.
-    const writtenParents = new Set<string>()
+    const preloadLoads = Math.max(0, parentBatches - 1)
     expect(childWork(), `child rows loaded by preload`).toBeLessThanOrEqual(
-      childrenOf(before),
+      workBound(childrenOf(before), preloadLoads),
     )
     expect(
       grandWork().delivered,
       `grandchild rows loaded by preload`,
-    ).toBeLessThanOrEqual(grandchildrenOf(shownKids(before)))
+    ).toBeLessThanOrEqual(
+      workBound(grandchildrenOf(shownKids(before)), preloadLoads),
+    )
 
     for (const [step, command] of testCase.history.entries()) {
       const childBefore = childWork()
       const grandBefore = grandWork().delivered
-      const unitsBefore = sortedUnits()
-      const heldBefore = shown.offset + shown.limit
+      const batchesBefore = parentBatches
       const ids = [...parents.keys()]
       const childIds = [...children.keys()]
       if (command.type === `insert-parent`) {
@@ -1191,7 +1224,6 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
           group,
         }
         parents.set(parent.id, parent)
-        writtenParents.add(parent.id)
         await parentSource.insert(parent).isPersisted.promise
       } else if (command.type === `delete-parent`) {
         if (ids.length === 0) continue
@@ -1207,7 +1239,6 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
           ? Math.max(...ranks) + 1
           : Math.min(...ranks) - 1
         parents.set(id, { ...parents.get(id)!, rank })
-        writtenParents.add(id)
         await parentSource.update(id, (draft) => {
           draft.rank = rank
         }).isPersisted.promise
@@ -1236,34 +1267,25 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
       const after = expectWindow(`rows after step ${step}`)
       const beforeKeys = new Set(before.map((row) => row.key))
       const shownGroups = new Set(before.map((row) => row.group))
-      // Groups the step may newly load: those of rows that entered the
-      // window, and of rows the parent's top-K can hold at an internal
-      // checkpoint, until its loader refills the window within the same
-      // graph run. Those are the rows of its held prefix before the step and
-      // the parents any step has written, which live changes deliver to it.
-      // Groups already shown load nothing.
-      const writtenUnits = new Set(
-        windowUnits(
-          [...writtenParents].flatMap((id) => parents.get(id) ?? []),
-          testCase.distinct,
-        ).map((unit) => unit.key),
-      )
+      // A step may newly load only the groups of rows that entered the
+      // window and were not shown before it.
       const loadable = new Set(
-        [
-          ...after.filter((row) => !beforeKeys.has(row.key)),
-          ...unitsBefore.slice(0, heldBefore),
-          ...sortedUnits().filter((unit) => writtenUnits.has(unit.key)),
-        ]
+        after
+          .filter((row) => !beforeKeys.has(row.key))
           .map((row) => row.group)
           .filter((group) => !shownGroups.has(group)),
       )
       const kidsBefore = shownKids(before)
-      const kidsEntered = new Set([
-        ...[...shownKids(after)].filter((kid) => !kidsBefore.has(kid)),
-        ...[...children.values()]
-          .filter((child) => loadable.has(child.group))
-          .map((child) => child.id),
-      ])
+      const kidsEntered = new Set(
+        [...shownKids(after)].filter((kid) => !kidsBefore.has(kid)),
+      )
+      const parentWrite =
+        command.type === `insert-parent` ||
+        command.type === `delete-parent` ||
+        command.type === `rank`
+          ? 1
+          : 0
+      const stepLoads = Math.max(0, parentBatches - batchesBefore - parentWrite)
       // Child rows the step writes reach a local subscription whether or not
       // their group is loaded, so each counts once: a fresh parent's group,
       // or one inserted or deleted child.
@@ -1282,13 +1304,18 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
         childWork() - childBefore,
         `child rows loaded by step ${step}`,
       ).toBeLessThanOrEqual(
-        [...children.values()].filter((child) => loadable.has(child.group))
-          .length + written,
+        workBound(
+          [...children.values()].filter((child) => loadable.has(child.group))
+            .length + written,
+          stepLoads,
+        ),
       )
       expect(
         grandWork().delivered - grandBefore,
         `grandchild rows loaded by step ${step}`,
-      ).toBeLessThanOrEqual(grandchildrenOf(kidsEntered) + freshGroup)
+      ).toBeLessThanOrEqual(
+        workBound(grandchildrenOf(kidsEntered) + freshGroup, stepLoads),
+      )
       before = after
     }
   } catch (error) {
@@ -1431,24 +1458,115 @@ describe(`includes work under an ordered parent window`, () => {
     }
   })
 
-  // Replays of the transient top-K row: moving a held row past every other
-  // rank lets the top-K hold it until its loader refills the slot.
-  it.each([
-    [`desc`, 24, 12, 1_257_390_839, false],
-    [`asc`, 36, 18, 0, true],
-  ] as const)(
-    `bounds a moved row the %s top-K holds until it refills`,
-    (direction, parents, groups, pick, up) =>
-      checkWindowedIncludeWork({
+  // Replays of transient top-K rows (#2151). Each shows the correct
+  // rows and loads one child row beyond the bound, at a checkpoint where the
+  // parent's ordered loader had not settled: a held row moved past every
+  // other rank, a tie loaded at the window edge during preload, and a window
+  // move while the loader refills. A larger overshoot fails.
+  const transient: Array<[string, WindowCase]> = [
+    [
+      `a desc held row moved to the lowest rank`,
+      {
         ...pinnedWindowCase,
-        parents,
-        groups,
+        parents: 24,
+        groups: 12,
         childrenPerGroup: 1,
-        direction,
+        direction: `desc`,
         offset: 1,
         limit: 1,
-        history: [{ type: `rank`, pick, up }],
-      }),
+        history: [{ type: `rank`, pick: 1_257_390_839, up: false }],
+      },
+    ],
+    [
+      `an asc held row moved to the highest rank`,
+      {
+        ...pinnedWindowCase,
+        parents: 36,
+        groups: 18,
+        childrenPerGroup: 1,
+        offset: 1,
+        limit: 1,
+        history: [{ type: `rank`, pick: 0, up: true }],
+      },
+    ],
+    [
+      `a tie at the window edge during preload (late page)`,
+      {
+        ...pinnedWindowCase,
+        parents: 38,
+        groups: 19,
+        copies: [{ pick: 735_689_178, group: false }],
+        childrenPerGroup: 1,
+        direction: `desc`,
+        offset: 17,
+        limit: 1,
+      },
+    ],
+    [
+      `ties at the window edge during preload (two rows)`,
+      {
+        ...pinnedWindowCase,
+        parents: 33,
+        groups: 17,
+        copies: [
+          { pick: 0, group: false },
+          { pick: 0, group: false },
+          { pick: 0, group: false },
+          { pick: 1_163_054_548, group: false },
+        ],
+        childrenPerGroup: 1,
+        direction: `desc`,
+        offset: 3,
+        limit: 2,
+      },
+    ],
+    [
+      `ties at the window edge during preload (first row)`,
+      {
+        ...pinnedWindowCase,
+        parents: 11,
+        groups: 6,
+        copies: [
+          { pick: 0, group: false },
+          { pick: 0, group: false },
+          { pick: 1_080_707_742, group: false },
+        ],
+        childrenPerGroup: 1,
+        direction: `desc`,
+        offset: 0,
+        limit: 1,
+      },
+    ],
+    [
+      `a window move while the loader refills`,
+      {
+        ...pinnedWindowCase,
+        parents: 33,
+        groups: 17,
+        childrenPerGroup: 1,
+        offset: 1,
+        limit: 2,
+        history: [
+          { type: `rank`, pick: 29_374_524, up: false },
+          { type: `insert-parent`, copy: 5 },
+          { type: `move`, offset: 4, limit: 1 },
+        ],
+      },
+    ],
+  ]
+  it.each(transient)(`bounds a transient top-K row: %s`, (_, testCase) =>
+    checkWindowedIncludeWork({ ...testCase, overshoot: 1 }),
+  )
+
+  // The same replays fail when no overshoot is allowed, so each one reaches
+  // a transient row and the loader-activity observation sees it.
+  it.each(transient)(
+    `reaches a transient top-K row: %s`,
+    async (_, testCase) => {
+      await expect(
+        checkWindowedIncludeWork({ ...testCase, overshoot: 0 }),
+      ).rejects.toThrow(/child rows loaded by/)
+    },
   )
 
   // Reconstruction: the fixed campaign's executed cases reach each premise.
@@ -1492,6 +1610,8 @@ describe(`includes work under an ordered parent window`, () => {
     fcTest.prop([windowCase], campaign.options)(
       `a parent window bounds child loading (${campaign.name})`,
       checkWindowedIncludeWork,
+      // Each run builds its own Collections; allow time per run.
+      oracleRuns(WINDOW_RUNS) * 100,
     )
   }
 })

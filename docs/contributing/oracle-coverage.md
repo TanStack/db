@@ -158,12 +158,16 @@ Histories insert, delete, and move parents, insert and delete children, and move
 the window, 60 base runs per campaign; a reconstruction check requires at least
 three executed fixed cases for the on-demand child, the static filter, limited
 nested children, and each parent form. Rows must equal a relational model.
-Preload may load only the children of the shown rows' groups. A step may newly
-load only groups not shown before it: those of rows that entered the window,
-and of rows the parent's top-K can hold at an internal checkpoint until its
-loader refills the window within the same graph run (its held prefix before
-the step and parents any step has written). Two replays pin a moved row the
-top-K held. On main, a late page delivered 120 child rows for a bound of 9.
+Preload may load only the children of the shown rows' groups, and a step only
+those of rows that entered the window and were not shown before it. Recorded
+limit (#2151): while an index-backed parent top-K refills within one graph run (a held
+row moved out, a tie loaded at the window edge, a window move), it can briefly
+hold a row outside the settled window and load that row's children; published
+rows stay correct. The harness sees such checkpoints as more parent change
+batches than the initial load or the step's own parent write, and the
+generated campaigns skip only their work bound (about 2.5% of checkpoints).
+Six replays pin the known traces and allow exactly the one extra child row each
+shows; with no overshoot allowed, each fails. On main, a late page delivered 120 child rows for a bound of 9.
 Routers that add the row after the window fail the generated campaigns;
 routers that add every row tied with a window edge fail a pinned collapse and
 a random campaign; a child that takes over `setWindow` fails the rows law. A
@@ -171,8 +175,7 @@ a random campaign; a child that takes over `setWindow` fails the rows law. A
 beside its parent load. Focused tests require a window inside a `from` or joined
 subquery not to answer `setWindow`. Limits: includes inherited from a `from`
 subquery and inputs to `fn.select` still route from every row before the
-window, and this owner does not generate them; the transient top-K allowance is
-a work bound, not a promise that such rows never load.
+window, and this owner does not generate them.
 
 Three Ordered acquisition companions own distinct controlled cuts:
 `packages/db/tests/query/load-subset-replay-refinement-oracle.test.ts` checks
