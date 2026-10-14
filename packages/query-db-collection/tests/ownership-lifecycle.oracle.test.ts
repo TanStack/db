@@ -371,6 +371,34 @@ async function runCleanups(): Promise<void> {
   }
 }
 
+// A held-scan comparison and its local teardown are separate failures. Try
+// every release and retain the comparison as the cause if teardown also fails.
+async function cleanupAfterCheck(
+  checkFailure: { reason: unknown } | undefined,
+  releases: ReadonlyArray<() => Promise<unknown> | unknown>,
+): Promise<void> {
+  const cleanupFailures: Array<unknown> = []
+  for (const release of releases) {
+    try {
+      await release()
+    } catch (error) {
+      cleanupFailures.push(error)
+    }
+  }
+  if (cleanupFailures.length === 0) return
+  if (checkFailure) {
+    throw new AggregateError(
+      [checkFailure.reason, ...cleanupFailures],
+      `Ownership comparison and cleanup both failed`,
+      { cause: checkFailure.reason },
+    )
+  }
+  if (cleanupFailures.length === 1) throw cleanupFailures[0]
+  throw new AggregateError(cleanupFailures, `Ownership cleanup failed`, {
+    cause: cleanupFailures[0],
+  })
+}
+
 /**
  * `collection.utils.refetch()` is normally an application barrier. The public
  * contract is `docs/collections/query-collection.md#controlling-refetch-behavior`:
@@ -20886,6 +20914,33 @@ describe(`query collection ownership lifecycle`, () => {
     },
   )
 
+  /** A held-scan assertion stays primary even when both local releases fail. */
+  it(`preserves a held-scan comparison failure through local cleanup`, async () => {
+    const comparison = new Error(`row ownership mismatch`)
+    const firstCleanup = new Error(`first cleanup failed`)
+    const secondCleanup = new Error(`second cleanup failed`)
+    const attempted: Array<string> = []
+    await expect(
+      cleanupAfterCheck({ reason: comparison }, [
+        () => {
+          attempted.push(`first`)
+          throw firstCleanup
+        },
+        () => {
+          attempted.push(`second`)
+          return Promise.reject(secondCleanup)
+        },
+        () => {
+          attempted.push(`third`)
+        },
+      ]),
+    ).rejects.toMatchObject({
+      cause: comparison,
+      errors: [comparison, firstCleanup, secondCleanup],
+    })
+    expect(attempted).toEqual([`first`, `second`, `third`])
+  })
+
   /**
    * A live demand begins while a matching owner's TTL is still valid. Its
    * metadata scan has not finished when that deadline passes, so a historical
@@ -20950,6 +21005,7 @@ describe(`query collection ownership lifecycle`, () => {
             .where(({ item }) => eq(item.category, `shared`))
             .select(({ item }) => ({ id: item.id, name: item.name })),
         )
+        let checkFailure: { reason: unknown } | undefined
         try {
           const preload = live.preload()
           await scanEntered.promise
@@ -21000,10 +21056,15 @@ describe(`query collection ownership lifecycle`, () => {
               false,
             )
           })
+        } catch (error) {
+          checkFailure = { reason: error }
+          throw error
         } finally {
-          releaseScan.resolve()
-          providerResult.resolve([])
-          await live.cleanup()
+          await cleanupAfterCheck(checkFailure, [
+            () => releaseScan.resolve(),
+            () => providerResult.resolve([]),
+            () => live.cleanup(),
+          ])
         }
       } finally {
         vi.useRealTimers()
@@ -21071,6 +21132,7 @@ describe(`query collection ownership lifecycle`, () => {
           .where(({ item }) => eq(item.category, `shared`))
           .select(({ item }) => ({ id: item.id, name: item.name })),
       )
+      let checkFailure: { reason: unknown } | undefined
       try {
         const preload = live.preload()
         await scanEntered.promise
@@ -21093,10 +21155,15 @@ describe(`query collection ownership lifecycle`, () => {
         await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(1))
         providerResult.resolve([shared])
         await preload
+      } catch (error) {
+        checkFailure = { reason: error }
+        throw error
       } finally {
-        releaseScan.resolve()
-        providerResult.resolve([])
-        await live.cleanup()
+        await cleanupAfterCheck(checkFailure, [
+          () => releaseScan.resolve(),
+          () => providerResult.resolve([]),
+          () => live.cleanup(),
+        ])
       }
     } finally {
       vi.useRealTimers()
@@ -21157,6 +21224,7 @@ describe(`query collection ownership lifecycle`, () => {
                   .select(({ item }) => ({ id: item.id, name: item.name })),
               )
             : undefined
+        let checkFailure: { reason: unknown } | undefined
         try {
           const load = Promise.resolve(
             live
@@ -21191,9 +21259,14 @@ describe(`query collection ownership lifecycle`, () => {
           releaseScan.resolve()
           expect(await load).toBe(`AbortError`)
           expect(queryFn).toHaveBeenCalledTimes(0)
+        } catch (error) {
+          checkFailure = { reason: error }
+          throw error
         } finally {
-          releaseScan.resolve()
-          await live?.cleanup()
+          await cleanupAfterCheck(checkFailure, [
+            () => releaseScan.resolve(),
+            () => live?.cleanup(),
+          ])
         }
       } finally {
         vi.useRealTimers()
@@ -21248,6 +21321,7 @@ describe(`query collection ownership lifecycle`, () => {
         )
       const first = buildLive()
       const second = buildLive()
+      let checkFailure: { reason: unknown } | undefined
       try {
         const retiredLoad = first.preload().then(
           () => `fulfilled`,
@@ -21277,11 +21351,16 @@ describe(`query collection ownership lifecycle`, () => {
           ).toEqual([currentHash])
           expect(storage.snapshot().collectionMetadata.has(marker)).toBe(false)
         })
+      } catch (error) {
+        checkFailure = { reason: error }
+        throw error
       } finally {
-        releaseScan.resolve()
-        providerResult.resolve([])
-        await first.cleanup()
-        await second.cleanup()
+        await cleanupAfterCheck(checkFailure, [
+          () => releaseScan.resolve(),
+          () => providerResult.resolve([]),
+          () => first.cleanup(),
+          () => second.cleanup(),
+        ])
       }
     } finally {
       vi.useRealTimers()
