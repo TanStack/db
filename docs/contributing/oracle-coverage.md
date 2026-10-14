@@ -574,14 +574,19 @@ request does not establish filtered coverage; the filtered demand may wait for
 its application or request its exact scope. The settled-full witness
 fails on the original implementation at the provider-call checkpoint.
 A failed full refresh leaves the prior public rows visible but cannot serve a
-new filtered acquisition from that failed Query result. Paired public preload
-histories retain or release an earlier filtered dependent, then require the
-new demand's own filtered provider request with the four-row predicate truth
+new filtered acquisition from that failed Query result. Public preload
+histories retain or release an earlier filtered dependent and also release
+the original full view while that filtered dependent remains. They check the
+retained view's ready rows before the new acquisition, then require the new
+demand's own filtered provider request with the four-row predicate truth
 table, a new matching row, and no new nonmatching row. The original dependent
-keeps its recorded full-Query lease when retained.
+keeps its recorded full-Query lease when retained, even after the full view
+releases.
 The pre-repair shortcut fails
 the retained case at the new preload outcome and provider-scope checkpoint;
-the released control passes.
+the released control passes. A premature full-Query refcount drop when its
+original owner leaves after failure fails at the retained filtered view's old
+row checkpoint; both earlier histories pass that mutant.
 It checks that the provider sees a live physical fetch signal when the first
 full acquisition releases but a narrower acquisition still owns the Query.
 Another held-fetch cut releases the final filtered owner during full Query

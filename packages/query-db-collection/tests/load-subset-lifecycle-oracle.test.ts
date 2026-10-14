@@ -86,6 +86,43 @@ function createQueryClient(): QueryClient {
   })
 }
 
+/** Keep the comparison failure visible while attempting every acquired release. */
+async function checkWithCleanup(
+  check: () => Promise<void> | void,
+  cleanups: ReadonlyArray<() => Promise<unknown> | unknown>,
+): Promise<void> {
+  let checkFailed = false
+  let primaryFailure: unknown
+  try {
+    await check()
+  } catch (error) {
+    checkFailed = true
+    primaryFailure = error
+  }
+
+  const cleanupFailures: Array<unknown> = []
+  for (const cleanup of cleanups) {
+    try {
+      await cleanup()
+    } catch (error) {
+      cleanupFailures.push(error)
+    }
+  }
+  if (checkFailed) {
+    if (cleanupFailures.length > 0) {
+      throw new AggregateError(
+        [primaryFailure, ...cleanupFailures],
+        `Load-subset check and cleanup both failed`,
+        { cause: primaryFailure },
+      )
+    }
+    throw primaryFailure
+  }
+  if (cleanupFailures.length === 1) throw cleanupFailures[0]
+  if (cleanupFailures.length > 1)
+    throw new AggregateError(cleanupFailures, `Load-subset cleanup failed`)
+}
+
 /**
  * The model has two provider categories. The full response proves both; a
  * filtered demand adds no source need while that completed full Query stays
@@ -278,8 +315,10 @@ async function expectPendingFullSourceNeedsAppliedEvidence(): Promise<void> {
  * acquisition. The earlier filtered owner keeps its original full-Query lease
  * and the last ready rows, but its presence cannot lend the failed result to
  * the new owner. The reference response for the new owner is the exact filtered
- * source result. Releasing the earlier owner is the control: both histories
- * must make the same filtered request and settle with the same public rows.
+ * source result. Releasing the earlier owner is the control. A third history
+ * releases the original full owner while the earlier filtered owner retains
+ * its full-Query lease. All three must make the same filtered request and
+ * settle with the same public rows.
  * Real live-query preloads and a QueryClient invalidation drive the history;
  * compare the provider predicate's truth table, new preload outcome, and
  * public rows after the failed full fetch and later filtered acquisition
@@ -288,6 +327,7 @@ async function expectPendingFullSourceNeedsAppliedEvidence(): Promise<void> {
  */
 async function expectFailedFullRefreshDoesNotCoverNewFilteredDemand(
   retainFirstFiltered: boolean,
+  releaseFullAfterFailure: boolean,
 ): Promise<void> {
   const queryClient = createQueryClient()
   const id = `failed-full-source-new-filtered-${collectionSequence++}`
@@ -336,7 +376,8 @@ async function expectFailedFullRefreshDoesNotCoverNewFilteredDemand(
     )
   const firstFiltered = makeFiltered()
   let secondFiltered: ReturnType<typeof makeFiltered> | undefined
-  try {
+  let fullReleased = false
+  await checkWithCleanup(async () => {
     await full.preload()
     await firstFiltered.preload()
     expect(requests).toEqual([`full`])
@@ -350,6 +391,26 @@ async function expectFailedFullRefreshDoesNotCoverNewFilteredDemand(
     ).toBe(`error`)
     expect(requests).toEqual([`full`, `full`])
     expect(collection.toArray.map((row) => row.id).sort()).toEqual([`a1`, `b1`])
+    if (retainFirstFiltered) {
+      expect(firstFiltered.status).toBe(`ready`)
+      expect(firstFiltered.toArray.map((row) => row.id)).toEqual([`a1`])
+    }
+    if (releaseFullAfterFailure) {
+      await full.cleanup()
+      fullReleased = true
+      expect(firstFiltered.status).toBe(`ready`)
+      expect(firstFiltered.toArray.map((row) => row.id)).toEqual([`a1`])
+      expect(collection.toArray.map((row) => row.id).sort()).toEqual([
+        `a1`,
+        `b1`,
+      ])
+      expect(
+        queryClient
+          .getQueryCache()
+          .find({ queryKey: [id], exact: true })
+          ?.getObserversCount(),
+      ).toBe(1)
+    }
 
     providerRows = [
       ...providerRows,
@@ -376,13 +437,13 @@ async function expectFailedFullRefreshDoesNotCoverNewFilteredDemand(
     })
     if (retainFirstFiltered)
       expect(firstFiltered.toArray.map((row) => row.id)).toEqual([`a1`, `a2`])
-  } finally {
-    await firstFiltered.cleanup()
-    await secondFiltered?.cleanup()
-    await full.cleanup()
-    await collection.cleanup()
-    queryClient.clear()
-  }
+  }, [
+    () => firstFiltered.cleanup(),
+    () => secondFiltered?.cleanup(),
+    () => (fullReleased ? undefined : full.cleanup()),
+    () => collection.cleanup(),
+    () => queryClient.clear(),
+  ])
 }
 
 /**
@@ -2598,6 +2659,34 @@ function expectLateRetiredQuery(observation: RetiredQueryObservation): void {
 }
 
 describe(`loadSubset lifecycle oracle`, () => {
+  it(`preserves the comparison failure and each cleanup diagnostic`, async () => {
+    const primary = new Error(`comparison failed after F2 preload`)
+    const firstCleanup = new Error(`first cleanup failed`)
+    const secondCleanup = new Error(`second cleanup failed`)
+    const attempted: Array<string> = []
+    await expect(
+      checkWithCleanup(() => {
+        throw primary
+      }, [
+        () => {
+          attempted.push(`first`)
+          throw firstCleanup
+        },
+        () => {
+          attempted.push(`second`)
+          return Promise.reject(secondCleanup)
+        },
+        () => {
+          attempted.push(`third`)
+        },
+      ]),
+    ).rejects.toMatchObject({
+      cause: primary,
+      errors: [primary, firstCleanup, secondCleanup],
+    })
+    expect(attempted).toEqual([`first`, `second`, `third`])
+  })
+
   it(`reuses an active complete full-source Query for a filtered demand`, async () => {
     await expectActiveFullSourceServesFilteredDemand()
   })
@@ -2607,13 +2696,30 @@ describe(`loadSubset lifecycle oracle`, () => {
   })
 
   it.each([
-    { first: `retained`, retainFirstFiltered: true },
-    { first: `released`, retainFirstFiltered: false },
+    {
+      first: `retained`,
+      full: `retained`,
+      retainFirstFiltered: true,
+      releaseFullAfterFailure: false,
+    },
+    {
+      first: `released`,
+      full: `retained`,
+      retainFirstFiltered: false,
+      releaseFullAfterFailure: false,
+    },
+    {
+      first: `retained`,
+      full: `released`,
+      retainFirstFiltered: true,
+      releaseFullAfterFailure: true,
+    },
   ])(
-    `loads an exact filtered demand after a failed full refresh with the first filtered owner $first`,
-    async ({ retainFirstFiltered }) => {
+    `loads an exact filtered demand after a failed full refresh with the first filtered owner $first and full owner $full`,
+    async ({ retainFirstFiltered, releaseFullAfterFailure }) => {
       await expectFailedFullRefreshDoesNotCoverNewFilteredDemand(
         retainFirstFiltered,
+        releaseFullAfterFailure,
       )
     },
   )
