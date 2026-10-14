@@ -11,6 +11,7 @@ import {
   compileSingleRowExpression,
   deepEquals,
   getLoadSubsetDemandKey,
+  makeComparator,
   toBooleanPredicate,
   validateSyncPersistenceCapability,
   warnOnce,
@@ -1065,10 +1066,6 @@ export function queryCollectionOptions(
   // transport. Pin each demand to its chosen Query until its final release.
   const fullSourceDependents = new Map<string, number>()
 
-  // During an explicit on-demand refetch, an ordered page's Query function reads
-  // the served prefix shared by pages with its predicate and order.
-  const prefixRefetches = new Map<string, typeof queryFn>()
-
   // Eager startup holds one reference until cleanup. Cache removal detaches
   // observation, not that ownership or its rows.
   let ensureEagerSubscription = () => {}
@@ -2065,86 +2062,73 @@ export function queryCollectionOptions(
               directWriteGeneration,
             ),
           )
-          const fetchPrefix = prefixRefetches.get(logicalHash)
-          if (fetchPrefix) return fetchPrefix(context)
-          // Any other refetch of a served ordered page, such as an
-          // invalidation, reads that page's own served prefix.
+          // A refetch of a served ordered page reads its served prefix.
           const page =
             syncMode === `on-demand`
-              ? pagePrefix(logicalHash, localObserver.getCurrentQuery())
+              ? pagePrefix(localObserver.getCurrentQuery())
               : undefined
-          if (page) return fetchServedPrefix(page, context, context.signal)
-          const fetchRequest = () => {
-            // A shared Query can outlive the acquisition that installed this
-            // queryFn. Use the Query signal for shared fetches, but preserve its
-            // lazy getter so an ignoring provider does not cause Query Core to
-            // cancel an unobserved fetch.
-            const queryWithSharedSignal = () => {
-              const sharedContext = Object.defineProperties(
-                {} as typeof context,
-                Object.getOwnPropertyDescriptors(context),
-              )
-              sharedContext.meta = {
-                ...context.meta,
-                loadSubsetOptions: {
-                  ...requestOptions,
-                  get signal() {
-                    return context.signal
-                  },
+          if (page) return readServedPrefix(page, context)
+          // A shared Query can outlive the acquisition that installed this
+          // queryFn. Use the Query signal for shared fetches, but preserve its
+          // lazy getter so an ignoring provider does not cause Query Core to
+          // cancel an unobserved fetch.
+          const queryWithSharedSignal = () => {
+            const sharedContext = Object.defineProperties(
+              {} as typeof context,
+              Object.getOwnPropertyDescriptors(context),
+            )
+            sharedContext.meta = {
+              ...context.meta,
+              loadSubsetOptions: {
+                ...requestOptions,
+                get signal() {
+                  return context.signal
                 },
-              }
-              return queryFunction(sharedContext)
+              },
             }
-            if (
-              (queryRefCounts.get(logicalHash) ?? 0) > 1 ||
-              (physicalQuery?.getObserversCount() ?? 0) > 1 ||
-              (hashedQueryKey === fullSourceHash &&
-                fullSourceDependents.size) ||
-              requestOptions.signal?.aborted
-            ) {
-              return queryWithSharedSignal()
-            }
-            const recoverReleasedSignal = (error: unknown) => {
-              // A peer can acquire the Query after this request starts with the
-              // first acquisition's signal. Retry only that signal's rejection
-              // or an AbortError while the same physical Query still has a live
-              // owner. A fresh AbortError has no provider provenance, so this
-              // bounded retry can also include an unrelated AbortError.
-              const isAbortError =
-                typeof error === `object` &&
-                error !== null &&
-                `name` in error &&
-                error.name === `AbortError`
-              if (
-                !requestOptions.signal?.aborted ||
-                (error !== requestOptions.signal.reason && !isAbortError) ||
-                !physicalQuery ||
-                physicalQuery.getObserversCount() === 0 ||
-                queryClient.getQueryCache().find({
-                  queryKey: context.queryKey,
-                  exact: true,
-                }) !== physicalQuery ||
-                physicalQuery.state.fetchStatus !== `fetching`
-              ) {
-                throw error
-              }
-              return queryWithSharedSignal()
-            }
-            try {
-              return Promise.resolve(queryFunction(context)).catch(
-                recoverReleasedSignal,
-              )
-            } catch (error) {
-              return recoverReleasedSignal(error)
-            }
+            return queryFunction(sharedContext)
           }
-          const result = fetchRequest()
-          if (!requestOptions.orderBy?.length || select) return result
-          const query = localObserver.getCurrentQuery()
-          return Promise.resolve(result).then((data) => {
-            recordServedBoundary(query, requestOptions, data)
-            return data
-          })
+          if (
+            (queryRefCounts.get(logicalHash) ?? 0) > 1 ||
+            (physicalQuery?.getObserversCount() ?? 0) > 1 ||
+            (hashedQueryKey === fullSourceHash && fullSourceDependents.size) ||
+            requestOptions.signal?.aborted
+          ) {
+            return queryWithSharedSignal()
+          }
+          const recoverReleasedSignal = (error: unknown) => {
+            // A peer can acquire the Query after this request starts with the
+            // first acquisition's signal. Retry only that signal's rejection
+            // or an AbortError while the same physical Query still has a live
+            // owner. A fresh AbortError has no provider provenance, so this
+            // bounded retry can also include an unrelated AbortError.
+            const isAbortError =
+              typeof error === `object` &&
+              error !== null &&
+              `name` in error &&
+              error.name === `AbortError`
+            if (
+              !requestOptions.signal?.aborted ||
+              (error !== requestOptions.signal.reason && !isAbortError) ||
+              !physicalQuery ||
+              physicalQuery.getObserversCount() === 0 ||
+              queryClient.getQueryCache().find({
+                queryKey: context.queryKey,
+                exact: true,
+              }) !== physicalQuery ||
+              physicalQuery.state.fetchStatus !== `fetching`
+            ) {
+              throw error
+            }
+            return queryWithSharedSignal()
+          }
+          try {
+            return Promise.resolve(queryFunction(context)).catch(
+              recoverReleasedSignal,
+            )
+          } catch (error) {
+            return recoverReleasedSignal(error)
+          }
         },
         meta: extendedMeta,
         structuralSharing: true,
@@ -2417,6 +2401,7 @@ export function queryCollectionOptions(
       const currentQuery = queryClient
         .getQueryCache()
         .find({ queryKey, exact: true })
+      if (currentQuery) recordServedBoundary(currentQuery, newItemsArray)
       const cachedRemoteFetchStart =
         currentQuery !== undefined &&
         queryCollectionSuccessfulFetchData.get(currentQuery) ===
@@ -3620,7 +3605,8 @@ export function queryCollectionOptions(
 
     const cleanup = () => {
       if (activeSyncSession === syncSession) activeSyncSession = undefined
-      prefixRefetchAbort?.abort()
+      prefixReadAbort.abort()
+      prefixReadAbort = new AbortController()
       pendingStartupLoads.clear()
       fullSourceDependents.clear()
       ensureEagerSubscription = () => {}
@@ -3802,13 +3788,14 @@ export function queryCollectionOptions(
    *
    * Refetching each page alone can leave a gap: a row that now sorts between
    * two pages is in neither result, and the loader sees no change. A refetch
-   * of a served page therefore reads its prefix with the request shapes the
-   * loader itself sends: a first page, then a tie and a cursor continuation
-   * from each last row, until a row sorts past the boundary or a page comes back
-   * short. A provider may honor either the cursor or the offset. An explicit
-   * refetch reads each predicate and order's deepest served prefix once, and
-   * every page with that predicate and order takes the combined rows. Other
-   * requests refetch as themselves.
+   * of a served page therefore reads its predicate and order's deepest served
+   * prefix with the request shapes the loader itself sends: a first page,
+   * then a tie and a cursor continuation from each last row, until a row
+   * sorts past the boundary or a page is empty. A provider may honor either
+   * the cursor or the offset, and may return fewer rows than a request's
+   * limit. Pages that refetch in one synchronous burst, such as one
+   * `refetch()` or one invalidation, share one read. Other requests refetch
+   * as themselves.
    */
   // One read of a served prefix, shared by the ordered pages that have the
   // same predicate and order. It exists only in this adapter.
@@ -3818,83 +3805,51 @@ export function queryCollectionOptions(
     boundary: unknown
     firstLimit: number
     pageSize: number
-    pages: Array<string>
   }
 
   // Each ordered page's boundary, and how far its request reached in the
-  // order. `null` records an empty first result. Both stay fixed until the
-  // loader starts a new acquisition attempt for the page.
+  // order, from its first applied result. `null` records an empty result.
+  // Both stay fixed until the loader starts a new acquisition attempt for
+  // the page.
   const servedBoundaries = new WeakMap<
     AnyQuery,
     { boundary: unknown; count: number } | null
   >()
   const recordServedBoundary = (
     query: AnyQuery,
-    options: LoadSubsetOptions,
-    data: unknown,
+    rows: Array<Record<string, unknown>>,
   ): void => {
-    if (servedBoundaries.has(query) || !Array.isArray(data)) return
-    const last = data.at(-1)
+    const options = query.meta?.loadSubsetOptions
+    if (
+      servedBoundaries.has(query) ||
+      !isStoredLoadSubsetOptions(options) ||
+      !options.orderBy?.length
+    )
+      return
+    const last = rows.at(-1)
     servedBoundaries.set(
       query,
       last === undefined
         ? null
         : {
             boundary: compileSingleRowExpression(
-              options.orderBy![0]!.expression,
+              options.orderBy[0]!.expression,
             )(last),
-            count: (options.offset ?? 0) + data.length,
+            count: (options.offset ?? 0) + rows.length,
           },
     )
   }
 
-  /**
-   * Compare two leading order values in request order. Values of different
-   * kinds, NaN, and invalid Dates are not comparable.
-   */
-  const compareLeadingValues = (
-    orderBy: NonNullable<LoadSubsetOptions[`orderBy`]>,
-    value: unknown,
-    boundary: unknown,
-  ): number | undefined => {
-    const { direction, nulls } = orderBy[0]!.compareOptions
-    if (value == null || boundary == null) {
-      if (value == null && boundary == null) return 0
-      return (value == null) === (nulls === `first`) ? -1 : 1
-    }
-    if (value instanceof Date !== boundary instanceof Date) return undefined
-    // Both are Dates or both are primitives of one kind, compared natively.
-    const left = (value instanceof Date ? value.getTime() : value) as number
-    const right = (
-      boundary instanceof Date ? boundary.getTime() : boundary
-    ) as number
-    if (
-      typeof left !== typeof right ||
-      Number.isNaN(left) ||
-      Number.isNaN(right)
-    )
-      return undefined
-    const order = left < right ? -1 : left > right ? 1 : 0
-    return direction === `asc` ? order : -order
-  }
-
-  // A read boundary that sorts nowhere. Comparing it with any value is
-  // undefined, so the read continues through the rest of the order.
-  const wholeOrder = Symbol(`whole order`)
-
   // One ordered page's served prefix, from its recorded boundary. A page with
   // no recorded boundary, or an empty first result, has none.
-  const pagePrefix = (
-    hashedQueryKey: string,
-    query: AnyQuery,
-  ): PrefixRead | undefined => {
+  const pagePrefix = (query: AnyQuery): PrefixRead | undefined => {
     const options = query.meta?.loadSubsetOptions
     const served = servedBoundaries.get(query)
     // A selected response has no row array to combine.
     if (select || !served || !isStoredLoadSubsetOptions(options)) return
     const { where, orderBy } = options
     if (!orderBy?.length) return
-    // The first prefix request reads as far as the page's serve reached, so a
+    // The first request reads as far as the page's serve reached, so a
     // repeated refetch reads the same rows rather than more.
     return {
       where,
@@ -3902,53 +3857,58 @@ export function queryCollectionOptions(
       boundary: served.boundary,
       firstLimit: served.count,
       pageSize: options.limit ?? served.count,
-      pages: [hashedQueryKey],
     }
   }
 
-  const planPrefixRefetches = (
-    hashedQueryKeys: Array<string>,
-  ): Array<PrefixRead> => {
-    const reads = new Map<string, PrefixRead>()
-    for (const hashedQueryKey of hashedQueryKeys) {
-      const query = state.observers.get(hashedQueryKey)?.getCurrentQuery()
-      if (!query) continue
-      const options = query.meta?.loadSubsetOptions
-      // Data that was cached or hydrated before this run was served too.
-      if (isStoredLoadSubsetOptions(options) && options.orderBy?.length) {
-        recordServedBoundary(query, options, query.state.data)
+  const readKey = ({ where, orderBy }: PrefixRead): string =>
+    getLoadSubsetDemandKey({ where, orderBy })!
+
+  // A read through the deepest boundary of every tracked page with the same
+  // predicate and order. Ordering uses the loader's own comparator.
+  const deepestPrefix = (first: PrefixRead): PrefixRead => {
+    const key = readKey(first)
+    const compare = makeComparator(first.orderBy[0]!.compareOptions)
+    const read = { ...first }
+    for (const observer of state.observers.values()) {
+      const page = pagePrefix(observer.getCurrentQuery())
+      if (!page || readKey(page) !== key) continue
+      if (compare(page.boundary, read.boundary) > 0) {
+        read.boundary = page.boundary
       }
-      const page = pagePrefix(hashedQueryKey, query)
-      if (!page) continue
-      const readKey = getLoadSubsetDemandKey({
-        where: page.where,
-        orderBy: page.orderBy,
-      })!
-      const read = reads.get(readKey)
-      if (!read) {
-        reads.set(readKey, page)
-        continue
-      }
-      const order = compareLeadingValues(
-        page.orderBy,
-        page.boundary,
-        read.boundary,
-      )
-      if (order === undefined) read.boundary = wholeOrder
-      else if (order > 0) read.boundary = page.boundary
       read.firstLimit = Math.max(read.firstLimit, page.firstLimit)
       read.pageSize = Math.max(read.pageSize, page.pageSize)
-      read.pages.push(hashedQueryKey)
     }
-    return [...reads.values()]
+    return read
+  }
+
+  // Reads started in one synchronous burst, keyed by predicate and order.
+  // Query Core calls each page's Query function synchronously as its fetch
+  // starts, so one `refetch()` or invalidation shares one read.
+  const prefixReads = new Map<string, Promise<Array<Record<string, unknown>>>>()
+  // Cleanup aborts unfinished reads. A read serves several pages, so no one
+  // page's Query signal may cancel it.
+  let prefixReadAbort = new AbortController()
+
+  const readServedPrefix = (
+    page: PrefixRead,
+    context: QueryFunctionContext<any>,
+  ): Promise<Array<Record<string, unknown>>> => {
+    const key = readKey(page)
+    let read = prefixReads.get(key)
+    if (!read) {
+      read = fetchServedPrefix(deepestPrefix(page), context)
+      prefixReads.set(key, read)
+      queueMicrotask(() => prefixReads.delete(key))
+    }
+    return read
   }
 
   const fetchServedPrefix = async (
     read: PrefixRead,
     context: QueryFunctionContext<any>,
-    signal: AbortSignal,
   ): Promise<Array<Record<string, unknown>>> => {
     const { where, orderBy, boundary } = read
+    const { signal } = prefixReadAbort
     const request = async (options: LoadSubsetOptions) => {
       const page: unknown = await queryFn({
         client: context.client,
@@ -3965,34 +3925,42 @@ export function queryCollectionOptions(
       return page as Array<Record<string, unknown>>
     }
     const rows = new Map<string | number, Record<string, unknown>>()
+    const add = (page: Array<Record<string, unknown>>) =>
+      page.forEach((row) => rows.set(getKey(row), row))
     const leadingValue = compileSingleRowExpression(orderBy[0]!.expression)
-    let limit = read.firstLimit
-    let page = await request({ where, orderBy, limit })
+    const compare = makeComparator(orderBy[0]!.compareOptions)
+    let page = await request({ where, orderBy, limit: read.firstLimit })
     let offset = 0
     let previousKeys: string | undefined
     for (;;) {
-      page.forEach((row) => rows.set(getKey(row), row))
+      add(page)
       offset += page.length
       const last = page.at(-1)
-      if (last === undefined || page.length < limit) break
+      // A short page does not prove source exhaustion; an empty one ends it.
+      if (last === undefined) break
       const value = leadingValue(last)
-      const order = compareLeadingValues(orderBy, value, boundary)
-      if (order !== undefined && order > 0) break
+      const order = compare(value, boundary)
+      if (order > 0) break
       const cursor = buildCursorExpressions(orderBy, value)
-      if (order === undefined || !cursor) {
+      if (!cursor) {
         // No cursor can continue from this value. Read the rest of the order.
-        const rest = await request({ where, orderBy, offset })
-        rest.forEach((row) => rows.set(getKey(row), row))
+        add(await request({ where, orderBy, offset }))
         break
       }
       // A cursor starts after the value, so first read the rest of its tie.
-      const tie = await request({
-        where: where ? and(where, cursor.whereCurrent) : cursor.whereCurrent,
-      })
-      tie.forEach((row) => rows.set(getKey(row), row))
+      add(
+        await request({
+          where: where ? and(where, cursor.whereCurrent) : cursor.whereCurrent,
+        }),
+      )
       if (order === 0) break
-      limit = read.pageSize
-      page = await request({ where, orderBy, cursor, offset, limit })
+      page = await request({
+        where,
+        orderBy,
+        cursor,
+        offset,
+        limit: read.pageSize,
+      })
       // A provider that honors neither the cursor nor the offset returns the
       // same page again. Fail instead of requesting forever.
       const keys = JSON.stringify(page.map(getKey))
@@ -4003,32 +3971,10 @@ export function queryCollectionOptions(
       }
       previousKeys = keys
     }
+    // Keep only the served prefix, in its order.
     return [...rows.values()]
-  }
-
-  // A newer refetch or cleanup aborts an unfinished prefix read.
-  let prefixRefetchAbort: AbortController | undefined
-
-  const startPrefixRefetches = (
-    reads: Array<PrefixRead>,
-  ): Map<string, typeof queryFn> => {
-    const plan = new Map<string, typeof queryFn>()
-    if (reads.length === 0) return plan
-    prefixRefetchAbort?.abort()
-    const { signal } = (prefixRefetchAbort = new AbortController())
-    for (const read of reads) {
-      let prefixFetch: Promise<Array<Record<string, unknown>>> | undefined
-      const fetchPrefix: typeof queryFn = (context) =>
-        (prefixFetch ??= fetchServedPrefix(read, context, signal).catch(
-          (error: unknown) => {
-            // A Query retry starts a new prefix read.
-            prefixFetch = undefined
-            throw error
-          },
-        ))
-      for (const page of read.pages) plan.set(page, fetchPrefix)
-    }
-    return plan
+      .filter((row) => compare(leadingValue(row), boundary) <= 0)
+      .sort((a, b) => compare(leadingValue(a), leadingValue(b)))
   }
 
   /**
@@ -4059,11 +4005,6 @@ export function queryCollectionOptions(
     awaitApplications: boolean,
   ): ReturnType<RefetchFn> => {
     const allQueryKeys = [...hashToQueryKey.values()]
-    const prefixPlan = startPrefixRefetches(
-      syncMode === `on-demand`
-        ? planPrefixRefetches(allQueryKeys.map((key) => hashKey(key)))
-        : [],
-    )
 
     // A replaced eager Query must reattach before refetch. An idle observer
     // on the same Query is applied explicitly below to avoid an extra fetch.
@@ -4083,18 +4024,9 @@ export function queryCollectionOptions(
       let result: QueryObserverResult<any, any>
       try {
         cancelPreWriteFetch(query, hashedQueryKey)
-        // Query Core calls the query function synchronously when the fetch
-        // starts, so only this refetch reads the served prefix.
-        const fetchPrefix = prefixPlan.get(hashedQueryKey)
-        if (fetchPrefix) prefixRefetches.set(hashedQueryKey, fetchPrefix)
-        let fetch: Promise<QueryObserverResult<any, any>>
-        try {
-          fetch = queryObserver.refetch({
-            throwOnError: opts?.throwOnError,
-          })
-        } finally {
-          prefixRefetches.delete(hashedQueryKey)
-        }
+        const fetch = queryObserver.refetch({
+          throwOnError: opts?.throwOnError,
+        })
         query = queryObserver.getCurrentQuery()
         startingResult = queryObserver.getCurrentResult()
         const fetchStart = queryCollectionCurrentFetchStarts.get(query)

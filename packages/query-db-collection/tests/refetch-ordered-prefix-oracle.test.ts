@@ -44,10 +44,12 @@ import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
  * collection's pages, such as `invalidateQueries`. Between those checkpoints
  * the provider may lag the backend, so no window is owed.
  *
- * Two neighboring laws bound how the refetch does its work:
+ * Neighboring laws bound how the refetch does its work:
  * - Repeating a refetch with an unchanged backend serves no more rows than the
  *   refetch before it. A refetch reads the served prefixes, not a prefix that
  *   grows with each read.
+ * - A refetch or invalidation of an unchanged backend starts one first-page
+ *   request for the window's predicate and order, not one per served page.
  * - A provider that honors neither `cursor` nor `offset` breaks the request
  *   contract. Refetch must then settle with an error, not request forever.
  * Each request also carries a Query key that matches its own request data,
@@ -63,13 +65,20 @@ import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
  *   is current. There the loader can stop refilling after a joined-side
  *   removal when its continuation returns only rows it already holds. That
  *   defect predates this fix and is recorded as open in the coverage map.
- * - It does not check refetch request counts or cost. The cursor-pagination
- *   integration oracle owns the zero-call law for a fresh `createCursorPager`
- *   cache.
- * - The provider is controlled: it evaluates each request exactly.
+ * - The generated campaigns use an uncapped provider. With a provider that
+ *   caps pages, a row whose order changes can drop out of the window after a
+ *   refetch even on main, through the loader's own repair. That defect is
+ *   separate from #2136 and has an `it.fails` witness. The named replays run
+ *   the issue trace with a page cap.
+ * - It checks refetch cost only as relations between reads of the same state.
+ *   The cursor-pagination integration oracle owns the zero-call law for a
+ *   fresh `createCursorPager` cache.
+ * - The provider is controlled: it evaluates each request exactly. It may
+ *   return fewer rows than a request's `limit`, as page-capped APIs do; a short
+ *   reply does not prove source exhaustion (glossary).
  */
 
-type Item = { id: number; rank: number }
+type Item = { id: number; rank: number; label: string }
 type Marker = { id: number; itemId: number }
 
 // ## Model
@@ -88,12 +97,21 @@ type Scenario = {
   // One order term uses unique ranks. Two terms allow rank ties, which the
   // loader resolves with separate tie requests.
   terms: 1 | 2
+  // The leading order term: a number, or a mixed-case string under the
+  // default locale collation, whose order differs from code-unit order.
+  orderKey: `rank` | `label`
+  // The most rows the provider returns for one request, if it caps pages.
+  pageCap: number | undefined
   limit: number
   offset: number
 }
 
-function compareRows(a: Item, b: Item, terms: 1 | 2): number {
-  return b.rank - a.rank || (terms === 2 ? a.id - b.id : 0)
+function compareRows(a: Item, b: Item, scenario: Scenario): number {
+  const leading =
+    scenario.orderKey === `rank`
+      ? b.rank - a.rank
+      : b.label.localeCompare(a.label)
+  return leading || (scenario.terms === 2 ? a.id - b.id : 0)
 }
 
 function expectedWindow(
@@ -103,7 +121,7 @@ function expectedWindow(
 ): Array<number> {
   return [...backend.values()]
     .filter((row) => markers.has(row.id))
-    .sort((a, b) => compareRows(a, b, scenario.terms))
+    .sort((a, b) => compareRows(a, b, scenario))
     .slice(scenario.offset, scenario.offset + scenario.limit)
     .map((row) => row.id)
 }
@@ -167,6 +185,9 @@ const caseArbitrary: fc.Arbitrary<Case> = fc.record({
     encoding: fc.constant(`cursor` as const),
     functionKey: fc.boolean(),
     terms: fc.constantFrom(1 as const, 2 as const),
+    orderKey: fc.constantFrom(`rank` as const, `label` as const),
+    // Page caps run in named replays only; see the limits above.
+    pageCap: fc.constant(undefined),
     limit: fc.integer({ min: 1, max: 3 }),
     offset: fc.integer({ min: 0, max: 1 }),
   }),
@@ -233,9 +254,13 @@ async function settle(): Promise<void> {
 async function startRun(testCase: Case): Promise<Run> {
   const { scenario } = testCase
   const id = `refetch-ordered-prefix-${collectionSequence++}`
+  // Letters alternate case, so locale and code-unit orders differ.
+  const letters = [`a`, `B`, `c`, `D`, `e`, `F`]
   const toItem = (row: { id: number; rank: number }): Item => ({
     id: row.id,
     rank: scenario.terms === 1 ? row.rank * 100 + row.id : row.rank,
+    label:
+      (letters[row.rank] ?? `z`) + (scenario.terms === 1 ? String(row.id) : ``),
   })
   const backend = new Map(testCase.initial.map((row) => [row.id, toItem(row)]))
   const markers = new Set(
@@ -262,11 +287,12 @@ async function startRun(testCase: Case): Promise<Run> {
       ),
     )
     if (options.orderBy) {
-      page.sort((a, b) => compareRows(a, b, scenario.terms))
+      page.sort((a, b) => compareRows(a, b, scenario))
       if (!usesCursor && encoding !== `ignore`) {
         page = page.slice(options.offset ?? 0)
       }
       if (options.limit !== undefined) page = page.slice(0, options.limit)
+      if (scenario.pageCap !== undefined) page = page.slice(0, scenario.pageCap)
     }
     servedRows += page.length
     return page.map((row) => ({ ...row }))
@@ -325,7 +351,10 @@ async function startRun(testCase: Case): Promise<Run> {
         eq(item.id, marker.itemId),
       )
       .where(({ marker }) => not(isUndefined(marker.itemId)))
-      .orderBy(({ item }) => item.rank, `desc`)
+      .orderBy(
+        ({ item }) => (scenario.orderKey === `rank` ? item.rank : item.label),
+        `desc`,
+      )
     return (
       scenario.terms === 2
         ? ordered.orderBy(({ item }) => item.id, `asc`)
@@ -447,19 +476,51 @@ async function checkCase(testCase: Case): Promise<Observation> {
     }
     // Repeat the refetch twice with the backend unchanged. The second read
     // must serve no more rows than the first.
-    const servedBy = async () => {
+    // A first-page request is ordered and limited, with no cursor.
+    const firstPageRequests = (from: number) =>
+      run.requests
+        .slice(from)
+        .filter(
+          (options) =>
+            options.orderBy !== undefined &&
+            options.limit !== undefined &&
+            options.cursor === undefined,
+        ).length
+    const servedBy = async (command: Command) => {
       const before = run.servedRows()
-      await run.apply({ type: `refetch` })
+      const requestsBefore = run.requests.length
+      await run.apply(command)
+      // The backend is unchanged, so the loader starts no repair and every
+      // first-page request comes from the refetch itself.
+      const firstPages = firstPageRequests(requestsBefore)
+      if (firstPages > 1) {
+        throw new Error(
+          `a ${command.type} of an unchanged backend started ${firstPages} first-page requests; expected at most 1`,
+        )
+      }
       return run.servedRows() - before
     }
-    const first = await servedBy()
-    const second = await servedBy()
+    // The first repeat may still settle loader work that the history
+    // started, so only later repeats check the first-page law.
+    const before = run.servedRows()
+    await run.apply({ type: `refetch` })
+    const first = run.servedRows() - before
+    const second = await servedBy({ type: `refetch` })
     if (second > first) {
       throw new Error(
         `a repeated refetch served ${second} rows after ${first} with an unchanged backend`,
       )
     }
     check(`after repeated refetches`)
+    // An invalidation refetches every page at once. It reads the same served
+    // prefixes as an explicit refetch, so it serves no more rows.
+    const invalidated = await servedBy({ type: `invalidate` })
+    if (invalidated > second) {
+      throw new Error(
+        `an invalidation served ${invalidated} rows; an explicit refetch of the same state served ${second}`,
+      )
+    }
+    check(`after an invalidation of an unchanged backend`)
     if (run.keyMismatches() > 0) {
       throw new Error(
         `${run.keyMismatches()} requests carried a Query key that did not match their request data`,
@@ -541,12 +602,41 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
         scenario: {
           encoding,
           functionKey: false,
+          orderKey: `rank`,
+          pageCap: undefined,
           terms: 1,
           limit: 2,
           offset: 0,
         },
         // With one order term the fixture rank is `rank * 100 + id`, so
         // rank 0 orders these rows by id: 10, 4, 1, 0.
+        initial: [10, 4, 1, 0].map((id) => ({ id, rank: 0, marked: true })),
+        history: [
+          { type: `flip`, id: 10 },
+          { type: `upsert`, id: 5, rank: 0 },
+          { type: `flip`, id: 5 },
+          { type: `upsert`, id: 6, rank: 0 },
+        ],
+      })
+      expect(observation.reachedLaggingRefetchAfterContinuation).toBe(true)
+    },
+  )
+
+  // The issue's trace with a provider that returns one row per request. A
+  // short reply does not end the order, so the prefix read must continue.
+  it.each([`cursor`, `offset`] as const)(
+    `shows a moved row after a refetch when the provider caps pages (%s encoding)`,
+    async (encoding) => {
+      const observation = await checkCase({
+        scenario: {
+          encoding,
+          functionKey: false,
+          orderKey: `rank`,
+          pageCap: 1,
+          terms: 1,
+          limit: 2,
+          offset: 0,
+        },
         initial: [10, 4, 1, 0].map((id) => ({ id, rank: 0, marked: true })),
         history: [
           { type: `flip`, id: 10 },
@@ -569,6 +659,8 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
         scenario: {
           encoding,
           functionKey: false,
+          orderKey: `rank`,
+          pageCap: undefined,
           terms: 1,
           limit: 2,
           offset: 0,
@@ -596,6 +688,8 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
         scenario: {
           encoding,
           functionKey: true,
+          orderKey: `rank`,
+          pageCap: undefined,
           terms: 2,
           limit: 2,
           offset: 0,
@@ -626,6 +720,8 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
       scenario: {
         encoding: `cursor`,
         functionKey: false,
+        orderKey: `rank`,
+        pageCap: undefined,
         terms: 1,
         limit: 1,
         offset: 0,
@@ -658,6 +754,8 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
         scenario: {
           encoding: `offset`,
           functionKey: false,
+          orderKey: `rank`,
+          pageCap: undefined,
           terms: 1,
           limit: 1,
           offset: 0,
@@ -684,6 +782,8 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
         scenario: {
           encoding: `cursor`,
           functionKey: false,
+          orderKey: `rank`,
+          pageCap: undefined,
           terms: 1,
           limit: 2,
           offset: 0,
@@ -719,6 +819,37 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
       } finally {
         await run.cleanup()
       }
+    },
+  )
+
+  it.fails(
+    `a capped provider keeps a moved row in the window after a refetch (known loader defect)`,
+    async () => {
+      await checkCase({
+        scenario: {
+          encoding: `cursor`,
+          functionKey: false,
+          orderKey: `rank`,
+          pageCap: 2,
+          terms: 1,
+          limit: 2,
+          offset: 1,
+        },
+        initial: [
+          { id: 0, rank: 1, marked: true },
+          { id: 1, rank: 0, marked: false },
+        ],
+        history: [
+          { type: `flip`, id: 7 },
+          { type: `upsert`, id: 2, rank: 1 },
+          { type: `upsert`, id: 7, rank: 0 },
+          { type: `refetch` },
+          { type: `delete`, id: 3 },
+          { type: `invalidate` },
+          { type: `upsert`, id: 3, rank: 1 },
+          { type: `upsert`, id: 0, rank: 0 },
+        ],
+      })
     },
   )
 
