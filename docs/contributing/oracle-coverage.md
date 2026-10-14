@@ -147,6 +147,17 @@ level. Provider scans, internal index traversal, facade allocations, and
 elapsed time remain outside this owner; DB includes-work counts source
 Collection reads and delivered changes, not internal index traversal.
 
+The DB includes-work owner
+(`packages/db/tests/query/includes-work-counter-oracle.test.ts`) also generates
+an ordered parent window with `offset`, `limit`, and optionally `distinct`,
+over a `materialize` include, through parent inserts, deletes, and rank moves,
+child inserts and deletes, and `setWindow` moves. Rows must equal a relational
+model, and child rows delivered must stay within the children of the shown
+parents plus one parent's headroom. On main, a late page delivered 96 child
+rows for a bound of 9, and 180 with `distinct`. A compiler that routes
+includes from rows before the window fails it, and one that routes none fails
+its rows law.
+
 Three Ordered acquisition companions own distinct controlled cuts:
 `packages/db/tests/query/load-subset-replay-refinement-oracle.test.ts` checks
 held replay authority and public snapshots;

@@ -750,6 +750,8 @@ function compileQueryInternal(
   }
   const selectHasAggregates =
     query.select !== undefined && containsAggregate(query.select)
+  // Includes compile once the query knows whether a window feeds them.
+  const deferredIncludes: Array<(windowRows: any) => void> = []
   if (query.select) {
     const includesEntries = extractIncludesFromSelect(query.select)
     // A nested include has one Collection per row, not one value per group,
@@ -764,6 +766,7 @@ function compileQueryInternal(
     if (includesEntries.length > 0) {
       query = { ...query, select: { ...query.select } }
     }
+    const parentRows = pipeline
     for (const { key, path, subquery, guards } of includesEntries) {
       const fieldName = getUniqueIncludesRoutingKey(key, includesRoutingFns)
       // Branch parent pipeline: map to [correlationValue, parentContext]
@@ -788,154 +791,168 @@ function compileQueryInternal(
             ? projectParentContext(nsRow, compiledProjections, valueIdentity)
             : null,
       }))
-      let parentKeys: any = pipeline.pipe(
-        map(([_key, nsRow]: any) => {
-          const routing = getRouting(nsRow)
-          return (
-            routing.active
-              ? [routing.correlationKey, routing.parentContext]
-              : [SKIP_INCLUDE, null]
-          ) as any
-        }),
-        filter(([correlationValue]: any) => correlationValue !== SKIP_INCLUDE),
-      )
-
-      // Deduplicate: when multiple parents share the same correlation key (and
-      // parentContext), clamp multiplicity to 1 so the inner join doesn't
-      // produce duplicate child entries that cause incorrect deletions.
-      parentKeys = parentKeys.pipe(
-        reduce((values: Array<[any, number]>) =>
-          values.map(([v, mult]) => [v, mult > 0 ? 1 : 0] as [any, number]),
-        ),
-      )
-
-      // --- Includes lazy loading (mirrors join lazy loading in joins.ts) ---
-      // Resolve the child correlation field to concrete collection targets so
-      // subquery and union child sources can load by branch when it is safe.
-      const childSourceAlias = subquery.childCorrelationField.path[0]!
-      const directChildCollection =
-        subquery.query.from.type === `collectionRef`
-          ? subquery.query.from.collection
-          : undefined
-      const lazyTargets = getLazyLoadTargets(
-        subquery.query,
-        subquery.query.from,
-        childSourceAlias,
-        subquery.childCorrelationField,
-        directChildCollection,
-        aliasRemapping,
-      )
-
-      if (lazyTargets.length > 0) {
-        // 1. Mark child source as lazy so CollectionSubscriber skips initial full load
-        for (const target of lazyTargets) {
-          lazySources.add(target.sourceId)
-        }
-
-        // 2. Ensure an index on the correlation field for efficient lookups
-        for (const target of lazyTargets) {
-          const targetFieldName = target.path[0]
-          if (targetFieldName) {
-            ensureIndexForField(targetFieldName, target.path, target.collection)
-          }
-        }
-
-        const initialKeys = getStaticDemandKeys(
-          rawQuery,
-          subquery.correlationField,
-        )
-        const demandPlans = lazyTargets.map((target) =>
-          registerLazyDemandPlan(callbacks, target, initialKeys),
-        )
-        const demandWeights = new Map<
-          string,
-          { key: unknown; weight: number }
-        >()
-
-        // Keep the async demand adapter in sync with the current parent-key
-        // relation. Retired keys stop participating in readiness immediately.
-        parentKeys = parentKeys.pipe(
-          tap((data: any) => {
-            for (const [[correlationValue], weight] of data.getInner()) {
-              if (correlationValue == null) continue
-              const encoded = valueIdentity.serializeEquality(correlationValue)
-              const previous = demandWeights.get(encoded)
-              const nextWeight = (previous?.weight ?? 0) + weight
-              if (nextWeight === 0) {
-                demandWeights.delete(encoded)
-              } else {
-                demandWeights.set(encoded, {
-                  key: correlationValue,
-                  weight: nextWeight,
-                })
-              }
-            }
-
-            const keys = new Set(
-              [...demandWeights.values()]
-                .filter(({ weight }) => weight > 0)
-                .map(({ key: demandedKey }) => demandedKey),
-            )
-            for (let index = 0; index < lazyTargets.length; index++) {
-              const target = lazyTargets[index]!
-              const plan = demandPlans[index]!
-              callbacks[target.sourceId]?.setDemand?.(plan, keys)
-            }
+      // A windowed parent routes only the rows its window shows, so a row
+      // that limit or offset drops loads no children (law 12).
+      deferredIncludes.push((windowRows: any) => {
+        let parentKeys: any = (windowRows ?? parentRows).pipe(
+          map(([, value]: any) => {
+            const routing: IncludeRouting = windowRows
+              ? (value[0].$selected?.[INCLUDES_ROUTING]?.[fieldName] ??
+                INACTIVE_ROUTE)
+              : getRouting(value)
+            return (
+              routing.active
+                ? [routing.correlationKey, routing.parentContext]
+                : [SKIP_INCLUDE, null]
+            ) as any
           }),
+          filter(
+            ([correlationValue]: any) => correlationValue !== SKIP_INCLUDE,
+          ),
         )
-      }
 
-      // If parent filters exist, append them to the child query's WHERE
-      const childQuery =
-        subquery.parentFilters && subquery.parentFilters.length > 0
-          ? {
-              ...subquery.query,
-              where: [
-                ...(subquery.query.where || []),
-                ...subquery.parentFilters,
-              ],
-            }
-          : subquery.query
+        // Deduplicate: when multiple parents share the same correlation key (and
+        // parentContext), clamp multiplicity to 1 so the inner join doesn't
+        // produce duplicate child entries that cause incorrect deletions.
+        parentKeys = parentKeys.pipe(
+          reduce((values: Array<[any, number]>) =>
+            values.map(([v, mult]) => [v, mult > 0 ? 1 : 0] as [any, number]),
+          ),
+        )
 
-      // Recursively compile child query WITH the parent key stream
-      const childResult = compileQueryInternal(
-        [
-          childQuery,
-          allInputs,
-          collections,
-          subscriptions,
-          callbacks,
-          lazySources,
-          optimizableOrderByCollections,
-          setWindowFn,
-          cache,
-          queryMapping,
-          parentKeys,
+        // --- Includes lazy loading (mirrors join lazy loading in joins.ts) ---
+        // Resolve the child correlation field to concrete collection targets so
+        // subquery and union child sources can load by branch when it is safe.
+        const childSourceAlias = subquery.childCorrelationField.path[0]!
+        const directChildCollection =
+          subquery.query.from.type === `collectionRef`
+            ? subquery.query.from.collection
+            : undefined
+        const lazyTargets = getLazyLoadTargets(
+          subquery.query,
+          subquery.query.from,
+          childSourceAlias,
           subquery.childCorrelationField,
-        ],
-        true,
-      )
+          directChildCollection,
+          aliasRemapping,
+        )
 
-      // Each include retains its own compilation result and lexical aliases.
-      // Copying them into this scope would let a child shadow a source used by
-      // the enclosing query's lazy join.
-      for (const [alias, whereClause] of childResult.sourceWhereClauses) {
-        sourceWhereClauses.set(alias, whereClause)
-      }
+        if (lazyTargets.length > 0) {
+          // 1. Mark child source as lazy so CollectionSubscriber skips initial full load
+          for (const target of lazyTargets) {
+            lazySources.add(target.sourceId)
+          }
 
-      includesResults.push({
-        pipeline: childResult.pipeline,
-        fieldName,
-        resultPath: path,
-        correlationField: subquery.correlationField,
-        childCorrelationField: subquery.childCorrelationField,
-        hasOrderBy: !!(
-          subquery.query.orderBy && subquery.query.orderBy.length > 0
-        ),
-        childCompilationResult: childResult,
-        parentProjection: subquery.parentProjection,
-        materialization: subquery.materialization,
-        scalarField: subquery.scalarField,
+          // 2. Ensure an index on the correlation field for efficient lookups
+          for (const target of lazyTargets) {
+            const targetFieldName = target.path[0]
+            if (targetFieldName) {
+              ensureIndexForField(
+                targetFieldName,
+                target.path,
+                target.collection,
+              )
+            }
+          }
+
+          const initialKeys = getStaticDemandKeys(
+            rawQuery,
+            subquery.correlationField,
+          )
+          const demandPlans = lazyTargets.map((target) =>
+            registerLazyDemandPlan(callbacks, target, initialKeys),
+          )
+          const demandWeights = new Map<
+            string,
+            { key: unknown; weight: number }
+          >()
+
+          // Keep the async demand adapter in sync with the current parent-key
+          // relation. Retired keys stop participating in readiness immediately.
+          parentKeys = parentKeys.pipe(
+            tap((data: any) => {
+              for (const [[correlationValue], weight] of data.getInner()) {
+                if (correlationValue == null) continue
+                const encoded =
+                  valueIdentity.serializeEquality(correlationValue)
+                const previous = demandWeights.get(encoded)
+                const nextWeight = (previous?.weight ?? 0) + weight
+                if (nextWeight === 0) {
+                  demandWeights.delete(encoded)
+                } else {
+                  demandWeights.set(encoded, {
+                    key: correlationValue,
+                    weight: nextWeight,
+                  })
+                }
+              }
+
+              const keys = new Set(
+                [...demandWeights.values()]
+                  .filter(({ weight }) => weight > 0)
+                  .map(({ key: demandedKey }) => demandedKey),
+              )
+              for (let index = 0; index < lazyTargets.length; index++) {
+                const target = lazyTargets[index]!
+                const plan = demandPlans[index]!
+                callbacks[target.sourceId]?.setDemand?.(plan, keys)
+              }
+            }),
+          )
+        }
+
+        // If parent filters exist, append them to the child query's WHERE
+        const childQuery =
+          subquery.parentFilters && subquery.parentFilters.length > 0
+            ? {
+                ...subquery.query,
+                where: [
+                  ...(subquery.query.where || []),
+                  ...subquery.parentFilters,
+                ],
+              }
+            : subquery.query
+
+        // Recursively compile child query WITH the parent key stream
+        const childResult = compileQueryInternal(
+          [
+            childQuery,
+            allInputs,
+            collections,
+            subscriptions,
+            callbacks,
+            lazySources,
+            optimizableOrderByCollections,
+            setWindowFn,
+            cache,
+            queryMapping,
+            parentKeys,
+            subquery.childCorrelationField,
+          ],
+          true,
+        )
+
+        // Each include retains its own compilation result and lexical aliases.
+        // Copying them into this scope would let a child shadow a source used by
+        // the enclosing query's lazy join.
+        for (const [alias, whereClause] of childResult.sourceWhereClauses) {
+          sourceWhereClauses.set(alias, whereClause)
+        }
+
+        includesResults.push({
+          pipeline: childResult.pipeline,
+          fieldName,
+          resultPath: path,
+          correlationField: subquery.correlationField,
+          childCorrelationField: subquery.childCorrelationField,
+          hasOrderBy: !!(
+            subquery.query.orderBy && subquery.query.orderBy.length > 0
+          ),
+          childCompilationResult: childResult,
+          parentProjection: subquery.parentProjection,
+          materialization: subquery.materialization,
+          scalarField: subquery.scalarField,
+        })
       })
 
       includesRoutingFns.push({ fieldName, getRouting })
@@ -1235,6 +1252,7 @@ function compileQueryInternal(
     throw new LimitOffsetRequireOrderByError()
   }
   let resultPipeline: ResultStream
+  let windowRows: any
   if (hasOrderBy || query.singleResult) {
     // When in includes mode with limit/offset, use grouped ordering so that
     // the limit is applied per parent (per correlation key), not globally.
@@ -1260,7 +1278,7 @@ function compileQueryInternal(
           }
         : undefined
 
-    resultPipeline = processOrderBy(
+    const ordered = processOrderBy(
       rawQuery,
       pipeline,
       // With no explicit order, top-K breaks ties by the public row key.
@@ -1272,7 +1290,10 @@ function compileQueryInternal(
       resultLimit,
       query.offset,
       includesGroupKeyFn,
-    ).pipe(
+    )
+    if (resultLimit !== undefined || query.offset !== undefined)
+      windowRows = ordered
+    resultPipeline = ordered.pipe(
       map(([key, [row, orderByIndex]]) => finalizeRow(key, row, orderByIndex)),
     ) as ResultStream
   } else {
@@ -1280,6 +1301,8 @@ function compileQueryInternal(
       map(([key, row]) => finalizeRow(key, row, undefined)),
     ) as ResultStream
   }
+
+  for (const compileInclude of deferredIncludes) compileInclude(windowRows)
 
   // Cache the result before returning (use original query as key)
   const compilationResult: CompilationResult = {
@@ -2589,6 +2612,12 @@ type IncludeRouting = {
   active: boolean
   correlationKey: unknown
   parentContext: Record<string, any> | null
+}
+
+const INACTIVE_ROUTE: IncludeRouting = {
+  active: false,
+  correlationKey: undefined,
+  parentContext: null,
 }
 
 /**

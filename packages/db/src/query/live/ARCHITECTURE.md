@@ -1503,6 +1503,13 @@ units. Queries without includes retain their original pipeline unless a joined
 custom-key query needs contributor reduction. Inline materialization must not
 create recursive Collection machinery.
 
+An ordered parent with `limit` or `offset` routes its includes from the rows
+its window shows, not from every row that reaches the window. A parent row the
+window drops, including every row `distinct` reads before the window, therefore
+activates no route and demands no child rows. Moving the window moves the
+routes in the same graph run. Queries without a window route from their rows
+after `where`, as before.
+
 ## Normative laws
 
 1. **Alpha-renaming:** changing an accepted alias to another unused name in a
