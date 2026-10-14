@@ -820,3 +820,66 @@ establish only the named schedules and checkpoints above.
 | ORC-012 review evidence | **Met as a bounded audit.** The exact merge and formatter provenance, RED/GREEN checkpoints, relevant mutants, and unresolved receiving cells are recorded here and assigned in the coverage map. No universal schedule or release-compatibility closure is claimed. |
 | ORC-013 boundary witnesses | **Met within the finite matrix.** Eager pre-retryer cancellation and same-turn replacement distinguish stale-signal reuse; same-options reacquisition distinguishes deletion of a new pending registration; old/current and sole/shared owners distinguish migration errors. |
 | ORC-014 controlled-premise handoff | **Open in two receiving cells.** Real SQLite restart supplies the historical-owner premise. The coverage map still assigns a custom Query behavior that omits `fetchSequence` and forwards Core's lazy signal getter, and the current peer range still admits published Query Core 5.90.20 without the required attribution API. These need a receiving witness and a compatible published release, respectively. |
+
+## Failed full-source refresh follow-up at `3dfe3d3bc`
+
+The reviewed executable head is
+`3dfe3d3bc1f8df9d24b663b88631e8e71645b2b0`, based on
+`0e5519edd22c77d643f131e31979c5aec39319fe`. The binary diff of
+`query.ts` and `load-subset-lifecycle-oracle.test.ts` from that base has
+SHA-256 `1b3e57e5e119230e3d35b3a82177a49777862615d4c6fbe63baf00a462c47234`.
+Their raw file hashes at the reviewed head are, respectively,
+`f26ee7c89f68510c97ca8c1246def66bbe6326b8e33c4aa16d7d548d436fa827`
+and `d221156847ddcf212a02fd9b1b0037338b66b6f67937e7609f14e42125a14dd6`.
+
+The Query Collection guide and live-query architecture permit a later narrow
+demand to share an active, successfully applied full-source Query. A failed
+full refresh does not establish that coverage for a new demand. The new fixed
+history first applies a complete full result and attaches filtered F1, then
+fails full invalidation while old rows stay visible. It acquires equal filtered
+F2 with F1 either retained or released. When retained, F1 keeps its recorded
+full-Query lease; F2 must obtain its own filtered source response. The
+controlled provider receives four rows after the failure. The received
+predicate must classify `a1` and new `a2` as matching, and `b1` and new `b2`
+as nonmatching. The new preload must fulfill with `a2` public while `b2`
+stays absent. These are post-preload public-row and provider-request
+checkpoints, not a claim about
+arbitrary predicates or persistence.
+
+On the pre-repair head, the retained-F1 history rejected F2 with the full
+error and made no filtered request; the released-F1 control fulfilled after an
+exact filtered request. Moving the success and application gates outside the
+`hasFullSourceDependent` shortcut made both fulfill without changing retained
+F1's route. An independent code reviewer restored the old shortcut in a
+disposable mutant: retained F1 failed at the F2 outcome and request
+comparison; the released control passed. An opposite mutant that always routes
+a new peer exactly when another filtered dependent exists failed the existing
+settled-full reuse witness at the extra provider call. An independent oracle reviewer ran two
+more reached mutants: replacing the pushed predicate with literal true failed
+the four-row truth table and `b2` absence; discarding the filtered result in
+`applySuccessfulResult` failed the `a2` public-row and source-row comparison.
+All are assertion failures at the intended cuts.
+
+The final Query DB runtime suite passed 1,031 tests in 20 files against an
+immutable archive of attribution-enabled Query Core source `877655c66`.
+TypeScript also passed with its resolution trace showing `@tanstack/query-core`
+resolved to that source. Changed-file ESLint had no errors and two pre-existing
+`no-shadow` warnings in `query.ts`; Prettier and `git diff --check` passed.
+The published Query Core receiving gap remains as recorded above.
+
+| Requirement | Disposition for this follow-up |
+| --- | --- |
+| ORC-001 authority and limits | **Met.** The guide and architecture authorize the bounded failed-full coverage rule; the fixed history and omitted predicates, providers, and schedules are named above. |
+| ORC-002 independent judgment | **Met within the four-row domain.** Expected matches come from `row.group === 'a'`; the IR evaluator interprets the received request but does not compute the expected truth table. F2's required public `a2` is absent from the old full result. |
+| ORC-003 literate responsibilities | **Met.** Prose beside the helper states the law, two legal histories, provider model, real preload/invalidation path, and post-settlement observations. |
+| ORC-004 generated grammar controls | **N/A.** The retained/released pair is a fixed enumeration, not a generated property. |
+| ORC-005 production path and observation | **Met for the named cut.** Real QueryClient, Query Collection, and live-query preload reach the failed refresh and compare F2 settlement, request predicate, and public rows. |
+| ORC-006 checker calibration | **Met.** Original shortcut, overbroad always-exact, wrong-predicate, and dropped-application mutants reached and failed their distinguishing assertions. |
+| ORC-007 fixed/random replay | **N/A.** This follow-up adds no important generated property. |
+| ORC-008 stateful-model minimality | **N/A to this extension.** It adds no state to a stateful reference model; the production acquisition route remains recorded per owner. |
+| ORC-009 vocabulary mapping | **N/A to a new mapping.** The helper uses the glossary's demand, acquisition, and public-row terms without combining production states in a new model term. |
+| ORC-010 failure fidelity and cleanup | **Partial.** The helper releases its Collections in `finally`, but no simultaneous assertion-plus-cleanup failure was injected to prove both diagnostics survive. |
+| ORC-011 second formulation | **N/A to a new formulation.** No remaining named shared semantic fault calls for another model in this bounded domain; the independent truth table and public `a2` observation reject the tested faults. |
+| ORC-012 review evidence | **Met for the stated boundary.** This exact-head record gives RED/GREEN and mutant outcomes for static on-demand key × retained/released F1 after failed full invalidation × real QueryClient and Collection × F2 request/outcome/public rows. The coverage map owns the untested cells. |
+| ORC-013 boundary witnesses | **Met.** Retained and released F1 distinguish the old shortcut; settled-full reuse rejects always-exact routing, while fresh `a2`/`b2` distinguish application and predicate errors. |
+| ORC-014 controlled-premise handoff | **Open for the integrated branch.** This controlled provider is cited only for the four-row Query Collection law. The custom Query behavior and compatible published Core receiving cells remain assigned in the coverage map. |

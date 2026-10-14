@@ -578,7 +578,7 @@ new filtered acquisition from that failed Query result. Paired public preload
 histories retain or release an earlier filtered dependent, then require the
 new demand's own filtered provider request with the four-row predicate truth
 table, a new matching row, and no new nonmatching row. The original dependent
-keeps its recorded full-Query lease.
+keeps its recorded full-Query lease when retained.
 The pre-repair shortcut fails
 the retained case at the new preload outcome and provider-scope checkpoint;
 the released control passes.
