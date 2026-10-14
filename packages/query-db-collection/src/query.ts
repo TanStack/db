@@ -1916,12 +1916,21 @@ export function queryCollectionOptions(
         ) !== undefined
       // Existing dependents keep their original observer lease even if an
       // explicit refetch creates an exact Query for the same requested scope.
+      // However, verify the observer is still in a valid state to avoid hanging
+      // if the observer is stuck fetching due to blocked persistence operations.
       const sharesFullSource =
         !opts.refetch &&
         fullSourceKey !== undefined &&
         fullSourceHash !== requestedHash &&
-        (hasFullSourceDependent ||
-          (!requestedScopeNeedsRevalidation &&
+        (hasFullSourceDependent
+          ? // For existing dependents, verify the observer still exists and has
+            // a valid result. This prevents hanging if the observer is in a
+            // problematic state (e.g., stuck fetching due to held persistence).
+            fullObserver !== undefined &&
+            (fullResult?.isSuccess === true ||
+              (fullResult?.isPending === true &&
+                fullQuery?.state.fetchStatus === `idle`))
+          : !requestedScopeNeedsRevalidation &&
             !state.observers.has(requestedHash) &&
             (queryRefCounts.get(fullSourceHash!) ?? 0) > 0 &&
             fullResult?.isSuccess === true &&
@@ -1929,7 +1938,7 @@ export function queryCollectionOptions(
             hasCurrentCacheGenerationFetch(fullQuery) &&
             !pendingResultApplications.has(fullSourceHash!) &&
             !failedResultApplications.has(fullSourceHash!) &&
-            appliedFullResult))
+            appliedFullResult)
       const key = sharesFullSource ? fullSourceKey : requestedKey
       const hashedQueryKey = sharesFullSource ? fullSourceHash! : requestedHash
       const {
