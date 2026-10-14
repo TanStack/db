@@ -41,6 +41,7 @@ function source(syncMode: `eager` | `on-demand`, indexed: boolean) {
     gcTime: 0,
     sync: { sync: start },
   })
+  if (indexed) collection.createIndex((row) => row.rank)
   return {
     collection,
     load,
@@ -58,8 +59,9 @@ function source(syncMode: `eager` | `on-demand`, indexed: boolean) {
 // Each step atomically replaces both independently keyed sources, then moves
 // a window. IDs 1..6 exclude duplicate keys; ranks 0..3 include ties; parent IDs
 // 1..3 admit matching and unmatched children; limits 0..4 cross closed, full and
-// underfilled windows. Source mode changes acquisition semantics, and index
-// presence changes the planner path. One to five replacements admit empty,
+// underfilled windows. Source mode changes acquisition semantics; explicit rank
+// indexes check parity with and without an available index. Local evaluation
+// bypasses provider order optimization. One to five replacements admit empty,
 // growing and shrinking inputs. Cleanup/restart follows every generated trace.
 const rowSet = fc.uniqueArray(
   fc.record({
@@ -191,6 +193,9 @@ describe(`local live-query evaluation`, () => {
                     })
                     let stop = () => {}
                     await withOracleCleanup(async () => {
+                      for (const src of [leftSource, rightSource]) {
+                        expect(src.collection.indexes.size > 0).toBe(indexed)
+                      }
                       {
                         const sub = query.subscribeChanges(() => {})
                         stop = () => sub.unsubscribe()
