@@ -155,18 +155,24 @@ moved by `setWindow`), optionally with `distinct` and a static parent filter by
 demand, in the forms `materialize`, a child Collection, a child `orderBy`, a
 child `limit`, a child `findOne`, nested includes, and limited nested includes.
 Histories insert, delete, and move parents, insert and delete children, and move
-the window. Rows must equal a relational model. Preload may load only the
-children of the shown rows' groups and the grandchildren of the shown children;
-a step may load only the children of the rows that entered the window, the
-grandchildren of the children that entered an include, and one changed row. On
-main, a late page delivered 120 child rows for a bound of 9. Before this fix's
-second round, a static filter seeded child demand for every named group, and an
-`orderBy`-only parent kept routing rows that `setWindow` dropped; both fail.
-Routers that add the row after the window, every row tied with a window edge,
-or the two rows before it fail the work bound, and a child that takes over
-`setWindow` fails the rows law. Limits: includes inherited from a `from`
+the window, 60 base runs per campaign; a reconstruction check requires at least
+three executed fixed cases for the on-demand child, the static filter, limited
+nested children, and each parent form. Rows must equal a relational model.
+Preload may load only the children of the shown rows' groups. A step may newly
+load only groups not shown before it: those of rows that entered the window,
+and of rows the parent's top-K can hold at an internal checkpoint until its
+loader refills the window within the same graph run (its held prefix before
+the step and parents any step has written). Two replays pin a moved row the
+top-K held. On main, a late page delivered 120 child rows for a bound of 9.
+Routers that add the row after the window fail the generated campaigns;
+routers that add every row tied with a window edge fail a pinned collapse and
+a random campaign; a child that takes over `setWindow` fails the rows law. A
+`findOne` detail page with on-demand parent and child must start its child load
+beside its parent load. Focused tests require a window inside a `from` or joined
+subquery not to answer `setWindow`. Limits: includes inherited from a `from`
 subquery and inputs to `fn.select` still route from every row before the
-window, and this owner does not generate them.
+window, and this owner does not generate them; the transient top-K allowance is
+a work bound, not a promise that such rows never load.
 
 Three Ordered acquisition companions own distinct controlled cuts:
 `packages/db/tests/query/load-subset-replay-refinement-oracle.test.ts` checks

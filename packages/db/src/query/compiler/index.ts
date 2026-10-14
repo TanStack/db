@@ -100,9 +100,10 @@ import type {
   UnionAll,
 } from '../ir.js'
 import type { LazyCollectionCallbacks } from './joins.js'
-import type { IStreamBuilder, KeyValue } from '@tanstack/db-ivm'
+import type { IStreamBuilder, KeyValue, MultiSet } from '@tanstack/db-ivm'
 import type { Collection } from '../../collection/index.js'
 import type {
+  InputRow,
   KeyedStream,
   NamespacedAndKeyedStream,
   NamespacedRow,
@@ -485,7 +486,7 @@ function compileQueryInternal(
     callbacks,
     lazySources,
     optimizableOrderByCollections,
-    setWindowFn,
+    ignoreWindow,
     cache,
     queryMapping,
     aliasToCollectionId,
@@ -601,7 +602,7 @@ function compileQueryInternal(
       callbacks,
       lazySources,
       optimizableOrderByCollections,
-      setWindowFn,
+      ignoreWindow,
       rawQuery,
       query.from,
       (...args) => compileQueryInternal(args, true),
@@ -772,11 +773,17 @@ function compileQueryInternal(
         // Deduplicate: when multiple parents share the same correlation key (and
         // parentContext), clamp multiplicity to 1 so the inner join doesn't
         // produce duplicate child entries that cause incorrect deletions.
-        let parentKeys: any = routes.pipe(
+        let parentKeys: KeyedStream = routes.pipe(
           filter((routing: IncludeRouting) => routing.active),
-          map((routing) => [routing.correlationKey, routing.parentContext]),
-          reduce((values: Array<[any, number]>) =>
-            values.map(([v, mult]) => [v, mult > 0 ? 1 : 0] as [any, number]),
+          // A parent key may carry no parent context (null).
+          map(
+            (routing) =>
+              [routing.correlationKey, routing.parentContext] as InputRow,
+          ),
+          reduce((values) =>
+            values.map(
+              ([v, mult]) => [v, mult > 0 ? 1 : 0] as [typeof v, number],
+            ),
           ),
         )
 
@@ -815,11 +822,20 @@ function compileQueryInternal(
             }
           }
 
-          // A window decides its parents only once it runs, so a static
-          // parent filter must not demand children for rows it drops.
-          const initialKeys = windowRows
-            ? new Set<unknown>()
-            : getStaticDemandKeys(rawQuery, subquery.correlationField)
+          // A static parent filter demands its children at once, unless a
+          // limit, an offset, or a findOne choosing among several rows can
+          // drop the rows it names.
+          const staticKeys = getStaticDemandKeys(
+            rawQuery,
+            subquery.correlationField,
+          )
+          const windowCanDrop =
+            query.offset !== undefined ||
+            (query.singleResult
+              ? staticKeys.size !== 1
+              : query.limit !== undefined)
+          const initialKeys =
+            windowRows && windowCanDrop ? new Set<unknown>() : staticKeys
           const demandPlans = lazyTargets.map((target) =>
             registerLazyDemandPlan(callbacks, target, initialKeys),
           )
@@ -831,33 +847,26 @@ function compileQueryInternal(
           // Keep the async demand adapter in sync with the current parent-key
           // relation. Retired keys stop participating in readiness immediately.
           parentKeys = parentKeys.pipe(
-            tap((data: any) => {
-              for (const [[correlationValue], weight] of data.getInner()) {
-                if (correlationValue == null) continue
-                const encoded =
-                  valueIdentity.serializeEquality(correlationValue)
-                const previous = demandWeights.get(encoded)
-                const nextWeight = (previous?.weight ?? 0) + weight
-                if (nextWeight === 0) {
-                  demandWeights.delete(encoded)
-                } else {
-                  demandWeights.set(encoded, {
-                    key: correlationValue,
-                    weight: nextWeight,
-                  })
-                }
+            tap((data: MultiSet<InputRow>) => {
+              for (const [[key], weight] of data.getInner()) {
+                if (key == null) continue
+                const encoded = valueIdentity.serializeEquality(key)
+                const nextWeight =
+                  (demandWeights.get(encoded)?.weight ?? 0) + weight
+                if (nextWeight === 0) demandWeights.delete(encoded)
+                else demandWeights.set(encoded, { key, weight: nextWeight })
               }
-
               const keys = new Set(
                 [...demandWeights.values()]
                   .filter(({ weight }) => weight > 0)
-                  .map(({ key: demandedKey }) => demandedKey),
+                  .map(({ key }) => key),
               )
-              for (let index = 0; index < lazyTargets.length; index++) {
-                const target = lazyTargets[index]!
-                const plan = demandPlans[index]!
-                callbacks[target.sourceId]?.setDemand?.(plan, keys)
-              }
+              lazyTargets.forEach((target, index) =>
+                callbacks[target.sourceId]?.setDemand?.(
+                  demandPlans[index]!,
+                  keys,
+                ),
+              )
             }),
           )
         }
@@ -884,8 +893,7 @@ function compileQueryInternal(
             callbacks,
             lazySources,
             optimizableOrderByCollections,
-            // An include child's top-K never answers the query's setWindow.
-            () => {},
+            ignoreWindow,
             cache,
             queryMapping,
             parentKeys,
@@ -1213,6 +1221,7 @@ function compileQueryInternal(
     throw new LimitOffsetRequireOrderByError()
   }
   let resultPipeline: ResultStream
+  let ownWindowFn: ((options: WindowOptions) => void) | undefined
   if (hasOrderBy || query.singleResult) {
     // When in includes mode with limit/offset, use grouped ordering so that
     // the limit is applied per parent (per correlation key), not globally.
@@ -1246,12 +1255,14 @@ function compileQueryInternal(
       query.select || {},
       collections[mainCollectionId]!,
       optimizableOrderByCollections,
-      setWindowFn,
+      (windowFn) => (ownWindowFn = windowFn),
       resultLimit,
       query.offset,
       includesGroupKeyFn,
     )
     for (const compileInclude of deferredIncludes) compileInclude(ordered)
+    // Only after its includes compile, so a failed child leaves no window.
+    if (ownWindowFn) setWindowFn(ownWindowFn)
     resultPipeline = ordered.pipe(
       map(([key, [row, orderByIndex]]) => finalizeRow(key, row, orderByIndex)),
     ) as ResultStream
@@ -2373,20 +2384,11 @@ function getUniqueIncludesRoutingKey(
   baseKey: string,
   entries: Array<{ key?: string; fieldName?: string }>,
 ): string {
-  const hasKey = (key: string) =>
-    entries.some((entry) => (entry.key ?? entry.fieldName) === key)
-
-  if (!hasKey(baseKey)) {
-    return baseKey
-  }
-
+  const taken = new Set(entries.map((entry) => entry.key ?? entry.fieldName))
+  if (!taken.has(baseKey)) return baseKey
   let suffix = entries.length
-  let key = `${baseKey}#${suffix}`
-  while (hasKey(key)) {
-    suffix++
-    key = `${baseKey}#${suffix}`
-  }
-  return key
+  while (taken.has(`${baseKey}#${suffix}`)) suffix++
+  return `${baseKey}#${suffix}`
 }
 
 /** Check if a value is a nested plain object in a select (not an IR expression node) */
@@ -2554,6 +2556,9 @@ type IncludeRouting = {
   correlationKey: unknown
   parentContext: Record<string, any> | null
 }
+
+/** Only the query's own top-K answers setWindow; subqueries never do. */
+const ignoreWindow = () => {}
 
 /** Rows an ordered window shows, with their fractional order index. */
 type WindowRows = IStreamBuilder<KeyValue<unknown, [NamespacedRow, string]>>

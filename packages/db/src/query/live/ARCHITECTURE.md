@@ -1503,12 +1503,17 @@ units. Queries without includes retain their original pipeline unless a joined
 custom-key query needs contributor reduction. Inline materialization must not
 create recursive Collection machinery.
 
-An ordered parent routes the includes in its own `select` from the rows its
-window shows, so a row the window drops activates no route and demands no
-child rows, including rows `distinct` reads first and rows a static filter
-names. Only the parent's window answers `setWindow`. Includes inherited from a
-`from` subquery and inputs to `fn.select` still route from every row before
-the window (a recorded limit).
+A query has a window when it has an `orderBy` or is a `findOne`, with or
+without `limit`. Only its own top-K answers `setWindow`; a top-K inside a
+`from` or joined subquery or an include child never does, so a query without a
+window rejects `setWindow`. A windowed query routes the includes in its own
+`select` from the rows its window shows, so a row the window drops activates no
+route. A static parent filter seeds child demand only when no `limit`,
+`offset`, or `findOne` over several named rows can drop those rows. Within one
+graph run, an index-backed top-K can briefly hold a row outside its settled
+window until its loader refills it, and that row's children may load. Includes
+inherited from a `from` subquery and inputs to `fn.select` still route from
+every row before the window (a recorded limit).
 
 ## Normative laws
 
