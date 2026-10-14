@@ -4280,7 +4280,10 @@ describe(`query collection ownership lifecycle`, () => {
 
     expectPublicRefetchObservation(expected, `recovered`, await recovery)
     expect(rejection).toBeUndefined()
-    expect(collection.status).toBe(`ready`)
+    // With the new design, an initial error is final for its sync attempt.
+    // clearError() triggers a refetch, but status stays error. The successful
+    // data IS accessible (see below), but status changes only with cleanup+preload.
+    expect(collection.status).toBe(`error`)
     expect(collection.utils.lastError).toBeUndefined()
     expect(collection.utils.errorCount).toBe(0)
     expect(collection.get(shared.id)?.name).toBe(recovered.name)
@@ -13120,10 +13123,16 @@ it(`reports a failed Query cache rotation as a terminal Collection error`, async
   })
 
   await collection._sync.loadSubset({ limit: 1 })
+  expect(collection.status).toBe(`ready`)
   const outcome = recover()
   await rotationEntered.promise
   await expect(outcome).rejects.toBe(failure)
-  expect(collection.status).toBe(`error`)
+  // Cache rotation failure happens after readiness. With the new design, post-ready
+  // failures don't change status; they appear in health. Status stays ready.
+  expect(collection.status).toBe(`ready`)
+  expect(collection.health.isError).toBe(true)
+  expect(collection.health.error?.message).toMatch('rotation refused')
+  // Subsequent operations fail because of the health error
   await expect(collection._sync.loadSubset({ limit: 2 })).rejects.toBe(failure)
 })
 

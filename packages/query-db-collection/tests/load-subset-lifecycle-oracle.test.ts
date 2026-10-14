@@ -1167,6 +1167,7 @@ async function expectInitialQueryFailureStatus(): Promise<void> {
     .fn()
     .mockRejectedValueOnce(error)
     .mockResolvedValueOnce([{ id: `recovered` }])
+    .mockResolvedValueOnce([{ id: `recovered` }]) // for cleanup+preload restart
   const collection = createCollection(
     queryCollectionOptions<Row>({
       id,

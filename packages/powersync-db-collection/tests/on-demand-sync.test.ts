@@ -3250,7 +3250,9 @@ describe(`On-Demand Sync Mode`, () => {
         // reported as health errors. Status stays ready; data stays available.
         expect(collection.status).toBe(`ready`)
         expect(collection.health.isError).toBe(true)
-        expect(collection.health.error?.message).toMatch(`trigger installation failed`)
+        expect(collection.health.error?.message).toMatch(
+          `trigger installation failed`,
+        )
       } finally {
         await collection.cleanup()
       }
