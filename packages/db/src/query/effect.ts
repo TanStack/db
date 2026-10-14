@@ -742,12 +742,8 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
         const { status } = event
 
-        // A Collection failure before the effect's initial gate ends the effect.
-        // After it, the failure is health metadata and the effect keeps running.
-        if (status === `error` && this.reachedReady) {
-          this.reportHealth()
-          return
-        }
+        // A source in error ends the effect, before or after its gate: an
+        // initial error or a crash. Health errors never change the status.
         if (status === `error`) {
           this.onSourceError(
             new Error(

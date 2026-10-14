@@ -3,7 +3,7 @@
  *
  * A Collection answers two questions on two separate axes:
  *
- * - **The gate (`status`)** says whether the data can be shown yet. It is
+ * - **The initial gate (`status`)** says whether the data can be shown yet. It is
  *   decided only by the initial sync of a sync run. While the sync adapter retries
  *   it stays `loading`. When the sync adapter gives up before Collection readiness
  *   (`markError`), the sync run fails for good: the status is `error`, and a
@@ -33,19 +33,23 @@
  * Collection over that source would have, so its tree also reaches through
  * a nested live query.
  *
- * An IndexedDB connection closure is not health: it ends read and admission
- * authority, so the Collection moves to `error` even after ready. The
- * IndexedDB oracles own that case.
+ * A crash is not health either. When a Collection can no longer serve reads
+ * or admit writes, as after IndexedDB closure or a terminal local persistence
+ * failure, it moves to `error` even after Collection readiness. The IndexedDB
+ * and persistence oracles own those causes; this oracle drives the transition
+ * directly.
  *
  * A live query's own gate follows its sources: it becomes ready when every
  * Collection is ready, and a Collection that fails before the query's initial-query readiness
  * fails the query's sync run, whatever the query's shape. After the query's
- * initial-query readiness, its sources can only report health, and the query keeps its
- * status and rows.
+ * initial-query readiness, its sources report problems only as health, and
+ * the query keeps its status and rows. The one exception is a crash: a query
+ * cannot keep serving rows from a Collection that cannot serve reads, so a
+ * crashed Collection ends every live query above it, as cleanup does.
  *
  * ## The model
  *
- * The model keeps, for each Collection, its gate and its health problem (none,
+ * The model keeps, for each Collection, its initial gate and its health problem (none,
  * non-final, or final), with a serial for each reported problem. It derives
  * each live query's gate from its Collections, using only the rules above, and
  * the include's parent rows from whether `B` synced its row while the
@@ -56,7 +60,8 @@
  *
  * Steps act on Collection `A` or `B`: `ready` writes the Collection's row and calls
  * `markReady()`; `fail` calls `markError()`; `report` and `reportFinal` call
- * `reportError()`; `healthy` calls `reportHealthy()`. `restart` cleans up the
+ * `reportError()`; `healthy` calls `reportHealthy()`; `crash` moves the
+ * Collection to `error` through its lifecycle, as a crash cause would. `restart` cleans up the
  * live query and every Collection, then preloads the live query again. Every step
  * is issued in every state. The model predicts its outcome, including a throw
  * for `markReady()` after `markError()`, and for a health report before
@@ -78,7 +83,7 @@
  * the current tree. Request lanes check that a lazy load or a root Collection's
  * load that fails after initial-query readiness is a request error on the query's
  * node, and that it clears. Effect lanes check the Effect's gate and its
- * request errors after the gate.
+ * request errors after its initial-query readiness.
  *
  * ## Limits
  *
@@ -120,7 +125,7 @@ type Shape =
   `direct` | `join` | `self-join` | `nested` | `include` | `pooled-nested`
 type Step =
   | {
-      kind: `ready` | `fail` | `report` | `reportFinal` | `healthy`
+      kind: `ready` | `fail` | `report` | `reportFinal` | `healthy` | `crash`
       source: SourceName
     }
   | { kind: `restart` }
@@ -139,7 +144,7 @@ type Model = {
   query: Gate
   inner: Gate
   serial: number
-  // Parent rows the include query's attempt has received from `B`.
+  // Parent rows the include query's sync run has received from `B`.
   parentRows: number
 }
 
@@ -163,11 +168,14 @@ function freshModel(): Model {
   }
 }
 
-// A live query's gate follows its sources and never leaves error or ready
-// within an attempt.
+// A live query's gate follows its sources and never leaves error within a
+// sync run. An input in `error` ends the query's sync run whenever it appears.
+// After the query is ready, an input reaches `error` only by crashing, since
+// `fail` after Collection readiness is health.
 function deriveGate(current: Gate, inputs: ReadonlyArray<Gate>): Gate {
-  if (current !== `loading`) return current
+  if (current === `error`) return `error`
   if (inputs.some((gate) => gate === `error`)) return `error`
+  if (current === `ready`) return `ready`
   if (inputs.every((gate) => gate === `ready`)) return `ready`
   return `loading`
 }
@@ -183,8 +191,8 @@ function deriveQueries(shape: Shape, model: Model): void {
     model.inner = deriveGate(model.inner, gates([`A`]))
     model.query = model.inner
   } else {
-    // A running attempt receives `B`'s row once `B` syncs it; a failed
-    // attempt receives nothing more.
+    // A running sync run receives `B`'s row once `B` syncs it; a failed
+    // sync run receives nothing more.
     if (
       shape === `include` &&
       model.query !== `error` &&
@@ -229,6 +237,10 @@ function applyModel(shape: Shape, model: Model, step: Step): `ok` | `throws` {
     case `healthy`:
       if (source.gate !== `ready`) outcome = `throws`
       else if (source.problem && !source.problem.final) source.problem = null
+      break
+    case `crash`:
+      // From any active status; a Collection already in error stays there.
+      source.gate = `error`
       break
   }
   deriveQueries(shape, model)
@@ -318,8 +330,8 @@ function expectedTree(
       ])
     case `include`:
       // The include node rolls up the per-row child Collections: one per
-      // parent row the attempt received. They stay until a restart, even
-      // when the attempt fails later. No grammar step fails a child
+      // parent row the sync run received. They stay until a restart, even
+      // when the sync run fails later. No grammar step fails a child
       // Collection, so none is in error.
       return queryNode(`root`, model.query, [
         source(`b`, B),
@@ -523,7 +535,7 @@ async function runHistory(
   let events: Array<Event> = []
   let announced: string = query.status
   let stop = () => {}
-  // Cleanup without subscribers drops event listeners, so each attempt
+  // Cleanup without subscribers drops event listeners, so each sync run
   // registers its own.
   const begin = () => {
     stop()
@@ -587,6 +599,10 @@ async function runHistory(
             params.markError(new Error(`${step.source} gave up`))
           } else if (step.kind === `healthy`) {
             params.reportHealthy()
+          } else if (step.kind === `crash`) {
+            params.collection._lifecycle.crash(
+              new Error(`${step.source} crashed`),
+            )
           } else {
             params.reportError(new Error(`${step.source} problem`), {
               final: step.kind === `reportFinal`,
@@ -718,6 +734,16 @@ const namedHistories: Record<string, ReadonlyArray<Step>> = {
     on(`ready`, `A`),
     on(`ready`, `B`),
   ],
+  'a crash after initial-query readiness ends the query': [
+    on(`ready`, `A`),
+    on(`ready`, `B`),
+    on(`report`, `A`),
+    on(`crash`, `A`),
+    on(`healthy`, `A`),
+    restart,
+    on(`ready`, `A`),
+    on(`ready`, `B`),
+  ],
   'a health report before Collection readiness throws': [
     on(`report`, `A`),
     on(`healthy`, `B`),
@@ -744,6 +770,7 @@ describe(`source failure and health oracle`, () => {
             `report` as const,
             `reportFinal` as const,
             `healthy` as const,
+            `crash` as const,
           ),
           fc.constantFrom(`A` as const, `B` as const),
         )
@@ -765,11 +792,11 @@ describe(`source failure and health oracle`, () => {
 /**
  * A live query's lazy source loads only the keys its rows reach, and an
  * on-demand root source loads the window the query shows. After the query's
- * first ready, a load that fails is a request error on the query's own node:
+ * initial-query readiness, a load that fails is a request error on the query's own node:
  * the source stays healthy and the query keeps its status. A lazy demand's
  * error clears when the same demand later settles, or when the query stops
  * needing it; a root source's error clears when a later load of that source
- * settles. Before the first ready, the same failure fails the query's attempt.
+ * settles. Before initial-query readiness, the same failure fails the query's sync run.
  */
 describe(`request errors`, () => {
   function createRequestHistory() {
@@ -840,7 +867,7 @@ describe(`request errors`, () => {
     }
   }
 
-  it(`a failed load after ready is a request error that clears when its demand settles`, () =>
+  it(`a failed load after initial-query readiness is a request error that clears when its demand settles`, () =>
     withHistory(
       async ({ query, children, outcomes, writeParent, markParentsReady }) => {
         const preload = query.preload()
@@ -886,7 +913,7 @@ describe(`request errors`, () => {
       expect(query.status).toBe(`ready`)
     }))
 
-  it(`a failed load before ready fails the query's attempt`, () =>
+  it(`a failed load before initial-query readiness fails the query's sync run`, () =>
     withHistory(async ({ query, outcomes, writeParent, markParentsReady }) => {
       outcomes.push(`fail`)
       const preload = query.preload()
@@ -904,7 +931,7 @@ describe(`request errors`, () => {
 })
 
 describe(`root request errors`, () => {
-  it(`a failed root load after ready is a request error that clears when a later load settles`, async () => {
+  it(`a failed root load after initial-query readiness is a request error that clears when a later load settles`, async () => {
     const outcomes: Array<`ok` | `fail`> = []
     const source = createCollection<Row, number>({
       id: `health-root-${Math.random().toString(36).slice(2)}`,
@@ -964,108 +991,120 @@ describe(`root request errors`, () => {
 // ---------------------------------------------------------------------------
 
 /**
- * An Effect works the same as a query. Its gate is its initial load: every
+ * An Effect works the same as a query. Its initial-query readiness is its
+ * initial load: every
  * initial load has settled and every eager source is ready, whether or not it
  * has `skipInitial`. `skipInitial` only decides whether the initial rows are
- * delivered. A source failure before the gate disposes the Effect through
- * `onSourceError`. After the gate, a source problem does not dispose it:
- * `onHealthChange` receives the error tree, with one node per source alias.
- * An on-demand source can fail its own initial sync after the gate, because
- * the gate follows the Effect's settled loads; that failure is health too.
+ * delivered. As for a live query, a source in `error` ends the Effect
+ * through `onSourceError`, before or after its initial-query readiness. A source reaches `error`
+ * by an initial error or by a crash. An on-demand source can have its initial
+ * error after initial-query readiness, because that readiness follows the Effect's settled loads.
+ * Every other source problem after it is a health error: it does not
+ * dispose the Effect, and `onHealthChange` receives the error tree, with one
+ * node per source alias.
  *
- * The lane crosses `skipInitial`, the source mode, and a failure before or
- * after the gate. Before the gate, an eager source has not called
- * `markReady()`, and an on-demand source still has its first load pending.
+ * The lane crosses `skipInitial`, the source mode, and when the source fails.
+ * Before initial-query readiness, an eager source has not called `markReady()`, and an
+ * on-demand source still has its first load pending. After it, the
+ * source calls `markError()`, which is an initial error for an on-demand
+ * source still in its initial sync and a final health error for an eager
+ * source after Collection readiness, or it crashes.
  */
 describe(`effect health`, () => {
   type EffectHistory = {
     skipInitial: boolean
     syncMode: `eager` | `on-demand`
-    failBeforeGate: boolean
+    failure: `before gate` | `markError after gate` | `crash after gate`
   }
   const histories: Array<EffectHistory> = [true, false].flatMap((skipInitial) =>
     ([`eager`, `on-demand`] as const).flatMap((syncMode) =>
-      [true, false].map((failBeforeGate) => ({
-        skipInitial,
-        syncMode,
-        failBeforeGate,
-      })),
+      (
+        [`before gate`, `markError after gate`, `crash after gate`] as const
+      ).map((failure) => ({ skipInitial, syncMode, failure })),
     ),
   )
 
-  it.each(histories)(
-    `%j`,
-    async ({ skipInitial, syncMode, failBeforeGate }) => {
-      let params!: SyncParams
-      let settleLoad = () => {}
-      const writeRow = () => {
-        params.begin()
-        params.write({ type: `insert`, value: { id: 1, parentId: 1 } })
-        params.commit()
-      }
-      const source = createCollection<Row, number>({
-        id: `health-effect-${syncMode}-${Math.random().toString(36).slice(2)}`,
-        getKey: (row) => row.id,
-        syncMode,
-        gcTime: 0,
-        sync: {
-          sync: (next) => {
-            params = next
-            if (syncMode === `eager`) return undefined
-            return {
-              loadSubset: () =>
-                new Promise<void>((resolve) => {
-                  settleLoad = () => {
-                    writeRow()
-                    resolve()
-                  }
-                }),
-            }
-          },
+  it.each(histories)(`%j`, async ({ skipInitial, syncMode, failure }) => {
+    let params!: SyncParams
+    let settleLoad = () => {}
+    const writeRow = () => {
+      params.begin()
+      params.write({ type: `insert`, value: { id: 1, parentId: 1 } })
+      params.commit()
+    }
+    const source = createCollection<Row, number>({
+      id: `health-effect-${syncMode}-${Math.random().toString(36).slice(2)}`,
+      getKey: (row) => row.id,
+      syncMode,
+      gcTime: 0,
+      sync: {
+        sync: (next) => {
+          params = next
+          if (syncMode === `eager`) return undefined
+          return {
+            loadSubset: () =>
+              new Promise<void>((resolve) => {
+                settleLoad = () => {
+                  writeRow()
+                  resolve()
+                }
+              }),
+          }
         },
-      })
-      const sourceErrors: Array<Error> = []
-      const trees: Array<ErrorTreeNode> = []
-      const delivered: Array<unknown> = []
-      const effect = createEffect({
-        query: (q) => q.from({ row: source }),
-        skipInitial,
-        onBatch: (events) => {
-          delivered.push(...events.map((event) => event.key))
-        },
-        onSourceError: (error) => sourceErrors.push(error),
-        onHealthChange: (errors) => trees.push(errors),
-      })
-      const consoleError = console.error
-      console.error = () => {}
-      try {
-        await flushPromises()
-        if (failBeforeGate) {
-          params.markError(new Error(`gave up`))
-          await flushPromises()
-          // Model: the Effect never passed its gate, so the failure ends it.
-          expect(effect.disposed).toBe(true)
-          expect(sourceErrors).toHaveLength(1)
-          expect(trees).toEqual([])
-          return
-        }
-        // Pass the gate: the eager source becomes ready, or the on-demand
-        // source's first load settles.
-        if (syncMode === `eager`) {
-          writeRow()
-          params.markReady()
-        } else {
-          settleLoad()
-        }
-        await flushPromises()
-        // Model: only `skipInitial` withholds the initial rows.
-        expect(delivered).toEqual(skipInitial ? [] : [1])
-
+      },
+    })
+    const sourceErrors: Array<Error> = []
+    const trees: Array<ErrorTreeNode> = []
+    const delivered: Array<unknown> = []
+    const effect = createEffect({
+      query: (q) => q.from({ row: source }),
+      skipInitial,
+      onBatch: (events) => {
+        delivered.push(...events.map((event) => event.key))
+      },
+      onSourceError: (error) => sourceErrors.push(error),
+      onHealthChange: (errors) => trees.push(errors),
+    })
+    const consoleError = console.error
+    console.error = () => {}
+    try {
+      await flushPromises()
+      if (failure === `before gate`) {
         params.markError(new Error(`gave up`))
         await flushPromises()
-        // Model: after the gate, the failure is health.
-        expect(effect.disposed).toBe(false)
-        expect(sourceErrors).toEqual([])
+        // Model: the Effect never reached initial-query readiness, so the failure
+        // ends it.
+        expect(effect.disposed).toBe(true)
+        expect(sourceErrors).toHaveLength(1)
+        expect(trees).toEqual([])
+        return
+      }
+      // Reach initial-query readiness: the eager source becomes ready, or the on-demand
+      // source's first load settles.
+      if (syncMode === `eager`) {
+        writeRow()
+        params.markReady()
+      } else {
+        settleLoad()
+      }
+      await flushPromises()
+      // Model: only `skipInitial` withholds the initial rows.
+      expect(delivered).toEqual(skipInitial ? [] : [1])
+
+      if (failure === `crash after gate`) {
+        params.collection._lifecycle.crash(new Error(`crashed`))
+      } else {
+        params.markError(new Error(`gave up`))
+      }
+      await flushPromises()
+      // Model: the source reaches `error` by a crash, or by an initial
+      // error while an on-demand source is still in its initial sync. Either
+      // ends the Effect. An eager source's markError after Collection
+      // readiness is a final health error instead.
+      const ends = failure === `crash after gate` || syncMode === `on-demand`
+      expect(effect.disposed).toBe(ends)
+      expect(sourceErrors).toHaveLength(ends ? 1 : 0)
+      if (!ends) {
         expect(trees.at(-1)).toMatchObject({
           kind: `live-query`,
           hasErrors: true,
@@ -1073,20 +1112,17 @@ describe(`effect health`, () => {
             {
               alias: `row`,
               isError: true,
-              error: {
-                phase: syncMode === `on-demand` ? `initial` : `sync`,
-                final: true,
-              },
+              error: { phase: `sync`, final: true },
             },
           ],
         })
-      } finally {
-        console.error = consoleError
-        await effect.dispose()
-        await source.cleanup()
       }
-    },
-  )
+    } finally {
+      console.error = consoleError
+      await effect.dispose()
+      await source.cleanup()
+    }
+  })
 })
 
 /**
@@ -1173,7 +1209,7 @@ describe(`effect request errors`, () => {
       if (parentMode === `eager`) parentParams.markReady()
       await flushPromises()
 
-      // Model: past the gate, a failed load is a request error.
+      // Model: after initial-query readiness, a failed load is a request error.
       outcomes.push(`fail`)
       writeParent(2)
       await flushPromises()
