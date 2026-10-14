@@ -430,12 +430,11 @@ class QueryCollectionUtilsImpl implements QueryCollectionUtils {
     await this.refetch({ throwOnError: true })
   }
 
-  // Getters for error state
-  // These track query-level errors (per query, not per collection). They are
-  // separate from Collection.health. When status is ready, query errors appear
-  // only in health; when status is error, they appear here too as the initial
-  // load failed. After ready, a failed query fetch sets health as a request
-  // error and keeps the last ready data while tracking in lastError/errorCount.
+  // Getters for error state. They cover every Query this Collection observes:
+  // a failed fetch or result application sets them, and a later successful
+  // application clears them. After Collection readiness, Collection health
+  // mirrors them: the same failure is a health error that is not final, since
+  // TanStack Query fetches again, and the same clear reports healthy.
   public get lastError() {
     return this.state.lastError
   }
@@ -1192,6 +1191,11 @@ export function queryCollectionOptions(
     const observedErrorUpdates = new WeakMap<AnyQuery, number>()
     let errorRevision = 0
     const failedResultApplications = new Map<string, unknown>()
+    const clearLastError = () => {
+      state.lastError = undefined
+      state.errorCount = 0
+      if (collection.status === `ready`) reportHealthy()
+    }
     const exceptionalResultSettlements = new WeakMap<
       QueryObserverResult<unknown, unknown>,
       ExceptionalResultSettlement
@@ -2688,13 +2692,9 @@ export function queryCollectionOptions(
               unownedDirectWritePositions.delete(key)
           })
           if (!signal?.aborted) {
-            // A successful refetch after an initial load failure does not revive
-            // the Collection. The failure is final; recovery needs cleanup() then
-            // preload(). After initial-query readiness, successful results report
-            // health recovery in trackResultApplication.
-            if (collection.status !== `error`) {
-              markReady()
-            }
+            // A later successful refetch does not revive a failed initial
+            // load; only a restart does.
+            if (collection.status !== `error`) markReady()
           }
         }
         const accepted = whenSyncAccepted(applied)
@@ -2778,16 +2778,10 @@ export function queryCollectionOptions(
       void application.then(
         () => {
           if (finish()) {
-            const hadError = failedResultApplications.has(hashedQueryKey)
             failedResultApplications.delete(hashedQueryKey)
             // Applying cached data during a fetch does not establish recovery.
             if (!isFetching && applicationErrorRevision === errorRevision) {
-              state.lastError = undefined
-              state.errorCount = 0
-              // Report recovery after a problem if the collection is ready
-              if (hadError && collection.status === `ready`) {
-                reportHealthy()
-              }
+              clearLastError()
             }
           }
         },
@@ -2801,9 +2795,6 @@ export function queryCollectionOptions(
             `[QueryCollection] Error applying query ${String(hashToQueryKey.get(hashedQueryKey))}:`,
             error,
           )
-          // Report post-ready failures as health issues. Not final because query
-          // observers will retry via refetchInterval, refetchOnWindowFocus, or
-          // manual refetch() calls; the observer may succeed on the next attempt.
           if (collection.status === `ready`) {
             reportError(error, { final: false })
           }
@@ -2849,8 +2840,7 @@ export function queryCollectionOptions(
           resultApplicationControllers.delete(hashedQueryKey)
           failedResultApplications.delete(hashedQueryKey)
           if (!result.isFetching && currentErrorRevision === errorRevision) {
-            state.lastError = undefined
-            state.errorCount = 0
+            clearLastError()
           }
         }
         return
@@ -3183,8 +3173,6 @@ export function queryCollectionOptions(
           if (collection.status === `loading`) {
             markError(result.error)
           } else if (collection.status === `ready`) {
-            // Report post-ready failures as health issues. Not final because
-            // observers will retry on interval/reconnect/manual refetch.
             reportError(result.error, { final: false })
           }
         }

@@ -13127,12 +13127,9 @@ it(`reports a failed Query cache rotation as a terminal Collection error`, async
   const outcome = recover()
   await rotationEntered.promise
   await expect(outcome).rejects.toBe(failure)
-  // Cache rotation failure happens after readiness. With the new design, post-ready
-  // failures don't change status; they appear in health. Status stays ready.
-  expect(collection.status).toBe(`ready`)
-  expect(collection.health.isError).toBe(true)
-  expect(collection.health.error?.message).toMatch('rotation refused')
-  // Subsequent operations fail because of the health error
+  // A refused rotation is a persistence failure, so the Collection crashes
+  // even after Collection readiness, and later demand rejects with its cause.
+  expect(collection.status).toBe(`error`)
   await expect(collection._sync.loadSubset({ limit: 2 })).rejects.toBe(failure)
 })
 

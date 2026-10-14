@@ -1158,6 +1158,76 @@ async function expectForeignOwnerReleaseKeepsInFlightSignal(): Promise<void> {
   }
 }
 
+/**
+ * After Collection readiness, Collection health mirrors `utils.lastError`.
+ * A failed refetch sets both: the health error is not final, because TanStack
+ * Query fetches again, and the status and rows stay. The next successful
+ * application clears both. The model is that one rule; it does not read the
+ * adapter's per-key bookkeeping.
+ */
+async function expectRefetchFailureHealthFollowsLastError(): Promise<void> {
+  const error = new Error(`refetch failed`)
+  const queryClient = createQueryClient()
+  const id = `load-subset-health-${collectionSequence++}`
+  const loggedError = vi.spyOn(console, `error`).mockImplementation(() => {})
+  const queryFn = vi
+    .fn()
+    .mockResolvedValueOnce([{ id: `first` }])
+    .mockRejectedValueOnce(error)
+    .mockResolvedValueOnce([{ id: `second` }])
+  const collection = createCollection(
+    queryCollectionOptions<Row>({
+      id,
+      queryClient,
+      queryKey: [id],
+      queryFn,
+      getKey: (row) => row.id,
+      retry: false,
+    }),
+  )
+  const observe = () => ({
+    status: collection.status,
+    lastError: collection.utils.lastError,
+    health: collection.health.error && {
+      phase: collection.health.error.phase,
+      final: collection.health.error.final,
+      cause: collection.health.error.cause,
+    },
+    rows: collection.toArray.map((row) => row.id),
+  })
+  try {
+    await collection.preload()
+    expect(observe()).toEqual({
+      status: `ready`,
+      lastError: undefined,
+      health: null,
+      rows: [`first`],
+    })
+
+    await collection.utils.refetch()
+    await vi.waitFor(() => expect(collection.utils.lastError).toBe(error))
+    expect(observe()).toEqual({
+      status: `ready`,
+      lastError: error,
+      health: { phase: `sync`, final: false, cause: error },
+      rows: [`first`],
+    })
+
+    await collection.utils.refetch()
+    await vi.waitFor(() => expect(collection.utils.lastError).toBeUndefined())
+    expect(observe()).toEqual({
+      status: `ready`,
+      lastError: undefined,
+      health: null,
+      rows: [`second`],
+    })
+  } finally {
+    loggedError.mockRestore()
+    await collection.cleanup()
+    queryClient.clear()
+  }
+}
+
 async function expectInitialQueryFailureStatus(): Promise<void> {
   const error = new Error(`initial query failed`)
   const queryClient = createQueryClient()
@@ -1167,7 +1237,7 @@ async function expectInitialQueryFailureStatus(): Promise<void> {
     .fn()
     .mockRejectedValueOnce(error)
     .mockResolvedValueOnce([{ id: `recovered` }])
-    .mockResolvedValueOnce([{ id: `recovered` }]) // for cleanup+preload restart
+    .mockResolvedValueOnce([{ id: `recovered` }])
   const collection = createCollection(
     queryCollectionOptions<Row>({
       id,
@@ -1204,19 +1274,14 @@ async function expectInitialQueryFailureStatus(): Promise<void> {
       throw new TraceAssertionError(0, caught)
     }
 
-    // With the new design, an initial error is final for its sync attempt.
-    // clearError() triggers a refetch, but the status stays error until
-    // cleanup() + preload() starts a fresh sync attempt.
-    // First, note that the refetch will succeed and the data will be available
-    // in lastError tracking, but status stays error.
+    // An initial error is final for its sync run. A successful refetch clears
+    // utils.lastError and applies its rows, but only a restart reaches ready.
     await collection.utils.clearError()
-    // After a successful refetch from an error state, status stays error,
-    // but utils.lastError clears and we can see the data
     await vi.waitFor(() => {
       expect(collection.utils.lastError).toBeUndefined()
       expect(collection.get(`recovered`)).toBeDefined()
     })
-    // To fully recover to ready status, cleanup and restart
+    expect(collection.status).toBe(`error`)
     await collection.cleanup()
     await live.cleanup()
     await collection.preload()
@@ -1331,11 +1396,8 @@ async function expectEveryFailedSourceToRecover(): Promise<void> {
     await expect(preload).rejects.toThrow()
     expect(live.status).toBe(`error`)
 
-    // With the new design, recovery from initial errors requires cleanup() + preload().
-    // After markError(), you cannot call markReady() in the same sync run.
-    // Instead, recovery is via cleanup() + preload() which starts a fresh sync attempt.
-
-    // Restart left
+    // Each failed source recovers only through a restart, and the dependent
+    // stays in error until it restarts after every source is ready.
     await left.collection.cleanup()
     const leftPreload = left.collection.preload()
     left.recover({ id: `shared` })
@@ -1344,14 +1406,11 @@ async function expectEveryFailedSourceToRecover(): Promise<void> {
     expect(right.collection.status).toBe(`error`)
     expect(live.status).toBe(`error`)
 
-    // Restart right
     await right.collection.cleanup()
     const rightPreload = right.collection.preload()
     right.recover({ id: `shared` })
     await rightPreload
     expect(right.collection.status).toBe(`ready`)
-
-    // Live query should now be ready after both sources recover
     await live.cleanup()
     const livePreload2 = live.preload()
     await livePreload2
@@ -2582,7 +2641,11 @@ describe(`loadSubset lifecycle oracle`, () => {
     await expectReleasedRefetchRejects()
   })
 
-  it(`reports an initial query failure and recovers after a successful refetch`, async () => {
+  it(`mirrors utils.lastError into Collection health after readiness`, async () => {
+    await expectRefetchFailureHealthFollowsLastError()
+  })
+
+  it(`keeps an initial query failure until a restart, even after a successful refetch`, async () => {
     await expectInitialQueryFailureStatus()
   })
 
@@ -2590,7 +2653,7 @@ describe(`loadSubset lifecycle oracle`, () => {
     await expectLateDependentObservesInitialFailure()
   })
 
-  it(`recovers a dependent only after every failed source recovers`, async () => {
+  it(`restarts a dependent only after every failed source restarts`, async () => {
     await expectEveryFailedSourceToRecover()
   })
 
