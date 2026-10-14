@@ -22,7 +22,7 @@
  * All current scenarios must pass. A future known bug needs an independently
  * approved exact failure signature; a whole-test waiver could hide another bug.
  */
-import type { Collection } from '@tanstack/db'
+import type { Collection, ErrorTreeNode } from '@tanstack/db'
 
 /** Default row shape used by the base scenarios (a "person"). */
 export interface Row {
@@ -79,6 +79,19 @@ export interface LaggingSourceHandle<
 }
 
 /**
+ * A source Collection that reaches Collection readiness at once with its
+ * initial rows, then lets the scenario play its sync adapter's health reports.
+ */
+export interface HealthSourceHandle<
+  T extends { id: string } = Row,
+> extends SourceHandle<T> {
+  /** The sync adapter reports a health error after Collection readiness. */
+  reportError: (error: unknown, options?: { final?: boolean }) => void
+  /** The sync adapter reports that sync works again. */
+  reportHealthy: () => void
+}
+
+/**
  * The subset of `@tanstack/db` query operators scenarios need, supplied by the
  * driver from the adapter's realm. Grows as engine scenarios are ported.
  */
@@ -113,6 +126,11 @@ export interface ConformanceResult {
   persistedError?: unknown
   isError: boolean
   isEnabled: boolean
+  /**
+   * The hook's error tree, read without normalization so scenarios can judge
+   * object identity. `undefined` only for a disabled query.
+   */
+  errors: ErrorTreeNode | undefined
 }
 
 /** A query-builder callback, e.g. `(q) => q.from({ items: source.collection })`. */
@@ -164,6 +182,10 @@ export interface LiveQueryDriver {
   ) => SourceHandle<T>
   /** Create a source that starts `loading` and readies on demand (keyed by `id`). */
   makeDeferredSource: <T extends { id: string }>() => DeferredSourceHandle<T>
+  /** Create a ready source whose sync adapter health the scenario controls. */
+  makeHealthSource: <T extends { id: string }>(
+    initialData: ReadonlyArray<T>,
+  ) => HealthSourceHandle<T>
   /** Create an on-demand source that lags behind its settled subset (keyed by `id`). */
   makeLaggingSource: <T extends { id: string }>() => LaggingSourceHandle<T>
   /**

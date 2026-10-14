@@ -22,6 +22,7 @@ import type {
   Collection,
   CollectionStatus,
   Context,
+  ErrorTreeNode,
   GetResult,
   InferResultType,
   InitialQueryBuilder,
@@ -65,6 +66,7 @@ export interface UseLiveQueryReturn<TContext extends Context> {
   isIdle: ComputedRef<boolean>
   isError: ComputedRef<boolean>
   isCleanedUp: ComputedRef<boolean>
+  errors: ComputedRef<ErrorTreeNode | undefined>
 }
 
 type InferConditionalResultType<TContext extends Context> =
@@ -102,6 +104,7 @@ export interface UseLiveQueryReturnWithCollection<
   isIdle: ComputedRef<boolean>
   isError: ComputedRef<boolean>
   isCleanedUp: ComputedRef<boolean>
+  errors: ComputedRef<ErrorTreeNode | undefined>
 }
 
 export interface UseLiveQueryReturnWithSingleResultCollection<
@@ -121,6 +124,7 @@ export interface UseLiveQueryReturnWithSingleResultCollection<
   isIdle: ComputedRef<boolean>
   isError: ComputedRef<boolean>
   isCleanedUp: ComputedRef<boolean>
+  errors: ComputedRef<ErrorTreeNode | undefined>
 }
 
 /**
@@ -374,6 +378,7 @@ export function useLiveQuery(
   )
   const persistedStatus = ref<LiveQueryPersistedStatus>(`unavailable`)
   const persistedError = shallowRef<unknown>(undefined)
+  const errors = shallowRef<ErrorTreeNode | undefined>(undefined)
 
   // The shared observer owns subscription, the ready-race, and status; Vue
   // materializes into its own reactive map (granular) + ordered array.
@@ -384,6 +389,7 @@ export function useLiveQuery(
     status.value = snapshot.status as CollectionStatus
     persistedStatus.value = snapshot.persistedStatus
     persistedError.value = snapshot.persistedError
+    errors.value = snapshot.errors
     internalData.value = snapshotRows(snapshot.data)
   }
 
@@ -400,6 +406,7 @@ export function useLiveQuery(
       status.value = `disabled` as const
       persistedStatus.value = `unavailable`
       persistedError.value = undefined
+      errors.value = undefined
       state.clear()
       internalData.value = []
       return
@@ -468,5 +475,6 @@ export function useLiveQuery(
     isIdle: computed(() => status.value === `idle`),
     isError: computed(() => status.value === `error`),
     isCleanedUp: computed(() => status.value === `cleaned-up`),
+    errors: computed(() => errors.value),
   }
 }

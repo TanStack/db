@@ -19,6 +19,7 @@ import type {
   Collection,
   CollectionStatus,
   Context,
+  ErrorTreeNode,
   GetResult,
   InferResultType,
   InitialQueryBuilder,
@@ -63,6 +64,8 @@ export interface InjectLiveQueryResult<TContext extends Context> {
   isError: Signal<boolean>
   /** A signal indicating whether the collection has been cleaned up */
   isCleanedUp: Signal<boolean>
+  /** A signal containing the error tree for the query and its dependencies */
+  errors: Signal<ErrorTreeNode | undefined>
 }
 
 type InferConditionalResultType<TContext extends Context> =
@@ -94,6 +97,7 @@ export interface InjectLiveQueryResultWithCollection<
   isIdle: Signal<boolean>
   isError: Signal<boolean>
   isCleanedUp: Signal<boolean>
+  errors: Signal<ErrorTreeNode | undefined>
 }
 
 export interface InjectLiveQueryResultWithSingleResultCollection<
@@ -113,6 +117,7 @@ export interface InjectLiveQueryResultWithSingleResultCollection<
   isIdle: Signal<boolean>
   isError: Signal<boolean>
   isCleanedUp: Signal<boolean>
+  errors: Signal<ErrorTreeNode | undefined>
 }
 
 export function injectLiveQuery<
@@ -227,6 +232,7 @@ export function injectLiveQuery(opts: any) {
   })
   const persistedStatus = signal<LiveQueryPersistedStatus>(`unavailable`)
   const persistedError = signal<unknown>(undefined)
+  const errors = signal<ErrorTreeNode | undefined>(undefined)
 
   // Returns single item for singleResult collections, array otherwise
   const data = computed(() => {
@@ -252,6 +258,7 @@ export function injectLiveQuery(opts: any) {
     statusValue.set(snapshot.status)
     persistedStatus.set(snapshot.persistedStatus)
     persistedError.set(snapshot.persistedError)
+    errors.set(snapshot.errors)
   }
 
   let unsub: (() => void) | null = null
@@ -268,6 +275,7 @@ export function injectLiveQuery(opts: any) {
       statusValue.set(`disabled` as const)
       persistedStatus.set(`unavailable`)
       persistedError.set(undefined)
+      errors.set(undefined)
       state.set(new Map())
       internalData.set([])
       cleanup()
@@ -318,5 +326,6 @@ export function injectLiveQuery(opts: any) {
     isIdle: computed(() => status() === `idle`),
     isError: computed(() => status() === `error`),
     isCleanedUp: computed(() => status() === `cleaned-up`),
+    errors,
   }
 }
