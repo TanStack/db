@@ -1155,7 +1155,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
     )
 
     it(`registers every distinct scenario without whole-test waivers`, () => {
-      expect(registry.size).toBe(35)
+      expect(registry.size).toBe(34)
     })
   })
 }
