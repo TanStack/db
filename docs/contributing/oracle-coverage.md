@@ -586,7 +586,10 @@ Another held-fetch cut releases the final filtered owner during full Query
 revalidation, then checks transport abort and no late row publication.
 Query-cache success reentry checks that initial and replacement full results
 cannot settle a filtered acquisition before Collection application; the
-replacement cut rejects a gate based only on previous full-row ownership. An
+replacement cut rejects a gate based only on previous full-row ownership. A
+controlled application barrier keeps the new row absent after Query success;
+both filtered acquisitions remain pending until it opens. Removing the
+readiness gate fails at that checkpoint. An
 applied direct cache patch permits reuse or one exact filtered revalidation
 for a new demand, but cannot trigger a redundant full request. The bounded
 history has no retry, invalidation, or explicit refetch; a duplicate filtered
@@ -611,7 +614,10 @@ Public Collection cleanup from a synchronous Query-cache fetch notification
 checks both the cached-result and uncached readiness-observer paths. At cleanup
 settlement and after an ignored-signal provider finishes, the Collection has no
 rows, the old Query has no observers, and its tracked exact cache entry is
-absent. A callback that adds a second public subscriber during the cached or
+absent. A Query-cache `added` notification can also clean up the Collection
+inside new observer construction, before Query DB records ownership. Its
+uncached witness requires no observer or cache entry at cleanup settlement;
+the pre-repair implementation fails there. A callback that adds a second public subscriber during the cached or
 uncached observer installation must likewise leave no Query observer after
 cleanup. A final public subscriber that leaves during cached installation must
 leave no Query observer at the returned-request cut. Core's public subscription
