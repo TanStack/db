@@ -710,6 +710,11 @@ type WindowCase = {
   // A replay of a known transient top-K row: the extra child rows it may load
   // at a checkpoint where the parent's ordered loader had not settled.
   overshoot?: number
+  // A `findOne` parent skips its `offset` when false. Omitted means true.
+  findOneOffset?: boolean
+  // A window `setWindow` requests before the live query starts (not for a
+  // `findOne` parent).
+  startWindow?: { offset: number; limit: number } | null
 }
 
 const windowCommand: fc.Arbitrary<WindowCommand> = fc.oneof(
@@ -770,6 +775,14 @@ const windowCase: fc.Arbitrary<WindowCase> = fc
       offset: fc.integer({ min: 0, max: 20 }),
       limit: fc.integer({ min: 1, max: 4 }),
       history: fc.array(windowCommand, { maxLength: 8 }),
+      findOneOffset: fc.boolean(),
+      startWindow: fc.option(
+        fc.record({
+          offset: fc.integer({ min: 0, max: 20 }),
+          limit: fc.integer({ min: 1, max: 4 }),
+        }),
+        { nil: null },
+      ),
     }),
   )
   // A findOne parent has one result row; `distinct` would not change it.
@@ -1089,7 +1102,11 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
       const windowed =
         testCase.parentForm === `orderOnly`
           ? ordered
-          : ordered.offset(testCase.offset).limit(testCase.limit)
+          : testCase.parentForm === `findOne`
+            ? testCase.findOneOffset === false
+              ? ordered
+              : ordered.offset(testCase.offset)
+            : ordered.offset(testCase.offset).limit(testCase.limit)
       const selected = testCase.distinct
         ? windowed
             .select(({ parent }) => ({
@@ -1113,10 +1130,18 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
     let shown =
       testCase.parentForm === `orderOnly`
         ? { offset: 0, limit: Number.POSITIVE_INFINITY }
-        : {
-            offset: testCase.offset,
-            limit: testCase.parentForm === `findOne` ? 1 : testCase.limit,
-          }
+        : testCase.parentForm === `findOne`
+          ? {
+              offset: testCase.findOneOffset === false ? 0 : testCase.offset,
+              limit: 1,
+            }
+          : { offset: testCase.offset, limit: testCase.limit }
+    // A window requested before the live query starts replaces the compiled
+    // one before its first load.
+    const startWindow =
+      testCase.parentForm === `findOne` ? undefined : testCase.startWindow
+    const startSettled = startWindow ? live.utils.setWindow(startWindow) : true
+    if (startWindow) shown = startWindow
     const sign = testCase.direction === `asc` ? 1 : -1
     const sortedUnits = () =>
       windowUnits(keptParents(), testCase.distinct).sort(
@@ -1186,6 +1211,7 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
       ).length
 
     await live.preload()
+    if (startSettled !== true) await startSettled
     await new Promise((resolve) => setTimeout(resolve, 0))
     let before = expectWindow(`rows after preload`)
     const preloadLoads = Math.max(0, parentBatches - 1)
@@ -1199,7 +1225,9 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
       workBound(grandchildrenOf(shownKids(before)), preloadLoads),
     )
 
+    let windowBefore: { offset: number; limit: number } | undefined
     for (const [step, command] of testCase.history.entries()) {
+      windowBefore = undefined
       const childBefore = childWork()
       const grandBefore = grandWork().delivered
       const batchesBefore = parentBatches
@@ -1259,6 +1287,7 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
         await changeChild(`delete`, child)
       } else {
         if (testCase.parentForm === `findOne`) continue
+        windowBefore = shown
         shown = { offset: command.offset, limit: command.limit }
         const settled = live.utils.setWindow(shown)
         if (settled !== true) await settled
@@ -1286,6 +1315,14 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
           ? 1
           : 0
       const stepLoads = Math.max(0, parentBatches - batchesBefore - parentWrite)
+      if (
+        command.type === `move` &&
+        testCase.parentForm !== `findOne` &&
+        command.offset > (windowBefore?.offset ?? 0) &&
+        (stepLoads === 0 || testCase.overshoot !== undefined)
+      ) {
+        windowReach.strictForwardMoves++
+      }
       // Child rows the step writes reach a local subscription whether or not
       // their group is loaded, so each counts once: a fresh parent's group,
       // or one inserted or deleted child.
@@ -1337,6 +1374,10 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
 // Enough runs that each dimension appears at the default multiplier; the
 // reconstruction check below counts them.
 const WINDOW_RUNS = 60
+
+// Forward window moves whose step the work bound checks strictly, counted
+// across this file's runs for the reach witness below.
+const windowReach = { strictForwardMoves: 0 }
 
 const pinnedWindowCase: WindowCase = {
   parents: 8,
@@ -1457,6 +1498,43 @@ describe(`includes work under an ordered parent window`, () => {
       ])
     }
   })
+
+  // A window requested before start can drop rows a static filter names,
+  // so the static seed must not load their children.
+  it(`seeds no static child demand under a window requested before start`, () =>
+    checkWindowedIncludeWork({
+      ...pinnedWindowCase,
+      childForm: `ordered`,
+      childSource: `on-demand`,
+      parentForm: `orderOnly`,
+      parentFilter: [0, 1, 2, 3, 4, 5],
+      startWindow: { offset: 0, limit: 1 },
+    }))
+
+  // Forward moves load more parent rows, so the generated campaigns cannot
+  // check them strictly; these do, with no overshoot allowed.
+  it.each([
+    [`local`, false],
+    [`local`, true],
+    [`on-demand`, false],
+    [`on-demand`, true],
+  ] as const)(
+    `moves the window forward strictly (%s children, distinct=%s)`,
+    (childSource, distinct) =>
+      checkWindowedIncludeWork({
+        ...pinnedWindowCase,
+        parents: 40,
+        groups: 40,
+        childrenPerGroup: 2,
+        childSource,
+        distinct,
+        history: [
+          { type: `move`, offset: 20, limit: 2 },
+          { type: `move`, offset: 30, limit: 2 },
+        ],
+        overshoot: 0,
+      }),
+  )
 
   // Replays of transient top-K rows (#2151). Each shows the correct
   // rows and loads one child row beyond the bound, at a checkpoint where the
@@ -1597,6 +1675,18 @@ describe(`includes work under an ordered parent window`, () => {
         `on-demand static filter`,
         count((c) => c.childSource === `on-demand` && c.parentFilter !== null),
       ],
+      [
+        `findOne parent without offset`,
+        count((c) => c.parentForm === `findOne` && c.findOneOffset === false),
+      ],
+      [
+        `orderBy-only parent with a static filter`,
+        count((c) => c.parentForm === `orderOnly` && c.parentFilter !== null),
+      ],
+      [
+        `window requested before start`,
+        count((c) => c.parentForm !== `findOne` && c.startWindow !== null),
+      ],
     ] as const) {
       expect(reached, premise).toBeGreaterThanOrEqual(3)
     }
@@ -1614,6 +1704,12 @@ describe(`includes work under an ordered parent window`, () => {
       oracleRuns(WINDOW_RUNS) * 100,
     )
   }
+
+  // Reach witness: the pinned forward moves add eight strictly checked moves;
+  // the generated campaigns must add more.
+  it(`checks some generated forward moves strictly`, () => {
+    expect(windowReach.strictForwardMoves).toBeGreaterThan(8)
+  })
 })
 
 /**
