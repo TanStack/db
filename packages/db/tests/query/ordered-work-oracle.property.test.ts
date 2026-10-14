@@ -4411,21 +4411,28 @@ describe(`ordered source work oracle`, () => {
  * window over those rows. A joined or anti-joined filter over an on-demand
  * source must not request the whole source at its initial load when the
  * first window's worth of source rows all pass the join and no boundary
- * value is null or NaN, and the rows it serves stay within the prefix, its
- * boundary ties and a refill, for each consumer. A holding provider answers
- * a load only at a `release` step, from the rows at that moment, so live
- * changes and other loads can arrive while it is in flight; it records a
- * request as served only once it answers, and never answers a request the
- * loader aborted. Every holding history ends by answering all held loads,
- * and every window move it made must then have settled. While a load is in
+ * value is null or NaN, and the rows each consumer (query or Effect) is
+ * served stay within the prefix, its boundary ties and a refill, and the
+ * source's size. A holding provider answers a load only at a `release`
+ * step, from the rows at that moment, so live changes and other loads can
+ * arrive while it is in flight; it records a request as served only once it
+ * answers, and drops a held request the loader aborts or unloads without
+ * answering it. Every holding history ends by answering all held loads, and
+ * every window move it made must then have settled. While a load is in
  * flight, the Collection must still hold exactly the provider's ledger, and
  * a query and its peer either keep the window they showed at the previous
  * checkpoint or show distinct ledger rows that pass the query, in its order.
- * A campaign fixed to that premise uses a forwarding provider and a plan
- * that refills from it, and deletes a visible row first, so its refill is in
- * flight during the later changes; a reconstruction check runs its executed
- * cases and requires such steps. Loading must reach a fixed point: a loader
- * that keeps asking fails. On either provider a step may
+ * This is weaker than the architecture's barrier rule (a repair or window
+ * move keeps the last complete public window until it settles), which
+ * on-demand joined plans break today (#2131). The Effect is not checked
+ * while a load is in flight. A campaign fixed to that premise uses a
+ * forwarding provider and an indexed source filter or a joined filter that
+ * refills from it, deletes three visible rows, then upserts a fresh row; a
+ * reconstruction check reads the fixed-seed campaign's per-case counts and
+ * requires every case that issues a held request to change rows while it is
+ * in flight. Loading must reach a fixed point: past a request budget the
+ * provider rejects and records it, and every step asserts it did not. A
+ * bounded step makes at most four provider requests. On either provider a step may
  * publish one intermediate window per provider request it made, and only
  * its last publication must show the final window (#2131).
  * A `move` step changes the first query's window with `setWindow`; its laws
@@ -4776,6 +4783,13 @@ const eagerFullJoinCase: fc.Arbitrary<EagerCase> = fc
 const eagerHeldCase: fc.Arbitrary<EagerCase> = fc
   .tuple(
     eagerCase,
+    // A change that lands while the refill is in flight: an upsert of a
+    // fresh row, which always writes.
+    eagerRowOf(9).map((row) => ({
+      type: `upsert` as const,
+      ...row,
+      id: row.id + 20,
+    })),
     fc.array(
       fc.oneof(
         { weight: 3, arbitrary: eagerHistory(1, 29).map(([first]) => first!) },
@@ -4788,18 +4802,35 @@ const eagerHeldCase: fc.Arbitrary<EagerCase> = fc
       { minLength: 2, maxLength: 10 },
     ),
   )
-  .map(([testCase, rest]) => ({
+  .map(([testCase, change, rest]) => ({
     ...testCase,
     path: `on-demand` as const,
-    // A forwarding provider sends the delete, and a source or joined filter
-    // refills from the provider, so the refill is a held request.
+    // A forwarding provider sends the delete, and an indexed source filter
+    // or a joined filter refills from the provider, so the refill is a held
+    // request. An unindexed source filter issues no held request.
     provider: `forward` as const,
     filter:
       testCase.filter === `function` || testCase.filter === `full-joined`
         ? (`source` as const)
         : testCase.filter,
+    indexed:
+      testCase.filter === `function` ||
+      testCase.filter === `full-joined` ||
+      testCase.filter === `source`
+        ? true
+        : testCase.indexed,
+    // One order term, so the refill pages by cursor.
+    terms: 1 as const,
     latency: `held` as const,
-    history: [{ type: `delete-visible` as const }, ...rest],
+    // A loaded prefix can hold headroom rows, so three visible deletes make
+    // a refill request likely before the change.
+    history: [
+      { type: `delete-visible` as const },
+      { type: `delete-visible` as const },
+      { type: `delete-visible` as const },
+      change,
+      ...rest,
+    ],
   }))
 
 function isJoinedFilter({ filter }: EagerCase): boolean {
@@ -4877,9 +4908,11 @@ function boundaryRanks(
     .map((row): number | null => row.rank)
 }
 
-// Change steps that ran while a held load was in flight, for the held
-// campaign's reconstruction check.
-let heldChangeSteps = 0
+// Per executed case, the steps that changed rows while a held load was in
+// flight, for the held campaign's reconstruction check.
+const heldChangesPerCase: Array<{ changes: number; requests: number }> = []
+let lastCaseHeldChanges = 0
+let lastCaseHeldRequests = 0
 
 async function checkEagerWindow(testCase: EagerCase): Promise<void> {
   const joined = isJoinedFilter(testCase)
@@ -4957,8 +4990,11 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
     testCase.path === `on-demand` && testCase.provider === `refetch`
   let providerRequests = 0
   const sent = new Map<number, Row>()
-  // Rows the provider returns, the on-demand transfer the work law bounds.
+  // Rows the provider returns, the on-demand transfer the work law bounds,
+  // in total and per consumer subscription (the query and its Effect load
+  // separately).
   let served = 0
+  const servedBy = new Map<unknown, number>()
   // The requests the provider has served. A request without a predicate
   // covers every row.
   const servedRequests: Array<LoadSubsetOptions> = []
@@ -5019,6 +5055,27 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
   }> = []
   let holding = false
   const inFlight = () => heldRequests.length > 0
+  // Whether the current step changed rows while a held load was in flight,
+  // and how many steps of this case did.
+  let stepChangedInFlight = false
+  let caseHeldChanges = 0
+  let caseHeldRequests = 0
+  const noteChange = () => {
+    if (holding && inFlight()) stepChangedInFlight = true
+  }
+  // Read through a call, as `lagging` is: the write callbacks assign it.
+  const changedInFlight = () => stepChangedInFlight
+  // A held request that the loader aborts or unloads leaves the queue
+  // unanswered: it is never served or recorded.
+  const dropHeld = (options: LoadSubsetOptions): boolean => {
+    const index = heldRequests.findIndex((entry) => entry.options === options)
+    if (index === -1) return false
+    heldRequests.splice(index, 1)[0]!.resolve()
+    return true
+  }
+  // A loader that keeps asking never reaches a fixed point. The provider
+  // stops answering and records it; every step asserts that it did not.
+  let runaway = false
   // Requests for the whole source: no predicate, cursor, or limit.
   let fullSourceRequests = 0
   // The rows each served request last returned, at its answer or at the
@@ -5026,24 +5083,26 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
   const lastAnswered = new Map<LoadSubsetOptions, Set<number>>()
   function servePage(options: LoadSubsetOptions): true | Promise<void> {
     providerRequests++
-    // Loading must reach a fixed point: a loader that keeps asking fails.
     if (providerRequests > 4 * rows.size + 100) {
-      throw new Error(`ordered loading did not reach a fixed point`)
+      // A rejected load is a provider failure the loader must handle, so it
+      // stops a loader that asks synchronously; the flag reports it.
+      runaway = true
+      return Promise.reject(new Error(`ordered loading did not stop`))
     }
     if (!options.where && !options.cursor && options.limit === undefined) {
       fullSourceRequests++
     }
     if (!holding) return answer(options)
-    return new Promise((resolve) => heldRequests.push({ options, resolve }))
+    caseHeldRequests++
+    return new Promise((resolve) => {
+      heldRequests.push({ options, resolve })
+      options.signal?.addEventListener(`abort`, () => dropHeld(options))
+    })
   }
   // Answers one held request from the current rows and settles its load
-  // once the rows apply. A request the loader aborted gets no answer.
+  // once the rows apply.
   async function releaseOldest(): Promise<void> {
     const { options, resolve } = heldRequests.shift()!
-    if (options.signal?.aborted) {
-      resolve()
-      return
-    }
     const applied = answer(options)
     if (applied !== true) await applied
     resolve()
@@ -5057,6 +5116,10 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       rangeEnds.set(options, { ...page.at(-1)! })
     }
     served += page.length
+    servedBy.set(
+      options.subscription,
+      (servedBy.get(options.subscription) ?? 0) + page.length,
+    )
     return send(page)
   }
   // A refetch keeps every served ordered range whole, as the LoadSubset
@@ -5092,6 +5155,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
   // request and removes the rows that no remaining request's last answer
   // holds. It sends nothing new. A forwarding provider keeps what it sent.
   function unload(options: LoadSubsetOptions): void {
+    if (dropHeld(options)) return
     const index = servedRequests.indexOf(options)
     if (!refetching || index === -1) return
     servedRequests.splice(index, 1)
@@ -5145,6 +5209,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
   // it writes nothing for any other row. A refetching provider writes
   // nothing until its next refetch.
   const sourceWrite = (type: `insert` | `update` | `delete`, value: Row) => {
+    noteChange()
     if (refetching) {
       stale = true
       return
@@ -5229,6 +5294,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
     const current = markersOf(rowId)
     if (matched === current.length > 0) return
     commits++
+    noteChange()
     if (!matched) for (const { key } of current) markerModel.delete(key)
     await (
       matched
@@ -5535,19 +5601,22 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
           fullSourceRequests,
           `full-source requests by the initial load of a proven prefix`,
         ).toBe(0)
-        // A bounded but oversized read also fails: the provider returns at
-        // most the prefix, its boundary ties, and a refill, for each
-        // consumer (the query and its Effect load separately).
-        expect(
-          served,
-          `rows served by the initial load of a proven prefix`,
-        ).toBeLessThanOrEqual(
-          (effect ? 2 : 1) *
-            prefixBound(
-              prefix.map((row): number | null => row.rank).slice(-2),
-              window,
-            ),
+        // A bounded but oversized read also fails: each consumer (the query
+        // and its Effect load separately) receives at most the prefix, its
+        // boundary ties, and a refill, and never more than the source holds.
+        const consumerBound = Math.min(
+          prefixBound(
+            prefix.map((row): number | null => row.rank).slice(-2),
+            window,
+          ),
+          rows.size,
         )
+        for (const consumerServed of servedBy.values()) {
+          expect(
+            consumerServed,
+            `rows one consumer is served by the initial load of a proven prefix`,
+          ).toBeLessThanOrEqual(consumerBound)
+        }
       }
     }
     // The work laws count one consumer, so a peer query turns them off.
@@ -5634,7 +5703,6 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
         generated.type === `delete-visible`
           ? { type: `delete`, id: visibleId! }
           : generated
-      if (held && inFlight() && `id` in command) heldChangeSteps++
       const before = `id` in command ? rows.get(command.id) : undefined
       const boundaryBefore = boundaryRanks(rows, shown)
       const sizeBefore = rows.size
@@ -5646,6 +5714,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       commits = 1
       const requestsBefore = providerRequests
       const visibleBefore = JSON.stringify(visibleIds())
+      stepChangedInFlight = false
       if (command.type === `refetch`) {
         await refetch()
       } else if (command.type === `move`) {
@@ -5718,6 +5787,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       } else if (command.type === `dup`) {
         if (!(joined || fullJoin) || viaLink || !before) continue
         if (markersOf(before.link ?? before.id).length === 0) continue
+        noteChange()
         await markers.insert(marker(before.link ?? before.id)).isPersisted
           .promise
       } else if (command.type === `touch`) {
@@ -5757,6 +5827,10 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       // While a refetching provider lags the rows, the Collection holds an
       // older state, so the window is checked over the provider's ledger
       // until the next refetch.
+      expect(runaway, `loading reached a fixed point by step ${step}`).toBe(
+        false,
+      )
+      if (changedInFlight()) caseHeldChanges++
       expectProviderLedger(`after step ${step}`)
       if (inFlight()) {
         expectInFlightWindow(
@@ -5856,6 +5930,14 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
         refetching || held || peer || command.type === `move`
           ? undefined
           : workBound([...boundaryBefore, ...boundaryRanks(rows, shown)])
+      // A bounded step makes at most two loads, each a page and its tie
+      // request.
+      if (bound !== undefined) {
+        expect(
+          requests,
+          `provider requests by step ${step}`,
+        ).toBeLessThanOrEqual(4)
+      }
       if (bound !== undefined && testCase.path === `on-demand`) {
         expect(served, `rows served by step ${step}`).toBeLessThanOrEqual(bound)
       } else if (bound !== undefined) {
@@ -5870,6 +5952,8 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
         ).toBeLessThanOrEqual(bound)
       }
     }
+    lastCaseHeldChanges = caseHeldChanges
+    lastCaseHeldRequests = caseHeldRequests
   } finally {
     unsubscribe?.()
     await effect?.dispose()
@@ -6258,22 +6342,35 @@ describe(`eager indexed ordered windows`, () => {
   const HELD_SEED = 2081
   fcTest.prop([eagerHeldCase], { numRuns: runs, seed: HELD_SEED })(
     `keeps a window whose loads answer between live changes for a fixed seed`,
-    checkEagerWindow,
+    async (testCase) => {
+      await checkEagerWindow(testCase)
+      heldChangesPerCase.push({
+        changes: lastCaseHeldChanges,
+        requests: lastCaseHeldRequests,
+      })
+    },
   )
 
-  // Reconstruction: the fixed-seed held campaign changes rows while a load
-  // is in flight. Sampling its arbitrary with its seed and run count yields
-  // exactly the cases it executes; running them counts those steps.
-  it(`changes rows while held loads are in flight`, async () => {
-    heldChangeSteps = 0
-    for (const [testCase] of fc.sample(fc.tuple(eagerHeldCase), {
-      numRuns: runs,
-      seed: HELD_SEED,
-    })) {
-      await checkEagerWindow(testCase)
-    }
-    // At one times the run count: 81 such steps in 40 cases.
-    expect(heldChangeSteps).toBeGreaterThanOrEqual(40)
+  // Reconstruction: every case the fixed-seed held campaign just executed
+  // changed rows while a load was in flight. The property records the count
+  // per case, so this reads it without running the campaign again.
+  it(`changes rows while held loads are in flight in every held case that issues one`, () => {
+    expect(
+      heldChangesPerCase.length,
+      `held cases recorded by the fixed-seed campaign`,
+    ).toBe(runs)
+    // A case whose deletes refill from rows the query already holds issues
+    // no held request; at one times the run count, 35 of 40 cases issue one.
+    expect(
+      heldChangesPerCase.filter((count) => count.requests > 0).length,
+      `held cases that issue a held request`,
+    ).toBeGreaterThanOrEqual(Math.ceil(runs * 0.75))
+    expect(
+      heldChangesPerCase.filter(
+        (count) => count.requests > 0 && count.changes === 0,
+      ),
+      `held cases with a held request but no in-flight change`,
+    ).toEqual([])
   })
 
   fcTest.prop(
