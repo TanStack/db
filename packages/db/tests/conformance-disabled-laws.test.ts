@@ -13,6 +13,7 @@ function disabled(
     isReady: true,
     isError: false,
     isEnabled: false,
+    errors: undefined,
   }
 }
 
@@ -46,6 +47,21 @@ const faults: Array<[string, (value: ConformanceResult) => void]> = [
     `error`,
     (value) => {
       value.isError = true
+    },
+  ],
+  [
+    `stale error tree`,
+    (value) => {
+      value.errors = {
+        alias: `root`,
+        collectionId: `stale`,
+        kind: `live-query`,
+        status: `ready`,
+        isError: false,
+        hasErrors: false,
+        error: null,
+        sources: [],
+      }
     },
   ],
   [

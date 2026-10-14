@@ -38,6 +38,7 @@ import type {
   CollectionStatus,
   Context,
   DbClient,
+  ErrorTreeNode,
   InferResultType,
   InitialQueryBuilder,
   LiveQueryPersistedStatus,
@@ -102,6 +103,7 @@ export type UseLiveInfiniteQueryReturnWithCollection<
   hasNextPage: boolean
   isFetchingNextPage: boolean
   error: unknown
+  errors: ErrorTreeNode | undefined
 }
 
 type EnabledLiveQueryReturn<TContext extends Context> = ReturnType<
@@ -471,5 +473,6 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     hasNextPage: snapshot.hasNextPage,
     isFetchingNextPage: snapshot.isFetchingNextPage,
     error: snapshot.error,
+    errors: snapshot.errors,
   }
 }

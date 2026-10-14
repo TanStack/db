@@ -772,6 +772,8 @@ class LiveQueryObserverImpl<
     const healthUnsub = collection.on(`health:change`, () => {
       if (errorsOf() === publishedErrors) return
       publishedErrors = errorsOf()
+      // No rows or status changed, so only this marks the snapshot stale.
+      this.snapshotDirty = true
       notify(undefined, collection.status)
     })
     const subscribeLayoutChanges = (

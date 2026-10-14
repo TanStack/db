@@ -14,6 +14,7 @@ import type {
   Collection,
   CollectionStatus,
   Context,
+  ErrorTreeNode,
   GetResult,
   InferResultType,
   InitialQueryBuilder,
@@ -68,6 +69,7 @@ export interface UseLiveInfiniteQueryReturn<
   hasNextPage: ComputedRef<boolean>
   isFetchingNextPage: ComputedRef<boolean>
   error: ComputedRef<unknown>
+  errors: ComputedRef<ErrorTreeNode | undefined>
 }
 
 export interface UseLiveInfiniteQueryReturnWithCollection<
@@ -93,6 +95,7 @@ export interface UseLiveInfiniteQueryReturnWithCollection<
   hasNextPage: ComputedRef<boolean>
   isFetchingNextPage: ComputedRef<boolean>
   error: ComputedRef<unknown>
+  errors: ComputedRef<ErrorTreeNode | undefined>
 }
 
 /**
@@ -269,5 +272,6 @@ export function useLiveInfiniteQuery<
     hasNextPage: computed(() => snapshot.value.hasNextPage),
     isFetchingNextPage: computed(() => snapshot.value.isFetchingNextPage),
     error: computed(() => snapshot.value.error),
+    errors: computed(() => snapshot.value.errors),
   }
 }

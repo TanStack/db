@@ -27,6 +27,7 @@ import type {
   CollectionStatus,
   Context,
   DbClient,
+  ErrorTreeNode,
   GetResult,
   InferResultType,
   InitialQueryBuilder,
@@ -401,6 +402,7 @@ export function useLiveQuery<TContext extends Context>(
   isError: boolean
   isCleanedUp: boolean
   isEnabled: true // Always true if always returns QueryBuilder
+  errors: ErrorTreeNode | undefined
 }
 
 // Overload 2: Accept query function that can return undefined/null
@@ -423,6 +425,7 @@ export function useLiveQuery<TContext extends Context>(
   isError: boolean
   isCleanedUp: boolean
   isEnabled: boolean
+  errors: ErrorTreeNode | undefined
 }
 
 // Overload 3: Accept query function that can return LiveQueryCollectionConfig
@@ -445,6 +448,7 @@ export function useLiveQuery<TContext extends Context>(
   isError: boolean
   isCleanedUp: boolean
   isEnabled: boolean
+  errors: ErrorTreeNode | undefined
 }
 
 // Overload 4: Accept query function that can return Collection
@@ -471,6 +475,7 @@ export function useLiveQuery<
   isError: boolean
   isCleanedUp: boolean
   isEnabled: boolean
+  errors: ErrorTreeNode | undefined
 }
 
 // Overload 5: Accept query function that can return all types
@@ -507,6 +512,7 @@ export function useLiveQuery<
   isError: boolean
   isCleanedUp: boolean
   isEnabled: boolean
+  errors: ErrorTreeNode | undefined
 }
 
 /**
@@ -561,6 +567,7 @@ export function useLiveQuery<TContext extends Context>(
   isError: boolean
   isCleanedUp: boolean
   isEnabled: true // Always true when query always returns a builder
+  errors: ErrorTreeNode | undefined
 }
 
 // Overload 7: Accept config object with a query that can return undefined/null
@@ -580,6 +587,7 @@ export function useLiveQuery<TContext extends Context>(
   isError: boolean
   isCleanedUp: boolean
   isEnabled: boolean
+  errors: ErrorTreeNode | undefined
 }
 
 // Overload 8: Accept config object with legacy deps
@@ -600,6 +608,7 @@ export function useLiveQuery<TContext extends Context>(
   isError: boolean
   isCleanedUp: boolean
   isEnabled: true // Always true when query always returns a builder
+  errors: ErrorTreeNode | undefined
 }
 
 // Overload 9: Accept config object with legacy deps and a query that can return undefined/null
@@ -620,6 +629,7 @@ export function useLiveQuery<TContext extends Context>(
   isError: boolean
   isCleanedUp: boolean
   isEnabled: boolean
+  errors: ErrorTreeNode | undefined
 }
 
 /**
@@ -672,6 +682,7 @@ export function useLiveQuery<
   isError: boolean
   isCleanedUp: boolean
   isEnabled: true // Always true for pre-created live query collections
+  errors: ErrorTreeNode | undefined
 }
 
 // Overload 10: Accept pre-created live query collection with singleResult: true
@@ -695,6 +706,7 @@ export function useLiveQuery<
   isError: boolean
   isCleanedUp: boolean
   isEnabled: true // Always true for pre-created live query collections
+  errors: ErrorTreeNode | undefined
 }
 
 // Implementation - use function overloads to infer the actual collection type
