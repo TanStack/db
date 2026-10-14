@@ -1,9 +1,9 @@
 # PR #2134 identity and persisted-key oracle review
 
-**Current evidence, 2026-10-13:** The append-only final reviews below supersede
-the earlier scope, calibration counts, proxy-collision premise, and ORC-014
-status in this record. They review code heads
-`de5d4189bc906cd8375ad174357c027bcfea98cf` and `5239c25c2`.
+**Current evidence, 2026-10-14:** The final review below supersedes the earlier
+source-only proxy-fixture claim and held-fetch calibration. Its executable code
+head is `d7ab913a4`. Earlier sections record how the repair changed; their
+bounded results remain evidence only for the setup stated there.
 The earlier sections remain as the history of how the oracle and repair changed.
 
 Reviewed PR head: `5e224075f`. Semantic repair: `9092cbf26`, 2026-10-13.
@@ -699,8 +699,9 @@ was released and acquired again before maintenance settled. The new history
 requires the first caller's `AbortError` and the second caller's applied row.
 A mutant that deletes the map entry without checking its set identity failed
 at the second caller's outcome (`AbortError` instead of `ready`); the repaired
-path passes. The literal-proxy tests now import the same DB source instance as
-Query Collection, removing a cross-copy test artifact from the earlier setup.
+path passes. In that source-aliased setup, the literal-proxy tests used the same
+DB source instance as Query Collection. The normal package resolution check in
+the final review below exposed a remaining cross-copy fixture gap.
 
 The integrated Query DB runtime suite passed 1,029 tests in 20 files, and the
 package typecheck passed, both against the attribution source. The executable
@@ -963,21 +964,76 @@ their source order and distinguishes the reviewed code from this head.
 | ID | Claim and proposed fix | Evaluation and PR action | Durable value |
 | --- | --- | --- | --- |
 | CR-1, comment `4264883996`, Minor | Persisted final unload leaves `pendingRetainedRevalidations`; a same-turn replacement may reuse a revoked promise. Delete the map entry at final unload. | **Stale on this head.** The map and `shareRetainedRevalidation` existed at reviewed commit `5dec2995`; that old failure was not replayed independently. Merge `5874c7078` removed both. Current held-provider histories for same-turn reacquisition and aborted successor success/failure pass at pending outcome, public row, durable owner, and retention marker checkpoints. No map deletion applies now. | The accepted law remains: a replacement demand cannot settle from retired work, and the historical durable owner remains until its fresh result applies. `ownership-lifecycle.oracle.test.ts` owns this boundary. |
-| CR-2, comment `4264884017`, Major | The ownership oracle imports `createSingleRowRefProxy` from built `dist`; source `isRefProxy` sees a different private brand. Import from source. | **Confirmed on the reviewed commit; already fixed in merge `5874c7078`.** A direct probe reported source proxy `true`, built proxy `false` under source `isRefProxy`; `dist` is untracked. This follow-up asserts the source brand beside each relevant fixture. Switching only the constructor import back to `dist` in a disposable copy fails two focused histories at their fixture-premise assertions. Current source histories pass. | A proxy-identity oracle must prove its fixture reaches the intended same-instance classifier before judging Query identity or durable ownership. The coverage map records that premise. |
+| CR-2, comment `4264884017`, Major | The ownership oracle imports `createSingleRowRefProxy` from built `dist`; source `isRefProxy` sees a different private brand. Import from source. | **Confirmed test-integrity bug; the source-import fix was incomplete.** Merge `5874c7078` made source-aliased tests pass, but normal package resolution still loaded the Query Collection's `@tanstack/db` from built `dist`. A source proxy was foreign to that package's private brand, and three historical-key comparisons failed. Commit `d7ab913a4` captures proxies through public `Collection.createIndex` from the same package import as the encoder; the fixed old EQ, IN, and other-path key comparisons now pass under normal resolution. | A proxy-identity oracle must prove its fixture reaches the classifier used by Query Collection. The exact historical key comparisons are that premise. |
 
 CodeRabbit identified one real test-integrity issue and one plausible old
-lifecycle concern. Its proposed import change was correct; the map deletion is
-inapplicable after the merge. The review had useful signal and clear locations,
+lifecycle concern. Its source-import fix addressed the source-aliased suite but
+left the normal package boundary broken; the map deletion is inapplicable after
+the merge. The review had useful signal and clear locations,
 but did not supply a runnable lifecycle counterexample. **Reviewer assessment:
 hire for review support**, with executable validation required before treating
 an async ownership warning as a confirmed bug.
 
 The Query DB suite passed 1,034 tests in 20 files against immutable
-attribution-enabled Query Core source `877655c66`. TypeScript, Prettier, and
-`git diff --check` passed. Changed-file ESLint reported no errors and ten
-pre-existing warnings in the large ownership oracle. The two CodeRabbit items
-are accounted for as one stale and one already fixed, with the fixture gap
-closed here. The custom Query behavior that invokes `queryFn` then throws
+attribution-enabled Query Core source `877655c66` with a DB source alias.
+TypeScript, Prettier, and `git diff --check` passed. Changed-file ESLint
+reported no errors and ten pre-existing warnings in the large ownership
+oracle. The two CodeRabbit items are accounted for as one stale and one
+confirmed fixture gap, completed in `d7ab913a4` below. The custom Query
+behavior that invokes `queryFn` then throws
 before `fetchStarted` still leaves a public Query DB load pending; PR #2143
 owns that receiving repair. A compatible published Query Core release remains
 required before this integrated branch can claim release compatibility.
+
+## Normal package fixture and held-fetch review at `d7ab913a4`
+
+The v9 oracle review found two false-green paths at the previous head
+`1ce240d81`. First, `ownership-lifecycle.oracle.test.ts` constructed literal
+proxies through `packages/db/src` and asserted the source instance's private
+brand. With normal package resolution, Query Collection and the key encoder
+used `@tanstack/db/dist`, so those proxies were foreign objects. The fixed
+historical EQ, singleton-IN, and other-path key comparisons failed before the
+fixture change. The source-aliased suite had hidden this boundary. The new
+fixture captures a single-row proxy from the public `Collection.createIndex`
+callback of the package instance used by the encoder. The test removes that
+index and cleans up its Collection. Under normal built-package resolution,
+all five selected proxy histories pass. The EQ and IN comparisons match fixed
+pre-upgrade bytes, the other-path marker remains, and the QueryClient identity
+history confirms distinct current keys for separately created proxies.
+
+Second, `load-subset-lifecycle-oracle.test.ts` overwrote its held signal and
+resolver on every provider call. A driver-injected schedule canceled the
+second call when the full view released and immediately started a third call.
+Both existing release-order tests passed: they checked the replacement's live
+signal instead of the canceled signal. The fixture now pins the second call's
+signal and resolver and checks exactly two provider calls after the full view
+releases, after the filtered view releases, and after late settlement. The
+same injected schedule fails at the first `requests === 2` comparison with
+three observed calls; the untouched reverse-order history passes. This was a
+driver-injected hostile schedule, not a production mutant.
+
+The review used normal built-package DB resolution and immutable Query Core
+source `273eb2526`. The five proxy histories and two held-fetch histories
+pass, as do all 1,034 Query DB tests in 20 files. Query DB typechecking also
+passes with that Core source. A separate older review copy of Query Core
+failed 11 provenance histories even after rebuilding DB `dist`; immutable
+Core `877655c66` and `273eb2526` both pass the full suite under the same DB
+resolution. Those 11 failures were Core-version differences, not evidence
+against the proxy or held-fetch repair.
+
+| Requirement | Outcome for this follow-up |
+| --- | --- |
+| ORC-001 | The exact-demand and retained-owner laws stated above remain the authority. This follow-up checks fixture reachability and the original fetch's ownership at two release orders; it does not claim arbitrary provider scheduling. |
+| ORC-002 | Historical bytes and object identity come from fixed fixtures and `Object.is`; provider count and the original signal are observed without reusing Query Collection's ownership classifier. |
+| ORC-003 | The oracle comments now explain the public proxy construction path, both legal release orders, the pinned second call, observations, and checkpoints beside the executable code. |
+| ORC-004 | Not triggered: this follow-up changes bounded fixed histories, not a generated grammar. |
+| ORC-005 | Normal package resolution reaches the package encoder and Query Collection; exact historical keys, public rows, the second call's signal, and request count are compared at their named checkpoints. |
+| ORC-006 | The old source-only fixture fails three intended key premises under normal resolution. The cancel-and-refetch hostile schedule survives the old held check and fails the new provider-count comparison. Neither is a timeout or setup-error kill. |
+| ORC-007 | Not triggered: no important generated property changed. |
+| ORC-008 | Not triggered: no reference-model state changed. |
+| ORC-009 | The pinned second provider call is one physical Query fetch, distinct from the full and filtered acquisition leases. The helper's index is only a public proxy-construction path. |
+| ORC-010 | The temporary Collection is registered with the existing aggregate cleanup harness; the held history retains its failure-preserving cleanup. No new shrinker or capture path was added. |
+| ORC-011 | The exact old key bytes and real QueryClient acquisition remain distinct identity formulations for the tested values. No new shared semantic fault between the model and production was identified. |
+| ORC-012 | This record names the reviewed code head, both false-green witnesses, their new comparison kills, package-resolution boundary, test outcomes, and limits. The coverage map assigns the remaining paths. |
+| ORC-013 | Same-path distinct proxies distinguish current identity from the old path-only encoder; category versus other distinguishes legacy path retention. A third request distinguishes a replacement from survival of the held second request. |
+| ORC-014 | Normal package resolution supplies the proxy brand at the receiving Query Collection boundary. The held provider remains controlled; native network cancellation and arbitrary scheduling are outside this witness. |

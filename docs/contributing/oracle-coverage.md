@@ -590,11 +590,13 @@ row checkpoint; both earlier histories pass that mutant.
 It checks that the provider sees a live physical fetch signal when the first
 full acquisition releases but a narrower acquisition still owns the Query.
 The held-revalidation matrix releases the original full view either before or
-during the provider request, checks one remaining observer, ready old rows, and
-a live physical signal, then releases the last filtered owner and requires
-abort with no late row publication. A mutant that aborts on the original
-full-view release passes the before-request case and fails the during-request
-signal checkpoint.
+during the provider request, checks one remaining observer, ready old rows, the
+original second provider call's live signal, and exactly two provider calls.
+It then releases the last filtered owner and requires that signal to abort with
+no late row publication. An abort-on-full-view-release mutant fails the
+during-request signal checkpoint. A driver-injected cancel-and-refetch schedule
+previously passed because it replaced the recorded signal; pinning the second
+call makes it fail at the provider-count comparison.
 Query-cache success reentry checks that initial and replacement full results
 cannot settle a filtered acquisition before Collection application; the
 replacement cut rejects a gate based only on previous full-row ownership. An
@@ -1049,12 +1051,13 @@ scan schedules remain open. The old encoder distinguished a literal proxy from a
 collapsed distinct literal proxies with the same path; the accepted migration
 policy retires that ambiguous old key when a matching proxy demand succeeds. The
 [PR #2134 oracle review](oracle-reviews/pr-2134-identity-and-persisted-key.md)
-records the RED/GREEN and hostile-mutant checks. Literal-proxy tests import the
-same `@tanstack/db` source instance as Query Collection; a second built copy
-cannot supply a valid identity witness. The ownership oracle now checks that
-its literal proxy fixtures carry the source instance's brand before judging
-their query and durable-owner outcomes. An old-dist-import mutant fails at
-that premise. The first eligible demand
+records the RED/GREEN and hostile-mutant checks. Literal-proxy ownership tests
+capture single-row proxies through the public `Collection.createIndex` callback
+from the `@tanstack/db` package instance used by Query Collection. Fixed
+historical EQ and singleton-IN bytes prove that the package encoder recognizes
+those proxies. This premise passes with normal built-package resolution; the
+earlier source-only constructor fixture failed three historical-key comparisons
+there. The first eligible demand
 requests one persisted-row metadata scan per sync run; the SQLite adapter still
 reads row values in that scan. Later eligible demands parse every persisted
 owner hash and retention marker. The oracle bounds scan count, not latency or
