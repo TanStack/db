@@ -560,31 +560,50 @@ async function expectFullSourceReuseWaitsForApplication(
   const fullDemand: LoadSubsetOptions = {}
   const response = createDeferred<Array<Row>>()
   const application = createDeferred<void>()
+  const commitEntered = createDeferred<void>()
+  const commitGate = createDeferred<void>()
+  let holdCommit = false
   const requests: Array<`full` | `filtered`> = []
-  const collection = createCollection(
-    queryCollectionOptions<Row>({
-      id,
-      queryClient,
-      queryKey: [id],
-      queryFn: (context) => {
-        if (context.meta?.loadSubsetOptions?.where === undefined) {
-          requests.push(`full`)
-          if (previousFullResult && requests.length === 1)
-            return Promise.resolve([
-              { id: `a1`, group: `a` },
-              { id: `b1`, group: `b` },
-            ] satisfies Array<Row>)
-          return response.promise
-        }
-        requests.push(`filtered`)
-        return Promise.resolve(fullRows.filter((row) => row.group === `a`))
-      },
-      getKey: (row) => row.id,
-      startSync: true,
-      syncMode: `on-demand`,
-      staleTime: 5 * 60 * 1000,
-    }),
-  )
+  const baseOptions = queryCollectionOptions<Row>({
+    id,
+    queryClient,
+    queryKey: [id],
+    queryFn: (context) => {
+      if (context.meta?.loadSubsetOptions?.where === undefined) {
+        requests.push(`full`)
+        if (previousFullResult && requests.length === 1)
+          return Promise.resolve([
+            { id: `a1`, group: `a` },
+            { id: `b1`, group: `b` },
+          ] satisfies Array<Row>)
+        return response.promise
+      }
+      requests.push(`filtered`)
+      return Promise.resolve(fullRows.filter((row) => row.group === `a`))
+    },
+    getKey: (row) => row.id,
+    startSync: true,
+    syncMode: `on-demand`,
+    staleTime: 5 * 60 * 1000,
+  })
+  const originalSync = baseOptions.sync
+  const collection = createCollection({
+    ...baseOptions,
+    sync: {
+      sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+        originalSync.sync({
+          ...params,
+          commit: (signal) => {
+            if (!holdCommit) return params.commit(signal)
+            commitEntered.resolve()
+            return commitGate.promise.then(() => {
+              const applied = params.commit(signal)
+              return applied === true ? undefined : applied
+            })
+          },
+        }),
+    },
+  })
   let observed:
     | {
         acquisition: true | Promise<void>
@@ -612,6 +631,9 @@ async function expectFullSourceReuseWaitsForApplication(
         !event.action.manual &&
         event.query.queryHash === JSON.stringify([id])
       ) {
+        // Opening the barrier causes another full success. Keep the first
+        // acquisition, whose settlement is the law under test.
+        if (observed !== undefined) return
         const acquisition = collection._sync.loadSubset(filteredDemand)
         observed = {
           acquisition,
@@ -657,8 +679,17 @@ async function expectFullSourceReuseWaitsForApplication(
     await new Promise<void>((resolve) => setTimeout(resolve, 0))
     expect(collection.has(`a2`)).toBe(false)
     expect(settledBeforeApplication).toBe(false)
+    // Now allow the Query result through but hold its Collection commit.
+    // A load that only waits for the Query result would settle here.
+    holdCommit = true
     collection.deferDataRefresh = null
     application.resolve()
+    await commitEntered.promise
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    expect(collection.has(`a2`)).toBe(false)
+    expect(settledBeforeApplication).toBe(false)
+    holdCommit = false
+    commitGate.resolve()
     if (observed?.acquisition !== true) await observed?.acquisition
     expect(await observed?.rowAppliedAtSettlement).toBe(true)
     expect(collection.has(`a2`)).toBe(true)
@@ -666,6 +697,8 @@ async function expectFullSourceReuseWaitsForApplication(
     await revalidation
     expect(collection.has(`a2`)).toBe(true)
   } finally {
+    holdCommit = false
+    commitGate.resolve()
     collection.deferDataRefresh = null
     application.resolve()
     response.resolve(fullRows)
@@ -2723,19 +2756,21 @@ describe(`loadSubset lifecycle oracle`, () => {
    * Query Core publishes a new cache entry while constructing an observer.
    * Cleanup from that synchronous notification precedes Query DB's ownership
    * registration. Once cleanup settles, the obsolete Query must have no
-   * observer or cache entry, even if its provider is still pending.
+   * observer or cache entry. The provider has not started at this boundary.
    */
   it(`retires a Query created during reentrant Collection cleanup`, async () => {
     const queryClient = createQueryClient()
     const id = `reentrant-query-added-cleanup-${collectionSequence++}`
     const queryKey = [id]
-    const heldResult = createDeferred<Array<Row>>()
+    const queryFn = vi.fn(() =>
+      Promise.resolve([{ id: `late` }] satisfies Array<Row>),
+    )
     const collection = createCollection(
       queryCollectionOptions<Row>({
         id,
         queryClient,
         queryKey,
-        queryFn: () => heldResult.promise,
+        queryFn,
         getKey: (row) => row.id,
         syncMode: `on-demand`,
         startSync: true,
@@ -2758,25 +2793,23 @@ describe(`loadSubset lifecycle oracle`, () => {
     })
 
     await checkPublicCleanupWitness(async () => {
-      const snapshot = Promise.resolve(subscription.requestSnapshot({}))
-      void snapshot.catch(() => undefined)
+      subscription.requestSnapshot({})
       expect(cleanup).toBeDefined()
       await cleanup
       expect(collection.status).toBe(`cleaned-up`)
+      expect(queryFn).not.toHaveBeenCalled()
       expect(observedQuery?.getObserversCount()).toBe(0)
       expect(
         queryClient.getQueryCache().find({ queryKey, exact: true }),
       ).toBeUndefined()
-      heldResult.resolve([{ id: `late` }])
-      await snapshot.catch(() => undefined)
       await new Promise<void>((resolve) => setTimeout(resolve, 0))
       expect(collection.toArray).toEqual([])
+      expect(queryFn).not.toHaveBeenCalled()
       expect(observedQuery?.getObserversCount()).toBe(0)
       expect(
         queryClient.getQueryCache().find({ queryKey, exact: true }),
       ).toBeUndefined()
     }, [
-      [`provider`, () => heldResult.resolve([])],
       [`cache listener`, unsubscribeCache],
       [`subscription`, () => subscription.unsubscribe()],
       [`Collection`, () => collection.cleanup()],
