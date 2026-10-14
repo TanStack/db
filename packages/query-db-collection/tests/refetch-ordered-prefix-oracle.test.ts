@@ -27,13 +27,13 @@ import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
  * The ordered loader pages a window through `loadSubset`: a first page
  * (`orderBy`, `limit`), tie requests (`where` equal to a boundary value), and
  * continuation pages that carry both a `cursor` and an `offset`. A provider may
- * honor either encoding (`LoadSubsetOptions`). After a page settles, the
- * loader's boundary is the leading order value of the page's last row
+ * honor either encoding (`LoadSubsetOptions`). After a page's request settles,
+ * the loader's boundary is the leading order value of the page's last row
  * (ARCHITECTURE.md, "Ordered requests, continuation, and recovery"). The
  * loader then treats every row through that boundary as loaded.
  *
- * The LoadSubset contract therefore requires the provider to keep each served
- * prefix whole (issue #2136). After `utils.refetch()`, the provider must
+ * The LoadSubset contract therefore requires the sync adapter to keep each
+ * served prefix whole (issue #2136). After a refetch, the sync adapter must
  * deliver every row that now sorts at or before each served boundary. If it
  * refetches each page alone, a row that now sorts between two pages is in no
  * result, and the loader sees no change that would start another load.

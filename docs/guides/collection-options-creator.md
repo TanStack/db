@@ -212,8 +212,8 @@ load with `AbortError` once its receipt resolves. Do not attach one request's
 signal to a shared stream transaction.
 
 An ordered request (one with `orderBy`) serves a prefix: every matching row
-from the start of the order through the leading order value of the last row it
-returned, ties included. The ordered loader treats that whole prefix as loaded,
+from the start of the order through its boundary, the leading order value of
+the last row it returned, ties included. The ordered loader treats that whole prefix as loaded,
 so keep it whole when you refresh data the loader already holds. If your
 adapter refetches loaded subsets on its own, deliver every row that now sorts
 within a served prefix, even when it now falls between two served pages.

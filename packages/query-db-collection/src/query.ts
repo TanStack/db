@@ -1066,7 +1066,7 @@ export function queryCollectionOptions(
   const fullSourceDependents = new Map<string, number>()
 
   // During an explicit on-demand refetch, an ordered page's Query function reads
-  // its family's served prefix in place of the page's own request.
+  // the served prefix shared by pages with its predicate and order.
   const prefixRefetches = new Map<string, typeof queryFn>()
 
   // Eager startup holds one reference until cleanup. Cache removal detaches
@@ -1995,7 +1995,7 @@ export function queryCollectionOptions(
 
         if (opts.refetch) {
           // The loader proves its boundary again from this acquisition.
-          servedPrefixEnds.delete(observer.getCurrentQuery())
+          servedBoundaries.delete(observer.getCurrentQuery())
           return refetchAndWaitForApplication(observer, hashedQueryKey)
         }
 
@@ -2142,7 +2142,7 @@ export function queryCollectionOptions(
           if (!requestOptions.orderBy?.length || select) return result
           const query = localObserver.getCurrentQuery()
           return Promise.resolve(result).then((data) => {
-            recordServedPrefixEnd(query, requestOptions, data)
+            recordServedBoundary(query, requestOptions, data)
             return data
           })
         },
@@ -2243,7 +2243,7 @@ export function queryCollectionOptions(
           )
         }
         const currentResult = localObserver.getCurrentResult()
-        if (opts.refetch) servedPrefixEnds.delete(localQuery)
+        if (opts.refetch) servedBoundaries.delete(localQuery)
         if (
           opts.refetch ||
           unpatchedCacheVersions.has(localQuery) ||
@@ -3794,53 +3794,55 @@ export function queryCollectionOptions(
   }
 
   /**
-   * The LoadSubset contract requires a provider to keep each served ordered
-   * prefix whole. A page's prefix runs from the start of its order through
-   * the leading order value of the last row it served, ties included; an
-   * empty page served none. The ordered loader's boundary was proven from
-   * that serve, so the end stays fixed until the page unloads.
+   * The LoadSubset contract requires a sync adapter to keep each served
+   * ordered prefix whole. A page's prefix runs from the start of its order
+   * through its boundary: the leading order value of the last row it served,
+   * ties included. An empty page served none. The ordered loader established
+   * that boundary from the serve, so it stays fixed until the page unloads.
    *
    * Refetching each page alone can leave a gap: a row that now sorts between
    * two pages is in neither result, and the loader sees no change. A refetch
    * of a served page therefore reads its prefix with the request shapes the
    * loader itself sends: a first page, then a tie and a cursor continuation
-   * from each last row, until a row sorts past the end or a page comes back
+   * from each last row, until a row sorts past the boundary or a page comes back
    * short. A provider may honor either the cursor or the offset. An explicit
    * refetch reads each predicate and order's deepest served prefix once, and
-   * every page in that family takes the combined rows. Other requests
-   * refetch as themselves.
+   * every page with that predicate and order takes the combined rows. Other
+   * requests refetch as themselves.
    */
-  type PrefixFamily = {
+  // One read of a served prefix, shared by the ordered pages that have the
+  // same predicate and order. It exists only in this adapter.
+  type PrefixRead = {
     where: LoadSubsetOptions[`where`]
     orderBy: NonNullable<LoadSubsetOptions[`orderBy`]>
-    end: unknown
+    boundary: unknown
     firstLimit: number
     pageSize: number
-    members: Array<string>
+    pages: Array<string>
   }
 
-  // The leading order value of the last row each ordered page served, and how
-  // far its request reached in the order. `null` records an empty first
-  // result. Both stay fixed until the loader acquires the page again.
-  const servedPrefixEnds = new WeakMap<
+  // Each ordered page's boundary, and how far its request reached in the
+  // order. `null` records an empty first result. Both stay fixed until the
+  // loader starts a new acquisition attempt for the page.
+  const servedBoundaries = new WeakMap<
     AnyQuery,
-    { end: unknown; count: number } | null
+    { boundary: unknown; count: number } | null
   >()
-  const recordServedPrefixEnd = (
+  const recordServedBoundary = (
     query: AnyQuery,
     options: LoadSubsetOptions,
     data: unknown,
   ): void => {
-    if (servedPrefixEnds.has(query) || !Array.isArray(data)) return
+    if (servedBoundaries.has(query) || !Array.isArray(data)) return
     const last = data.at(-1)
-    servedPrefixEnds.set(
+    servedBoundaries.set(
       query,
       last === undefined
         ? null
         : {
-            end: compileSingleRowExpression(options.orderBy![0]!.expression)(
-              last,
-            ),
+            boundary: compileSingleRowExpression(
+              options.orderBy![0]!.expression,
+            )(last),
             count: (options.offset ?? 0) + data.length,
           },
     )
@@ -3876,18 +3878,18 @@ export function queryCollectionOptions(
     return direction === `asc` ? order : -order
   }
 
-  // A family end that sorts nowhere. Comparing it with any value is
+  // A read boundary that sorts nowhere. Comparing it with any value is
   // undefined, so the read continues through the rest of the order.
   const wholeOrder = Symbol(`whole order`)
 
-  // One ordered page's served prefix, from its recorded end. A page with no
-  // recorded end, or an empty first result, has none.
+  // One ordered page's served prefix, from its recorded boundary. A page with
+  // no recorded boundary, or an empty first result, has none.
   const pagePrefix = (
     hashedQueryKey: string,
     query: AnyQuery,
-  ): PrefixFamily | undefined => {
+  ): PrefixRead | undefined => {
     const options = query.meta?.loadSubsetOptions
-    const served = servedPrefixEnds.get(query)
+    const served = servedBoundaries.get(query)
     // A selected response has no row array to combine.
     if (select || !served || !isStoredLoadSubsetOptions(options)) return
     const { where, orderBy } = options
@@ -3897,52 +3899,56 @@ export function queryCollectionOptions(
     return {
       where,
       orderBy,
-      end: served.end,
+      boundary: served.boundary,
       firstLimit: served.count,
       pageSize: options.limit ?? served.count,
-      members: [hashedQueryKey],
+      pages: [hashedQueryKey],
     }
   }
 
   const planPrefixRefetches = (
     hashedQueryKeys: Array<string>,
-  ): Array<PrefixFamily> => {
-    const families = new Map<string, PrefixFamily>()
+  ): Array<PrefixRead> => {
+    const reads = new Map<string, PrefixRead>()
     for (const hashedQueryKey of hashedQueryKeys) {
       const query = state.observers.get(hashedQueryKey)?.getCurrentQuery()
       if (!query) continue
       const options = query.meta?.loadSubsetOptions
       // Data that was cached or hydrated before this run was served too.
       if (isStoredLoadSubsetOptions(options) && options.orderBy?.length) {
-        recordServedPrefixEnd(query, options, query.state.data)
+        recordServedBoundary(query, options, query.state.data)
       }
       const page = pagePrefix(hashedQueryKey, query)
       if (!page) continue
-      const familyKey = getLoadSubsetDemandKey({
+      const readKey = getLoadSubsetDemandKey({
         where: page.where,
         orderBy: page.orderBy,
       })!
-      const family = families.get(familyKey)
-      if (!family) {
-        families.set(familyKey, page)
+      const read = reads.get(readKey)
+      if (!read) {
+        reads.set(readKey, page)
         continue
       }
-      const order = compareLeadingValues(page.orderBy, page.end, family.end)
-      if (order === undefined) family.end = wholeOrder
-      else if (order > 0) family.end = page.end
-      family.firstLimit = Math.max(family.firstLimit, page.firstLimit)
-      family.pageSize = Math.max(family.pageSize, page.pageSize)
-      family.members.push(hashedQueryKey)
+      const order = compareLeadingValues(
+        page.orderBy,
+        page.boundary,
+        read.boundary,
+      )
+      if (order === undefined) read.boundary = wholeOrder
+      else if (order > 0) read.boundary = page.boundary
+      read.firstLimit = Math.max(read.firstLimit, page.firstLimit)
+      read.pageSize = Math.max(read.pageSize, page.pageSize)
+      read.pages.push(hashedQueryKey)
     }
-    return [...families.values()]
+    return [...reads.values()]
   }
 
   const fetchServedPrefix = async (
-    family: PrefixFamily,
+    read: PrefixRead,
     context: QueryFunctionContext<any>,
     signal: AbortSignal,
   ): Promise<Array<Record<string, unknown>>> => {
-    const { where, orderBy, end } = family
+    const { where, orderBy, boundary } = read
     const request = async (options: LoadSubsetOptions) => {
       const page: unknown = await queryFn({
         client: context.client,
@@ -3960,7 +3966,7 @@ export function queryCollectionOptions(
     }
     const rows = new Map<string | number, Record<string, unknown>>()
     const leadingValue = compileSingleRowExpression(orderBy[0]!.expression)
-    let limit = family.firstLimit
+    let limit = read.firstLimit
     let page = await request({ where, orderBy, limit })
     let offset = 0
     let previousKeys: string | undefined
@@ -3970,7 +3976,7 @@ export function queryCollectionOptions(
       const last = page.at(-1)
       if (last === undefined || page.length < limit) break
       const value = leadingValue(last)
-      const order = compareLeadingValues(orderBy, value, end)
+      const order = compareLeadingValues(orderBy, value, boundary)
       if (order !== undefined && order > 0) break
       const cursor = buildCursorExpressions(orderBy, value)
       if (order === undefined || !cursor) {
@@ -3985,7 +3991,7 @@ export function queryCollectionOptions(
       })
       tie.forEach((row) => rows.set(getKey(row), row))
       if (order === 0) break
-      limit = family.pageSize
+      limit = read.pageSize
       page = await request({ where, orderBy, cursor, offset, limit })
       // A provider that honors neither the cursor nor the offset returns the
       // same page again. Fail instead of requesting forever.
@@ -4004,23 +4010,23 @@ export function queryCollectionOptions(
   let prefixRefetchAbort: AbortController | undefined
 
   const startPrefixRefetches = (
-    families: Array<PrefixFamily>,
+    reads: Array<PrefixRead>,
   ): Map<string, typeof queryFn> => {
     const plan = new Map<string, typeof queryFn>()
-    if (families.length === 0) return plan
+    if (reads.length === 0) return plan
     prefixRefetchAbort?.abort()
     const { signal } = (prefixRefetchAbort = new AbortController())
-    for (const family of families) {
+    for (const read of reads) {
       let prefixFetch: Promise<Array<Record<string, unknown>>> | undefined
       const fetchPrefix: typeof queryFn = (context) =>
-        (prefixFetch ??= fetchServedPrefix(family, context, signal).catch(
+        (prefixFetch ??= fetchServedPrefix(read, context, signal).catch(
           (error: unknown) => {
             // A Query retry starts a new prefix read.
             prefixFetch = undefined
             throw error
           },
         ))
-      for (const member of family.members) plan.set(member, fetchPrefix)
+      for (const page of read.pages) plan.set(page, fetchPrefix)
     }
     return plan
   }
