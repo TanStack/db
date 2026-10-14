@@ -1046,10 +1046,17 @@ alone fails the markerless variant. These histories cover static on-demand keys 
 the adapter's singleton-IN demand shape. Custom query-key functions, other
 key-format changes, cross-version finite-TTL-to-infinite retention policy,
 arbitrary nested predicates, proxy-owned rows across a cold restart,
-signal-ignoring public remount, and overlapping application or expiry/alias
-scan schedules remain open. The old encoder distinguished a literal proxy from a genuine row reference, but
-collapsed distinct literal proxies with the same path; the accepted migration
-policy retires that ambiguous old key when a matching proxy demand succeeds. The
+signal-ignoring public remount, and overlapping application schedules remain
+open. A held historical-alias metadata scan now crosses a finite TTL during
+public live-query preload. The success history keeps the restored row public
+and durable until the provider result replaces its owner; the failed-scan
+control lets the expired row and marker retire without a provider request. The
+old implementation deletes the row before the held provider result. Other
+expiry/alias-scan orders, including overlapping acquisitions and cancellation,
+remain open. The old encoder distinguished a literal proxy from a genuine row
+reference, but collapsed distinct literal proxies with the same path. The
+accepted migration policy retires that ambiguous old key when a matching proxy
+demand succeeds. The
 [PR #2134 oracle review](oracle-reviews/pr-2134-identity-and-persisted-key.md)
 records the RED/GREEN and hostile-mutant checks. Literal-proxy ownership tests
 capture single-row proxies through the public `Collection.createIndex` callback

@@ -1037,3 +1037,36 @@ against the proxy or held-fetch repair.
 | ORC-012 | This record names the reviewed code head, both false-green witnesses, their new comparison kills, package-resolution boundary, test outcomes, and limits. The coverage map assigns the remaining paths. |
 | ORC-013 | Same-path distinct proxies distinguish current identity from the old path-only encoder; category versus other distinguishes legacy path retention. A third request distinguishes a replacement from survival of the held second request. |
 | ORC-014 | Normal package resolution supplies the proxy brand at the receiving Query Collection boundary. The held provider remains controlled; native network cancellation and arbitrary scheduling are outside this witness. |
+
+## Finite-TTL alias scan race after `b232b84ac`
+
+An independent code reviewer held the first historical-owner metadata scan
+while a live equality demand crossed an old singleton-IN owner's finite TTL.
+At the deadline, expiry could run before alias discovery canceled its timer.
+The restored row then disappeared from the source Collection, live-query
+Collection, and storage before the held provider result revalidated it. The
+prior ownership histories crossed finite TTL and failed revalidation, but did
+not hold alias discovery over the deadline. Their observation checkpoints
+could not distinguish this schedule.
+
+The new two-case public live-query history seeds fixed historical singleton-IN
+bytes, a durable row, and a TTL marker expiring at 1,050. A live equality
+preload begins at 1,000 and holds the metadata scan. At 1,050 it checks the
+source and live-query rows, durable row and owner, marker, and absence of a
+provider request. On successful scan release it holds the provider result and
+checks those observations again before application, then requires the current
+owner and no old marker after application. On failed scan release it requires
+the expired source and durable row and marker to retire without a provider
+request. The success case failed on `b232b84ac` at the source-row comparison
+after scan release; both cases pass with the expiry repair. This is an
+original-implementation assertion kill at the intended checkpoint, not a
+timeout or setup failure.
+
+Expiry now retains its timer identity while maintenance waits for any pending
+owner scan. An acquired alias cancels that identity before cleanup; scan
+failure leaves it eligible for cleanup. The full Query DB suite passed 1,036
+tests in 20 files against immutable attribution-enabled Query Core source
+`273eb2526`, with normal DB package resolution. Changed-file ESLint had no
+errors; its 12 warnings are outside the changed lines. The coverage map keeps
+overlapping acquisitions, cancellation during the scan, and other expiry
+orders open for review.

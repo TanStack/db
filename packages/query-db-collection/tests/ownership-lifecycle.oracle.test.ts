@@ -20852,6 +20852,124 @@ describe(`query collection ownership lifecycle`, () => {
   )
 
   /**
+   * A live demand begins while a historical owner's TTL is still valid. Its
+   * alias scan has not finished when that deadline passes, so the old edge
+   * remains the only durable claim until revalidation can replace it. The
+   * provider result is held to observe the Collection and live-query rows at
+   * the deadline and again after alias discovery, before result application.
+   * A failed scan leaves no acquired alias and permits the expired edge to
+   * retire.
+   */
+  it.each([{ scanOutcome: `success` }, { scanOutcome: `failure` }] as const)(
+    `settles a historical singleton owner after a live demand scans past its TTL, scan=$scanOutcome`,
+    async ({ scanOutcome }) => {
+      vi.useFakeTimers()
+      try {
+        vi.setSystemTime(1_000)
+        const id = `singleton-alias-scan-crosses-ttl`
+        const oldHash = hashKey([id, legacySingletonCategoryDemandKey])
+        const equality = { where: eq(new IR.PropRef([`category`]), `shared`) }
+        const currentHash = hashKey([id, getLoadSubsetDemandKey(equality)])
+        const marker = `queryCollection:gc:${oldHash}`
+        const storage = createOwnershipStorage({
+          rows: new Map([[shared.id, shared]]),
+          rowMetadata: new Map([
+            [shared.id, { queryCollection: { owners: { [oldHash]: true } } }],
+          ]),
+          collectionMetadata: new Map([
+            [marker, { queryHash: oldHash, mode: `ttl`, expiresAt: 1_050 }],
+          ]),
+        })
+        const scanRows = storage.adapter.scanRows!
+        const scanEntered = createDeferred<void>()
+        const releaseScan = createDeferred<void>()
+        storage.adapter.scanRows = (target, options, context) => {
+          if (options?.metadataOnly) {
+            scanEntered.resolve()
+            return releaseScan.promise.then(() =>
+              scanRows(target, options, context),
+            )
+          }
+          return scanRows(target, options, context)
+        }
+        const { collection, queryFn } = createPersistedOwnershipFixture(
+          id,
+          storage,
+          [],
+          `on-demand`,
+          100,
+        )
+        const providerResult = createDeferred<Array<Item>>()
+        queryFn.mockImplementationOnce(() => providerResult.promise)
+        await collection.stateWhenReady()
+        const live = createLiveQueryCollection((query) =>
+          query
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `shared`))
+            .select(({ item }) => ({ id: item.id, name: item.name })),
+        )
+        try {
+          const preload = live.preload()
+          await scanEntered.promise
+          expect(rows(live)).toEqual([shared.id])
+          await vi.advanceTimersByTimeAsync(50)
+          for (let turn = 0; turn < 20; turn++) await Promise.resolve()
+          expect(rows(collection)).toEqual([shared.id])
+          expect(rows(live)).toEqual([shared.id])
+          expect(storedItems(storage)).toEqual([shared])
+          expect(
+            persistedOwners(storage.snapshot().rowMetadata, shared.id),
+          ).toEqual([oldHash])
+          expect(storage.snapshot().collectionMetadata.has(marker)).toBe(true)
+          expect(queryFn).toHaveBeenCalledTimes(0)
+
+          if (scanOutcome === `failure`) {
+            releaseScan.reject(new Error(`persisted scan failed`))
+            await expect(preload).rejects.toThrow(`persisted scan failed`)
+            await vi.waitFor(() => {
+              expect(rows(collection)).toEqual([])
+              expect(storedItems(storage)).toEqual([])
+              expect(storage.snapshot().collectionMetadata.has(marker)).toBe(
+                false,
+              )
+            })
+            expect(queryFn).toHaveBeenCalledTimes(0)
+            return
+          }
+          releaseScan.resolve()
+          await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(1))
+          expect(rows(collection)).toEqual([shared.id])
+          expect(rows(live)).toEqual([shared.id])
+          expect(storedItems(storage)).toEqual([shared])
+          expect(
+            persistedOwners(storage.snapshot().rowMetadata, shared.id),
+          ).toEqual([oldHash])
+          expect(storage.snapshot().collectionMetadata.has(marker)).toBe(true)
+
+          providerResult.resolve([shared])
+          await preload
+          await vi.waitFor(() => {
+            expect(rows(collection)).toEqual([shared.id])
+            expect(rows(live)).toEqual([shared.id])
+            expect(
+              persistedOwners(storage.snapshot().rowMetadata, shared.id),
+            ).toEqual([currentHash])
+            expect(storage.snapshot().collectionMetadata.has(marker)).toBe(
+              false,
+            )
+          })
+        } finally {
+          releaseScan.resolve()
+          providerResult.resolve([])
+          await live.cleanup()
+        }
+      } finally {
+        vi.useRealTimers()
+      }
+    },
+  )
+
+  /**
    * Under the old encoder, AND(IN [shared]) and AND(IN [shared], EQ shared)
    * had two keys even though both selected this row. The new encoder reduces
    * both to AND(EQ shared). Both old edges must retire on one successful new

@@ -2028,8 +2028,17 @@ export function queryCollectionOptions(
 
       const delay = Math.max(0, entry.expiresAt - Date.now())
       const timer = setTimeout(() => {
-        persistedRetentionTimers.delete(entry.queryHash)
         void runPersistedRetentionMaintenance(async () => {
+          // An acquisition that began before expiry may still be discovering
+          // this hash as a historical alias. Its scan settles before its
+          // continuation cancels the timer or reports a scan failure.
+          try {
+            await persistedOwnerScan
+          } catch {
+            // A failed scan leaves no acquired alias to protect this owner.
+          }
+          if (persistedRetentionTimers.get(entry.queryHash) !== timer) return
+          persistedRetentionTimers.delete(entry.queryHash)
           const currentEntry = metadata?.collection.get(
             `${QUERY_COLLECTION_GC_PREFIX}${entry.queryHash}`,
           )
