@@ -2121,6 +2121,10 @@ export function queryCollectionOptions(
         notifyOnChangeProps: `all`,
       }
 
+      const cachedQueryBeforeObserver = queryClient.getQueryCache().find({
+        queryKey: key,
+        exact: true,
+      })
       const localObserver = new QueryObserver<
         Array<any>,
         any,
@@ -2129,6 +2133,19 @@ export function queryCollectionOptions(
         any
       >(queryClient, observerOptions)
       const localQuery = localObserver.getCurrentQuery()
+      // QueryCache's `added` notification runs inside the constructor. It
+      // can clean up this Collection before we register the new Query.
+      if (activeSyncSession !== syncSession) {
+        if (
+          cachedQueryBeforeObserver !== localQuery &&
+          localQuery.getObserversCount() === 0 &&
+          (queryCollectionCacheOwners.get(localQuery)?.size ?? 0) === 0 &&
+          queryClient.getQueryCache().get(localQuery.queryHash) === localQuery
+        ) {
+          queryClient.getQueryCache().remove(localQuery)
+        }
+        return Promise.reject(new LoadSubsetOperationAbortedError())
+      }
       trackOwnedCacheQuery(localQuery, hashedQueryKey)
       const resolvedQueryGcTime = queryClient.getQueryCache().find({
         queryKey: key,

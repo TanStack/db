@@ -302,6 +302,24 @@ async function expectIneligibleFullRefreshNeedsNewCoverage(
         ]),
         refetch: true,
       })
+      // An options object that acquired no lease cannot retire the exact
+      // Query. Check before either legitimate owner releases its acquisition.
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect(nextFiltered.toArray.map((row) => row.id).sort()).toEqual([
+        `a1`,
+        `a2`,
+      ])
+      expect(collection.has(`a2`)).toBe(true)
+      expect(full.toArray.map((row) => row.id).sort()).toEqual([
+        `a1`,
+        `a2`,
+        `b1`,
+      ])
+      if (firstFiltered)
+        expect(firstFiltered.toArray.map((row) => row.id).sort()).toEqual([
+          `a1`,
+          `a2`,
+        ])
     }
 
     if (firstRelease === `new`) {
@@ -541,6 +559,7 @@ async function expectFullSourceReuseWaitsForApplication(
   const filteredDemand: LoadSubsetOptions = { where: filter }
   const fullDemand: LoadSubsetOptions = {}
   const response = createDeferred<Array<Row>>()
+  const application = createDeferred<void>()
   const requests: Array<`full` | `filtered`> = []
   const collection = createCollection(
     queryCollectionOptions<Row>({
@@ -570,6 +589,7 @@ async function expectFullSourceReuseWaitsForApplication(
     | {
         acquisition: true | Promise<void>
         rowApplied: boolean
+        rowAppliedAtSettlement: boolean | Promise<boolean>
       }
     | undefined
   let unsubscribe = () => {}
@@ -584,6 +604,7 @@ async function expectFullSourceReuseWaitsForApplication(
     } else {
       await collection.utils.writeUpsert({ id: `local`, group: `b` })
     }
+    collection.deferDataRefresh = application.promise
     unsubscribe = queryClient.getQueryCache().subscribe((event) => {
       if (
         event.type === `updated` &&
@@ -591,9 +612,19 @@ async function expectFullSourceReuseWaitsForApplication(
         !event.action.manual &&
         event.query.queryHash === JSON.stringify([id])
       ) {
+        const acquisition = collection._sync.loadSubset(filteredDemand)
         observed = {
-          acquisition: collection._sync.loadSubset(filteredDemand),
+          acquisition,
           rowApplied: collection.has(`a2`),
+          // Register at the acquisition boundary, before the test later
+          // awaits anything that could let a premature result appear valid.
+          rowAppliedAtSettlement:
+            acquisition === true
+              ? collection.has(`a2`)
+              : acquisition.then(
+                  () => collection.has(`a2`),
+                  () => false,
+                ),
         }
       }
     })
@@ -614,12 +645,29 @@ async function expectFullSourceReuseWaitsForApplication(
     await vi.waitFor(() => expect(observed).toBeDefined())
     expect(observed?.rowApplied).toBe(false)
     expect(observed?.acquisition).not.toBe(true)
+    let settledBeforeApplication = false
+    void Promise.resolve(observed?.acquisition).then(
+      () => {
+        settledBeforeApplication = true
+      },
+      () => {
+        settledBeforeApplication = true
+      },
+    )
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    expect(collection.has(`a2`)).toBe(false)
+    expect(settledBeforeApplication).toBe(false)
+    collection.deferDataRefresh = null
+    application.resolve()
     if (observed?.acquisition !== true) await observed?.acquisition
+    expect(await observed?.rowAppliedAtSettlement).toBe(true)
     expect(collection.has(`a2`)).toBe(true)
     if (fullAcquisition !== true) await fullAcquisition
     await revalidation
     expect(collection.has(`a2`)).toBe(true)
   } finally {
+    collection.deferDataRefresh = null
+    application.resolve()
     response.resolve(fullRows)
     unsubscribe()
     collection._sync.unloadSubset(filteredDemand)
@@ -2671,6 +2719,71 @@ it(`preserves the primary mismatch when a cleanup step also fails`, async () => 
 })
 
 describe(`loadSubset lifecycle oracle`, () => {
+  /**
+   * Query Core publishes a new cache entry while constructing an observer.
+   * Cleanup from that synchronous notification precedes Query DB's ownership
+   * registration. Once cleanup settles, the obsolete Query must have no
+   * observer or cache entry, even if its provider is still pending.
+   */
+  it(`retires a Query created during reentrant Collection cleanup`, async () => {
+    const queryClient = createQueryClient()
+    const id = `reentrant-query-added-cleanup-${collectionSequence++}`
+    const queryKey = [id]
+    const heldResult = createDeferred<Array<Row>>()
+    const collection = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey,
+        queryFn: () => heldResult.promise,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+      }),
+    )
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    let cleanup: Promise<void> | undefined
+    let observedQuery: { getObserversCount: () => number } | undefined
+    const unsubscribeCache = queryClient.getQueryCache().subscribe((event) => {
+      if (
+        cleanup === undefined &&
+        event.type === `added` &&
+        event.query.queryKey[0] === id
+      ) {
+        observedQuery = event.query
+        cleanup = collection.cleanup()
+      }
+    })
+
+    await checkPublicCleanupWitness(async () => {
+      const snapshot = Promise.resolve(subscription.requestSnapshot({}))
+      void snapshot.catch(() => undefined)
+      expect(cleanup).toBeDefined()
+      await cleanup
+      expect(collection.status).toBe(`cleaned-up`)
+      expect(observedQuery?.getObserversCount()).toBe(0)
+      expect(
+        queryClient.getQueryCache().find({ queryKey, exact: true }),
+      ).toBeUndefined()
+      heldResult.resolve([{ id: `late` }])
+      await snapshot.catch(() => undefined)
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect(collection.toArray).toEqual([])
+      expect(observedQuery?.getObserversCount()).toBe(0)
+      expect(
+        queryClient.getQueryCache().find({ queryKey, exact: true }),
+      ).toBeUndefined()
+    }, [
+      [`provider`, () => heldResult.resolve([])],
+      [`cache listener`, unsubscribeCache],
+      [`subscription`, () => subscription.unsubscribe()],
+      [`Collection`, () => collection.cleanup()],
+      [`Query client`, () => queryClient.clear()],
+    ])
+  })
+
   /**
    * Public Collection cleanup can also run from Query Core's fetch callback.
    * The old sync run must not install an observer after cleanup has removed
