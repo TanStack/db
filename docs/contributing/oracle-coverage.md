@@ -149,33 +149,57 @@ Collection reads and delivered changes, not internal index traversal.
 
 The DB includes-work owner
 (`packages/db/tests/query/includes-work-counter-oracle.test.ts`) also generates
-an ordered parent (a page, a `findOne` with an offset, or an `orderBy` alone
-moved by `setWindow`), optionally with `distinct` and a static parent filter by
-`eq` or `inArray` on the correlation field. Its children are local or on
-demand, in the forms `materialize`, a child Collection, a child `orderBy`, a
-child `limit`, a child `findOne`, nested includes, and limited nested includes.
-Histories insert, delete, and move parents, insert and delete children, and move
-the window, 60 base runs per campaign; a reconstruction check requires at least
-three executed fixed cases for the on-demand child, the static filter, limited
-nested children, and each parent form. Rows must equal a relational model.
-Preload may load only the children of the shown rows' groups, and a step only
-those of rows that entered the window and were not shown before it. Recorded
-limit (#2151): while an index-backed parent top-K refills within one graph run (a held
-row moved out, a tie loaded at the window edge, a window move), it can briefly
-hold a row outside the settled window and load that row's children; published
-rows stay correct. The harness sees such checkpoints as more parent change
-batches than the initial load or the step's own parent write, and the
-generated campaigns skip only their work bound (about 2.5% of checkpoints).
-Six replays pin the known traces and allow exactly the one extra child row each
-shows; with no overshoot allowed, each fails. On main, a late page delivered 120 child rows for a bound of 9.
-Routers that add the row after the window fail the generated campaigns;
-routers that add every row tied with a window edge fail a pinned collapse and
-a random campaign; a child that takes over `setWindow` fails the rows law. A
-`findOne` detail page with on-demand parent and child must start its child load
-beside its parent load. Focused tests require a window inside a `from` or joined
-subquery not to answer `setWindow`. Limits: includes inherited from a `from`
-subquery and inputs to `fn.select` still route from every row before the
-window, and this owner does not generate them.
+an ordered parent (a page, a `findOne` with or without an `offset`, or an
+`orderBy` alone, optionally narrowed by `setWindow` before start and moved by
+it later), optionally with `distinct` and a static parent filter by `eq` or
+`inArray` on the correlation field. Its child source Collections are local or
+on demand; the on-demand test handler stands in for both the sync adapter and
+the provider. Child forms are `materialize`, a child Collection, a child
+`orderBy`, a child `limit`, a child `findOne`, nested includes, and limited
+nested includes. Histories insert, delete, and move parents, insert and delete
+children, and move the window, with 60 base runs per campaign; a
+reconstruction check requires at least three executed fixed cases for each
+premise. Rows must equal a relational model. Preload may load only the
+children of the shown rows' groups, and a step only those of rows that entered
+the window and were not shown before it. A static parent filter creates child
+demand before the window runs only when the query has no window, or is a
+`findOne` with no `offset` over one named row; a window requested before start
+that dropped named rows loaded 12 child rows for a bound of 2 before this rule.
+A `findOne` detail page with on-demand parent and child starts its child
+acquisition attempt beside its parent's. On main, a late page delivered 120
+child rows for a bound of 9. Routers that add the row after the window fail the
+generated campaigns; routers that add every row in an edge tie group fail a
+pinned collapse and the detail page; a child that takes over `setWindow` fails
+the rows law. Focused tests require a window inside a `from` or joined subquery
+not to answer `setWindow`.
+
+Recorded limit (#2151): while an index-backed parent top-K refills within one
+graph run (a held row moved out, a tie group loaded at the window edge, a
+forward window move), it can briefly hold a row outside the settled window and
+load that row's children; the public snapshot stays correct. An unsettled
+checkpoint is a model observation that combines ordered acquisition and its
+settlement: the parent Collection delivers more change batches than the initial
+load or the step's own parent write. The generated campaigns skip only its work
+bound. In the fixed campaign (60 runs, seed 2137), the work bound checks 275 of
+278 checkpoints strictly: preload 60 of 60, parent inserts 45 of 45, parent
+deletes 34 of 35, rank moves 43 of 43, child inserts 36 of 36, child deletes 37
+of 37, backward window moves 12 of 12, and forward window moves 8 of 10. Six
+replays pin the known traces and allow exactly the one extra child row each
+shows; with no overshoot allowed, each fails. Four pinned forward moves (local
+and on-demand children, with and without `distinct`) allow none, and a reach
+witness requires strictly checked generated forward moves.
+
+Open in-scope paths, all owned by this includes-work owner unless noted:
+unsettled checkpoints need the #2151 fix (holding include demand until the
+ordered acquisition settles) before the work bound can check them; includes
+inherited from a `from` subquery and inputs to `fn.select` still route from
+every row before the window, and need generated forms under the work bound; a
+`findOne` with one static row that `setWindow` later moves past that row still
+loads its child, and needs a `findOne` move history; the edge tie group router
+is caught only by pinned cases, and needs a generated tie at the window edge on
+a settled checkpoint; a child compile error after the parent's `orderBy` still
+leaves the parent's auto-index (owner: compiler tests), and needs a focused
+witness that the index does not outlive a failed compile.
 
 Three Ordered acquisition companions own distinct controlled cuts:
 `packages/db/tests/query/load-subset-replay-refinement-oracle.test.ts` checks

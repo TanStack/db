@@ -822,20 +822,20 @@ function compileQueryInternal(
             }
           }
 
-          // A static parent filter demands its children at once, unless a
-          // limit, an offset, or a findOne choosing among several rows can
-          // drop the rows it names.
+          // A static parent filter demands its children at once only when no
+          // window, compiled or later requested with setWindow, can drop the
+          // rows it names: no window at all, or a findOne over one row.
           const staticKeys = getStaticDemandKeys(
             rawQuery,
             subquery.correlationField,
           )
-          const windowCanDrop =
-            query.offset !== undefined ||
-            (query.singleResult
-              ? staticKeys.size !== 1
-              : query.limit !== undefined)
           const initialKeys =
-            windowRows && windowCanDrop ? new Set<unknown>() : staticKeys
+            !windowRows ||
+            (query.singleResult &&
+              query.offset === undefined &&
+              staticKeys.size === 1)
+              ? staticKeys
+              : new Set<unknown>()
           const demandPlans = lazyTargets.map((target) =>
             registerLazyDemandPlan(callbacks, target, initialKeys),
           )
