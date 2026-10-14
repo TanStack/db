@@ -59,6 +59,7 @@ Returns a reactive object with getter properties:
 // Query function — access via dot notation
 const query = useLiveQuery((q) => q.from({ todo: todoCollection }))
 // query.data, query.isLoading, query.status, etc.
+// query.errors → error tree; query.errors?.hasErrors means data may be stale
 
 // With reactive deps — use GETTER FUNCTIONS
 let minPriority = $state(5)

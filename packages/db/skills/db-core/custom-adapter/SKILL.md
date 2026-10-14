@@ -2,7 +2,8 @@
 name: db-core/custom-adapter
 description: >
   Building custom collection adapters for new backends. SyncConfig interface:
-  sync function receiving begin, write, commit, markReady, markError, truncate, metadata
+  sync function receiving begin, write, commit, markReady, markError,
+  reportError, reportHealthy, truncate, metadata
   primitives and returning cleanup, loadSubset, and optional unloadSubset
   handlers.
   ChangeMessage format (insert, update, delete). On-demand LoadSubsetOptions
@@ -94,8 +95,8 @@ function myBackendCollectionOptions<T extends object>(config: {
           .catch((error) => {
             if (initialSyncAbort.signal.aborted) return
             console.error('Initial sync failed:', error)
-            // Only initial startup owns collection readiness. A later refetch
-            // failure must keep the last ready snapshot usable.
+            // Give up only before readiness. After it, report the problem
+            // with reportError() and keep the rows.
             if (collection.status === 'loading') markError(error)
           })
 
@@ -346,13 +347,20 @@ sync: ({ begin, write, commit, markReady }) => {
 
 `markReady()` transitions the collection to "ready" status. Without it, live queries never resolve and `useLiveSuspenseQuery` hangs forever in Suspense.
 
-If initial sync fails before it produces a usable snapshot, call
-`markError(error)` instead. This rejects readiness waits with the supplied cause
-and moves dependent live queries to the error state. Calling `markError()`
-without a cause remains supported and rejects with a generic collection-state
-error. Later successful work in the same sync run can call `markReady()` to
-recover. Cleanup ends that run; a restart invokes `sync()` again and starts a
-new one.
+If initial sync fails before it produces a usable snapshot and you stop
+retrying, call `markError(error)` instead. This rejects readiness waits with the
+supplied cause and moves dependent live queries to the error state. Calling
+`markError()` without a cause remains supported and rejects with a generic
+collection-state error. The error is final for the sync run: `markReady()`
+afterward throws. Only a restart (`cleanup()`, then `preload()`) starts a new
+sync run.
+
+After the first `markReady()`, never move the Collection to `error`. Report a
+sync problem with `reportError(error, { final })`, keeping the rows, and call
+`reportHealthy()` when sync works again. Pass `final: true` only when you stop
+trying; only a restart clears a final error. Apps read these reports from
+`collection.health` and from each live query's `errors` tree. While a retry is
+in progress, report nothing.
 
 Source: docs/guides/collection-options-creator.md
 
