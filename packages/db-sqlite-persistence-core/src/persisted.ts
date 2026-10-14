@@ -5880,9 +5880,34 @@ function createWrappedSyncConfig<
       }
 
       let sourceSession = 0
+      const reportUpstreamHealthy = () => {
+        if (startupState.cleanedUp || getTerminalFailure()) return
+        void (fullStartPromise ?? runtime.ensureStarted())
+          .then(() => {
+            if (!isCleanedUp() && !getTerminalFailure()) {
+              params.reportHealthy()
+            }
+          })
+          .catch(() => undefined)
+      }
+      const reportUpstreamErrorForHealth = (
+        error: unknown,
+        options?: { final?: boolean },
+      ) => {
+        if (startupState.cleanedUp || getTerminalFailure()) return
+        void (fullStartPromise ?? runtime.ensureStarted())
+          .then(() => {
+            if (!isCleanedUp() && !getTerminalFailure()) {
+              params.reportError(error, options)
+            }
+          })
+          .catch(() => undefined)
+      }
       const wrappedParams = {
         ...params,
         markError: reportUpstreamError,
+        reportError: reportUpstreamErrorForHealth,
+        reportHealthy: reportUpstreamHealthy,
         markReady: () => {
           if (startupState.cleanedUp || getTerminalFailure()) return
           void (fullStartPromise ?? runtime.ensureStarted())
