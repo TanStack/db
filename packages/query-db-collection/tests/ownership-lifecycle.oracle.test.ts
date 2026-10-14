@@ -25,6 +25,7 @@ import {
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createDeferred } from '../../db/src/deferred.js'
 import { createSingleRowRefProxy } from '../../db/src/query/builder/ref-proxy.js'
+import { isRefProxy } from '../../db/src/query/builder/ref-proxy-identity.js'
 import {
   compileSingleRowExpression,
   toBooleanPredicate,
@@ -1188,6 +1189,8 @@ const legacyProxyCategoryMembershipDemandKey = `{"type":"loadSubsetDemand","quer
 
 function proxyCategorySubset(operator: `eq` | `in`): LoadSubsetOptions {
   const member = createSingleRowRefProxy<{ category: string }>().category
+  // The identity oracle must exercise a proxy recognized by this DB source.
+  expect(isRefProxy(member)).toBe(true)
   return {
     where: new IR.Func(operator, [
       new IR.PropRef([`category`]),
@@ -16673,6 +16676,8 @@ describe(`query collection ownership lifecycle`, () => {
     const id = `literal-proxy-query-identity`
     const firstValue = createSingleRowRefProxy<{ value: number }>().value
     const secondValue = createSingleRowRefProxy<{ value: number }>().value
+    expect(isRefProxy(firstValue)).toBe(true)
+    expect(isRefProxy(secondValue)).toBe(true)
     const source: Row = { id: `one`, value: firstValue }
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false, staleTime: Infinity } },
@@ -20991,6 +20996,7 @@ describe(`query collection ownership lifecycle`, () => {
       category: string
       other: string
     }>().other
+    expect(isRefProxy(otherMember)).toBe(true)
     const otherDemand: LoadSubsetOptions = {
       where: new IR.Func(`eq`, [
         new IR.PropRef([`category`]),

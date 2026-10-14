@@ -889,7 +889,7 @@ The published Query Core receiving gap remains as recorded above.
 The executable head is `65432b73fb67bb585961847e213b879621fdeb4c`,
 based on `8c615772df68772476643ef9c5fc24685f548478`. The binary diff of
 `query.ts` and `load-subset-lifecycle-oracle.test.ts` between those heads has
-SHA-256 `a1957c99b86429d85022d7256cabb66b2ab4a4e7f2eb9933966`.
+SHA-256 `a1957c99b86429d85022d7256cabb66b2ab4a0f3922b428f4a4e7f2eb9933966`.
 Production `query.ts` is unchanged, with SHA-256
 `f26ee7c89f68510c97ca8c1246def66bbe6326b8e33c4aa16d7d548d436fa827`;
 the revised oracle has SHA-256
@@ -906,7 +906,8 @@ classify `a1`/`a2` as matching and `b1`/`b2` as nonmatching, fulfill its preload
 and publish `a2` without `b2`. The retained and released controls remain.
 These checks establish retained ownership and new-demand coverage for this
 schedule. They do not infer global deletion from rows omitted by F2: F1 still
-owns the old full-source rows.
+owns the old full-source rows. The released-F1 control relinquishes its lease;
+only retained F1 carries it through the full-view release.
 
 A disposable production mutant set the full Query refcount to zero when its
 original full owner released after a failed refresh, ignoring F1's remaining

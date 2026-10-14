@@ -655,11 +655,17 @@ async function expectFilteredDemandAfterDirectWriteAvoidsRedundantFetch(): Promi
 }
 
 /**
- * A narrower lease can outlive the full view, but it is still the final owner
- * of that Query. Releasing it during a held revalidation must abort the Query
- * fetch and retire the old rows. Late provider settlement cannot republish.
+ * A narrower lease can outlive the full view, including when the full view
+ * releases during a held revalidation. That release leaves the physical fetch
+ * live and the old rows visible. The narrower lease is then the final owner:
+ * releasing it aborts the fetch and retires the rows. Late provider settlement
+ * cannot republish. The two legal histories cross full-view release before
+ * versus during the held request; Query observer count, provider signal, and
+ * public rows are checked before final release.
  */
-async function expectFinalFullSourceDependentCancelsFetch(): Promise<void> {
+async function expectFinalFullSourceDependentCancelsFetch(
+  fullExit: `before-revalidation` | `during-revalidation`,
+): Promise<void> {
   const queryClient = createQueryClient()
   const id = `full-source-final-dependent-${collectionSequence++}`
   let resolveHeldFetch: ((rows: Array<Row>) => void) | undefined
@@ -700,16 +706,34 @@ async function expectFinalFullSourceDependentCancelsFetch(): Promise<void> {
       .where(({ row }) => eq(row.group, `a`))
       .select(({ row }) => ({ id: row.id })),
   )
-  try {
+  let fullReleased = false
+  let invalidation: Promise<void> | undefined
+  await checkWithCleanup(async () => {
     await full.preload()
     await filtered.preload()
     expect(requests).toBe(1)
-    await full.cleanup()
-    const invalidation = queryClient.invalidateQueries({
+    if (fullExit === `before-revalidation`) {
+      await full.cleanup()
+      fullReleased = true
+    }
+    invalidation = queryClient.invalidateQueries({
       queryKey: [id],
       exact: true,
     })
     await vi.waitFor(() => expect(resolveHeldFetch).toBeDefined())
+    if (fullExit === `during-revalidation`) {
+      await full.cleanup()
+      fullReleased = true
+    }
+    expect(filtered.status).toBe(`ready`)
+    expect(filtered.toArray.map((row) => row.id)).toEqual([`a1`])
+    expect(collection.toArray.map((row) => row.id).sort()).toEqual([`a1`, `b1`])
+    expect(
+      queryClient
+        .getQueryCache()
+        .find({ queryKey: [id], exact: true })
+        ?.getObserversCount(),
+    ).toBe(1)
     expect(heldSignal?.aborted).toBe(false)
     await filtered.cleanup()
     expect(heldSignal?.aborted).toBe(true)
@@ -718,13 +742,14 @@ async function expectFinalFullSourceDependentCancelsFetch(): Promise<void> {
     await invalidation
     expect(collection.size).toBe(0)
     expect(collection.has(`late`)).toBe(false)
-  } finally {
-    resolveHeldFetch?.([])
-    await full.cleanup()
-    await filtered.cleanup()
-    await collection.cleanup()
-    queryClient.clear()
-  }
+  }, [
+    () => resolveHeldFetch?.([]),
+    () => invalidation,
+    () => (fullReleased ? undefined : full.cleanup()),
+    () => filtered.cleanup(),
+    () => collection.cleanup(),
+    () => queryClient.clear(),
+  ])
 }
 
 /**
@@ -2738,9 +2763,12 @@ describe(`loadSubset lifecycle oracle`, () => {
     await expectFilteredDemandAfterDirectWriteAvoidsRedundantFetch()
   })
 
-  it(`cancels a shared full-source fetch after its final filtered owner releases`, async () => {
-    await expectFinalFullSourceDependentCancelsFetch()
-  })
+  it.each([`before-revalidation`, `during-revalidation`] as const)(
+    `cancels a shared full-source fetch after its final filtered owner releases with the full owner exiting %s`,
+    async (fullExit) => {
+      await expectFinalFullSourceDependentCancelsFetch(fullExit)
+    },
+  )
 
   it.each([`full-source`, `equal-filtered`] as const)(
     `lets a shared %s fetch finish when the provider ignores its signal`,
