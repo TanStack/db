@@ -113,8 +113,6 @@ import type { QueryCache, QueryMapping, WindowOptions } from './types.js'
 export type { WindowOptions } from './types.js'
 export { INCLUDES_PUBLIC_KEY, INCLUDES_ROUTING } from './route-metadata.js'
 
-const SKIP_INCLUDE = Symbol(`skipInclude`)
-
 function getUnsupportedFnSelectResultDescription(
   value: unknown,
   seen: Set<object> = new Set(),
@@ -696,14 +694,14 @@ function compileQueryInternal(
           : query.fnSelect && !materializeSelectInput
             ? []
             : [{ path: [sourceAlias, ...include.resultPath], guards: [] }],
-      route: (nsRow: any) =>
-        nsRow[sourceAlias]?.[INCLUDES_ROUTING]?.[include.fieldName],
+      route: (nsRow: NamespacedRow) =>
+        readRouteTag(nsRow[sourceAlias], include.fieldName),
     })),
     ...(query.select ? directIncludes : []).map((include) => ({
       include,
       keyPrefix: ``,
       paths: findProjectedIncludePaths(query.select!, include.resultPath),
-      route: (nsRow: any) => nsRow[INCLUDES_ROUTING]?.[include.fieldName],
+      route: (nsRow: NamespacedRow) => readRouteTag(nsRow, include.fieldName),
     })),
   ]
   for (const { include, keyPrefix, paths, route } of inheritedIncludes) {
@@ -721,18 +719,11 @@ function compileQueryInternal(
   }
   const selectHasAggregates =
     query.select !== undefined && containsAggregate(query.select)
-  // An ordered parent with limit or offset routes its includes from the rows
-  // its window shows, so a row the window drops loads no children (law 12).
-  // Those includes compile after the window; every other include compiles here.
-  // A single-result query must expose only its first row when another query
-  // consumes it as a QueryRef, before the outer join or filter runs.
-  const resultLimit = query.singleResult
-    ? Math.min(query.limit ?? 1, 1)
-    : query.limit
+  // An ordered parent routes its includes from the rows its window shows, so
+  // a row the window drops loads no children (law 12). Those includes compile
+  // after the window; every other include compiles here.
   const hasOrderBy = (query.orderBy?.length ?? 0) > 0
-  const parentHasWindow =
-    (hasOrderBy || !!query.singleResult) &&
-    (resultLimit !== undefined || query.offset !== undefined)
+  const parentHasWindow = hasOrderBy || !!query.singleResult
   const deferredIncludes: Array<(windowRows: WindowRows) => void> = []
   if (query.select) {
     const includesEntries = extractIncludesFromSelect(query.select)
@@ -773,26 +764,17 @@ function compileQueryInternal(
             : null,
       }))
       const compileInclude = (windowRows?: WindowRows) => {
+        // A window row carries the route its select tagged; reading it keeps
+        // the window's routes identical to the rows it publishes.
         const routes = windowRows
-          ? windowRows.pipe(map(([, [row]]) => getRouting(row)))
+          ? windowRows.pipe(map(([, [row]]) => windowRoute(row, fieldName)))
           : pipeline.pipe(map(([, row]) => getRouting(row)))
-        let parentKeys: any = routes.pipe(
-          map((routing: IncludeRouting) => {
-            return (
-              routing.active
-                ? [routing.correlationKey, routing.parentContext]
-                : [SKIP_INCLUDE, null]
-            ) as any
-          }),
-          filter(
-            ([correlationValue]: any) => correlationValue !== SKIP_INCLUDE,
-          ),
-        )
-
         // Deduplicate: when multiple parents share the same correlation key (and
         // parentContext), clamp multiplicity to 1 so the inner join doesn't
         // produce duplicate child entries that cause incorrect deletions.
-        parentKeys = parentKeys.pipe(
+        let parentKeys: any = routes.pipe(
+          filter((routing: IncludeRouting) => routing.active),
+          map((routing) => [routing.correlationKey, routing.parentContext]),
           reduce((values: Array<[any, number]>) =>
             values.map(([v, mult]) => [v, mult > 0 ? 1 : 0] as [any, number]),
           ),
@@ -833,10 +815,11 @@ function compileQueryInternal(
             }
           }
 
-          const initialKeys = getStaticDemandKeys(
-            rawQuery,
-            subquery.correlationField,
-          )
+          // A window decides its parents only once it runs, so a static
+          // parent filter must not demand children for rows it drops.
+          const initialKeys = windowRows
+            ? new Set<unknown>()
+            : getStaticDemandKeys(rawQuery, subquery.correlationField)
           const demandPlans = lazyTargets.map((target) =>
             registerLazyDemandPlan(callbacks, target, initialKeys),
           )
@@ -901,8 +884,8 @@ function compileQueryInternal(
             callbacks,
             lazySources,
             optimizableOrderByCollections,
-            // Only the query's own window operator answers setWindow.
-            ignoreChildWindow,
+            // An include child's top-K never answers the query's setWindow.
+            () => {},
             cache,
             queryMapping,
             parentKeys,
@@ -924,9 +907,7 @@ function compileQueryInternal(
           resultPath: path,
           correlationField: subquery.correlationField,
           childCorrelationField: subquery.childCorrelationField,
-          hasOrderBy: !!(
-            subquery.query.orderBy && subquery.query.orderBy.length > 0
-          ),
+          hasOrderBy: (subquery.query.orderBy?.length ?? 0) > 0,
           childCompilationResult: childResult,
           parentProjection: subquery.parentProjection,
           materialization: subquery.materialization,
@@ -1220,6 +1201,11 @@ function compileQueryInternal(
     ]
   }
 
+  // A single-result query must expose only its first row when another query
+  // consumes it as a QueryRef, before the outer join or filter runs.
+  const resultLimit = query.singleResult
+    ? Math.min(query.limit ?? 1, 1)
+    : query.limit
   if (
     !hasOrderBy &&
     (query.limit !== undefined || query.offset !== undefined)
@@ -1227,7 +1213,6 @@ function compileQueryInternal(
     throw new LimitOffsetRequireOrderByError()
   }
   let resultPipeline: ResultStream
-  let windowRows: WindowRows | undefined
   if (hasOrderBy || query.singleResult) {
     // When in includes mode with limit/offset, use grouped ordering so that
     // the limit is applied per parent (per correlation key), not globally.
@@ -1266,7 +1251,7 @@ function compileQueryInternal(
       query.offset,
       includesGroupKeyFn,
     )
-    if (parentHasWindow) windowRows = ordered
+    for (const compileInclude of deferredIncludes) compileInclude(ordered)
     resultPipeline = ordered.pipe(
       map(([key, [row, orderByIndex]]) => finalizeRow(key, row, orderByIndex)),
     ) as ResultStream
@@ -1275,8 +1260,6 @@ function compileQueryInternal(
       map(([key, row]) => finalizeRow(key, row, undefined)),
     ) as ResultStream
   }
-
-  for (const compileInclude of deferredIncludes) compileInclude(windowRows!)
 
   // Cache the result before returning (use original query as key)
   const compilationResult: CompilationResult = {
@@ -2575,8 +2558,28 @@ type IncludeRouting = {
 /** Rows an ordered window shows, with their fractional order index. */
 type WindowRows = IStreamBuilder<KeyValue<unknown, [NamespacedRow, string]>>
 
-/** An include child's top-K never owns the live query's setWindow. */
-const ignoreChildWindow = () => {}
+/** The include route a compiled value's routing tag holds for one field. */
+function readRouteTag(
+  value: unknown,
+  fieldName: string,
+): IncludeRouting | undefined {
+  const tag = (
+    value as { [INCLUDES_ROUTING]?: Record<string, IncludeRouting> } | undefined
+  )?.[INCLUDES_ROUTING]
+  return tag?.[fieldName]
+}
+
+/** The route a window row's select tagged; a missing tag is an invariant. */
+function windowRoute(row: NamespacedRow, fieldName: string): IncludeRouting {
+  const routing = readRouteTag(row.$selected, fieldName)
+  if (!routing)
+    throw new Error(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `An ordered window row has no include route`
+        : codedMessage(243),
+    )
+  return routing
+}
 
 /**
  * Compiles a select-branch guard set once and resolves the include route only

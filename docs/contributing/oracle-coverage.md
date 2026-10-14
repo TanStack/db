@@ -149,20 +149,24 @@ Collection reads and delivered changes, not internal index traversal.
 
 The DB includes-work owner
 (`packages/db/tests/query/includes-work-counter-oracle.test.ts`) also generates
-an ordered parent window with `offset`, `limit`, and optionally `distinct`,
-over a `materialize` include, through parent inserts, deletes, and rank moves,
-child inserts and deletes, and `setWindow` moves. Rows must equal a relational
-model, and child rows delivered must stay within the children of the shown
-parents plus one parent's headroom. On main, a late page delivered 96 child
-rows for a bound of 9, and 180 with `distinct`. A compiler that routes
-includes from rows before the window fails it, and one that routes none fails
-its rows law. Child forms vary over `materialize`, a child `orderBy`, a child
-`limit`, and nested includes; a child that takes over `setWindow` fails after
-the first window move, and a router that adds the two rows before the window
-fails the work bound. `distinct` cases collapse parents with equal rank and
-group, and copied ranks tie at the window edge. Limits: includes inherited from
-a `from` subquery and inputs to `fn.select` still route from every row before
-the window, and this owner does not generate them.
+an ordered parent (a page, a `findOne` with an offset, or an `orderBy` alone
+moved by `setWindow`), optionally with `distinct` and a static parent filter by
+`eq` or `inArray` on the correlation field. Its children are local or on
+demand, in the forms `materialize`, a child Collection, a child `orderBy`, a
+child `limit`, a child `findOne`, nested includes, and limited nested includes.
+Histories insert, delete, and move parents, insert and delete children, and move
+the window. Rows must equal a relational model. Preload may load only the
+children of the shown rows' groups and the grandchildren of the shown children;
+a step may load only the children of the rows that entered the window, the
+grandchildren of the children that entered an include, and one changed row. On
+main, a late page delivered 120 child rows for a bound of 9. Before this fix's
+second round, a static filter seeded child demand for every named group, and an
+`orderBy`-only parent kept routing rows that `setWindow` dropped; both fail.
+Routers that add the row after the window, every row tied with a window edge,
+or the two rows before it fail the work bound, and a child that takes over
+`setWindow` fails the rows law. Limits: includes inherited from a `from`
+subquery and inputs to `fn.select` still route from every row before the
+window, and this owner does not generate them.
 
 Three Ordered acquisition companions own distinct controlled cuts:
 `packages/db/tests/query/load-subset-replay-refinement-oracle.test.ts` checks

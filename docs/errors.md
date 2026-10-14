@@ -2449,3 +2449,13 @@ Development builds show this message, with `${...}` replaced by values:
 ```text
 LocalStorage sync belongs to its options Collection.
 ```
+
+<a id="error-243"></a>
+
+## Error 243: `query/compiler/index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+An ordered window row has no include route
+```
