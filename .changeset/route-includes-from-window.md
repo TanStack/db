@@ -1,5 +1,5 @@
 ---
-'@tanstack/db': patch
+'@tanstack/db': minor
 ---
 
 Load includes only for the rows a windowed query or a `findOne` shows. A live query with an `orderBy`, or a `findOne`, no longer evaluates the includes in its own `select` (a child query, `toArray`, `materialize`, or `findOne`) for rows outside the rows it shows, whether `limit` and `offset` set the window or `setWindow` moves it. A late page now costs about the same as the first one. With `distinct`, the query no longer loads children for every source row. A `where` that names correlation values starts their child loads at once only when no enclosing query is windowed or a `findOne`, and either the query is neither windowed nor a `findOne`, or it is a `findOne` that shows one row for one named correlation value, with no `offset`, and offset 0 at start if a window was requested before start. Any other window or `findOne`, including a window that `setWindow` requests later, can drop those rows. Includes inherited from a subquery in `from`, and includes passed into `fn.select`, still load for every row before the window.
