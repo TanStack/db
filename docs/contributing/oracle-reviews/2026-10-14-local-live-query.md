@@ -77,3 +77,31 @@ render-cut suite also passed in the earlier 120-test selection. The real Query
 Collection ingestion test passes at runtime and typecheck. Core and React
 builds, core test typechecking, formatting, and the 405-name mangle check pass.
 Package lint has no errors; remaining warnings are in untouched files.
+
+## Upstream standards comparison
+
+Reviewed correction: `c17de4a0544e84d29d5e3d80098ec4b4586a7509`.
+The independent reviewer confirmed the fixture repair. All 27 local oracle
+tests, core test typechecking, scoped lint and formatting pass.
+
+This correction supersedes the ORC-004 index-planning claim above.
+The independent comparison found a fixture reach gap: automatic indexing did
+not establish an index on the local window path. An index-presence assertion
+failed with the automatic-only fixture. The fixture explicitly creates a rank
+index, and the generated campaigns check its presence before subscribing.
+Local queries bypass provider order optimization; these lanes establish result
+parity with and without an available index, not distinct ordered loader plans.
+
+Merged precedents support the boundaries used here:
+
+- [#2060](https://github.com/TanStack/db/pull/2060) separates source retention
+  from acquisition and checks core and React ownership boundaries.
+- [#2115](https://github.com/TanStack/db/pull/2115) separates query readiness
+  from background source readiness.
+- [#2132](https://github.com/TanStack/db/pull/2132) checks that configured oracle
+  dimensions actually reach the claimed cases, motivating the index assertion.
+- [#2119](https://github.com/TanStack/db/pull/2119) distinguishes product-law
+  proposals from defects under accepted contracts. The local-only law remains
+  an API proposal; ordinary fetching-query laws are unchanged.
+
+These are merged-code precedents, not maintainer endorsement of this API.
