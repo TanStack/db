@@ -5815,12 +5815,13 @@ describe(`query collection ownership lifecycle`, () => {
       queryClient.clear()
     })
 
-    await collection._sync.loadSubset({})
+    const request = {}
+    await collection._sync.loadSubset(request)
     let unloaded = false
     const subscription = collection.subscribeChanges(() => {
       if (!unloaded && collection.has(orphaned.id)) {
         unloaded = true
-        collection._sync.unloadSubset({})
+        collection._sync.unloadSubset(request)
       }
     })
     cleanups.push(() => Promise.resolve(subscription.unsubscribe()))
@@ -8882,10 +8883,11 @@ describe(`query collection ownership lifecycle`, () => {
       queryClient.clear()
     })
 
-    await collection._sync.loadSubset({})
+    const initialRequest = {}
+    await collection._sync.loadSubset(initialRequest)
     expect(collection.get(`x`)?.name).toBe(`Cached`)
     await collection.utils.writeInsert({ id: `y`, name: `Manual` })
-    collection._sync.unloadSubset({})
+    collection._sync.unloadSubset(initialRequest)
     const reacquisition = Promise.resolve(collection._sync.loadSubset({}))
     let settled = false
     void reacquisition.then(() => (settled = true))
@@ -9230,16 +9232,17 @@ describe(`query collection ownership lifecycle`, () => {
       queryClient.clear()
     })
 
+    const ownerBRequest = {}
     await Promise.all([
       ownerA._sync.loadSubset({}),
-      ownerB._sync.loadSubset({}),
+      ownerB._sync.loadSubset(ownerBRequest),
     ])
     const refresh = ownerA.utils.refetch({ throwOnError: true })
     void refresh.catch(() => undefined)
     await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
     await ownerA.utils.writeUpdate({ id: server.id, name: `Manual` })
     expect(ownerB.get(server.id)?.name).toBe(`Server`)
-    ownerB._sync.unloadSubset({})
+    ownerB._sync.unloadSubset(ownerBRequest)
     expect(ownerB.has(server.id)).toBe(false)
     const reacquire = Promise.resolve(ownerB._sync.loadSubset({}))
     void reacquire.catch(() => undefined)
@@ -9654,7 +9657,8 @@ describe(`query collection ownership lifecycle`, () => {
       }
       if (finalRefetch) await fetchB(false)
       const callsBeforeAcquisition = queryFn.mock.calls.length
-      await a._sync.loadSubset({})
+      const request = {}
+      await a._sync.loadSubset(request)
       const revalidatedCacheEdit = cacheEdit && !finalRefetch
       expect(queryFn).toHaveBeenCalledTimes(
         callsBeforeAcquisition + Number(revalidatedCacheEdit),
@@ -9680,7 +9684,7 @@ describe(`query collection ownership lifecycle`, () => {
           ? `Other write`
           : undefined,
       )
-      a._sync.unloadSubset({})
+      a._sync.unloadSubset(request)
       expect(a.get(`x`)?.name).toBe(
         remoteMayReplace ? undefined : directX.value,
       )
@@ -9819,10 +9823,11 @@ describe(`query collection ownership lifecycle`, () => {
         acceptFetch(`older`, initialStart, initial.name)
         expectPublicRow()
       }
+      const olderRefetchSubset = existingOwner
+        ? { ...olderSubset, refetch: true }
+        : olderSubset
       const olderStart = start()
-      const olderLoad = collection._sync.loadSubset(
-        existingOwner ? { ...olderSubset, refetch: true } : olderSubset,
-      )
+      const olderLoad = collection._sync.loadSubset(olderRefetchSubset)
       void Promise.resolve(olderLoad).catch(() => undefined)
       await vi.waitFor(() =>
         expect(queryFn).toHaveBeenCalledTimes(existingOwner ? 2 : 1),
@@ -9872,7 +9877,7 @@ describe(`query collection ownership lifecycle`, () => {
         const subset = owner === `older` ? olderSubset : newerSubset
         collection._sync.unloadSubset(subset)
         if (owner === `older` && existingOwner)
-          collection._sync.unloadSubset(subset)
+          collection._sync.unloadSubset(olderRefetchSubset)
         reference.owners.delete(owner)
         expectPublicRow()
       }
@@ -9904,6 +9909,99 @@ describe(`query collection ownership lifecycle`, () => {
         expectPublicRow()
         expect(queryFn).toHaveBeenCalledTimes(2)
       }
+    },
+  )
+
+  /**
+   * Query Core can notify cache listeners after accepting A's fetch but
+   * before invoking A's query function. A listener then starts B, whose query
+   * function runs first. The source-order model assigns B the earlier value
+   * position and A the later one. Both results still claim their own subset;
+   * after A applies and B settles last, the public row keeps A's value. This
+   * checkpoint distinguishes query-function start from fetch-call acceptance.
+   */
+  it.each([`A`, `B`] as const)(
+    `orders reentrant subset results by query-function start when %s releases first`,
+    async (firstRelease) => {
+      const id = `reentrant-subset-start-order`
+      const queryClient = createQueryClient()
+      const a = { where: eq(new IR.PropRef([`category`]), `shared`) }
+      const b = { where: eq(new IR.PropRef([`id`]), shared.id) }
+      const aHash = hashKey([id, getLoadSubsetDemandKey(a)])
+      const aResult = createDeferred<Array<Item>>()
+      const bResult = createDeferred<Array<Item>>()
+      const starts: Array<`A` | `B`> = []
+      const queryFn = vi.fn((context: QueryFunctionContext) => {
+        const where = context.meta?.loadSubsetOptions?.where
+        if (
+          where?.type !== `func` ||
+          where.name !== `eq` ||
+          where.args.length !== 2 ||
+          where.args[0]?.type !== `ref` ||
+          where.args[1]?.type !== `val`
+        ) {
+          throw new Error(`Expected a single-field equality demand`)
+        }
+        const source =
+          where.args[0].path.length === 1 &&
+          where.args[0].path[0] === `category` &&
+          where.args[1].value === `shared`
+            ? `A`
+            : where.args[0].path.length === 1 &&
+                where.args[0].path[0] === `id` &&
+                where.args[1].value === shared.id
+              ? `B`
+              : undefined
+        if (!source) throw new Error(`Unexpected subset predicate`)
+        starts.push(source)
+        return source === `A` ? aResult.promise : bResult.promise
+      })
+      const collection = createCollection(
+        queryCollectionOptions<Item>({
+          id,
+          queryClient,
+          queryKey: [id],
+          queryFn,
+          getKey: (item) => item.id,
+          syncMode: `on-demand`,
+          startSync: true,
+          retry: false,
+        }),
+      )
+      let bLoad: true | Promise<void> | undefined
+      const releaseCache = queryClient.getQueryCache().subscribe((event) => {
+        if (
+          bLoad === undefined &&
+          event.type === `updated` &&
+          event.action.type === `fetch` &&
+          event.query.queryHash === aHash
+        ) {
+          bLoad = collection._sync.loadSubset(b)
+          void Promise.resolve(bLoad).catch(() => undefined)
+        }
+      })
+      cleanups.push(async () => {
+        releaseCache()
+        aResult.resolve([])
+        bResult.resolve([])
+        await collection.cleanup()
+        queryClient.clear()
+      })
+
+      const aLoad = collection._sync.loadSubset(a)
+      void Promise.resolve(aLoad).catch(() => undefined)
+      expect(bLoad).toBeDefined()
+      expect(starts).toEqual([`B`, `A`])
+      aResult.resolve([{ ...shared, name: `A` }])
+      await aLoad
+      expect(collection.get(shared.id)?.name).toBe(`A`)
+      bResult.resolve([{ ...shared, name: `B` }])
+      await bLoad
+      expect(collection.get(shared.id)?.name).toBe(`A`)
+      collection._sync.unloadSubset(firstRelease === `A` ? a : b)
+      expect(collection.get(shared.id)?.name).toBe(`A`)
+      collection._sync.unloadSubset(firstRelease === `A` ? b : a)
+      expect(collection.has(shared.id)).toBe(false)
     },
   )
 
@@ -9978,8 +10076,9 @@ describe(`query collection ownership lifecycle`, () => {
         queryClient.clear()
         driver.close()
       })
-      await firstA._sync.loadSubset({})
-      firstA._sync.unloadSubset({})
+      const firstARequest = {}
+      await firstA._sync.loadSubset(firstARequest)
+      firstA._sync.unloadSubset(firstARequest)
       const callsBeforeWrite =
         aQueryFn.mock.calls.length + bQueryFn.mock.calls.length
       await firstA.utils.writeInsert({ id: `x`, name: `Direct` })
@@ -10235,9 +10334,10 @@ describe(`query collection ownership lifecycle`, () => {
       queryClient.clear()
     })
 
-    await collection._sync.loadSubset({})
+    const firstRequest = {}
+    await collection._sync.loadSubset(firstRequest)
     await collection.utils.writeUpdate({ id: before.id, name: `After` })
-    collection._sync.unloadSubset({})
+    collection._sync.unloadSubset(firstRequest)
     expect(collection.has(before.id)).toBe(false)
     await collection._sync.loadSubset({})
     expect(collection.has(before.id)).toBe(true)
@@ -10614,11 +10714,12 @@ describe(`query collection ownership lifecycle`, () => {
       queryClient.clear()
     })
 
-    await collection._sync.loadSubset({})
+    const request = {}
+    await collection._sync.loadSubset(request)
     const query = queryClient.getQueryCache().find({ queryKey: [id] })!
     const observer = query.observers[0]!
     releaseListener = observer.subscribe(() => {})
-    collection._sync.unloadSubset({})
+    collection._sync.unloadSubset(request)
     await collection.utils.writeUpdate({ id: `x`, name: `after` })
     expect(query.state.data).toEqual([{ id: `x`, name: `after` }])
     await collection._sync.loadSubset({})
@@ -10653,7 +10754,8 @@ describe(`query collection ownership lifecycle`, () => {
       scan.resolve([])
       return Promise.resolve()
     })
-    await collection._sync.loadSubset({})
+    const request = {}
+    await collection._sync.loadSubset(request)
     const query = queryClient.getQueryCache().find({ queryKey: [id] })!
     const foreign = new QueryObserver(queryClient, {
       queryKey: [id],
@@ -10662,7 +10764,7 @@ describe(`query collection ownership lifecycle`, () => {
     })
     const release = foreign.subscribe(() => {})
     cleanups.push(() => Promise.resolve(release()))
-    collection._sync.unloadSubset({})
+    collection._sync.unloadSubset(request)
     await collection.utils.writeDelete(before.id)
     collection._state.syncedCollectionMetadata.set(
       `queryCollection:gc:${queryHash}`,
@@ -10784,7 +10886,8 @@ describe(`query collection ownership lifecycle`, () => {
           if (key === queryHash && typeof value === `number`) stamped.add(this)
           return originalSet.call(this, key, value)
         })
-      const load = Promise.resolve(collection._sync.loadSubset({}))
+      const request = {}
+      const load = Promise.resolve(collection._sync.loadSubset(request))
       void load.catch(() => undefined)
       try {
         await vi.waitFor(() => expect(queryFn).toHaveBeenCalledOnce())
@@ -10792,7 +10895,7 @@ describe(`query collection ownership lifecycle`, () => {
         setSpy.mockRestore()
       }
       const query = queryClient.getQueryCache().find({ queryKey: [id] })!
-      collection._sync.unloadSubset({})
+      collection._sync.unloadSubset(request)
       expect(query.state.fetchStatus).toBe(`fetching`)
       const fetchStarts = [...stamped].find(
         (map) =>
@@ -10963,11 +11066,14 @@ describe(`query collection ownership lifecycle`, () => {
     })
 
     await collection.utils.writeInsert(shared)
-    const initialLoad = Promise.resolve(collection._sync.loadSubset({}))
+    const initialRequest = {}
+    const initialLoad = Promise.resolve(
+      collection._sync.loadSubset(initialRequest),
+    )
     void initialLoad.catch(() => undefined)
     await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(1))
     const query = queryClient.getQueryCache().find({ queryKey: [id] })!
-    collection._sync.unloadSubset({})
+    collection._sync.unloadSubset(initialRequest)
     expect(query.state.fetchStatus).toBe(`fetching`)
     expect(query.getObserversCount()).toBe(0)
 
@@ -11003,7 +11109,10 @@ describe(`query collection ownership lifecycle`, () => {
         results: [first.promise, []],
       })
       await collection.utils.writeInsert(shared)
-      const initialLoad = Promise.resolve(collection._sync.loadSubset({}))
+      const initialRequest = {}
+      const initialLoad = Promise.resolve(
+        collection._sync.loadSubset(initialRequest),
+      )
       void initialLoad.catch(() => undefined)
       await vi.waitFor(() => expect(queryFn).toHaveBeenCalledOnce())
       const query = queryClient.getQueryCache().find({ queryKey: [id] })!
@@ -11017,7 +11126,7 @@ describe(`query collection ownership lifecycle`, () => {
         unsubscribe()
         return Promise.resolve()
       })
-      collection._sync.unloadSubset({})
+      collection._sync.unloadSubset(initialRequest)
       expect(query.state.fetchStatus).toBe(`fetching`)
       expect(query.getObserversCount()).toBe(1)
       await collection.utils.writeDelete(shared.id)
@@ -11267,11 +11376,12 @@ describe(`query collection ownership lifecycle`, () => {
       queryClient.clear()
     })
 
-    await collection._sync.loadSubset({})
+    const initialRequest = {}
+    await collection._sync.loadSubset(initialRequest)
     await collection.utils.writeUpdate({ id: `x`, name: `Manual` })
     queryClient.setQueryData(queryKey, [{ id: `x`, name: `Local edit` }])
     expect(collection.get(`x`)?.name).toBe(`Manual`)
-    collection._sync.unloadSubset({})
+    collection._sync.unloadSubset(initialRequest)
     expect(collection.has(`x`)).toBe(false)
     const load = Promise.resolve(collection._sync.loadSubset({}))
     void load.catch(() => undefined)
@@ -11814,7 +11924,8 @@ describe(`query collection ownership lifecycle`, () => {
     })
     const history: Array<`empty-result` | `restart`> = []
 
-    await collection._sync.loadSubset({})
+    let currentRequest: LoadSubsetOptions = {}
+    await collection._sync.loadSubset(currentRequest)
     history.push(`empty-result`)
     expect(rows(collection)).toEqual([])
     expect(scanPersistedRows).toHaveBeenCalledTimes(
@@ -11822,8 +11933,9 @@ describe(`query collection ownership lifecycle`, () => {
     )
 
     for (let result = 0; result < 2; result++) {
-      collection._sync.unloadSubset({})
-      await collection._sync.loadSubset({ refetch: true })
+      collection._sync.unloadSubset(currentRequest)
+      currentRequest = { refetch: true }
+      await collection._sync.loadSubset(currentRequest)
       history.push(`empty-result`)
       expect(rows(collection)).toEqual([])
       expect(scanPersistedRows).toHaveBeenCalledTimes(
@@ -11913,7 +12025,8 @@ describe(`query collection ownership lifecycle`, () => {
       )
 
       await collection.stateWhenReady()
-      await collection._sync.loadSubset({})
+      const fullRequest = {}
+      await collection._sync.loadSubset(fullRequest)
       await collection._sync.loadSubset(subset)
 
       expect({
@@ -11939,11 +12052,63 @@ describe(`query collection ownership lifecycle`, () => {
         ).toEqual([hashKey([id])])
       }
       if (name === `unchanged`) {
-        collection._sync.unloadSubset({})
+        collection._sync.unloadSubset(fullRequest)
         expect(rows(collection)).toEqual([oldRow.id])
       }
     },
   )
+
+  /**
+   * A process can stop while a persisted subset is active, before unload
+   * writes a retention marker. Its durable row owner still needs
+   * revalidation. The hot run below creates that state through the real
+   * persistence path; the cold run starts from its snapshot. A complete full
+   * result may reconcile the old owner itself, or the next subset acquisition
+   * may do so. At that acquisition's settlement, an omitted row must be gone
+   * from public rows, durable rows, and durable owner metadata. This witness
+   * rejects a gate that checks only for a retention marker.
+   */
+  it(`revalidates a markerless persisted subset owner after full-source loading`, async () => {
+    const id = `markerless-subset-after-full`
+    const oldRow: Item = {
+      id: `detail-row`,
+      category: `detail`,
+      name: `Original`,
+    }
+    const subset = categorySubset(`detail`)
+    const subsetHash = hashKey([id, getLoadSubsetDemandKey(subset)])
+    const retentionKey = `queryCollection:gc:${subsetHash}`
+    const hotStorage = createOwnershipStorage()
+    const hot = createPersistedOwnershipFixture(id, hotStorage, [oldRow])
+    await hot.collection.stateWhenReady()
+    await hot.collection._sync.loadSubset(subset)
+    const crashSnapshot = hotStorage.snapshot()
+    expect(storedItems(hotStorage)).toEqual([oldRow])
+    expect(persistedOwners(crashSnapshot.rowMetadata, oldRow.id)).toEqual([
+      subsetHash,
+    ])
+    expect(crashSnapshot.collectionMetadata.has(retentionKey)).toBe(false)
+    await hot.collection.cleanup()
+
+    const coldStorage = createOwnershipStorage(crashSnapshot)
+    const cold = createPersistedOwnershipFixture(id, coldStorage, [])
+    await cold.collection.stateWhenReady()
+    // On-demand restore does not publish rows before a subset asks for them.
+    expect(storedItems(coldStorage)).toEqual([oldRow])
+    expect(
+      persistedOwners(coldStorage.snapshot().rowMetadata, oldRow.id),
+    ).toEqual([subsetHash])
+    expect(coldStorage.snapshot().collectionMetadata.has(retentionKey)).toBe(
+      false,
+    )
+    await cold.collection._sync.loadSubset({})
+    await cold.collection._sync.loadSubset(subset)
+    expect(rows(cold.collection)).toEqual([])
+    expect(storedItems(coldStorage)).toEqual([])
+    expect(
+      persistedOwners(coldStorage.snapshot().rowMetadata, oldRow.id),
+    ).toEqual([])
+  })
 
   it(`emits metadata for every owner of rows shared by overlapping queries`, async () => {
     const metadata: MetadataRecorder = { rows: new Map(), writes: [] }
@@ -13252,17 +13417,17 @@ it(`does not restart a released Query acquisition after cache rotation`, async (
     driver.close()
   })
 
-  await collection._sync.loadSubset({ limit: 1 })
-  const oldLoad = Promise.resolve(
-    collection._sync.loadSubset({ limit: 1, refetch: true }),
-  )
+  const initialRequest: LoadSubsetOptions = { limit: 1 }
+  const refetchRequest: LoadSubsetOptions = { limit: 1, refetch: true }
+  await collection._sync.loadSubset(initialRequest)
+  const oldLoad = Promise.resolve(collection._sync.loadSubset(refetchRequest))
   void oldLoad.catch(() => undefined)
   await oldFetchEntered.promise
   now += 10_001
   providerRows = [{ id: `fresh`, category: `active`, name: `Fresh` }]
   await collection._sync.loadSubset({ limit: 2 })
-  collection._sync.unloadSubset({ limit: 1 })
-  collection._sync.unloadSubset({ limit: 1 })
+  collection._sync.unloadSubset(initialRequest)
+  collection._sync.unloadSubset(refetchRequest)
   const fetchesAtRelease = activeFetches
   releaseOldFetch.resolve()
   await Promise.allSettled([oldLoad])

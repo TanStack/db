@@ -1,0 +1,5 @@
+---
+'@tanstack/query-db-collection': patch
+---
+
+Keep a shared Query's provider signal live while another Collection acquisition owns it, and require an applied full-source result before reusing it for a narrower demand. Release the physical Query chosen by each acquisition when equal demands route differently after a failed full refresh or an explicit exact refetch. Order overlapping fetched row values by query-function invocation when cache callbacks start another Query first. Let a fresh server response replace an older persisted direct value after the original Collection acquisition releases.

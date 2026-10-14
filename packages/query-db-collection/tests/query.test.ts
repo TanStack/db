@@ -876,18 +876,19 @@ describe(`QueryCollection`, () => {
       const transaction = createTransaction({
         mutationFn: () => persistence.promise,
       })
+      const request = {}
 
       try {
         transaction.mutate(() =>
           collection.insert({ id: `local`, name: `Local` }),
         )
-        collection._sync.loadSubset({})
+        collection._sync.loadSubset(request)
         queryResult.resolve([{ id: `first`, name: `First` }])
         await flushPromises()
 
         queryClient.setQueryData(queryKey, [{ id: `second`, name: `Second` }])
         await flushPromises()
-        collection._sync.unloadSubset({})
+        collection._sync.unloadSubset(request)
 
         persistence.resolve()
         await transaction.isPersisted.promise
@@ -1753,12 +1754,13 @@ describe(`QueryCollection`, () => {
       expect(queryFn).toHaveBeenCalledTimes(1)
     })
 
-    // Verify queryFn was called with the correct context, including the meta object
-    expect(queryFn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        meta: expect.objectContaining({ ...meta, loadSubsetOptions: {} }),
-      }),
-    )
+    // The metadata signal follows the Query observed by this Collection.
+    const context = queryFn.mock.calls[0]?.[0] as QueryFunctionContext
+    expect(context.meta?.errorMessage).toBe(meta.errorMessage)
+    expect(context.meta?.loadSubsetOptions?.signal).toBe(context.signal)
+    expect(Object.keys(context.meta?.loadSubsetOptions ?? {})).toEqual([
+      `signal`,
+    ])
   })
 
   describe(`loadSubsetOptions passed to queryFn`, () => {
@@ -7688,13 +7690,14 @@ describe(`QueryCollection`, () => {
             }),
         },
       })
-      const load = collection._sync.loadSubset({})
+      const request = {}
+      const load = collection._sync.loadSubset(request)
       await vi.waitFor(() => {
         expect(scanPersistedRows).toHaveBeenCalledOnce()
         expect(scanPersistedRows).toHaveBeenCalledWith()
       })
 
-      collection._sync.unloadSubset({})
+      collection._sync.unloadSubset(request)
       persistedScan.resolve([])
       await load
       await flushPromises()
@@ -9335,10 +9338,10 @@ describe(`QueryCollection`, () => {
         expect(collection.size).toBe(items.length)
       })
 
-      // Should call queryFn once with empty predicates
+      // Should call queryFn once with empty predicates and the Query signal
       expect(queryFn).toHaveBeenCalledTimes(1)
       const call = queryFn.mock.calls[0]?.[0]
-      expect(call?.meta?.loadSubsetOptions).toEqual({})
+      expect(call?.meta?.loadSubsetOptions).toEqual({ signal: call?.signal })
     })
   })
 

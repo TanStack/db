@@ -1047,6 +1047,33 @@ export function queryCollectionOptions(
   // A completed full-source Query can own narrower demands without a second
   // transport. Pin each demand to its chosen Query until its final release.
   const fullSourceDependents = new Map<string, number>()
+  // Core releases an acquisition with its original options object. Equal
+  // predicates can choose different Queries over time, so the semantic hash
+  // cannot identify which Query an acquisition must release.
+  type AcquisitionLease = {
+    requestedHash: string
+    hashedQueryKey: string
+  }
+  let acquisitionLeasesByOptions = new WeakMap<
+    LoadSubsetOptions,
+    Array<AcquisitionLease>
+  >()
+  const recordAcquisitionLease = (
+    options: LoadSubsetOptions,
+    requestedHash: string,
+    hashedQueryKey: string,
+  ) => {
+    const lease = { requestedHash, hashedQueryKey }
+    const optionsLeases = acquisitionLeasesByOptions.get(options) ?? []
+    optionsLeases.push(lease)
+    acquisitionLeasesByOptions.set(options, optionsLeases)
+    if (hashedQueryKey !== requestedHash) {
+      fullSourceDependents.set(
+        requestedHash,
+        (fullSourceDependents.get(requestedHash) ?? 0) + 1,
+      )
+    }
+  }
 
   // Eager startup holds one reference until cleanup. Cache removal detaches
   // observation, not that ownership or its rows.
@@ -1709,15 +1736,12 @@ export function queryCollectionOptions(
     }
 
     /**
-     * Generate a consistent query key from LoadSubsetOptions.
-     * CRITICAL: Must use identical logic in both createQueryFromOpts and unloadSubset
-     * so that refcount increment/decrement operations target the same hashedQueryKey.
-     * Inconsistent keys would cause refcount leaks and prevent proper cleanup.
+     * Generate the requested Query key. The accepted acquisition records its
+     * chosen physical Query separately for release.
      */
     const generateQueryKeyFromOptions = (opts: LoadSubsetOptions): QueryKey => {
       if (typeof queryKey === `function`) {
-        // Refetch starts another acquisition for the same semantic demand. It
-        // must not create a second Query cache or unload identity.
+        // Refetch does not change the semantic demand's requested Query key.
         const { refetch: _refetch, ...queryKeyOptions } = opts
         return queryKey(queryKeyOptions)
       } else if (syncMode === `on-demand`) {
@@ -1904,6 +1928,7 @@ export function queryCollectionOptions(
       const fullResult = fullObserver?.getCurrentResult()
       const appliedFullResult =
         fullResult !== undefined &&
+        fullQuery !== undefined &&
         getRecordedResultApplicationSettlement(fullSourceHash!, fullResult) !==
           undefined
       const retainedRequestedEntry = metadata?.collection.get(
@@ -1913,23 +1938,26 @@ export function queryCollectionOptions(
         parsePersistedQueryRetentionEntry(
           retainedRequestedEntry,
           requestedHash,
-        ) !== undefined
+        ) !== undefined ||
+        (!state.observers.has(requestedHash) &&
+          (queryToRows.get(requestedHash)?.size ?? 0) > 0)
       // Existing dependents keep their original observer lease even if an
       // explicit refetch creates an exact Query for the same requested scope.
       const sharesFullSource =
         !opts.refetch &&
         fullSourceKey !== undefined &&
         fullSourceHash !== requestedHash &&
-        (hasFullSourceDependent ||
-          (!requestedScopeNeedsRevalidation &&
-            !state.observers.has(requestedHash) &&
-            (queryRefCounts.get(fullSourceHash!) ?? 0) > 0 &&
-            fullResult?.isSuccess === true &&
-            fullQuery?.state.fetchStatus === `idle` &&
-            hasCurrentCacheGenerationFetch(fullQuery) &&
-            !pendingResultApplications.has(fullSourceHash!) &&
-            !failedResultApplications.has(fullSourceHash!) &&
-            appliedFullResult))
+        !requestedScopeNeedsRevalidation &&
+        !state.observers.has(requestedHash) &&
+        (queryRefCounts.get(fullSourceHash!) ?? 0) > 0 &&
+        fullResult?.isSuccess === true &&
+        fullQuery !== undefined &&
+        queryClient.getQueryCache().get(fullQuery.queryHash) === fullQuery &&
+        fullQuery.state.fetchStatus === `idle` &&
+        hasCurrentCacheGenerationFetch(fullQuery) &&
+        !pendingResultApplications.has(fullSourceHash!) &&
+        !failedResultApplications.has(fullSourceHash!) &&
+        appliedFullResult
       const key = sharesFullSource ? fullSourceKey : requestedKey
       const hashedQueryKey = sharesFullSource ? fullSourceHash! : requestedHash
       const {
@@ -1968,12 +1996,7 @@ export function queryCollectionOptions(
           hashedQueryKey,
           (queryRefCounts.get(hashedQueryKey) || 0) + 1,
         )
-        if (sharesFullSource) {
-          fullSourceDependents.set(
-            requestedHash,
-            (fullSourceDependents.get(requestedHash) ?? 0) + 1,
-          )
-        }
+        recordAcquisitionLease(opts, requestedHash, hashedQueryKey)
 
         // Get the current result and return based on its state
         const observer = state.observers.get(hashedQueryKey)!
@@ -2042,74 +2065,33 @@ export function queryCollectionOptions(
             queryKey: context.queryKey,
             exact: true,
           })
-          fetchStartGenerations.set(
-            logicalHash,
-            Math.max(
-              fetchStartGenerations.get(logicalHash) ?? 0,
-              directWriteGeneration,
-            ),
+          if (!physicalQuery) throw new Error(`A fetching Query left the cache`)
+          // Cache listeners may start another Query before this query function
+          // runs. Source values take their order from provider invocation.
+          const fetchStart = ++nextQueryCollectionAuthorityPosition
+          queryCollectionCurrentFetchStarts.set(physicalQuery, fetchStart)
+          fetchStartGenerations.set(logicalHash, fetchStart)
+          state.observers.forEach((observer, hash) => {
+            if (observer.getCurrentQuery() === physicalQuery)
+              fetchStartGenerations.set(hash, fetchStart)
+          })
+          // Query Core's signal follows the physical Query's observers. Keep
+          // its getter lazy so a provider that ignores cancellation can still
+          // finish into cache after the final Collection owner releases.
+          const sharedContext = Object.defineProperties(
+            {} as typeof context,
+            Object.getOwnPropertyDescriptors(context),
           )
-          // A shared Query can outlive the acquisition that installed this
-          // queryFn. Use the Query signal for shared fetches, but preserve its
-          // lazy getter so an ignoring provider does not cause Query Core to
-          // cancel an unobserved fetch.
-          const queryWithSharedSignal = () => {
-            const sharedContext = Object.defineProperties(
-              {} as typeof context,
-              Object.getOwnPropertyDescriptors(context),
-            )
-            sharedContext.meta = {
-              ...context.meta,
-              loadSubsetOptions: {
-                ...requestOptions,
-                get signal() {
-                  return context.signal
-                },
-              },
-            }
-            return queryFunction(sharedContext)
+          const loadSubsetOptions = { ...requestOptions }
+          Object.defineProperty(loadSubsetOptions, `signal`, {
+            get: () => context.signal,
+            enumerable: true,
+          })
+          sharedContext.meta = {
+            ...context.meta,
+            loadSubsetOptions,
           }
-          if (
-            (queryRefCounts.get(logicalHash) ?? 0) > 1 ||
-            (physicalQuery?.getObserversCount() ?? 0) > 1 ||
-            (hashedQueryKey === fullSourceHash && fullSourceDependents.size) ||
-            requestOptions.signal?.aborted
-          ) {
-            return queryWithSharedSignal()
-          }
-          const recoverReleasedSignal = (error: unknown) => {
-            // A peer can acquire the Query after this request starts with the
-            // first acquisition's signal. Retry only that signal's rejection
-            // or an AbortError while the same physical Query still has a live
-            // owner. A fresh AbortError has no provider provenance, so this
-            // bounded retry can also include an unrelated AbortError.
-            const isAbortError =
-              typeof error === `object` &&
-              error !== null &&
-              `name` in error &&
-              error.name === `AbortError`
-            if (
-              !requestOptions.signal?.aborted ||
-              (error !== requestOptions.signal.reason && !isAbortError) ||
-              !physicalQuery ||
-              physicalQuery.getObserversCount() === 0 ||
-              queryClient.getQueryCache().find({
-                queryKey: context.queryKey,
-                exact: true,
-              }) !== physicalQuery ||
-              physicalQuery.state.fetchStatus !== `fetching`
-            ) {
-              throw error
-            }
-            return queryWithSharedSignal()
-          }
-          try {
-            return Promise.resolve(queryFunction(context)).catch(
-              recoverReleasedSignal,
-            )
-          } catch (error) {
-            return recoverReleasedSignal(error)
-          }
+          return queryFunction(sharedContext)
         },
         meta: extendedMeta,
         structuralSharing: true,
@@ -2154,6 +2136,7 @@ export function queryCollectionOptions(
         hashedQueryKey,
         (queryRefCounts.get(hashedQueryKey) || 0) + 1,
       )
+      recordAcquisitionLease(opts, requestedHash, hashedQueryKey)
 
       // Check if data already exists in QueryClient cache (persisted within gcTime from
       // a previous observer). This avoids creating unnecessary promises and subscription
@@ -2549,7 +2532,7 @@ export function queryCollectionOptions(
 
         previouslyOwnedRows.forEach((key) => {
           const oldItem = shouldUsePersistedBaseline
-            ? persistedBaseline.get(key)?.value
+            ? (currentSyncedItems.get(key) ?? persistedBaseline.get(key)?.value)
             : currentSyncedItems.get(key)
           const newItem = newItemsMap.get(key)
           if (!newItem) {
@@ -2865,6 +2848,16 @@ export function queryCollectionOptions(
         const observedQuery = observer?.getCurrentQuery()
         if (observer && observedQuery) {
           trackOwnedCacheQuery(observedQuery, hashedQueryKey)
+          const fetchStart =
+            queryCollectionCurrentFetchStarts.get(observedQuery)
+          if (fetchStart !== undefined)
+            fetchStartGenerations.set(
+              hashedQueryKey,
+              Math.max(
+                fetchStartGenerations.get(hashedQueryKey) ?? 0,
+                fetchStart,
+              ),
+            )
         }
         // A direct cache write cannot establish fetched result authority or
         // clear a recorded fetch error.
@@ -3518,9 +3511,12 @@ export function queryCollectionOptions(
               captureFetchResult(event.query, fetchStart)
               // The observer result handler may attach its application promise
               // after the cache success action. Capture again in the microtask.
+              const terminalStarts = [
+                ...(fetchApplicationRecords.get(event.query)?.keys() ?? []),
+              ]
               queueMicrotask(() => {
                 captureFetchApplications(event.query, fetchStart)
-                retireFetchApplicationRecords(event.query, [fetchStart])
+                retireFetchApplicationRecords(event.query, terminalStarts)
               })
             }
           } else if (event.action.type === `error`) {
@@ -3529,8 +3525,11 @@ export function queryCollectionOptions(
             )
             if (fetchStart !== undefined) {
               captureFetchResult(event.query, fetchStart)
+              const terminalStarts = [
+                ...(fetchApplicationRecords.get(event.query)?.keys() ?? []),
+              ]
               queueMicrotask(() =>
-                retireFetchApplicationRecords(event.query, [fetchStart]),
+                retireFetchApplicationRecords(event.query, terminalStarts),
               )
             }
           } else if (
@@ -3545,8 +3544,11 @@ export function queryCollectionOptions(
               event.query,
             )
             if (fetchStart !== undefined) {
+              const terminalStarts = [
+                ...(fetchApplicationRecords.get(event.query)?.keys() ?? []),
+              ]
               queueMicrotask(() =>
-                retireFetchApplicationRecords(event.query, [fetchStart]),
+                retireFetchApplicationRecords(event.query, terminalStarts),
               )
             }
           }
@@ -3586,6 +3588,7 @@ export function queryCollectionOptions(
       if (activeSyncSession === syncSession) activeSyncSession = undefined
       pendingStartupLoads.clear()
       fullSourceDependents.clear()
+      acquisitionLeasesByOptions = new WeakMap()
       ensureEagerSubscription = () => {}
       applyRefetchResultWhenUnsubscribed = () => false
       unsubscribeFromCollectionEvents()
@@ -3648,10 +3651,9 @@ export function queryCollectionOptions(
      * Called when a live query subscription unsubscribes (via collection._sync.unloadSubset()).
      *
      * Flow:
-     * 1. Receives the same predicates that were passed to loadSubset
-     * 2. Computes the queryKey using generateQueryKeyFromOptions (same logic as loadSubset)
-     * 3. Decrements refcount
-     * 4. If refcount reaches 0:
+     * 1. Finds the physical Query recorded for this acquisition's options.
+     * 2. Decrements that Query's refcount.
+     * 3. If refcount reaches 0:
      *    - Checks hasListeners() to detect invalidateQueries cycles
      *    - If hasListeners is true: resets refcount (TanStack Query keeping observer alive)
      *    - If hasListeners is false: calls forceCleanupQuery() to perform row-level GC
@@ -3675,17 +3677,14 @@ export function queryCollectionOptions(
         if (pending.size === 0) pendingStartupLoads.delete(options)
         return
       }
-      // 1. Same predicates → 2. Same queryKey
-      const requestedHash = hashKey(generateQueryKeyFromOptions(options))
-      const dependentCount = options.refetch
-        ? undefined
-        : fullSourceDependents.get(requestedHash)
-      if (dependentCount !== undefined) {
-        if (dependentCount === 1) fullSourceDependents.delete(requestedHash)
+      const lease = acquisitionLeasesByOptions.get(options)?.pop()
+      if (!lease) return
+      const { requestedHash, hashedQueryKey } = lease
+      if (hashedQueryKey !== requestedHash) {
+        const dependentCount = fullSourceDependents.get(requestedHash) ?? 0
+        if (dependentCount <= 1) fullSourceDependents.delete(requestedHash)
         else fullSourceDependents.set(requestedHash, dependentCount - 1)
       }
-      const hashedQueryKey =
-        dependentCount === undefined ? requestedHash : fullSourceHash!
 
       // 3. Decrement refcount
       const currentCount = queryRefCounts.get(hashedQueryKey) || 0

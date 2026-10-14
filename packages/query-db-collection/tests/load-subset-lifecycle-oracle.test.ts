@@ -45,13 +45,9 @@ import type { LoadSubsetOptions, SyncMetadataApi } from '@tanstack/db'
  * below. They do not make an incomplete or failed request authoritative for a
  * broader scope. The guide also permits an ignored-signal provider to finish
  * after final observer removal and supports metadata request signals. A
- * shared Query's later fetch must use a live signal when its original
- * acquisition has released; reading that signal eagerly would change the
- * ignored-signal behavior. If a peer joins after a fetch starts, an abort from
- * the original acquisition can end the provider call while the Query remains
- * owned. One replacement call gives that peer a live transport. The controlled
- * fixture covers exact abort reasons and fresh AbortErrors; a fresh unrelated
- * AbortError after the same abort has no distinguishable provider provenance.
+ * shared Query's fetch keeps a live signal while any Collection acquisition
+ * owns it. Reading the Query signal eagerly would change the ignored-signal
+ * behavior. A provider failure remains a failure of that physical fetch.
  * Each direct load below represents one acquisition lease; the small reference
  * history keeps a shared Query transport active while any lease remains. The
  * held provider checks the abort signal at each release checkpoint. The
@@ -160,7 +156,7 @@ async function expectActiveFullSourceServesFilteredDemand(): Promise<void> {
     // original owner cannot make its rows or freshness disappear.
     await full.cleanup()
     await filtered.cleanup()
-    expect(originalFullSignal?.aborted).toBe(true)
+    expect(originalFullSignal?.aborted).toBe(false)
     expect(collection.has(`a1`)).toBe(true)
     expect(collection.has(`b1`)).toBe(true)
 
@@ -190,6 +186,254 @@ async function expectActiveFullSourceServesFilteredDemand(): Promise<void> {
     await full.cleanup()
     await filtered.cleanup()
     await filteredPeer.cleanup()
+    await collection.cleanup()
+    queryClient.clear()
+  }
+}
+
+/**
+ * A failed full refresh supplies no current source coverage.
+ * An earlier filtered demand may still own the full Query's last applied rows,
+ * but a new filtered demand needs a new applied response. The independent
+ * provider filters a changed source by the request it receives. The live-query
+ * rows and request scope at preload settlement distinguish a fresh response
+ * from joining an ineligible full Query or replaying its old rows. Both
+ * acquisition release orders then check which physical Query owns each row.
+ * An unload with options that never acquired anything must not release either
+ * peer, even when its predicate and refetch flag match an active acquisition.
+ */
+async function expectIneligibleFullRefreshNeedsNewCoverage(
+  hasPriorDependent: boolean,
+  firstRelease: `old` | `new`,
+  unmatchedRelease: boolean,
+): Promise<void> {
+  const queryClient = createQueryClient()
+  const id = `failed-full-source-new-demand-${collectionSequence++}`
+  const requests: Array<{
+    scope: `full` | `filtered`
+    key: ReadonlyArray<unknown>
+  }> = []
+  const failure = new Error(`full refresh failed`)
+  const collection = createCollection(
+    queryCollectionOptions<Row>({
+      id,
+      queryClient,
+      queryKey: [id],
+      queryFn: ({ queryKey, meta }) => {
+        const where = meta?.loadSubsetOptions?.where
+        if (where !== undefined) {
+          // The provider's bounded reference rule reads the requested
+          // predicate. A different filter must not get the same canned rows.
+          expect(where.type).toBe(`func`)
+          if (where.type !== `func`) throw new Error(`Expected a function`)
+          expect(where.name).toBe(`eq`)
+          expect(where.args).toHaveLength(2)
+          expect(where.args[0]).toMatchObject({
+            type: `ref`,
+            path: [`group`],
+          })
+          expect(where.args[1]).toMatchObject({ type: `val`, value: `a` })
+        }
+        const scope = where === undefined ? `full` : `filtered`
+        requests.push({ scope, key: queryKey })
+        if (requests.length === 2) return Promise.reject(failure)
+        const rows: Array<Row> =
+          requests.length === 1
+            ? [
+                { id: `a1`, group: `a` },
+                { id: `b1`, group: `b` },
+              ]
+            : [
+                { id: `a1`, group: `a` },
+                { id: `a2`, group: `a` },
+                { id: `b1`, group: `b` },
+                { id: `b2`, group: `b` },
+              ]
+        return Promise.resolve(
+          scope === `full` ? rows : rows.filter((row) => row.group === `a`),
+        )
+      },
+      getKey: (row) => row.id,
+      startSync: true,
+      syncMode: `on-demand`,
+    }),
+  )
+  const makeFiltered = () =>
+    createLiveQueryCollection((query) =>
+      query
+        .from({ row: collection })
+        .where(({ row }) => eq(row.group, `a`))
+        .select(({ row }) => ({ id: row.id })),
+    )
+  const full = createLiveQueryCollection((query) =>
+    query.from({ row: collection }).select(({ row }) => ({ id: row.id })),
+  )
+  const firstFiltered = hasPriorDependent ? makeFiltered() : undefined
+  const nextFiltered = makeFiltered()
+  try {
+    await full.preload()
+    await firstFiltered?.preload()
+    expect(requests.map(({ scope }) => scope)).toEqual([`full`])
+
+    const fullRefresh = queryClient.refetchQueries({
+      queryKey: [id],
+      exact: true,
+    })
+    await fullRefresh
+    expect(requests.map(({ scope }) => scope)).toEqual([`full`, `full`])
+    expect(full.toArray.map((row) => row.id).sort()).toEqual([`a1`, `b1`])
+
+    await nextFiltered.preload()
+    expect(requests.length).toBeGreaterThanOrEqual(3)
+    for (const { scope, key } of requests.slice(2)) {
+      expect(key).toEqual(scope === `full` ? [id] : [id, expect.anything()])
+    }
+    expect(nextFiltered.toArray.map((row) => row.id).sort()).toEqual([
+      `a1`,
+      `a2`,
+    ])
+    expect(collection.has(`b1`)).toBe(true)
+
+    if (unmatchedRelease) {
+      collection._sync.unloadSubset({
+        where: new IR.Func<boolean>(`eq`, [
+          new IR.PropRef([`group`]),
+          new IR.Value(`a`),
+        ]),
+        refetch: true,
+      })
+    }
+
+    if (firstRelease === `new`) {
+      // The exact acquisition must release its own lease, leaving the older
+      // equal filter on the full Query and retiring its sole a2 row.
+      await nextFiltered.cleanup()
+      expect(collection.has(`a2`)).toBe(false)
+      expect(full.toArray.map((row) => row.id).sort()).toEqual([`a1`, `b1`])
+      await full.cleanup()
+      if (firstFiltered) {
+        expect(firstFiltered.toArray.map((row) => row.id)).toEqual([`a1`])
+        expect(collection.has(`a1`)).toBe(true)
+        await firstFiltered.cleanup()
+      }
+    } else {
+      // Reversing release order must keep the newer exact acquisition's a2
+      // row after the older dependent and full view have left.
+      await firstFiltered!.cleanup()
+      expect(collection.has(`a2`)).toBe(true)
+      await full.cleanup()
+      expect(nextFiltered.toArray.map((row) => row.id).sort()).toEqual([
+        `a1`,
+        `a2`,
+      ])
+      expect(collection.has(`b1`)).toBe(false)
+      await nextFiltered.cleanup()
+    }
+    expect(collection.size).toBe(0)
+  } finally {
+    await nextFiltered.cleanup()
+    await firstFiltered?.cleanup()
+    await full.cleanup()
+    await collection.cleanup()
+    queryClient.clear()
+  }
+}
+
+/**
+ * An explicit filtered refetch acquires its exact Query even while an older
+ * full refresh is pending. The reference has two owners of a1 and orders
+ * successful values by query-function invocation: full starts first, exact
+ * starts second, exact settles first. The later-started exact value survives
+ * the full result and either owner's release while the other still owns a1.
+ * The real QueryClient supplies the start order; public rows after both
+ * settlements and each release are the comparison checkpoints.
+ */
+async function expectFullAndExactResultsKeepLaterValue(
+  firstRelease: `full` | `exact`,
+): Promise<void> {
+  type NamedRow = Row & { group: string; name: string }
+  const queryClient = createQueryClient()
+  const id = `full-exact-value-order-${collectionSequence++}`
+  const fullRequest: LoadSubsetOptions = {}
+  const exactRequest: LoadSubsetOptions = {
+    where: new IR.Func<boolean>(`eq`, [
+      new IR.PropRef([`group`]),
+      new IR.Value(`a`),
+    ]),
+    refetch: true,
+  }
+  const heldFull = createDeferred<Array<NamedRow>>()
+  const calls: Array<`full` | `exact`> = []
+  const collection = createCollection(
+    queryCollectionOptions<NamedRow>({
+      id,
+      queryClient,
+      queryKey: [id],
+      queryFn: ({ meta }) => {
+        const where = meta?.loadSubsetOptions?.where
+        if (where !== undefined) {
+          expect(where).toMatchObject({
+            type: `func`,
+            name: `eq`,
+            args: [
+              { type: `ref`, path: [`group`] },
+              { type: `val`, value: `a` },
+            ],
+          })
+          calls.push(`exact`)
+          return Promise.resolve([
+            { id: `a1`, group: `a`, name: `New` },
+            { id: `a2`, group: `a`, name: `Exact only` },
+          ])
+        }
+        calls.push(`full`)
+        return calls.length === 1
+          ? Promise.resolve([
+              { id: `a1`, group: `a`, name: `Initial` },
+              { id: `b1`, group: `b`, name: `Initial B` },
+            ])
+          : heldFull.promise
+      },
+      getKey: (row) => row.id,
+      startSync: true,
+      syncMode: `on-demand`,
+    }),
+  )
+  let fullRefresh: Promise<void> | undefined
+  try {
+    await collection._sync.loadSubset(fullRequest)
+    fullRefresh = queryClient.refetchQueries({ queryKey: [id], exact: true })
+    await vi.waitFor(() => expect(calls).toEqual([`full`, `full`]))
+    await collection._sync.loadSubset(exactRequest)
+    expect(calls).toEqual([`full`, `full`, `exact`])
+    expect(collection.get(`a1`)?.name).toBe(`New`)
+
+    heldFull.resolve([
+      { id: `a1`, group: `a`, name: `Old` },
+      { id: `b1`, group: `b`, name: `Updated B` },
+    ])
+    await fullRefresh
+    await vi.waitFor(() => expect(collection.get(`b1`)?.name).toBe(`Updated B`))
+    expect(collection.get(`a1`)?.name).toBe(`New`)
+    expect(collection.get(`a2`)?.name).toBe(`Exact only`)
+
+    if (firstRelease === `exact`) {
+      collection._sync.unloadSubset(exactRequest)
+      expect(collection.get(`a1`)?.name).toBe(`New`)
+      expect(collection.has(`a2`)).toBe(false)
+      collection._sync.unloadSubset(fullRequest)
+    } else {
+      collection._sync.unloadSubset(fullRequest)
+      expect(collection.get(`a1`)?.name).toBe(`New`)
+      expect(collection.get(`b1`)).toBeUndefined()
+      collection._sync.unloadSubset(exactRequest)
+    }
+    expect(collection.size).toBe(0)
+  } finally {
+    heldFull.resolve([])
+    await fullRefresh?.catch(() => undefined)
+    collection._sync.unloadSubset(fullRequest)
+    collection._sync.unloadSubset(exactRequest)
     await collection.cleanup()
     queryClient.clear()
   }
@@ -295,6 +539,7 @@ async function expectFullSourceReuseWaitsForApplication(
     new IR.Value(`a`),
   ])
   const filteredDemand: LoadSubsetOptions = { where: filter }
+  const fullDemand: LoadSubsetOptions = {}
   const response = createDeferred<Array<Row>>()
   const requests: Array<`full` | `filtered`> = []
   const collection = createCollection(
@@ -332,7 +577,7 @@ async function expectFullSourceReuseWaitsForApplication(
   let revalidation: Promise<void> | undefined
   try {
     if (previousFullResult) {
-      fullAcquisition = collection._sync.loadSubset({})
+      fullAcquisition = collection._sync.loadSubset(fullDemand)
       if (fullAcquisition !== true) await fullAcquisition
       expect(collection.has(`a1`)).toBe(true)
       await collection.utils.writeUpdate({ id: `b1`, group: `b` })
@@ -358,7 +603,7 @@ async function expectFullSourceReuseWaitsForApplication(
         exact: true,
       })
     } else {
-      fullAcquisition = collection._sync.loadSubset({})
+      fullAcquisition = collection._sync.loadSubset(fullDemand)
     }
     await vi.waitFor(() =>
       expect(requests.filter((request) => request === `full`).length).toBe(
@@ -370,6 +615,7 @@ async function expectFullSourceReuseWaitsForApplication(
     expect(observed?.rowApplied).toBe(false)
     expect(observed?.acquisition).not.toBe(true)
     if (observed?.acquisition !== true) await observed?.acquisition
+    expect(collection.has(`a2`)).toBe(true)
     if (fullAcquisition !== true) await fullAcquisition
     await revalidation
     expect(collection.has(`a2`)).toBe(true)
@@ -377,7 +623,7 @@ async function expectFullSourceReuseWaitsForApplication(
     response.resolve(fullRows)
     unsubscribe()
     collection._sync.unloadSubset(filteredDemand)
-    collection._sync.unloadSubset({})
+    collection._sync.unloadSubset(fullDemand)
     await collection.cleanup()
     queryClient.clear()
   }
@@ -603,105 +849,12 @@ async function expectIgnoredSignalLetsSharedFetchFinish(
 }
 
 /**
- * A late peer can keep a physical Query alive after the first provider rejects
- * on its acquisition signal. The replacement provider ignores all signals.
- * Once the peer releases, Query Core may still finish that provider into its
- * cache because no provider consumed the replacement transport signal. The
- * model checks cached rows after the held replacement settles and expects no
- * Collection rows after final release. This rejects a recovery guard that
- * reads Query Core's lazy signal only to check whether it is aborted.
- */
-async function expectRecoveredIgnoredSignalFetchFinishes(): Promise<void> {
-  const queryClient = createQueryClient()
-  const id = `recovered-ignored-signal-${collectionSequence++}`
-  const firstController = new AbortController()
-  const peerController = new AbortController()
-  const filter = new IR.Func<boolean>(`eq`, [
-    new IR.PropRef([`group`]),
-    new IR.Value(`a`),
-  ])
-  const firstDemand: LoadSubsetOptions = {
-    where: filter,
-    signal: firstController.signal,
-  }
-  const peerDemand: LoadSubsetOptions = {
-    where: filter,
-    signal: peerController.signal,
-  }
-  const firstResponse = createDeferred<Array<Row>>()
-  const replacementResponse = createDeferred<Array<Row>>()
-  const rows: Array<Row> = [{ id: `a1`, group: `a` }]
-  let calls = 0
-  const queryFn = vi.fn((context: QueryFunctionContext) => {
-    calls++
-    if (calls > 1) return replacementResponse.promise
-    const requestSignal = context.meta?.loadSubsetOptions?.signal
-    requestSignal?.addEventListener(
-      `abort`,
-      () => firstResponse.reject(requestSignal.reason),
-      { once: true },
-    )
-    return firstResponse.promise
-  })
-  const collection = createCollection(
-    queryCollectionOptions<Row>({
-      id,
-      queryClient,
-      queryKey: [id],
-      queryFn,
-      getKey: (row) => row.id,
-      startSync: true,
-      syncMode: `on-demand`,
-      staleTime: 5 * 60 * 1000,
-      retry: false,
-    }),
-  )
-  let firstLoad: true | Promise<void> | undefined
-  let peerLoad: true | Promise<void> | undefined
-  try {
-    firstLoad = collection._sync.loadSubset(firstDemand)
-    void Promise.resolve(firstLoad).catch(() => undefined)
-    await vi.waitFor(() => expect(calls).toBe(1))
-    const sharedKey = queryClient
-      .getQueryCache()
-      .find({ queryKey: [id], exact: false })?.queryKey
-    expect(sharedKey).toBeDefined()
-    peerLoad = collection._sync.loadSubset(peerDemand)
-    void Promise.resolve(peerLoad).catch(() => undefined)
-    firstController.abort()
-    collection._sync.unloadSubset(firstDemand)
-    await vi.waitFor(() => expect(calls).toBe(2))
-    peerController.abort()
-    collection._sync.unloadSubset(peerDemand)
-    replacementResponse.resolve(rows)
-    await Promise.allSettled([
-      Promise.resolve(firstLoad),
-      Promise.resolve(peerLoad),
-    ])
-    await vi.waitFor(() =>
-      expect(queryClient.getQueryData(sharedKey!)).toEqual(rows),
-    )
-    expect(collection.size).toBe(0)
-  } finally {
-    firstResponse.resolve(rows)
-    replacementResponse.resolve(rows)
-    await Promise.allSettled([
-      Promise.resolve(firstLoad),
-      Promise.resolve(peerLoad),
-    ])
-    await collection.cleanup()
-    queryClient.clear()
-  }
-}
-
-/**
- * Two equal live queries share one Query transport but own separate acquisition
- * signals. After the first owner releases, its signal is stale. The remaining
- * owner may still invalidate and receive a new snapshot. This history crosses
- * both full and filtered Query keys; the latter cannot rely on the full-source
- * dependent map. The provider reads the documented request metadata signal
- * and rejects an already-aborted signal. The public checkpoint is the peer's
- * new row after invalidation, not a particular signal object identity.
+ * Two equal live queries share one Query transport. Its signal remains live
+ * after the first owner releases, and the remaining owner can invalidate and
+ * receive a new snapshot. This history crosses both full and filtered Query
+ * keys; the latter cannot rely on the full-source dependent map. The provider
+ * reads the documented request metadata signal and the public checkpoint is
+ * the peer's new row after invalidation.
  */
 async function expectEqualQueryPeerGetsLiveSignal(
   scope: `full` | `filtered`,
@@ -748,7 +901,7 @@ async function expectEqualQueryPeerGetsLiveSignal(
     await peer.preload()
     expect(queryFn).toHaveBeenCalledOnce()
     await first.cleanup()
-    expect(firstSignal?.aborted).toBe(true)
+    expect(firstSignal?.aborted).toBe(false)
     rows = [
       { id: `a1`, group: `a` },
       { id: `a2`, group: `a` },
@@ -851,23 +1004,17 @@ async function expectEqualFilteredPeerKeepsInFlightSignal(): Promise<void> {
 /**
  * A peer may acquire an equal demand after a sole-owner fetch has started,
  * during either the initial load or a later refetch.
- * The provider already holds the first acquisition's exact signal, which
- * aborts when that owner releases. With a peer, the physical Query remains
- * live and its current source result must reach the peer; with no peer, release
- * must not start another provider request. This controlled provider rejects
- * with its signal's AbortError, then returns the current rows if retried.
- * Compare provider calls, peer settlement, and public rows after the held
- * request ends. A custom reason and a fresh AbortError caused by the signal
- * must have the same result. An ordinary unrelated provider error after
- * signal abort must not be retried; the no-peer history also rejects an
- * unconditional retry design. A fresh unrelated AbortError after the same
- * signal abort is indistinguishable without provider provenance and may get
- * one retry.
+ * The provider holds the Query signal, which remains live while a peer owns
+ * the fetch and aborts after the final owner releases. The same request must
+ * reach the peer without a replacement. An independent provider error still
+ * reaches that peer. The production path uses direct Collection acquisitions
+ * on one Query and compares provider calls, signals, settlement, and rows at
+ * each owner-release checkpoint.
  */
-async function expectPeerJoiningHeldFetchRecovers(
+async function expectPeerJoiningHeldFetchSettles(
   phase: `initial` | `refetch`,
   peerJoins: boolean,
-  failure: `signal` | `custom-signal` | `fresh-abort` | `unrelated` = `signal`,
+  failure: `signal` | `unrelated` = `signal`,
 ): Promise<void> {
   const queryClient = createQueryClient()
   const id = `join-held-filtered-${phase}-${peerJoins}-${collectionSequence++}`
@@ -906,12 +1053,7 @@ async function expectPeerJoiningHeldFetchRecovers(
     if (failure !== `unrelated`)
       requestSignal?.addEventListener(
         `abort`,
-        () =>
-          held.reject(
-            failure === `fresh-abort`
-              ? new DOMException(`provider aborted`, `AbortError`)
-              : requestSignal?.reason,
-          ),
+        () => held.reject(requestSignal?.reason),
         { once: true },
       )
     return held.promise
@@ -945,11 +1087,7 @@ async function expectPeerJoiningHeldFetchRecovers(
       peerLoad = collection._sync.loadSubset(peerDemand)
       void Promise.resolve(peerLoad).catch(() => undefined)
     }
-    firstSignal.abort(
-      failure === `custom-signal`
-        ? new Error(`custom cancellation`)
-        : undefined,
-    )
+    firstSignal.abort()
     collection._sync.unloadSubset(firstDemand)
     firstReleased = true
     const signalState = {
@@ -973,7 +1111,7 @@ async function expectPeerJoiningHeldFetchRecovers(
       ...signalState,
       hasNew: collection.has(`a2`),
     }).toEqual({
-      requestAborted: true,
+      requestAborted: !peerJoins,
       transportAborted: !peerJoins,
       hasNew: expectNewRow,
     })
@@ -983,7 +1121,7 @@ async function expectPeerJoiningHeldFetchRecovers(
       expect(collection.utils.lastError).toBe(unrelatedError)
       expect(peerOutcome).toBe(phase === `initial` ? `rejected` : `fulfilled`)
     }
-    if (!peerJoins || failure === `unrelated`) expect(calls).toBe(heldCall)
+    expect(calls).toBe(heldCall)
   } finally {
     held.resolve(replacement)
     await invalidation?.catch(() => undefined)
@@ -1077,15 +1215,20 @@ async function expectForeignQueryFnUsesLiveSharedSignal(): Promise<void> {
  * Two Collections can observe the same physical Query. Query Core runs the
  * queryFn last installed by B while A still owns the Query. B then releases
  * during the fetch. The independent ownership rule keeps the transport alive
- * for A, so its public rows must include the held result. The provider listens
- * to metadata signal and the driver records Query's transport signal; this
- * distinguishes physical observer sharing from one Collection's refcount.
+ * for A; after A also releases, the physical Query signal aborts. The provider
+ * listens to metadata signal and the driver records Query's transport signal;
+ * identity and both release cuts distinguish one physical signal from a
+ * detached or never-aborted substitute.
  */
-async function expectForeignOwnerReleaseKeepsInFlightSignal(): Promise<void> {
+async function expectForeignOwnerReleaseKeepsInFlightSignal(
+  releaseFinalOwner: boolean,
+): Promise<void> {
   const queryClient = createQueryClient()
   const id = `foreign-in-flight-signal-${collectionSequence++}`
   const firstSignal = new AbortController()
   const secondSignal = new AbortController()
+  const firstDemand: LoadSubsetOptions = { signal: firstSignal.signal }
+  const secondDemand: LoadSubsetOptions = { signal: secondSignal.signal }
   const initial: Array<Row> = [{ id: `a1`, group: `a` }]
   const replacement: Array<Row> = [
     { id: `a1`, group: `a` },
@@ -1124,34 +1267,50 @@ async function expectForeignOwnerReleaseKeepsInFlightSignal(): Promise<void> {
   let sourceB: ReturnType<typeof makeSource> | undefined
   let invalidation: Promise<void> | undefined
   let releasedB = false
+  let releasedA = false
   try {
-    await sourceA._sync.loadSubset({ signal: firstSignal.signal })
+    await sourceA._sync.loadSubset(firstDemand)
     sourceB = makeSource(`B`)
-    await sourceB._sync.loadSubset({ signal: secondSignal.signal })
+    await sourceB._sync.loadSubset(secondDemand)
     invalidation = queryClient.invalidateQueries({
       queryKey: [id],
       exact: true,
     })
     await vi.waitFor(() => expect(providerCalls.at(-1)).toBe(`B`))
     secondSignal.abort()
-    sourceB._sync.unloadSubset({ signal: secondSignal.signal })
+    sourceB._sync.unloadSubset(secondDemand)
     releasedB = true
+    expect(requestSignal).toBe(transportSignal)
     expect({
       requestAborted: requestSignal?.aborted,
       transportAborted: transportSignal?.aborted,
     }).toEqual({ requestAborted: false, transportAborted: false })
-    response.resolve(replacement)
-    await invalidation
-    await vi.waitFor(() => expect(sourceA.has(`a2`)).toBe(true))
+    if (releaseFinalOwner) {
+      firstSignal.abort()
+      sourceA._sync.unloadSubset(firstDemand)
+      releasedA = true
+      expect({
+        requestAborted: requestSignal?.aborted,
+        transportAborted: transportSignal?.aborted,
+      }).toEqual({ requestAborted: true, transportAborted: true })
+      await invalidation
+      expect(sourceA.has(`a2`)).toBe(false)
+    } else {
+      response.resolve(replacement)
+      await invalidation
+      await vi.waitFor(() => expect(sourceA.has(`a2`)).toBe(true))
+    }
   } finally {
     response.resolve(replacement)
     await invalidation?.catch(() => undefined)
     if (sourceB && !releasedB) {
       secondSignal.abort()
-      sourceB._sync.unloadSubset({ signal: secondSignal.signal })
+      sourceB._sync.unloadSubset(secondDemand)
     }
-    firstSignal.abort()
-    sourceA._sync.unloadSubset({ signal: firstSignal.signal })
+    if (!releasedA) {
+      firstSignal.abort()
+      sourceA._sync.unloadSubset(firstDemand)
+    }
     await sourceA.cleanup()
     await sourceB?.cleanup()
     queryClient.clear()
@@ -2002,9 +2161,8 @@ async function observeDemandIdentity(
   const requests: Array<LoadSubsetOptions> = []
   const queryFn = vi.fn((context: QueryFunctionContext) => {
     const options = context.meta?.loadSubsetOptions ?? {}
-    // Direct calls in this fixture supply only immutable request data, not a
-    // signal/subscription. Capture the complete received request before checks.
-    requests.push(structuredClone(options))
+    // Capture the declared request data without reading the lazy Query signal.
+    requests.push({ where: structuredClone(options.where) })
     const result = selectIdentityRows(options, providerRows)
     return Promise.resolve(
       fault === `wrong value`
@@ -2454,9 +2612,32 @@ describe(`loadSubset lifecycle oracle`, () => {
     await expectActiveFullSourceServesFilteredDemand()
   })
 
+  it.each([
+    { hasPriorDependent: false, firstRelease: `new`, unmatchedRelease: false },
+    { hasPriorDependent: true, firstRelease: `new`, unmatchedRelease: false },
+    { hasPriorDependent: true, firstRelease: `old`, unmatchedRelease: false },
+    { hasPriorDependent: true, firstRelease: `new`, unmatchedRelease: true },
+  ] as const)(
+    `requires new coverage after a failed full refresh, prior dependent=$hasPriorDependent, first release=$firstRelease, unmatched release=$unmatchedRelease`,
+    async ({ hasPriorDependent, firstRelease, unmatchedRelease }) => {
+      await expectIneligibleFullRefreshNeedsNewCoverage(
+        hasPriorDependent,
+        firstRelease,
+        unmatchedRelease,
+      )
+    },
+  )
+
   it(`does not treat an unfinished full-source Query as filtered coverage`, async () => {
     await expectPendingFullSourceNeedsAppliedEvidence()
   })
+
+  it.each([`full`, `exact`] as const)(
+    `keeps the later-started exact value across an older full result when %s releases first`,
+    async (firstRelease) => {
+      await expectFullAndExactResultsKeepLaterValue(firstRelease)
+    },
+  )
 
   it.each([
     { previousFullResult: false, description: `initial full result` },
@@ -2483,10 +2664,6 @@ describe(`loadSubset lifecycle oracle`, () => {
     },
   )
 
-  it(`lets an ignored-signal provider finish after late-peer recovery and final release`, async () => {
-    await expectRecoveredIgnoredSignalFetchFinishes()
-  })
-
   it.each([`full`, `filtered`] as const)(
     `keeps a live request signal for an equal %s peer`,
     async (scope) => {
@@ -2500,18 +2677,15 @@ describe(`loadSubset lifecycle oracle`, () => {
 
   it.each([
     { phase: `initial`, peerJoins: true, failure: `signal` },
-    { phase: `initial`, peerJoins: true, failure: `custom-signal` },
-    { phase: `initial`, peerJoins: true, failure: `fresh-abort` },
     { phase: `initial`, peerJoins: true, failure: `unrelated` },
     { phase: `initial`, peerJoins: false, failure: `signal` },
     { phase: `refetch`, peerJoins: true, failure: `signal` },
-    { phase: `refetch`, peerJoins: true, failure: `fresh-abort` },
     { phase: `refetch`, peerJoins: true, failure: `unrelated` },
     { phase: `refetch`, peerJoins: false, failure: `signal` },
   ] as const)(
     `settles a held $phase filtered fetch after its first owner releases, peer joins=$peerJoins, failure=$failure`,
     async ({ phase, peerJoins, failure }) => {
-      await expectPeerJoiningHeldFetchRecovers(phase, peerJoins, failure)
+      await expectPeerJoiningHeldFetchSettles(phase, peerJoins, failure)
     },
   )
 
@@ -2519,9 +2693,12 @@ describe(`loadSubset lifecycle oracle`, () => {
     await expectForeignQueryFnUsesLiveSharedSignal()
   })
 
-  it(`keeps another Collection's in-flight request alive after its owner releases`, async () => {
-    await expectForeignOwnerReleaseKeepsInFlightSignal()
-  })
+  it.each([false, true])(
+    `keeps a shared physical signal through foreign release, final owner releases=%s`,
+    async (releaseFinalOwner) => {
+      await expectForeignOwnerReleaseKeepsInFlightSignal(releaseFinalOwner)
+    },
+  )
 
   it(`refetches an existing semantic demand without changing its query or unload identity`, async () => {
     await expectRefetchRevalidatesExistingDemand()
