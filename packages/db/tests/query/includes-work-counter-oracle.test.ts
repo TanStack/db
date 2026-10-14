@@ -479,15 +479,15 @@ async function expectJoinFreeWorkBound(fillerCount: number): Promise<void> {
   expectSourceWorkBound(scaled.sourceWork, baseline.sourceWork)
 }
 
-function campaigns(fixedSeed: number, property: string) {
+function campaigns(fixedSeed: number, property: string, baseRuns = 6) {
   return [
     {
       name: `fixed`,
-      options: { numRuns: oracleRuns(6), seed: fixedSeed },
+      options: { numRuns: oracleRuns(baseRuns), seed: fixedSeed },
     },
     {
       name: `random or replayed`,
-      options: oraclePropertyOptions(6, property),
+      options: oraclePropertyOptions(baseRuns, property),
     },
   ]
 }
@@ -1154,6 +1154,9 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
     await live.preload()
     await new Promise((resolve) => setTimeout(resolve, 0))
     let before = expectWindow(`rows after preload`)
+    // Parents inserted or moved by a step, which live changes deliver to the
+    // parent's top-K even outside its loaded prefix.
+    const writtenParents = new Set<string>()
     expect(childWork(), `child rows loaded by preload`).toBeLessThanOrEqual(
       childrenOf(before),
     )
@@ -1165,6 +1168,8 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
     for (const [step, command] of testCase.history.entries()) {
       const childBefore = childWork()
       const grandBefore = grandWork().delivered
+      const unitsBefore = sortedUnits()
+      const heldBefore = shown.offset + shown.limit
       const ids = [...parents.keys()]
       const childIds = [...children.keys()]
       if (command.type === `insert-parent`) {
@@ -1186,6 +1191,7 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
           group,
         }
         parents.set(parent.id, parent)
+        writtenParents.add(parent.id)
         await parentSource.insert(parent).isPersisted.promise
       } else if (command.type === `delete-parent`) {
         if (ids.length === 0) continue
@@ -1201,6 +1207,7 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
           ? Math.max(...ranks) + 1
           : Math.min(...ranks) - 1
         parents.set(id, { ...parents.get(id)!, rank })
+        writtenParents.add(id)
         await parentSource.update(id, (draft) => {
           draft.rank = rank
         }).isPersisted.promise
@@ -1228,11 +1235,35 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
       await new Promise((resolve) => setTimeout(resolve, 0))
       const after = expectWindow(`rows after step ${step}`)
       const beforeKeys = new Set(before.map((row) => row.key))
-      const entered = after.filter((row) => !beforeKeys.has(row.key))
-      const kidsBefore = shownKids(before)
-      const kidsEntered = new Set(
-        [...shownKids(after)].filter((kid) => !kidsBefore.has(kid)),
+      const shownGroups = new Set(before.map((row) => row.group))
+      // Groups the step may newly load: those of rows that entered the
+      // window, and of rows the parent's top-K can hold at an internal
+      // checkpoint, until its loader refills the window within the same
+      // graph run. Those are the rows of its held prefix before the step and
+      // the parents any step has written, which live changes deliver to it.
+      // Groups already shown load nothing.
+      const writtenUnits = new Set(
+        windowUnits(
+          [...writtenParents].flatMap((id) => parents.get(id) ?? []),
+          testCase.distinct,
+        ).map((unit) => unit.key),
       )
+      const loadable = new Set(
+        [
+          ...after.filter((row) => !beforeKeys.has(row.key)),
+          ...unitsBefore.slice(0, heldBefore),
+          ...sortedUnits().filter((unit) => writtenUnits.has(unit.key)),
+        ]
+          .map((row) => row.group)
+          .filter((group) => !shownGroups.has(group)),
+      )
+      const kidsBefore = shownKids(before)
+      const kidsEntered = new Set([
+        ...[...shownKids(after)].filter((kid) => !kidsBefore.has(kid)),
+        ...[...children.values()]
+          .filter((child) => loadable.has(child.group))
+          .map((child) => child.id),
+      ])
       // Child rows the step writes reach a local subscription whether or not
       // their group is loaded, so each counts once: a fresh parent's group,
       // or one inserted or deleted child.
@@ -1250,7 +1281,10 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
       expect(
         childWork() - childBefore,
         `child rows loaded by step ${step}`,
-      ).toBeLessThanOrEqual(childrenOf(entered) + written)
+      ).toBeLessThanOrEqual(
+        [...children.values()].filter((child) => loadable.has(child.group))
+          .length + written,
+      )
       expect(
         grandWork().delivered - grandBefore,
         `grandchild rows loaded by step ${step}`,
@@ -1272,6 +1306,10 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<void> {
     )
   }
 }
+
+// Enough runs that each dimension appears at the default multiplier; the
+// reconstruction check below counts them.
+const WINDOW_RUNS = 60
 
 const pinnedWindowCase: WindowCase = {
   parents: 8,
@@ -1393,10 +1431,230 @@ describe(`includes work under an ordered parent window`, () => {
     }
   })
 
-  for (const campaign of campaigns(2137, `includes-work.ordered-window`)) {
+  // Replays of the transient top-K row: moving a held row past every other
+  // rank lets the top-K hold it until its loader refills the slot.
+  it.each([
+    [`desc`, 24, 12, 1_257_390_839, false],
+    [`asc`, 36, 18, 0, true],
+  ] as const)(
+    `bounds a moved row the %s top-K holds until it refills`,
+    (direction, parents, groups, pick, up) =>
+      checkWindowedIncludeWork({
+        ...pinnedWindowCase,
+        parents,
+        groups,
+        childrenPerGroup: 1,
+        direction,
+        offset: 1,
+        limit: 1,
+        history: [{ type: `rank`, pick, up }],
+      }),
+  )
+
+  // Reconstruction: the fixed campaign's executed cases reach each premise.
+  it(`reaches every window dimension in the executed fixed cases`, () => {
+    const cases = fc
+      .sample(fc.tuple(windowCase), {
+        numRuns: oracleRuns(WINDOW_RUNS),
+        seed: 2137,
+      })
+      .map(([testCase]) => testCase)
+    const count = (premise: (testCase: WindowCase) => boolean) =>
+      cases.filter(premise).length
+    for (const [premise, reached] of [
+      [`on-demand child`, count((c) => c.childSource === `on-demand`)],
+      [`static filter`, count((c) => c.parentFilter !== null)],
+      [`limited-nested`, count((c) => c.childForm === `limited-nested`)],
+      [`page parent`, count((c) => c.parentForm === `page`)],
+      [`findOne parent`, count((c) => c.parentForm === `findOne`)],
+      [
+        `orderBy-only parent moved by setWindow`,
+        count(
+          (c) =>
+            c.parentForm === `orderOnly` &&
+            c.history.some((command) => command.type === `move`),
+        ),
+      ],
+      [
+        `on-demand static filter`,
+        count((c) => c.childSource === `on-demand` && c.parentFilter !== null),
+      ],
+    ] as const) {
+      expect(reached, premise).toBeGreaterThanOrEqual(3)
+    }
+  })
+
+  for (const campaign of campaigns(
+    2137,
+    `includes-work.ordered-window`,
+    WINDOW_RUNS,
+  )) {
     fcTest.prop([windowCase], campaign.options)(
       `a parent window bounds child loading (${campaign.name})`,
       checkWindowedIncludeWork,
     )
   }
+})
+
+/**
+ * # Static demand and window ownership
+ *
+ * A window can drop rows only when it cuts with `limit` or `offset`, or when a
+ * `findOne` chooses among several rows. When a parent `where` names its only
+ * candidate by the correlation field, the include may demand that child at
+ * once, beside the parent load, so a detail page does not wait for its parent
+ * before it starts its child load. Only the query's own window answers
+ * `setWindow`; a window inside a `from` or a joined subquery never does.
+ */
+describe(`static include demand and setWindow ownership`, () => {
+  it(`starts a findOne detail page's child load beside its parent load`, async () => {
+    const calls: Array<string> = []
+    let releaseParent!: () => void
+    const parentHeld = new Promise<void>((resolve) => {
+      releaseParent = resolve
+    })
+    const parents = createCollection<{ id: string }, string>({
+      id: `detail-parents-${nextCollectionId++}`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          markReady()
+          return {
+            loadSubset: () => {
+              calls.push(`parent`)
+              return parentHeld.then(() => {
+                begin()
+                write({ type: `insert`, value: { id: `parent-1` } })
+                commit()
+              })
+            },
+          }
+        },
+      },
+    })
+    const children = createCollection<{ id: string; parentId: string }, string>(
+      {
+        id: `detail-children-${nextCollectionId++}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => {
+                calls.push(`child`)
+                begin()
+                write({
+                  type: `insert`,
+                  value: { id: `child-1`, parentId: `parent-1` },
+                })
+                commit()
+                return true
+              },
+            }
+          },
+        },
+      },
+    )
+    const live = createLiveQueryCollection({
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ parent: parents })
+          .where(({ parent }) => eq(parent.id, `parent-1`))
+          .select(({ parent }) => ({
+            id: parent.id,
+            kids: toArray(
+              q
+                .from({ child: children })
+                .where(({ child }) => eq(child.parentId, parent.id))
+                .select(({ child }) => ({ id: child.id })),
+            ),
+          }))
+          .findOne(),
+    })
+    try {
+      const ready = live.toArrayWhenReady()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      // The child load has started while the parent load is still held.
+      expect(calls).toEqual([`parent`, `child`])
+      releaseParent()
+      await ready
+      expect(
+        (
+          live.toArray as unknown as Array<{
+            id: string
+            kids: Array<{ id: string }>
+          }>
+        ).map((row) => ({ id: row.id, kids: row.kids.map((kid) => kid.id) })),
+      ).toEqual([{ id: `parent-1`, kids: [`child-1`] }])
+      expect(calls).toEqual([`parent`, `child`])
+    } finally {
+      releaseParent()
+      await runCleanups([
+        () => live.cleanup(),
+        () => parents.cleanup(),
+        () => children.cleanup(),
+      ])
+    }
+  })
+
+  it.each([`from`, `join`] as const)(
+    `rejects setWindow when only a %s subquery has a window`,
+    async (placement) => {
+      const rows = createSourceCollection(`owner-rows`, [
+        { id: `row-0`, rank: 0 },
+        { id: `row-1`, rank: 1 },
+        { id: `row-2`, rank: 2 },
+      ])
+      const live = createLiveQueryCollection((q) => {
+        const page = q
+          .from({ row: rows })
+          .orderBy(({ row }) => row.rank)
+          .limit(2)
+        return placement === `from`
+          ? q.from({ page })
+          : q
+              .from({ row: rows })
+              .join({ page }, ({ row, page: paged }) => eq(row.id, paged.id))
+      })
+      try {
+        await live.preload()
+        expect(() => live.utils.setWindow({ offset: 1, limit: 2 })).toThrow(
+          SetWindowRequiresOrderByError,
+        )
+      } finally {
+        await runCleanups([() => live.cleanup(), () => rows.cleanup()])
+      }
+    },
+  )
+
+  it(`moves the outer window, not a from subquery's`, async () => {
+    const rows = createSourceCollection(
+      `outer-owner-rows`,
+      Array.from({ length: 6 }, (_, rank) => ({ id: `row-${rank}`, rank })),
+    )
+    const live = createLiveQueryCollection((q) =>
+      q
+        .from({
+          page: q
+            .from({ row: rows })
+            .orderBy(({ row }) => row.rank)
+            .limit(4),
+        })
+        .orderBy(({ page }) => page.rank)
+        .limit(2),
+    )
+    try {
+      await live.preload()
+      const settled = live.utils.setWindow({ offset: 2, limit: 2 })
+      if (settled !== true) await settled
+      expect(live.toArray.map((row) => row.id)).toEqual([`row-2`, `row-3`])
+    } finally {
+      await runCleanups([() => live.cleanup(), () => rows.cleanup()])
+    }
+  })
 })
