@@ -4986,8 +4986,9 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
     const applied = syncControls!.commit()
     return applied === true ? true : applied.then(() => undefined)
   }
-  // The last row of each full, limited, ordered page: where its served range
-  // ends. A page shorter than its limit reached the end of the order.
+  // The last row of each nonempty, limited, ordered page: where its served
+  // range ends. A short page proves no source exhaustion (ARCHITECTURE.md,
+  // ordered requests), so its range also ends at its last row.
   const rangeEnds = new Map<LoadSubsetOptions, Row>()
   // Requests a holding provider has not answered yet, oldest first. Holding
   // starts after the initial load.
@@ -5021,7 +5022,6 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
     if (
       options.orderBy &&
       options.limit !== undefined &&
-      page.length === options.limit &&
       page.length > 0
     ) {
       rangeEnds.set(options, { ...page.at(-1)! })
