@@ -613,8 +613,8 @@ settlement and after an ignored-signal provider finishes, the Collection has no
 rows, the old Query has no observers, and its tracked exact cache entry is
 absent. A callback that adds a second public subscriber during the cached or
 uncached observer installation must likewise leave no Query observer after
-cleanup. A final public subscriber that leaves during installation must leave
-no Query observer at the returned-request cut. Core's public subscription
+cleanup. A final public subscriber that leaves during cached installation must
+leave no Query observer at the returned-request cut. Core's public subscription
 defers acquisition release during adapter
 `loadSubset` until that call returns. Synchronous setup throws remain outside
 these cleanup histories.
