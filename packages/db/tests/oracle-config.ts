@@ -113,6 +113,7 @@ const staticOracleProperties = [
   `includes-work.correlated-links`,
   `includes-work.join-free`,
   `includes-work.join-targets`,
+  `includes-work.ordered-window`,
   `includes-publication.atomic-parent-replacement`,
   `includes-publication.child-scalar`,
   `includes-publication.optimistic-rollback`,
