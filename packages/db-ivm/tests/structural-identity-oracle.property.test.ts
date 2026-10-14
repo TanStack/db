@@ -38,7 +38,9 @@ import {
  * binary values, holes, and nesting deeper than the identity's depth cap.
  * Pinned pairs cover joins a random short string cannot build, distinct
  * symbols with the same description, and different object kinds with the same
- * body. The depth cap bounds work and recursion, including on a cyclic value;
+ * body. Fixed representation witnesses verify that the driver reaches each
+ * prototype, key-order, and hidden-symbol variant it claims. The depth cap
+ * bounds work and recursion, including on a cyclic value;
  * it does not decide equality, so raising it changes no law here.
  * Both generated pair grammars run fixed and fresh-seed campaigns. A replay
  * seed and path select the requested property without running the fixed one.
@@ -333,7 +335,48 @@ const collisionPairs: Array<[string, unknown, unknown]> = [
   [`header spans the body`, [`#1`], [1]],
 ]
 
+function decisions(...values: Array<boolean>): () => boolean {
+  let index = 0
+  return () => values[index++] ?? false
+}
+
 describe(`structuralIdentity`, () => {
+  it(`ignores array subclass and hidden symbol representations`, () => {
+    const spec: Spec = { k: `array`, items: [{ k: `leaf`, i: 3 }] }
+    const plain = build(spec, () => false)
+    const variant = build(spec, decisions(true, true)) as Sub
+    expect(variant).toBeInstanceOf(Sub)
+    const [hidden] = Object.getOwnPropertySymbols(variant)
+    expect(hidden).toBeDefined()
+    expect(Object.getOwnPropertyDescriptor(variant, hidden!)?.enumerable).toBe(
+      false,
+    )
+    expectAgreement(spec, spec, plain, variant)
+  })
+
+  it(`ignores object prototype, key order, and hidden symbol representations`, () => {
+    const spec: Spec = {
+      k: `object`,
+      entries: [
+        [`a`, { k: `leaf`, i: 0 }],
+        [`b`, { k: `leaf`, i: 3 }],
+      ],
+    }
+    const plain = build(spec, () => false)
+    const classVariant = build(spec, decisions(true, true, true, true))
+    const nullPrototype = build(spec, decisions(true, false, false, false))
+    expect(classVariant).toBeInstanceOf(Instance)
+    expect(Object.keys(classVariant as object)).toEqual([`b`, `a`])
+    const [hidden] = Object.getOwnPropertySymbols(classVariant as object)
+    expect(hidden).toBeDefined()
+    expect(
+      Object.getOwnPropertyDescriptor(classVariant, hidden!)?.enumerable,
+    ).toBe(false)
+    expect(Object.getPrototypeOf(nullPrototype)).toBeNull()
+    expectAgreement(spec, spec, plain, classVariant)
+    expectAgreement(spec, spec, plain, nullPrototype)
+  })
+
   it.each(collisionPairs)(
     `gives different values different identities: %s`,
     (_, left, right) => {
