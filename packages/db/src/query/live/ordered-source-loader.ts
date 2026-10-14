@@ -623,10 +623,12 @@ export class OrderedSourceLoader {
     const orderedLoadGeneration = this.orderedLoadGeneration
     const orderingInvalidationGeneration = this.orderingInvalidationGeneration
     const settlesAsync = result instanceof Promise
-    // A requiresFullSource plan's first full-source request is its initial
-    // load, not a repair, so it shares the initial synchronous cut.
+    // A full-source fallback still belongs to the initial load when an
+    // ordered request settled but the first window is not ready yet.
     const isInitialFullSource =
-      isFullSource && !this.hasSettledSourceRequest && !this.needsOrderingRepair
+      isFullSource &&
+      !this.needsOrderingRepair &&
+      (!this.hasSettledSourceRequest || !this.canRetryRepair())
     const canSettleSynchronously =
       !settlesAsync &&
       windowOperationGeneration === undefined &&

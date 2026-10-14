@@ -27,11 +27,13 @@ import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
  * query-readiness cut: an initial ordered load whose adapter returns literal
  * `true`, after synchronously applying every establishing receipt, installs its
  * completed window before the initiating call stack returns. The initial load
- * is an ordinary ordered request or, for a requiresFullSource plan, its first
- * full-source request. Promise settlement remains asynchronous. This does not
+ * includes every request needed for the first window: an ordinary ordered
+ * request, a requiresFullSource plan's first full-source request, and a
+ * full-source fallback when the ordered boundary cannot be expressed. Promise
+ * settlement remains asynchronous. This does not
  * make a successful request prove source exhaustion or broader coverage, and it
- * does not change explicit window, later full-source fallback, repair, replay,
- * or framework render-time contracts.
+ * does not change explicit window, work after initial publication, repair,
+ * replay, or framework render-time contracts.
  *
  * Ordered acquisition has six independent control dimensions: acquisition
  * path, delivery time, window change, provider-response outcome, sync run, and
@@ -1007,8 +1009,8 @@ describe(`synchronous initial settlement refinement`, () => {
   // The synchronous cut covers the initial load. For a query that must read
   // its whole source first (here a function filter), the initial load is its
   // first full-source request. When the source answers with literal `true`,
-  // the query is ready with its rows at creation. A later full-source fallback
-  // and a full-source repair keep their asynchronous settlement.
+  // the query is ready with its rows at creation. Full-source work after that
+  // initial window and a full-source repair remain outside this guarantee.
   it(`publishes an eager full-source ordered window at creation`, async () => {
     const source = createCollection<{ id: number; rank: number }, number>({
       id: `full-source-initial-${Math.random()}`,
@@ -1343,7 +1345,158 @@ describe(`ordered lifecycle product`, () => {
   )
 })
 
+/**
+ * ## Initial locale-string fallback
+ *
+ * The architecture's initial synchronous cut covers the whole first-window
+ * request chain. An ordered prefix ending at a locale string cannot express
+ * its boundary as a cursor, so a full-source acquisition completes that same
+ * initial chain. Two ISO date strings have a known descending singleton:
+ * row 2. The independent reference predicts `ready` with row 2 when both
+ * acquisitions return literal `true`, and `loading` with no rows when the
+ * fallback returns a Promise. Neither result claims source exhaustion from
+ * the ordered prefix alone.
+ *
+ * The finite grammar crosses indexed and unindexed ordered requests with
+ * synchronous and Promise full-source fallbacks. The controlled on-demand
+ * adapter delivers only row 2 for the ordered request, then row 1 for the
+ * filtered full-source request. The real live-query Collection is observed
+ * immediately after preload starts its sync run and after preload settles.
+ * An offset of zero identifies the indexed first page; no offset identifies
+ * the unindexed prefix, so the two index cells cannot collapse to one path.
+ * The request trace must reach both acquisitions by the immediate checkpoint;
+ * a deferred acquisition or a test that checks before preload cannot pass.
+ * This owner does not establish React's render timing or adapter-specific
+ * cache behavior.
+ */
+type InitialFallbackRow = { id: number; at: string }
+const initialFallbackRows: ReadonlyArray<InitialFallbackRow> = [
+  { id: 1, at: `2026-10-01` },
+  { id: 2, at: `2026-10-02` },
+]
+
+function expectedInitialFallback(
+  settlement: InitialSettlementShape,
+): InitialSettlementObservation {
+  return settlement === `synchronous`
+    ? { rows: [2], status: `ready` }
+    : { rows: [], status: `loading` }
+}
+
+async function observeInitialFallback(
+  autoIndex: `eager` | `off`,
+  settlement: InitialSettlementShape,
+) {
+  const requests: Array<LoadSubsetOptions> = []
+  const delivered = new Set<number>()
+  const source = createCollection<InitialFallbackRow, number>({
+    id: `initial-locale-fallback-${autoIndex}-${settlement}`,
+    getKey: ({ id }) => id,
+    syncMode: `on-demand`,
+    autoIndex,
+    defaultIndexType: autoIndex === `eager` ? BTreeIndex : undefined,
+    defaultStringCollation: { stringSort: `locale` },
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        markReady()
+        return {
+          loadSubset: (options) => {
+            requests.push(options)
+            const served = options.orderBy
+              ? initialFallbackRows.slice(1)
+              : initialFallbackRows
+            const fresh = served.filter(({ id }) => !delivered.has(id))
+            if (fresh.length > 0) {
+              begin()
+              for (const row of fresh) {
+                delivered.add(row.id)
+                write({ type: `insert`, value: row })
+              }
+              expect(commit()).toBe(true)
+            }
+            return options.orderBy || settlement === `synchronous`
+              ? true
+              : Promise.resolve()
+          },
+        }
+      },
+    },
+  })
+  const live = createLiveQueryCollection({
+    startSync: false,
+    query: (q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.at, `desc`)
+        .findOne(),
+  })
+  const observeCurrent = (): InitialSettlementObservation => ({
+    rows: live.toArray.map(({ id }) => id),
+    status: live.status,
+  })
+  let observation:
+    | {
+        immediate: InitialSettlementObservation
+        settled: InitialSettlementObservation
+        requestsAtCut: Array<LoadSubsetOptions>
+      }
+    | undefined
+  let primaryFailure: CapturedOracleFailure | undefined
+  try {
+    const preload = live.preload()
+    const immediate = observeCurrent()
+    const requestsAtCut = [...requests]
+    await preload
+    observation = { immediate, settled: observeCurrent(), requestsAtCut }
+  } catch (error) {
+    primaryFailure = { error }
+  }
+  await finishOracleCleanup(
+    primaryFailure,
+    [() => live.cleanup(), () => source.cleanup()],
+    `Initial locale fallback oracle cleanup failed`,
+  )
+  return observation!
+}
+
+describe(`initial locale-string fallback oracle`, () => {
+  const cells = ([`eager`, `off`] as const).flatMap((autoIndex) =>
+    ([`synchronous`, `promise`] as const).map((settlement) => ({
+      autoIndex,
+      settlement,
+    })),
+  )
+
+  it(`enumerates every index and fallback-settlement cell exactly once`, () => {
+    expect(cells).toHaveLength(4)
+    expect(new Set(cells.map((cell) => JSON.stringify(cell))).size).toBe(4)
+  })
+
+  it.each(cells)(
+    `publishes the $autoIndex locale-string singleton at the $settlement checkpoint`,
+    async ({ autoIndex, settlement }) => {
+      const observed = await observeInitialFallback(autoIndex, settlement)
+      expect(observed.requestsAtCut).toHaveLength(2)
+      expect(observed.requestsAtCut[0]).toMatchObject({ limit: 1 })
+      expect(observed.requestsAtCut[0]?.orderBy).toHaveLength(1)
+      expect(observed.requestsAtCut[0]?.offset).toBe(
+        autoIndex === `eager` ? 0 : undefined,
+      )
+      expect(observed.requestsAtCut[1]?.orderBy).toBeUndefined()
+      expect(observed.requestsAtCut[1]?.limit).toBeUndefined()
+      expect(observed.requestsAtCut[1]?.cursor).toBeUndefined()
+      expect(observed.requestsAtCut[1]?.offset).toBeUndefined()
+      expect(observed.immediate).toEqual(expectedInitialFallback(settlement))
+      expect(observed.settled).toEqual({ rows: [2], status: `ready` })
+    },
+  )
+})
+
 describe(`warm ordered readiness oracle`, () => {
+  // The four remote rows have the ascending order [3, 4, 1, 2], with null
+  // last. A warm literal-true response to each required acquisition therefore
+  // owes that complete window and `ready` at the first preload call's return.
+  // The zero-limit neighbor owes an empty ready window without acquisition.
   it.each([
     { limit: 0, expectedRequests: [] },
     {
@@ -1403,7 +1556,7 @@ describe(`warm ordered readiness oracle`, () => {
           },
         },
       })
-      const query = (queryLimit: number) =>
+      const query = (queryLimit: number, startSync = true) =>
         createLiveQueryCollection({
           query: (q) =>
             q
@@ -1413,34 +1566,69 @@ describe(`warm ordered readiness oracle`, () => {
                 nulls: `last`,
               })
               .limit(queryLimit),
-          startSync: true,
+          startSync,
         })
       const coldQuery = query(50)
+      let warmQuery: ReturnType<typeof query> | undefined
+      let observation:
+        | {
+            requestsAtCut: Array<{
+              ordered: boolean
+              filtered: boolean
+              limit: number | undefined
+            }>
+            immediate: InitialSettlementObservation
+            settled: InitialSettlementObservation
+            isLoadingSubset: boolean
+          }
+        | undefined
+      let primaryFailure: CapturedOracleFailure | undefined
       try {
         await coldQuery.preload()
         cold = false
-
-        const warmQuery = query(limit)
-        try {
-          if (limit > 0) {
-            // The null cursor requires a full-source fallback, outside the
-            // ordinary ordered chain's synchronous-readiness promise.
-            expect(warmQuery.status).toBe(`loading`)
-            await warmQuery.preload()
-          }
-          expect(warmQuery.status).toBe(`ready`)
-          expect(warmQuery.isLoadingSubset).toBe(false)
-          expect(warmQuery.toArray.map(({ id }) => id)).toEqual(
-            limit === 0 ? [] : [3, 4, 1, 2],
-          )
-          expect(warmRequests).toEqual(expectedRequests)
-        } finally {
-          await warmQuery.cleanup()
+        warmQuery = query(limit, false)
+        // Preload starts this live-query sync run. Record the request trace and
+        // public state before awaiting, then compare after cleanup.
+        const requestsBeforePreload = [...warmRequests]
+        const preload = warmQuery.preload()
+        const requestsAtCut = [...warmRequests]
+        const immediate = {
+          status: warmQuery.status,
+          rows: warmQuery.toArray.map(({ id }) => id),
         }
-      } finally {
-        await coldQuery.cleanup()
-        await source.cleanup()
+        await preload
+        observation = {
+          requestsAtCut,
+          immediate,
+          settled: {
+            status: warmQuery.status,
+            rows: warmQuery.toArray.map(({ id }) => id),
+          },
+          isLoadingSubset: warmQuery.isLoadingSubset,
+        }
+        expect(requestsBeforePreload).toEqual([])
+      } catch (error) {
+        primaryFailure = { error }
       }
+      await finishOracleCleanup(
+        primaryFailure,
+        [
+          () => warmQuery?.cleanup(),
+          () => coldQuery.cleanup(),
+          () => source.cleanup(),
+        ],
+        `Warm ordered readiness oracle cleanup failed`,
+      )
+      expect(observation!.requestsAtCut).toEqual(expectedRequests)
+      expect(observation!.immediate).toEqual({
+        status: `ready`,
+        rows: limit === 0 ? [] : [3, 4, 1, 2],
+      })
+      expect(observation!.settled).toEqual({
+        status: `ready`,
+        rows: limit === 0 ? [] : [3, 4, 1, 2],
+      })
+      expect(observation!.isLoadingSubset).toBe(false)
     },
   )
 
@@ -1770,11 +1958,12 @@ describe(`nullable multi-term lifecycle product`, () => {
  * must be the predicate-only full-source shape, so a plan that silently took
  * the ordered path cannot pass.
  *
- * A later full-source fallback is also outside this cut. The warm readiness
- * oracle below pins one: an ordinary ordered chain whose null boundary cannot be
- * expressed as a cursor falls back to a full-source request after its first
- * request settles, and stays `loading` until that fallback settles. It rejects a
- * gate keyed on the request kind rather than the initial load.
+ * A fallback remains in the initial chain when its leading boundary cannot
+ * be expressed as a cursor. The warm readiness oracle above checks a null
+ * boundary after an ordered request. It observes the request trace and public
+ * status immediately after preload starts the sync run, rather than before
+ * acquisition. The locale-string cells check the same law for `findOne()`.
+ * A Promise result for the fallback keeps the window unpublished at that cut.
  *
  * Replay is outside this cut. After the initial window settles, a truncate
  * replays the same full-source request. Even when its provider answers with

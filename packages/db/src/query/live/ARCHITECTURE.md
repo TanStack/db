@@ -1014,9 +1014,10 @@ repair (an eager source, an index, one order term, no joined filter) returns
 literal `true`, the
 repair settles synchronously,
 so its tie and refill steps finish inside the same graph run and a window move
-that consumes the repair still publishes once. A full-source repair keeps its
-asynchronous settlement. An initial full-source load follows the initial
-synchronous cut described under initial readiness. The
+that consumes the repair still publishes once. A full-source repair holds the
+previous public window until its authoritative acquisition and graph work
+settle; its scheduling is not part of the initial synchronous cut. An initial
+full-source load follows that cut as described under initial readiness. The
 ordered graph's top-K operator owns the local result window. Provider transfer
 remains bounded by `orderBy` and `limit`; local delivery cardinality is a
 separate observation.
@@ -1367,8 +1368,11 @@ view built during a render defers it until a view has a subscriber or a
 preload.
 
 An initial ordered load also has a synchronous observation cut. The initial
-load is an ordinary ordered request or, for a plan that requires the full
-source, its first filtered full-source request. The cut holds when the first
+load is the request chain needed to complete the first ordered window. It may
+start with an ordinary ordered request or, for a plan that requires the full
+source, a filtered full-source request. A full-source fallback after an
+inexpressible boundary is still part of that initial chain while the window
+remains unpublished. The cut holds when the first
 subscriber or preload starts the live-query Collection's sync run, or when its
 source Collections are eager. A sync run that started earlier resumes deferred
 on-demand acquisition through the subscription's restart path, which settles
@@ -1377,10 +1381,10 @@ returns literal `true` after its establishing applied receipts are visible,
 core drains the remaining synchronous ordered continuations and graph work
 before the initiating call stack returns. The live-query Collection rows and
 initial-query readiness are observable at that cut. A Promise result keeps that
-acquisition asynchronous. This cut does not apply to explicit window moves, a
-later full-source fallback, repair other than a bounded prefix repair, truncate
-replay, or framework render timing, and it proves neither source exhaustion nor
-broader source coverage.
+acquisition asynchronous. This cut does not apply to explicit window moves,
+full-source work started after the initial window publishes, repair other than
+a bounded prefix repair, truncate replay, or framework render timing, and it
+proves neither source exhaustion nor broader source coverage.
 
 If any source subscriber adds input to the graph during a synchronous ordered
 continuation, core returns to graph work before deciding whether that ordered
