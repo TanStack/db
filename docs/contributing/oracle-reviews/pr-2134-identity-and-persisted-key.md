@@ -1107,8 +1107,8 @@ also killed wrong-alias matching and never-cleanup timer mutants at public-row
 comparisons. A disposable mutant that omits the direct current-hash branch
 fails the permanent current-owner history at public rows after scan delivery;
 a separate probe fails the same mutant at the 1,050 durable-row checkpoint.
-These are assertion kills after the production path reached the deadline; none
-relies on timeout as a verdict.
+Each reached the intended row assertion after the deadline; no test-runner
+timeout or setup failure was counted as a kill.
 
 At executable head `18089e931`, all 1,044 Query DB tests in 20 files pass
 against immutable attribution-enabled Query Core source `273eb2526`. TypeScript
@@ -1118,4 +1118,6 @@ installed Query Core version still lacks required attribution fields, so this
 is not a published-release compatibility claim. The controlled schedules do
 not cover arbitrary overlaps among multiple scans, provider application, and
 TTL maintenance. The ownership oracle and SQLite receiving path retain those
-cells in the coverage map.
+cells in the coverage map. Integration with subsequent Query Core changes
+requires a separate receiving run; the green result above is bound to
+`273eb2526`.
