@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { equalHashValues, structuralIdentity } from '../src/hashing/hash.js'
+import { oraclePropertyOptions } from '../../db/tests/oracle-config.js'
 
 /**
  * # Does a structural identity agree with D2 value identity?
@@ -207,6 +208,7 @@ function normal(spec: Spec): string | undefined {
           ? `number:NaN`
           : `number:${value === 0 ? 0 : value}`
       if (typeof value === `symbol`) return `symbol:s`
+      if (typeof value === `string`) return `string:${JSON.stringify(value)}`
       return `${typeof value}:${String(value)}`
     }
     case `text`:
@@ -245,8 +247,15 @@ function normal(spec: Spec): string | undefined {
     case `binary`:
       return `binary:${spec.bytes.join(`,`)}`
     case `deep`: {
-      const v = normal(spec.v)
-      return v && `deep:${spec.depth}:${v}`
+      // Collapse nested deep nodes by summing their depths
+      let innerSpec = spec.v
+      let totalDepth = spec.depth
+      while (innerSpec.k === `deep`) {
+        totalDepth += innerSpec.depth
+        innerSpec = innerSpec.v
+      }
+      const v = normal(innerSpec)
+      return v && `deep:${totalDepth}:${v}`
     }
   }
 }
@@ -327,7 +336,7 @@ describe(`structuralIdentity`, () => {
           build(right, () => false),
         )
       }),
-      { numRuns: 2000 },
+      oraclePropertyOptions(2000, `structural-identity.independent-values`),
     )
   })
 })
