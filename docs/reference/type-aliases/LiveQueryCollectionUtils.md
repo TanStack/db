@@ -54,10 +54,11 @@ Most recent subset-load failure observed by this live query.
 setWindow: (options) => true | Promise<void>;
 ```
 
-Sets the offset and limit of the query's window. A query has a window
-when it has an `orderBy` or is a `findOne`. A `findOne` keeps its compiled
-limit (1, or 0 for `.limit(0).findOne()`), and only an ordered `findOne`
-can move its offset.
+Sets the offset and limit of the query's window, its ordered view. A query
+with an `orderBy` has a window. A `findOne` keeps its compiled limit (1, or
+0 for `.limit(0).findOne()`); an ordered `findOne` has a movable window,
+and an unordered one is a fixed one-row result that `setWindow` cannot
+move.
 
 #### Parameters
 
@@ -73,8 +74,8 @@ can move its offset.
 
 #### Throws
 
-`SetWindowRequiresOrderByError` if the query has no window, or an
-unordered `findOne` would move its offset.
+`SetWindowRequiresOrderByError` if the query has no `orderBy` and
+is not a `findOne`, or an unordered `findOne` would move its offset.
 
 #### Throws
 

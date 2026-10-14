@@ -987,7 +987,7 @@ A Collection already tracks an unsettled transaction with id "tx-1". Give each t
 Development builds show the full message. For example:
 
 ```text
-setWindow() cannot change the limit of a findOne() query. Move only its offset.
+setWindow() cannot change the limit of a findOne() query.
 ```
 
 ## Other errors and log messages

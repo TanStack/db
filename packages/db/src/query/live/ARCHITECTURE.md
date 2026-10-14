@@ -1503,14 +1503,14 @@ units. Queries without includes retain their original pipeline unless a joined
 custom-key query needs contributor reduction. Inline materialization must not
 create recursive Collection machinery.
 
-A query has a window when it has an `orderBy` or is a `findOne`, with or
-without `limit`. A `findOne` window keeps its compiled limit (1, or 0 for
+A query has a window, its ordered view, when it has an `orderBy`, with or
+without `limit`. A `findOne` keeps its compiled limit (1, or 0 for
 `.limit(0).findOne()`), and `setWindow` throws `SetWindowFindOneLimitError` for
-any other limit. A window is an ordered view, so only an ordered `findOne` can
-move its offset; an unordered one throws `SetWindowRequiresOrderByError`, as
-`.offset()` without `orderBy` does. Only the query's own top-K answers
-`setWindow`; a top-K inside a `from` or joined subquery or an include child
-never does, so a query without a window rejects `setWindow`. A windowed query
+any other limit. An ordered `findOne` has a movable window; an unordered one is
+a fixed one-row result that `setWindow` cannot move, and a nonzero offset throws
+`SetWindowRequiresOrderByError`, as `.offset()` without `orderBy` does. Only the
+query's own top-K answers `setWindow`; a top-K inside a `from` or joined
+subquery or an include child never does, so a query without a window rejects `setWindow`. A windowed query
 adds route relations for the includes in its own `select` only from the rows
 its window shows, so a row the window drops activates no bucket and creates no
 demand. Any requested window can drop rows, so a static filter creates static

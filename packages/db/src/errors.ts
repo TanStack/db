@@ -1135,11 +1135,14 @@ export class SetWindowRequiresOrderByError extends QueryCompilationError {
   }
 }
 
+/**
+ * Error thrown when setWindow would change the limit of a findOne() query.
+ */
 export class SetWindowFindOneLimitError extends QueryCompilationError {
   constructor() {
     super(
       devBuild() && process.env.NODE_ENV !== `production`
-        ? `setWindow() cannot change the limit of a findOne() query. Move only its offset.`
+        ? `setWindow() cannot change the limit of a findOne() query.`
         : codedMessage(244),
     )
   }

@@ -59,13 +59,14 @@ export type LiveQueryCollectionUtils = UtilsRecord & {
   /** Most recent subset-load failure observed by this live query. */
   readonly lastSubsetError: unknown | undefined
   /**
-   * Sets the offset and limit of the query's window. A query has a window
-   * when it has an `orderBy` or is a `findOne`. A `findOne` keeps its compiled
-   * limit (1, or 0 for `.limit(0).findOne()`), and only an ordered `findOne`
-   * can move its offset.
+   * Sets the offset and limit of the query's window, its ordered view. A query
+   * with an `orderBy` has a window. A `findOne` keeps its compiled limit (1, or
+   * 0 for `.limit(0).findOne()`); an ordered `findOne` has a movable window,
+   * and an unordered one is a fixed one-row result that `setWindow` cannot
+   * move.
    *
-   * @throws `SetWindowRequiresOrderByError` if the query has no window, or an
-   * unordered `findOne` would move its offset.
+   * @throws `SetWindowRequiresOrderByError` if the query has no `orderBy` and
+   * is not a `findOne`, or an unordered `findOne` would move its offset.
    * @throws `SetWindowFindOneLimitError` if a `findOne` would change its limit.
    * @returns `true` if no subset loading was triggered, or `Promise<void>` that resolves when the subset has been loaded
    */
@@ -192,7 +193,6 @@ export class CollectionConfigBuilder<
       query: config.query,
       requireObjectResult: true,
     })
-    // A findOne's window shows at most one row.
     this.initialWindow =
       this.query.orderBy?.length || this.query.singleResult
         ? {
@@ -411,7 +411,8 @@ export class CollectionConfigBuilder<
   }
 
   getWindow(): { offset: number; limit: number } | undefined {
-    // Only return window if this is a windowed query (has orderBy and windowFn)
+    // An ordered query or ordered findOne returns its window. An unordered
+    // findOne returns its fixed one-row result as { offset: 0, limit: 1 }.
     const window = this.settledWindow ?? this.initialWindow
     if (!this.windowFn || !window) {
       return undefined

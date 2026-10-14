@@ -723,9 +723,8 @@ function compileQueryInternal(
   }
   const selectHasAggregates =
     query.select !== undefined && containsAggregate(query.select)
-  // An ordered parent routes its includes from the rows its window shows, so
-  // a row the window drops loads no children (law 12). Those includes compile
-  // after the window; every other include compiles here.
+  // A windowed query's includes compile after its window and route only from
+  // the rows it shows (law 12); every other include compiles here.
   const hasOrderBy = (query.orderBy?.length ?? 0) > 0
   const parentHasWindow = hasOrderBy || !!query.singleResult
   const deferredIncludes: Array<(windowRows: WindowRows) => void> = []
@@ -808,13 +807,10 @@ function compileQueryInternal(
         )
 
         if (lazyTargets.length > 0) {
-          // 1. Mark child source as lazy so CollectionSubscriber skips initial full load
+          // Mark each child source as lazy so CollectionSubscriber skips its
+          // initial full load, and index the correlation field for lookups.
           for (const target of lazyTargets) {
             lazySources.add(target.sourceId)
-          }
-
-          // 2. Ensure an index on the correlation field for efficient lookups
-          for (const target of lazyTargets) {
             const targetFieldName = target.path[0]
             if (targetFieldName) {
               ensureIndexForField(
@@ -825,10 +821,9 @@ function compileQueryInternal(
             }
           }
 
-          // A static parent filter demands its children at once only when no
-          // window, compiled or later requested with setWindow, here or in an
-          // enclosing query, can drop the rows it names: no window at all, or
-          // a findOne that shows one row for one named correlation value.
+          // Static demand starts at once only when no window here or in an
+          // enclosing query can drop the rows it names: no window, or a
+          // findOne showing one row for one named correlation value.
           const staticKeys = getStaticDemandKeys(
             rawQuery,
             subquery.correlationField,
@@ -854,18 +849,23 @@ function compileQueryInternal(
           // relation. Retired keys stop participating in readiness immediately.
           parentKeys = parentKeys.pipe(
             tap((data: MultiSet<InputRow>) => {
-              for (const [[key], weight] of data.getInner()) {
-                if (key == null) continue
-                const encoded = valueIdentity.serializeEquality(key)
+              for (const [[correlationValue], weight] of data.getInner()) {
+                if (correlationValue == null) continue
+                const encoded =
+                  valueIdentity.serializeEquality(correlationValue)
                 const nextWeight =
                   (demandWeights.get(encoded)?.weight ?? 0) + weight
                 if (nextWeight === 0) demandWeights.delete(encoded)
-                else demandWeights.set(encoded, { key, weight: nextWeight })
+                else
+                  demandWeights.set(encoded, {
+                    key: correlationValue,
+                    weight: nextWeight,
+                  })
               }
               const keys = new Set(
                 [...demandWeights.values()]
                   .filter(({ weight }) => weight > 0)
-                  .map(({ key }) => key),
+                  .map(({ key: demandedKey }) => demandedKey),
               )
               lazyTargets.forEach((target, index) =>
                 callbacks[target.sourceId]?.setDemand?.(
@@ -937,7 +937,11 @@ function compileQueryInternal(
       // Replace includes entry in select with a null placeholder
       query = {
         ...query,
-        select: replaceIncludesInSelect(query.select!, path),
+        select: replaceIncludesInSelectValue(
+          query.select!,
+          path,
+          new ValClass(null),
+        ).value,
       }
     }
   }
@@ -2433,13 +2437,6 @@ function assertNoNestedIncludes(
  * Replaces an IncludesSubquery entry in the select object with a null Value placeholder.
  * This ensures processSelect() doesn't encounter it.
  */
-function replaceIncludesInSelect(
-  select: Record<string, any>,
-  path: Array<string>,
-): Record<string, any> {
-  return replaceIncludesInSelectValue(select, path, new ValClass(null)).value
-}
-
 function replaceIncludesInSelectValue(
   value: any,
   path: Array<string>,

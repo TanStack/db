@@ -1998,8 +1998,9 @@ describe(`static include demand and setWindow ownership`, () => {
     }
   })
 
-  // A findOne's window keeps its compiled limit. setWindow may move its
-  // offset or pass that limit, and throws for any other limit.
+  // A findOne keeps its compiled limit, and setWindow throws for any other
+  // limit. An ordered findOne has a movable window; an unordered one is a
+  // fixed one-row result that rejects offset moves.
   it(`keeps a findOne's compiled window limit and moves only an ordered findOne`, async () => {
     const rows = createSourceCollection(
       `find-one-window-rows`,

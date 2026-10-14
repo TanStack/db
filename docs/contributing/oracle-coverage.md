@@ -160,8 +160,9 @@ handler stands in for both the sync adapter and the provider. Child forms are
 delete, and move parents, insert and delete children, and move the window, with
 60 base runs per campaign; a reconstruction check requires at least three
 executed fixed cases for each premise, and every checkpoint asserts
-`getWindow()`, whose `findOne` window keeps the compiled limit (1, or 0 for
-`.limit(0).findOne()`). Rows must equal
+`getWindow()`. A `findOne` keeps its compiled limit (1, or 0 for
+`.limit(0).findOne()`); an ordered `findOne` has a movable window, and an
+unordered one is a fixed one-row result that `setWindow` cannot move. Rows must equal
 a relational model. Preload may load only the children of the shown rows'
 groups, and a step only those of rows that entered the window and were not
 shown before it. A static filter creates static child demand before the
@@ -172,8 +173,9 @@ the rule closes: a window requested before start (12 child rows for a bound of
 2 before the rule), grandchild demand below a windowed parent, a `findOne` with
 `limit(0)`, and a `findOne` moved past its one named value before start; a
 detail page whose window before start is at offset 0 still starts its child
-acquisition attempt at once. A `findOne` window keeps its compiled limit, and a
-focused test requires `setWindow` to throw for any other limit. A `findOne` detail page with on-demand parent and child starts
+acquisition attempt at once. A focused test requires `setWindow` to throw
+`SetWindowFindOneLimitError` for any other `findOne` limit and
+`SetWindowRequiresOrderByError` for an offset move on an unordered `findOne`. A `findOne` detail page with on-demand parent and child starts
 its child acquisition attempt beside its parent's. On main, a late page
 delivered 120 child rows for a bound of 9. Routers that add the row after the
 window fail the generated campaigns; routers that add every row in an edge tie

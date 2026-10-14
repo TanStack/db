@@ -259,6 +259,6 @@
     "IndexedDB collection requires a \"getKey\" configuration option. This function extracts the unique key from each item."
   ],
   "SetWindowFindOneLimitError": [
-    "setWindow() cannot change the limit of a findOne() query. Move only its offset."
+    "setWindow() cannot change the limit of a findOne() query."
   ]
 }
