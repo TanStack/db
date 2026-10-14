@@ -4392,59 +4392,77 @@ describe(`ordered source work oracle`, () => {
  * from the Collection's `currentStateAsChanges`, and rows the source delivers
  * to the query's subscription, which include index refills. Scan is counted
  * as the rows the Collection's `entries()` yields.
- * The sync path also runs against an on-demand source. Its provider serves
- * each request from the rows: filtered with the reference evaluator, sorted
- * by the requested order, with the offset only when there is no cursor, up
- * to the limit. It returns the commit's applied receipt and keeps its own
- * ledger of sent rows. A forwarding provider sends live changes only for
- * rows it sent or rows that match a subset it served; the rows law holds
- * after each step, and the work law bounds the rows it serves. A refetching
- * provider, like query-db-collection, sends nothing until a `refetch` step.
- * A refetch keeps every served ordered range whole, as the LoadSubset
+ * The sync path also runs against an on-demand source.
+ *
+ * Model terms (glossary, model alignment rule). The test provider combines a
+ * sync adapter and its provider: it accepts each `loadSubset` call as a
+ * physical acquisition, owns the model's source rows, and writes sync
+ * transactions. A held request is a physical acquisition whose provider
+ * answer is delayed until a `release` step. A served range is a model
+ * abstraction: the prefix and boundary that one answer establishes, up to
+ * the last order value a nonempty limited answer returned. A short answer
+ * does not prove source exhaustion. The ledger is the model's record of the
+ * rows the provider has sent. The peer is a second live-query Collection
+ * over the same source Collections.
+ *
+ * The provider answers each request from the rows: filtered with the
+ * reference evaluator, sorted by the requested order, with the offset only
+ * when there is no cursor, up to the limit. Its load fulfills once the
+ * commit's applied receipt settles. A forwarding provider sends live changes
+ * only for rows it sent or rows that match a subset it served; the rows law
+ * holds after each step, and the work law bounds the rows it serves. A
+ * refetching provider, like query-db-collection, sends nothing until a
+ * `refetch` step. A refetch keeps every served range whole, as the LoadSubset
  * contract requires: it sends every row from the start of the order through
- * the last order value a limited page returned, so a row that moves between
- * two pages still arrives, and rows in no range leave. Until then the
- * Collection may lag the rows, so the rows law over the model applies only
- * once no change is pending, and every refetching history ends with a
- * refetch. On either provider, after every step the Collection holds exactly
- * the rows in the provider's ledger, and the query and the Effect show their
- * window over those rows. A joined or anti-joined filter over an on-demand
- * source must not request the whole source at its initial load when the
- * first window's worth of source rows all pass the join and no boundary
- * value is null or NaN, and the rows each consumer (query or Effect) is
- * served stay within the prefix, its boundary ties and a refill, and the
- * source's size. A holding provider answers a load only at a `release`
- * step, from the rows at that moment, so live changes and other loads can
- * arrive while it is in flight; it records a request as served only once it
- * answers, and drops a held request the loader aborts or unloads without
- * answering it. Every holding history ends by answering all held loads, and
- * every window move it made must then have settled. While a load is in
- * flight, the Collection must still hold exactly the provider's ledger, and
- * a query and its peer either keep the window they showed at the previous
- * checkpoint or show distinct ledger rows that pass the query, in its order.
- * This is weaker than the architecture's barrier rule (a repair or window
- * move keeps the last complete public window until it settles), which
- * on-demand joined plans break today (#2131). The Effect is not checked
- * while a load is in flight. A campaign fixed to that premise uses a
- * forwarding provider and an indexed source filter or a joined filter that
- * refills from it, deletes three visible rows, then upserts a fresh row; a
- * reconstruction check reads the fixed-seed campaign's per-case counts and
- * requires every case that issues a held request to change rows while it is
- * in flight. Loading must reach a fixed point: past a request budget the
- * provider rejects and records it, and every step asserts it did not. A
- * bounded step makes at most four provider requests. On either provider a step may
- * publish one intermediate window per provider request it made, and only
- * its last publication must show the final window (#2131).
+ * the range's boundary, so a row that moves between two answers still
+ * arrives, and rows in no served range leave. Until then the Collection may
+ * lag the rows, so the rows law over the model applies only once no change
+ * is pending, and every refetching history ends with a refetch. On either
+ * provider, after every step the Collection holds exactly the rows in the
+ * ledger, and the query and the Effect show their window over those rows.
+ *
+ * A joined or anti-joined filter over an on-demand source must not request
+ * the whole source at its initial load when the first window's worth of
+ * source rows all pass the join and no boundary value is null or NaN, and
+ * the rows each consumer (query or Effect) is served stay within the prefix,
+ * its boundary ties and a refill, and the source's size.
+ *
+ * A holding provider answers a held request only at a `release` step, from
+ * the rows at that moment, so live changes and other loads can arrive while
+ * it is in flight. It counts a request as served only once it answers it.
+ * Acquisition release aborts the request's signal and gives the adapter one
+ * unload: a held request that is aborted or unloaded installs no rows, its
+ * load fulfills, and it is never counted as served (cancellation is
+ * cooperative, `LoadSubsetOptions.signal`). Every holding history ends by
+ * answering all held requests, and every window-move promise it made must
+ * then have fulfilled. While a load is in flight, the Collection must still
+ * hold exactly the ledger, and a query and its peer either keep the window
+ * they showed at the previous checkpoint or show distinct ledger rows that
+ * pass the query, in its order. This is weaker than the architecture's
+ * barrier rule (a repair or window move keeps the last public snapshot
+ * until it settles), which on-demand joined plans break today (#2131). The
+ * Effect is not checked while a load is in flight. A campaign fixed to that
+ * premise uses a forwarding provider and an indexed source filter or a
+ * joined filter that refills from it, deletes three visible rows, then
+ * upserts an eligible row with an unshared id; a reconstruction check reads
+ * the fixed-seed campaign's per-case counts and requires every case that
+ * issues a held request to change rows while it is in flight. Loading must
+ * reach a fixed point: past a request budget the provider rejects and
+ * records it, and every checkpoint asserts it did not. A bounded step makes
+ * at most four provider requests. On either provider a step may publish one
+ * intermediate window per provider request it made, and only its last
+ * publication must show the final window (#2131).
+ *
  * A `move` step changes the first query's window with `setWindow`; its laws
- * then follow the moved window. A refetching provider drops an unloaded
- * request and removes the rows that no remaining request's last answer
- * holds, as query-db-collection does. The per-step work law applies only to
- * forwarding, immediate, single-consumer cases; it skips refetching,
- * holding and peer cases, and move steps.
- * One case in four adds a peer: a second live query over the same sources
- * with its own window, the first `offset + limit + 1` rows. Its rows law
- * holds beside the first query's at every checkpoint; the work laws count one
- * consumer, so they do not apply to those cases.
+ * then follow the moved window. On acquisition release, a refetching
+ * provider's adapter unload drops the request and removes the rows that no
+ * remaining request's last answer holds, as query-db-collection does. The
+ * per-step work law applies only to forwarding, immediate, single-consumer
+ * cases; it skips refetching, holding and peer cases, and move steps.
+ * One case in four adds a peer with its own window, the first
+ * `offset + limit + 1` rows. Its rows law holds beside the first query's at
+ * every checkpoint; the work laws count one consumer, so they do not apply
+ * to those cases.
  * Joined filters can match a row through several markers, by `dup`, so a
  * LEFT-joined filter and a full join keep one result row per matched
  * (row, marker) pair, and an anti-join keeps a row once.
@@ -5050,9 +5068,9 @@ async function runEagerWindow(
     const applied = syncControls!.commit()
     return applied === true ? true : applied.then(() => undefined)
   }
-  // The last row of each nonempty, limited, ordered page: where its served
-  // range ends. A short page proves no source exhaustion (ARCHITECTURE.md,
-  // ordered requests), so its range also ends at its last row.
+  // The last row of each nonempty, limited, ordered answer: the boundary
+  // of its served range. A short answer does not prove source exhaustion
+  // (glossary), so its range also ends at its last row.
   const rangeEnds = new Map<LoadSubsetOptions, Row>()
   // Requests a holding provider has not answered yet, oldest first. Holding
   // starts after the initial load.
@@ -5072,8 +5090,8 @@ async function runEagerWindow(
   }
   // Read through a call, as `lagging` is: the write callbacks assign it.
   const changedInFlight = () => stepChangedInFlight
-  // A held request that the loader aborts or unloads leaves the queue: the
-  // provider installs none of its rows and settles its load, as cooperative
+  // A held request that is aborted or unloaded leaves the queue: the
+  // provider installs none of its rows and fulfills its load, as cooperative
   // cancellation allows (LoadSubsetOptions.signal), and never records it as
   // served.
   const dropHeld = (options: LoadSubsetOptions): boolean => {
@@ -5104,14 +5122,14 @@ async function runEagerWindow(
     if (!holding) return answer(options)
     caseHeldRequests++
     // Cancellation is cooperative (LoadSubsetOptions.signal): an aborted
-    // request installs no rows and its load settles.
+    // request installs no rows and its load fulfills.
     if (options.signal?.aborted) return true
     return new Promise((resolve) => {
       heldRequests.push({ options, resolve })
       options.signal?.addEventListener(`abort`, () => dropHeld(options))
     })
   }
-  // Answers one held request from the current rows and settles its load
+  // Answers one held request from the current rows and fulfills its load
   // once the rows apply.
   async function releaseOldest(): Promise<void> {
     const { options, resolve } = heldRequests.shift()!
@@ -5166,9 +5184,10 @@ async function runEagerWindow(
     if (endIndex === -1) throw new Error(`coverage sentinel missing`)
     return ordered.slice(0, endIndex).map((row) => rows.get(row.id)!)
   }
-  // A refetching provider, like query-db-collection, drops an unloaded
-  // request and removes the rows that no remaining request's last answer
-  // holds. It sends nothing new. A forwarding provider keeps what it sent.
+  // On acquisition release, a refetching provider's adapter unload (like
+  // query-db-collection's) drops the request and removes the rows that no
+  // remaining request's last answer holds. It sends nothing new. A
+  // forwarding provider keeps what it sent.
   function unload(options: LoadSubsetOptions): void {
     if (dropHeld(options)) return
     const index = servedRequests.indexOf(options)
@@ -5505,7 +5524,7 @@ async function runEagerWindow(
     expect(ledgerRows(source.values()), `${label}: Collection rows`).toEqual(
       ledgerRows(sent.values()),
     )
-    // While a load is in flight, a query may hold its last complete window.
+    // While a load is in flight, a query may keep its last public snapshot.
     if (inFlight()) return
     expectEagerWindow(
       visibleIds(),
