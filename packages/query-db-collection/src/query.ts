@@ -1176,6 +1176,20 @@ export function queryCollectionOptions(
     }
     const { begin, write, commit, markReady, markError, collection, metadata } =
       params
+    const removeLateUnobservedQuery = (
+      query: AnyQuery,
+      ownedBeforeCleanup: boolean,
+    ) => {
+      if (
+        activeSyncSession !== syncSession &&
+        ownedBeforeCleanup &&
+        query.getObserversCount() === 0 &&
+        (queryCollectionCacheOwners.get(query)?.size ?? 0) === 0 &&
+        queryClient.getQueryCache().get(query.queryHash) === query
+      ) {
+        queryClient.getQueryCache().remove(query)
+      }
+    }
     const persistence =
       metadata === undefined
         ? null
@@ -1298,6 +1312,8 @@ export function queryCollectionOptions(
         pending.add(cancel)
         pendingReadyUnsubscribes.set(hashedQueryKey, pending)
 
+        const observedQuery = observer.getCurrentQuery()
+        const ownedBeforeCleanup = ownedCacheQueries.has(observedQuery)
         unsubscribe = observer.subscribe((result) => {
           queueMicrotask(() => {
             if (
@@ -1308,6 +1324,13 @@ export function queryCollectionOptions(
             }
           })
         })
+        // Cleanup can cancel this waiter while subscribe synchronously starts
+        // a fetch, before the returned unsubscribe is assigned above.
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- The fetch callback can cancel this waiter during observer.subscribe.
+        if (!active) {
+          unsubscribe()
+          removeLateUnobservedQuery(observedQuery, ownedBeforeCleanup)
+        }
       })
 
     const getDeferredRefresh = (
@@ -3169,34 +3192,63 @@ export function queryCollectionOptions(
         fetchStart: number | undefined
       },
     ) => {
+      if (activeSyncSession !== syncSession) return
       if (!isSubscribed(hashedQueryKey)) {
-        // Cache removal does not retire eager ownership. Reattach the observer
-        // to the current cache entry before subscribing to its updates.
-        if (syncMode === `eager`) observer.setOptions(observer.options)
-        const cachedQueryKey = hashToQueryKey.get(hashedQueryKey)!
-        const handleQueryResult = makeQueryResultHandler(cachedQueryKey)
-        const applyResult = (result: QueryObserverResult<any, any>) => {
-          if (ignoredCacheSnapshot && result.isSuccess) {
-            const query = observer.getCurrentQuery()
-            if (
-              query.state.data === ignoredCacheSnapshot.data &&
-              query.state.dataUpdateCount === ignoredCacheSnapshot.version &&
-              (query.state.fetchStatus !== `idle` ||
-                queryCollectionCurrentFetchStarts.get(query) ===
-                  ignoredCacheSnapshot.fetchStart)
-            )
-              return
-          }
-          handleQueryResult(result)
+        // A fetch notification can reenter this function before subscribe
+        // returns. Reserve the slot so a second subscriber cannot install a
+        // listener whose unsubscribe would be overwritten.
+        let releasedDuringInstall = false
+        const cancelPendingSubscription = () => {
+          releasedDuringInstall = true
         }
-        const unsubscribeFn = observer.subscribe(applyResult)
-        unsubscribes.set(hashedQueryKey, unsubscribeFn)
+        unsubscribes.set(hashedQueryKey, cancelPendingSubscription)
+        try {
+          // Cache removal does not retire eager ownership. Reattach the observer
+          // to the current cache entry before subscribing to its updates.
+          if (syncMode === `eager`) observer.setOptions(observer.options)
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Reentrant Query callbacks can release the reserved subscription.
+          if (releasedDuringInstall || activeSyncSession !== syncSession) return
+          const cachedQueryKey = hashToQueryKey.get(hashedQueryKey)!
+          const handleQueryResult = makeQueryResultHandler(cachedQueryKey)
+          const applyResult = (result: QueryObserverResult<any, any>) => {
+            if (ignoredCacheSnapshot && result.isSuccess) {
+              const query = observer.getCurrentQuery()
+              if (
+                query.state.data === ignoredCacheSnapshot.data &&
+                query.state.dataUpdateCount === ignoredCacheSnapshot.version &&
+                (query.state.fetchStatus !== `idle` ||
+                  queryCollectionCurrentFetchStarts.get(query) ===
+                    ignoredCacheSnapshot.fetchStart)
+              )
+                return
+            }
+            handleQueryResult(result)
+          }
+          // Cleanup can run while Query Core starts a fetch during subscribe.
+          const observedQuery = observer.getCurrentQuery()
+          const ownedBeforeCleanup = ownedCacheQueries.has(observedQuery)
+          const unsubscribeFn = observer.subscribe(applyResult)
+          if (
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Reentrant Query callbacks can release the reserved subscription.
+            releasedDuringInstall ||
+            activeSyncSession !== syncSession ||
+            state.observers.get(hashedQueryKey) !== observer
+          ) {
+            unsubscribeFn()
+            removeLateUnobservedQuery(observedQuery, ownedBeforeCleanup)
+            return
+          }
+          unsubscribes.set(hashedQueryKey, unsubscribeFn)
 
-        // Process the current result immediately if available
-        // This ensures data is synced when resubscribing to a query with cached data
-        const currentResult = observer.getCurrentResult()
-        if (currentResult.isSuccess || currentResult.isError) {
-          applyResult(currentResult)
+          // Process the current result immediately if available
+          // This ensures data is synced when resubscribing to a query with cached data
+          const currentResult = observer.getCurrentResult()
+          if (currentResult.isSuccess || currentResult.isError) {
+            applyResult(currentResult)
+          }
+        } finally {
+          if (unsubscribes.get(hashedQueryKey) === cancelPendingSubscription)
+            unsubscribes.delete(hashedQueryKey)
         }
       }
     }

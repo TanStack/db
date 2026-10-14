@@ -607,11 +607,28 @@ eager consumption of Query Core's lazy signal. The foreign closure
 witnesses verify the installed Query Core's option-selection path both before
 and during a shared fetch. A synchronous provider throw caused by reentrant
 peer acquisition has no separate witness.
+Public Collection cleanup from a synchronous Query-cache fetch notification
+checks both the cached-result and uncached readiness-observer paths. At cleanup
+settlement and after an ignored-signal provider finishes, the Collection has no
+rows, the old Query has no observers, and its tracked exact cache entry is
+absent. A callback that adds a second public subscriber during the cached or
+uncached observer installation must likewise leave no Query observer after
+cleanup. A final public subscriber that leaves during installation must leave
+no Query observer at the returned-request cut. Core's public subscription
+defers acquisition release during adapter
+`loadSubset` until that call returns. Synchronous setup throws remain outside
+these cleanup histories.
 The [bounded design grammar](oracle-reviews/2026-10-14-query-db-published-core-design-grammar.md)
 models the overlapping equal-demand lease and physical full-Query signal rules;
 its TLA+ safe configuration passes, while hash-only release and per-acquisition
 abort weakenings produce counterexamples. It does not model result application
-or persisted row reconciliation.
+or persisted row reconciliation. The [exact-commit oracle review](oracle-reviews/2026-10-14-query-db-published-core-review.md)
+records the production controls, guide audit, and remaining receiving paths.
+The new public cleanup witnesses preserve a primary mismatch and each cleanup
+failure separately. Older fixed histories in the load-lifecycle owner still use
+`finally`; a cleanup throw can mask the original assertion or skip later
+releases. The load-lifecycle oracle owns a dual-fault cleanup diagnostic and
+aggregation across those older fixtures.
 The ownership owner seeds a persisted `until-revalidated` subset owner, then
 applies a complete full-source result and acquires that subset. An omitted,
 unchanged, or moved source row must match public and durable rows at settlement,
