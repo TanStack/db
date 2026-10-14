@@ -614,9 +614,11 @@ describe(`includes deterministic work-counter oracle`, () => {
  *
  * A static parent filter (`eq` or `inArray` on the correlation field) may
  * create child demand before the window runs only when no window can drop the
- * rows it names: the query has no window, or it is a `findOne` with no
- * `offset` over one named row. Any other window can drop them, including one
- * `setWindow` requests later, so the static demand must wait for the window.
+ * rows it names: neither the query nor an enclosing query has a window, or
+ * the query is a `findOne` that shows one row, with no `offset` and no window
+ * requested before start, for one named correlation value. Any other window can drop them, including one `setWindow`
+ * requests later, so the static demand must wait for the window. A `findOne`'s
+ * window is `{ offset, limit: 1 }`, and `setWindow` keeps its limit at 1.
  *
  * ## Model
  *
@@ -665,26 +667,27 @@ describe(`includes deterministic work-counter oracle`, () => {
  *
  * While an index-backed parent top-K refills its window within one graph run,
  * after a held row moves out, a tie group at the window edge loads, or the
- * window moves forward, it can briefly hold a row outside the settled window,
- * and that row's children load. The public snapshot stays correct. An
- * unsettled checkpoint is a model observation that combines two production
- * facts the harness cannot see directly, ordered acquisition and its
- * settlement within the graph run: it counts the change batches the parent
- * Collection delivers to the query, and more than the initial load at
- * preload, or more than the step's own parent write, means the ordered
- * acquisition took more rows. The generated campaigns skip only the work bound
- * at unsettled checkpoints and still check the rows. Replays pin every known
- * trace and allow exactly the one extra child row each shows, and pinned
- * forward moves allow none.
+ * window moves forward, it can briefly hold a row outside the window it shows
+ * once that acquisition completes, and that row's children load. The public
+ * snapshot stays correct. A refill checkpoint is a model observation that
+ * combines two production facts the harness cannot see directly, an ordered
+ * acquisition and whether it completed within the graph run: the parent
+ * Collection delivers more change batches to the query than the initial load
+ * at preload, or than the step's own parent write. The generated campaigns
+ * skip only the work bound at refill checkpoints and still check the rows.
+ * Replays pin every known trace and allow exactly the one extra child row
+ * each shows, and pinned forward moves allow none. Each generated campaign
+ * counts the forward moves its own runs check strictly and requires some.
  *
  * ## Histories
  *
  * Histories insert parents (fresh, or copying an existing rank and group),
  * delete parents, move a parent's rank past every other rank, insert and
- * delete children, and move the parent window with `setWindow` (not for a
- * `findOne` parent), optionally after a window requested before start.
- * Indexes exist before the live query starts, and every step settles before it
- * is checked.
+ * delete children, and move the parent window with `setWindow`, optionally
+ * after a window requested before start. A static child filter on the
+ * grandchild correlation field (the child id) may keep only some children.
+ * Indexes exist before the live query starts, and every step completes before
+ * it is checked.
  */
 type WindowParent = { id: string; rank: number; group: string }
 type WindowChild = { id: string; group: string; n: number }
@@ -724,7 +727,7 @@ type WindowCase = {
   limit: number
   history: Array<WindowCommand>
   // A replay of a known transient top-K row: the extra child rows it may load
-  // at a checkpoint where the parent's ordered loader had not settled.
+  // at a checkpoint where the parent's ordered acquisition had not completed.
   overshoot?: number
   // A `findOne` parent skips its `offset` when false. Omitted means true.
   findOneOffset?: boolean
@@ -1608,7 +1611,7 @@ describe(`includes work under an ordered parent window`, () => {
 
   // Replays of transient top-K rows (#2151). Each shows the correct
   // rows and loads one child row beyond the bound, at a checkpoint where the
-  // parent's ordered loader had not settled: a held row moved past every
+  // parent's ordered acquisition had not completed: a held row moved past every
   // other rank, a tie loaded at the window edge during preload, and a window
   // move while the loader refills. A larger overshoot fails.
   const transient: Array<[string, WindowCase]> = [
@@ -1899,7 +1902,7 @@ describe(`static include demand and setWindow ownership`, () => {
     }
   })
 
-  // A findOne with limit 0 shows no row, so the one named row's child must
+  // A findOne with limit 0 shows no row, so its named correlation value's child must
   // not load.
   it(`starts no child acquisition for a findOne with limit 0`, async () => {
     const calls: Array<string> = []
@@ -1942,6 +1945,7 @@ describe(`static include demand and setWindow ownership`, () => {
                 .where(({ child }) => eq(child.parentId, parent.id)),
             ),
           }))
+          .orderBy(({ parent }) => parent.id)
           .limit(0)
           .findOne(),
     })
