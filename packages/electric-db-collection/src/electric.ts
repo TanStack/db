@@ -1760,7 +1760,7 @@ function createElectricSync<T extends Row<unknown>>(
       markReady,
       markError,
       reportError,
-      reportHealthy,
+      reportHealthy: _reportHealthy,
       truncate,
       collection,
       metadata,
@@ -1898,7 +1898,6 @@ function createElectricSync<T extends Row<unknown>>(
     // Wrap markReady to wait for test hook in progressive mode
     let progressiveReadyGate: Promise<void> | null = null
     let streamErrorVersion = 0
-    let hasHealthError = false
     const wrappedMarkReady = (
       isBuffering: boolean,
       expectedErrorVersion = streamErrorVersion,
@@ -1922,12 +1921,6 @@ function createElectricSync<T extends Row<unknown>>(
       } else {
         // No hook, not buffering, or already past first up-to-date
         markReady()
-      }
-
-      // Report Collection health recovery if we've recovered from a health error
-      if (hasHealthError && collection.status === `ready`) {
-        hasHealthError = false
-        reportHealthy()
       }
     }
 
@@ -2664,8 +2657,8 @@ function createElectricSync<T extends Row<unknown>>(
               abortController.abort()
               if (collection.status !== `error`) {
                 if (collection.status === `ready`) {
-                  // Post-readiness transaction failure: sync adapter is giving up
-                  hasHealthError = true
+                  // Post-readiness transaction failure: sync adapter gives up
+                  // and will not retry.
                   reportError(error, { final: true })
                 } else {
                   // Pre-readiness failure
@@ -2726,15 +2719,16 @@ function createElectricSync<T extends Row<unknown>>(
       },
       (error) => {
         // The SDK gave up: it rejected the retry decision or exhausted its
-        // retry loop. No provider batch will settle the gate, and before the
-        // first ready this is the source's final initial failure.
+        // retry loop. No provider batch will settle the gate.
         rejectFullSnapshot(error)
-        if (
-          isActiveLifecycle() &&
-          !abortController.signal.aborted &&
-          collection.status === `loading`
-        )
-          failInitialSync(error)
+        if (isActiveLifecycle() && !abortController.signal.aborted) {
+          if (collection.status === `loading`) {
+            failInitialSync(error)
+          } else if (collection.status === `ready`) {
+            // Post-readiness stream failure: SDK gives up and will not retry
+            reportError(error, { final: true })
+          }
+        }
       },
     )
 
@@ -2758,7 +2752,14 @@ function createElectricSync<T extends Row<unknown>>(
           streamErrorVersion++
           unsubscribeStream()
           abortController.abort()
-          markError(error)
+          if (collection.status === `ready`) {
+            // Post-readiness resume failure: adapter cannot proceed with invalid
+            // resume state and will not retry
+            reportError(error, { final: true })
+          } else {
+            // Pre-readiness failure
+            markError(error)
+          }
         },
       )
     }

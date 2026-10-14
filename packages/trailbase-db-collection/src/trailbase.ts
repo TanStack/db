@@ -185,9 +185,17 @@ export function trailBaseCollectionOptions<
   type SyncParams = Parameters<SyncConfig<TItem, TKey>[`sync`]>[0]
   const sync = {
     sync: (params: SyncParams) => {
-      const { begin, write, commit, markReady, markError, reportError, reportHealthy, collection } = params
+      const {
+        begin,
+        write,
+        commit,
+        markReady,
+        markError,
+        reportError,
+        reportHealthy: _reportHealthy,
+        collection,
+      } = params
       let cancelled = false
-      let hasHealthError = false
       let periodicCleanupTask: ReturnType<typeof setInterval> | undefined
       const cleanup = () => {
         cancelled = true
@@ -427,8 +435,7 @@ export function trailBaseCollectionOptions<
                 if (collection.status === `loading`) {
                   markError(error)
                 } else if (collection.status === `ready`) {
-                  // Post-readiness stream failure: sync adapter is giving up
-                  hasHealthError = true
+                  // Post-readiness stream failure: adapter does not resubscribe
                   reportError(error, { final: true })
                 } else {
                   console.error(`TrailBase subscription failed`, error)
@@ -456,17 +463,10 @@ export function trailBaseCollectionOptions<
           if (collection.status === `loading`) {
             markError(error)
           } else if (collection.status === `ready`) {
-            // Post-readiness stream failure: sync adapter is giving up
-            hasHealthError = true
+            // Post-readiness stream failure: adapter does not resubscribe
             reportError(error, { final: true })
           }
           return
-        }
-
-        // Report Collection health recovery if listener settled successfully after a health error
-        if (hasHealthError && collection.status === `ready`) {
-          hasHealthError = false
-          reportHealthy()
         }
 
         // Lastly, start a periodic cleanup task that will be removed when the
