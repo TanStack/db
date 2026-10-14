@@ -1416,6 +1416,82 @@ async function expectInstalledFetchFailureSettles(): Promise<void> {
   }
 }
 
+/**
+ * A behavior may invoke queryFn before throwing during fetch setup. The
+ * provider's promise can remain pending after the requesting load rejects.
+ * The physical signal belongs to that abandoned source work. The reference
+ * requires final acquisition release to abort work still pending, and never
+ * accepts its late value as a Query cache or Collection row. Resolving before
+ * and after final release checks both owned and retired observation cuts.
+ * This distinguishes setup failure from the installed-fetch rejection above.
+ */
+async function expectFailedSetupDiscardsDeferredSource(
+  release: `before` | `after`,
+): Promise<void> {
+  const queryClient = createQueryClient()
+  const id = `failed-setup-provider-signal-${collectionSequence++}`
+  const setupError = new Error(`behavior setup failed`)
+  const held = createDeferred<Array<Row>>()
+  let providerSignal: AbortSignal | undefined
+  queryClient.setQueryDefaults([id], {
+    behavior: {
+      onFetch(context) {
+        context.fetchFn()
+        throw setupError
+      },
+    },
+  })
+  const collection = createCollection(
+    queryCollectionOptions<Row>({
+      id,
+      queryClient,
+      queryKey: [id],
+      queryFn: (context) => {
+        providerSignal = context.meta?.loadSubsetOptions?.signal
+        return held.promise
+      },
+      getKey: (row) => row.id,
+      startSync: true,
+      syncMode: `on-demand`,
+      retry: false,
+    }),
+  )
+  const request: LoadSubsetOptions = {}
+  const publishedRows: Array<string> = []
+  const rowSubscription = collection.subscribeChanges(
+    (batch) => {
+      for (const change of batch) publishedRows.push(change.value.id)
+    },
+    { includeInitialState: false },
+  )
+  let released = false
+  try {
+    await expect(collection._sync.loadSubset(request)).rejects.toBe(setupError)
+    expect(providerSignal).toBeDefined()
+    if (release === `before`) {
+      collection._sync.unloadSubset(request)
+      released = true
+      expect(providerSignal?.aborted).toBe(true)
+    }
+    held.resolve([{ id: `discarded` }])
+    await held.promise
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    expect(collection.toArray).toEqual([])
+    expect(queryClient.getQueryData([id])).toBeUndefined()
+    expect(publishedRows).toEqual([])
+    if (release === `after`) {
+      collection._sync.unloadSubset(request)
+      released = true
+    }
+  } finally {
+    if (!released) collection._sync.unloadSubset(request)
+    held.resolve([])
+    rowSubscription.unsubscribe()
+    await collection.cleanup()
+    queryClient.clear()
+  }
+}
+
 async function expectLateDependentObservesInitialFailure(): Promise<void> {
   const error = new Error(`source failed before dependent construction`)
   const queryClient = createQueryClient()
@@ -3235,6 +3311,13 @@ describe(`loadSubset lifecycle oracle`, () => {
     `settles a $path operation when behavior setup fails $source invoking its source`,
     async ({ path, source }) => {
       await expectEagerBehaviorSetupFailureSettles(path, source)
+    },
+  )
+
+  it.each([`before`, `after`] as const)(
+    `discards deferred source work after behavior setup fails with release %s response`,
+    async (release) => {
+      await expectFailedSetupDiscardsDeferredSource(release)
     },
   )
 

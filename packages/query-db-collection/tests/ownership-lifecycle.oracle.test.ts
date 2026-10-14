@@ -16196,6 +16196,106 @@ describe(`query collection ownership lifecycle`, () => {
   )
 
   /**
+   * A retained owner needs a new accepted source result before it can retire.
+   * A behavior setup failure is a terminal error for its requesting load,
+   * even though Query Core installs no physical fetch-start event. The small
+   * source model keeps the old durable row and marker, and rejects with the
+   * exact setup error. Full and exact subset keys use cold and warm Query
+   * caches. Cold subscription can start the failed request before the explicit
+   * revalidation helper runs; a warm cache makes that helper own the failure.
+   * The behavior fails only once so an automatic retry becomes false success.
+   * Invoking queryFn before the throw cannot publish an unaccepted new row.
+   */
+  it.each([
+    { scope: `full`, cache: `cold`, source: `before` },
+    { scope: `full`, cache: `cold`, source: `after` },
+    { scope: `full`, cache: `warm`, source: `before` },
+    { scope: `full`, cache: `warm`, source: `after` },
+    { scope: `subset`, cache: `cold`, source: `before` },
+    { scope: `subset`, cache: `cold`, source: `after` },
+    { scope: `subset`, cache: `warm`, source: `before` },
+    { scope: `subset`, cache: `warm`, source: `after` },
+  ] as const)(
+    `rejects retained $scope $cache revalidation when behavior setup fails $source source invocation`,
+    async ({ scope, cache, source }) => {
+      const id = `retained-setup-failure-${scope}-${cache}-${source}`
+      const request = scope === `full` ? {} : categorySubset(`detail`)
+      const queryKey = [
+        id,
+        ...(scope === `full` ? [] : [getLoadSubsetDemandKey(request)]),
+      ]
+      const queryHash = hashKey(queryKey)
+      const retentionKey = `queryCollection:gc:${queryHash}`
+      const oldRow: Item = {
+        id: `old`,
+        category: `detail`,
+        name: `Durable`,
+      }
+      const sourceRow: Item = {
+        id: `new`,
+        category: `detail`,
+        name: `Discarded`,
+      }
+      const setupError = new Error(`behavior setup failed`)
+      let setups = 0
+      const storage = createOwnershipStorage({
+        rows: new Map([[oldRow.id, oldRow]]),
+        rowMetadata: new Map([
+          [oldRow.id, { queryCollection: { owners: { [queryHash]: true } } }],
+        ]),
+        collectionMetadata: new Map([
+          [retentionKey, { queryHash, mode: `until-revalidated` }],
+        ]),
+      })
+      const { collection, queryFn } = createPersistedOwnershipFixture(
+        id,
+        storage,
+        [sourceRow],
+        `on-demand`,
+        (queryClient) => {
+          if (cache === `warm`) queryClient.setQueryData(queryKey, [oldRow])
+          queryClient.setQueryDefaults([id], {
+            refetchOnMount: false,
+            behavior: {
+              onFetch(context) {
+                if (++setups !== 1) return
+                if (source === `after`) context.fetchFn()
+                throw setupError
+              },
+            },
+          })
+        },
+      )
+      await collection.stateWhenReady()
+      const outcome = await Promise.resolve(
+        collection._sync.loadSubset(request),
+      ).then(
+        () => ({ kind: `fulfilled` as const }),
+        (error: unknown) => ({ kind: `rejected` as const, error }),
+      )
+      expect(outcome.kind).toBe(`rejected`)
+      if (outcome.kind === `rejected`) expect(outcome.error).toBe(setupError)
+      expect(setups).toBe(1)
+      expect(queryFn).toHaveBeenCalledTimes(Number(source === `after`))
+      expect(rows(collection)).toEqual([oldRow.id])
+      expect(storedItems(storage)).toEqual([oldRow])
+      expect(storage.snapshot().collectionMetadata.has(retentionKey)).toBe(true)
+
+      // A later acquisition is a new attempt. It can revalidate the retained
+      // owner after this setup failure without inheriting the first error.
+      collection._sync.unloadSubset(request)
+      await collection._sync.loadSubset(request)
+      expect(setups).toBe(2)
+      expect(queryFn).toHaveBeenCalledTimes(Number(source === `after`) + 1)
+      expect(rows(collection)).toEqual([sourceRow.id])
+      expect(storedItems(storage)).toEqual([sourceRow])
+      expect(storage.snapshot().collectionMetadata.has(retentionKey)).toBe(
+        false,
+      )
+    },
+  )
+
+  /**
    * A retained marker requires an applied authoritative source result before
    * its acquisition can fulfill. A custom Query persister may call queryFn yet
    * return a different value, so Query Core leaves its result provenance

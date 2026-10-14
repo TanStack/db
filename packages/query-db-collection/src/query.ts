@@ -2095,8 +2095,10 @@ export function queryCollectionOptions(
           cancelPreWriteFetch(observer.getCurrentQuery(), hashedQueryKey)
           for (;;) {
             if (!active) return
+            let setupWithoutFetch = false
             try {
               const query = observer.getCurrentQuery()
+              const previousFetchSequence = query.fetchSequence
               const retainedStart =
                 retainedRevalidationStarts.get(hashedQueryKey)
               const joinsRetainedFetch =
@@ -2120,11 +2122,18 @@ export function queryCollectionOptions(
               // Query Core can turn a canceled fetch into the prior cached
               // result. The retryer's promise retains the cancellation that
               // observer.refetch hides from this exact-demand caller.
-              let physical =
-                capture.promise ?? observer.getCurrentQuery().promise
-              if (!physical) {
+              const currentQuery = observer.getCurrentQuery()
+              let physical = capture.promise ?? currentQuery.promise
+              if (
+                !physical ||
+                (capture.fetchStart === undefined &&
+                  currentQuery === query &&
+                  query.fetchSequence !== previousFetchSequence)
+              ) {
+                setupWithoutFetch = true
                 // Behavior setup can reject before Core installs a retryer.
-                // Its observer promise retains the original setup error.
+                // An old canceled retryer can still occupy query.promise.
+                // The new sequence without fetchStarted identifies this call.
                 await fetch
                 throw new Error(`Query refetch started no fetch`)
               }
@@ -2150,6 +2159,7 @@ export function queryCollectionOptions(
               }
             } catch (error) {
               if (error instanceof LoadSubsetOperationAbortedError) throw error
+              if (setupWithoutFetch) throw error
               const fetchStart = queryCollectionCurrentFetchStarts.get(
                 observer.getCurrentQuery(),
               )
@@ -2207,8 +2217,19 @@ export function queryCollectionOptions(
     const refetchOrWaitForEnabledQuery = (
       observer: QueryObserver<Array<any>, any, Array<any>, Array<any>, any>,
       hashedQueryKey: string,
+      subscriptionStart?: number | null,
     ): Promise<void> => {
       const query = observer.getCurrentQuery()
+      if (
+        subscriptionStart !== undefined &&
+        (query.fetchSequence ?? null) !== subscriptionStart &&
+        query.state.status === `error` &&
+        query.state.fetchStatus === `idle`
+      ) {
+        // Subscription started this attempt before the explicit revalidation
+        // helper ran. Return its error instead of silently starting a retry.
+        return Promise.reject(query.state.error)
+      }
       const queryEnabled =
         typeof enabled === `function` ? enabled(query) : enabled !== false
       if (queryEnabled)
@@ -2554,6 +2575,7 @@ export function queryCollectionOptions(
       if (syncMode === `on-demand`)
         queryCollectionOnDemandObservers.add(localObserver)
       const localQuery = localObserver.getCurrentQuery()
+      const subscriptionStart = localQuery.fetchSequence ?? null
       trackOwnedCacheQuery(localQuery, hashedQueryKey)
       const resolvedQueryGcTime = queryClient.getQueryCache().find({
         queryKey: key,
@@ -2660,10 +2682,18 @@ export function queryCollectionOptions(
         ) {
           return opts.refetch
             ? refetchAndWaitForApplication(localObserver, hashedQueryKey)
-            : refetchOrWaitForEnabledQuery(localObserver, hashedQueryKey)
+            : refetchOrWaitForEnabledQuery(
+                localObserver,
+                hashedQueryKey,
+                subscriptionStart,
+              )
         }
         if (!hasCurrentCacheGenerationFetch(localObserver.getCurrentQuery())) {
-          return refetchOrWaitForEnabledQuery(localObserver, hashedQueryKey)
+          return refetchOrWaitForEnabledQuery(
+            localObserver,
+            hashedQueryKey,
+            subscriptionStart,
+          )
         }
         if (currentResult.isError && !currentResult.isFetching) {
           return Promise.reject(currentResult.error)
@@ -2687,7 +2717,11 @@ export function queryCollectionOptions(
         if (syncStarted || collection.subscriberCount > 0) {
           subscribeToQuery(localObserver, hashedQueryKey)
         }
-        return refetchOrWaitForEnabledQuery(localObserver, hashedQueryKey)
+        return refetchOrWaitForEnabledQuery(
+          localObserver,
+          hashedQueryKey,
+          subscriptionStart,
+        )
       }
 
       // Create a promise that resolves when the query result is first available
@@ -4248,7 +4282,9 @@ export function queryCollectionOptions(
             const fetchStart = event.fetchSequence
             if (
               fetchStart !== undefined &&
-              isCancelledError(event.action.error) &&
+              (isCancelledError(event.action.error) ||
+                queryCollectionCurrentFetchStarts.get(event.query) !==
+                  fetchStart) &&
               event.state.fetchStatus === `idle`
             )
               getPhysicalFetchState(event.query)

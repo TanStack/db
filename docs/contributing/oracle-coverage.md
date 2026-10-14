@@ -577,17 +577,31 @@ The same owner checks a public `QueryClient` behavior that throws during fetch
 setup, both before and after invoking `queryFn`. Direct on-demand loads and
 live-query preloads reject with the exact setup error. Exact subset refetches
 and throwing utility refetches reject with that error; nonthrowing utility
-refetches return an error result. The oracle checks that a source value invoked
-before the throw does not publish and that no installed fetch-start event was
-reported for the failed setup. A neighboring provider rejection checks the
-ordinary installed-fetch path and its two start events. The setup histories
-rely on Query Core reporting a terminal observer error for setup failure. The
-installed Query Core version does not
-provide that signal; published-version compatibility remains open until the
-attribution repair is released and the peer range is raised. Concurrent
-cleanup, replacement, and nested behavior reentry during setup remain outside
-these receiving histories.
-It checks that the provider sees a live physical fetch signal when the first
+refetches return an error result. A deferred source invoked before the throw
+cannot publish a Collection row or Query cache value, whether it resolves
+before or after final release. The oracle checks public change batches and
+requires the pending provider's physical signal to abort on final release.
+It also checks that no installed fetch-start event was reported for the failed
+setup. A neighboring provider rejection checks the ordinary installed-fetch
+path and its two start events. The ownership oracle crosses retained full and
+exact subset owners with cold and warm Query caches. A setup failure rejects
+the first acquisition without an automatic retry, retains the durable row and
+marker, and permits a later acquisition to revalidate. These histories test
+both before- and after-source failure. The setup histories rely on Query Core
+reporting a terminal observer error for setup failure. The installed Query Core
+version does not provide that signal; published-version compatibility remains
+open until the attribution repair is released and the peer range is raised.
+Concurrent cleanup, replacement, and nested behavior reentry during setup
+remain outside these receiving histories. A behavior-authored silent or revert
+`CancelledError` without a successor has no terminal Query Core observer event;
+these histories make no settlement claim for that internal cancellation.
+The live-query deferred-acquisition oracle owns the separate same-instance
+recovery law after an on-demand source fails, then `clearError()` succeeds. A
+Query DB receiving witness is needed: today the source row recovers while the
+failed live query remains in error. The accepted contract does not say whether
+the same live-query instance must recover or callers must recreate it.
+
+The load-lifecycle owner checks that the provider sees a live physical fetch signal when the first
 full acquisition releases but a narrower acquisition still owns the Query.
 Another held-fetch cut releases the final filtered owner during full Query
 revalidation, then checks transport abort and no late row publication.
