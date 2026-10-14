@@ -424,6 +424,43 @@ function UserList() {
 }
 ```
 
+### Stale Data and the Error Tree
+
+Every live query hook also returns `errors`, an error tree with one node for
+the query and one for each source alias. After the query is ready, a source
+that loses its sync connection keeps its rows, and `status` stays `ready`. The
+problem appears only in `errors`:
+
+```tsx
+function UserList() {
+  const { data, isLoading, isError, errors } = useLiveQuery((q) =>
+    q.from({ user: usersCollection }),
+  )
+
+  if (isLoading) return <div>Loading...</div>
+  if (isError) return <div>Error loading users</div>
+
+  return (
+    <>
+      {errors?.hasErrors && <div>Users may be out of date</div>}
+      <ul>
+        {data.map((user) => (
+          <li key={user.id}>{user.name}</li>
+        ))}
+      </ul>
+    </>
+  )
+}
+```
+
+> **Important:** `isError` means the query must restart: its initial load
+> failed, or a source crashed. To show a "data may be out of date" banner,
+> check `errors.hasErrors`. `useLiveSuspenseQuery` also returns `errors`, and
+> after its first render it never throws for these problems.
+
+See [Collection Status and Error States](./error-handling.md#collection-status-and-error-states)
+for the shape of the tree, its phases, and how to restart.
+
 ### Conditional Queries
 
 For optional inputs, prefer rendering the query component only after the inputs exist. That avoids creating a live query before all required values exist.
@@ -471,7 +508,7 @@ const { data, isEnabled, status } = useLiveQuery({
 
 The top-level callback form supports the same behavior. When the query is disabled:
 - `status` is `'disabled'`
-- `data`, `state`, and `collection` are `undefined`
+- `data`, `state`, `collection`, and `errors` are `undefined`
 - `isEnabled` is `false`
 - `isReady` is `true`
 - `isLoading`, `isIdle`, `isError`, and `isCleanedUp` are all `false`

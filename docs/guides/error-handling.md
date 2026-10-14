@@ -183,35 +183,157 @@ are waiting for replay with `AbortError`.
 
 ## Collection Status and Error States
 
-Collections track their status and transition between states:
+A Collection and every live query over it answer two separate questions:
+
+| Question | Where to look | Changes when |
+| --- | --- | --- |
+| Can this data be shown, or must the query restart? | `status`, `isReady`, `isError` | During the initial load of a sync run, or when a Collection crashes |
+| Is this data still kept up to date? | `errors` (the error tree) | When a sync adapter reports a problem or recovers, or a request for more data fails |
 
 ```tsx
 import { useLiveQuery } from "@tanstack/react-db"
 
 const TodoList = () => {
-  const { data, status, isError, isLoading, isReady } = useLiveQuery(
-    (query) => query.from({ todos: todoCollection })
+  const { data, isError, isLoading, errors } = useLiveQuery((query) =>
+    query.from({ todos: todoCollection })
   )
 
-  if (isError) {
-    return <div>Collection is in error state</div>
-  }
+  if (isLoading) return <div>Loading...</div>
+  if (isError) return <div>Todos failed to load</div>
 
-  if (isLoading) {
-    return <div>Loading...</div>
-  }
-
-  return <div>{data?.map(todo => <div key={todo.id}>{todo.text}</div>)}</div>
+  return (
+    <>
+      {errors?.hasErrors && <div>Todos may be out of date.</div>}
+      {data.map((todo) => (
+        <div key={todo.id}>{todo.text}</div>
+      ))}
+    </>
+  )
 }
 ```
 
 Collection status values:
 - `idle` - Not yet started
 - `loading` - Loading initial data
-- `initialCommit` - Processing initial data
 - `ready` - Ready for use
-- `error` - In error state
-- `cleaned-up` - Cleaned up and no longer usable
+- `error` - The sync run failed; only a restart recovers
+- `cleaned-up` - Cleaned up; a new preload or subscriber restarts it
+
+### The initial load
+
+Until a Collection has its first usable snapshot, its status is `loading`.
+While its sync adapter retries, it stays `loading`. When the sync adapter gives
+up, the status becomes `error`, readiness waits such as `preload()` reject with
+the original cause, and every live query and Effect that depends on the
+Collection fails too.
+
+An initial error is final for its sync run. TanStack DB does not retry it, and
+a later successful sync does not move the Collection back to `ready`. To try
+again, restart the query:
+
+```ts
+await todosQuery.cleanup()
+await todosQuery.preload()
+```
+
+### After the first ready
+
+Once the data has loaded, it stays. When the sync adapter later loses its
+connection or a refresh fails, `status` stays `ready` and the rows stay, even
+as they grow stale. The problem appears in `errors` and in
+`collection.health` instead. The sync adapter clears it when sync works again,
+unless the error is final: a final error means the sync adapter stopped
+trying, and only a restart clears it.
+
+> **Important:** `isError` does not report these problems. To show a "this data
+> may be out of date" banner, check `errors.hasErrors`.
+
+### When a Collection crashes
+
+A few failures leave a Collection unable to serve reads or accept writes: a
+closed IndexedDB connection, a failed write to local SQLite persistence, or an
+internal invariant failure. The Collection then moves to `error` even after it
+was ready, and so does every live query and Effect above it. These failures are
+rare, and they mean storage is broken. Recover the same way as from an initial
+error: clean up and restart.
+
+### The error tree
+
+Every live query result includes `errors`. It has the same shape for a given
+query: one node for the live query and one node for each source alias, in query
+order. Healthy nodes are present too, with `isError: false`. A disabled query
+has no query definition, so its `errors` is `undefined`.
+
+```ts
+type ErrorTreeNode = {
+  alias: string // the query alias, or "root"
+  collectionId: string
+  kind: "source" | "live-query" | "include"
+  status: CollectionStatus
+  isError: boolean // this node has a problem now
+  hasErrors: boolean // this node or any node below it
+  error: CollectionErrorInfo | null
+  instances?: { total: number; inError: number } // include nodes only
+  sources: Array<ErrorTreeNode>
+}
+
+type CollectionErrorInfo = {
+  phase: "initial" | "sync" | "request"
+  final: boolean // the sync adapter stopped trying; only a restart clears it
+  name: string
+  message: string
+  code?: string
+  at: number // epoch milliseconds
+  cause: unknown // the original value; omitted from JSON
+}
+```
+
+The phases:
+
+- `initial`: the Collection's sync run failed, by an initial error or a crash.
+  Its `status` is `error`.
+- `sync`: the sync adapter reported a problem after the Collection was ready.
+- `request`: a request for more data, such as the next page or a newly
+  joined row, failed after the query was ready. The source Collection stays
+  healthy. The error clears when that data loads, or when the query stops
+  needing it.
+
+A Collection used twice in one query, for example in a self-join, has one node
+per alias. An include has one node for all of its per-row child Collections,
+with `instances` counting how many are in error. A nested live query's node
+carries its own sources.
+
+The tree keeps its object identity until something in it changes, so you can
+pass it to `useMemo` or compare it with `===`. Apart from `cause`, it is plain
+data that you can log or send:
+
+```ts
+useEffect(() => {
+  if (errors?.hasErrors) reportToMonitoring(JSON.parse(JSON.stringify(errors)))
+}, [errors])
+```
+
+Server-side rendering does not transfer `errors`; the client builds its own
+tree from its own sync.
+
+### Effects
+
+An Effect follows the same rules. A source that fails its initial load, or
+that crashes, disposes the Effect through `onSourceError`. Any other problem
+after the Effect's initial load does not dispose it. Subscribe to it instead:
+
+```ts
+createEffect({
+  query: (q) => q.from({ order: orders }),
+  onBatch: (events) => {
+    /* ... */
+  },
+  onHealthChange: (errors) => {
+    if (errors.hasErrors) pauseAutomations()
+    else resumeAutomations()
+  },
+})
+```
 
 ### Using Suspense and Error Boundaries (React)
 
@@ -223,13 +345,19 @@ import { Suspense } from "react"
 import { ErrorBoundary } from "react-error-boundary"
 
 const TodoList = () => {
-  // No need to check status - Suspense and ErrorBoundary handle it
-  const { data } = useLiveSuspenseQuery(
-    (query) => query.from({ todos: todoCollection })
+  const { data, errors } = useLiveSuspenseQuery((query) =>
+    query.from({ todos: todoCollection })
   )
 
   // data is always defined here
-  return <div>{data.map(todo => <div key={todo.id}>{todo.text}</div>)}</div>
+  return (
+    <>
+      {errors?.hasErrors && <div>Todos may be out of date.</div>}
+      {data.map((todo) => (
+        <div key={todo.id}>{todo.text}</div>
+      ))}
+    </>
+  )
 }
 
 const App = () => (
@@ -241,7 +369,10 @@ const App = () => (
 )
 ```
 
-With this approach, loading states are handled by `<Suspense>` and error states are handled by `<ErrorBoundary>` instead of within your component logic. See the [React Suspense section in Live Queries](./live-queries#using-with-react-suspense) for more details.
+`<Suspense>` handles the initial load and `<ErrorBoundary>` handles an initial
+error. After the first render, the hook does not throw, as in TanStack Query:
+problems appear in `errors`, and a crash sets `isError` while the last data
+stays on screen. See the [React Suspense section in Live Queries](./live-queries#using-with-react-suspense) for more details.
 
 When every eager SQLite persisted source opts in, a failed client query stream can produce a different initial result. React waits for every persisted restore. If each restore succeeds, React renders the query result. A derived-query failure still reaches the Error Boundary. See [Render after SQLite restore](./sqlite-persistence.md#render-after-sqlite-restore) for the option and its limits.
 
@@ -358,7 +489,7 @@ and the transaction remains completed. This is not a persistence failure.
 
 ### Invalid Collection State
 
-Collections in an `error` state cannot perform operations and must be manually recovered:
+Collections in an `error` state, after an initial error or a crash, cannot perform operations and must be restarted:
 
 ```ts
 import { CollectionInErrorStateError } from "@tanstack/db"
@@ -529,9 +660,9 @@ When sync errors occur:
 - Error is logged to console: `[QueryCollection] Error observing query...`
 - An initial failure marks the collection as `error` because no usable snapshot exists
 - Readiness waits such as `preload()` and `toArrayWhenReady()` reject with the cause passed to `markError(error)` while the collection is in that initial error state
-- A later refetch failure keeps the collection `ready` and preserves its cached data
-- Error tracking counters are updated (`lastError`, `errorCount`)
-- A later successful refetch recovers an initial `error` collection to `ready`; a new readiness wait then resolves normally
+- A later refetch failure keeps the collection `ready` and preserves its cached data, and reports a health error that is not final, because TanStack Query fetches again
+- Error tracking counters are updated (`lastError`, `errorCount`); after the collection is ready, `collection.health` and the `errors` tree mirror `lastError`
+- A later successful refetch clears `lastError` and the health error, but it does not move an initial `error` collection back to `ready`; restart it with `cleanup()` and `preload()`
 
 ### Sync Write Errors
 
@@ -630,20 +761,27 @@ Cleanup also disposes dependent Effects; recreate them after the source restarts
 
 ### Graceful Degradation
 
-Collections continue to work with cached data even when sync fails:
+After the first ready, Collections keep working with their rows when sync
+fails. The error tree tells you which source has the problem and whether its
+sync adapter is still trying:
 
 ```tsx
 const TodoApp = () => {
-  const { data, isError } = useLiveQuery((query) => 
+  const { data, errors } = useLiveQuery((query) =>
     query.from({ todos: todoCollection })
   )
+  const todosError = errors?.sources[0]?.error
 
   return (
     <div>
-      {isError && (
-        <div>Sync failed, but you can still view cached data</div>
+      {todosError && (
+        <div>
+          {todosError.final
+            ? "Sync stopped. Reload to try again."
+            : "Reconnecting. Showing saved data."}
+        </div>
       )}
-      {data?.map(todo => <TodoItem key={todo.id} todo={todo} />)}
+      {data.map((todo) => <TodoItem key={todo.id} todo={todo} />)}
     </div>
   )
 }
@@ -814,7 +952,7 @@ Thrown when calling `commit()` on a sync transaction that's already committed.
 
 2. **Import specific error types** - Import only the error classes you need for better tree-shaking
 3. **Always handle SchemaValidationError** - Provide clear feedback for validation failures
-4. **Check collection status** - Use `isError`, `isLoading`, `isReady` flags in React components
+4. **Check both axes** - Use `isLoading` and `isError` for whether data can be shown, and `errors.hasErrors` for whether it may be stale
 5. **Handle transaction promises** - Always handle `when('settled')` rejections
 
 ## Example: Complete Error Handling
@@ -864,7 +1002,7 @@ const todosQuery = createLiveQueryCollection((query) =>
 )
 
 const TodoApp = () => {
-  const { data, isError, isLoading } = useLiveQuery(todosQuery)
+  const { data, isError, isLoading, errors } = useLiveQuery(todosQuery)
 
   const handleAddTodo = async (text: string) => {
     try {
@@ -900,7 +1038,7 @@ const TodoApp = () => {
   if (isError) {
     return (
       <div>
-        <div>Collection error - data may be stale</div>
+        <div>Todos could not load</div>
         <button onClick={handleRestart}>Restart Collections</button>
       </div>
     )
@@ -912,10 +1050,11 @@ const TodoApp = () => {
 
   return (
     <div>
+      {errors?.hasErrors && <div>Todos may be out of date</div>}
       <button onClick={() => handleAddTodo("New todo")}>
         Add Todo
       </button>
-      {data?.map(todo => (
+      {data.map((todo) => (
         <div key={todo.id}>{todo.text}</div>
       ))}
     </div>

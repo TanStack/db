@@ -356,7 +356,9 @@ The Node package prunes its applied transaction log by default. Its [README](htt
 
 ## Errors and limits
 
-An unavailable browser storage capability raises `PersistenceUnavailableError`. A durable write failure raises `PersistedCollectionDurabilityError` and puts the Collection in its error state.
+An unavailable browser storage capability raises `PersistenceUnavailableError`. A durable write failure raises `PersistedCollectionDurabilityError` and crashes the Collection: it moves to its error state even after it was ready, and every live query and Effect over it fails too. Restart it with `cleanup()` and `preload()`.
+
+Failures from the wrapped sync adapter keep their usual meaning. Before the Collection is ready, the adapter's `markError` fails the sync run. After it, the adapter's `reportError` and `reportHealthy` appear in `collection.health` and in each live query's `errors` tree, and the persisted rows stay. In a follower tab, a failed request routed to the leader appears as a request error on the query that asked for the data.
 
 If a coordinated write loses its response, the result can be uncertain. `IndeterminateCommitError` means the application must check the durable state before it retries that write.
 

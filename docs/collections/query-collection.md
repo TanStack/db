@@ -685,6 +685,14 @@ The collection provides these utility methods via `collection.utils`:
 - `clearError()`: Refetch with errors enabled; retain the recorded error until a successful result applies to the Collection
   - Uses the same phase-dependent boundary as `refetch()`. During a mutation handler, the promise can resolve at the fetch boundary before the result applies and clears the error.
 
+`utils.lastError`, `utils.isError`, and `utils.errorCount` cover every Query the
+Collection observes. After the Collection is ready, `collection.health` and each
+live query's `errors` tree mirror them: a failed fetch or result application is
+a health error that is not final, because TanStack Query fetches again, and the
+next successful application clears both. A successful refetch does not move a
+Collection whose initial load failed back to `ready`; restart it with
+`cleanup()` and `preload()`.
+
 ## Direct Writes
 
 Direct writes are intended for scenarios where the normal query/mutation flow doesn't fit your needs. They write directly to the synced data store and bypass the optimistic update system. Their Query cache behavior depends on the collection's sync mode.

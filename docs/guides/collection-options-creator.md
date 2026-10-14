@@ -147,9 +147,8 @@ const sync: SyncConfig<T>['sync'] = (params) => {
     } catch (error) {
       if (initialSyncAbort.signal.aborted) return
       console.error('Initial sync failed:', error)
-      // No usable initial snapshot exists.
-      // Only initial startup owns collection readiness. A later refetch
-      // failure must keep the last ready snapshot usable.
+      // No usable initial snapshot exists, and this example does not retry.
+      // After readiness, report failures with reportError() instead.
       if (collection.status === 'loading') markError(error)
     }
   }
@@ -174,8 +173,56 @@ The sync process follows this lifecycle:
 1. **begin()** - Start collecting changes
 2. **write()** - Add changes to the pending transaction (buffered until commit)
 3. **commit()** - Apply all changes atomically to the collection state
-4. **markReady()** - Signal that a usable initial or recovered snapshot exists
-5. **markError(error?)** - Signal that initial sync failed before producing a usable snapshot; pass the cause so readiness waits reject with it
+4. **markReady()** - Signal that a usable initial snapshot exists
+5. **markError(error?)** - Signal that you gave up on the initial sync before producing a usable snapshot; pass the cause so readiness waits reject with it. It is final for the sync run: `markReady()` afterward throws, and only a restart starts over
+6. **reportError(error, { final })** - After the Collection is ready, report a sync problem without changing its status or rows. Pass `final: true` when you stop trying; only a restart clears a final error
+7. **reportHealthy()** - After the Collection is ready, report that sync works again. It clears an error that is not final
+
+### Reporting failures
+
+Users see two separate signals: whether data can be shown, and whether it is
+still kept up to date. Follow these rules so both stay truthful:
+
+1. While you retry the initial sync, call nothing. The Collection stays
+   `loading`.
+2. Call `markError(error)` only when you give up before the first
+   `markReady()`. Do not call `markReady()` after it.
+3. After the first `markReady()`, call `reportError(error, { final })` for
+   problems and `reportHealthy()` when sync works again. Never discard rows
+   because sync failed.
+4. Stay silent while a retry is in progress, and report `final: true` only
+   when you stop for good.
+
+```ts
+sync: ({ begin, write, commit, markReady, markError, reportError, reportHealthy }) => {
+  let ready = false
+  const stream = connect({
+    onData: (rows) => {
+      begin()
+      rows.forEach((row) => write({ type: "insert", value: row }))
+      commit()
+      if (!ready) {
+        markReady()
+        ready = true
+      } else {
+        reportHealthy()
+      }
+    },
+    onError: (error, { willRetry }) => {
+      if (!ready) {
+        if (!willRetry) markError(error)
+      } else {
+        reportError(error, { final: !willRetry })
+      }
+    },
+  })
+  return () => stream.close()
+}
+```
+
+Calling `markError(error)` after the first `markReady()` still works while you
+migrate: it is treated as `reportError(error, { final: true })` and logs a
+development warning.
 
 `commit()` accepts the transaction and returns `true`. An accepted transaction
 always applies, in commit order. While an optimistic transaction is persisting,
@@ -983,8 +1030,8 @@ const collection = createCollection(
 
 ## Best Practices
 
-1. **Report initial sync status** - Call `markReady()` after a usable snapshot, or `markError(error)` if initial sync fails
-2. **Recover explicitly** - After an error, call `markReady()` only when a later sync has produced a usable snapshot
+1. **Report initial sync status** - Call `markReady()` after a usable snapshot, or `markError(error)` when you give up on the initial sync
+2. **Report health after readiness** - Use `reportError()` and `reportHealthy()` once the Collection is ready; recovery from an initial error is a restart, not a later `markReady()`
 3. **Clean up resources** - Return a cleanup function from sync to prevent memory leaks
 4. **Batch operations** - Use begin/commit to batch multiple changes for better performance
 5. **Race Conditions** - Start listeners before initial fetch and buffer events

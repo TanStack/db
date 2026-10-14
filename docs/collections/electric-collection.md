@@ -407,9 +407,16 @@ rather than when its durable-cache notification arrives. Outside scoped
 recovery, coordinator invalidation retains its normal behavior.
 
 An eager or progressive resume cannot apply a partial update to an unknown row.
-The adapter rejects that batch, enters an error state, and records a reset so the
-next sync starts from a full snapshot. This does not silently retry the failed
-stream. Complete updates from an explicit `replica: 'full'` stream remain valid.
+The adapter rejects that batch, stops the stream, and records a reset so the
+next sync starts from a full snapshot. Before the Collection is ready, this is
+an initial error; after it, the rows stay and the Collection reports a final
+health error in `collection.health` and in each live query's `errors` tree.
+This does not silently retry the failed stream; a restart refetches.
+
+While the Electric stream retries a failed request, the Collection reports
+nothing: it stays `loading` before its first up-to-date, and keeps its health
+afterward. When the stream gives up, the failure is final: an initial error
+before readiness, or a final health error after it. Complete updates from an explicit `replica: 'full'` stream remain valid.
 On-demand streams can observe updates outside their loaded subsets; unknown
 partial rows are ignored, while transaction acknowledgement evidence is retained.
 Outside scoped recovery, complete rows published by persistence reloads or
