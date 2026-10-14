@@ -162,13 +162,12 @@ delete, and move parents, insert and delete children, and move the window, with
 executed fixed cases for each premise, and every checkpoint asserts
 `getWindow()`. A `findOne` keeps its compiled limit (1, or 0 for
 `.limit(0).findOne()`); an ordered `findOne` has a movable window, and an
-unordered one is a fixed one-row result that `setWindow` cannot move. Rows must equal
+unordered one is a fixed one-row result that accepts only its compiled limit
+at offset 0. Rows must equal
 a relational model. Preload may load only the children of the shown rows'
 groups, and a step only those of rows that entered the window and were not
 shown before it. A static filter creates static child demand before the
-window runs only when no enclosing query has a window, the window at start, if
-one was requested before start, has offset 0, and either the query has no window or it is a `findOne` that
-shows one row, with no `offset`, for one named correlation value. Pinned witnesses show each case
+query runs only when no enclosing query is windowed or a `findOne`, and either the query is neither windowed nor a `findOne`, or it is a `findOne` that shows one row for one named correlation value, with no `offset`, and offset 0 at start if a window was requested before start. Pinned witnesses show each case
 the rule closes: a window requested before start (12 child rows for a bound of
 2 before the rule), grandchild demand below a windowed parent, a `findOne` with
 `limit(0)`, and a `findOne` moved past its one named value before start; a

@@ -926,7 +926,7 @@
   },
   "243": {
     "file": "query/compiler/index.ts",
-    "template": "An ordered window row has no include route",
-    "literals": ["An ordered window row has no include route"]
+    "template": "A windowed or findOne result row has no include route",
+    "literals": ["A windowed or findOne result row has no include route"]
   }
 }

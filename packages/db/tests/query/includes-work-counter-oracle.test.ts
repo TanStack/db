@@ -616,15 +616,17 @@ describe(`includes deterministic work-counter oracle`, () => {
  * child's own `orderBy` or `limit` must not take it over.
  *
  * A static parent filter (`eq` or `inArray` on the correlation field) may
- * create child demand before the window runs only when no window can drop the
- * rows it names: no enclosing query has a window, the window at start, if one
- * was requested before start, has offset 0, and either the query has no window or it is a
- * `findOne` that shows one row, with no `offset`, for one named correlation
- * value. Any other window can drop them, including one `setWindow` requests
- * later, so the static demand must wait for the window. A `findOne` window
- * keeps its compiled limit (1, or 0 for `.limit(0).findOne()`): `setWindow`
- * throws `SetWindowFindOneLimitError` for any other limit. A window is an
- * ordered view, so only an ordered `findOne` may move its offset.
+ * create child demand before the query runs only when no top-K can drop the
+ * rows it names: no enclosing query is windowed or a `findOne`, and either the
+ * query is neither windowed nor a `findOne`, or it is a `findOne` that shows
+ * one row for one named correlation value, with no `offset`, and offset 0 at
+ * start if a window was requested before start. Any other window or `findOne`
+ * can drop them, including a window `setWindow` requests later, so the static
+ * demand must wait for the rows it shows. A `findOne` keeps its compiled limit
+ * (1, or 0 for `.limit(0).findOne()`): `setWindow` throws
+ * `SetWindowFindOneLimitError` for any other limit. A window is an ordered
+ * view, so only an ordered `findOne` has a movable window; an unordered one
+ * accepts only its compiled limit at offset 0.
  *
  * ## Model
  *
@@ -2001,7 +2003,7 @@ describe(`static include demand and setWindow ownership`, () => {
   // A findOne keeps its compiled limit, and setWindow throws for any other
   // limit. An ordered findOne has a movable window; an unordered one is a
   // fixed one-row result that rejects offset moves.
-  it(`keeps a findOne's compiled window limit and moves only an ordered findOne`, async () => {
+  it(`keeps a findOne's compiled limit and moves only an ordered findOne`, async () => {
     const rows = createSourceCollection(
       `find-one-window-rows`,
       Array.from({ length: 4 }, (_, rank) => ({ id: `row-${rank}`, rank })),

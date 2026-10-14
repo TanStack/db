@@ -398,8 +398,8 @@ type CompileQueryArgs = [
   queryMapping?: QueryMapping,
   parentKeyStream?: KeyedStream,
   childCorrelationField?: PropRef,
-  // An enclosing query has a window that can drop this include's parents.
-  ancestorHasWindow?: boolean,
+  // An enclosing windowed query or findOne can drop this include's parents.
+  ancestorHasTopK?: boolean,
 ]
 
 export function compileQuery(...args: CompileQueryArgs): CompilationResult {
@@ -420,7 +420,7 @@ function compileQueryInternal(
     queryMapping = new WeakMap(),
     parentKeyStream,
     childCorrelationField,
-    ancestorHasWindow = false,
+    ancestorHasTopK = false,
   ]: CompileQueryArgs,
   scopeValidated: boolean,
 ): CompilationResult {
@@ -723,10 +723,10 @@ function compileQueryInternal(
   }
   const selectHasAggregates =
     query.select !== undefined && containsAggregate(query.select)
-  // A windowed query's includes compile after its window and route only from
-  // the rows it shows (law 12); every other include compiles here.
+  // A windowed query's or a findOne's includes compile after its top-K and
+  // route only from the rows it shows (law 12); others compile here.
   const hasOrderBy = (query.orderBy?.length ?? 0) > 0
-  const parentHasWindow = hasOrderBy || !!query.singleResult
+  const parentHasTopK = hasOrderBy || !!query.singleResult
   const deferredIncludes: Array<(windowRows: WindowRows) => void> = []
   if (query.select) {
     const includesEntries = extractIncludesFromSelect(query.select)
@@ -767,8 +767,8 @@ function compileQueryInternal(
             : null,
       }))
       const compileInclude = (windowRows?: WindowRows) => {
-        // A window row carries the route its select tagged; reading it keeps
-        // the window's routes identical to the rows it publishes.
+        // A top-K result row carries the route its select tagged; reading it
+        // keeps the routes identical to the rows the query publishes.
         const routes = windowRows
           ? windowRows.pipe(map(([, [row]]) => windowRoute(row, fieldName)))
           : pipeline.pipe(map(([, row]) => getRouting(row)))
@@ -821,15 +821,15 @@ function compileQueryInternal(
             }
           }
 
-          // Static demand starts at once only when no window here or in an
-          // enclosing query can drop the rows it names: no window, or a
-          // findOne showing one row for one named correlation value.
+          // Static demand starts at once only when no top-K here or in an
+          // enclosing query can drop the rows it names: no window and no
+          // findOne, or a findOne showing one row for one named value.
           const staticKeys = getStaticDemandKeys(
             rawQuery,
             subquery.correlationField,
           )
           const initialKeys =
-            !ancestorHasWindow &&
+            !ancestorHasTopK &&
             (!windowRows ||
               (query.singleResult &&
                 query.offset === undefined &&
@@ -904,7 +904,7 @@ function compileQueryInternal(
             queryMapping,
             parentKeys,
             subquery.childCorrelationField,
-            ancestorHasWindow || parentHasWindow,
+            ancestorHasTopK || parentHasTopK,
           ],
           true,
         )
@@ -929,7 +929,7 @@ function compileQueryInternal(
           scalarField: subquery.scalarField,
         })
       }
-      if (parentHasWindow) deferredIncludes.push(compileInclude)
+      if (parentHasTopK) deferredIncludes.push(compileInclude)
       else compileInclude()
 
       includesRoutingFns.push({ fieldName, getRouting })
@@ -937,11 +937,7 @@ function compileQueryInternal(
       // Replace includes entry in select with a null placeholder
       query = {
         ...query,
-        select: replaceIncludesInSelectValue(
-          query.select!,
-          path,
-          new ValClass(null),
-        ).value,
+        select: replaceIncludesInSelectValue(query.select!, path).value,
       }
     }
   }
@@ -2434,20 +2430,21 @@ function assertNoNestedIncludes(
 }
 
 /**
- * Replaces an IncludesSubquery entry in the select object with a null Value placeholder.
- * This ensures processSelect() doesn't encounter it.
+ * Replaces the IncludesSubquery at `path` inside a select value, through
+ * nested objects and conditional branches, with a null Value placeholder, so
+ * processSelect() never sees it. Returns the new value and whether anything
+ * was replaced, so each level rebuilds only the objects that changed.
  */
 function replaceIncludesInSelectValue(
   value: any,
   path: Array<string>,
-  replacement: ValClass,
 ): { value: any; replaced: boolean } {
   if (path.length === 0 && value instanceof IncludesSubquery) {
-    return { value: replacement, replaced: true }
+    return { value: new ValClass(null), replaced: true }
   }
 
   if (value instanceof ConditionalSelect) {
-    return replaceIncludesInConditionalSelect(value, path, replacement)
+    return replaceIncludesInConditionalSelect(value, path)
   }
 
   if (path.length === 0 || !isNestedSelectObject(value)) {
@@ -2455,7 +2452,7 @@ function replaceIncludesInSelectValue(
   }
 
   const [head, ...rest] = path
-  const result = replaceIncludesInSelectValue(value[head!], rest, replacement)
+  const result = replaceIncludesInSelectValue(value[head!], rest)
   if (!result.replaced) {
     return { value, replaced: false }
   }
@@ -2471,11 +2468,10 @@ function replaceIncludesInSelectValue(
 function replaceIncludesInConditionalSelect(
   conditional: ConditionalSelect,
   path: Array<string>,
-  replacement: ValClass,
 ): { value: ConditionalSelect; replaced: boolean } {
   let replaced = false
   const branches = conditional.branches.map((branch) => {
-    const result = replaceIncludesInSelectValue(branch.value, path, replacement)
+    const result = replaceIncludesInSelectValue(branch.value, path)
     if (!result.replaced) {
       return branch
     }
@@ -2485,11 +2481,7 @@ function replaceIncludesInConditionalSelect(
 
   let defaultValue = conditional.defaultValue
   if (conditional.defaultValue !== undefined) {
-    const result = replaceIncludesInSelectValue(
-      conditional.defaultValue,
-      path,
-      replacement,
-    )
+    const result = replaceIncludesInSelectValue(conditional.defaultValue, path)
     if (result.replaced) {
       replaced = true
       defaultValue = result.value
@@ -2528,7 +2520,7 @@ type IncludeRouting = {
 /** Only the query's own top-K answers setWindow; subqueries never do. */
 const ignoreWindow = () => {}
 
-/** Rows an ordered window shows, with their fractional order index. */
+/** Rows a windowed query or a findOne shows, with their fractional index. */
 type WindowRows = IStreamBuilder<KeyValue<unknown, [NamespacedRow, string]>>
 
 /** The include route a compiled value's routing tag holds for one field. */
@@ -2542,13 +2534,13 @@ function readRouteTag(
   return tag?.[fieldName]
 }
 
-/** The route a window row's select tagged; a missing tag is an invariant. */
+/** The route a top-K result row's select tagged; a missing tag is an invariant. */
 function windowRoute(row: NamespacedRow, fieldName: string): IncludeRouting {
   const routing = readRouteTag(row.$selected, fieldName)
   if (!routing)
     throw new Error(
       devBuild() && process.env.NODE_ENV !== `production`
-        ? `An ordered window row has no include route`
+        ? `A windowed or findOne result row has no include route`
         : codedMessage(243),
     )
   return routing

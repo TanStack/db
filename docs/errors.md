@@ -2467,5 +2467,5 @@ LocalStorage sync belongs to its options Collection.
 Development builds show this message, with `${...}` replaced by values:
 
 ```text
-An ordered window row has no include route
+A windowed or findOne result row has no include route
 ```
