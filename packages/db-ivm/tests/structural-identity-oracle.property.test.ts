@@ -25,22 +25,21 @@ import {
  * `deep` and explicit one-element `array` nodes denote the same nested arrays.
  * Symbol leaf indices denote stable symbol instances, not their descriptions.
  * Distinct RegExp objects whose lastIndex is NaN compare unequal because D2
- * compares headers with ===. The model shares no code with the hashing module; a sanity check also
- * compares it with `equalHashValues`.
+ * compares headers with ===. The model shares no code with the hashing module;
+ * a sanity check also compares it with `equalHashValues`.
  *
- * Histories: pairs built from one spec, once directly and once with
- * representations D2 identity ignores (an array subclass for an array, a
- * class instance or null-prototype object for a plain object, reversed key
- * order, a non-enumerable symbol), and pairs built from two specs. Strings
- * and keys include every separator the identity uses and digits, so an
- * encoding that loses where one part ends fails law 2. Values include
- * distinct symbols with the same description, enumerable symbol keys, Dates
- * (also invalid), RegExps, Maps, Sets, small
+ * Histories: equal pairs use one comparable spec or two spellings of the same
+ * nested arrays. Their builds vary array subclasses, object prototypes, key order,
+ * and non-enumerable symbols; D2 identity ignores those differences.
+ * Independent pairs use two specs. Strings and keys include every separator
+ * the identity uses and digits, so an encoding that loses where one part
+ * ends fails law 2. Values include distinct symbols with the same description,
+ * enumerable symbol keys, Dates (also invalid), RegExps, Maps, Sets, small
  * binary values, holes, and nesting deeper than the identity's depth cap.
- * Pinned pairs cover joins a random short string cannot build, distinct symbols
- * with the same description, and different object kinds with the same body.
- * The depth cap bounds work and recursion, including on a cyclic value; it does not
- * decide equality, so raising it changes no law here.
+ * Pinned pairs cover joins a random short string cannot build, distinct
+ * symbols with the same description, and different object kinds with the same
+ * body. The depth cap bounds work and recursion, including on a cyclic value;
+ * it does not decide equality, so raising it changes no law here.
  * Both generated pair grammars run fixed and fresh-seed campaigns. A replay
  * seed and path select the requested property without running the fixed one.
  */
@@ -140,6 +139,42 @@ const specArbitrary = fc.letrec<{ spec: Spec }>((tie) => ({
     }),
   ),
 })).spec
+
+// Distinct RegExp instances with a NaN lastIndex are not equal, even when
+// built from one spec. This grammar check does not consult the normal-form
+// model; the independent-pair grammar still generates those RegExps.
+function containsNaNRegExp(spec: Spec): boolean {
+  switch (spec.k) {
+    case `regexp`:
+      return Number.isNaN(spec.lastIndex)
+    case `array`:
+      return spec.items.some((item) => item !== null && containsNaNRegExp(item))
+    case `object`:
+      return (
+        spec.entries.some(([, value]) => containsNaNRegExp(value)) ||
+        (spec.symbol !== undefined && containsNaNRegExp(spec.symbol))
+      )
+    case `map`:
+    case `set`:
+    case `deep`:
+      return containsNaNRegExp(spec.v)
+    default:
+      return false
+  }
+}
+const comparableSpecArbitrary = specArbitrary.filter(
+  (spec) => !containsNaNRegExp(spec),
+)
+
+const equalSpecPairArbitrary = fc.oneof(
+  comparableSpecArbitrary.map((spec): [Spec, Spec] => [spec, spec]),
+  fc
+    .tuple(comparableSpecArbitrary, fc.integer({ min: 3, max: 5 }))
+    .map(([spec, depth]): [Spec, Spec] => [
+      { k: `array`, items: [{ k: `deep`, depth, v: spec }] },
+      { k: `deep`, depth: depth + 1, v: spec },
+    ]),
+)
 
 /** Build a value; `vary` picks representations that D2 identity ignores. */
 function build(spec: Spec, vary: () => boolean): unknown {
@@ -323,16 +358,16 @@ describe(`structuralIdentity`, () => {
       return
     // The guarded replay records completed runs through an async reporter.
     const property = fc.asyncProperty(
-      specArbitrary,
+      equalSpecPairArbitrary,
       fc.array(fc.boolean(), { minLength: 64, maxLength: 64 }),
-      (spec, coins) => {
+      ([leftSpec, rightSpec], coins) => {
         let index = 0
         const vary = () => coins[index++ % coins.length]!
         expectAgreement(
-          spec,
-          spec,
-          build(spec, () => false),
-          build(spec, vary),
+          leftSpec,
+          rightSpec,
+          build(leftSpec, () => false),
+          build(rightSpec, vary),
         )
         return Promise.resolve()
       },
