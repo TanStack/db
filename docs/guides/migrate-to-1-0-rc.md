@@ -17,8 +17,8 @@ npm install @tanstack/react-db@rc @tanstack/electric-db-collection@rc
 ```
 
 The first candidate is `1.0.0-rc.1`. `@tanstack/query-db-collection` and
-`@tanstack/offline-transactions` are already stable 1.x packages; keep them on
-their 1.x releases rather than changing them to an RC version.
+`@tanstack/offline-transactions` were both accidentally released as 1.0 before
+the RC. Keep them on their existing 1.x versions.
 
 ## Replace `$synced` with `$hasPendingWrites`
 
