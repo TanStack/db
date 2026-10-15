@@ -7346,28 +7346,32 @@ describe(`loadSubset lifecycle oracle`, () => {
    * still owns the Query: A's caller rejects only after that receipt applies,
    * with A public at the exact rejection checkpoint. B remains unaccepted.
    *
-   * These two legal histories use a real QueryClient and direct loadSubset
-   * caller. One writes B into Query cache synchronously inside A's commit
-   * callback and aborts there. The other releases and reacquires a public
-   * subscriber after A is accepted, causing Query DB to replay the same A
-   * result while its first commit is held. A wrapping sync records A's real
+   * These legal histories use a real QueryClient and direct loadSubset caller.
+   * One writes B into Query cache synchronously inside A's commit callback
+   * and aborts its caller. A neighboring history
+   * starts A by explicit refetch of an existing Query, where Query Core can
+   * return B's result object even though A supplied the physical response.
+   * Another releases and reacquires a public subscriber after A is accepted,
+   * causing Query DB to replay the same A result. A wrapping sync records A's real
    * receipt and holds the later commit before forwarding it to Collection
    * core. The caller's outcome, receipt state, and complete public rows are
    * captured together when its promise settles. The controlled wrapper does
    * not establish native persistence or arbitrary Query-cache scheduling.
    */
   it.each([
-    { trigger: `cache-write-before-waiter` },
-    { trigger: `same-result-replay` },
+    { trigger: `cache-write-before-waiter`, existingQuery: false },
+    { trigger: `same-result-replay`, existingQuery: false },
+    { trigger: `cache-write-before-waiter`, existingQuery: true },
   ] as const)(
-    `keeps an accepted receipt through $trigger`,
-    async ({ trigger }) => {
+    `keeps an accepted receipt through $trigger, existingQuery=$existingQuery`,
+    async ({ trigger, existingQuery }) => {
       const queryClient = createQueryClient()
       const id = `accepted-reentry-${trigger}-${collectionSequence++}`
       const providerAnswer = createDeferred<Array<Row>>()
       const mutationEntered = createDeferred<void>()
       const releaseMutation = createDeferred<void>()
       const acceptedA = createDeferred<void>()
+      let sourceResultArmed = !existingQuery
       const laterCommitEntered = createDeferred<void>()
       const releaseLaterCommit = createDeferred<void>()
       const caller = new AbortController()
@@ -7386,7 +7390,9 @@ describe(`loadSubset lifecycle oracle`, () => {
         queryKey: [id],
         queryFn: () => {
           providerCalls++
-          return providerAnswer.promise
+          return existingQuery && providerCalls === 1
+            ? Promise.resolve([{ id: `seed` }])
+            : providerAnswer.promise
         },
         getKey: (row) => row.id,
         startSync: true,
@@ -7434,8 +7440,11 @@ describe(`loadSubset lifecycle oracle`, () => {
                     },
                     () => undefined,
                   )
-                acceptedA.resolve()
-                if (trigger === `cache-write-before-waiter`) {
+                if (sourceResultArmed) acceptedA.resolve()
+                if (
+                  sourceResultArmed &&
+                  trigger === `cache-write-before-waiter`
+                ) {
                   queryClient.setQueryData([id], [{ id: `B` }])
                   caller.abort()
                 }
@@ -7447,9 +7456,27 @@ describe(`loadSubset lifecycle oracle`, () => {
       let passive = collection.subscribeChanges(() => {}, {
         includeInitialState: false,
       })
-      const request: LoadSubsetOptions = { signal: caller.signal }
+      const request: LoadSubsetOptions = {
+        signal: caller.signal,
+        ...(existingQuery ? { refetch: true } : {}),
+      }
 
       await checkPublicCleanupWitness(async () => {
+        if (existingQuery) {
+          let baselineLoad: true | Promise<void> | undefined
+          passive.requestSnapshot({
+            onLoadSubsetResult: (result) => {
+              baselineLoad = result
+            },
+          })
+          if (baselineLoad === undefined)
+            throw new Error(`The existing Query was not acquired`)
+          await Promise.resolve(baselineLoad)
+          expect(rows()).toEqual([`seed`])
+          sourceCommits = 0
+          receiptAApplied = false
+          sourceResultArmed = true
+        }
         const mutation = collection.insert({ id: `local` })
         await mutationEntered.promise
         const load = Promise.resolve(collection._sync.loadSubset(request))
@@ -7473,7 +7500,9 @@ describe(`loadSubset lifecycle oracle`, () => {
             void Promise.resolve(result).catch(() => undefined)
           },
         })
-        await vi.waitFor(() => expect(providerCalls).toBe(1))
+        await vi.waitFor(() =>
+          expect(providerCalls).toBe(existingQuery ? 2 : 1),
+        )
         providerAnswer.resolve([{ id: `A` }])
         await acceptedA.promise
         if (trigger === `same-result-replay`) {
@@ -7492,10 +7521,10 @@ describe(`loadSubset lifecycle oracle`, () => {
         } else {
           await laterCommitEntered.promise
         }
-        expect(providerCalls).toBe(1)
+        expect(providerCalls).toBe(existingQuery ? 2 : 1)
         expect(sourceCommits).toBe(2)
         expect(receiptAApplied).toBe(false)
-        expect(rows()).toEqual([`local`])
+        expect(rows()).toEqual(existingQuery ? [`local`, `seed`] : [`local`])
         await new Promise<void>((resolve) => setTimeout(resolve, 0))
         expect(outcome).toBeUndefined()
 

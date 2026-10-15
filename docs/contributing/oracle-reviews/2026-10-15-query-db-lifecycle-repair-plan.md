@@ -187,14 +187,22 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
           at B's promised load outcome. A distinct-Query version-key witness
           checks C's physical signal and B's public row after all three have
           promoted; replacing maximum call order with last array element
-          fails at C's signal checkpoint (2026-10-15).
-    - [x] Accepted-result supersession: three fixed histories hold A's accepted
+          fails at C's signal checkpoint. A direct release from the function-
+          built key callback during promotion failed on `0552b559e` at the
+          public-row checkpoint; a public subscription at the same cut checks
+          Core's deferred unload. Both paths now leave no Query observer or
+          source row (2026-10-15).
+    - [x] Accepted-result supersession: four fixed histories hold A's accepted
           receipt while distinct B or a replay of A enters an unaccepted
           commit. They record A's receipt and complete public rows inside the
           aborting caller's settlement handler. The prior latest-controller
-          lookup fails all three at the pre-application outcome checkpoint;
+          lookup fails the first three at the pre-application outcome checkpoint;
           overwriting A's controller on same-result replay fails that history
-          at the same checkpoint (2026-10-15).
+          at the same checkpoint. An existing-Query explicit refetch can return
+          B's later cache result object after A's callback; `0552b559e`
+          rejected its caller before A applied. The fourth history now checks
+          that A's fetch application remains the caller's receipt barrier
+          (2026-10-15).
   - [x] Request shape: signal-free and explicit-signal requests check the
         physical signal, own keys, descriptor, cloning, JSON, and deletion.
         The configurable-descriptor assertion failed before its repair.
@@ -237,7 +245,7 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
         load. The two primary oracles pass 522 tests, direct refetch replay and
         the 37-test replay manifest pass, and the safe model and eight hostile
         configurations reach their intended results (2026-10-15).
-  - [x] Package verification: all 959 Query DB runtime tests and 959 persisted
+  - [x] Package verification: all 962 Query DB runtime tests and 959 persisted
         oracle tests pass (one skipped, one todo). Query DB, DB, and persisted
         core TypeScript checks pass, as do affected-file lint (existing warnings
         only), formatting, and whitespace checks (2026-10-15). The package's
