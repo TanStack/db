@@ -221,12 +221,15 @@ fallback provider Promise after root 3's writes apply, then retarget marker 2
 to root 2 before settling it, with pending or settled child demand. They check
 both public cuts, final rows, and every callback, while allowing a coherent
 root-3 window to publish before the second marker change. These controlled
-histories do not assert synchronous timing after first publication. Other
-marker actions and overlapping root-source changes remain open. The held
-Promise has no later provider write or rejection, so it does not establish
-whether the ordered loader waits for provider settlement to claim full-source
-authority. Real adapter delivery and an on-demand React first commit need
-receiving witnesses.
+histories do not assert synchronous timing after first publication. Four
+neighboring histories retarget marker 2 to root 4 while that provider Promise
+is pending, then write root 4 only after releasing the Promise gate. The
+independent join model checks the final window and callbacks. The adapter
+observes that the cursor-page acquisition lease remains active while the
+full-source Promise is pending and retires after it settles; ignoring provider
+settlement fails at that held lease cut. Other marker actions, overlapping
+root-source changes, and provider rejection remain open. Real adapter delivery
+and an on-demand React first commit need receiving witnesses.
 
 Three Ordered acquisition companions own distinct controlled cuts:
 `packages/db/tests/query/load-subset-replay-refinement-oracle.test.ts` checks
