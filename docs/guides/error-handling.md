@@ -71,7 +71,12 @@ For more details on schema validation and type transformations, see the [Schemas
 
 ## Query Collection Error Tracking
 
-Query collections provide enhanced error tracking utilities through the `utils` object. These methods expose error state information and provide recovery mechanisms for failed queries:
+Query collections report failures through Collection health, like every other
+Collection. Before the first successful result, a failed query is an initial
+error: the status is `error`, and readiness waits reject with the cause. After
+it, a failed refetch or result application is a health error that is not
+final, because TanStack Query fetches again. The rows stay, and the next
+successful result clears the error:
 
 ```tsx
 import { createCollection } from "@tanstack/db"
@@ -81,26 +86,25 @@ import { useLiveQuery } from "@tanstack/react-db"
 const syncedCollection = createCollection(
   queryCollectionOptions({
     queryClient,
-    queryKey: ['synced-data'],
+    queryKey: ["synced-data"],
     queryFn: fetchData,
     getKey: (item) => item.id,
   })
 )
 
-// Component can check error state
 function DataList() {
-  const { data } = useLiveQuery({
-    query: (q) => q.from({ item: syncedCollection }),
-  })
-  const isError = syncedCollection.utils.isError
-  const errorCount = syncedCollection.utils.errorCount
-  
+  const { data, errors } = useLiveQuery((q) =>
+    q.from({ item: syncedCollection })
+  )
+
   return (
     <>
-      {isError && errorCount > 3 && (
+      {errors?.hasErrors && (
         <Alert>
           Unable to sync. Showing cached data.
-          <button onClick={() => syncedCollection.utils.clearError()}>
+          <button
+            onClick={() => syncedCollection.utils.refetch({ throwOnError: true })}
+          >
             Retry
           </button>
         </Alert>
@@ -111,17 +115,10 @@ function DataList() {
 }
 ```
 
-Error tracking methods:
-- **`lastError`**: Returns the most recent error encountered by the query, or `undefined` if no errors have occurred since a successful result applied:
-- **`isError`**: Returns a boolean indicating whether the collection is currently in an error state:
-- **`errorCount`**: Returns the number of consecutive sync failures. This counter is incremented only when queries fail completely (not per retry attempt) and is reset after a successful result applies:
-- **`clearError()`**: Triggers a refetch. The current error remains visible until a successful result applies to the Collection. An applied result clears `lastError` and resets `errorCount`; a failed retry records another consecutive failure and rejects the returned promise. During a mutation handler, the promise can resolve at the fetch boundary before application clears the error:
-
-  ```text
-  error visible → clearError() → retry pending, error still visible
-                                   ├─ applied success → error cleared
-                                   └─ failure → new error visible, count increased
-  ```
+`utils.refetch({ throwOnError: true })` retries and rejects when the retry
+fails. The error stays visible while the retry is pending. During a mutation
+handler, the promise can resolve at the fetch boundary before the result
+applies and clears the error.
 
 ## Incremental Subset Load Errors
 
@@ -661,8 +658,8 @@ When sync errors occur:
 - An initial failure marks the collection as `error` because no usable snapshot exists
 - Readiness waits such as `preload()` and `toArrayWhenReady()` reject with the cause passed to `markError(error)` while the collection is in that initial error state
 - A later refetch failure keeps the collection `ready` and preserves its cached data, and reports a health error that is not final, because TanStack Query fetches again
-- Error tracking counters are updated (`lastError`, `errorCount`); after the collection is ready, `collection.health` and the `errors` tree mirror `lastError`
-- A later successful refetch clears `lastError` and the health error, but it does not move an initial `error` collection back to `ready`; restart it with `cleanup()` and `preload()`
+- After the collection is ready, the failure appears in `collection.health` and the `errors` tree
+- A later successful refetch clears that health error, but it does not move an initial `error` collection back to `ready`; restart it with `cleanup()` and `preload()`
 
 ### Sync Write Errors
 

@@ -301,7 +301,8 @@ export interface QueryCollectionUtils<
   TItem extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TInsertInput extends object = TItem,
-  TError = unknown,
+  // Kept so existing four-argument references still type-check.
+  _TError = unknown,
 > {
   // Keep this interface closed: extending UtilsRecord would make every
   // nonexistent adapter utility appear as `any`.
@@ -320,16 +321,8 @@ export interface QueryCollectionUtils<
   /** Execute direct writes as one atomic batch. Resolves when the sync commit applies. */
   writeBatch: (callback: () => void) => Promise<void>
 
-  // Query Observer State (getters)
-  /** Get the last error encountered by the query (if any); reset after a successful result applies */
-  lastError: TError | undefined
-  /** Check if the collection is in an error state */
-  isError: boolean
-  /**
-   * Get the number of consecutive sync failures.
-   * Incremented only when query fails completely (not per retry attempt); reset after a successful result applies.
-   */
-  errorCount: number
+  // Query Observer State (getters). Failures appear in `collection.health`
+  // and each live query's `errors` tree.
   /** Check if query is currently fetching (initial or background) */
   isFetching: boolean
   /** Check if query is refetching in background (not initial fetch) */
@@ -344,24 +337,12 @@ export interface QueryCollectionUtils<
    * `idle` when every observer is idle or no observers exist.
    */
   fetchStatus: `fetching` | `paused` | `idle`
-
-  /**
-   * Refetch, retaining errors until a successful result applies. While a user
-   * mutation is persisting or its handler is active, this retains the Query
-   * fetch boundary so it cannot wait on publication blocked by that
-   * transaction.
-   * @returns Promise that resolves when the applicable refetch boundary completes
-   * @throws Error if the refetch fails
-   */
-  clearError: () => Promise<void>
 }
 
 /**
  * Internal state object for tracking query observer and errors
  */
 interface QueryCollectionState {
-  lastError: any
-  errorCount: number
   observers: Map<
     string,
     QueryObserver<Array<any>, any, Array<any>, Array<any>, any>
@@ -424,27 +405,6 @@ class QueryCollectionUtilsImpl implements QueryCollectionUtils {
     this.writeDelete = writeUtils.writeDelete
     this.writeUpsert = writeUtils.writeUpsert
     this.writeBatch = writeUtils.writeBatch
-  }
-
-  public async clearError() {
-    await this.refetch({ throwOnError: true })
-  }
-
-  // Getters for error state. They cover every Query this Collection observes:
-  // a failed fetch or result application sets them, and a later successful
-  // application clears them. After Collection readiness, Collection health
-  // mirrors them: the same failure is a health error that is not final, since
-  // TanStack Query fetches again, and the same clear reports healthy.
-  public get lastError() {
-    return this.state.lastError
-  }
-
-  public get isError() {
-    return !!this.state.lastError
-  }
-
-  public get errorCount() {
-    return this.state.errorCount
   }
 
   // Getters for QueryObserver state
@@ -834,8 +794,6 @@ export function queryCollectionOptions(
 
   /** State object to hold error tracking and observer reference */
   const state: QueryCollectionState = {
-    lastError: undefined as any,
-    errorCount: 0,
     observers: new Map<
       string,
       QueryObserver<Array<any>, any, Array<any>, Array<any>, any>
@@ -1191,9 +1149,10 @@ export function queryCollectionOptions(
     const observedErrorUpdates = new WeakMap<AnyQuery, number>()
     let errorRevision = 0
     const failedResultApplications = new Map<string, unknown>()
-    const clearLastError = () => {
-      state.lastError = undefined
-      state.errorCount = 0
+    // A failed fetch or result application after Collection readiness is a
+    // health error that is not final, since TanStack Query fetches again. A
+    // later successful application with no newer failure reports healthy.
+    const reportRecovered = () => {
       if (collection.status === `ready`) reportHealthy()
     }
     const exceptionalResultSettlements = new WeakMap<
@@ -2781,15 +2740,13 @@ export function queryCollectionOptions(
             failedResultApplications.delete(hashedQueryKey)
             // Applying cached data during a fetch does not establish recovery.
             if (!isFetching && applicationErrorRevision === errorRevision) {
-              clearLastError()
+              reportRecovered()
             }
           }
         },
         (error) => {
           if (!finish()) return
           failedResultApplications.set(hashedQueryKey, error)
-          state.lastError = error
-          state.errorCount++
           errorRevision++
           console.error(
             `[QueryCollection] Error applying query ${String(hashToQueryKey.get(hashedQueryKey))}:`,
@@ -2840,7 +2797,7 @@ export function queryCollectionOptions(
           resultApplicationControllers.delete(hashedQueryKey)
           failedResultApplications.delete(hashedQueryKey)
           if (!result.isFetching && currentErrorRevision === errorRevision) {
-            clearLastError()
+            reportRecovered()
           }
         }
         return
@@ -3157,8 +3114,6 @@ export function queryCollectionOptions(
             if (observedQuery) {
               observedErrorUpdates.set(observedQuery, result.errorUpdateCount)
             }
-            state.lastError = result.error
-            state.errorCount++
             errorRevision++
           }
 
@@ -3169,7 +3124,7 @@ export function queryCollectionOptions(
 
           // A failure before the first successful snapshot leaves no usable
           // collection state. Later refetch failures keep the last ready
-          // snapshot available while utils expose the error.
+          // snapshot available and report health.
           if (collection.status === `loading`) {
             markError(result.error)
           } else if (collection.status === `ready`) {

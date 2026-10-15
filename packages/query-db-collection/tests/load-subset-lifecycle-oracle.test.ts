@@ -15,6 +15,20 @@ import type { QueryFunctionContext } from '@tanstack/query-core'
 import type { LoadSubsetOptions, SyncMetadataApi } from '@tanstack/db'
 
 /**
+ * The Query failure a Collection reports: its initial error while it is in
+ * `error`, or the cause of its health error after readiness.
+ */
+function reportedError(collection: {
+  status: string
+  health: { error: { cause: unknown } | null }
+  _lifecycle: { getSyncError: () => unknown }
+}): unknown {
+  return collection.status === `error`
+    ? collection._lifecycle.getSyncError()
+    : collection.health.error?.cause
+}
+
+/**
  * # Does Query-backed loadSubset preserve identity and lifecycle?
  *
  * Canonically equal demands share one Query transport. An applied full-source
@@ -980,7 +994,7 @@ async function expectPeerJoiningHeldFetchRecovers(
     if (expectNewRow) expect(peerOutcome).toBe(`fulfilled`)
     if (!peerJoins) expect(peerOutcome).toBe(`not-started`)
     if (failure === `unrelated`) {
-      expect(collection.utils.lastError).toBe(unrelatedError)
+      expect(reportedError(collection)).toBe(unrelatedError)
       expect(peerOutcome).toBe(phase === `initial` ? `rejected` : `fulfilled`)
     }
     if (!peerJoins || failure === `unrelated`) expect(calls).toBe(heldCall)
@@ -1159,13 +1173,12 @@ async function expectForeignOwnerReleaseKeepsInFlightSignal(): Promise<void> {
 }
 
 /**
- * After Collection readiness, Collection health mirrors `utils.lastError`.
- * A failed refetch sets both: the health error is not final, because TanStack
- * Query fetches again, and the status and rows stay. The next successful
- * application clears both. The model is that one rule; it does not read the
- * adapter's per-key bookkeeping.
+ * After Collection readiness, a failed refetch is a health error that is not
+ * final, because TanStack Query fetches again, and the status and rows stay.
+ * The next successful application clears it. The model is that one rule; it
+ * does not read the adapter's per-key bookkeeping.
  */
-async function expectRefetchFailureHealthFollowsLastError(): Promise<void> {
+async function expectRefetchFailureIsHealth(): Promise<void> {
   const error = new Error(`refetch failed`)
   const queryClient = createQueryClient()
   const id = `load-subset-health-${collectionSequence++}`
@@ -1187,7 +1200,6 @@ async function expectRefetchFailureHealthFollowsLastError(): Promise<void> {
   )
   const observe = () => ({
     status: collection.status,
-    lastError: collection.utils.lastError,
     health: collection.health.error && {
       phase: collection.health.error.phase,
       final: collection.health.error.final,
@@ -1199,25 +1211,22 @@ async function expectRefetchFailureHealthFollowsLastError(): Promise<void> {
     await collection.preload()
     expect(observe()).toEqual({
       status: `ready`,
-      lastError: undefined,
       health: null,
       rows: [`first`],
     })
 
     await collection.utils.refetch()
-    await vi.waitFor(() => expect(collection.utils.lastError).toBe(error))
+    await vi.waitFor(() => expect(collection.health.isError).toBe(true))
     expect(observe()).toEqual({
       status: `ready`,
-      lastError: error,
       health: { phase: `sync`, final: false, cause: error },
       rows: [`first`],
     })
 
     await collection.utils.refetch()
-    await vi.waitFor(() => expect(collection.utils.lastError).toBeUndefined())
+    await vi.waitFor(() => expect(collection.health.isError).toBe(false))
     expect(observe()).toEqual({
       status: `ready`,
-      lastError: undefined,
       health: null,
       rows: [`second`],
     })
@@ -1259,8 +1268,8 @@ async function expectInitialQueryFailureStatus(): Promise<void> {
 
   try {
     await vi.waitFor(() => {
-      expect(collection.utils.lastError).toBe(error)
-      expect(collection.utils.isError).toBe(true)
+      expect(reportedError(collection)).toBe(error)
+      expect(reportedError(collection)).toBeDefined()
     })
     expect(loggedError).toHaveBeenCalled()
     try {
@@ -1274,13 +1283,13 @@ async function expectInitialQueryFailureStatus(): Promise<void> {
       throw new TraceAssertionError(0, caught)
     }
 
-    // An initial error is final for its sync run. A successful refetch clears
-    // utils.lastError and applies its rows, but only a restart reaches ready.
-    await collection.utils.clearError()
+    // An initial error is final for its sync run. A successful refetch
+    // applies its rows, but the error stays until a restart reaches ready.
+    await collection.utils.refetch({ throwOnError: true })
     await vi.waitFor(() => {
-      expect(collection.utils.lastError).toBeUndefined()
       expect(collection.get(`recovered`)).toBeDefined()
     })
+    expect(reportedError(collection)).toBe(error)
     expect(collection.status).toBe(`error`)
     await collection.cleanup()
     await live.cleanup()
@@ -1453,7 +1462,7 @@ async function expectRefetchFailureKeepsReadySnapshot(): Promise<void> {
     await live.preload()
     await collection.utils.refetch()
     await vi.waitFor(() => {
-      expect(collection.utils.lastError).toBe(error)
+      expect(reportedError(collection)).toBe(error)
     })
     expect(collection.status).toBe(`ready`)
     expect(live.status).toBe(`ready`)
@@ -1561,7 +1570,7 @@ async function expectDeferredStartupReadyDoesNotOverrideError(): Promise<void> {
     await maintenanceDeleted
     for (let turn = 0; turn < 10; turn++) await Promise.resolve()
     expect(collection.status).toBe(`error`)
-    expect(collection.utils.lastError).toBe(queryError)
+    expect(reportedError(collection)).toBe(queryError)
   } finally {
     if (typeof secondSync === `function`) {
       await secondSync()
@@ -2474,7 +2483,7 @@ async function observeLateRetiredQuery(
         live: values(current.toArray),
         sourceStatus: source.status,
         liveStatus: current.status,
-        sourceError: source.utils.lastError,
+        sourceError: reportedError(source),
       })
     }
     const sourceSubscription = source.subscribeChanges(capture)
@@ -2641,8 +2650,8 @@ describe(`loadSubset lifecycle oracle`, () => {
     await expectReleasedRefetchRejects()
   })
 
-  it(`mirrors utils.lastError into Collection health after readiness`, async () => {
-    await expectRefetchFailureHealthFollowsLastError()
+  it(`reports a failed refetch after readiness as Collection health`, async () => {
+    await expectRefetchFailureIsHealth()
   })
 
   it(`keeps an initial query failure until a restart, even after a successful refetch`, async () => {
