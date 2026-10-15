@@ -6093,6 +6093,533 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
   }
 }
 
+type OptimisticWindowShape = `source` | `joined` | `anti-joined`
+type OptimisticWindowMutation = `update` | `delete`
+type OptimisticWindowConsumer = `collection` | `effect`
+type OptimisticWindowOutcome = `acknowledge` | `rollback`
+type OptimisticWindowCheckpoint = `initial` | `optimistic` | `settled`
+const MAX_OPTIMISTIC_WINDOW_REQUESTS = 8
+const OPTIMISTIC_ACQUISITION_OBSERVATION_TURNS = 8
+
+type OptimisticWindowCase = {
+  shape: OptimisticWindowShape
+  mutation: OptimisticWindowMutation
+  consumer: OptimisticWindowConsumer
+  outcome: OptimisticWindowOutcome
+  width: 1 | 2
+  indexed: boolean
+}
+
+type OptimisticWindowObservation = {
+  initial: Array<number>
+  immediate: Array<number>
+  acquiring: Array<number>
+  answerQueued: Array<number>
+  settled: Array<number>
+  preSettlementPublications: Array<Array<number>>
+  allPublications: Array<Array<number>>
+  attempts: Array<{
+    submittedRows: Array<number>
+    appliedReceiptPending: boolean
+    providerPending: boolean
+  }>
+  requestsStableAcrossTwoTurns: boolean
+}
+
+function referenceOptimisticWindow(
+  shape: OptimisticWindowShape,
+  outcome: OptimisticWindowOutcome,
+  checkpoint: OptimisticWindowCheckpoint,
+  width: 1 | 2,
+  indexed: boolean,
+): Array<number> {
+  if (checkpoint === `initial`) return width === 1 ? [3] : [3, 2]
+  if (checkpoint === `optimistic`) {
+    if (indexed || shape === `source`) return width === 1 ? [] : [2]
+    return width === 1 ? [2] : [2, 1]
+  }
+  if (outcome === `rollback`) return width === 1 ? [3] : [3, 2]
+  return width === 1 ? [2] : [2, 1]
+}
+
+function expectedInitialProviderRows(
+  shape: OptimisticWindowShape,
+  width: 1 | 2,
+  indexed: boolean,
+): Array<number> {
+  if (shape === `source`) return width === 1 ? [3] : [3, 2]
+  if (!indexed) return width === 1 ? [4, 1, 2, 3] : [4, 3, 1, 2]
+  return width === 1 ? [4, 3] : [4, 3, 2]
+}
+
+async function observeAcquisitionAcrossTaskTurns(
+  initialRequests: number,
+  currentRequests: () => number,
+): Promise<boolean> {
+  for (let turn = 0; turn < OPTIMISTIC_ACQUISITION_OBSERVATION_TURNS; turn++) {
+    if (currentRequests() > initialRequests) return true
+    await flushPromises()
+  }
+  return currentRequests() > initialRequests
+}
+
+/**
+ * An optimistic row that leaves an on-demand ordered window is public before
+ * its mutation settles. This law does not depend on whether departure comes
+ * from a source predicate, a joined or anti-joined predicate, an update, or a
+ * delete. It also applies to both live-query Collections and Effects.
+ *
+ * The independent reference table states the five public cuts for one
+ * four-row base ledger and one pending departure. The legal-history grammar
+ * crosses one- and two-row windows, indexed and unindexed loading, all three
+ * predicate shapes, both departure operations, both consumers, and
+ * acknowledgement or rollback. Production receives each history through a
+ * controlled on-demand provider and a real live-query plan.
+ *
+ * Four observation cuts keep distinct responsibilities distinguishable:
+ * mutation admission must recompute over the installed rows; missing extent
+ * must start acquisition before persistence settles; a provider answer whose
+ * real applied receipt is still pending must remain private; and settlement
+ * must publish the complete acknowledged window or restore the original
+ * rollback window. Public Collection changes and Effect callbacks record the
+ * same law. The request budget rejects a repeated-refill loop.
+ */
+async function checkOptimisticWindow(
+  testCase: OptimisticWindowCase,
+): Promise<OptimisticWindowObservation> {
+  const { shape, mutation, consumer, outcome, width, indexed } = testCase
+  const remote = new Map<number, Row>(
+    [1, 2, 3, 4].map((id) => [
+      id,
+      {
+        id,
+        rank: id,
+        eligible: id !== 4,
+        label: `row`,
+        link: id,
+      },
+    ]),
+  )
+  let sync!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
+  const sent = new Map<number, Row>()
+  const refillStarted = createDeferred<void>()
+  const providerAnswer = createDeferred<void>()
+  const answerSubmitted = createDeferred<void>()
+  const persistence = createDeferred<void>()
+  let holdLaterAcquisition = false
+  const attempts: Array<{
+    submittedRows: Array<number>
+    appliedReceiptSettled: boolean
+    providerSettled: boolean
+  }> = []
+  let requests = 0
+  const persistAuthoritativeMutation = async () => {
+    await persistence.promise
+    const previous = remote.get(3)!
+    const next = {
+      ...previous,
+      eligible: shape === `source` ? false : previous.eligible,
+      link: shape === `source` ? previous.link : -previous.id,
+    }
+    if (mutation === `delete`) remote.delete(3)
+    else remote.set(3, next)
+    sync.begin()
+    sync.write({
+      type: mutation,
+      value: mutation === `delete` ? previous : next,
+    })
+    // This authoritative echo is queued behind the transaction. Its applied
+    // receipt must not be mistaken for optimistic-publication permission.
+    sync.commit()
+  }
+  const source = createCollection<Row, number>({
+    id: `optimistic-window-${shape}-${mutation}-${consumer}-${outcome}-${Math.random()}`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    onUpdate: persistAuthoritativeMutation,
+    onDelete: persistAuthoritativeMutation,
+    sync: {
+      sync: (controls) => {
+        sync = controls
+        controls.markReady()
+        return {
+          loadSubset: (options) => {
+            requests++
+            if (requests > MAX_OPTIMISTIC_WINDOW_REQUESTS) {
+              throw new Error(`optimistic ordered loading did not stop`)
+            }
+            const attempt = holdLaterAcquisition
+              ? {
+                  submittedRows: [] as Array<number>,
+                  appliedReceiptSettled: false,
+                  providerSettled: false,
+                }
+              : undefined
+            if (attempt) attempts.push(attempt)
+            const answer = () => {
+              try {
+                let page = [...remote.values()].filter(
+                  (row) =>
+                    (!options.where ||
+                      evaluateReferenceExpression(options.where, row) ===
+                        true) &&
+                    (!options.cursor ||
+                      evaluateReferenceExpression(
+                        options.cursor.whereFrom,
+                        row,
+                      ) === true),
+                )
+                if (options.orderBy) {
+                  const [{ compareOptions }] = options.orderBy
+                  page.sort((left, right) =>
+                    compareOptions.direction === `desc`
+                      ? right.rank - left.rank
+                      : left.rank - right.rank,
+                  )
+                  if (!options.cursor) page = page.slice(options.offset ?? 0)
+                  if (options.limit !== undefined)
+                    page = page.slice(0, options.limit)
+                }
+                controls.begin()
+                for (const row of page) {
+                  controls.write({
+                    type: sent.has(row.id) ? `update` : `insert`,
+                    value: { ...row },
+                  })
+                  sent.set(row.id, { ...row })
+                }
+                if (attempt)
+                  attempt.submittedRows.push(...page.map(({ id }) => id))
+                const applied = controls.commit()
+                if (attempt) {
+                  attempt.appliedReceiptSettled = applied === true
+                  if (applied !== true) {
+                    void applied.then(
+                      () => (attempt.appliedReceiptSettled = true),
+                      () => (attempt.appliedReceiptSettled = true),
+                    )
+                  }
+                  answerSubmitted.resolve()
+                }
+                return applied === true ? true : applied.then(() => undefined)
+              } catch (error) {
+                if (attempt) answerSubmitted.reject(error)
+                throw error
+              }
+            }
+            if (!holdLaterAcquisition) return answer()
+            refillStarted.resolve()
+            const provider = providerAnswer.promise.then(answer)
+            void provider.then(
+              () => (attempt!.providerSettled = true),
+              () => (attempt!.providerSettled = true),
+            )
+            return provider
+          },
+        }
+      },
+    },
+  })
+  if (indexed) {
+    source.createIndex((row) => row.rank, {
+      indexType: BTreeIndex,
+      options: {
+        compareOptions: {
+          direction: `asc`,
+          nulls: `first`,
+          stringSort: `locale`,
+        },
+      },
+    })
+  }
+  const markers = createCollection(
+    localOnlyCollectionOptions<Marker, number>({
+      id: `optimistic-window-markers-${Math.random()}`,
+      getKey: (marker) => marker.id,
+      initialData:
+        shape === `joined`
+          ? [1, 2, 3].map((id) => ({ id, rowId: id }))
+          : shape === `anti-joined`
+            ? [
+                { id: 4, rowId: 4 },
+                { id: 3, rowId: -3 },
+              ]
+            : [],
+    }),
+  )
+  markers.createIndex((marker) => marker.rowId, { indexType: BTreeIndex })
+  const buildQuery = (q: InitialQueryBuilder) => {
+    const direct = q
+      .from({ row: source })
+      .where(({ row }) => eq(row.eligible, true))
+    const left = q
+      .from({ row: source })
+      .leftJoin({ marker: markers }, ({ row, marker }) =>
+        eq(row.link, marker.rowId),
+      )
+    const filtered =
+      shape === `source`
+        ? direct
+        : shape === `joined`
+          ? left.where(({ marker }) => not(isUndefined(marker.rowId)))
+          : left.where(({ marker }) => isUndefined(marker.rowId))
+    return filtered.orderBy(({ row }) => row.rank, `desc`).limit(width)
+  }
+  const query =
+    consumer === `collection`
+      ? createLiveQueryCollection({ query: buildQuery })
+      : undefined
+  const effectRows = new Map<number, Row>()
+  const publications: Array<Array<number>> = []
+  const resultRow = (value: unknown): Row => {
+    const result = value as Row & { row?: Row }
+    return result.row ?? result
+  }
+  const ids = () => {
+    if (query) return query.toArray.map(resultRow).map(({ id }) => id)
+    // Effect callbacks expose membership deltas rather than positional
+    // changes. Keep their membership deterministic without claiming that the
+    // callback API reports an ordered sequence.
+    return [...effectRows.values()]
+      .sort((left, right) => right.rank - left.rank)
+      .map(({ id }) => id)
+  }
+  const effect =
+    consumer === `effect`
+      ? createEffect({
+          query: buildQuery,
+          onBatch: (events) => {
+            for (const event of events) {
+              const row = resultRow(event.value)
+              if (event.type === `exit`) effectRows.delete(row.id)
+              else effectRows.set(row.id, row)
+            }
+            publications.push(ids())
+          },
+        })
+      : undefined
+  let unsubscribe: (() => void) | undefined
+  let settled: Promise<void> = Promise.resolve()
+  return withHistoryCleanup(
+    async () => {
+      if (query) await query.preload()
+      else
+        await vi.waitFor(() =>
+          expect(ids()).toEqual(
+            referenceOptimisticWindow(
+              shape,
+              outcome,
+              `initial`,
+              width,
+              indexed,
+            ),
+          ),
+        )
+      const initial = ids()
+      expect(initial, `initial rows`).toEqual(
+        referenceOptimisticWindow(shape, outcome, `initial`, width, indexed),
+      )
+      expect(
+        [...sent.keys()],
+        `initial provider rows include the leading rejected row`,
+      ).toEqual(expectedInitialProviderRows(shape, width, indexed))
+      const initialRequests = requests
+      if (query) {
+        const subscription = query.subscribeChanges(() => {
+          publications.push(ids())
+        })
+        unsubscribe = () => subscription.unsubscribe()
+      } else publications.length = 0
+      holdLaterAcquisition = true
+
+      const transaction =
+        mutation === `delete`
+          ? source.delete(3)
+          : source.update(3, (draft) => {
+              if (shape === `source`) draft.eligible = false
+              else draft.link = -draft.id
+            })
+      settled = transaction.isPersisted.promise.catch(() => undefined)
+      const immediate = ids()
+      const acquisitionStarted = await observeAcquisitionAcrossTaskTurns(
+        initialRequests,
+        () => requests,
+      )
+      const acquiring = ids()
+      let answerQueued = acquiring
+      if (acquisitionStarted) {
+        await refillStarted.promise
+        providerAnswer.resolve()
+        await answerSubmitted.promise
+        await flushPromises()
+        answerQueued = ids()
+      } else providerAnswer.resolve()
+      const attemptsBeforeSettlement = attempts.map((attempt) => ({
+        submittedRows: [...attempt.submittedRows],
+        appliedReceiptPending: !attempt.appliedReceiptSettled,
+        providerPending: !attempt.providerSettled,
+      }))
+      const preSettlementPublications = publications.map((window) => [
+        ...window,
+      ])
+
+      if (outcome === `acknowledge`) persistence.resolve()
+      else persistence.reject(new Error(`rollback`))
+      await settled
+      await flushPromises()
+      const requestsAtSettlement = requests
+      await flushPromises()
+
+      return {
+        initial,
+        immediate,
+        acquiring,
+        answerQueued,
+        settled: ids(),
+        preSettlementPublications,
+        allPublications: publications.map((window) => [...window]),
+        attempts: attemptsBeforeSettlement,
+        requestsStableAcrossTwoTurns: requests === requestsAtSettlement,
+      }
+    },
+    () => [
+      () => unsubscribe?.(),
+      () => persistence.resolve(),
+      () => providerAnswer.resolve(),
+      () => settled,
+      () => effect?.dispose(),
+      () => query?.cleanup(),
+      () => source.cleanup(),
+      () => markers.cleanup(),
+      () =>
+        expect(requests, `bounded refill requests`).toBeLessThanOrEqual(
+          MAX_OPTIMISTIC_WINDOW_REQUESTS,
+        ),
+    ],
+  )
+}
+
+function optimisticWindowViolations(
+  observation: OptimisticWindowObservation,
+  testCase: OptimisticWindowCase,
+): Array<string> {
+  const violations: Array<string> = []
+  const { outcome, width, indexed } = testCase
+  const optimistic = referenceOptimisticWindow(
+    testCase.shape,
+    outcome,
+    `optimistic`,
+    width,
+    indexed,
+  )
+  const settled = referenceOptimisticWindow(
+    testCase.shape,
+    outcome,
+    `settled`,
+    width,
+    indexed,
+  )
+  const compare = (label: string, actual: unknown, expected: unknown) => {
+    if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+      violations.push(
+        `${label}: ${JSON.stringify(actual)} instead of ${JSON.stringify(expected)}`,
+      )
+    }
+  }
+  compare(`immediate rows`, observation.immediate, optimistic)
+  compare(`acquiring rows`, observation.acquiring, optimistic)
+  compare(`queued-answer rows`, observation.answerQueued, optimistic)
+  compare(
+    `first optimistic publication`,
+    observation.preSettlementPublications[0],
+    optimistic,
+  )
+  compare(
+    `other pre-settlement publications`,
+    observation.preSettlementPublications.slice(1),
+    [],
+  )
+  compare(`settled rows`, observation.settled, settled)
+  const expectedSettledPublications =
+    JSON.stringify(optimistic) === JSON.stringify(settled) ? [] : [settled]
+  compare(
+    `settled publications`,
+    observation.allPublications.slice(
+      observation.preSettlementPublications.length,
+    ),
+    expectedSettledPublications,
+  )
+  const needsAcquisition = indexed || testCase.shape === `source`
+  if (needsAcquisition && observation.attempts.length === 0) {
+    violations.push(`refill acquisition did not start`)
+  }
+  const refillId = width === 1 ? 2 : 1
+  const refillAttempt = observation.attempts.find(({ submittedRows }) =>
+    submittedRows.includes(refillId),
+  )
+  if (needsAcquisition && !refillAttempt) {
+    violations.push(`refill answer did not submit row ${refillId}`)
+  } else if (refillAttempt && !refillAttempt.appliedReceiptPending) {
+    violations.push(`applied receipt was not pending at the queued-answer cut`)
+  }
+  if (refillAttempt && !refillAttempt.providerPending) {
+    violations.push(`provider was not pending at the queued-answer cut`)
+  }
+  if (!needsAcquisition && observation.attempts.length > 0) {
+    violations.push(`refill acquisition started with complete local extent`)
+  }
+  if (!observation.requestsStableAcrossTwoTurns) {
+    violations.push(
+      `provider requests changed across two post-settlement turns`,
+    )
+  }
+  return violations
+}
+
+function knownOptimisticWindowViolations(
+  testCase: OptimisticWindowCase,
+): Array<string> {
+  const { shape, mutation, consumer, outcome, width, indexed } = testCase
+  if (!indexed && shape !== `source`) return []
+  if (shape !== `source` && mutation === `update` && consumer === `effect`) {
+    return []
+  }
+  const optimistic = referenceOptimisticWindow(
+    shape,
+    outcome,
+    `optimistic`,
+    width,
+    indexed,
+  )
+  if (shape !== `source` && mutation === `update`) {
+    return [
+      `first optimistic publication: undefined instead of ${JSON.stringify(optimistic)}`,
+    ]
+  }
+  const retained = referenceOptimisticWindow(
+    shape,
+    outcome,
+    `initial`,
+    width,
+    indexed,
+  )
+  const violations = [
+    `immediate rows: ${JSON.stringify(retained)} instead of ${JSON.stringify(optimistic)}`,
+    `acquiring rows: ${JSON.stringify(retained)} instead of ${JSON.stringify(optimistic)}`,
+    `queued-answer rows: ${JSON.stringify(retained)} instead of ${JSON.stringify(optimistic)}`,
+    `first optimistic publication: undefined instead of ${JSON.stringify(optimistic)}`,
+  ]
+  if (outcome === `rollback`) {
+    violations.push(
+      `settled publications: [] instead of ${JSON.stringify([retained])}`,
+    )
+  }
+  if (shape !== `source`) {
+    violations.push(`refill answer did not submit row ${width === 1 ? 2 : 1}`)
+  }
+  return violations
+}
+
 describe(`eager indexed ordered windows`, () => {
   const { multiplier, ...replay } = readOracleRunConfig()
   const runs = 40 * multiplier
@@ -6309,6 +6836,67 @@ describe(`eager indexed ordered windows`, () => {
         { type: `dup`, id: 0 },
       ],
     })
+  })
+
+  const optimisticWindowCases = (
+    [`source`, `joined`, `anti-joined`] as const
+  ).flatMap((shape) =>
+    ([`update`, `delete`] as const).flatMap((mutation) =>
+      ([`collection`, `effect`] as const).flatMap((consumer) =>
+        ([`acknowledge`, `rollback`] as const).flatMap((outcome) =>
+          ([1, 2] as const).flatMap((width) =>
+            [true, false].map((indexed) => ({
+              shape,
+              mutation,
+              consumer,
+              outcome,
+              width,
+              indexed,
+            })),
+          ),
+        ),
+      ),
+    ),
+  )
+
+  it.each(optimisticWindowCases)(
+    `characterizes a width-$width $indexed indexed optimistic $shape $mutation for a $consumer before $outcome`,
+    async (testCase) => {
+      const observation = await checkOptimisticWindow(testCase)
+      // Compare every obligation before accepting the reviewed base's exact
+      // mismatch ledger. The production repair replaces the expected ledger
+      // with [] without changing the observation or law computations.
+      expect(optimisticWindowViolations(observation, testCase)).toEqual(
+        knownOptimisticWindowViolations(testCase),
+      )
+    },
+  )
+
+  it(`rejects a hostile optimistic observation that makes no refill progress`, () => {
+    const testCase: OptimisticWindowCase = {
+      shape: `joined`,
+      mutation: `delete`,
+      consumer: `collection`,
+      outcome: `acknowledge`,
+      width: 2,
+      indexed: true,
+    }
+    const observation: OptimisticWindowObservation = {
+      initial: [3, 2],
+      immediate: [2],
+      acquiring: [2],
+      answerQueued: [2],
+      settled: [2, 1],
+      preSettlementPublications: [[2]],
+      allPublications: [[2], [2, 1]],
+      attempts: [],
+      requestsStableAcrossTwoTurns: true,
+    }
+
+    expect(optimisticWindowViolations(observation, testCase)).toEqual([
+      `refill acquisition did not start`,
+      `refill answer did not submit row 1`,
+    ])
   })
 
   it.each([

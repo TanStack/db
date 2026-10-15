@@ -1206,6 +1206,20 @@ restart. Queued ordered-repair startup joins this barrier before invoking the
 adapter, so a synchronous throw cannot publish a partial replacement merely
 because it returned no acquisition promise. The queued task belongs to the
 loader that scheduled it, not a replacement created after cleanup.
+
+An optimistic overlay departure is not an authoritative loss of provider
+coverage. When an optimistic update removes a row from query membership, or an
+optimistic delete removes it from an ordered window, live-query Collections and
+Effects publish that departure immediately, even when the provider work that
+could refill the window is still pending. The intermediate result may therefore
+be shorter than the requested window. The loader starts any acquisition needed
+to fill that gap without waiting for the optimistic transaction to settle. The
+refill remains private until its applied receipt settles, then publishes the
+complete recomputed window. Rollback restores the prior window. This exception
+does not define the separate rank-move case, and does not permit a partially
+applied provider page or an authoritative repair to bypass the complete-window
+barrier.
+
 The loader tracks each sequential request as a bounded participant,
 not every recursive suffix of a long refinement chain.
 
