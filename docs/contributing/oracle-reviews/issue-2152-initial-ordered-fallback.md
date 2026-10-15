@@ -358,3 +358,34 @@ ordered-acquisition limit is retained in the coverage map.
 | ORC-012 | This exact-commit record gives the observed reach, wrong-result rejection, mutant survivor, and remaining owner limit. |
 | ORC-013 | The claim is limited to four named histories and their nearby stale-event control, not a universal provider-settlement boundary law. |
 | ORC-014 | The provider is controlled; the test makes no new real-adapter or framework-render claim. |
+
+## Late provider write and acquisition lease
+
+Reviewed oracle and coverage-map commit:
+`2c01526a67d03040366922f2b78449b70374106b` (parent
+`ff23fd2ecd887cef39459add6aba925eb3b09dc6`). This section follows the
+held-Promise overlap record above. No production code changed.
+
+Four neighboring histories keep the same first marker deletion or retarget and
+pending or settled child demand. The full-source provider applies root 3, then
+holds its returned Promise. Marker 2 retargets from root 3 to the as-yet-absent
+root 4. After the gate opens, the provider applies root 4 before its returned
+Promise settles. The independent join model predicts root 4 at the final public
+checkpoint; callback replay and the net change comparison check the path to
+that result. The adapter also records acquisition unloads. The cursor-page
+lease must remain active at the held-Promise cut and retire after successful
+full-source settlement. This follows the architecture's rule that authoritative
+full-source success retires settled finite acquisitions; a pending provider
+answer has not established that success.
+
+The normal focused histories passed, and the full ordered-lifecycle file passed
+296/296 tests with no Vitest type errors. Prettier and `git diff --check` passed;
+ESLint had no errors and one warning on an unchanged line. A temporary loader
+mutant that replaced the provider Promise with `Promise.resolve()` failed all
+four new histories at the held cursor-page lease assertion. The provider entry
+and overlap cuts were reached, so these are intended-checkpoint assertion
+failures. The mutant was removed before the code commit. This closes the
+specific false-green result from the prior held-Promise histories: early loader
+completion can no longer pass this bounded late-write schedule. Provider
+rejection, overlapping root-source changes, real adapter delivery, and an
+on-demand React first commit remain outside this witness.
