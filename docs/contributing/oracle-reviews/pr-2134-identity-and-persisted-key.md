@@ -1,10 +1,11 @@
 # PR #2134 identity and persisted-key oracle review
 
-**Latest executable evidence, 2026-10-14:** The head-bound disposition below
-audits `7ebfb4dee`; the later branch commit changes this record only. Earlier
-sections preserve the sequence of repairs and reviews, with each result bound
-to its stated executable head. The source-only proxy-fixture claim and the
-first held-fetch calibration were superseded by later receiving checks.
+**Latest executable evidence, 2026-10-15:** The integration note below binds
+the combined test result to merge head `2089e0630`. The last independent ORC
+disposition audits `7ebfb4dee`; later sections preserve the sequence of
+repairs and reviews, with each result bound to its stated executable head.
+The source-only proxy-fixture claim and the first held-fetch calibration were
+superseded by later receiving checks.
 
 Reviewed PR head: `5e224075f`. Semantic repair: `9092cbf26`, 2026-10-13.
 The initial record correction changed no production code or executable oracle.
@@ -1171,3 +1172,28 @@ cell remains with the Query Collection ownership oracle and its SQLite
 receiver. Any change to proxy-literal wire admission or preservation needs a
 separate transport-law review in the SQLite persistence wire owner before a
 row-bearing migration expectation can be added.
+
+## #2158 integration at `2089e0630`
+
+Exact #2158 head `f4b4c17a6`, including the `efeaf8104` minification-gate
+field rename, entered #2134 through a normal merge commit. The one conflict
+was in pending startup-load promotion. The resolution keeps #2134's
+`deferUntil` and pending-claim release behavior and applies #2158's
+`AcquisitionHandle.acquisitionLease` name at every use. The merged replay
+property name and caller-settlement assertion are retained.
+
+At the merge head, `check:mangle` passed for 405 cached names. The focused
+ownership and load-subset lifecycle run passed 927 checks with two skipped;
+the direct Query DB and DB test typechecks passed; and the DB replay registry
+passed 37 tests. After the merge commit, the full Query DB run passed 1,060
+runtime tests and 589 type assertions, with two runtime tests skipped and no
+type errors. These checks establish the combined executable tree, not every
+legal acquisition schedule.
+
+Independent code and oracle reviews of the pre-merge #2134 head `ef9c19f52`
+found no confirmed correctness defect. Custom function-key migration remains
+open in [#2180](https://github.com/TanStack/db/issues/2180), and historical
+owner parsing cost remains open in
+[#2181](https://github.com/TanStack/db/issues/2181). The row-bearing proxy
+receiving gap above also remains open. This integration run does not replace
+the independent ORC disposition or extend its claims to those cells.
