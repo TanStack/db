@@ -78,8 +78,24 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
           physical-signal, and public-row checkpoints. Two further production
           mutants, retaining an aborted caller's lease and stealing the peer's
           lease on a duplicate unload, failed at the physical-signal and
-          intermediate public-row checkpoints (2026-10-15). Initial-fetch
-          callback reentry and refetch cells remain.
+          intermediate public-row checkpoints (2026-10-15). Refetch remains a
+          separate caller-cancellation cell.
+    - [x] Pending-fetch callback reentry: twelve named histories and matching
+          fixed/random 48-run campaigns cross caller abort versus Query-cache
+          observer removal, one/two source rows, consumed versus ignored
+          physical signal, and both release orders after caller abort. The
+          callback peer receives the scripted keys and values at load
+          settlement and keeps them until release. A replacement fetch returns
+          distinct values so an old cancelled result cannot satisfy that
+          comparison. The signal axis distinguishes one continuing request
+          from a cancelled first request plus replacement. Direct seed/path
+          replay passed. A forced-retirement mutant failed all four
+          observer-removal histories at the peer-settlement row checkpoint;
+          retaining an aborted caller's lease failed the four peer-first
+          histories at the intermediate row and observer checkpoints; leaving
+          a Query observer subscribed failed those histories at the observer
+          checkpoint (2026-10-15). Source failure and two reentrant peers are
+          outside this grammar.
     - [x] Accepted-commit release grammar: caller abort or unsubscribe after
           source-result acceptance, crossed with one/two rows and peer timing,
           runs eight named

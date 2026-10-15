@@ -5388,6 +5388,281 @@ describe(`loadSubset lifecycle oracle`, () => {
   })
 
   /**
+   * A peer acquired synchronously from a release callback owns its pending
+   * load, even if the old physical Query has no observer for an instant. The
+   * independent model knows the scripted source rows and the two public
+   * subscription lifetimes. Query Core keeps an ignored-signal fetch alive
+   * after observer removal, but cancels a consumed-signal fetch and starts a
+   * replacement for the new peer. The replacement returns the same keys with
+   * a distinct value, so the peer's settlement also checks which physical
+   * result supplied them. Its rows remain public through its own release.
+   *
+   * The legal grammar crosses caller abort with Query-cache observer removal,
+   * one or two source rows, and a provider that consumes or ignores the Query
+   * signal and both caller-abort release orders. The driver holds the first
+   * provider, enters the callback through public abort or unsubscribe, then
+   * compares the new load's outcome and exact public rows at settlement and
+   * after each release. It also checks Query-cache observer counts,
+   * physical request count and the consumed first Query signal. Caller abort
+   * also varies which subscription releases first after settlement: its own
+   * acquisition has already retired, so the peer's release must leave no row
+   * or Query observer even while the aborted subscription object remains.
+   * The callback count is reach evidence.
+   * Source failure, an already accepted result, and two reentrant peers are
+   * separate grammars or remaining cells.
+   */
+  type PendingReentryHistory = {
+    cut: `caller-abort` | `observer-removal`
+    rowCount: 1 | 2
+    consumesSignal: boolean
+    releaseOrder: `first` | `peer`
+  }
+
+  function expectedPendingReentry(history: PendingReentryHistory) {
+    const source =
+      history.cut === `observer-removal` && history.consumesSignal
+        ? `replacement`
+        : `first`
+    const sourceRows =
+      history.rowCount === 1 ? [`a:${source}`] : [`a:${source}`, `b:${source}`]
+    const peerReleasesFirst = history.releaseOrder === `peer`
+    return {
+      callbackCount: 1,
+      ...(history.cut === `caller-abort` ? { firstOutcome: `AbortError` } : {}),
+      providerCalls:
+        history.cut === `observer-removal` && history.consumesSignal ? 2 : 1,
+      ...(history.consumesSignal
+        ? { firstPhysicalAborted: history.cut === `observer-removal` }
+        : {}),
+      peerOutcome: `fulfilled`,
+      peerRowsAtSettlement: sourceRows,
+      observersAtSettlement: 1,
+      afterFirstPostSettlementReleaseRows: peerReleasesFirst ? [] : sourceRows,
+      afterFirstPostSettlementReleaseObservers: peerReleasesFirst ? 0 : 1,
+      afterFinalReleaseRows: [] as Array<string>,
+      afterFinalReleaseObservers: 0,
+    }
+  }
+
+  async function observePendingReentry(
+    history: PendingReentryHistory,
+    expected: ReturnType<typeof expectedPendingReentry>,
+  ) {
+    const queryClient = createQueryClient()
+    const id = `pending-reentry-${collectionSequence++}`
+    const firstRows: Array<Row> =
+      history.rowCount === 1
+        ? [{ id: `a`, group: `first` }]
+        : [
+            { id: `a`, group: `first` },
+            { id: `b`, group: `first` },
+          ]
+    const replacementRows = firstRows.map((row) => ({
+      ...row,
+      group: `replacement`,
+    }))
+    const firstStarted = createDeferred<void>()
+    const firstResult = createDeferred<Array<Row>>()
+    let providerCalls = 0
+    let firstSignal: AbortSignal | undefined
+    const collection = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn: (context) => {
+          providerCalls++
+          if (history.consumesSignal) {
+            const physicalSignal = context.signal
+            if (providerCalls === 1) firstSignal = physicalSignal
+          }
+          if (providerCalls === 1) {
+            firstStarted.resolve()
+            return firstResult.promise
+          }
+          return Promise.resolve(replacementRows)
+        },
+        getKey: (row) => row.id,
+        startSync: true,
+        syncMode: `on-demand`,
+      }),
+    )
+    const first = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    const caller = new AbortController()
+    let peer: ReturnType<typeof collection.subscribeChanges> | undefined
+    let peerLoad: true | Promise<void> | undefined
+    let callbackCount = 0
+    let releasingFirst = false
+    const rowValues = () =>
+      collection.toArray.map((row) => `${row.id}:${row.group}`).sort()
+    const observerCount = () =>
+      queryClient
+        .getQueryCache()
+        .findAll({ queryKey: [id] })
+        .reduce((count, query) => count + query.getObserversCount(), 0)
+    const acquirePeer = () => {
+      callbackCount++
+      peer = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+      peer.requestSnapshot({
+        onLoadSubsetResult: (load) => {
+          peerLoad = load
+          if (load !== true) void load.catch(() => undefined)
+        },
+      })
+    }
+    if (history.cut === `caller-abort`)
+      caller.signal.addEventListener(`abort`, acquirePeer, { once: true })
+    const stopCacheListener = queryClient.getQueryCache().subscribe((event) => {
+      if (
+        history.cut === `observer-removal` &&
+        releasingFirst &&
+        callbackCount === 0 &&
+        event.type === `observerRemoved` &&
+        event.query.queryKey[0] === id
+      )
+        acquirePeer()
+    })
+
+    return checkPublicCleanupWitness(async () => {
+      let firstLoad: true | Promise<void> | undefined
+      first.requestSnapshot({
+        ...(history.cut === `caller-abort` ? { signal: caller.signal } : {}),
+        onLoadSubsetResult: (load) => {
+          firstLoad = load
+          if (load !== true) void load.catch(() => undefined)
+        },
+      })
+      await firstStarted.promise
+      if (firstLoad === undefined || firstLoad === true)
+        throw new Error(`The first source fetch was not pending`)
+      if (history.cut === `caller-abort`) caller.abort()
+      else {
+        releasingFirst = true
+        first.unsubscribe()
+      }
+      expect(callbackCount).toBe(1)
+      if (peerLoad === undefined)
+        throw new Error(`The reentrant peer did not receive a load result`)
+
+      const peerOutcome = Promise.resolve(peerLoad).then(
+        () => ({ status: `fulfilled` as const, rows: rowValues() }),
+        () => ({ status: `rejected` as const, rows: rowValues() }),
+      )
+      const firstOutcome =
+        history.cut === `caller-abort`
+          ? await firstLoad.then(
+              () => `fulfilled`,
+              (error: unknown) =>
+                error instanceof Error ? error.name : `non-Error rejection`,
+            )
+          : undefined
+      firstResult.resolve(firstRows)
+      const observedPeer = await peerOutcome
+      const observersAtSettlement = observerCount()
+      if (history.releaseOrder === `peer`) peer?.unsubscribe()
+      else first.unsubscribe()
+      const afterFirstPostSettlementReleaseRows = rowValues()
+      const afterFirstPostSettlementReleaseObservers = observerCount()
+      if (history.releaseOrder === `peer`) first.unsubscribe()
+      else peer?.unsubscribe()
+      const afterFinalReleaseRows = rowValues()
+      const afterFinalReleaseObservers = observerCount()
+      const observed = {
+        callbackCount,
+        ...(history.cut === `caller-abort` ? { firstOutcome } : {}),
+        providerCalls,
+        ...(history.consumesSignal
+          ? { firstPhysicalAborted: firstSignal?.aborted }
+          : {}),
+        peerOutcome: observedPeer.status,
+        peerRowsAtSettlement: observedPeer.rows,
+        observersAtSettlement,
+        afterFirstPostSettlementReleaseRows,
+        afterFirstPostSettlementReleaseObservers,
+        afterFinalReleaseRows,
+        afterFinalReleaseObservers,
+      }
+      expect(observed, JSON.stringify({ history, observed, expected })).toEqual(
+        expected,
+      )
+      return observed
+    }, [
+      [`first provider`, () => firstResult.resolve([])],
+      [`cache listener`, stopCacheListener],
+      [`first subscription`, () => first.unsubscribe()],
+      [`peer subscription`, () => peer?.unsubscribe()],
+      [`Collection`, () => collection.cleanup()],
+      [`Query client`, () => queryClient.clear()],
+    ])
+  }
+
+  const pendingReentryProperty = `query-db.pending-reentry-history`
+  const pendingReentryReplay = readOracleRunConfig()
+  const pendingReentryArbitrary = fc
+    .record({
+      cut: fc.constantFrom<PendingReentryHistory[`cut`]>(
+        `caller-abort`,
+        `observer-removal`,
+      ),
+      rowCount: fc.constantFrom<PendingReentryHistory[`rowCount`]>(1, 2),
+      consumesSignal: fc.boolean(),
+      releaseOrder: fc.constantFrom<PendingReentryHistory[`releaseOrder`]>(
+        `first`,
+        `peer`,
+      ),
+    })
+    .filter(
+      (history) =>
+        history.cut === `caller-abort` || history.releaseOrder === `first`,
+    )
+  const namedPendingReentryHistories = (
+    [`caller-abort`, `observer-removal`] as const
+  ).flatMap((cut) =>
+    ([1, 2] as const).flatMap((rowCount) =>
+      [false, true].flatMap((consumesSignal) =>
+        (cut === `caller-abort`
+          ? ([`first`, `peer`] as const)
+          : ([`first`] as const)
+        ).map((releaseOrder) => ({
+          cut,
+          rowCount,
+          consumesSignal,
+          releaseOrder,
+        })),
+      ),
+    ),
+  )
+
+  it.each(namedPendingReentryHistories)(
+    `reconstructs a pending reentry history: %j`,
+    async (history) => {
+      await observePendingReentry(history, expectedPendingReentry(history))
+    },
+  )
+
+  it(`refines generated pending reentry histories`, async () => {
+    if (
+      pendingReentryReplay.replayPath !== undefined &&
+      pendingReentryReplay.replayProperty !== pendingReentryProperty
+    )
+      return
+    const property = fc.asyncProperty(
+      pendingReentryArbitrary,
+      async (history) => {
+        await observePendingReentry(history, expectedPendingReentry(history))
+      },
+    )
+    const options = oraclePropertyOptions(48, pendingReentryProperty)
+    if (pendingReentryReplay.replaySeed === undefined)
+      await fc.assert(property, { ...options, seed: 2_160_2029 })
+    await fc.assert(property, options)
+  }, 20_000)
+
+  /**
    * A public caller abort cancels that pending acquisition without requiring
    * releaseSnapshot or unsubscribe. The Query signal follows physical observer
    * ownership: it aborts for a final caller that consumed it, but remains live

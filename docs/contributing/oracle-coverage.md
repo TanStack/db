@@ -757,9 +757,25 @@ unload mutant that steals the peer's observer lease fails at the intermediate
 public-row checkpoint. Both are assertion failures after the intended public
 path. The grammar
 holds one initial provider result; the fixed ignored-signal witness checks the
-installed Query Core's optional cache completion behavior. Late peer
-acquisition, refetch, accepted commit reentry, and provider-specific transport
-remain separate cells.
+installed Query Core's optional cache completion behavior. A separate
+pending-fetch reentry grammar crosses caller-abort and Query-cache
+`observerRemoved` callbacks, one/two source rows, consumed/ignored Query
+signals, and both release orders after caller abort. Twelve named histories
+and matching fixed/random 48-run campaigns acquire a peer inside the callback
+while the first provider is held. The peer must receive the scripted keys and
+values at load settlement. A replacement fetch supplies distinct values, so
+the cancelled first result cannot impersonate it. Public rows and Query-cache
+observer counts track the surviving lease after either subscription releases
+and reach zero after the final release. With this pinned Query Core setup
+(`retry:false`), the signal axis also distinguishes a continuing request from
+a cancelled first request plus one replacement; the request count is path
+evidence for the peer ownership law. A forced-retire mutant fulfilled the new
+peer's load without rows and failed all four observer-removal histories at the
+peer-settlement public-row checkpoint. A mutant retaining the aborted caller's
+lease failed the four peer-first histories at the intermediate row and
+observer checkpoints; skipping final observer unsubscription failed at the
+observer checkpoint. Source failure, two callback peers, refetch, and
+provider-specific transport remain separate cells.
 Direct `_sync.loadSubset` calls that reuse one options object for several live
 acquisitions have no caller token at `unloadSubset(options)`. The existing
 cached-row and startup witnesses check aggregate ownership. A full/exact
