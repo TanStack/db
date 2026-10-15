@@ -74,6 +74,7 @@ export class OrderedSourceLoader {
   private lastPage: { count: number; boundary: unknown } | undefined
   private lastPrefixCount: number | undefined
   private lastBoundary: unknown
+  private needsOptimisticRefill = false
   private repairRetries = 0
   private repairTimer: ReturnType<typeof setTimeout> | undefined
   private stagedContinuation: OrderedContinuation | undefined
@@ -118,8 +119,18 @@ export class OrderedSourceLoader {
     hasOptimisticOverlay: (key: string | number) => boolean,
   ): void {
     let hasNewRows = false
+    let hasOptimisticDeparture = false
     for (const change of changes) {
       const previous = sentRows?.get(change.key)
+      if (
+        hasOptimisticOverlay(change.key) &&
+        change.type !== `insert` &&
+        previous !== undefined &&
+        (change.type === `delete` ||
+          this.info.comparator(previous, change.value) !== 0)
+      ) {
+        hasOptimisticDeparture = true
+      }
       if (
         !hasOptimisticOverlay(change.key) &&
         change.type !== `insert` &&
@@ -131,6 +142,18 @@ export class OrderedSourceLoader {
         return
       }
       if (change.type !== `delete` && previous === undefined) hasNewRows = true
+    }
+    if (hasOptimisticDeparture && !this.info.sourceHoldsAllRows) {
+      const locallyAvailable = this.subscription
+        .readOrderedSnapshot({
+          orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
+          limit: this.info.offset + this.info.limit,
+        })
+        .filter(({ key }) => !hasOptimisticOverlay(key)).length
+      if (locallyAvailable < this.info.offset + this.info.limit) {
+        this.needsOptimisticRefill = true
+        this.invalidateCursor()
+      }
     }
     // New keys, including ties, may need another page. Duplicate delivery or
     // an order-equal update cannot invalidate an already attempted request.
@@ -249,10 +272,12 @@ export class OrderedSourceLoader {
     if (!this.info.index) {
       const shouldLoad =
         windowOperationGeneration !== undefined ||
+        this.needsOptimisticRefill ||
         (this.info.dataNeeded?.() ?? 0) > 0 ||
         (this.lastPrefixCount !== undefined &&
           this.lastPrefixCount < this.info.offset + this.info.limit)
       if (shouldLoad) {
+        this.needsOptimisticRefill = false
         this.loadPrefix(
           this.info.offset + this.info.limit,
           windowOperationGeneration,
@@ -282,6 +307,7 @@ export class OrderedSourceLoader {
     let count = Math.max(
       this.info.dataNeeded(this.settledSourceBoundary),
       this.hasSettledSourceRequest ? 0 : this.info.offset + this.info.limit,
+      this.needsOptimisticRefill ? 1 : 0,
     )
     if (
       windowOperationGeneration !== undefined &&
@@ -291,6 +317,7 @@ export class OrderedSourceLoader {
       count = Math.max(count, needed - this.countAcquiredRows())
     }
     if (count > 0) {
+      this.needsOptimisticRefill = false
       this.loadPage(
         count,
         windowOperationGeneration,
