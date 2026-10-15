@@ -3669,9 +3669,7 @@ describe(`loadSubset lifecycle oracle`, () => {
         const promisedRowsPresent = () =>
           promisedIds.every((rowId) => rowIds().includes(rowId))
         peer.requestSnapshot({
-          ...(history.scope === `disjoint`
-            ? { where: peerWheres[index] }
-            : {}),
+          ...(history.scope === `disjoint` ? { where: peerWheres[index] } : {}),
           onLoadSubsetResult: (load) => {
             peerOutcomes.push(
               load === true
@@ -3778,12 +3776,11 @@ describe(`loadSubset lifecycle oracle`, () => {
       .record({
         cut: reentrantCutArbitrary,
         rowCount: fc.constantFrom<ReentrantReleaseHistory[`rowCount`]>(1, 2),
-        releaseOrder:
-          fc.constantFrom<ReentrantReleaseHistory[`releaseOrder`]>(
-            `only`,
-            `first`,
-            `second`,
-          ),
+        releaseOrder: fc.constantFrom<ReentrantReleaseHistory[`releaseOrder`]>(
+          `only`,
+          `first`,
+          `second`,
+        ),
       })
       .map((history) => ({ ...history, scope: `equal` as const })),
     fc
@@ -3831,27 +3828,26 @@ describe(`loadSubset lifecycle oracle`, () => {
     },
   )
 
-  it(
-    `refines generated reentrant release histories`,
-    async () => {
-      if (
-        reentrantReleaseReplay.replayPath !== undefined &&
-        reentrantReleaseReplay.replayProperty !== reentrantReleaseProperty
-      )
-        return
-      const property = fc.asyncProperty(
-        reentrantReleaseArbitrary,
-        async (history) => {
-          await observeReentrantRelease(history, expectedReentrantRelease(history))
-        },
-      )
-      const options = oraclePropertyOptions(48, reentrantReleaseProperty)
-      if (reentrantReleaseReplay.replaySeed === undefined)
-        await fc.assert(property, { ...options, seed: 2_160_2028 })
-      await fc.assert(property, options)
-    },
-    20_000,
-  )
+  it(`refines generated reentrant release histories`, async () => {
+    if (
+      reentrantReleaseReplay.replayPath !== undefined &&
+      reentrantReleaseReplay.replayProperty !== reentrantReleaseProperty
+    )
+      return
+    const property = fc.asyncProperty(
+      reentrantReleaseArbitrary,
+      async (history) => {
+        await observeReentrantRelease(
+          history,
+          expectedReentrantRelease(history),
+        )
+      },
+    )
+    const options = oraclePropertyOptions(48, reentrantReleaseProperty)
+    if (reentrantReleaseReplay.replaySeed === undefined)
+      await fc.assert(property, { ...options, seed: 2_160_2028 })
+    await fc.assert(property, options)
+  }, 20_000)
 
   /**
    * A direct write can overlap a fetched result. While merging that result,
