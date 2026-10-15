@@ -1,6 +1,7 @@
 import { QueryClient } from '@tanstack/query-core'
 import {
   BTreeIndex,
+  IR,
   createCollection,
   createLiveQueryCollection,
   eq,
@@ -77,10 +78,12 @@ import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
  *   cause. A report says only that pages may have shifted, so a second one
  *   in the same step would repeat the repair for nothing.
  * - A refetch or invalidation of an unchanged backend never reports.
- * - A page that only loses rows, or whose rows change only in place, still
- *   starts at the same point and ends at or after its old end. With no later
- *   page, no row can fall outside it, so the refetch does not report. A
+ * - A full page that only loses rows, or whose rows change only in place,
+ *   still starts at the same point and ends at or after its old end. With no
+ *   later page, no row can fall outside it, so the refetch does not report. A
  *   visible delete or order change already starts the loader's own repair.
+ *   A short last page that loses its last row ends earlier, so it may
+ *   report; that costs one repair, not a wrong window.
  * - A page whose end moves earlier reports, because a filtered window can
  *   need a row that now sorts between the page's new and old end. But a
  *   window whose rows are all in its own first page, as after an ordinary
@@ -116,6 +119,11 @@ import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
  *   reports on its own, and the repair it starts reads the provider again.
  *   The application-failure replay checks only the window around a failed
  *   application.
+ * - A Query refetch that joins a running `refetch: true` acquisition on the
+ *   same Query hash does not report, because the guard cannot tell the two
+ *   results apart. No history here reaches it.
+ * - It drives one runtime. Follower tabs of a multi-tab persisted collection
+ *   do not receive the report (#2174).
  * - It checks refetch cost only as relations between reads of the same state.
  *   The cursor-pagination integration oracle owns the zero-call law for a
  *   fresh `createCursorPager` cache.
@@ -1177,6 +1185,64 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
     const failures = await run.cleanup()
     if (primary !== undefined) throw primary
     expect(failures).toEqual([])
+  })
+
+  // The report gate keeps an empty page apart from a page whose last row has
+  // no order value. Rows without `rank` sort last, so the first page ends on
+  // one. A row that arrives ahead moves that page's end earlier, so the
+  // refetch must report. This drives the sync boundary directly: the
+  // generated campaigns give every row a rank.
+  it(`a refetch reports a page whose end moves earlier from a row without an order value`, async () => {
+    type Row = { id: number; rank?: number }
+    const backend: Array<Row> = [{ id: 0, rank: 3 }, { id: 1 }, { id: 2 }]
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { staleTime: Infinity, retry: false } },
+    })
+    const items = createCollection(
+      queryCollectionOptions<Row>({
+        id: `refetch-ordered-prefix-unranked-${collectionSequence++}`,
+        queryClient,
+        queryKey: [`unranked`],
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        queryFn: (ctx) => {
+          const options = ctx.meta?.loadSubsetOptions as LoadSubsetOptions
+          const offset = options.offset ?? 0
+          return [...backend]
+            .sort(
+              (a, b) =>
+                (b.rank ?? -Infinity) - (a.rank ?? -Infinity) || a.id - b.id,
+            )
+            .slice(offset, offset + options.limit!)
+        },
+      }),
+    )
+    let reports = 0
+    items.on(`loadedSubsets:invalidated`, () => {
+      reports++
+    })
+    const orderBy: Array<IR.OrderByClause> = [
+      {
+        expression: new IR.PropRef([`rank`]),
+        compareOptions: {
+          direction: `desc`,
+          nulls: `last`,
+          stringSort: `lexical`,
+        },
+      },
+    ]
+    try {
+      items.startSyncImmediate()
+      await items._sync.loadSubset({ orderBy, limit: 2 })
+      expect(items.toArray.map((row) => row.id).sort()).toEqual([0, 1])
+      backend.push({ id: 3, rank: 2 })
+      await items.utils.refetch()
+      await settle()
+      expect(reports).toBe(1)
+    } finally {
+      await items.cleanup()
+      queryClient.clear()
+    }
   })
 
   it(`a refetch settles when the provider honors neither cursor nor offset`, async () => {

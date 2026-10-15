@@ -1180,9 +1180,18 @@ export function queryCollectionOptions(
      */
     const orderedPageResults = new WeakMap<
       AnyQuery,
-      { readKey: string; keys: string; last: unknown }
+      {
+        readKey: string
+        leadingValue: (row: any) => unknown
+        compare: (a: unknown, b: unknown) => number
+        // The page's keys, and its last row's leading order value. An empty
+        // page has no last row.
+        keys: string
+        last: { value: unknown } | undefined
+      }
     >()
-    const acquisitionRefetches = new Set<string>()
+    // Each running `refetch: true` acquisition on a Query hash.
+    const acquisitionRefetches = new Map<string, number>()
     let invalidationTimer: ReturnType<typeof setTimeout> | undefined
     const recordOrderedPageResult = (
       query: AnyQuery,
@@ -1196,42 +1205,47 @@ export function queryCollectionOptions(
         !options.orderBy?.length
       )
         return
-      const { where, orderBy } = options
-      const leadingValue = compileSingleRowExpression(orderBy[0]!.expression)
       const previous = orderedPageResults.get(query)
+      const { where, orderBy } = options
       const next = {
-        readKey: getLoadSubsetDemandKey({ where, orderBy })!,
+        readKey:
+          previous?.readKey ?? getLoadSubsetDemandKey({ where, orderBy })!,
+        leadingValue:
+          previous?.leadingValue ??
+          compileSingleRowExpression(orderBy[0]!.expression),
+        compare:
+          previous?.compare ?? makeComparator(orderBy[0]!.compareOptions),
         keys: JSON.stringify(rows.map(getKey)),
-        last: rows.length > 0 ? leadingValue(rows.at(-1)) : undefined,
+        last: undefined as { value: unknown } | undefined,
       }
+      if (rows.length > 0) next.last = { value: next.leadingValue(rows.at(-1)) }
       orderedPageResults.set(query, next)
       if (
+        invalidationTimer !== undefined ||
         acquisitionRefetches.has(hashedQueryKey) ||
-        previous === undefined ||
-        previous.keys === next.keys ||
-        previous.last === undefined
+        previous?.last === undefined ||
+        previous.keys === next.keys
       )
         return
-      const compare = makeComparator(orderBy[0]!.compareOptions)
+      const end = previous.last.value
       const endMovedEarlier =
-        next.last === undefined || compare(next.last, previous.last) < 0
+        next.last === undefined || next.compare(next.last.value, end) < 0
       // The page has a later page when another page with its predicate and
       // order ends deeper in the order. An empty page counts: it continues
       // from where an earlier page ended.
-      const hasLaterPage = [...state.observers.values()].some((observer) => {
-        const other = orderedPageResults.get(observer.getCurrentQuery())
-        return (
-          other !== undefined &&
-          other !== next &&
-          other.readKey === next.readKey &&
-          (other.last === undefined || compare(other.last, previous.last) > 0)
-        )
-      })
+      const hasLaterPage = () =>
+        [...state.observers.values()].some((observer) => {
+          const other = orderedPageResults.get(observer.getCurrentQuery())
+          return (
+            other !== undefined &&
+            other !== next &&
+            other.readKey === next.readKey &&
+            (other.last === undefined ||
+              next.compare(other.last.value, end) > 0)
+          )
+        })
       // One report per burst of refetched pages, after their rows apply.
-      if (
-        (endMovedEarlier || hasLaterPage) &&
-        invalidationTimer === undefined
-      ) {
+      if (endMovedEarlier || hasLaterPage()) {
         invalidationTimer = setTimeout(() => {
           invalidationTimer = undefined
           if (activeSyncSession === syncSession) invalidateLoadedSubsets()
@@ -1872,7 +1886,9 @@ export function queryCollectionOptions(
         const finish = (settle: () => void) => {
           if (!active) return
           active = false
-          acquisitionRefetches.delete(hashedQueryKey)
+          const refetches = acquisitionRefetches.get(hashedQueryKey)! - 1
+          if (refetches === 0) acquisitionRefetches.delete(hashedQueryKey)
+          else acquisitionRefetches.set(hashedQueryKey, refetches)
           pending.delete(cancel)
           if (pending.size === 0) {
             pendingReadyUnsubscribes.delete(hashedQueryKey)
@@ -1885,7 +1901,10 @@ export function queryCollectionOptions(
         pending.add(cancel)
         pendingReadyUnsubscribes.set(hashedQueryKey, pending)
         // This acquisition's result answers the loader; it reports no shift.
-        acquisitionRefetches.add(hashedQueryKey)
+        acquisitionRefetches.set(
+          hashedQueryKey,
+          (acquisitionRefetches.get(hashedQueryKey) ?? 0) + 1,
+        )
 
         const refetch = async () => {
           const waitsForDeferredApplication = !!collection.deferDataRefresh

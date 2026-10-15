@@ -219,8 +219,12 @@ adapter refetches loaded subsets on its own, deliver every row that now sorts
 within a served prefix, even when it now falls between two served pages.
 Refetching each page alone can leave such a row in no result, and the loader
 receives no change that would request it. Either read each prefix again from
-the start of its order, or delete the rows of the later pages so the loader
-requests them again.
+the start of its order, or call `invalidateLoadedSubsets()` from the sync
+params once the refetched rows apply. Each ordered live query then repairs its
+window with a bounded read from the start of its order. Call it only when a
+refetch changed which rows a page holds, because every paging ordered live
+query on the Collection repairs. Do not call it for results that answer a
+`loadSubset` call.
 
 If an adapter supplies `unloadSubset`, release only the acquisition belonging to
 the supplied options. Release must be idempotent and non-throwing; the adapter
