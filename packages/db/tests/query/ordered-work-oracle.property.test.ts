@@ -6270,7 +6270,7 @@ async function checkOptimisticWindow(
                       ) === true),
                 )
                 if (options.orderBy) {
-                  const [{ compareOptions }] = options.orderBy
+                  const { compareOptions } = options.orderBy[0]!
                   page.sort((left, right) =>
                     compareOptions.direction === `desc`
                       ? right.rank - left.rank
@@ -6314,7 +6314,7 @@ async function checkOptimisticWindow(
               () => (attempt!.providerSettled = true),
               () => (attempt!.providerSettled = true),
             )
-            return provider
+            return provider.then(() => undefined)
           },
         }
       },
@@ -6439,7 +6439,10 @@ async function checkOptimisticWindow(
               if (shape === `source`) draft.eligible = false
               else draft.link = -draft.id
             })
-      settled = transaction.isPersisted.promise.catch(() => undefined)
+      settled = transaction.isPersisted.promise.then(
+        () => undefined,
+        () => undefined,
+      )
       const immediate = ids()
       const acquisitionStarted = await observeAcquisitionAcrossTaskTurns(
         initialRequests,
