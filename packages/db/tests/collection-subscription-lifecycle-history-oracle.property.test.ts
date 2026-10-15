@@ -6,8 +6,10 @@ import { Func, PropRef, Value } from '../src/query/ir.js'
 import {
   abortReplayHistory,
   abortedRestartHistory,
+  cleanedRestartDemandCases,
   compoundLifecycleCoverageHistories,
   createLifecycleModel,
+  expectedCleanedRestartDemand,
   greenLifecycleHistories,
   greenLifecycleHistoryArbitrary,
   mixedAbortedRestartHistory,
@@ -41,6 +43,140 @@ const randomCampaign = (property: string) =>
   replay.replayPath === undefined || replay.replayProperty === property
     ? fcTest
     : fcTest.skip
+
+/**
+ * # What settles a demand created while a Collection is cleaned up?
+ *
+ * Collection lifecycle and the live-query architecture require the next sync
+ * run to serve this waiting logical owner. Eager readiness is the complete
+ * source evidence and starts no physical acquisition. On-demand readiness is
+ * insufficient; one settled acquisition supplies the evidence instead.
+ *
+ * The independent model in the lifecycle grammar crosses both sync modes with
+ * empty and nonempty replacements and with or without an eager loader. The
+ * production driver publishes an old row, creates a direct subscription,
+ * cleans up its source, requests a snapshot, and restarts the real Collection.
+ * It holds eager readiness to prove the wait cannot fulfill early. Before that
+ * release and after restart settlement, the returned wait, acquisition count,
+ * subscription status, and public rows must match the model. This fixed matrix
+ * does not claim failure or competing-owner coverage.
+ */
+describe(`demand created while its Collection is cleaned up`, () => {
+  it.each(cleanedRestartDemandCases)(
+    `$syncMode source with $loader loader and a $replacement replacement`,
+    async (history) => {
+      const expected = expectedCleanedRestartDemand(history)
+      let syncRuns = 0
+      let physicalAcquisitions = 0
+      let releaseEagerReady: (() => void) | undefined
+      let begin!: () => void
+      let write!: (message: { type: `insert`; value: { id: string } }) => void
+      let commit!: () => void
+
+      const publishRow = (id: string) => {
+        begin()
+        write({ type: `insert`, value: { id } })
+        commit()
+      }
+      const publishReplacement = () => {
+        if (history.replacement === `row`) publishRow(`replacement`)
+      }
+      const collection = createCollection<{ id: string }>({
+        id: `cleaned-restart-${history.syncMode}-${history.loader}-${history.replacement}`,
+        getKey: ({ id }) => id,
+        syncMode: history.syncMode,
+        sync: {
+          sync: (operations) => {
+            const syncRun = syncRuns++
+            begin = operations.begin
+            write = operations.write
+            commit = operations.commit
+            if (syncRun === 0) {
+              operations.markReady()
+            } else if (history.syncMode === `eager`) {
+              releaseEagerReady = () => {
+                publishReplacement()
+                operations.markReady()
+              }
+            } else {
+              operations.markReady()
+            }
+            if (history.loader === `absent`) return
+            return {
+              loadSubset: () => {
+                physicalAcquisitions++
+                publishReplacement()
+                return true
+              },
+            }
+          },
+        },
+      })
+      const visible = new Map<string | number, { id: string }>()
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          for (const change of changes) {
+            if (change.type === `delete`) visible.delete(change.key)
+            else visible.set(change.key, { id: change.value.id })
+          }
+        },
+        { includeInitialState: false },
+      )
+
+      try {
+        publishRow(`old`)
+        expect([...visible.values()]).toEqual([{ id: `old` }])
+        await collection.cleanup()
+        let resultState: `pending` | `fulfilled` | `rejected` = `pending`
+        let result: unknown
+        subscription.requestSnapshot({
+          onLoadSubsetResult: (returned) => {
+            result = returned
+            if (returned instanceof Promise) {
+              void returned.then(
+                () => {
+                  resultState = `fulfilled`
+                },
+                () => {
+                  resultState = `rejected`
+                },
+              )
+            } else {
+              resultState = `fulfilled`
+            }
+          },
+        })
+
+        expect(result).toBeInstanceOf(Promise)
+        expect(resultState).toBe(`pending`)
+
+        collection.startSyncImmediate()
+        await flushPromises()
+
+        if (expected.beforeEagerReady) {
+          expect({
+            physicalAcquisitions,
+            result: resultState,
+            status: subscription.status,
+            rows: [...visible.values()],
+          }).toEqual(expected.beforeEagerReady)
+          releaseEagerReady!()
+          await flushPromises()
+        }
+
+        expect({
+          physicalAcquisitions,
+          result: resultState,
+          status: subscription.status,
+          rows: [...visible.values()],
+        }).toEqual(expected.settled)
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+})
 
 /**
  * # Does the runtime follow the subscription lifecycle grammar?

@@ -757,6 +757,79 @@ export const releasedObsoleteResolveHistory: ReadonlyArray<LifecycleCommand> = [
 ]
 
 /**
+ * A demand created while its Collection is cleaned up waits for the next sync
+ * run's evidence. An eager source supplies that evidence through Collection
+ * readiness and starts no physical acquisition. An on-demand source supplies
+ * it through one settled acquisition. Either mode must reconcile the complete
+ * replacement rows before the caller's wait fulfills.
+ *
+ * These six cases are a bounded history grammar, not a projection of the
+ * subscription implementation. Empty and nonempty replacements must remove an
+ * older public row. An optional eager loader proves that eager mode bypasses it;
+ * the absent-loader cases preserve the valid Query Collection boundary. The
+ * model predicts only the public wait, rows, subscription readiness, and
+ * physical acquisition count before eager readiness and at restart settlement;
+ * failures, concurrent owners, and asynchronous acquisitions stay with the
+ * broader lifecycle histories above.
+ */
+export type CleanedRestartDemandCase = {
+  syncMode: `eager` | `on-demand`
+  loader: `absent` | `present`
+  replacement: `empty` | `row`
+}
+
+export const cleanedRestartDemandCases: ReadonlyArray<CleanedRestartDemandCase> =
+  ([`empty`, `row`] as const).flatMap((replacement) =>
+    ([`absent`, `present`] as const).map((loader) => ({
+      syncMode: `eager` as const,
+      loader,
+      replacement,
+    })),
+  ).concat(
+    ([`empty`, `row`] as const).map((replacement) => ({
+      syncMode: `on-demand` as const,
+      loader: `present` as const,
+      replacement,
+    })),
+  )
+
+export function expectedCleanedRestartDemand(
+  history: CleanedRestartDemandCase,
+): {
+  beforeEagerReady?: {
+    physicalAcquisitions: 0
+    result: `pending`
+    status: `loadingSubset`
+    rows: []
+  }
+  settled: {
+    physicalAcquisitions: number
+    result: `fulfilled`
+    status: `ready`
+    rows: Array<{ id: string }>
+  }
+} {
+  return {
+    ...(history.syncMode === `eager`
+      ? {
+          beforeEagerReady: {
+            physicalAcquisitions: 0 as const,
+            result: `pending` as const,
+            status: `loadingSubset` as const,
+            rows: [],
+          },
+        }
+      : {}),
+    settled: {
+      physicalAcquisitions: history.syncMode === `on-demand` ? 1 : 0,
+      result: `fulfilled`,
+      status: `ready`,
+      rows: history.replacement === `row` ? [{ id: `replacement` }] : [],
+    },
+  }
+}
+
+/**
  * Publication deferral is outside acquisition ownership above. These commands
  * project only its sync-run boundary and later subscriber batches. The first
  * run's nested handles can outlive cleanup; the restarted run is independent.

@@ -339,7 +339,8 @@ export class CollectionSubscription
     }
     if (
       this.collection.status === `error` ||
-      this.collection._sync.syncLoadSubsetFn === null
+      (this.collection.config.syncMode === `on-demand` &&
+        this.collection._sync.syncLoadSubsetFn === null)
     ) {
       this.setReadyIfIdle()
       return
@@ -351,6 +352,14 @@ export class CollectionSubscription
     )
     if (demands.length === 0) {
       this.setReadyIfIdle()
+      return
+    }
+    // Eager demand is satisfied by the complete ready snapshot, never by a
+    // subset acquisition or the partial state of a loading sync run.
+    if (
+      this.collection.config.syncMode === `eager` &&
+      this.collection.status !== `ready`
+    ) {
       return
     }
 

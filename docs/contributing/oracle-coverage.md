@@ -89,6 +89,15 @@ that test identifiers must copy production's private data structures.
 
 ### Guide-audit boundary handoffs
 
+The Collection lifecycle history owner includes a six-cell cleanup-restart
+matrix. It crosses eager sources with absent or present loaders and on-demand
+controls with empty or nonempty replacements. Eager demand must stay pending
+until source readiness, start no physical subset acquisition, and then fulfill
+with the exact replacement. The focused Query Collection test receives that
+law through automatic Collection GC, an eager Query Collection, and
+`DbClient.preloadLiveQuery`. Failure, concurrent owners, and asynchronous
+subset acquisitions remain with the broader lifecycle histories.
+
 The includes-space owner (`packages/db/tests/query/includes-space-oracle.test.ts`)
 now varies leaves per twig across 0, 1, and 10. Public leaf rows change from
 0 to 10 to 100 while 13 Collection facades remain. This protects facade
