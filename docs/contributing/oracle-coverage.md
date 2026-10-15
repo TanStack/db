@@ -218,7 +218,9 @@ unfiltered full-source request supplies the new eligible row. A finite join
 model checks the final public window and the net delete/insert change events,
 and each callback's rows must match its changes. These controlled histories do
 not assert synchronous timing for full-source work after first publication.
-They do not cover other adapters or an on-demand React first commit.
+Other marker changes and Promise or held-receipt responses on this later
+fallback still need ordered-lifecycle witnesses. Real adapter delivery and an
+on-demand React first commit need receiving witnesses.
 
 Three Ordered acquisition companions own distinct controlled cuts:
 `packages/db/tests/query/load-subset-replay-refinement-oracle.test.ts` checks

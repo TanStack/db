@@ -150,3 +150,71 @@ and `ready`. The adjacent preload-started cell remains synchronously ready.
 The focused warm cells and all 277 ordered lifecycle tests passed with no type
 errors. Other adapters and a real on-demand React first commit remain outside
 these witnesses.
+
+## Post-publication oracle follow-up
+
+Reviewed oracle and coverage-map commit: `44cf62e2d9597e2a58a213d24c31e8733fdd2884`
+(parent `3aca442c6549048246379661f2dcc133f12d0d53`). This section is a
+documentation follow-up to that exact code revision; the earlier ORC table
+describes the initial-fallback change.
+
+The ordered-lifecycle oracle now exercises the publication/readiness distinction
+through the public live-query Collection. Its finite model joins three root
+rows to marker rows and takes the first eligible row in nulls-last order. An
+on-demand child holds Collection status at `loading` after root 1's first
+window publishes. Two legal marker histories, deletion and retargeting, remove
+root 1's match. The next ordered page supplies ineligible root 2 at a null
+boundary; a later unfiltered full-source request supplies eligible root 3.
+The controlled adapter evaluates request predicates and cursor expressions,
+sorts the requested page, and applies its writes before returning literal
+`true`.
+
+The oracle checks the already public row and `loading` status at fallback
+entry, the pending child acquisition, the ordered page before the full-source
+request, the final public row, and the net delete/insert events. Its explicit
+`getKey` uses the root ID, so the comparison does not depend on the compiler's
+composite-key encoding. At each nonempty event callback, applying its changes
+to the prior public snapshot must reproduce the rows read in that callback.
+The net comparison allows either order for changes to distinct keys. It waits
+for the final public change rather than a fixed number of scheduler turns. It
+also keeps every callback-visible window within the one-row limit. The
+refinement check runs before cleanup so its mismatch remains the primary
+diagnostic if cleanup fails. It allows coherent intermediate publications and
+makes no
+synchronous-timing claim for work started after first publication. A temporary
+fault kept the full-source request and its reported served rows but dropped
+the newly delivered root 3 write. Both histories failed at the final public
+snapshot: the faulty run showed `[]` and `ready` instead of root 3 and
+`loading`. The fault was removed after calibration.
+Another temporary fault duplicated the recorded public event batch. Both
+histories failed at the net change-event comparison while their final rows
+remained correct; this fault was also removed.
+
+At the reviewed code commit, all 279 ordered lifecycle tests and the DB test
+TypeScript check passed. Prettier and `git diff --check` passed. ESLint had no
+errors and one warning on an unchanged line. An independent source review
+found and prompted repairs to the key-encoding assumption, event order,
+page-before-fallback reach, pending-child reach, fixed-turn wait, callback
+window bound, and failure fidelity before this commit.
+
+This is a controlled core witness for these two marker actions and one null
+boundary. It does not establish other provider delivery schedules, real
+adapter handoffs, or a first React commit over an on-demand source. The
+initial synchronous-cut histories above retain those separate limits.
+
+| Requirement | Post-publication outcome |
+| --- | --- |
+| ORC-001 | The architecture's coherent-publication and pending-demand laws govern this later fallback. The synchronous first-window cut expressly excludes work started after publication. |
+| ORC-002 | The expected row comes from a finite marker join, nulls-last sort, and one-row slice. It does not call the loader or its ordering classifier. |
+| ORC-003 | Prose beside the model and driver names the law, two-action grammar, controlled production path, public cuts, and refinement check. |
+| ORC-004 | Not triggered: these are two enumerated histories, with no generated-history coverage claim. |
+| ORC-005 | `createLiveQueryCollection` and `preload` reach a published row with a pending child acquisition, then an ordered cursor page before the unfiltered full-source request. Public callback rows and changes are compared after the needed row is delivered. |
+| ORC-006 | A temporary dropped full-source write failed both histories at the final public-row comparison; a temporary duplicate event failed both at the net-event comparison. Both faults reached the fallback and were removed. |
+| ORC-007 | Not triggered: the owner's existing fixed and random campaigns were unchanged. |
+| ORC-008 | Not triggered: the new model is a stateless finite recomputation. |
+| ORC-009 | A marker mutation is one source Collection sync transaction; the model's eligible result is the live-query Collection's public row. A pending child request keeps Collection status `loading` after publication. |
+| ORC-010 | The comparison runs before cleanup. `finishOracleCleanup` retains a primary assertion and distinct cleanup failures; the child gate is released and every Collection and observer is cleaned up. |
+| ORC-011 | No shared semantic fault requiring a second result formulation was identified. The reviewer found an internal-key encoding dependency; explicit `getKey` removes it. |
+| ORC-012 | This section records the exact code revision, checks, faults, and bounded claim. |
+| ORC-013 | Not triggered: the evidence claims only two named marker actions and one null-boundary path, not a reusable timing or range law beyond them. |
+| ORC-014 | No real-provider handoff claim is made for this controlled later-fallback path. Other adapters and on-demand React remain separate receiving limits. |
