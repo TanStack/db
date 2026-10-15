@@ -192,7 +192,7 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
           public-row checkpoint; a public subscription at the same cut checks
           Core's deferred unload. Both paths now leave no Query observer or
           source row (2026-10-15).
-    - [x] Accepted-result supersession: four fixed histories hold A's accepted
+    - [x] Accepted-result supersession: seven fixed histories hold A's accepted
           receipt while distinct B or a replay of A enters an unaccepted
           commit. They record A's receipt and complete public rows inside the
           aborting caller's settlement handler. The prior latest-controller
@@ -200,8 +200,16 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
           overwriting A's controller on same-result replay fails that history
           at the same checkpoint. An existing-Query explicit refetch can return
           B's later cache result object after A's callback; `0552b559e`
-          rejected its caller before A applied. The fourth history now checks
-          that A's fetch application remains the caller's receipt barrier
+          rejected its caller before A applied. The existing-Query histories
+          now cross immediate start, offline pause, retry, and paused retry.
+          The three new paths failed on `7f7b1cdee` while A's receipt was held:
+          the fetch action and later query-function invocation had different
+          positions, so A could not be found from its caller's record. One
+          physical fetch now retains one application record across those
+          positions; a paused cached seed cannot claim A's terminal result.
+          Removing record reuse makes the plain retry reject early; accepting
+          every non-fetching result makes the paused retry reject early. Both
+          controls fail at the held-receipt outcome checkpoint
           (2026-10-15).
   - [x] Request shape: signal-free and explicit-signal requests check the
         physical signal, own keys, descriptor, cloning, JSON, and deletion.
@@ -245,7 +253,7 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
         load. The two primary oracles pass 522 tests, direct refetch replay and
         the 37-test replay manifest pass, and the safe model and eight hostile
         configurations reach their intended results (2026-10-15).
-  - [x] Package verification: all 962 Query DB runtime tests and 959 persisted
+  - [x] Package verification: all 965 Query DB runtime tests and 959 persisted
         oracle tests pass (one skipped, one todo). Query DB, DB, and persisted
         core TypeScript checks pass, as do affected-file lint (existing warnings
         only), formatting, and whitespace checks (2026-10-15). The package's

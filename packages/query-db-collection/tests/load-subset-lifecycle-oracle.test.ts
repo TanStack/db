@@ -1,4 +1,4 @@
-import { QueryClient } from '@tanstack/query-core'
+import { QueryClient, onlineManager } from '@tanstack/query-core'
 import fc from 'fast-check'
 import {
   BasicIndex,
@@ -7348,24 +7348,57 @@ describe(`loadSubset lifecycle oracle`, () => {
    *
    * These legal histories use a real QueryClient and direct loadSubset caller.
    * One writes B into Query cache synchronously inside A's commit callback
-   * and aborts its caller. A neighboring history
-   * starts A by explicit refetch of an existing Query, where Query Core can
-   * return B's result object even though A supplied the physical response.
+   * and aborts its caller. Neighboring histories start A by explicit refetch
+   * of an existing Query. Query Core may start its query function immediately,
+   * pause before starting it while offline, retry after a failure, or pause
+   * that retry. In the paused-retry history the cached seed replay applies
+   * before A's receipt is held. In every case A's accepted receipt, rather
+   * than a later cache result or that seed replay, controls rejection.
    * Another releases and reacquires a public subscriber after A is accepted,
    * causing Query DB to replay the same A result. A wrapping sync records A's real
    * receipt and holds the later commit before forwarding it to Collection
    * core. The caller's outcome, receipt state, and complete public rows are
-   * captured together when its promise settles. The controlled wrapper does
+   * captured together when its promise settles. The paused histories use
+   * Query Core's real online manager and retryer. The controlled wrapper does
    * not establish native persistence or arbitrary Query-cache scheduling.
    */
   it.each([
-    { trigger: `cache-write-before-waiter`, existingQuery: false },
-    { trigger: `same-result-replay`, existingQuery: false },
-    { trigger: `cache-write-before-waiter`, existingQuery: true },
+    {
+      trigger: `cache-write-before-waiter`,
+      existingQuery: false,
+      fetchPath: `immediate`,
+    },
+    {
+      trigger: `same-result-replay`,
+      existingQuery: false,
+      fetchPath: `immediate`,
+    },
+    {
+      trigger: `cache-write-before-waiter`,
+      existingQuery: true,
+      fetchPath: `immediate`,
+    },
+    {
+      trigger: `cache-write-before-waiter`,
+      existingQuery: true,
+      fetchPath: `paused-start`,
+    },
+    {
+      trigger: `cache-write-before-waiter`,
+      existingQuery: true,
+      fetchPath: `retry`,
+    },
+    {
+      trigger: `cache-write-before-waiter`,
+      existingQuery: true,
+      fetchPath: `paused-retry`,
+    },
   ] as const)(
-    `keeps an accepted receipt through $trigger, existingQuery=$existingQuery`,
-    async ({ trigger, existingQuery }) => {
+    `keeps an accepted receipt through $trigger, existingQuery=$existingQuery, fetchPath=$fetchPath`,
+    async ({ trigger, existingQuery, fetchPath }) => {
       const queryClient = createQueryClient()
+      if (fetchPath === `paused-start` || fetchPath === `paused-retry`)
+        queryClient.mount()
       const id = `accepted-reentry-${trigger}-${collectionSequence++}`
       const providerAnswer = createDeferred<Array<Row>>()
       const mutationEntered = createDeferred<void>()
@@ -7378,8 +7411,10 @@ describe(`loadSubset lifecycle oracle`, () => {
       let providerCalls = 0
       let sourceCommits = 0
       let wroteB = false
+      let wroteA = false
       let replayArmed = false
       let receiptAApplied = false
+      let seedReplaysApplied = 0
       let outcome: `fulfilled` | `AbortError` | `other-error` | undefined
       let receiptAppliedAtSettlement: boolean | undefined
       let rowsAtSettlement: Array<string> | undefined
@@ -7390,13 +7425,23 @@ describe(`loadSubset lifecycle oracle`, () => {
         queryKey: [id],
         queryFn: () => {
           providerCalls++
-          return existingQuery && providerCalls === 1
-            ? Promise.resolve([{ id: `seed` }])
-            : providerAnswer.promise
+          if (existingQuery && providerCalls === 1)
+            return Promise.resolve([{ id: `seed` }])
+          if (
+            (fetchPath === `retry` || fetchPath === `paused-retry`) &&
+            providerCalls === 2
+          ) {
+            if (fetchPath === `paused-retry`) onlineManager.setOnline(false)
+            return Promise.reject(new Error(`retry before A`))
+          }
+          return providerAnswer.promise
         },
         getKey: (row) => row.id,
         startSync: true,
         syncMode: `on-demand`,
+        retry:
+          fetchPath === `retry` || fetchPath === `paused-retry` ? 1 : false,
+        retryDelay: 0,
         onInsert: async () => {
           mutationEntered.resolve()
           await releaseMutation.promise
@@ -7412,11 +7457,14 @@ describe(`loadSubset lifecycle oracle`, () => {
               ...params,
               begin: () => {
                 wroteB = false
+                wroteA = false
                 params.begin()
               },
               write: (change) => {
                 if (change.type !== `delete` && change.value.id === `B`)
                   wroteB = true
+                if (change.type !== `delete` && change.value.id === `A`)
+                  wroteA = true
                 params.write(change)
               },
               commit: (signal) => {
@@ -7432,17 +7480,30 @@ describe(`loadSubset lifecycle oracle`, () => {
                   })
                 }
                 const receipt = params.commit(signal)
-                if (receipt === true) receiptAApplied = true
-                else
-                  void receipt.then(
-                    () => {
-                      receiptAApplied = true
-                    },
-                    () => undefined,
-                  )
-                if (sourceResultArmed) acceptedA.resolve()
+                if (sourceResultArmed && !wroteA && !wroteB) {
+                  if (receipt === true) seedReplaysApplied++
+                  else
+                    void receipt.then(
+                      () => {
+                        seedReplaysApplied++
+                      },
+                      () => undefined,
+                    )
+                }
+                if (sourceResultArmed && wroteA) {
+                  if (receipt === true) receiptAApplied = true
+                  else
+                    void receipt.then(
+                      () => {
+                        receiptAApplied = true
+                      },
+                      () => undefined,
+                    )
+                  acceptedA.resolve()
+                }
                 if (
                   sourceResultArmed &&
+                  wroteA &&
                   trigger === `cache-write-before-waiter`
                 ) {
                   queryClient.setQueryData([id], [{ id: `B` }])
@@ -7477,8 +7538,12 @@ describe(`loadSubset lifecycle oracle`, () => {
           receiptAApplied = false
           sourceResultArmed = true
         }
-        const mutation = collection.insert({ id: `local` })
-        await mutationEntered.promise
+        let mutation: ReturnType<typeof collection.insert> | undefined
+        if (fetchPath !== `paused-retry`) {
+          mutation = collection.insert({ id: `local` })
+          await mutationEntered.promise
+        }
+        if (fetchPath === `paused-start`) onlineManager.setOnline(false)
         const load = Promise.resolve(collection._sync.loadSubset(request))
         void load.then(
           () => {
@@ -7500,8 +7565,32 @@ describe(`loadSubset lifecycle oracle`, () => {
             void Promise.resolve(result).catch(() => undefined)
           },
         })
+        if (fetchPath === `paused-start` || fetchPath === `paused-retry`) {
+          await vi.waitFor(() => {
+            expect(
+              queryClient.getQueryCache().find({ queryKey: [id], exact: true })
+                ?.state.fetchStatus,
+            ).toBe(`paused`)
+            expect(providerCalls).toBe(fetchPath === `paused-start` ? 1 : 2)
+          })
+          expect(outcome).toBeUndefined()
+          if (fetchPath === `paused-retry`) {
+            await vi.waitFor(() =>
+              expect(seedReplaysApplied).toBeGreaterThan(0),
+            )
+            mutation = collection.insert({ id: `local` })
+            await mutationEntered.promise
+          }
+          onlineManager.setOnline(true)
+        }
         await vi.waitFor(() =>
-          expect(providerCalls).toBe(existingQuery ? 2 : 1),
+          expect(providerCalls).toBe(
+            fetchPath === `retry` || fetchPath === `paused-retry`
+              ? 3
+              : existingQuery
+                ? 2
+                : 1,
+          ),
         )
         providerAnswer.resolve([{ id: `A` }])
         await acceptedA.promise
@@ -7521,14 +7610,22 @@ describe(`loadSubset lifecycle oracle`, () => {
         } else {
           await laterCommitEntered.promise
         }
-        expect(providerCalls).toBe(existingQuery ? 2 : 1)
-        expect(sourceCommits).toBe(2)
+        expect(providerCalls).toBe(
+          fetchPath === `retry` || fetchPath === `paused-retry`
+            ? 3
+            : existingQuery
+              ? 2
+              : 1,
+        )
+        if (fetchPath === `immediate`) expect(sourceCommits).toBe(2)
+        else expect(sourceCommits).toBeGreaterThanOrEqual(2)
         expect(receiptAApplied).toBe(false)
         expect(rows()).toEqual(existingQuery ? [`local`, `seed`] : [`local`])
         await new Promise<void>((resolve) => setTimeout(resolve, 0))
         expect(outcome).toBeUndefined()
 
         releaseMutation.resolve()
+        if (!mutation) throw new Error(`The mutation did not start`)
         await mutation.isPersisted.promise
         await expect(load).rejects.toMatchObject({ name: `AbortError` })
         expect(outcome).toBe(`AbortError`)
@@ -7536,6 +7633,7 @@ describe(`loadSubset lifecycle oracle`, () => {
         expect(rowsAtSettlement).toEqual([`A`])
         expect(rows()).toEqual([`A`])
       }, [
+        [`Query online manager`, () => onlineManager.setOnline(true)],
         [`provider`, () => providerAnswer.resolve([])],
         [`mutation handler`, () => releaseMutation.resolve()],
         [`later commit`, () => releaseLaterCommit.resolve()],
@@ -7543,6 +7641,7 @@ describe(`loadSubset lifecycle oracle`, () => {
         [`direct acquisition`, () => collection._sync.unloadSubset(request)],
         [`Collection`, () => collection.cleanup()],
         [`Query client`, () => queryClient.clear()],
+        [`Query client mount`, () => queryClient.unmount()],
       ])
     },
   )

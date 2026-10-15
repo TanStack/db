@@ -385,6 +385,7 @@ type AnyQuery = Query<any, any, any, any>
 
 let nextQueryCollectionAuthorityPosition = 0
 const queryCollectionFetchActionStarts = new WeakMap<object, number>()
+const queryCollectionCurrentFetchActionStarts = new WeakMap<AnyQuery, number>()
 const queryCollectionCurrentFetchStarts = new WeakMap<AnyQuery, number>()
 const queryCollectionSuccessfulFetchStarts = new WeakMap<AnyQuery, number>()
 const queryCollectionSuccessfulFetchData = new WeakMap<AnyQuery, unknown>()
@@ -904,7 +905,14 @@ export function queryCollectionOptions(
       recordsByStart.get(fetchStart) ??
       new Map<string, FetchApplicationRecord>()
     recordsByStart.set(fetchStart, recordsByHash)
-    const record = recordsByHash.get(hashedQueryKey) ?? {}
+    // Query Core retries and offline resumes reuse one fetch action while the
+    // query function receives a new invocation position for row authority.
+    const actionStart = queryCollectionCurrentFetchActionStarts.get(query)
+    const actionRecord =
+      actionStart !== undefined && actionStart !== fetchStart
+        ? recordsByStart.get(actionStart)?.get(hashedQueryKey)
+        : undefined
+    const record = recordsByHash.get(hashedQueryKey) ?? actionRecord ?? {}
     recordsByHash.set(hashedQueryKey, record)
     return record
   }
@@ -3018,14 +3026,22 @@ export function queryCollectionOptions(
         applicationToken: ResultApplicationController,
       ) => true | Promise<void>,
     ): void => {
-      if (!result.isFetching) {
+      if (result.isSuccess && result.fetchStatus === `idle`) {
         const query = state.observers.get(hashedQueryKey)?.getCurrentQuery()
         const fetchStart = query && queryCollectionCurrentFetchStarts.get(query)
         if (query && fetchStart !== undefined) {
-          const record = fetchApplicationRecords
-            .get(query)
-            ?.get(fetchStart)
-            ?.get(hashedQueryKey)
+          const actionStart = queryCollectionCurrentFetchActionStarts.get(query)
+          const record =
+            fetchApplicationRecords
+              .get(query)
+              ?.get(fetchStart)
+              ?.get(hashedQueryKey) ??
+            (actionStart === undefined
+              ? undefined
+              : fetchApplicationRecords
+                  .get(query)
+                  ?.get(actionStart)
+                  ?.get(hashedQueryKey))
           if (record) record.applicationResult ??= result
         }
       }
@@ -3786,6 +3802,7 @@ export function queryCollectionOptions(
               if (observer.getCurrentQuery() === event.query)
                 fetchStartGenerations.set(logicalHash, fetchStart)
             })
+            queryCollectionCurrentFetchActionStarts.set(event.query, fetchStart)
             queryCollectionCurrentFetchStarts.set(event.query, fetchStart)
             const obsoleteFetchStarts = [
               ...(fetchApplicationRecords.get(event.query)?.keys() ?? []),

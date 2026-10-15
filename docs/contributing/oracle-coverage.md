@@ -761,20 +761,28 @@ checkpoint. These fixed cuts do not establish arbitrary callback reentry or
 all abort/unload orderings; the generated grammar and hostile controls below
 extend them. [Issue #2162](https://github.com/TanStack/db/issues/2162)
 remains open pending final review of that bounded claim.
-Four more accepted-result histories hold A's applied receipt while a later B
+Seven more accepted-result histories hold A's applied receipt while a later B
 result or a replay of A enters an unaccepted commit. A direct caller aborts
 after A's acceptance. Each history records A's receipt state and the complete
 public rows inside that caller's rejection handler; it must remain pending
 before A applies and reject with A visible afterward. One history starts B by
 refetch, one writes B into Query cache during A's commit callback before the
 waiter records A, and one replays the same observer result after a passive
-subscriber remounts. The fourth starts A by explicit refetch of an existing
-Query. Query Core can return B's result object after the reentrant cache edit;
-the caller must still wait for A's accepted receipt. The previous result-object
-lookup failed at the held-gate outcome checkpoint. Restoring the latest-controller
-lookup fails the first three at that checkpoint. Allowing the replay to overwrite A's
-result controller fails the same-result history there. These controlled
-histories do not establish arbitrary later accepted-result ordering.
+subscriber remounts. Four start A by explicit refetch of an existing Query:
+immediately, after an offline pause, after a failed attempt and retry, and
+after a paused retry. Query Core can return B's result object after the
+reentrant cache edit; the caller must still wait for A's accepted receipt.
+The previous result-object lookup failed at the held-gate outcome checkpoint.
+On `7f7b1cdee`, the three paused or retried paths also rejected before A
+applied: one Query Core fetch action can span several query-function invocation
+positions, and a paused cached result is not A's completed response. Separate
+records for retry positions fail the retry history at the held-gate outcome
+checkpoint. Treating every non-fetching result as completed fails the
+paused-retry history there. The latest-controller lookup fails the first three
+at that checkpoint.
+Allowing the replay to overwrite A's result controller fails the same-result
+history there. These controlled histories do not establish arbitrary later
+accepted-result ordering.
 An initial-fetch lease grammar now varies an equal peer, consumed versus
 ignored physical signal, six first-caller actions (including both abort/unload
 orders and Collection cleanup), peer release before provider settlement, and
