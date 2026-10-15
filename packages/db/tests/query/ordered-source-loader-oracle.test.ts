@@ -476,13 +476,13 @@ describe(`OrderedSourceLoader`, () => {
       const stagedContinuation = (
         loader as unknown as {
           stagedContinuation?: {
-            isAuthoritativeRepair: boolean
+            isAuthoritativeRequest: boolean
             windowOperationGeneration?: number
           }
         }
       ).stagedContinuation
       expect(stagedContinuation).toMatchObject({
-        isAuthoritativeRepair: false,
+        isAuthoritativeRequest: false,
       })
       expect(stagedContinuation?.windowOperationGeneration).toBeUndefined()
       expect(
