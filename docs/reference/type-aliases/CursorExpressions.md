@@ -23,10 +23,13 @@ Neither expression includes the main `where` clause - they are cursor-specific o
 optional lastKey: string | number;
 ```
 
-Defined in: [packages/db/src/types.ts:316](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L316)
+Defined in: [packages/db/src/types.ts:319](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L319)
 
-The key of the last item that was loaded.
-Can be used by sync layers for tracking or deduplication.
+Optional key of a provider-established continuation boundary. External
+loadSubset callers may supply it after establishing provider coverage.
+A local snapshot selection does not establish that coverage, so
+CollectionSubscription never sets it. Adapters must also handle requests
+without it.
 
 ***
 

@@ -3,7 +3,7 @@ id: PropRef
 title: PropRef
 ---
 
-Defined in: [packages/db/src/query/ir.ts:151](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L151)
+Defined in: [packages/db/src/query/ir.ts:200](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L200)
 
 ## Extends
 
@@ -26,7 +26,7 @@ new PropRef<T>(
 bindingId?): PropRef<T>;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:155](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L155)
+Defined in: [packages/db/src/query/ir.ts:204](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L204)
 
 #### Parameters
 
@@ -60,7 +60,7 @@ BaseExpression<T>.constructor
 readonly __returnType: T;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:79](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L79)
+Defined in: [packages/db/src/query/ir.ts:83](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L83)
 
 **`Internal`**
 
@@ -80,7 +80,7 @@ BaseExpression.__returnType
 readonly optional bindingId: string;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:154](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L154)
+Defined in: [packages/db/src/query/ir.ts:203](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L203)
 
 ***
 
@@ -90,7 +90,7 @@ Defined in: [packages/db/src/query/ir.ts:154](https://github.com/TanStack/db/blo
 path: string[];
 ```
 
-Defined in: [packages/db/src/query/ir.ts:156](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L156)
+Defined in: [packages/db/src/query/ir.ts:205](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L205)
 
 ***
 
@@ -100,7 +100,7 @@ Defined in: [packages/db/src/query/ir.ts:156](https://github.com/TanStack/db/blo
 readonly optional sourceAlias: string;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:153](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L153)
+Defined in: [packages/db/src/query/ir.ts:202](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L202)
 
 ***
 
@@ -110,7 +110,7 @@ Defined in: [packages/db/src/query/ir.ts:153](https://github.com/TanStack/db/blo
 type: "ref";
 ```
 
-Defined in: [packages/db/src/query/ir.ts:152](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L152)
+Defined in: [packages/db/src/query/ir.ts:201](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L201)
 
 #### Overrides
 

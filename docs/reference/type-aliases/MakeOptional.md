@@ -7,7 +7,7 @@ title: MakeOptional
 type MakeOptional<T, K> = Omit<T, K> & Partial<Pick<T, K>>;
 ```
 
-Defined in: [packages/db/src/types.ts:1267](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1267)
+Defined in: [packages/db/src/types.ts:1288](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1288)
 
 ## Type Parameters
 

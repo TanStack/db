@@ -527,7 +527,7 @@ class PooledLiveQuery {
             new Error(
               devBuild() && process.env.NODE_ENV !== `production`
                 ? `The pooled live query's source ended`
-                : codedMessage(244),
+                : codedMessage(246),
             ),
             `initial`,
             true,

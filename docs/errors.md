@@ -897,7 +897,7 @@ Internal error: compiler returned aliases without inputs: alias1, alias2. This i
 Development builds show the full message. For example:
 
 ```text
-setWindow() can only be called on collections with an ORDER BY clause. Add .orderBy() to your query to enable window movement.
+setWindow() can only move a window on a query with an ORDER BY clause. Add .orderBy() to your query to enable window movement.
 ```
 
 <a id="error-85"></a>
@@ -978,6 +978,16 @@ Development builds show the full message. For example:
 
 ```text
 A Collection already tracks an unsettled transaction with id "tx-1". Give each transaction a unique id.
+```
+
+<a id="error-244"></a>
+
+## Error 244: `SetWindowFindOneLimitError`
+
+Development builds show the full message. For example:
+
+```text
+setWindow() cannot change the limit of a findOne() query.
 ```
 
 ## Other errors and log messages
@@ -2452,7 +2462,17 @@ LocalStorage sync belongs to its options Collection.
 
 <a id="error-243"></a>
 
-## Error 243: `collection/lifecycle.ts`
+## Error 243: `query/compiler/index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+A windowed or findOne result row has no include route
+```
+
+<a id="error-245"></a>
+
+## Error 245: `collection/lifecycle.ts`
 
 Development builds show this message, with `${...}` replaced by values:
 
@@ -2460,9 +2480,9 @@ Development builds show this message, with `${...}` replaced by values:
 ${operation}() reports a problem after Collection readiness, but Collection "${this.id}" is ${this.status}. Before Collection readiness, retry without reporting, or call markError() when the sync adapter gives up.
 ```
 
-<a id="error-244"></a>
+<a id="error-246"></a>
 
-## Error 244: `query/pooled-live-query.ts`
+## Error 246: `query/pooled-live-query.ts`
 
 Development builds show this message, with `${...}` replaced by values:
 

@@ -925,6 +925,11 @@
     "literals": ["LocalStorage sync belongs to its options Collection."]
   },
   "243": {
+    "file": "query/compiler/index.ts",
+    "template": "A windowed or findOne result row has no include route",
+    "literals": ["A windowed or findOne result row has no include route"]
+  },
+  "245": {
     "file": "collection/lifecycle.ts",
     "template": "${operation}() reports a problem after Collection readiness, but Collection \"${this.id}\" is ${this.status}. Before Collection readiness, retry without reporting, or call markError() when the sync adapter gives up.",
     "literals": [
@@ -933,7 +938,7 @@
       ". Before Collection readiness, retry without reporting, or call markError() when the sync adapter gives up."
     ]
   },
-  "244": {
+  "246": {
     "file": "query/pooled-live-query.ts",
     "template": "The pooled live query's source ended",
     "literals": ["The pooled live query's source ended"]

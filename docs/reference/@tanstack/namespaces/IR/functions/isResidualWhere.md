@@ -7,7 +7,7 @@ title: isResidualWhere
 function isResidualWhere(where): boolean;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:352](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L352)
+Defined in: [packages/db/src/query/ir.ts:418](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L418)
 
 Check if a Where clause is marked as residual
 

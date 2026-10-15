@@ -3,6 +3,7 @@ import { compileQuery } from '../compiler/index.js'
 import {
   LoadSubsetOperationAbortedError,
   MissingAliasInputsError,
+  SetWindowFindOneLimitError,
   SetWindowReentrancyError,
   SetWindowRequiresOrderByError,
 } from '../../errors.js'
@@ -60,9 +61,15 @@ export type LiveQueryCollectionUtils = UtilsRecord & {
   /** Most recent subset-load failure observed by this live query. */
   readonly lastSubsetError: unknown | undefined
   /**
-   * Sets the offset and limit of an ordered query.
-   * Is a no-op if the query is not ordered.
+   * Sets the offset and limit of the query's window, its ordered view. A
+   * windowed query has an `orderBy`. A `findOne` keeps its compiled limit (1,
+   * or 0 for `.limit(0).findOne()`); an ordered `findOne` has a movable window,
+   * and an unordered one is a fixed one-row result that accepts only its
+   * compiled limit at offset 0.
    *
+   * @throws `SetWindowRequiresOrderByError` if the query is neither windowed
+   * nor a `findOne`, or an unordered `findOne` would move its offset.
+   * @throws `SetWindowFindOneLimitError` if a `findOne` would change its limit.
    * @returns `true` if no subset loading was triggered, or `Promise<void>` that resolves when the subset has been loaded
    */
   setWindow: (options: WindowOptions) => true | Promise<void>
@@ -189,12 +196,15 @@ export class CollectionConfigBuilder<
       query: config.query,
       requireObjectResult: true,
     })
-    this.initialWindow = this.query.orderBy?.length
-      ? {
-          offset: this.query.offset ?? 0,
-          limit: this.query.limit ?? Infinity,
-        }
-      : undefined
+    this.initialWindow =
+      this.query.orderBy?.length || this.query.singleResult
+        ? {
+            offset: this.query.offset ?? 0,
+            limit: this.query.singleResult
+              ? Math.min(this.query.limit ?? 1, 1)
+              : (this.query.limit ?? Infinity),
+          }
+        : undefined
     this.settledWindow = this.initialWindow
     this.collections = extractCollectionsFromQuery(this.query)
     this.collectionSources = extractCollectionSources(this.query)
@@ -294,6 +304,16 @@ export class CollectionConfigBuilder<
     const windowFn = this.windowFn
     if (!windowFn) {
       throw new SetWindowRequiresOrderByError()
+    }
+    // A findOne keeps its compiled limit, and only an ordered one moves.
+    if (this.query.singleResult) {
+      if (!this.query.orderBy?.length && (options.offset ?? 0) !== 0)
+        throw new SetWindowRequiresOrderByError()
+      if (
+        (options.limit ?? this.initialWindow!.limit) !==
+        this.initialWindow!.limit
+      )
+        throw new SetWindowFindOneLimitError()
     }
     if (
       this.activeWindowOperation ||
@@ -395,7 +415,8 @@ export class CollectionConfigBuilder<
   }
 
   getWindow(): { offset: number; limit: number } | undefined {
-    // Only return window if this is a windowed query (has orderBy and windowFn)
+    // A windowed query or an ordered findOne returns its window. An unordered
+    // findOne returns its fixed result: offset 0 and its compiled limit.
     const window = this.settledWindow ?? this.initialWindow
     if (!this.windowFn || !window) {
       return undefined
@@ -1363,7 +1384,9 @@ export class CollectionConfigBuilder<
         lazyCallbacks.setDemand = (plan, keys) =>
           collectionSubscriber.setDemand(subscription, plan, keys)
         for (const plan of lazyCallbacks.plans ?? []) {
-          if (plan.initialKeys.size > 0) {
+          // A window requested before start with a nonzero offset can drop
+          // the rows a static filter names, so it gets no static demand.
+          if (plan.initialKeys.size > 0 && !this.currentWindow?.offset) {
             lazyCallbacks.setDemand(plan, plan.initialKeys)
           }
         }

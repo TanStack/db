@@ -319,7 +319,7 @@ export class CollectionLifecycleManager<
       throw new CollectionStateError(
         devBuild() && process.env.NODE_ENV !== `production`
           ? `${operation}() reports a problem after Collection readiness, but Collection "${this.id}" is ${this.status}. Before Collection readiness, retry without reporting, or call markError() when the sync adapter gives up.`
-          : codedMessage(243, { operation, id: this.id, status: this.status }),
+          : codedMessage(245, { operation, id: this.id, status: this.status }),
       )
     }
   }

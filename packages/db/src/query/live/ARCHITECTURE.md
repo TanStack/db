@@ -1517,6 +1517,29 @@ units. Queries without includes retain their original pipeline unless a joined
 custom-key query needs contributor reduction. Inline materialization must not
 create recursive Collection machinery.
 
+A windowed query has an `orderBy`; its window is the ordered view, by offset
+and limit, that `setWindow` moves. A `findOne` is bounded by a top-K too: it
+keeps its compiled limit (1, or 0 for `.limit(0).findOne()`), and `setWindow`
+throws `SetWindowFindOneLimitError` for any other limit. An ordered `findOne`
+has a movable window. An unordered `findOne` is a fixed one-row result that
+accepts only its compiled limit at offset 0; a nonzero offset throws
+`SetWindowRequiresOrderByError`, as `.offset()` without `orderBy` does. A query
+that is neither windowed nor an ordered `findOne` rejects offset moves, and one
+that is neither windowed nor a `findOne` rejects `setWindow`. Only the query's
+own top-K answers `setWindow`; a top-K inside a `from` or joined subquery or an
+include child never does. A windowed query or a `findOne` adds route relations
+for the includes in its own `select` only from the rows it shows, so a row it
+drops activates no bucket and creates no demand. A static filter creates static
+child demand before the query runs only when no enclosing query is windowed or
+a `findOne`, and either the query is neither windowed nor a `findOne`, or it is
+a `findOne` that shows one row for one named correlation value, with no
+`offset`, and offset 0 at start if a window was requested before start. Within
+one graph run, an index-backed top-K can briefly hold a row outside the rows it
+shows once its ordered acquisition completes, and that row's children may load
+(a recorded limit, #2151; the public snapshot stays correct). Includes
+inherited from a `from` subquery and inputs to `fn.select` still route from
+every row before the top-K (a recorded limit).
+
 ## Normative laws
 
 1. **Alpha-renaming:** changing an accepted alias to another unused name in a
