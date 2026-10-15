@@ -40,7 +40,11 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
         revalidation supplies authority; disabling the guard made the load
         fulfill before the provider started (2026-10-15).
   - [ ] Repeated direct acquisitions with one options object.
-  - [ ] Request shape and retained persistence controls.
+  - [x] Request shape: signal-free and explicit-signal requests check the
+        physical signal, own keys, descriptor, cloning, JSON, and deletion.
+        The new configurable-descriptor assertion failed before the one-line
+        repair (2026-10-15).
+  - [ ] Retained persistence through final release during application.
   - [ ] Cleanup failure fidelity across older fixtures.
 - [ ] Run independent oracle review, package verification, and CI; record the
       exact covered boundary and remaining limits.

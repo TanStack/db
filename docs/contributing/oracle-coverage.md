@@ -652,8 +652,12 @@ witnesses verify the installed Query Core's option-selection path both before
 and during a shared fetch. A synchronous provider throw caused by reentrant
 peer acquisition has no separate witness.
 A signal-free provider request keeps its options cloneable and its enumerable
-shape empty while exposing the physical Query signal by property access. The
-original enumerable accessor fails this request-shape witness. Public snapshot
+shape empty while exposing the physical Query signal by property access. A
+request with an explicit signal keeps that enumerable key but receives the
+physical Query signal, not the acquisition signal. Both forms check the own
+property descriptor, JSON, structured cloning, and deletion from the request
+copy. The original enumerable accessor fails the signal-free witness; a
+non-configurable derived accessor fails the deletion witness. Public snapshot
 histories now abort a pending caller without explicit release, with and without
 an equal peer, and with a provider that consumes or ignores the physical Query
 signal. They compare each load outcome, signal lifetime, and public rows before

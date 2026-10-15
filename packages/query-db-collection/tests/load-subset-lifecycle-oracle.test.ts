@@ -3933,45 +3933,71 @@ describe(`loadSubset lifecycle oracle`, () => {
   })
 
   /**
-   * Request metadata keeps the supplied options' serializable shape. The
-   * physical Query signal remains readable for a provider, but a request that
-   * supplied no signal must still be cloneable and serialize as an empty
-   * options object.
+   * Request metadata keeps the supplied options' own enumerable shape. A
+   * provider can read the physical Query signal lazily, and can remove that
+   * derived property from its mutable request copy. An absent signal stays
+   * absent from cloning and JSON; an explicit signal keeps its supplied key.
+   * The direct-load path exercises the real QueryClient and compares keys,
+   * descriptor, serialization, and signal identity before provider return.
    */
-  it(`preserves the shape of signal-free provider request options`, async () => {
-    const queryClient = createQueryClient()
-    const id = `signal-free-request-options-${collectionSequence++}`
-    let observed = false
-    const collection = createCollection(
-      queryCollectionOptions<Row>({
-        id,
-        queryClient,
-        queryKey: [id],
-        queryFn: (context) => {
-          const options = context.meta?.loadSubsetOptions
-          expect(options).toBeDefined()
-          expect(options?.signal).toBeInstanceOf(AbortSignal)
-          expect(Object.keys(options ?? {})).not.toContain(`signal`)
-          expect(structuredClone(options)).toEqual({})
-          expect(JSON.stringify(options)).toBe(`{}`)
-          observed = true
-          return Promise.resolve([])
-        },
-        getKey: (row) => row.id,
-        startSync: true,
-        syncMode: `on-demand`,
-      }),
-    )
-    const request = {}
-    try {
-      await collection._sync.loadSubset(request)
-      expect(observed).toBe(true)
-    } finally {
-      collection._sync.unloadSubset(request)
-      await collection.cleanup()
-      queryClient.clear()
-    }
-  })
+  it.each([false, true] as const)(
+    `preserves provider request options, supplied signal=%s`,
+    async (suppliedSignal) => {
+      const queryClient = createQueryClient()
+      const id = `signal-free-request-options-${collectionSequence++}`
+      const caller = new AbortController()
+      const request: LoadSubsetOptions = suppliedSignal
+        ? { signal: caller.signal }
+        : {}
+      let observed = false
+      const collection = createCollection(
+        queryCollectionOptions<Row>({
+          id,
+          queryClient,
+          queryKey: [id],
+          queryFn: (context) => {
+            const options = context.meta?.loadSubsetOptions
+            expect(options).toBeDefined()
+            const descriptor = Object.getOwnPropertyDescriptor(
+              options,
+              `signal`,
+            )
+            expect(descriptor).toMatchObject({
+              enumerable: suppliedSignal,
+              configurable: true,
+            })
+            expect(descriptor?.get).toBeTypeOf(`function`)
+            expect(options?.signal).toBe(context.signal)
+            if (suppliedSignal) expect(options?.signal).not.toBe(caller.signal)
+            expect(Object.keys(options ?? {})).toEqual(
+              suppliedSignal ? [`signal`] : [],
+            )
+            expect(structuredClone(options)).toEqual(
+              suppliedSignal ? { signal: {} } : {},
+            )
+            expect(JSON.stringify(options)).toBe(
+              suppliedSignal ? `{"signal":{}}` : `{}`,
+            )
+            expect(Reflect.deleteProperty(options!, `signal`)).toBe(true)
+            expect(Object.keys(options ?? {})).toEqual([])
+            observed = true
+            return Promise.resolve([])
+          },
+          getKey: (row) => row.id,
+          startSync: true,
+          syncMode: `on-demand`,
+        }),
+      )
+      await checkPublicCleanupWitness(async () => {
+        await collection._sync.loadSubset(request)
+        expect(observed).toBe(true)
+      }, [
+        [`acquisition`, () => collection._sync.unloadSubset(request)],
+        [`Collection`, () => collection.cleanup()],
+        [`Query client`, () => queryClient.clear()],
+      ])
+    },
+  )
 
   /**
    * Eager ownership survives Query cache eviction. An explicit refetch must

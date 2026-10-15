@@ -2159,6 +2159,7 @@ export function queryCollectionOptions(
           Object.defineProperty(loadSubsetOptions, `signal`, {
             get: () => context.signal,
             enumerable: Object.hasOwn(requestOptions, `signal`),
+            configurable: true,
           })
           sharedContext.meta = {
             ...context.meta,
