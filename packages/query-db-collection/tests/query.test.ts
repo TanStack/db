@@ -330,8 +330,9 @@ describe(`QueryCollection`, () => {
       .fn<() => Promise<Array<TestItem>>>()
       .mockResolvedValueOnce([{ id: `old`, name: `Old` }])
       .mockImplementationOnce(() => replacement.promise)
-    const descriptor = collectionOptions(`eager-query-restart-preload`, (db) =>
-      ({
+    const descriptor = collectionOptions(
+      `eager-query-restart-preload`,
+      (db) => ({
         ...queryCollectionOptions<TestItem>({
           id: `eager-query-restart-preload`,
           queryClient: db.requireDependency<QueryClient>(`queryClient`),
