@@ -3922,7 +3922,9 @@ export function queryCollectionOptions(
                 queueMicrotask(() => {
                   if (settled) return
                   const stillAcquired = acquisition
-                    ? acquisitionLeasesByOptions.get(opts)?.includes(acquisition)
+                    ? acquisitionLeasesByOptions
+                        .get(opts)
+                        ?.includes(acquisition)
                     : pendingStartupLoads.has(opts)
                   if (!stillAcquired) return
                   aborting = true
