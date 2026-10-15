@@ -5528,9 +5528,7 @@ describe(`loadSubset lifecycle oracle`, () => {
 
   function expectedAcceptedRelease(history: AcceptedReleaseHistory) {
     const serverRows =
-      history.rowCount === 1
-        ? [`server-a`]
-        : [`server-a`, `server-b`]
+      history.rowCount === 1 ? [`server-a`] : [`server-a`, `server-b`]
     return {
       reachedAcceptedCommit: true,
       providerCalls: 1,
@@ -5568,21 +5566,21 @@ describe(`loadSubset lifecycle oracle`, () => {
     let sourceTransactionHasServerRow = false
     let receiptApplied = false
     const baseOptions = queryCollectionOptions<Row>({
-        id,
-        queryClient,
-        queryKey: [id],
-        queryFn: () =>
-          Promise.resolve(
-            ++providerCalls === 1 ? serverRows : [{ id: `replacement` }],
-          ),
-        getKey: (row) => row.id,
-        startSync: true,
-        syncMode: `on-demand`,
-        onInsert: async () => {
-          handlerEntered.resolve()
-          await releaseHandler.promise
-          return { refetch: false }
-        },
+      id,
+      queryClient,
+      queryKey: [id],
+      queryFn: () =>
+        Promise.resolve(
+          ++providerCalls === 1 ? serverRows : [{ id: `replacement` }],
+        ),
+      getKey: (row) => row.id,
+      startSync: true,
+      syncMode: `on-demand`,
+      onInsert: async () => {
+        handlerEntered.resolve()
+        await releaseHandler.promise
+        return { refetch: false }
+      },
     })
     const originalSync = baseOptions.sync
     const collection = createCollection({
@@ -5596,10 +5594,7 @@ describe(`loadSubset lifecycle oracle`, () => {
               params.begin()
             },
             write: (change) => {
-              if (
-                change.type !== `delete` &&
-                change.value.id === `server-a`
-              )
+              if (change.type !== `delete` && change.value.id === `server-a`)
                 sourceTransactionHasServerRow = true
               params.write(change)
             },
@@ -5763,27 +5758,23 @@ describe(`loadSubset lifecycle oracle`, () => {
     },
   )
 
-  it(
-    `refines generated accepted release histories`,
-    async () => {
-      if (
-        acceptedReleaseReplay.replayPath !== undefined &&
-        acceptedReleaseReplay.replayProperty !== acceptedReleaseProperty
-      )
-        return
-      const property = fc.asyncProperty(
-        acceptedReleaseArbitrary,
-        async (history) => {
-          await observeAcceptedRelease(history, expectedAcceptedRelease(history))
-        },
-      )
-      const options = oraclePropertyOptions(48, acceptedReleaseProperty)
-      if (acceptedReleaseReplay.replaySeed === undefined)
-        await fc.assert(property, { ...options, seed: 2_160_2027 })
-      await fc.assert(property, options)
-    },
-    20_000,
-  )
+  it(`refines generated accepted release histories`, async () => {
+    if (
+      acceptedReleaseReplay.replayPath !== undefined &&
+      acceptedReleaseReplay.replayProperty !== acceptedReleaseProperty
+    )
+      return
+    const property = fc.asyncProperty(
+      acceptedReleaseArbitrary,
+      async (history) => {
+        await observeAcceptedRelease(history, expectedAcceptedRelease(history))
+      },
+    )
+    const options = oraclePropertyOptions(48, acceptedReleaseProperty)
+    if (acceptedReleaseReplay.replaySeed === undefined)
+      await fc.assert(property, { ...options, seed: 2_160_2027 })
+    await fc.assert(property, options)
+  }, 20_000)
 
   it(`starts a fresh query after an aborted owner immediately remounts`, async () => {
     await expectRemountAfterAbortStartsFreshQuery()
