@@ -868,15 +868,15 @@ at that checkpoint.
 Allowing the replay to overwrite A's result controller fails the same-result
 history there. These controlled histories do not establish arbitrary later
 accepted-result ordering.
-A second-fetch witness starts B inside A's Collection commit callback, then
-holds B's accepted receipt behind an optimistic mutation. Query Core reports
-B's fetch action before A's cache success action. A later unaccepted cache
-edit aborts B's caller; the caller must stay pending until B's receipt applies,
-then reject with exactly B's row public. The neighboring deferred-start case
-reverses the cache-event order. The old terminal-record retirement failed the
-inside-callback case at the held-receipt caller-outcome checkpoint. These
-fixed histories do not establish arbitrary chains of reentrant fetches or
-provider failure during that overlap.
+A second-fetch witness starts B inside A's Collection commit callback, either
+fetching or paused offline, then holds B's accepted receipt behind an optimistic
+mutation. Query Core reports B's fetch action before A's cache success action.
+A later unaccepted cache edit aborts B's caller; the caller must stay pending
+until B's receipt applies, then reject with exactly B's row public. The
+neighboring deferred-start case reverses the cache-event order. The original
+retirement failed the fetching case; `43551b835` failed the paused case at the
+held-receipt caller-outcome checkpoint. These fixed histories do not establish
+arbitrary chains of reentrant fetches or provider failure during that overlap.
 An initial-fetch lease grammar now varies an equal peer, consumed versus
 ignored physical signal, six first-caller actions (including both abort/unload
 orders and Collection cleanup), peer release before provider settlement, and
@@ -908,8 +908,9 @@ caller abort/unload/cleanup actions, baseline release before or after caller
 abort, an equal peer and its
 early or later release, signal consumption, and provider success or failure.
 The independent reference counts live public subscriptions and takes row
-values from the scripted provider. It compares the caller's outcome while it
-is still entitled to one, the physical signal, exact public rows before and
+values from the scripted provider. It compares a caller abort while the
+provider is still held, the caller's final outcome where the contract promises
+one, the physical signal, exact public rows before and
 after the held answer and each final release, and the captured Query's observer
 count. A passive public change listener sees the baseline insert and checks
 that no transient source insert or update reaches it after the last owner
@@ -921,7 +922,9 @@ observer. Releasing only the baseline acquisition while the subscription stays
 mounted then removes both row and observer; this distinguishes lease provenance
 from a wrongly retained aborted refetch. Direct seed/path replay passed.
 Early-fulfillment, caller-abort bypass,
-and observer-unsubscribe mutants failed at those intended comparisons. The
+and observer-unsubscribe mutants failed at those intended comparisons. A
+delayed-abort wrong-result control fails at the held-provider caller-outcome
+checkpoint. The
 grammar does not assert Query-cache completion after an ignored-signal final
 release; a separate fixed witness checks that installed Query Core path. A second
 refetch, accepted commit, and provider-specific transport remain outside this

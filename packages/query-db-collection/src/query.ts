@@ -984,7 +984,7 @@ export function queryCollectionOptions(
     // A Collection commit can start the next fetch inside Query Core's
     // observer callback, before Core reports the prior fetch's cache event.
     const newerActionStart =
-      query.state.fetchStatus === `fetching`
+      query.state.fetchStatus !== `idle`
         ? queryCollectionCurrentFetchActionStarts.get(query)
         : undefined
     return {

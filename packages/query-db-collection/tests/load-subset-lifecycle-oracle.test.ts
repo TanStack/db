@@ -5734,8 +5734,9 @@ describe(`loadSubset lifecycle oracle`, () => {
    * passive public change listener records any source-row publication after
    * the last lease leaves, including a transient insert later removed. The
    * real path is `requestSnapshot({ refetch: true, signal })`, not a direct
-   * adapter call. Comparisons occur after the held provider settles and after
-   * each remaining owner releases. The raw adapter promise after unsubscribe
+   * adapter call. A caller abort is compared while the provider is still held;
+   * rows and ownership are compared again after the provider settles and each
+   * remaining owner releases. The raw adapter promise after unsubscribe
    * or Collection cleanup has no promised outcome. This bounded grammar does
    * not model a second refetch or an accepted sync transaction. It excludes
    * peer release without a peer, reverse early-release order without an early
@@ -5773,7 +5774,12 @@ describe(`loadSubset lifecycle oracle`, () => {
     return {
       initialRows: [`old`],
       beforeAnswerRows: liveBaseline || liveCaller || livePeer ? [`old`] : [],
-      callerFulfilledBeforeAnswer: false,
+      ...(history.action === `none` || history.action === `abort`
+        ? {
+            callerOutcomeBeforeAnswer:
+              history.action === `abort` ? `AbortError` : `pending`,
+          }
+        : {}),
       ...(history.consumesSignal
         ? { physicalAborted: !liveBaseline && !liveCaller && !livePeer }
         : {}),
@@ -5911,12 +5917,15 @@ describe(`loadSubset lifecycle oracle`, () => {
       if (callerLoad === undefined || callerLoad === true)
         throw new Error(`The public refetch did not return a pending load`)
       liveOwners.caller = true
-      let callerFulfilledBeforeAnswer = false
+      let callerOutcomeBeforeAnswer = `pending`
       void callerLoad.then(
         () => {
-          callerFulfilledBeforeAnswer = true
+          callerOutcomeBeforeAnswer = `fulfilled`
         },
-        () => undefined,
+        (error: unknown) => {
+          callerOutcomeBeforeAnswer =
+            error instanceof Error ? error.name : `non-Error rejection`
+        },
       )
       await started.promise
       peer?.requestSnapshot()
@@ -5970,7 +5979,7 @@ describe(`loadSubset lifecycle oracle`, () => {
       // the provider is still held. A single microtask misses early settlement.
       await new Promise<void>((resolve) => setTimeout(resolve, 0))
       const beforeAnswerRows = publicRows()
-      const callerFulfilledBeforeAnswerObserved = callerFulfilledBeforeAnswer
+      const callerOutcomeBeforeAnswerObserved = callerOutcomeBeforeAnswer
       const physicalAborted = physicalSignal?.aborted
       const observerBeforeAnswer = observerCount()
       if (history.outcome === `success`) held.resolve([{ id: `new` }])
@@ -6007,7 +6016,9 @@ describe(`loadSubset lifecycle oracle`, () => {
       const observed = {
         initialRows,
         beforeAnswerRows,
-        callerFulfilledBeforeAnswer: callerFulfilledBeforeAnswerObserved,
+        ...(history.action === `none` || history.action === `abort`
+          ? { callerOutcomeBeforeAnswer: callerOutcomeBeforeAnswerObserved }
+          : {}),
         ...(history.consumesSignal ? { physicalAborted } : {}),
         observerBeforeAnswer,
         ...(history.action === `none` || history.action === `abort`
@@ -6219,7 +6230,7 @@ describe(`loadSubset lifecycle oracle`, () => {
     await fc.assert(property, options)
   }, 20_000)
 
-  it(`rejects transient unowned source publication and a missed cleanup status`, async () => {
+  it(`rejects delayed caller abort, transient publication, and missed cleanup`, async () => {
     const abandoned: RefetchLeaseHistory = {
       action: `abort`,
       releaseBaseline: true,
@@ -6234,6 +6245,12 @@ describe(`loadSubset lifecycle oracle`, () => {
       abandoned,
       expectedAbandoned,
     )
+    expect(() =>
+      expect({
+        ...observedAbandoned,
+        callerOutcomeBeforeAnswer: `pending`,
+      }).toEqual(expectedAbandoned),
+    ).toThrow()
     expect(() =>
       expect({
         ...observedAbandoned,
@@ -6356,6 +6373,10 @@ describe(`loadSubset lifecycle oracle`, () => {
         (error: unknown) =>
           error instanceof Error ? error.name : `non-Error rejection`,
       )
+      let refetchOutcomeBeforeAnswer = `pending`
+      void refetchOutcome.then((outcome) => {
+        refetchOutcomeBeforeAnswer = outcome
+      })
       await refetchStarted.promise
       caller.abort()
       await new Promise<void>((resolve) => setTimeout(resolve, 0))
@@ -6363,7 +6384,13 @@ describe(`loadSubset lifecycle oracle`, () => {
         rows: publicRows(),
         physicalAborted: physicalSignal?.aborted,
         observers: physicalQuery.getObserversCount(),
-      }).toEqual({ rows: [`old`], physicalAborted: false, observers: 1 })
+        refetchOutcomeBeforeAnswer,
+      }).toEqual({
+        rows: [`old`],
+        physicalAborted: false,
+        observers: 1,
+        refetchOutcomeBeforeAnswer: `AbortError`,
+      })
 
       heldRefetch.resolve([{ id: `new` }])
       expect(await refetchOutcome).toBe(`AbortError`)
@@ -7648,10 +7675,10 @@ describe(`loadSubset lifecycle oracle`, () => {
 
   /**
    * One Query can start fetch B inside fetch A's Collection commit callback.
-   * Query Core then reports B's fetch action before it reports A's cache
-   * success. A's late notification must not retire B's application record or
-   * claim that B succeeded. The neighboring deferred-start history reverses
-   * those cache events and checks the ordinary boundary.
+   * B may start fetching or pause offline. Query Core then reports B's fetch
+   * action before it reports A's cache success. A's late notification must
+   * not retire B's application record or claim that B succeeded. The
+   * neighboring deferred-start history reverses those cache events.
    *
    * This real QueryClient/Collection history holds B's accepted receipt behind
    * an optimistic mutation, then lets a later unaccepted C cache edit abort
@@ -7660,9 +7687,17 @@ describe(`loadSubset lifecycle oracle`, () => {
    * The cache event order is path evidence; the promise, receipt, and rows are
    * the public comparison. This controlled callback does not model storage.
    */
-  it.each([`inside-callback`, `after-callback`] as const)(
-    `keeps a second fetch receipt when started $0`,
-    async (startBAt) => {
+  it.each([
+    { name: `inside callback`, startBAt: `inside-callback`, pauseB: false },
+    {
+      name: `inside callback while offline`,
+      startBAt: `inside-callback`,
+      pauseB: true,
+    },
+    { name: `after callback`, startBAt: `after-callback`, pauseB: false },
+  ] as const)(
+    `keeps a second fetch receipt when started $name`,
+    async ({ startBAt, pauseB }) => {
       const id = `overlapping-success-${collectionSequence++}`
       const queryClient = createQueryClient()
       const providerB = createDeferred<Array<Row>>()
@@ -7734,6 +7769,7 @@ describe(`loadSubset lifecycle oracle`, () => {
                 const receipt = params.commit(signal)
                 if (writes.includes(`A`) && !bLoad) {
                   const startB = () => {
+                    if (pauseB) onlineManager.setOnline(false)
                     const load = Promise.resolve(
                       collection._sync.loadSubset(requestB),
                     ).then(() => undefined)
@@ -7777,6 +7813,8 @@ describe(`loadSubset lifecycle oracle`, () => {
         collection.startSyncImmediate()
         const aLoad = Promise.resolve(collection._sync.loadSubset(first))
         void aLoad.catch(() => undefined)
+        await vi.waitFor(() => expect(bLoad).toBeDefined())
+        if (pauseB) onlineManager.setOnline(true)
         await vi.waitFor(() => expect(providerCalls).toBe(2))
         const mutation = collection.insert({ id: `local` })
         await mutationStarted.promise
@@ -7792,6 +7830,7 @@ describe(`loadSubset lifecycle oracle`, () => {
         expect(secondFetch).toBeGreaterThan(0)
         expect(firstSuccess).toBeGreaterThan(0)
         expect(secondFetch < firstSuccess).toBe(startBAt === `inside-callback`)
+        if (pauseB) expect(cacheActions[secondFetch]).toBe(`fetch:paused`)
         expect(bReceiptApplied).toBe(false)
         expect(rows()).toEqual([`A`, `local`])
         await new Promise<void>((resolve) => setTimeout(resolve, 0))
@@ -7804,6 +7843,7 @@ describe(`loadSubset lifecycle oracle`, () => {
         expect(bReceiptApplied).toBe(true)
         expect(rows()).toEqual([`B`])
       }, [
+        [`online manager`, () => onlineManager.setOnline(true)],
         [`B provider`, () => providerB.resolve([])],
         [`mutation`, () => mutationGate.resolve()],
         [`later commit`, () => laterCommitGate.resolve()],
