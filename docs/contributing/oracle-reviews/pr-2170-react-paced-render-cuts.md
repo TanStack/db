@@ -1,6 +1,7 @@
 # PR #2170 React paced-mutation render-cut review
 
 Reviewed product commit: `6d176225cdcac2547ec04c7df86c0a5b8bc0c88f`.
+Oracle repair commit: `0e3214d12a47cd14cfc06046709847765452076e`.
 Base: `ce0b4a98061e335f7aeb144283c7679d6fdc6529`.
 The production repair already existed at the reviewed commit. This follow-up
 replaces its example-only tests with an independent React receiving oracle and
