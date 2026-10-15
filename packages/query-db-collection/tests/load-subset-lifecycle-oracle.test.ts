@@ -1156,7 +1156,7 @@ async function expectPeerJoiningHeldFetchSettles(
   let firstLoad: true | Promise<void> | undefined
   let peerLoad: true | Promise<void> | undefined
   let firstReleased = false
-  try {
+  await checkPublicCleanupWitness(async () => {
     firstLoad = collection._sync.loadSubset(firstDemand)
     void Promise.resolve(firstLoad).catch(() => undefined)
     if (phase === `refetch`) {
@@ -1203,22 +1203,45 @@ async function expectPeerJoiningHeldFetchSettles(
       expect(peerOutcome).toBe(phase === `initial` ? `rejected` : `fulfilled`)
     }
     expect(calls).toBe(heldCall)
-  } finally {
-    held.resolve(replacement)
-    await invalidation?.catch(() => undefined)
-    await Promise.resolve(firstLoad).catch(() => undefined)
-    await Promise.resolve(peerLoad).catch(() => undefined)
-    if (!firstReleased) {
-      firstSignal.abort()
-      collection._sync.unloadSubset(firstDemand)
-    }
-    if (peerLoad !== undefined) {
-      peerSignal.abort()
-      collection._sync.unloadSubset(peerDemand)
-    }
-    await collection.cleanup()
-    queryClient.clear()
-  }
+  }, [
+    [`held provider`, () => held.resolve(replacement)],
+    [
+      `invalidation`,
+      async () => {
+        await invalidation?.catch(() => undefined)
+      },
+    ],
+    [
+      `first load`,
+      async () => {
+        await Promise.resolve(firstLoad).catch(() => undefined)
+      },
+    ],
+    [
+      `peer load`,
+      async () => {
+        await Promise.resolve(peerLoad).catch(() => undefined)
+      },
+    ],
+    [
+      `first acquisition`,
+      () => {
+        if (firstReleased) return
+        firstSignal.abort()
+        collection._sync.unloadSubset(firstDemand)
+      },
+    ],
+    [
+      `peer acquisition`,
+      () => {
+        if (peerLoad === undefined) return
+        peerSignal.abort()
+        collection._sync.unloadSubset(peerDemand)
+      },
+    ],
+    [`Collection`, () => collection.cleanup()],
+    [`Query client`, () => queryClient.clear()],
+  ])
 }
 
 /**
@@ -2279,7 +2302,7 @@ async function observeDemandIdentity(
         .sort((a, b) => a.id.localeCompare(b.id)),
     })
   }
-  try {
+  return checkPublicCleanupWitness(async () => {
     await collection._sync.loadSubset(fixture.first)
     capture(`first`)
     await collection._sync.loadSubset(fixture.equivalent)
@@ -2293,13 +2316,10 @@ async function observeDemandIdentity(
     collection._sync.unloadSubset(fixture.distinct)
     capture(`final distinct owner leaves`)
     return observations
-  } finally {
-    try {
-      await collection.cleanup()
-    } finally {
-      queryClient.clear()
-    }
-  }
+  }, [
+    [`Collection`, () => collection.cleanup()],
+    [`Query client`, () => queryClient.clear()],
+  ])
 }
 
 function expectDemandIdentity(
@@ -2447,7 +2467,7 @@ async function observeSharedInFlightQueryCancellation(): Promise<
     })
   }
 
-  try {
+  return checkPublicCleanupWitness(async () => {
     await started.promise
     capture(2)
     collection._sync.unloadSubset(firstRequest)
@@ -2457,15 +2477,17 @@ async function observeSharedInFlightQueryCancellation(): Promise<
     collection._sync.unloadSubset(secondRequest)
     capture(0)
     return snapshots
-  } finally {
-    providerResult.resolve([])
-    try {
-      await collection.cleanup()
-    } finally {
-      queryClient.clear()
-      await Promise.allSettled([first, second])
-    }
-  }
+  }, [
+    [`provider`, () => providerResult.resolve([])],
+    [`Collection`, () => collection.cleanup()],
+    [`Query client`, () => queryClient.clear()],
+    [
+      `load outcomes`,
+      async () => {
+        await Promise.allSettled([first, second])
+      },
+    ],
+  ])
 }
 
 function expectSharedInFlightQueryCancellation(
@@ -2599,7 +2621,7 @@ async function observeLateRetiredQuery(
   )
   let second: ReturnType<typeof buildLive> | undefined
   const unsubscribe: Array<() => void> = []
-  try {
+  return checkPublicCleanupWitness(async () => {
     await started.promise
     expect(signal?.aborted).toBe(false)
     await first.cleanup()
@@ -2652,23 +2674,15 @@ async function observeLateRetiredQuery(
       calls: queryFn.mock.calls.length,
       snapshots,
     }
-  } finally {
-    old.resolve([])
-    unsubscribe.forEach((stop) => stop())
-    try {
-      await first.cleanup()
-    } finally {
-      try {
-        await second?.cleanup()
-      } finally {
-        try {
-          await source.cleanup()
-        } finally {
-          queryClient.clear()
-        }
-      }
-    }
-  }
+  }, [
+    [`old provider`, () => old.resolve([])],
+    [`source listener`, () => unsubscribe[0]?.()],
+    [`live listener`, () => unsubscribe[1]?.()],
+    [`first live query`, () => first.cleanup()],
+    [`second live query`, () => second?.cleanup()],
+    [`source Collection`, () => source.cleanup()],
+    [`Query client`, () => queryClient.clear()],
+  ])
 }
 
 function expectLateRetiredQuery(observation: RetiredQueryObservation): void {
@@ -2692,14 +2706,15 @@ function expectLateRetiredQuery(observation: RetiredQueryObservation): void {
 }
 
 /** Preserve the public observation failure if a cleanup step also fails. */
-async function checkPublicCleanupWitness(
-  check: () => Promise<void>,
+async function checkPublicCleanupWitness<T>(
+  check: () => Promise<T>,
   cleanup: ReadonlyArray<readonly [string, () => void | Promise<void>]>,
-): Promise<void> {
+): Promise<T> {
   let primaryFailure: unknown
   let checkFailed = false
+  let observation!: T
   try {
-    await check()
+    observation = await check()
   } catch (error) {
     checkFailed = true
     primaryFailure = error
@@ -2718,12 +2733,14 @@ async function checkPublicCleanupWitness(
       cause: checkFailed ? primaryFailure : undefined,
     })
   if (checkFailed) throw primaryFailure
+  return observation
 }
 
-/** A dual fault must keep the product mismatch and each cleanup diagnostic. */
-it(`preserves the primary mismatch when a cleanup step also fails`, async () => {
+/** A dual fault must keep the product mismatch and every cleanup diagnostic. */
+it(`preserves the primary mismatch and every cleanup failure`, async () => {
   const primary = new Error(`public row mismatch`)
-  const secondary = new Error(`unsubscribe failed`)
+  const firstCleanupError = new Error(`unsubscribe failed`)
+  const secondCleanupError = new Error(`Collection cleanup failed`)
   const reached: Array<string> = []
   const failure = await checkPublicCleanupWitness(
     () => Promise.reject(primary),
@@ -2732,13 +2749,20 @@ it(`preserves the primary mismatch when a cleanup step also fails`, async () => 
         `subscription`,
         () => {
           reached.push(`subscription`)
-          throw secondary
+          throw firstCleanupError
         },
       ],
       [
         `Collection`,
         () => {
           reached.push(`Collection`)
+          throw secondCleanupError
+        },
+      ],
+      [
+        `Query client`,
+        () => {
+          reached.push(`Query client`)
         },
       ],
     ],
@@ -2748,10 +2772,12 @@ it(`preserves the primary mismatch when a cleanup step also fails`, async () => 
   )
   if (!(failure instanceof AggregateError)) throw failure
   expect(failure.cause).toBe(primary)
-  expect(failure.errors).toHaveLength(1)
+  expect(failure.errors).toHaveLength(2)
   expect(failure.errors[0].message).toBe(`subscription failed`)
-  expect(failure.errors[0].cause).toBe(secondary)
-  expect(reached).toEqual([`subscription`, `Collection`])
+  expect(failure.errors[0].cause).toBe(firstCleanupError)
+  expect(failure.errors[1].message).toBe(`Collection failed`)
+  expect(failure.errors[1].cause).toBe(secondCleanupError)
+  expect(reached).toEqual([`subscription`, `Collection`, `Query client`])
 })
 
 describe(`loadSubset lifecycle oracle`, () => {

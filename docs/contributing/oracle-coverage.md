@@ -717,6 +717,12 @@ failure separately. Older fixed histories in the load-lifecycle owner still use
 `finally`; a cleanup throw can mask the original assertion or skip later
 releases. The load-lifecycle oracle owns a dual-fault cleanup diagnostic and
 aggregation across those older fixtures.
+The shared cleanup checker now returns a recorded observation and aggregates
+all secondary cleanup errors under the primary mismatch. Its dual-fault
+control makes two cleanup steps fail and still reaches the final release.
+Four older identity, shared-fetch, peer-join, and retired-endpoint helpers now
+use it; the remaining `finally` paths still need conversion before the
+cleanup-fidelity cell is closed.
 The ownership owner seeds a persisted `until-revalidated` subset owner, then
 applies a complete full-source result and acquires that subset. An omitted,
 unchanged, or moved source row must match public and durable rows at settlement,

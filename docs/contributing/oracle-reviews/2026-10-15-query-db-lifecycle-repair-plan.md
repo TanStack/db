@@ -63,6 +63,13 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
         checkpoint; bypassing only Query DB's local owner checks survives
         because the wrapper independently fences this path (2026-10-15).
   - [ ] Cleanup failure fidelity across older fixtures.
+    - [x] The shared checker now returns observations while preserving a
+          primary mismatch and every secondary cleanup error. A dual-fault
+          control proves the final cleanup step still runs. Four older
+          identity, shared-fetch, peer-join, and retired-endpoint helpers use
+          it; their full oracle file, typecheck, and lint pass (2026-10-15).
+    - [ ] Convert the remaining older `finally` cleanup paths; a failure in
+          one of them can still mask the first oracle mismatch.
 - [ ] Run independent oracle review, package verification, and CI; record the
       exact covered boundary and remaining limits.
 - [ ] Integrate the repaired #2158 behavior into #2134 and verify its combined
