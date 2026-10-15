@@ -421,7 +421,10 @@ export function useLiveQuery(
     localWait?.observer.dispose()
     localWait = undefined
   }
-  onCleanup(releaseLocalWait)
+  onCleanup(() => {
+    resourceGeneration++
+    releaseLocalWait()
+  })
 
   const [getDataResource] = createResource(
     () => ({ currentCollection: collection() }),
