@@ -91,10 +91,14 @@ function makeDeferredSource<
   }
 }
 
-function makePrecreated(build: QueryBuild, opts?: { startSync?: boolean }) {
+function makePrecreated(
+  build: QueryBuild,
+  opts?: { startSync?: boolean; gcTime?: number },
+) {
   const collection = createLiveQueryCollection({
     query: build as any,
     startSync: opts?.startSync ?? true,
+    gcTime: opts?.gcTime,
   })
   return { collection }
 }
@@ -133,8 +137,8 @@ function mountCollection(collection: any) {
   return makeHandle(hook)
 }
 
-function mountConfig(build: QueryBuild) {
-  const hook = renderHook(() => useLiveQuery({ query: build as any }))
+function mountConfig(build: QueryBuild, opts?: { gcTime?: number }) {
+  const hook = renderHook(() => useLiveQuery({ query: build as any, ...opts }))
   return makeHandle(hook)
 }
 
@@ -168,6 +172,7 @@ function mountControllable<P>(
 
 function makeHandle(hook: RenderHookResult<any, any>) {
   return {
+    collection: () => hook.result.current?.collection ?? null,
     current(): ConformanceResult {
       const r: any = hook.result.current
       return expectResultSurface({

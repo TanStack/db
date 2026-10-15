@@ -36,6 +36,8 @@ import type {
   SingleResult,
 } from '@tanstack/db'
 
+const DEFAULT_GC_TIME_MS = 1
+
 /** Copy a snapshot's ordered rows; a single-result query's `data` is one row. */
 function snapshotRows(data: unknown): Array<any> {
   if (Array.isArray(data)) return [...data]
@@ -425,9 +427,13 @@ export function useLiveQuery(
       collection = preparedValue
     } else if (preparedValue instanceof BaseQueryBuilder) {
       // Hydration keys the live-query Collection by identity.
-      collection = resolveLiveQueryValue(preparedValue, { pool: !dbClient })
+      collection = resolveLiveQueryValue(preparedValue, {
+        gcTime: DEFAULT_GC_TIME_MS,
+        pool: !dbClient,
+      })
     } else {
       collection = createLiveQueryCollection({
+        gcTime: DEFAULT_GC_TIME_MS,
         ...(preparedValue as LiveQueryCollectionConfig<any>),
         startSync: true,
       })

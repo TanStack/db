@@ -34,6 +34,8 @@ import type {
   SingleResult,
 } from '@tanstack/db'
 
+const DEFAULT_GC_TIME_MS = 1
+
 type InferConditionalResultType<TContext extends Context> =
   TContext extends SingleResult
     ? InferResultType<TContext> | []
@@ -323,7 +325,7 @@ export function useLiveQuery(
           return null
         }
 
-        return resolveLiveQueryValue(result)
+        return resolveLiveQueryValue(result, { gcTime: DEFAULT_GC_TIME_MS })
       }
 
       const innerCollection = configOrQueryOrCollection()
@@ -339,6 +341,7 @@ export function useLiveQuery(
       }
 
       return createLiveQueryCollection({
+        gcTime: DEFAULT_GC_TIME_MS,
         ...innerCollection,
         startSync: true,
       })
