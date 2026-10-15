@@ -755,7 +755,7 @@ export class OrderedSourceLoader {
             if (
               !continuesOrderedPrefixRepair &&
               orderedLoadGeneration === this.orderedLoadGeneration &&
-              (isAuthoritativeRepair ||
+              (isAuthoritativeRequest ||
                 orderingInvalidationGeneration ===
                   this.orderingInvalidationGeneration) &&
               prefixCount !== undefined
@@ -768,7 +768,7 @@ export class OrderedSourceLoader {
             // A request issued before an ordering invalidation that settles
             // after the repair finished is already superseded by that repair.
             if (
-              !isAuthoritativeRepair &&
+              !isAuthoritativeRequest &&
               orderedLoadGeneration === this.orderedLoadGeneration &&
               orderingInvalidationGeneration !==
                 this.orderingInvalidationGeneration &&
@@ -882,7 +882,7 @@ export class OrderedSourceLoader {
       // bounded repair that superseded it has finished. Its partial writes
       // still need a full-source read, which the overlap used to start.
       const recoversAfterRepair =
-        !isAuthoritativeRepair &&
+        !isAuthoritativeRequest &&
         orderingInvalidationGeneration !==
           this.orderingInvalidationGeneration &&
         this.failedRequest === undefined &&
