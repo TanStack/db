@@ -384,6 +384,19 @@ export function warnUnhashableDerivedIdentity(
  *   </ul>
  * )
  */
+/** Status, persistence, and health fields every `useLiveQuery` result has. */
+type UseLiveQueryFlags = {
+  isLoading: boolean
+  isReady: boolean
+  persistedStatus: LiveQueryPersistedStatus
+  isPersistedReady: boolean
+  persistedError: unknown | undefined
+  isIdle: boolean
+  isError: boolean
+  isCleanedUp: boolean
+  errors: ErrorTreeNode | undefined
+}
+
 // Overload 1: Accept query function that always returns QueryBuilder
 export function useLiveQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
@@ -393,17 +406,8 @@ export function useLiveQuery<TContext extends Context>(
   data: InferResultType<TContext>
   collection: Collection<GetResult<TContext>, string | number, {}>
   status: CollectionStatus // Can't be disabled if always returns QueryBuilder
-  isLoading: boolean
-  isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
   isEnabled: true // Always true if always returns QueryBuilder
-  errors: ErrorTreeNode | undefined
-}
+} & UseLiveQueryFlags
 
 // Overload 2: Accept query function that can return undefined/null
 export function useLiveQuery<TContext extends Context>(
@@ -416,17 +420,8 @@ export function useLiveQuery<TContext extends Context>(
   data: InferResultType<TContext> | undefined
   collection: Collection<GetResult<TContext>, string | number, {}> | undefined
   status: UseLiveQueryStatus
-  isLoading: boolean
-  isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
   isEnabled: boolean
-  errors: ErrorTreeNode | undefined
-}
+} & UseLiveQueryFlags
 
 // Overload 3: Accept query function that can return LiveQueryCollectionConfig
 export function useLiveQuery<TContext extends Context>(
@@ -439,17 +434,8 @@ export function useLiveQuery<TContext extends Context>(
   data: InferResultType<TContext> | undefined
   collection: Collection<GetResult<TContext>, string | number, {}> | undefined
   status: UseLiveQueryStatus
-  isLoading: boolean
-  isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
   isEnabled: boolean
-  errors: ErrorTreeNode | undefined
-}
+} & UseLiveQueryFlags
 
 // Overload 4: Accept query function that can return Collection
 export function useLiveQuery<
@@ -466,17 +452,8 @@ export function useLiveQuery<
   data: Array<TResult> | undefined
   collection: Collection<TResult, TKey, TUtils> | undefined
   status: UseLiveQueryStatus
-  isLoading: boolean
-  isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
   isEnabled: boolean
-  errors: ErrorTreeNode | undefined
-}
+} & UseLiveQueryFlags
 
 // Overload 5: Accept query function that can return all types
 export function useLiveQuery<
@@ -503,17 +480,8 @@ export function useLiveQuery<
     | Collection<TResult, TKey, TUtils>
     | undefined
   status: UseLiveQueryStatus
-  isLoading: boolean
-  isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
   isEnabled: boolean
-  errors: ErrorTreeNode | undefined
-}
+} & UseLiveQueryFlags
 
 /**
  * Create a live query using configuration object
@@ -558,17 +526,8 @@ export function useLiveQuery<TContext extends Context>(
   data: InferResultType<TContext>
   collection: Collection<GetResult<TContext>, string | number, {}>
   status: CollectionStatus // Can't be disabled when query always returns a builder
-  isLoading: boolean
-  isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
   isEnabled: true // Always true when query always returns a builder
-  errors: ErrorTreeNode | undefined
-}
+} & UseLiveQueryFlags
 
 // Overload 7: Accept config object with a query that can return undefined/null
 export function useLiveQuery<TContext extends Context>(
@@ -578,17 +537,8 @@ export function useLiveQuery<TContext extends Context>(
   data: InferResultType<TContext> | undefined
   collection: Collection<GetResult<TContext>, string | number, {}> | undefined
   status: UseLiveQueryStatus
-  isLoading: boolean
-  isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
   isEnabled: boolean
-  errors: ErrorTreeNode | undefined
-}
+} & UseLiveQueryFlags
 
 // Overload 8: Accept config object with legacy deps
 export function useLiveQuery<TContext extends Context>(
@@ -599,17 +549,8 @@ export function useLiveQuery<TContext extends Context>(
   data: InferResultType<TContext>
   collection: Collection<GetResult<TContext>, string | number, {}>
   status: CollectionStatus // Can't be disabled when query always returns a builder
-  isLoading: boolean
-  isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
   isEnabled: true // Always true when query always returns a builder
-  errors: ErrorTreeNode | undefined
-}
+} & UseLiveQueryFlags
 
 // Overload 9: Accept config object with legacy deps and a query that can return undefined/null
 export function useLiveQuery<TContext extends Context>(
@@ -620,17 +561,8 @@ export function useLiveQuery<TContext extends Context>(
   data: InferResultType<TContext> | undefined
   collection: Collection<GetResult<TContext>, string | number, {}> | undefined
   status: UseLiveQueryStatus
-  isLoading: boolean
-  isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
   isEnabled: boolean
-  errors: ErrorTreeNode | undefined
-}
+} & UseLiveQueryFlags
 
 /**
  * Subscribe to an existing live query collection
@@ -673,17 +605,8 @@ export function useLiveQuery<
   data: Array<TResult>
   collection: Collection<TResult, TKey, TUtils>
   status: CollectionStatus // Can't be disabled for pre-created live query collections
-  isLoading: boolean
-  isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
   isEnabled: true // Always true for pre-created live query collections
-  errors: ErrorTreeNode | undefined
-}
+} & UseLiveQueryFlags
 
 // Overload 10: Accept pre-created live query collection with singleResult: true
 export function useLiveQuery<
@@ -697,17 +620,8 @@ export function useLiveQuery<
   data: TResult | undefined
   collection: Collection<TResult, TKey, TUtils> & SingleResult
   status: CollectionStatus // Can't be disabled for pre-created live query collections
-  isLoading: boolean
-  isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
   isEnabled: true // Always true for pre-created live query collections
-  errors: ErrorTreeNode | undefined
-}
+} & UseLiveQueryFlags
 
 // Implementation - use function overloads to infer the actual collection type
 export function useLiveQuery(

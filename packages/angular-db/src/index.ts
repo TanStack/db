@@ -38,17 +38,8 @@ export * from '@tanstack/db'
  * The result of calling `injectLiveQuery`.
  * Contains reactive signals for the query state and data.
  */
-export interface InjectLiveQueryResult<TContext extends Context> {
-  /** A signal containing the complete state map of results keyed by their ID */
-  state: Signal<Map<string | number, GetResult<TContext>>>
-  /** A signal containing the results as an array, or single result for findOne queries */
-  data: Signal<InferResultType<TContext>>
-  /** A signal containing the underlying collection instance (null for disabled queries) */
-  collection: Signal<Collection<
-    GetResult<TContext>,
-    string | number,
-    {}
-  > | null>
+/** Status, persistence, and health signals every `injectLiveQuery` result has. */
+export interface InjectLiveQueryFlags {
   /** A signal containing the current status of the collection */
   status: Signal<CollectionStatus | `disabled`>
   /** A signal indicating whether the collection is currently loading */
@@ -68,6 +59,21 @@ export interface InjectLiveQueryResult<TContext extends Context> {
   errors: Signal<ErrorTreeNode | undefined>
 }
 
+export interface InjectLiveQueryResult<
+  TContext extends Context,
+> extends InjectLiveQueryFlags {
+  /** A signal containing the complete state map of results keyed by their ID */
+  state: Signal<Map<string | number, GetResult<TContext>>>
+  /** A signal containing the results as an array, or single result for findOne queries */
+  data: Signal<InferResultType<TContext>>
+  /** A signal containing the underlying collection instance (null for disabled queries) */
+  collection: Signal<Collection<
+    GetResult<TContext>,
+    string | number,
+    {}
+  > | null>
+}
+
 type InferConditionalResultType<TContext extends Context> =
   TContext extends SingleResult
     ? InferResultType<TContext> | []
@@ -84,40 +90,20 @@ export interface InjectLiveQueryResultWithCollection<
   TResult extends object = any,
   TKey extends string | number = string | number,
   TUtils extends Record<string, any> = {},
-> {
+> extends InjectLiveQueryFlags {
   state: Signal<Map<TKey, TResult>>
   data: Signal<Array<TResult>>
   collection: Signal<Collection<TResult, TKey, TUtils> | null>
-  status: Signal<CollectionStatus | `disabled`>
-  isLoading: Signal<boolean>
-  isReady: Signal<boolean>
-  persistedStatus: Signal<LiveQueryPersistedStatus>
-  isPersistedReady: Signal<boolean>
-  persistedError: Signal<unknown | undefined>
-  isIdle: Signal<boolean>
-  isError: Signal<boolean>
-  isCleanedUp: Signal<boolean>
-  errors: Signal<ErrorTreeNode | undefined>
 }
 
 export interface InjectLiveQueryResultWithSingleResultCollection<
   TResult extends object = any,
   TKey extends string | number = string | number,
   TUtils extends Record<string, any> = {},
-> {
+> extends InjectLiveQueryFlags {
   state: Signal<Map<TKey, TResult>>
   data: Signal<TResult | undefined>
   collection: Signal<(Collection<TResult, TKey, TUtils> & SingleResult) | null>
-  status: Signal<CollectionStatus | `disabled`>
-  isLoading: Signal<boolean>
-  isReady: Signal<boolean>
-  persistedStatus: Signal<LiveQueryPersistedStatus>
-  isPersistedReady: Signal<boolean>
-  persistedError: Signal<unknown | undefined>
-  isIdle: Signal<boolean>
-  isError: Signal<boolean>
-  isCleanedUp: Signal<boolean>
-  errors: Signal<ErrorTreeNode | undefined>
 }
 
 export function injectLiveQuery<

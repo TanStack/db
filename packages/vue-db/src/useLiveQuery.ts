@@ -53,10 +53,8 @@ function snapshotRows(data: unknown): Array<any> {
  * @property isError - True when query encountered an error
  * @property isCleanedUp - True when query has been cleaned up
  */
-export interface UseLiveQueryReturn<TContext extends Context> {
-  state: ComputedRef<Map<string | number, GetResult<TContext>>>
-  data: ComputedRef<InferResultType<TContext>>
-  collection: ComputedRef<Collection<GetResult<TContext>, string | number, {}>>
+/** Status, persistence, and health refs every `useLiveQuery` result has. */
+export interface UseLiveQueryFlags {
   status: ComputedRef<CollectionStatus>
   isLoading: ComputedRef<boolean>
   isReady: ComputedRef<boolean>
@@ -67,6 +65,14 @@ export interface UseLiveQueryReturn<TContext extends Context> {
   isError: ComputedRef<boolean>
   isCleanedUp: ComputedRef<boolean>
   errors: ComputedRef<ErrorTreeNode | undefined>
+}
+
+export interface UseLiveQueryReturn<
+  TContext extends Context,
+> extends UseLiveQueryFlags {
+  state: ComputedRef<Map<string | number, GetResult<TContext>>>
+  data: ComputedRef<InferResultType<TContext>>
+  collection: ComputedRef<Collection<GetResult<TContext>, string | number, {}>>
 }
 
 type InferConditionalResultType<TContext extends Context> =
@@ -91,40 +97,20 @@ export interface UseLiveQueryReturnWithCollection<
   T extends object,
   TKey extends string | number,
   TUtils extends Record<string, any>,
-> {
+> extends UseLiveQueryFlags {
   state: ComputedRef<Map<TKey, T>>
   data: ComputedRef<Array<T>>
   collection: ComputedRef<Collection<T, TKey, TUtils>>
-  status: ComputedRef<CollectionStatus>
-  isLoading: ComputedRef<boolean>
-  isReady: ComputedRef<boolean>
-  persistedStatus: ComputedRef<LiveQueryPersistedStatus>
-  isPersistedReady: ComputedRef<boolean>
-  persistedError: ComputedRef<unknown | undefined>
-  isIdle: ComputedRef<boolean>
-  isError: ComputedRef<boolean>
-  isCleanedUp: ComputedRef<boolean>
-  errors: ComputedRef<ErrorTreeNode | undefined>
 }
 
 export interface UseLiveQueryReturnWithSingleResultCollection<
   T extends object,
   TKey extends string | number,
   TUtils extends Record<string, any>,
-> {
+> extends UseLiveQueryFlags {
   state: ComputedRef<Map<TKey, T>>
   data: ComputedRef<T | undefined>
   collection: ComputedRef<Collection<T, TKey, TUtils> & SingleResult>
-  status: ComputedRef<CollectionStatus>
-  isLoading: ComputedRef<boolean>
-  isReady: ComputedRef<boolean>
-  persistedStatus: ComputedRef<LiveQueryPersistedStatus>
-  isPersistedReady: ComputedRef<boolean>
-  persistedError: ComputedRef<unknown | undefined>
-  isIdle: ComputedRef<boolean>
-  isError: ComputedRef<boolean>
-  isCleanedUp: ComputedRef<boolean>
-  errors: ComputedRef<ErrorTreeNode | undefined>
 }
 
 /**

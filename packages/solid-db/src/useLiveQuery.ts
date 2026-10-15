@@ -109,6 +109,19 @@ type InferConditionalResultType<TContext extends Context> =
  *   </Suspense>
  * )
  */
+/** Status, persistence, and health fields every `useLiveQuery` result has. */
+type UseLiveQueryFlags = {
+  isLoading: boolean
+  isReady: boolean
+  persistedStatus: LiveQueryPersistedStatus
+  isPersistedReady: boolean
+  persistedError: unknown | undefined
+  isIdle: boolean
+  isError: boolean
+  isCleanedUp: boolean
+  errors: ErrorTreeNode | undefined
+}
+
 // Overload 1: Accept query function that always returns QueryBuilder
 export function useLiveQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
@@ -121,16 +134,7 @@ export function useLiveQuery<TContext extends Context>(
   state: ReactiveMap<string | number, GetResult<TContext>>
   collection: Collection<GetResult<TContext>, string | number, {}>
   status: CollectionStatus
-  isLoading: boolean
-  isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
-  errors: ErrorTreeNode | undefined
-}
+} & UseLiveQueryFlags
 
 // Overload 1b: Accept query function that can return undefined/null
 export function useLiveQuery<TContext extends Context>(
@@ -146,16 +150,7 @@ export function useLiveQuery<TContext extends Context>(
   state: ReactiveMap<string | number, GetResult<TContext>>
   collection: Collection<GetResult<TContext>, string | number, {}> | null
   status: CollectionStatus | `disabled`
-  isLoading: boolean
-  isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
-  errors: ErrorTreeNode | undefined
-}
+} & UseLiveQueryFlags
 
 /**
  * Create a live query using configuration object
@@ -209,16 +204,7 @@ export function useLiveQuery<TContext extends Context>(
   state: ReactiveMap<string | number, GetResult<TContext>>
   collection: Collection<GetResult<TContext>, string | number, {}>
   status: CollectionStatus
-  isLoading: boolean
-  isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
-  errors: ErrorTreeNode | undefined
-}
+} & UseLiveQueryFlags
 
 /**
  * Subscribe to an existing live query collection
@@ -273,16 +259,7 @@ export function useLiveQuery<
   state: ReactiveMap<TKey, TResult>
   collection: Collection<TResult, TKey, TUtils>
   status: CollectionStatus
-  isLoading: boolean
-  isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
-  errors: ErrorTreeNode | undefined
-}
+} & UseLiveQueryFlags
 
 // Overload 3b: Accept pre-created live query collection with singleResult: true
 export function useLiveQuery<
@@ -302,16 +279,7 @@ export function useLiveQuery<
   state: ReactiveMap<TKey, TResult>
   collection: Collection<TResult, TKey, TUtils> & SingleResult
   status: CollectionStatus
-  isLoading: boolean
-  isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
-  errors: ErrorTreeNode | undefined
-}
+} & UseLiveQueryFlags
 
 // Implementation - use function overloads to infer the actual collection type
 export function useLiveQuery(
