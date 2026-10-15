@@ -2170,9 +2170,7 @@ describe(`Query Collections`, () => {
         await Promise.resolve()
         expect(readAbandonedStatus!()).not.toBe(`error`)
         expect(readAbandoned!).not.toThrow()
-        await waitFor(() =>
-          expect(queryCollection!.status).toBe(`cleaned-up`),
-        )
+        await waitFor(() => expect(queryCollection!.status).toBe(`cleaned-up`))
       } finally {
         view.unmount()
         await source.cleanup()
