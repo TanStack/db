@@ -298,3 +298,63 @@ publication-hold sentence added during this PR was removed. The changeset
 names the permitted later completion. Framework render timing remains outside
 the core cut, and the React first-layout-commit witness does not claim to
 cover Vue, Solid, Svelte, or Angular.
+
+## Held provider Promise across a later marker change
+
+Reviewed oracle and coverage-map commit:
+`a613f96e07728257b543e65695dfc5266a5c8a70` (parent
+`1c557a4ddc7a03b08059ea2f069f26e6770de3dd`). This section supersedes the
+earlier open held-Promise item above without changing that historical record.
+No production code changed.
+
+The architecture requires coherent public windows and callback events when
+source changes overlap ordered work. It does not prescribe synchronous timing
+for a full-source fallback started after first publication. The finite grammar
+adds four histories: deletion or retargeting of marker 1, each with pending or
+settled child demand. The fallback applies root 3 and returns a Promise that
+remains pending while marker 2 retargets from root 3 to root 2. The independent
+join model predicts root 3 after the first marker action and root 2 after the
+second. A coherent root-3 window may publish before marker 2 changes; it may
+remain visible while the later change is pending. The oracle does not require
+or forbid either schedule.
+
+The driver confirms that root 3 applied, the provider Promise remains pending,
+and the root Collection reports a pending subset at the overlap cut. It reads
+the public window before and after marker 2 changes, then compares the final
+window with the model. It replays every public change callback against that
+callback's visible rows. If root 3 published before the overlap, its insert
+and later delete are expected; an insert first published after the overlap is
+rejected. The provider request still has no predicate, cursor, order, limit,
+or offset. A synthetic wrong-result control adds a coherent stale root-3
+publication and retraction after the correct root-2 result, leaving final rows
+unchanged. The event comparison rejects that control.
+
+After the commit hook, the full ordered-lifecycle file passed 292/292 tests
+with no Vitest type errors; Prettier and `git diff --check` passed. ESLint had
+no errors and one warning on an unchanged line. A temporary loader mutant
+that replaced `settlesAsync ? result : Promise.resolve()` with
+`Promise.resolve()` survived all four new histories. This is a **survival**,
+not a kill: all provider writes in this fixture had already applied, and the
+source Collection still tracked the provider Promise, so these public cuts did
+not distinguish early loader completion. The mutant was removed. The new
+witness protects overlap publication and events, but it does not establish
+that the loader waits for provider settlement before claiming full-source
+authority when later provider writes or rejection are possible. That separate
+ordered-acquisition limit is retained in the coverage map.
+
+| Requirement | Outcome for this follow-up |
+| --- | --- |
+| ORC-001 | Atomic ordered publication and the absence of a later synchronous cut come from `ARCHITECTURE.md`; the four controlled histories and remaining settlement limit are explicit. |
+| ORC-002 | The finite marker-to-root join and null-last sort compute the expected winner without the loader's request or completion classifier. |
+| ORC-003 | Opening and local prose distinguish the contract, marker grammar, independent join model, live Collection path, public cuts, and comparison. |
+| ORC-004 | No new generated-history claim. The fixed two-marker-action × two-child-state grammar reaches all four cells; root-source changes and later provider writes are excluded. |
+| ORC-005 | The real `createLiveQueryCollection`/`preload` path records unfiltered fallback requests, applied root 3, a pending provider Promise, public rows, and callback snapshots at named cuts. |
+| ORC-006 | The coherent stale-event wrong-result control is rejected at the event comparison. The separate early-loader-completion mutant survived and narrows the claim as stated above. |
+| ORC-007 | No new important generated property; existing fixed and random lifecycle campaigns are unchanged. |
+| ORC-008 | The finite model adds a second marker state because the next legal marker action changes the winning root from 3 to 2; it adds no loader state. |
+| ORC-009 | Marker mutation, applied source row, provider settlement, public window, and callback publication retain the glossary's separate boundaries. |
+| ORC-010 | The provider gate resolves before cleanup even after a primary failure; the existing cleanup helper preserves secondary diagnostics. |
+| ORC-011 | No plausible shared semantic fault needing a different join formulation was identified for these three fixed roots. |
+| ORC-012 | This exact-commit record gives the observed reach, wrong-result rejection, mutant survivor, and remaining owner limit. |
+| ORC-013 | The claim is limited to four named histories and their nearby stale-event control, not a universal provider-settlement boundary law. |
+| ORC-014 | The provider is controlled; the test makes no new real-adapter or framework-render claim. |
