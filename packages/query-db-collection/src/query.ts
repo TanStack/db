@@ -1240,6 +1240,9 @@ export function queryCollectionOptions(
     // A commit held by a wrapping sync is canceled only when the Query owner
     // leaves, including after that result replacement.
     const queryCommitControllers = new Map<string, AbortController>()
+    // A replacement owner must not diff against an older, still-open commit
+    // that the final release has aborted but a wrapping sync has not settled.
+    const retiringCommitSettlements = new Map<string, Promise<void>>()
     const queryCommitSignal = (hashedQueryKey: string): AbortSignal => {
       let controller = queryCommitControllers.get(hashedQueryKey)
       if (!controller) {
@@ -1251,6 +1254,21 @@ export function queryCollectionOptions(
     const abortQueryCommit = (hashedQueryKey: string) => {
       const controller = queryCommitControllers.get(hashedQueryKey)
       queryCommitControllers.delete(hashedQueryKey)
+      const application = pendingResultApplications.get(hashedQueryKey)
+      if (application) {
+        const previous = retiringCommitSettlements.get(hashedQueryKey)
+        const settled = application.then(
+          () => undefined,
+          () => undefined,
+        )
+        const barrier = previous ? previous.then(() => settled) : settled
+        retiringCommitSettlements.set(hashedQueryKey, barrier)
+        void barrier.then(() => {
+          if (retiringCommitSettlements.get(hashedQueryKey) === barrier) {
+            retiringCommitSettlements.delete(hashedQueryKey)
+          }
+        })
+      }
       controller?.abort()
     }
     const effectivePersistedGcTimes = new Map<string, number>()
@@ -2048,6 +2066,9 @@ export function queryCollectionOptions(
 
         // Get the current result and return based on its state
         const observer = state.observers.get(hashedQueryKey)!
+        if (syncStarted || collection.subscriberCount > 0) {
+          subscribeToQuery(observer, hashedQueryKey)
+        }
         const currentResult = observer.getCurrentResult()
 
         if (opts.refetch) {
@@ -2411,6 +2432,16 @@ export function queryCollectionOptions(
       // Reserve the Query owner's cancellation before getKey, write, or a
       // wrapping sync can synchronously release the final acquisition.
       const commitSignal = queryCommitSignal(hashedQueryKey)
+      const assertCurrentOwner = () => {
+        if (
+          commitSignal.aborted ||
+          signal?.aborted ||
+          collection.status === `cleaned-up` ||
+          resultApplicationControllers.get(hashedQueryKey) !== applicationToken
+        ) {
+          throw new LoadSubsetOperationAbortedError()
+        }
+      }
 
       if (isMutationPublicationBlocked()) {
         applicationToken.settleRefetchAtFetchBoundary?.()
@@ -2489,6 +2520,7 @@ export function queryCollectionOptions(
       const newItemsMap = new Map<string | number, any>()
       newItemsArray.forEach((item) => {
         const key = getKey(item)
+        assertCurrentOwner()
         const acceptedPosition = acceptedRowPositions.get(key)
         newItemsMap.set(
           key,
@@ -2592,6 +2624,7 @@ export function queryCollectionOptions(
 
         begin()
         transactionActive = true
+        assertCurrentOwner()
         if (metadata) {
           metadata.collection.delete(
             `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,
@@ -2615,10 +2648,12 @@ export function queryCollectionOptions(
             // storage, so delete by key even when no stored row is known.
             if (needToRemove) {
               write({ type: `delete`, key })
+              assertCurrentOwner()
               removedRows.add(key)
             }
           } else if (oldItem && !deepEquals(oldItem, newItem)) {
             write({ type: `update`, value: newItem })
+            assertCurrentOwner()
           }
         })
 
@@ -2649,6 +2684,7 @@ export function queryCollectionOptions(
           addRowOwner(key, hashedQueryKey)
           if (insertsRow) {
             write({ type: `insert`, value: newItem })
+            assertCurrentOwner()
           } else if (
             !previouslyOwnedRows.has(key) &&
             (result.isFetchedAfterMount ||
@@ -2660,6 +2696,7 @@ export function queryCollectionOptions(
             // A fetched row can first claim a directly inserted key. That
             // claim also replaces the direct value with the server value.
             write({ type: `update`, value: newItem })
+            assertCurrentOwner()
           }
           if (addsOwner || insertsRow) {
             // An insert clears stale metadata for its key. Stage ownership
@@ -2676,6 +2713,7 @@ export function queryCollectionOptions(
         if (isMutationPublicationBlocked()) {
           applicationToken.settleRefetchAtFetchBoundary?.()
         }
+        assertCurrentOwner()
         // A commit can still reject on this signal until it reaches Core's
         // no-cancel point. After that point, cleanup cannot roll it back.
         const applied = commit(commitSignal)
@@ -2840,6 +2878,7 @@ export function queryCollectionOptions(
         applicationToken: ResultApplicationController,
       ) => true | Promise<void>,
     ): void => {
+      const priorCommit = retiringCommitSettlements.get(hashedQueryKey)
       invalidatePendingResultApplication(hashedQueryKey)
       const currentErrorRevision = errorRevision
       const controller: ResultApplicationController = new AbortController()
@@ -2851,7 +2890,16 @@ export function queryCollectionOptions(
       resultApplicationControllers.set(hashedQueryKey, controller)
       let application: true | Promise<void>
       try {
-        application = apply(controller.signal, controller)
+        application = priorCommit
+          ? priorCommit.then(async () => {
+              if (
+                resultApplicationControllers.get(hashedQueryKey) !== controller
+              ) {
+                throw new LoadSubsetOperationAbortedError()
+              }
+              await apply(controller.signal, controller)
+            })
+          : apply(controller.signal, controller)
       } catch (error) {
         application = Promise.reject(error)
       }
@@ -3299,9 +3347,11 @@ export function queryCollectionOptions(
     }
 
     const subscribeToQueries = () => {
-      state.observers.forEach((observer, hashedQueryKey) =>
-        subscribeToQuery(observer, hashedQueryKey),
-      )
+      state.observers.forEach((observer, hashedQueryKey) => {
+        if ((queryRefCounts.get(hashedQueryKey) ?? 0) > 0) {
+          subscribeToQuery(observer, hashedQueryKey)
+        }
+      })
     }
 
     const unsubscribeFromQueries = () => {
@@ -3383,21 +3433,27 @@ export function queryCollectionOptions(
      * Callers are responsible for ensuring the query is safe to cleanup.
      */
     const unsubscribePendingReadyListeners = (hashedQueryKey: string) => {
-      pendingReadyUnsubscribes.get(hashedQueryKey)?.forEach((unsubscribe) => {
+      const pending = pendingReadyUnsubscribes.get(hashedQueryKey)
+      pendingReadyUnsubscribes.delete(hashedQueryKey)
+      pending?.forEach((unsubscribe) => {
         unsubscribe()
       })
-      pendingReadyUnsubscribes.delete(hashedQueryKey)
     }
 
-    const cleanupQueryInternal = (hashedQueryKey: string) => {
+    const cleanupQueryInternal = (hashedQueryKey: string, force = false) => {
       const query = state.observers.get(hashedQueryKey)?.getCurrentQuery()
       abortQueryCommit(hashedQueryKey)
-      unsubscribes.get(hashedQueryKey)?.()
+      if (!force && (queryRefCounts.get(hashedQueryKey) ?? 0) > 0) return
+      const unsubscribe = unsubscribes.get(hashedQueryKey)
       unsubscribes.delete(hashedQueryKey)
+      unsubscribe?.()
+      if (!force && (queryRefCounts.get(hashedQueryKey) ?? 0) > 0) return
       unsubscribePendingReadyListeners(hashedQueryKey)
+      if (!force && (queryRefCounts.get(hashedQueryKey) ?? 0) > 0) return
       cancelPersistedRetentionExpiry(hashedQueryKey)
       retainedQueriesPendingRevalidation.delete(hashedQueryKey)
       invalidatePendingResultApplication(hashedQueryKey)
+      if (!force && (queryRefCounts.get(hashedQueryKey) ?? 0) > 0) return
 
       const nextOwnersByRow = removeQueryOwnership(hashedQueryKey)
       const rowsToDelete: Array<any> = []
@@ -3473,9 +3529,12 @@ export function queryCollectionOptions(
         effectivePersistedGcTimes.get(hashedQueryKey)
 
       if (refcount <= 0) {
-        unsubscribes.get(hashedQueryKey)?.()
+        const unsubscribe = unsubscribes.get(hashedQueryKey)
         unsubscribes.delete(hashedQueryKey)
+        unsubscribe?.()
+        if ((queryRefCounts.get(hashedQueryKey) ?? 0) > 0) return
         unsubscribePendingReadyListeners(hashedQueryKey)
+        if ((queryRefCounts.get(hashedQueryKey) ?? 0) > 0) return
       }
 
       // Refcounts are explicit ownership tokens. A cache event can remove the
@@ -3490,7 +3549,9 @@ export function queryCollectionOptions(
         persistence?.scanPersistedRows
       ) {
         abortQueryCommit(hashedQueryKey)
+        if ((queryRefCounts.get(hashedQueryKey) ?? 0) > 0) return
         invalidatePendingResultApplication(hashedQueryKey)
+        if ((queryRefCounts.get(hashedQueryKey) ?? 0) > 0) return
         begin()
         metadata.collection.set(
           `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,
@@ -3533,7 +3594,7 @@ export function queryCollectionOptions(
      * Ignores refcounts/hasListeners and removes everything.
      */
     const forceCleanupQuery = (hashedQueryKey: string) => {
-      cleanupQueryInternal(hashedQueryKey)
+      cleanupQueryInternal(hashedQueryKey, true)
     }
 
     // Subscribe to the query client's cache to handle queries that are GCed by tanstack query

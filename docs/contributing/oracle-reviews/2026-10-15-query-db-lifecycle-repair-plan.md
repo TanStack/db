@@ -19,7 +19,10 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
 - [x] Restore the committed baseline and preserve the staged reversal patch.
 - [x] Show all four expected failures as ordinary assertion failures at their
       public checkpoints on `b5c55a2a4` (four assertion failures, 2026-10-15).
-- [ ] Repair reentrant ownership (#2160) and turn its three witnesses green.
+- [x] Turn the three pinned reentrant ownership witnesses into ordinary passing
+      tests; full load-lifecycle and ownership oracles pass (2026-10-15).
+- [ ] Expand reentrant ownership histories and hostile controls before calling
+      the #2160 bug class closed.
 - [ ] Repair public caller abort (#2162) and turn its witness green.
 - [ ] Expand generated histories and TLA+ publication/abort coverage; kill
       plausible wrong designs at the intended comparisons.
