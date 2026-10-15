@@ -158,6 +158,6 @@ The first 1.0 candidate Changeset enters Changesets prerelease mode through
 for subsequent candidate releases; the normal release workflow handles each
 patch or minor Changeset. When the candidates are ready for stable 1.0, run
 `pnpm changeset pre exit` and commit the resulting `.changeset/pre.json` change.
-The next Version Packages PR promotes the candidate packages to `1.0.0` and
-keeps already stable packages at their current versions. Merge that PR to
-publish 1.0.
+The next Version Packages PR promotes the candidate packages to `1.0.0`.
+Already stable packages keep their versions unless a pending Changeset
+explicitly releases them. Merge that PR to publish 1.0.

@@ -180,10 +180,23 @@ export async function versionDuringRc(rootDirectory = root) {
 
 export async function versionOnRcExit(rootDirectory = root) {
   const { packages, releaseConfig, plan } = await rcReleasePlan(rootDirectory)
+  // The release plan includes newly pending Changesets in its pre-state.
+  // The saved pre-state identifies which Changesets were already versioned.
+  const preState = JSON.parse(
+    readFileSync(join(rootDirectory, '.changeset', 'pre.json'), 'utf8'),
+  )
   const privatePackages = new Set(
     packages.packages
       .filter(({ packageJson }) => packageJson.private)
       .map(({ packageJson }) => packageJson.name),
+  )
+  const consumedChangesets = new Set(preState.changesets)
+  const pendingStableNames = new Set(
+    plan.changesets
+      .filter(({ id }) => !consumedChangesets.has(id))
+      .flatMap(({ releases }) =>
+        releases.filter(({ type }) => type !== 'none').map(({ name }) => name),
+      ),
   )
   plan.releases = plan.releases.filter((release) => {
     if (privatePackages.has(release.name)) return false
@@ -191,7 +204,11 @@ export async function versionOnRcExit(rootDirectory = root) {
       release.newVersion = '1.0.0'
       return true
     }
-    if (/^\d+\.\d+\.\d+$/.test(release.oldVersion)) return false
+    if (/^\d+\.\d+\.\d+$/.test(release.oldVersion)) {
+      if (!pendingStableNames.has(release.name)) return false
+      release.newVersion = versionForRcRelease(release)
+      return true
+    }
     throw new Error(
       `Cannot exit RC mode for ${release.name}: ${release.oldVersion}.`,
     )

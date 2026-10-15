@@ -173,13 +173,16 @@ test('RC versioning consumes Changesets while preserving stable and private pack
   await versionDuringRc(root)
   assert.equal(packageVersion(root, 'db'), '1.0.0-rc.2.1')
 
+  addChangeset(root, 'stable-on-exit', {
+    '@tanstack/query-db-collection': 'patch',
+  })
   const preStatePath = join(root, '.changeset', 'pre.json')
   const preState = JSON.parse(readFileSync(preStatePath, 'utf8'))
   writeJson(preStatePath, { ...preState, mode: 'exit' })
   await versionOnRcExit(root)
   assert.equal(packageVersion(root, 'db'), '1.0.0')
   assert.equal(packageVersion(root, 'react-db'), '1.0.0')
-  assert.equal(packageVersion(root, 'query-db-collection'), '1.4.6')
+  assert.equal(packageVersion(root, 'query-db-collection'), '1.4.7')
   assert.equal(packageVersion(root, 'offline-transactions'), '1.1.3')
   assert.equal(
     JSON.parse(
@@ -190,4 +193,5 @@ test('RC versioning consumes Changesets while preserving stable and private pack
   assert.equal(existsSync(preStatePath), false)
   assert.equal(existsSync(join(root, '.changeset', 'first-rc.md')), false)
   assert.equal(existsSync(join(root, '.changeset', 'patch-one.md')), false)
+  assert.equal(existsSync(join(root, '.changeset', 'stable-on-exit.md')), false)
 })
