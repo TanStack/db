@@ -78,8 +78,8 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
           physical-signal, and public-row checkpoints. Two further production
           mutants, retaining an aborted caller's lease and stealing the peer's
           lease on a duplicate unload, failed at the physical-signal and
-          intermediate public-row checkpoints (2026-10-15). Reentry and
-          refetch cells remain; accepted-commit reentry remains open below.
+          intermediate public-row checkpoints (2026-10-15). Initial-fetch
+          callback reentry and refetch cells remain.
     - [x] Accepted-commit release grammar: caller abort or unsubscribe after
           source-result acceptance, crossed with one/two rows and peer timing,
           runs eight named
@@ -92,10 +92,16 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
           unsubscribe controls passed. Reentrant peer acquisition at caller
           abort or Query-cache observer removal keeps the peer's accepted
           rows; a forced-retirement mutant failed at the row comparison.
-          An independent oracle reviewer found
-          and helped close timing, replacement-fetch, and early-publication
-          false-greens (2026-10-15). Reentrant callbacks and cleanup during
-          this accepted interval remain open.
+          An independent oracle reviewer found and helped close timing,
+          replacement-fetch, and early-publication false-greens (2026-10-15).
+          Collection cleanup during this accepted interval remains open.
+    - [x] Synchronous provider throw receiving witness: a second public
+          acquisition joins inside the query function before its first call
+          throws. Both loads reject the exact provider error; after the first
+          owner releases, Query invalidation fetches and applies a new row for
+          the surviving peer. Final peer release removes it. A mutant that
+          retires every lease on the first unload failed at the provider-call
+          checkpoint (2026-10-15).
 - [ ] Close the automatic-GC, hydration, repeated-options, request-shape,
       persistence, and cleanup-harness cells with tests or explicit contract
       decisions.

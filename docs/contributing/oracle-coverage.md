@@ -710,8 +710,14 @@ acquisition-settlement,
 public-row, cache-row, and error checkpoints. An ignored-signal witness rejects
 eager consumption of Query Core's lazy signal. The foreign closure
 witnesses verify the installed Query Core's option-selection path both before
-and during a shared fetch. A synchronous provider throw caused by reentrant
-peer acquisition has no separate witness.
+and during a shared fetch. A separate receiving witness acquires a second
+public subscriber inside a query function that then throws synchronously. Both
+loads reject the exact provider error. After the first subscription releases,
+invalidation must fetch and apply a new row for the surviving peer; final peer
+release removes it. Retiring all leases on the first unload prevents that
+fetch and fails the provider-call comparison. This fixed history does not
+cover Query Core retries inside one physical fetch or a throw during observer
+construction.
 A signal-free provider request keeps its options cloneable and its enumerable
 shape empty while exposing the physical Query signal by property access. A
 request with an explicit signal keeps that enumerable key but receives the

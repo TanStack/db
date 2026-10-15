@@ -3850,6 +3850,92 @@ describe(`loadSubset lifecycle oracle`, () => {
   }, 20_000)
 
   /**
+   * A provider error belongs to its physical fetch, including a synchronous
+   * throw after a second public acquisition joins inside the query function.
+   * Both loads reject that exact error; the peer's acquisition lease survives
+   * the first owner's release and can recover when its Query is invalidated.
+   * The independent account is the scripted first throw and second row, not
+   * Query status or Query DB's observer bookkeeping. This single reentrant
+   * history checks both load outcomes, the public row after invalidation, and its
+   * removal after the peer releases. It does not cover retries inside one
+   * physical fetch or a throw during observer construction.
+   */
+  it(`preserves a reentrant peer after a synchronous provider throw`, async () => {
+    const queryClient = createQueryClient()
+    const id = `reentrant-provider-throw-${collectionSequence++}`
+    const providerError = new Error(`first source failed`)
+    let providerCalls = 0
+    let acquirePeer = () => {}
+    const collection = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn: () => {
+          providerCalls++
+          if (providerCalls === 1) {
+            acquirePeer()
+            throw providerError
+          }
+          return [{ id: `recovered` }]
+        },
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+      }),
+    )
+    const first = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    let peer: ReturnType<typeof collection.subscribeChanges> | undefined
+    let peerLoad: true | Promise<void> | undefined
+    acquirePeer = () => {
+      peer = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+      peer.requestSnapshot({
+        onLoadSubsetResult: (load) => {
+          peerLoad = load
+          if (load !== true) void load.catch(() => undefined)
+        },
+      })
+    }
+
+    await checkPublicCleanupWitness(async () => {
+      let firstLoad: true | Promise<void> | undefined
+      first.requestSnapshot({
+        onLoadSubsetResult: (load) => {
+          firstLoad = load
+          if (load !== true) void load.catch(() => undefined)
+        },
+      })
+      await vi.waitFor(() => expect(peerLoad).toBeDefined())
+      expect(providerCalls).toBe(1)
+      if (firstLoad === undefined || firstLoad === true)
+        throw new Error(`The failed first acquisition returned no load`)
+      if (peerLoad === undefined || peerLoad === true)
+        throw new Error(`The reentrant peer returned no load`)
+      await expect(firstLoad).rejects.toBe(providerError)
+      await expect(peerLoad).rejects.toBe(providerError)
+      expect(collection.toArray).toEqual([])
+
+      first.unsubscribe()
+      expect(collection.subscriberCount).toBe(1)
+      await queryClient.invalidateQueries({ queryKey: [id] })
+      expect(providerCalls).toBe(2)
+      await vi.waitFor(() => expect(collection.has(`recovered`)).toBe(true))
+      expect(collection.toArray.map((row) => row.id)).toEqual([`recovered`])
+      peer?.unsubscribe()
+      expect(collection.toArray).toEqual([])
+    }, [
+      [`first subscription`, () => first.unsubscribe()],
+      [`peer subscription`, () => peer?.unsubscribe()],
+      [`Collection`, () => collection.cleanup()],
+      [`Query client`, () => queryClient.clear()],
+    ])
+  })
+
+  /**
    * A direct write can overlap a fetched result. While merging that result,
    * Query DB briefly subscribes to its own Query observer. That temporary
    * listener is not an owner: final public release in the cache notification
