@@ -1,137 +1,74 @@
 # Live-query automatic-loading review
 
-The API is `autoLoad: false` on live-query configuration, including React's
-`useLiveQuery` and `useLiveInfiniteQuery`. The proposed contract is described in
-the architecture's [Automatic loading](../../../packages/db/src/query/live/ARCHITECTURE.md#automatic-loading)
-section. The implementation head for the validation update below is
-`a47a73719a709d667d44374abfb1db7702df95a9`.
+Reviewed implementation: `4bef0fbbe16a09e360f085af1a9af5302087088f`.
 
-This update uses the current API and test names. Historical findings remain
-tied to their recorded commits; the [original review record](https://github.com/jchook/db/blob/a47a73719a709d667d44374abfb1db7702df95a9/docs/contributing/oracle-reviews/2026-10-14-local-live-query.md)
-preserves their original wording. This is bounded implementation evidence,
-not upstream acceptance of the API.
+## Why this design
 
-## Review at `4ec786c7`
+`autoLoad: false` queries data already in collections and keeps results reactive.
+Application-owned fetching is one use case: some remote API requests cannot be
+derived from the query IR, so the application constructs the request and ingests
+its results. The contract is defined in the architecture's
+[Automatic loading](../../../packages/db/src/query/live/ARCHITECTURE.md#automatic-loading)
+section.
 
-The implementation reviewed in this section was
-`4ec786c7f37c8cb92344292bf405626a4187d069`.
+Suppressing `loadSubset` alone is insufficient because subscriptions can start
+source sync, which can fetch independently. The implementation suppresses both
+and determines readiness after evaluating available rows, without depending on
+source loading. Other consumers can still load and update the shared rows.
 
-The independent reviewer found an identity collision when a caller's query key
-contained the same element used internally to distinguish loading modes.
-The regression failed before separate mode tracking and passes with it; the
-reviewer's reproduction returns different Collections and one fetching load.
-The local-subscription status regression likewise rejected `loadingSubset`
-after another owner started the source and passes with the restart-listener
-fix. The focused re-review reported no remaining blockers or should-fix issues.
+Filtering, joins, includes, and pagination use the ordinary query engine.
+Subscriptions skip the provider-loading callbacks, and ordered windows evaluate
+the available rows. This avoids a separate implementation of query evaluation.
 
-## Oracle evidence
+Loading mode is part of query identity, including explicit keys, because queries
+that request data and queries that only read available rows have different
+readiness behavior. The discriminator sits outside the user-supplied key array
+to prevent collisions. The default remains `true`, with unchanged default hashes.
 
-The numbered obligations refer to `docs/contributing/oracle-tests.md`.
+## Evidence and limits
 
-- ORC-001–003: the oracle states the proposed local-evaluation law, authority,
-  driver and limits. Array filter/join/sort/slice computes expected values
-  independently of the compiler and subscription machinery. Comparisons preserve
-  projected values, duplicates, and order; only Collection virtual fields are
-  omitted.
-- ORC-004: the grammar documents unique IDs 1–6, ranks 0–3, parent IDs 1–3,
-  limits 0–4 and one to five replacements. Duplicate source keys are excluded.
-  Empty/nonempty, matching/unmatched, ties, closed/underfilled windows and
-  growth/shrink traces are reconstructible. Eager/on-demand changes loading
-  semantics; window/join/include changes relational shape. The index-availability
-  evidence is corrected below. Every trace subscribes, preloads, replaces rows,
-  moves windows and restarts the query. Arbitrary interleavings are not claimed.
-- ORC-005: real Collection and live-query entry points provide all modeled rows
-  before settled window comparisons. Immediate post-subscribe observations check
-  readiness and zero source startup. Pinned histories observe incremental
-  reorder/delete, provider error, and a pending fetching peer. No missing source
-  fact was identified for these local snapshots.
-- ORC-006: forcing the source subscription to acquire data failed the
-  source-start assertion, not setup or a timeout. Seed `112919`, path
-  `0:0:0:0:0`, shrinks to one empty replacement with limit zero. The mutation
-  is restored; the ordinary suite passes.
-- ORC-007: all twelve mode/index/shape lanes run fixed seed `112919` and random
-  campaigns with the same ten-run budget, scaled by the standard multiplier.
-  Direct seed/path replay reproduces the source-start failure under the mutant.
-  No `fc.commands` replay path is applicable.
-- ORC-008–009: the reference is stateless recomputation over input arrays;
-  there is no additional lifecycle model state or renamed subsystem state.
-- ORC-010: `withOracleCleanup` preserves the primary failure and cleanup errors;
-  the reduced mutant witness retains the source-start assertion.
-- ORC-011: no shared semantic fault requiring a second relational formulation was
-  identified. Array recomputation is already separate from incremental execution.
-- ORC-012: this record ties the verdict and outstanding scope to the exact
-  implementation head above. It makes no general bug-class closure claim.
-- ORC-013: the adjacent idle/started, empty/populated and zero/nonzero-window
-  cases distinguish memory readiness from provider readiness. The fetching-peer
-  witness distinguishes local suppression from globally disabling acquisition.
-  No broader numerical boundary claim is made.
-- ORC-014: controlled adapters establish core behavior only. The Query Collection
-  integration separately receives explicit initialization and `writeUpsert`
-  ingestion without invoking its fetcher. Remote provider protocols, arbitrary
-  nested plans and non-React framework scheduling remain outside this evidence.
+The [core oracle](../../../packages/db/tests/live-query-auto-load-oracle.test.ts)
+compares real Collection results with independent array calculations.
+[React tests](../../../packages/react-db/tests/live-query-auto-load.test.tsx)
+cover loading-mode changes, identity isolation, and pagination. The
+[Query Collection integration](../../../packages/query-db-collection/tests/live-query-auto-load.test.ts)
+checks application-owned ingestion without invoking the collection fetcher.
+The requirement numbers below refer to the [oracle guide](../oracle-tests.md).
 
-Replay the captured input from `packages/db` using the current test names:
+- ORC-001–003: the proposed contract, authority, model, production path, and
+  limits are stated. Array filter/join/sort/slice calculations preserve selected
+  values, duplicates, and order independently of incremental execution.
+- ORC-004–005: generated replacements and windows cover eager/on-demand sources,
+  windows, joins, and includes, with and without explicitly created indexes.
+  Index presence is asserted. Checks cover subscription, preload, truncate,
+  restart, readiness, and zero acquisition; pinned cases cover incremental
+  updates, provider failure, and coexistence with a fetching consumer.
+- ORC-006: enabling acquisition in the source subscription makes the replay
+  below fail at the source-start assertion. Restoring `autoLoad: false` passes.
+- ORC-007: all twelve mode/index/shape combinations run fixed and random
+  campaigns with ten cases each, scaled by the standard multiplier. Seed/path
+  replay is supported; command-model replay does not apply.
+- ORC-008–010: the reference calculation is stateless, so additional model-state
+  obligations do not apply. Cleanup preserves primary failures, and the reduced
+  failing input retains the source-start assertion.
+- ORC-011–012: no shared-fault hypothesis requiring another relational
+  formulation is claimed. This record identifies the reviewed implementation
+  and evidence limits; it does not claim general bug-class closure.
+- ORC-013–014: empty/nonempty inputs and zero/nonzero windows distinguish
+  available-row readiness from loading. The fetching-peer and Query Collection
+  cases check shared ownership and direct ingestion. Arbitrary nested plans,
+  remote provider protocols, and other frameworks remain outside this coverage.
+
+## Validation
+
+The automatic-loading oracle passes 27 tests. Focused identity/preload checks
+pass 33 core tests; React checks pass 153 tests and type checks. Scoped lint and
+formatting pass. The full workspace suite remains incomplete because of four
+undiagnosed SQLite CLI runtime test timeouts. A separate ordered-window timeout
+also reproduces on unchanged upstream code.
+
+Run the calibrated replay from `packages/db`:
 
 ```sh
 TANSTACK_DB_ORACLE_SEED=112919 TANSTACK_DB_ORACLE_PATH=0:0:0:0:0 TANSTACK_DB_ORACLE_PROPERTY=live-query-auto-load.on-demand.false.window pnpm exec vitest run --coverage.enabled=false tests/live-query-auto-load-oracle.test.ts
 ```
-
-The mutation result belongs to the historical review above. Running this
-command without the mutation checks the captured input against the implementation.
-
-## Validation at `4ec786c7`
-
-The local oracle passes 27 tests, including both generated campaigns. Selected
-core regression runs pass 1,450 and 575 tests respectively (overlapping suites).
-The final React selection passes 111 tests including type assertions; the
-render-cut suite also passed in the earlier 120-test selection. The real Query
-Collection ingestion test passes at runtime and typecheck. Core and React
-builds, core test typechecking, formatting, and the 405-name mangle check pass.
-Package lint has no errors; remaining warnings are in untouched files.
-
-## Upstream standards comparison
-
-Reviewed correction: `c17de4a0544e84d29d5e3d80098ec4b4586a7509`.
-The independent reviewer confirmed the fixture repair. All 27 local oracle
-tests, core test typechecking, scoped lint and formatting pass.
-
-This correction establishes the ORC-004 index-availability evidence.
-The independent comparison found a fixture reach gap: automatic indexing did
-not establish an index on the local window path. An index-presence assertion
-failed with the automatic-only fixture. The fixture explicitly creates a rank
-index, and the generated campaigns check its presence before subscribing.
-Local queries bypass provider order optimization; these lanes establish result
-parity with and without an available index, not distinct ordered loader plans.
-
-Merged precedents support the boundaries used here:
-
-- [#2060](https://github.com/TanStack/db/pull/2060) separates source retention
-  from acquisition and checks core and React ownership boundaries.
-- [#2115](https://github.com/TanStack/db/pull/2115) separates query readiness
-  from background source readiness.
-- [#2132](https://github.com/TanStack/db/pull/2132) checks that configured oracle
-  dimensions actually reach the claimed cases, motivating the index assertion.
-- [#2119](https://github.com/TanStack/db/pull/2119) distinguishes product-law
-  proposals from defects under accepted contracts. Automatic-loading control
-  remains an API proposal; ordinary fetching-query laws are unchanged.
-
-These are merged-code precedents, not maintainer endorsement of this API.
-
-## API and validation at `a47a7371`
-
-`autoLoad: false` queries available collection rows through the standard hooks;
-there is no dedicated hook. The oracle is
-`packages/db/tests/live-query-auto-load-oracle.test.ts`, and replay property names
-begin with `live-query-auto-load`. Provider planning uses the ordinary compiler;
-subscriptions with `autoLoad: false` do not activate its loading callbacks.
-
-The cleanup verification passed 33 core identity/preload tests and 153 React
-tests and type checks, including loading-mode isolation and infinite-query
-behavior. Scoped lint and formatting passed. The automatic-loading oracle
-passed all 27 tests at this head. The replay command above also passed its
-selected generated case and three pinned cases, with 23 tests skipped.
-
-The full workspace test run at `3f76b61b` stopped on four SQLite CLI runtime
-test timeouts. Those failures remain undiagnosed. A separate ordered-window
-timeout also reproduced on unchanged upstream code at `8660cc0e`; this does
-not establish that the SQLite timeouts have the same cause.
