@@ -897,7 +897,7 @@ Internal error: compiler returned aliases without inputs: alias1, alias2. This i
 Development builds show the full message. For example:
 
 ```text
-setWindow() can only be called on collections with an ORDER BY clause. Add .orderBy() to your query to enable window movement.
+setWindow() can only move a window on a query with an ORDER BY clause. Add .orderBy() to your query to enable window movement.
 ```
 
 <a id="error-85"></a>
@@ -978,6 +978,16 @@ Development builds show the full message. For example:
 
 ```text
 A Collection already tracks an unsettled transaction with id "tx-1". Give each transaction a unique id.
+```
+
+<a id="error-244"></a>
+
+## Error 244: `SetWindowFindOneLimitError`
+
+Development builds show the full message. For example:
+
+```text
+setWindow() cannot change the limit of a findOne() query.
 ```
 
 ## Other errors and log messages
@@ -2448,4 +2458,14 @@ Development builds show this message, with `${...}` replaced by values:
 
 ```text
 LocalStorage sync belongs to its options Collection.
+```
+
+<a id="error-243"></a>
+
+## Error 243: `query/compiler/index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+A windowed or findOne result row has no include route
 ```
