@@ -659,6 +659,10 @@ Direct `_sync.loadSubset` calls that reuse one options object for several live
 acquisitions have no caller token at `unloadSubset(options)`. The current
 shared-fetch witness checks total transport lifetime, not which such caller
 releases first. Core supplies a distinct options object per public acquisition.
+An eager Query with finite `gcTime` is now observed after its last public
+subscriber leaves and Query Core's timer evicts it. With no public subscriber,
+`utils.refetch()` recreates the Query, calls the provider once, and applies its
+new row. The existing explicit `removeQueries` case remains a separate path.
 Public Collection cleanup from a synchronous Query-cache fetch notification
 checks both the cached-result and uncached readiness-observer paths. At cleanup
 settlement and after an ignored-signal provider finishes, the Collection has no

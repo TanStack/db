@@ -4014,6 +4014,62 @@ describe(`loadSubset lifecycle oracle`, () => {
   })
 
   /**
+   * Query Core's finite gcTime can evict an eager Query after the final public
+   * subscriber leaves. The Collection still owns eager source work, so a later
+   * utils.refetch() must create a Query, call the provider, and apply its row.
+   * The preceding explicit-removal case does not exercise Query Core's timer.
+   */
+  it(`refetches an eager Collection after automatic Query GC`, async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    })
+    const id = `eager-refetch-after-gc-${collectionSequence++}`
+    const queryKey = [id]
+    const queryFn = vi
+      .fn()
+      .mockResolvedValueOnce([{ id: `before` }])
+      .mockResolvedValueOnce([{ id: `after` }])
+    const collection = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey: (row) => row.id,
+        gcTime: 10,
+        startSync: true,
+      }),
+    )
+    await checkPublicCleanupWitness(async () => {
+      await collection.preload()
+      expect(collection.has(`before`)).toBe(true)
+      const subscription = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+      const query = queryClient.getQueryCache().find({ queryKey, exact: true })
+      expect(query?.getObserversCount()).toBeGreaterThan(0)
+      vi.useFakeTimers()
+      subscription.unsubscribe()
+      await Promise.resolve()
+      expect(collection.subscriberCount).toBe(0)
+      expect(query?.getObserversCount()).toBe(0)
+      await vi.advanceTimersByTimeAsync(11)
+      expect(
+        queryClient.getQueryCache().find({ queryKey, exact: true }),
+      ).toBeUndefined()
+      vi.useRealTimers()
+
+      await collection.utils.refetch()
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(collection.has(`after`)).toBe(true)
+    }, [
+      [`timers`, () => vi.useRealTimers()],
+      [`Collection`, () => collection.cleanup()],
+      [`Query client`, () => queryClient.clear()],
+    ])
+  })
+
+  /**
    * A public caller abort cancels that pending acquisition without requiring
    * releaseSnapshot or unsubscribe. The Query signal follows physical observer
    * ownership: it aborts for a final caller that consumed it, but remains live
@@ -4067,7 +4123,7 @@ describe(`loadSubset lifecycle oracle`, () => {
       const caller = new AbortController()
       let load: true | Promise<void> | undefined
       let peerLoad: true | Promise<void> | undefined
-      try {
+      await checkPublicCleanupWitness(async () => {
         subscription.requestSnapshot({
           signal: caller.signal,
           onLoadSubsetResult: (result) => {
@@ -4102,13 +4158,13 @@ describe(`loadSubset lifecycle oracle`, () => {
         } else {
           await vi.waitFor(() => expect(collection.toArray).toEqual([]))
         }
-      } finally {
-        held.resolve([])
-        subscription.unsubscribe()
-        peerSubscription?.unsubscribe()
-        await collection.cleanup()
-        queryClient.clear()
-      }
+      }, [
+        [`provider`, () => held.resolve([])],
+        [`first subscription`, () => subscription.unsubscribe()],
+        [`peer subscription`, () => peerSubscription?.unsubscribe()],
+        [`Collection`, () => collection.cleanup()],
+        [`Query client`, () => queryClient.clear()],
+      ])
     },
   )
 
@@ -4150,7 +4206,7 @@ describe(`loadSubset lifecycle oracle`, () => {
     const caller = new AbortController()
     let firstLoad: true | Promise<void> | undefined
     let peerLoad: true | Promise<void> | undefined
-    try {
+    await checkPublicCleanupWitness(async () => {
       const mutation = collection.insert({ id: `local` })
       await handlerEntered.promise
       first.requestSnapshot({
@@ -4197,13 +4253,13 @@ describe(`loadSubset lifecycle oracle`, () => {
       await Promise.resolve(peerLoad)
       expect(firstOutcome).toBe(`rejected`)
       expect(collection.has(`server`)).toBe(true)
-    } finally {
-      releaseHandler.resolve()
-      first.unsubscribe()
-      peer.unsubscribe()
-      await collection.cleanup()
-      queryClient.clear()
-    }
+    }, [
+      [`mutation handler`, () => releaseHandler.resolve()],
+      [`first subscription`, () => first.unsubscribe()],
+      [`peer subscription`, () => peer.unsubscribe()],
+      [`Collection`, () => collection.cleanup()],
+      [`Query client`, () => queryClient.clear()],
+    ])
   })
 
   it(`starts a fresh query after an aborted owner immediately remounts`, async () => {

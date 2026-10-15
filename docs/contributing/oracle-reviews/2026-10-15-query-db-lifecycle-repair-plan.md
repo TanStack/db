@@ -32,6 +32,12 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
 - [ ] Close the automatic-GC, hydration, repeated-options, request-shape,
       persistence, and cleanup-harness cells with tests or explicit contract
       decisions.
+  - [x] Automatic Query GC: finite `gcTime` evicts an unobserved eager Query;
+        `utils.refetch()` recreates it and applies a new row (2026-10-15).
+  - [ ] Cross-client hydration authority.
+  - [ ] Repeated direct acquisitions with one options object.
+  - [ ] Request shape and retained persistence controls.
+  - [ ] Cleanup failure fidelity across older fixtures.
 - [ ] Run independent oracle review, package verification, and CI; record the
       exact covered boundary and remaining limits.
 - [ ] Integrate the repaired #2158 behavior into #2134 and verify its combined
