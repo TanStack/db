@@ -255,7 +255,7 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
           cleanup errors, and reaches the final cleanup step. The combined
           lifecycle and ownership oracles pass 449 tests; package typecheck,
           affected-file lint, and whitespace checks pass (2026-10-15).
-- [ ] Run independent oracle review, package verification, and CI; record the
+- [x] Run independent oracle review, package verification, and CI; record the
       exact covered boundary and remaining limits.
   - [x] Repair the first review's refetch, accepted-cleanup, model, and contract
         gaps. The refetch grammar checks a later baseline release, transient
@@ -282,12 +282,17 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
         confirmed in-scope defect. At `efeaf8104`, the 969-test Query DB suite,
         direct Query DB and DB test typechecks, renamed-property replay,
         replay-registry checks, and `check:mangle` pass (2026-10-15).
-  - [ ] Check GitHub CI on the final executable head. The first minified API
-        check failed because DB's private-name cache also contained `lease`;
-        `efeaf8104` renames Query DB's internal field and replay property while
-        keeping the gate intact. Await the rerun.
-- [ ] Integrate the repaired #2158 behavior into #2134 and verify its combined
-      tree.
+  - [x] GitHub CI passed at pushed head `f4b4c17a6`, including browser,
+        desktop, cloud-mobile, package, replay, lint, build, and minified-API
+        jobs (2026-10-15). The first minified API check failed because DB's
+        private-name cache also contained `lease`; `efeaf8104` renamed Query
+        DB's internal field and replay property without weakening that gate.
+- [x] Merge the repaired #2158 behavior into #2134 and verify its combined
+      executable tree. Merge commit `2089e0630` passed 1,060 Query DB runtime
+      checks, 589 type assertions, both package typechecks, 37 replay-registry
+      checks, and `check:mangle`. Independent exact-merge code and oracle reviews
+      found no new confirmed in-scope defect. #2134 was pushed at `0476a1a01`
+      and retargeted to the #2158 branch (2026-10-15).
 
 ## Contract and scope
 
