@@ -46,7 +46,8 @@ import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
  * A separate joined history checks public rows and change events when a
  * null-boundary full-source fallback starts after first publication. It
  * crosses two marker actions with literal, Promise, and held-receipt responses;
- * the held receipt also runs after child demand settles.
+ * the held receipt also runs after child demand settles. A held provider
+ * Promise after applied writes crosses a second marker change.
  * A second product adds nullable multi-term ordering, including null placement
  * for both terms. A four-cell overlay varies both directions independently
  * without multiplying that lifecycle product. The initial-settlement cells are
@@ -1639,9 +1640,11 @@ describe(`initial locale-string fallback oracle`, () => {
  * absent root, crossed with a literal-true response, a Promise response after
  * applied writes, or a response held on the establishing applied receipt. The
  * held receipt also runs after the child demand settles, so the live-query
- * Collection's public loading flag isolates the root fallback. The
- * independent model joins marker IDs to the three fixed root rows, sorts
- * eligible roots with null last, and takes one winner. The provider honors
+ * Collection's public loading flag isolates the root fallback. In the held
+ * Promise history, the provider applies root 3, then marker 2 retargets from
+ * root 3 to root 2 before the provider settles. The independent model joins
+ * marker IDs to the three fixed root rows, sorts eligible roots with null
+ * last, and takes one winner. The provider honors
  * predicates, cursor, order, offset, and limit: its first page delivers root 1,
  * its next page delivers ineligible root 2 at a null boundary, and the
  * unfiltered fallback delivers eligible root 3. The held-receipt case parks
@@ -1651,12 +1654,16 @@ describe(`initial locale-string fallback oracle`, () => {
  * comparison requires the published first window while status is still
  * `loading`, reaches the later fallback, and checks every public event against
  * its callback snapshot and the model's final delta. It permits coherent
- * intermediate publications and assigns no synchronous cut to later work. A
- * separate cleanup-failure pair requires that retiring the first acquisition
- * still leaves the successful replacement and reports the adapter error.
+ * intermediate publications and assigns no synchronous cut to later work. The
+ * Promise overlap checks the public window before and after its second marker
+ * action, then checks every callback and the final model result after provider
+ * settlement. A separate cleanup-failure pair requires that retiring the
+ * first acquisition still leaves the successful replacement and reports the
+ * adapter error.
  */
 type LaterFallbackMutation = `delete-marker` | `retarget-marker`
-type LaterFallbackResponse = `literal-true` | `promise` | `held-receipt`
+type LaterFallbackResponse =
+  `literal-true` | `promise` | `held-receipt` | `held-promise`
 type LaterFallbackChildDemand = `pending` | `settled`
 type LaterFallbackRoot = { id: number; at: number | null; note: string }
 type LaterFallbackMarker = { id: number; rootId: number }
@@ -1701,6 +1708,17 @@ type LaterFallbackObservation = {
         receiptPending: boolean
         rootLoading: boolean
         liveLoading: boolean
+      }
+    | undefined
+  heldPromiseCut:
+    | {
+        sourceHasRoot3: boolean
+        providerPending: boolean
+        rootLoading: boolean
+        rowsBeforeOverlap: Array<LaterFallbackRow>
+        rowsAfterOverlap: Array<LaterFallbackRow>
+        publicationsBeforeOverlap: number
+        overlapCommitImmediate: boolean
       }
     | undefined
   final: {
@@ -1765,6 +1783,14 @@ function laterFallbackMarkersAfter(
       ]
 }
 
+function laterFallbackMarkersAfterOverlap(
+  mutation: LaterFallbackMutation,
+): Array<LaterFallbackMarker> {
+  return laterFallbackMarkersAfter(mutation).map((marker) =>
+    marker.id === 2 ? { id: 2, rootId: 2 } : marker,
+  )
+}
+
 async function observeLaterFallback(
   mutation: LaterFallbackMutation,
   response: LaterFallbackResponse,
@@ -1778,6 +1804,7 @@ async function observeLaterFallback(
   >[0]
   const childGate = createDeferred<void>()
   const blockerGate = createDeferred<void>()
+  const providerGate = createDeferred<void>()
   const fallbackEntered = createDeferred<void>()
   const finalPublication = createDeferred<void>()
   const loadSettled = createDeferred<void>()
@@ -1847,7 +1874,7 @@ async function observeLaterFallback(
               !options.cursor &&
               options.limit === undefined &&
               options.offset === undefined
-            if (isFullSource) {
+            if (isFullSource && !fallbackEntry) {
               fallbackEntry = {
                 rows: live.toArray.map(({ id, children }) => ({
                   id,
@@ -1896,6 +1923,7 @@ async function observeLaterFallback(
             if (isFullSource) {
               fallbackEntered.resolve()
               if (response === `promise`) return Promise.resolve()
+              if (response === `held-promise`) return providerGate.promise
             }
             return true
           },
@@ -1983,6 +2011,7 @@ async function observeLaterFallback(
   }
   let primaryFailure: CapturedOracleFailure | undefined
   let heldCut: LaterFallbackObservation[`heldCut`]
+  let heldPromiseCut: LaterFallbackObservation[`heldPromiseCut`]
   let readyChildCut: LaterFallbackObservation[`readyChildCut`]
   try {
     const preload = live.preload()
@@ -2026,7 +2055,9 @@ async function observeLaterFallback(
           })),
           rows,
         })
-        if (rows.length === 1 && rows[0]?.id === 3) finalPublication.resolve()
+        const finalId = response === `held-promise` ? 2 : 3
+        if (rows.length === 1 && rows[0]?.id === finalId)
+          finalPublication.resolve()
       },
       { includeInitialState: false },
     )
@@ -2058,6 +2089,36 @@ async function observeLaterFallback(
         liveLoading: live.isLoadingSubset,
       }
       blockerGate.resolve()
+    }
+    if (response === `held-promise`) {
+      const entryLimit = setTimeout(() => fallbackEntered.resolve(), 1500)
+      try {
+        await fallbackEntered.promise
+      } finally {
+        clearTimeout(entryLimit)
+      }
+      await flushPromises()
+      const rowsBeforeOverlap = publicRows()
+      const publicationsBeforeOverlap = publications.length
+      const sourceHasRoot3 = rootCollection.get(3) !== undefined
+      const rootLoading = rootCollection.isLoadingSubset
+      markerSync.begin()
+      markerSync.write({
+        type: `update`,
+        value: { id: 2, rootId: 2 },
+      })
+      const overlapCommitImmediate = markerSync.commit() === true
+      await flushPromises()
+      heldPromiseCut = {
+        sourceHasRoot3,
+        providerPending: providerGate.isPending(),
+        rootLoading,
+        rowsBeforeOverlap,
+        rowsAfterOverlap: publicRows(),
+        publicationsBeforeOverlap,
+        overlapCommitImmediate,
+      }
+      providerGate.resolve()
     }
     // The later full-source cut has no synchronous scheduling promise. Wait
     // for its public change. The timer bounds a missing-event failure; the
@@ -2092,6 +2153,7 @@ async function observeLaterFallback(
       afterMutation: requests.slice(beforeMutation.length),
       fallbackEntry,
       heldCut,
+      heldPromiseCut,
       final: {
         rows: publicRows(),
         status: live.status,
@@ -2107,6 +2169,7 @@ async function observeLaterFallback(
     primaryFailure = { error }
   }
   blockerGate.resolve()
+  providerGate.resolve()
   childGate.resolve()
   // A persistence failure is a distinct cleanup diagnostic if the public
   // comparison already failed. Bound the wait so cleanup still reports it.
@@ -2149,7 +2212,14 @@ function assertLaterFallbackObservation(
   observed: LaterFallbackObservation,
 ): void {
   const initial = expectedLaterFallbackWindow(laterFallbackInitialMarkers)
-  const final = expectedLaterFallbackWindow(laterFallbackMarkersAfter(mutation))
+  const afterFirst = expectedLaterFallbackWindow(
+    laterFallbackMarkersAfter(mutation),
+  )
+  const final = expectedLaterFallbackWindow(
+    observed.response === `held-promise`
+      ? laterFallbackMarkersAfterOverlap(mutation)
+      : laterFallbackMarkersAfter(mutation),
+  )
   expect(observed.releaseFailures).toBe(observed.releaseError ? 1 : 0)
   expect(observed.markerCommitImmediate).toBe(true)
   expect(observed.commitReceipts).toEqual([
@@ -2208,7 +2278,9 @@ function assertLaterFallbackObservation(
       options.limit === undefined &&
       options.offset === undefined,
   )
-  expect(fullSource).toHaveLength(1)
+  if (observed.response === `held-promise`)
+    expect(fullSource.length).toBeGreaterThanOrEqual(1)
+  else expect(fullSource).toHaveLength(1)
   expect(fullSource[0]?.served).toEqual([1, 2, 3])
   expect(observed.afterMutation.indexOf(fullSource[0]!)).toBeGreaterThan(
     orderedPageIndex,
@@ -2231,6 +2303,29 @@ function assertLaterFallbackObservation(
     })
     expect([`loading`, `ready`]).toContain(observed.heldCut?.status)
   } else expect(observed.heldCut).toBeUndefined()
+  if (observed.response === `held-promise`) {
+    expect(observed.heldPromiseCut).toMatchObject({
+      sourceHasRoot3: true,
+      providerPending: true,
+      rootLoading: true,
+      overlapCommitImmediate: true,
+    })
+    const beforeOverlap = observed.heldPromiseCut?.rowsBeforeOverlap
+    const afterOverlap = observed.heldPromiseCut?.rowsAfterOverlap
+    expect([
+      initial.map(({ row }) => row),
+      [],
+      afterFirst.map(({ row }) => row),
+    ]).toContainEqual(beforeOverlap)
+    const allowedAfterOverlap = [
+      initial.map(({ row }) => row),
+      [],
+      final.map(({ row }) => row),
+    ]
+    if (beforeOverlap?.[0]?.id === afterFirst[0]?.row.id)
+      allowedAfterOverlap.push(afterFirst.map(({ row }) => row))
+    expect(allowedAfterOverlap).toContainEqual(afterOverlap)
+  } else expect(observed.heldPromiseCut).toBeUndefined()
   expect(observed.final.rows).toEqual(final.map(({ row }) => row))
   expect(observed.final.rootLoading).toBe(false)
   if (observed.childDemand === `settled`)
@@ -2256,6 +2351,30 @@ function assertLaterFallbackObservation(
     { type: `delete`, key: initial[0]!.key, value: initial[0]!.row },
     { type: `insert`, key: final[0]!.key, value: final[0]!.row },
   ]
+  if (observed.response === `held-promise`) {
+    const firstReplacement = afterFirst[0]!
+    const earlyChanges = observed.publications
+      .slice(0, observed.heldPromiseCut?.publicationsBeforeOverlap)
+      .flatMap(({ changes: batch }) => batch)
+    const firstReplacementPublished =
+      observed.heldPromiseCut?.rowsBeforeOverlap[0]?.id ===
+      firstReplacement.row.id
+    const firstInsert: LaterFallbackChange = {
+      type: `insert`,
+      key: firstReplacement.key,
+      value: firstReplacement.row,
+    }
+    expect(
+      earlyChanges.filter(({ key }) => key === firstReplacement.key),
+    ).toEqual(firstReplacementPublished ? [firstInsert] : [])
+    if (firstReplacementPublished) {
+      expectedChanges.push(firstInsert, {
+        type: `delete`,
+        key: firstReplacement.key,
+        value: firstReplacement.row,
+      })
+    }
+  }
   const byKey = (left: LaterFallbackChange, right: LaterFallbackChange) =>
     Number(left.key) - Number(right.key)
   expect([...changes].sort(byKey)).toEqual(expectedChanges.sort(byKey))
@@ -2272,6 +2391,8 @@ describe(`post-publication null fallback oracle`, () => {
     { mutation, response: `promise`, childDemand: `pending` },
     { mutation, response: `held-receipt`, childDemand: `pending` },
     { mutation, response: `held-receipt`, childDemand: `settled` },
+    { mutation, response: `held-promise`, childDemand: `pending` },
+    { mutation, response: `held-promise`, childDemand: `settled` },
   ])
   it.each(cases)(
     `keeps the public window and change events coherent after $mutation with $response and $childDemand child demand`,
@@ -2281,6 +2402,48 @@ describe(`post-publication null fallback oracle`, () => {
       )
     },
   )
+
+  it(`rejects a stale window event after an overlapping held provider result`, async () => {
+    await observeLaterFallback(
+      `delete-marker`,
+      `held-promise`,
+      `settled`,
+      (observed) => {
+        assertLaterFallbackObservation(`delete-marker`, observed)
+        const final = expectedLaterFallbackWindow(
+          laterFallbackMarkersAfterOverlap(`delete-marker`),
+        )[0]!
+        const stale = expectedLaterFallbackWindow(
+          laterFallbackMarkersAfter(`delete-marker`),
+        )[0]!
+        // This wrong result leaves the final rows correct, but publishes the
+        // obsolete winner and then retracts it after the overlap.
+        const wrong: LaterFallbackObservation = {
+          ...observed,
+          publications: [
+            ...observed.publications,
+            {
+              changes: [
+                { type: `delete`, key: final.key, value: final.row },
+                { type: `insert`, key: stale.key, value: stale.row },
+              ],
+              rows: [stale.row],
+            },
+            {
+              changes: [
+                { type: `delete`, key: stale.key, value: stale.row },
+                { type: `insert`, key: final.key, value: final.row },
+              ],
+              rows: [final.row],
+            },
+          ],
+        }
+        expect(() =>
+          assertLaterFallbackObservation(`delete-marker`, wrong),
+        ).toThrow()
+      },
+    )
+  })
 
   it.each([`delete-marker`, `retarget-marker`] as const)(
     `reports the first lease's cleanup failure after the %s fallback publishes its replacement`,
