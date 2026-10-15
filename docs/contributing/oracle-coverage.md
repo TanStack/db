@@ -104,7 +104,10 @@ interruption schedules remain open. The broader generated lifecycle histories
 cover those ownership operations only in on-demand mode.
 Before the truncate repair, the four eager loader-present truncate cells
 fulfilled at the loading checkpoint; their loader-absent controls stayed
-pending. This distinguishes sync mode from the adapter's incidental shape.
+pending. This distinguishes sync mode from the adapter's incidental shape. The
+[issue #2163 audit](oracle-reviews/issue-2163-eager-restart-truncate-bb2122012.md)
+records the exact-head ORC-001–014 outcomes, RED/GREEN calibration, review
+ledger, and remaining limits.
 
 The includes-space owner (`packages/db/tests/query/includes-space-oracle.test.ts`)
 now varies leaves per twig across 0, 1, and 10. Public leaf rows change from
