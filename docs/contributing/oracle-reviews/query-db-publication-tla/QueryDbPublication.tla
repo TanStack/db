@@ -205,6 +205,11 @@ NoEarlyLoadFulfillment == \A owner \in Owners :
   outcome[owner] = "fulfilled" => appliedEver
 NoUnacceptedPublication == rowOwners # {} => phase = "applied"
 AcceptedEventuallySettles == acceptedEver ~> (appliedEver \/ cleaned)
+\* Caller abort cannot revoke an accepted receipt, even if cleanup follows.
+\* This safety check catches abandonment at the abort checkpoint; liveness
+\* alone accepts a later cleanup as eventual settlement.
+AcceptedRemainsPendingUntilApplyOrCleanup ==
+  acceptedEver /\ ~appliedEver /\ ~cleaned => phase = "accepted"
 CleanupClearsOwners == cleaned => active = {} /\ rowOwners = {}
 CleanupAbandonsPendingReceipt == cleaned /\ ~appliedEver =>
   phase = "abandoned" /\ \A owner \in Owners : outcome[owner] # "fulfilled"

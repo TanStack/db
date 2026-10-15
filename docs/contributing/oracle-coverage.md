@@ -693,12 +693,14 @@ unsubscribe callback histories reject it at the after-gate row checkpoint.
 Removing only the outer refcount rechecks survived because the inner cleanup
 guard still protected the peer. Collection cleanup during the accepted
 interval remains outside this grammar.
-A separate two-history receiving witness cleans up the Collection after a
+A separate four-history receiving witness cleans up the Collection after a
 source transaction is accepted but while an optimistic mutation holds its
-publication. With one or two source rows, it checks that the real applied
-receipt and pending public subset load reject with `AbortError`, exactly one
-receipt settlement occurs, no source row appears before or after the gate, and
-the captured physical Query has no observer after cleanup. A temporary Core
+publication. With one or two source rows and one or two subscriptions, it checks
+that the real applied receipt and every pending public subset load reject with
+`AbortError`, exactly one receipt settlement occurs, and no source row appears
+before cleanup or after the gate. A passive event recorder rejects transient
+source publication through both cuts; a local insert proves it is live. The
+captured physical Query has no observer after cleanup. A temporary Core
 build mutant that fulfilled the receipt during cleanup failed at the receipt
 comparison. The witness does not establish restart or durable persistence after
 cleanup. The Core sync-adapter contract permits this cleanup exception; an
@@ -729,13 +731,24 @@ release removes it. Retiring all leases on the first unload prevents that
 fetch and fails the provider-call comparison. This fixed history does not
 cover Query Core retries inside one physical fetch or a throw during observer
 construction.
-A signal-free provider request keeps its options cloneable and its enumerable
-shape empty while exposing the physical Query signal by property access. A
-request with an explicit signal keeps that enumerable key but receives the
-physical Query signal, not the acquisition signal. Both forms check the own
-property descriptor, JSON, structured cloning, and deletion from the request
-copy. The original enumerable accessor fails the signal-free witness; a
-non-configurable derived accessor fails the deletion witness. Public snapshot
+A direct adapter request with or without a supplied signal keeps its provider
+metadata cloneable and its signal hidden from enumeration while exposing the
+physical Query signal by property access. Public snapshots have the same
+signal shape. Both paths check the own descriptor, signal identity, keys,
+JSON, structured cloning, and deletion from the request copy. Direct-then-public
+and public-then-direct refetch histories use one physical Query and compare the
+metadata at both provider calls. The first observer's query function may serve
+the later caller; the direct-first history rejected an accessor that enumerated
+the supplied signal. Serializing metadata must leave the physical signal lazy:
+after final release, an ignored provider can still populate Query cache without
+republishing an unowned Collection row. The original enumerable accessor fails
+the signal-free witnesses; a non-configurable derived accessor fails the
+deletion witnesses. A separate receiving witness sends a public snapshot
+through a custom sync adapter and a real `SingleProcessCoordinator`. It checks
+that Core supplies an enumerable data signal to the adapter, that spread-based
+forwarding retains it, and that process-local subset admission accepts it; a
+hidden Core signal fails at that boundary. This witness does not instantiate
+`persistedCollectionOptions` or exercise cache rotation. Public snapshot
 histories now abort a pending caller without explicit release, with and without
 an equal peer, and with a provider that consumes or ignores the physical Query
 signal. They compare each load outcome, signal lifetime, and public rows before
@@ -780,11 +793,14 @@ values from the scripted provider. It compares the caller's outcome while it
 is still entitled to one, the physical signal, exact public rows before and
 after the held answer and each final release, and the captured Query's observer
 count. A passive public change listener sees the baseline insert and checks
-that no transient source insert reaches it after the last owner leaves. The
+that no transient source insert or update reaches it after the last owner
+leaves, including a reappearance of the prior row. The
 Collection status is checked at cleanup settlement and after a failed refetch.
 A separate public witness keeps a baseline and a held refetch in one
 subscription: aborting only the refetch leaves the baseline row and physical
-observer until that subscription releases. Direct seed/path replay passed.
+observer. Releasing only the baseline acquisition while the subscription stays
+mounted then removes both row and observer; this distinguishes lease provenance
+from a wrongly retained aborted refetch. Direct seed/path replay passed.
 Early-fulfillment, caller-abort bypass,
 and observer-unsubscribe mutants failed at those intended comparisons. The
 grammar does not assert Query-cache completion after an ignored-signal final

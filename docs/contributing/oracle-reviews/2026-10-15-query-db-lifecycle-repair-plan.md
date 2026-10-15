@@ -173,8 +173,16 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
           failed on the previous oldest-first release path (2026-10-15).
   - [x] Request shape: signal-free and explicit-signal requests check the
         physical signal, own keys, descriptor, cloning, JSON, and deletion.
-        The new configurable-descriptor assertion failed before the one-line
-        repair (2026-10-15).
+        The configurable-descriptor assertion failed before its repair.
+        Direct→public and public→direct refetch histories establish one stable
+        hidden provider-signal shape across a reused Query. The direct-first
+        history and direct explicit-signal descriptor failed on the prior
+        per-acquisition condition. The SSR dehydration oracle reads the
+        physical signal by property access and checks that it is hidden from
+        enumerable metadata. A separate public Core→custom adapter→real
+        `SingleProcessCoordinator` witness protects the enumerable acquisition
+        signal required for release; it does not run cache rotation or
+        `persistedCollectionOptions` (2026-10-15).
   - [x] Retained persistence through final release during application: four
         histories cross prior marker present/absent with sole/peer ownership,
         then restart against an empty authoritative source. They check public
@@ -205,9 +213,12 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
         load. The two primary oracles pass 522 tests, direct refetch replay and
         the 37-test replay manifest pass, and the safe model and eight hostile
         configurations reach their intended results (2026-10-15).
-  - [x] Package verification: all 943 Query DB tests pass, both Query DB and
-        DB TypeScript checks pass, and affected-file lint, formatting, and
-        whitespace checks pass (2026-10-15).
+  - [x] Package verification: all 948 Query DB runtime tests and 959 persisted
+        oracle tests pass (one skipped, one todo). Query DB, DB, and persisted
+        core TypeScript checks pass, as do affected-file lint (existing warnings
+        only), formatting, and whitespace checks (2026-10-15). The package's
+        combined Vitest typecheck mode still reports cross-package `rootDir`
+        errors; its runtime run passed with that mode disabled.
   - [ ] Review the repaired exact head independently, record ORC-001–014
         evidence, and check CI outcome.
 - [ ] Integrate the repaired #2158 behavior into #2134 and verify its combined

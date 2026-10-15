@@ -25,8 +25,8 @@ import type { LoadSubsetOptions } from '@tanstack/db'
  * The fixed grammar has a plain cached-query control, a live query with two
  * `where` clauses, a direct subset request carrying only a cancellation
  * signal, and an ordered cursor request with a custom comparator. The provider
- * receives the physical Query signal while the acquisition keeps its own
- * cancellation signal. These forms
+ * reads the physical Query signal without exposing it in enumerable request
+ * metadata while the acquisition keeps its own cancellation signal. These forms
  * isolate the unsupported values and adjacent request shapes. After
  * successful loading, the driver dehydrates the cache and passes it to
  * `crossSerializeStream`, as the router integration does. The check observes
@@ -213,6 +213,7 @@ describe(`Query collection SSR dehydration oracle`, () => {
     const queryClient = createQueryClient()
     const requestSignal = new AbortController().signal
     let receivedSignal: AbortSignal | undefined
+    let enumerableSignal: boolean | undefined
     let transportSignal: AbortSignal | undefined
     const collection = createCollection(
       queryCollectionOptions<Row>({
@@ -220,7 +221,10 @@ describe(`Query collection SSR dehydration oracle`, () => {
         queryClient,
         queryKey: [`on-demand-ssr-signal-oracle`],
         queryFn: (context) => {
-          receivedSignal = { ...context.meta?.loadSubsetOptions }.signal
+          receivedSignal = context.meta?.loadSubsetOptions?.signal
+          enumerableSignal = Object.keys(
+            context.meta?.loadSubsetOptions ?? {},
+          ).includes(`signal`)
           transportSignal = context.signal
           return Promise.resolve([row])
         },
@@ -236,6 +240,7 @@ describe(`Query collection SSR dehydration oracle`, () => {
       })
       expect(receivedSignal).toBe(transportSignal)
       expect(receivedSignal).not.toBe(requestSignal)
+      expect(enumerableSignal).toBe(false)
       const initial = dehydrate(queryClient)
       expectDehydratedRow(initial)
       const streamed = await serializeRouterPayload(initial)

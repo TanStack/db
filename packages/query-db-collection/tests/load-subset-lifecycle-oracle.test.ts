@@ -4880,12 +4880,14 @@ describe(`loadSubset lifecycle oracle`, () => {
   )
 
   /**
-   * Request metadata keeps the supplied options' own enumerable shape. A
-   * provider can read the physical Query signal lazily, and can remove that
-   * derived property from its mutable request copy. An absent signal stays
-   * absent from cloning and JSON; an explicit signal keeps its supplied key.
-   * The direct-load path exercises the real QueryClient and compares keys,
-   * descriptor, serialization, and signal identity before provider return.
+   * A provider can read the physical Query signal lazily through request
+   * metadata. That derived signal is hidden from enumerable request data even
+   * when a direct caller supplied an acquisition signal. Query Core may reuse
+   * the first observer's query function for a later direct or public caller,
+   * so the physical Query has one metadata shape across both acquisition paths.
+   * The real QueryClient path compares keys, descriptor, serialization, and
+   * signal identity before provider return. Core's sync adapter still receives
+   * its own enumerable acquisition signal for release.
    */
   it.each([false, true] as const)(
     `preserves provider request options, supplied signal=%s`,
@@ -4910,21 +4912,15 @@ describe(`loadSubset lifecycle oracle`, () => {
               `signal`,
             )
             expect(descriptor).toMatchObject({
-              enumerable: suppliedSignal,
+              enumerable: false,
               configurable: true,
             })
             expect(descriptor?.get).toBeTypeOf(`function`)
             expect(options?.signal).toBe(context.signal)
             if (suppliedSignal) expect(options?.signal).not.toBe(caller.signal)
-            expect(Object.keys(options ?? {})).toEqual(
-              suppliedSignal ? [`signal`] : [],
-            )
-            expect(structuredClone(options)).toEqual(
-              suppliedSignal ? { signal: {} } : {},
-            )
-            expect(JSON.stringify(options)).toBe(
-              suppliedSignal ? `{"signal":{}}` : `{}`,
-            )
+            expect(Object.keys(options ?? {})).toEqual([])
+            expect(structuredClone(options)).toEqual({})
+            expect(JSON.stringify(options)).toBe(`{}`)
             expect(Reflect.deleteProperty(options!, `signal`)).toBe(true)
             expect(Object.keys(options ?? {})).toEqual([])
             observed = true
@@ -4945,6 +4941,236 @@ describe(`loadSubset lifecycle oracle`, () => {
       ])
     },
   )
+
+  /**
+   * Both direct→public and public→direct are legal acquisitions of one Query.
+   * The first observer owns the query function reused by refetch, so metadata
+   * cannot depend on which caller arrived second. At each provider invocation
+   * the same hidden physical signal must be readable, while serialization
+   * must contain only request data. The Query count and two provider calls
+   * establish that the second acquisition actually refetched the first Query.
+   */
+  it.each([`direct-first`, `public-first`] as const)(
+    `keeps one metadata shape across %s acquisitions`,
+    async (order) => {
+      const queryClient = createQueryClient()
+      const id = `mixed-request-options-${order}-${collectionSequence++}`
+      const directController = new AbortController()
+      const publicController = new AbortController()
+      const directRequest: LoadSubsetOptions = {
+        signal: directController.signal,
+        ...(order === `public-first` ? { refetch: true } : {}),
+      }
+      const observed: Array<{
+        keys: Array<string>
+        json: string | undefined
+        cloneKeys: Array<string>
+        enumerable: boolean | undefined
+        physicalSignal: boolean
+        callerSignal: boolean
+      }> = []
+      const collection = createCollection(
+        queryCollectionOptions<Row>({
+          id,
+          queryClient,
+          queryKey: [id],
+          queryFn: (context) => {
+            const options = context.meta?.loadSubsetOptions
+            if (!options) throw new Error(`The provider received no request`)
+            observed.push({
+              keys: Object.keys(options),
+              json: JSON.stringify(options),
+              cloneKeys: Object.keys(structuredClone(options)),
+              enumerable: Object.getOwnPropertyDescriptor(options, `signal`)
+                ?.enumerable,
+              physicalSignal: options.signal === context.signal,
+              callerSignal:
+                options.signal === directController.signal ||
+                options.signal === publicController.signal,
+            })
+            return Promise.resolve([])
+          },
+          getKey: (row) => row.id,
+          startSync: true,
+          syncMode: `on-demand`,
+        }),
+      )
+      const subscription = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+      const requestPublicSnapshot = async (refetch: boolean) => {
+        let load: true | Promise<void> | undefined
+        subscription.requestSnapshot({
+          signal: publicController.signal,
+          refetch,
+          onLoadSubsetResult: (result) => {
+            load = result
+          },
+        })
+        await load
+      }
+      await checkPublicCleanupWitness(async () => {
+        if (order === `direct-first`) {
+          await collection._sync.loadSubset(directRequest)
+          await requestPublicSnapshot(true)
+        } else {
+          await requestPublicSnapshot(false)
+          await collection._sync.loadSubset(directRequest)
+        }
+        expect(
+          queryClient.getQueryCache().findAll({ queryKey: [id] }),
+        ).toHaveLength(1)
+        expect(observed).toHaveLength(2)
+        const expectedKeys =
+          order === `direct-first` ? [] : [`where`, `orderBy`, `limit`]
+        for (const metadata of observed) {
+          expect(metadata).toEqual({
+            keys: expectedKeys,
+            json: `{}`,
+            cloneKeys: expectedKeys,
+            enumerable: false,
+            physicalSignal: true,
+            callerSignal: false,
+          })
+        }
+      }, [
+        [
+          `direct acquisition`,
+          () => collection._sync.unloadSubset(directRequest),
+        ],
+        [`subscription`, () => subscription.unsubscribe()],
+        [`Collection`, () => collection.cleanup()],
+        [`Query client`, () => queryClient.clear()],
+      ])
+    },
+  )
+
+  it.each([false, true] as const)(
+    `keeps public snapshot metadata serializable, caller signal=%s`,
+    async (suppliedSignal) => {
+      const queryClient = createQueryClient()
+      const id = `public-request-options-${collectionSequence++}`
+      const caller = new AbortController()
+      let observed:
+        | {
+            keys: Array<string>
+            json: string | undefined
+            enumerable: boolean
+            configurable: boolean
+            hasGetter: boolean
+            cloneKeys: Array<string>
+            matchesPhysicalSignal: boolean
+            differsFromCallerSignal: boolean
+            deleteSucceeds: boolean
+            keysAfterDelete: Array<string>
+          }
+        | undefined
+      const collection = createCollection(
+        queryCollectionOptions<Row>({
+          id,
+          queryClient,
+          queryKey: [id],
+          queryFn: (context) => {
+            const options = context.meta?.loadSubsetOptions
+            if (!options) throw new Error(`The provider received no request`)
+            const descriptor = Object.getOwnPropertyDescriptor(
+              options,
+              `signal`,
+            )
+            const clone = structuredClone(options)
+            observed = {
+              keys: Object.keys(options),
+              json: JSON.stringify(options),
+              enumerable: descriptor?.enumerable ?? false,
+              configurable: descriptor?.configurable ?? false,
+              hasGetter: typeof descriptor?.get === `function`,
+              cloneKeys: Object.keys(clone),
+              matchesPhysicalSignal: options.signal === context.signal,
+              differsFromCallerSignal: options.signal !== caller.signal,
+              deleteSucceeds: Reflect.deleteProperty(options, `signal`),
+              keysAfterDelete: Object.keys(options),
+            }
+            return Promise.resolve([])
+          },
+          getKey: (row) => row.id,
+          startSync: true,
+          syncMode: `on-demand`,
+        }),
+      )
+      const subscription = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+      return checkPublicCleanupWitness(async () => {
+        let load: true | Promise<void> | undefined
+        subscription.requestSnapshot({
+          ...(suppliedSignal ? { signal: caller.signal } : {}),
+          onLoadSubsetResult: (result) => {
+            load = result
+          },
+        })
+        await load
+        expect(observed).toEqual({
+          keys: [`where`, `orderBy`, `limit`],
+          json: `{}`,
+          enumerable: false,
+          configurable: true,
+          hasGetter: true,
+          cloneKeys: [`where`, `orderBy`, `limit`],
+          matchesPhysicalSignal: true,
+          differsFromCallerSignal: true,
+          deleteSucceeds: true,
+          keysAfterDelete: [`where`, `orderBy`, `limit`],
+        })
+      }, [
+        [`subscription`, () => subscription.unsubscribe()],
+        [`Collection`, () => collection.cleanup()],
+        [`Query client`, () => queryClient.clear()],
+      ])
+    },
+  )
+
+  it(`keeps an ignored public snapshot fetch in Query cache after serializing signal-free metadata`, async () => {
+    const queryClient = createQueryClient()
+    const id = `public-metadata-lazy-signal-${collectionSequence++}`
+    const started = createDeferred<void>()
+    const held = createDeferred<Array<Row>>()
+    let serialized: string | undefined
+    const collection = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn: (context) => {
+          serialized = JSON.stringify(context.meta?.loadSubsetOptions)
+          started.resolve()
+          return held.promise
+        },
+        getKey: (row) => row.id,
+        startSync: true,
+        syncMode: `on-demand`,
+        retry: false,
+      }),
+    )
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    return checkPublicCleanupWitness(async () => {
+      subscription.requestSnapshot()
+      await started.promise
+      expect(serialized).toBe(`{}`)
+      subscription.unsubscribe()
+      held.resolve([{ id: `cached` }])
+      await vi.waitFor(() =>
+        expect(queryClient.getQueryData([id])).toEqual([{ id: `cached` }]),
+      )
+      expect(collection.toArray).toEqual([])
+    }, [
+      [`provider`, () => held.resolve([])],
+      [`subscription`, () => subscription.unsubscribe()],
+      [`Collection`, () => collection.cleanup()],
+      [`Query client`, () => queryClient.clear()],
+    ])
+  })
 
   /**
    * Eager ownership survives Query cache eviction. An explicit refetch must
@@ -5513,7 +5739,7 @@ describe(`loadSubset lifecycle oracle`, () => {
             recorderSawBaselineInsert = true
           if (liveOwners.baseline || liveOwners.caller || liveOwners.peer)
             continue
-          if (change.key === `new` && change.type !== `delete`)
+          if (change.type !== `delete`)
             unownedPublicationEvents.push(
               `${change.type}:${String(change.key)}`,
             )
@@ -5551,13 +5777,13 @@ describe(`loadSubset lifecycle oracle`, () => {
     }
 
     return checkPublicCleanupWitness(async () => {
+      liveOwners.baseline = true
       baseline.requestSnapshot({
         onLoadSubsetResult: (result) => {
           baselineLoad = result
         },
       })
       await baselineLoad
-      liveOwners.baseline = true
       trackedQuery = queryClient
         .getQueryCache()
         .find({ queryKey: [id], exact: true })
@@ -5854,7 +6080,7 @@ describe(`loadSubset lifecycle oracle`, () => {
     await fc.assert(property, options)
   }, 20_000)
 
-  it(`rejects a transient unowned refetch publication and a missed cleanup status`, async () => {
+  it(`rejects transient unowned source publication and a missed cleanup status`, async () => {
     const abandoned: RefetchLeaseHistory = {
       action: `abort`,
       releaseBaseline: true,
@@ -5873,6 +6099,12 @@ describe(`loadSubset lifecycle oracle`, () => {
       expect({
         ...observedAbandoned,
         unownedPublicationEvents: [`insert:new`],
+      }).toEqual(expectedAbandoned),
+    ).toThrow()
+    expect(() =>
+      expect({
+        ...observedAbandoned,
+        unownedPublicationEvents: [`insert:old`],
       }).toEqual(expectedAbandoned),
     ).toThrow()
 
@@ -5896,7 +6128,9 @@ describe(`loadSubset lifecycle oracle`, () => {
    * not the baseline acquisition lease owned by the same subscription. The
    * real public requestSnapshot path must keep the old row and Query observer
    * while the provider is held; the provider's later row may refresh that
-   * baseline, and final subscription release removes it. This witness differs
+   * baseline. Releasing only the baseline acquisition while the subscription
+   * stays mounted then removes the row and observer; that distinguishes the
+   * baseline lease from a wrongly retained aborted-refetch lease. This witness differs
    * from the grammar above, which assigns baseline and refetch to separate
    * subscriptions. It does not claim a result for a raw adapter promise after
    * unsubscribe.
@@ -5931,13 +6165,15 @@ describe(`loadSubset lifecycle oracle`, () => {
     })
     const caller = new AbortController()
     let baselineLoad: true | Promise<void> | undefined
+    let releaseBaseline: (() => void) | undefined
     let refetchLoad: true | Promise<void> | undefined
     const publicRows = () => collection.toArray.map((row) => row.id).sort()
 
     await checkPublicCleanupWitness(async () => {
       subscription.requestSnapshot({
-        onLoadSubsetResult: (result) => {
+        onLoadSubsetResult: (result, _options, release) => {
           baselineLoad = result
+          releaseBaseline = release
         },
       })
       await baselineLoad
@@ -5976,6 +6212,20 @@ describe(`loadSubset lifecycle oracle`, () => {
         rows: [`new`],
         providerCalls: 2,
       })
+      if (!releaseBaseline)
+        throw new Error(`The baseline acquisition has no release callback`)
+      releaseBaseline()
+      const afterBaselineRelease = {
+        rows: publicRows(),
+        observers: physicalQuery.getObserversCount(),
+      }
+      const expectedAfterBaselineRelease = { rows: [], observers: 0 }
+      expect(afterBaselineRelease).toEqual(expectedAfterBaselineRelease)
+      expect(() =>
+        expect({ rows: [`new`], observers: 1 }).toEqual(
+          expectedAfterBaselineRelease,
+        ),
+      ).toThrow()
       subscription.unsubscribe()
       expect({
         rows: publicRows(),
@@ -6806,7 +7056,9 @@ describe(`loadSubset lifecycle oracle`, () => {
    * `commit()` receipt without changing it; a pending committed transaction is
    * only a reach witness. The public checks are receipt cause and settlement
    * count, every load outcome, status and observer count at cleanup settlement
-   * while the gate is still held, and exact rows before and after the gate.
+   * while the gate is still held, and exact rows and source change events
+   * before cleanup and after the gate. A local insert proves the event recorder
+   * is live before the source result is accepted.
    * Recording settlement rather than awaiting a possibly stranded load makes
    * a missing rejection fail at the cleanup checkpoint. This does not model a
    * new sync run or durable persistence after cleanup.
@@ -6887,6 +7139,24 @@ describe(`loadSubset lifecycle oracle`, () => {
             }),
         },
       })
+      let recorderSawLocalInsert = false
+      const sourcePublicationEvents: Array<string> = []
+      const eventRecorder = collection.subscribeChanges(
+        (changes) => {
+          for (const change of changes) {
+            if (change.key === `local` && change.type === `insert`)
+              recorderSawLocalInsert = true
+            if (
+              String(change.key).startsWith(`server-`) &&
+              change.type !== `delete`
+            )
+              sourcePublicationEvents.push(
+                `${change.type}:${String(change.key)}`,
+              )
+          }
+        },
+        { includeInitialState: false },
+      )
       const subscriptions = Array.from({ length: subscriptionCount }, () =>
         collection.subscribeChanges(() => {}, { includeInitialState: false }),
       )
@@ -6936,6 +7206,34 @@ describe(`loadSubset lifecycle oracle`, () => {
         if (!physicalQuery)
           throw new Error(`The accepted result has no physical Query`)
         expect(receiptState).toBe(`pending`)
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        const beforeCleanup = {
+          rows: collection.toArray
+            .map((row) => row.id)
+            .filter((rowId) => rowId.startsWith(`server-`))
+            .sort(),
+          sourcePublicationEvents,
+          recorderSawLocalInsert,
+        }
+        const expectedBeforeCleanup = {
+          rows: [],
+          sourcePublicationEvents: [],
+          recorderSawLocalInsert: true,
+        }
+        expect(beforeCleanup).toEqual(expectedBeforeCleanup)
+        if (rowCount === 1 && subscriptionCount === 1) {
+          expect(() =>
+            expect({ ...beforeCleanup, rows: [`server-a`] }).toEqual(
+              expectedBeforeCleanup,
+            ),
+          ).toThrow()
+          expect(() =>
+            expect({
+              ...beforeCleanup,
+              sourcePublicationEvents: [`insert:server-a`],
+            }).toEqual(expectedBeforeCleanup),
+          ).toThrow()
+        }
         const cleanup = collection.cleanup()
         await cleanup
         const atCleanupSettlement = {
@@ -6957,6 +7255,7 @@ describe(`loadSubset lifecycle oracle`, () => {
           rows: collection.toArray
             .map((row) => row.id)
             .filter((rowId) => rowId.startsWith(`server-`)),
+          sourcePublicationEvents,
         }
         const expectedAfterCleanup = {
           receiptState: `rejected`,
@@ -6968,6 +7267,7 @@ describe(`loadSubset lifecycle oracle`, () => {
           ),
           loadSettlements: Array.from({ length: subscriptionCount }, () => 1),
           rows: [],
+          sourcePublicationEvents: [],
         }
         expect(settledAfterCleanup).toEqual(expectedAfterCleanup)
         if (rowCount === 1 && subscriptionCount === 1) {
@@ -6995,12 +7295,14 @@ describe(`loadSubset lifecycle oracle`, () => {
             .map((row) => row.id)
             .filter((rowId) => rowId.startsWith(`server-`))
             .sort(),
+          sourcePublicationEvents,
         }).toEqual({
           receiptState: `rejected`,
           receiptSettlements: 1,
           status: `cleaned-up`,
           observers: 0,
           rows: [],
+          sourcePublicationEvents: [],
         })
       }, [
         [`mutation handler`, () => releaseHandler.resolve()],
@@ -7011,6 +7313,7 @@ describe(`loadSubset lifecycle oracle`, () => {
               () => subscription.unsubscribe(),
             ] as const,
         ),
+        [`source event recorder`, () => eventRecorder.unsubscribe()],
         [`Collection`, () => collection.cleanup()],
         [`Query client`, () => queryClient.clear()],
       ])

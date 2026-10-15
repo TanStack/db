@@ -72,8 +72,11 @@ release order must preserve the surviving owner's row.
 `NoEarlyLoadFulfillment` and `NoUnacceptedPublication` compare
 load and row observations with the applied-receipt boundary.
 `NoEarlyPhysicalAbort` checks the physical Query signal against remaining
-leases. `AcceptedEventuallySettles` checks that acceptance leads to application
-or cleanup under weak fairness of `Apply`. `CleanupClearsOwners` and
+leases. `AcceptedRemainsPendingUntilApplyOrCleanup` requires an accepted receipt
+to remain accepted at every pre-application, pre-cleanup checkpoint, including
+after caller abort. `AcceptedEventuallySettles` separately checks that
+acceptance leads to application or cleanup under weak fairness of `Apply`.
+`CleanupClearsOwners` and
 `CleanupAbandonsPendingReceipt` require cleanup to retire every lease and reject
 the receipt if it has not applied. The model's `phase = "abandoned"` represents
 that receipt rejection; production compares the actual receipt separately.
@@ -92,12 +95,14 @@ comparison and produced a counterexample:
 | `wrong-drop-first.cfg` | Remove `a`'s row when `b` releases | `LiveOwnersKeepRow` |
 | `wrong-late-publish.cfg` | Publish after final release | `OnlyLiveOwnersPublish` |
 | `wrong-early-physical-abort.cfg` | Abort the physical fetch when any caller leaves | `NoEarlyPhysicalAbort` |
-| `wrong-abort-accepted.cfg` | Abandon an accepted transaction on caller abort | `AcceptedEventuallySettles` |
+| `wrong-abort-accepted.cfg` | Abandon an accepted transaction on caller abort | `AcceptedRemainsPendingUntilApplyOrCleanup` |
 | `wrong-cleanup-keeps-accepted.cfg` | Leave an accepted receipt pending after Collection cleanup | `CleanupAbandonsPendingReceipt` |
 | `wrong-cleanup-drops-claimed-load.cfg` | Make a claimed pending load unobserved at cleanup | `CleanupSettlesClaimedLoads` |
 
-Seven controls failed as invariant counterexamples; `wrong-abort-accepted` failed
-as a temporal counterexample. None was a timeout, setup failure, or
+All eight controls fail as invariant counterexamples. The caller-abort control
+fails at the abort step, including the prefix of a history where Collection
+cleanup would later settle the receipt; a temporal check alone can pass that
+history. None was a timeout, setup failure, or
 unreached path. Run from this directory with
 `java -cp tla2tools.jar tlc2.TLC -deadlock -config safe.cfg QueryDbPublication.tla`,
 then substitute each `wrong-*.cfg`. The local `-deadlock` option allows valid
