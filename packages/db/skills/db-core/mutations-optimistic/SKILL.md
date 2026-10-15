@@ -258,17 +258,17 @@ const todoCollection = createCollection(
 )
 ```
 
-For ElectricCollection, return `{ txid }` instead of refetching:
+For ElectricCollection, wait for each txid in the Electric stream:
 
 ```ts
-onUpdate: async ({ transaction }) => {
+onUpdate: async ({ transaction, collection }) => {
   const txids = await Promise.all(
     transaction.mutations.map(async (m) => {
       const res = await api.todos.update(m.original.id, m.changes)
       return res.txid
     }),
   )
-  return { txid: txids }
+  await Promise.all(txids.map((txid) => collection.utils.awaitTxId(txid)))
 }
 ```
 
