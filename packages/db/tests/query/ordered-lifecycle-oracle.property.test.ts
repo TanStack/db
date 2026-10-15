@@ -1381,7 +1381,7 @@ type InitialFallbackOrder = `distinct` | `tied`
 type InitialFallbackPublication = {
   changes: Array<{
     type: `insert` | `update` | `delete`
-    key: number
+    key: string | number
     value: InitialFallbackRow
   }>
   rows: Array<InitialFallbackRow>
