@@ -31,6 +31,9 @@ export function buildErrorTree(
   { alias, id, kind, instances }: Omit<ErrorTreeSource, `collection`> = {
     alias: `root`,
   },
+  // The reader that caches this node, so a source's node lives only as long
+  // as the query that reads it.
+  owner: object = collection,
 ): ErrorTreeNode {
   // A live query's tree shape comes from its query definition.
   const builder = getCollectionBuilder(collection)
@@ -39,9 +42,9 @@ export function buildErrorTree(
   const error: CollectionErrorInfo | null =
     lifecycle.gateProblem ?? lifecycle.health.error
   const children = sources.map((source) =>
-    buildErrorTree(source.collection, source),
+    buildErrorTree(source.collection, source, collection),
   )
-  return errorTreeNode(collection, id, {
+  return errorTreeNode(owner, id, {
     alias,
     collectionId: collection.id,
     kind: kind ?? (builder ? `live-query` : `source`),

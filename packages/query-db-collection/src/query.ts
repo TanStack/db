@@ -1150,9 +1150,16 @@ export function queryCollectionOptions(
     let errorRevision = 0
     const failedResultApplications = new Map<string, unknown>()
     // A failed fetch or result application after Collection readiness is a
-    // health error that is not final, since TanStack Query fetches again. A
-    // later successful application with no newer failure reports healthy.
-    const reportRecovered = () => {
+    // health error that is not final, since TanStack Query fetches again.
+    // The Collection is healthy again once no observed Query is failing.
+    const failingQueries = new Set<string>()
+    const reportFailing = (hashedQueryKey: string, error: unknown) => {
+      failingQueries.add(hashedQueryKey)
+      if (collection.status === `ready`) reportError(error)
+    }
+    const reportRecovered = (hashedQueryKey: string) => {
+      if (!failingQueries.delete(hashedQueryKey) || failingQueries.size > 0)
+        return
       if (collection.status === `ready`) reportHealthy()
     }
     const exceptionalResultSettlements = new WeakMap<
@@ -2740,7 +2747,7 @@ export function queryCollectionOptions(
             failedResultApplications.delete(hashedQueryKey)
             // Applying cached data during a fetch does not establish recovery.
             if (!isFetching && applicationErrorRevision === errorRevision) {
-              reportRecovered()
+              reportRecovered(hashedQueryKey)
             }
           }
         },
@@ -2752,12 +2759,8 @@ export function queryCollectionOptions(
             `[QueryCollection] Error applying query ${String(hashToQueryKey.get(hashedQueryKey))}:`,
             error,
           )
-          if (collection.status === `ready`) {
-            reportError(error)
-          }
-          if (collection.status === `loading`) {
-            markError(error)
-          }
+          if (collection.status === `loading`) markError(error)
+          else reportFailing(hashedQueryKey, error)
         },
       )
     }
@@ -2797,7 +2800,7 @@ export function queryCollectionOptions(
           resultApplicationControllers.delete(hashedQueryKey)
           failedResultApplications.delete(hashedQueryKey)
           if (!result.isFetching && currentErrorRevision === errorRevision) {
-            reportRecovered()
+            reportRecovered(hashedQueryKey)
           }
         }
         return
@@ -3125,11 +3128,10 @@ export function queryCollectionOptions(
           // A failure before the first successful snapshot leaves no usable
           // collection state. Later refetch failures keep the last ready
           // snapshot available and report health.
-          if (collection.status === `loading`) {
-            markError(result.error)
-          } else if (collection.status === `ready`) {
-            reportError(result.error)
-          }
+          // A re-notified error is the same failure, so it is not reported
+          // again.
+          if (collection.status === `loading`) markError(result.error)
+          else if (isNewError) reportFailing(hashedQueryKey, result.error)
         }
       }
       return handleQueryResult
@@ -3346,6 +3348,7 @@ export function queryCollectionOptions(
       }
 
       state.observers.delete(hashedQueryKey)
+      reportRecovered(hashedQueryKey)
       if (query?.state.fetchStatus !== `fetching`)
         fetchStartGenerations.delete(hashedQueryKey)
       queryToRows.delete(hashedQueryKey)
@@ -3416,6 +3419,7 @@ export function queryCollectionOptions(
         unsubscribes.get(hashedQueryKey)?.()
         unsubscribes.delete(hashedQueryKey)
         state.observers.delete(hashedQueryKey)
+        reportRecovered(hashedQueryKey)
         // Query Core may keep an empty-cache fetch alive without an observer.
         // A later lease can reuse that request, so keep its start position.
         if (observer?.getCurrentQuery().state.fetchStatus !== `fetching`)

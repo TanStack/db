@@ -1879,8 +1879,12 @@ class PersistedCollectionRuntime<
     if (this.syncErrorReported) return this.reportedSyncError
     if (!markError) return error
 
-    this.syncErrorReported = true
-    this.reportedSyncError = error
+    // After readiness the sync adapter's markError is a final health error
+    // and the run continues, so only a failure that ends the run latches.
+    if (origin === `persistence` || this.collection?.status !== `ready`) {
+      this.syncErrorReported = true
+      this.reportedSyncError = error
+    }
     try {
       if (origin === `sync adapter`) markError(error)
       else this.collection?._lifecycle.crash(error)

@@ -109,6 +109,7 @@ import { createPooledLiveQuery } from '../src/query/pooled-live-query.js'
 import { Query } from '../src/query/builder/index.js'
 import { eq } from '../src/query/builder/functions.js'
 import { InvalidCollectionStatusTransitionError } from '../src/errors.js'
+import { RequestErrors } from '../src/collection/lifecycle.js'
 import { BasicIndex } from '../src/indexes/basic-index.js'
 import { oraclePropertyOptions } from './oracle-config.js'
 import { flushPromises } from './utils.js'
@@ -999,18 +1000,30 @@ describe(`root request errors`, () => {
  * on-demand source still has its first load pending. After it, the
  * source calls `markError()`, which is an initial error for an on-demand
  * source still in its initial sync and a final health error for an eager
- * source after Collection readiness, or it crashes.
+ * source after Collection readiness, or it crashes, or it reaches Collection
+ * readiness (on-demand only) and then reports a health error that is not
+ * final. Every history also checks that one change reaches
+ * `onHealthChange` once: no two reported trees are the same object.
  */
 describe(`effect health`, () => {
   type EffectHistory = {
     skipInitial: boolean
     syncMode: `eager` | `on-demand`
-    failure: `before gate` | `markError after gate` | `crash after gate`
+    failure:
+      | `before gate`
+      | `markError after gate`
+      | `crash after gate`
+      | `report after gate`
   }
   const histories: Array<EffectHistory> = [true, false].flatMap((skipInitial) =>
     ([`eager`, `on-demand`] as const).flatMap((syncMode) =>
       (
-        [`before gate`, `markError after gate`, `crash after gate`] as const
+        [
+          `before gate`,
+          `markError after gate`,
+          `crash after gate`,
+          `report after gate`,
+        ] as const
       ).map((failure) => ({ skipInitial, syncMode, failure })),
     ),
   )
@@ -1082,6 +1095,21 @@ describe(`effect health`, () => {
       // Model: only `skipInitial` withholds the initial rows.
       expect(delivered).toEqual(skipInitial ? [] : [1])
 
+      if (failure === `report after gate`) {
+        // An on-demand source reaches its own Collection readiness after the
+        // Effect's: a status change that must reach onHealthChange once.
+        if (syncMode === `on-demand`) params.markReady()
+        await flushPromises()
+        params.reportError(new Error(`stalled`))
+        await flushPromises()
+        expect(effect.disposed).toBe(false)
+        expect(trees.at(-1)).toMatchObject({
+          hasErrors: true,
+          sources: [{ alias: `row`, error: { phase: `sync`, final: false } }],
+        })
+        expect(new Set(trees).size, `one report per change`).toBe(trees.length)
+        return
+      }
       if (failure === `crash after gate`) {
         params.collection._lifecycle.crash(new Error(`crashed`))
       } else {
@@ -1095,6 +1123,7 @@ describe(`effect health`, () => {
       const ends = failure === `crash after gate` || syncMode === `on-demand`
       expect(effect.disposed).toBe(ends)
       expect(sourceErrors).toHaveLength(ends ? 1 : 0)
+      expect(new Set(trees).size, `one report per change`).toBe(trees.length)
       if (!ends) {
         expect(trees.at(-1)).toMatchObject({
           kind: `live-query`,
@@ -1234,7 +1263,9 @@ describe(`effect request errors`, () => {
  * it throws on a new row, counts in `inError` and makes the include node
  * `hasErrors`; the live query emits `health:change` for it and keeps its own
  * status. Two includes that read one Collection under the same alias are
- * two nodes, and each counts only its own children.
+ * two nodes, and each counts only its own children. A healthy child that
+ * starts does not change any node's error state, so it emits no
+ * `health:change`; otherwise every new parent row would rebuild the tree.
  */
 describe(`include instances`, () => {
   it(`a failing child Collection counts in its own include only`, async () => {
@@ -1288,6 +1319,12 @@ describe(`include instances`, () => {
       const stop = query.on(`health:change`, () => {
         events++
       })
+      // New parent rows start healthy child Collections.
+      B.write({ id: 3, parentId: 3 })
+      B.write({ id: 4, parentId: 4 })
+      await flushPromises()
+      expect(events, `healthy children emit no health:change`).toBe(0)
+      expect(includes()[0]!.instances).toEqual({ total: 4, inError: 0 })
       // One child Collection of `items` fails: its index throws on row 9.
       class FailingIndex extends BasicIndex<number> {
         override add(key: number, item: any): void {
@@ -1305,9 +1342,9 @@ describe(`include instances`, () => {
       expect(query.status).toBe(`ready`)
       expect(events, `health:change relay`).toBeGreaterThan(0)
       const [itemsNode, sameNode] = includes()
-      expect(itemsNode!.instances).toEqual({ total: 2, inError: 1 })
+      expect(itemsNode!.instances).toEqual({ total: 4, inError: 1 })
       expect(itemsNode!.hasErrors).toBe(true)
-      expect(sameNode!.instances).toEqual({ total: 2, inError: 0 })
+      expect(sameNode!.instances).toEqual({ total: 4, inError: 0 })
       expect(sameNode!.hasErrors).toBe(false)
       expect(query.errors.hasErrors).toBe(true)
     } finally {
@@ -1315,6 +1352,50 @@ describe(`include instances`, () => {
       await query.cleanup()
       await A.collection.cleanup()
       await B.collection.cleanup()
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Request error bookkeeping
+// ---------------------------------------------------------------------------
+
+/**
+ * A live query or Effect can have several failed requests at once, one per
+ * issuer (a lazy demand or a root source). Its node shows one of them: the
+ * most recent failure among the requests still failing. When the last one
+ * settles, the node is healthy again. The model is a list of failing issuers
+ * in failure order; the production driver is the shared `RequestErrors`
+ * tracker, and the check compares the shown cause after every step, plus
+ * whether a settle reported a change.
+ */
+describe(`request error bookkeeping`, () => {
+  const key = fc.constantFrom(`a`, `b`, `c`)
+  const step = fc.oneof(
+    fc.record({ kind: fc.constant(`fail` as const), key }),
+    fc.record({ kind: fc.constant(`settle` as const), key }),
+  )
+  fcTest.prop(
+    [fc.array(step, { maxLength: 12 })],
+    oraclePropertyOptions(100, `source-health.request-errors`),
+  )(`a node shows the latest failure still failing`, (steps) => {
+    const tracker = new RequestErrors()
+    const failing: Array<{ key: string; cause: Error }> = []
+    for (const { kind, key: issuer } of steps) {
+      const before = failing.at(-1)?.cause ?? null
+      const index = failing.findIndex((entry) => entry.key === issuer)
+      if (index !== -1) failing.splice(index, 1)
+      if (kind === `fail`) {
+        const cause = new Error(`${issuer} failed`)
+        failing.push({ key: issuer, cause })
+        tracker.fail(issuer, cause)
+      } else {
+        const changed = tracker.settle(issuer)
+        expect(changed, `settle ${issuer} reports a change`).toBe(
+          (failing.at(-1)?.cause ?? null) !== before,
+        )
+      }
+      expect(tracker.problem?.cause ?? null).toBe(failing.at(-1)?.cause ?? null)
     }
   })
 })

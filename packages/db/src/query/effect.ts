@@ -475,6 +475,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   // a Collection health problem does not dispose the Effect.
   private reachedReady = false
   private readonly requests = new RequestErrors()
+  private reportedTree: ErrorTreeNode | undefined
   private readonly onHealthChange: ((errors: ErrorTreeNode) => void) | undefined
 
   // Scheduler integration
@@ -767,8 +768,8 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         ) {
           this.initialLoadComplete = true
         }
-        const wasReady = this.reachedReady
-        if (this.latchReady() && wasReady) this.reportHealth()
+        // health:change follows every status change and reports the tree.
+        this.latchReady()
       })
       this.unsubscribeCallbacks.add(statusUnsubscribe)
       this.unsubscribeCallbacks.add(
@@ -1095,14 +1096,18 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       status: this.reachedReady ? `ready` : `loading`,
       error: this.requests.problem,
       sources: this.collectionSources.map(({ sourceId, alias, collection }) =>
-        buildErrorTree(collection, { alias, id: sourceId }),
+        buildErrorTree(collection, { alias, id: sourceId }, this),
       ),
     })
   }
 
   private reportHealth(): void {
     if (this.disposed || !this.reachedReady || !this.onHealthChange) return
-    this.onHealthChange(this.errorTree())
+    // An unchanged tree keeps its identity; report each change once.
+    const tree = this.errorTree()
+    if (tree === this.reportedTree) return
+    this.reportedTree = tree
+    this.onHealthChange(tree)
   }
 
   private canCompleteInitialLoad(): boolean {

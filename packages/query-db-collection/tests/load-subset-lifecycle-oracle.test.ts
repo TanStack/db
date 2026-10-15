@@ -1237,6 +1237,63 @@ async function expectRefetchFailureIsHealth(): Promise<void> {
   }
 }
 
+/**
+ * Collection health covers every Query the Collection observes. With two
+ * on-demand subsets, one failing refetch is a health error even when the
+ * other subset's refetch succeeds; the Collection is healthy again only once
+ * no Query is failing. The model is the set of failing subsets.
+ */
+async function expectHealthWaitsForEveryFailingQuery(): Promise<void> {
+  const queryClient = createQueryClient()
+  const id = `load-subset-health-keys-${collectionSequence++}`
+  const loggedError = vi.spyOn(console, `error`).mockImplementation(() => {})
+  const failing = new Set<number>()
+  const queryFn = vi.fn((context: QueryFunctionContext) => {
+    const limit = context.meta?.loadSubsetOptions?.limit ?? 0
+    return failing.has(limit)
+      ? Promise.reject(new Error(`subset ${limit} failed`))
+      : Promise.resolve([{ id: `row-${limit}` }])
+  })
+  const collection = createCollection(
+    queryCollectionOptions<Row>({
+      id,
+      queryClient,
+      queryKey: [id],
+      queryFn,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      retry: false,
+    }),
+  )
+  try {
+    collection.startSyncImmediate()
+    await collection._sync.loadSubset({ limit: 1 })
+    await collection._sync.loadSubset({ limit: 2 })
+    expect(collection.status).toBe(`ready`)
+    expect(collection.health.isError).toBe(false)
+
+    failing.add(1)
+    await collection.utils.refetch()
+    await vi.waitFor(() => expect(collection.health.isError).toBe(true))
+    expect(collection.health.error?.message).toBe(`subset 1 failed`)
+
+    // A subset that starts after the failure and succeeds does not make the
+    // failing subset healthy.
+    await collection._sync.loadSubset({ limit: 3 })
+    await vi.waitFor(() => expect(collection.has(`row-3`)).toBe(true))
+    expect(collection.health.error?.message).toBe(`subset 1 failed`)
+
+    failing.clear()
+    await collection.utils.refetch()
+    await vi.waitFor(() => expect(collection.health.isError).toBe(false))
+    expect(collection.status).toBe(`ready`)
+  } finally {
+    loggedError.mockRestore()
+    await collection.cleanup()
+    queryClient.clear()
+  }
+}
+
 async function expectInitialQueryFailureStatus(): Promise<void> {
   const error = new Error(`initial query failed`)
   const queryClient = createQueryClient()
@@ -2648,6 +2705,10 @@ describe(`loadSubset lifecycle oracle`, () => {
 
   it(`rejects a refetch after its final acquisition is released`, async () => {
     await expectReleasedRefetchRejects()
+  })
+
+  it(`keeps Collection health in error while any observed Query fails`, async () => {
+    await expectHealthWaitsForEveryFailingQuery()
   })
 
   it(`reports a failed refetch after readiness as Collection health`, async () => {

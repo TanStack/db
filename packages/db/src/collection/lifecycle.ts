@@ -609,19 +609,23 @@ export class CollectionLifecycleManager<
 
 /** @internal Requests that failed after initial-query readiness, by issuer. */
 export class RequestErrors {
-  private readonly failed = new Set<string>()
+  // In failure order, so the latest failure still failing is last.
+  private readonly failed = new Map<string, CollectionErrorInfo>()
   problem: CollectionErrorInfo | null = null
 
   fail(key: string, error: unknown): void {
-    this.failed.add(key)
+    this.failed.delete(key)
     this.problem = describeProblem(error, `request`, false)
+    this.failed.set(key, this.problem)
   }
 
-  /** Returns whether the last failed request settled. */
+  /** Returns whether the shown problem changed. */
   settle(key: string): boolean {
-    if (!this.failed.delete(key) || this.failed.size > 0) return false
-    this.problem = null
-    return true
+    if (!this.failed.delete(key)) return false
+    const shown = [...this.failed.values()].at(-1) ?? null
+    const changed = shown !== this.problem
+    this.problem = shown
+    return changed
   }
 }
 

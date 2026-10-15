@@ -466,7 +466,15 @@ export class BucketFacadeAdapter {
       startSync: true,
       gcTime: 0,
     })
-    collection.on(`health:change`, this.onInstanceHealthChange)
+    // The include node counts the children in error, so only a change in
+    // that state concerns the parent; startup status changes do not.
+    let inError = false
+    collection.on(`health:change`, () => {
+      const next = collection.status === `error` || collection.health.isError
+      if (next === inError) return
+      inError = next
+      this.onInstanceHealthChange()
+    })
     const dispose = collection.cleanup.bind(collection)
     // Other parent rows can share this facade, so a holder must not end it.
     collection.cleanup = () =>
