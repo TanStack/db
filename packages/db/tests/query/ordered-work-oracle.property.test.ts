@@ -4412,10 +4412,15 @@ describe(`ordered source work oracle`, () => {
  * only for rows it sent or rows that match a subset it served; the rows law
  * holds after each step, and the work law bounds the rows it serves. A
  * refetching provider, like query-db-collection, sends nothing until a
- * `refetch` step. A refetch keeps every served range whole, as the LoadSubset
- * contract requires: it sends every row from the start of the order through
- * the range's boundary, so a row that moves between two answers still
- * arrives, and rows in no served range leave. Until then the Collection may
+ * `refetch` step. The LoadSubset contract gives a refetch two ways to stay
+ * correct, and the oracle has a provider for each. A whole-range refetch
+ * keeps every served range whole: it sends every row from the start of the
+ * order through the range's boundary, so a row that moves between two
+ * answers still arrives, and rows in no served range leave. A signalling
+ * refetch re-runs each request alone, as query-db-collection does, so a row
+ * can fall between two answers; when any answer changed, it then calls
+ * `invalidateLoadedSubsets()`, and each ordered loader must re-establish its
+ * window with a bounded repair. Until then the Collection may
  * lag the rows, so the rows law over the model applies only once no change
  * is pending, and every refetching history ends with a refetch. On either
  * provider, after every step the Collection holds exactly the rows in the
@@ -4511,9 +4516,11 @@ type EagerCase = {
   // change to a row it sent, or to a row that matches a subset it served.
   // `refetch` sends nothing until a refetch, which keeps every served
   // ordered range whole: rows that now sort inside one arrive then, and rows
-  // in no range leave (query-db-collection, without its page gaps). Omitted
-  // means `forward`.
-  provider?: `forward` | `refetch`
+  // in no range leave. `refetch-signal` also waits for a refetch, but re-runs
+  // each served request alone, as query-db-collection does, and then reports
+  // `invalidateLoadedSubsets()` when any answer changed. Omitted means
+  // `forward`.
+  provider?: `forward` | `refetch` | `refetch-signal`
   // When an on-demand provider answers a load. `immediate` answers within
   // the request. `held` answers only at an `answer` or `drain` step, from the
   // rows at that moment, so live changes can arrive while a load is in flight.
@@ -4634,7 +4641,11 @@ const eagerCaseBase: fc.Arbitrary<EagerCase> = fc.record({
     `local-only` as const,
     `on-demand` as const,
   ),
-  provider: fc.constantFrom(`forward` as const, `refetch` as const),
+  provider: fc.constantFrom(
+    `forward` as const,
+    `refetch` as const,
+    `refetch-signal` as const,
+  ),
   latency: fc.constantFrom(`immediate` as const, `held` as const),
   cancellation: fc.constantFrom(`cooperative` as const, `late` as const),
   // One case in four has a peer, so most cases keep the work laws.
@@ -4668,7 +4679,8 @@ const eagerCaseBase: fc.Arbitrary<EagerCase> = fc.record({
 // last map, until the fix; a pinned replay keeps the trace.
 function withoutPeerRefetch(testCase: EagerCase): EagerCase {
   return testCase.path === `on-demand` &&
-    testCase.provider === `refetch` &&
+    (testCase.provider === `refetch` ||
+      testCase.provider === `refetch-signal`) &&
     testCase.peer
     ? { ...testCase, peer: false }
     : testCase
@@ -5008,6 +5020,7 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
           value: Row
         }) => void
         commit: Parameters<SyncConfig<Row, number>[`sync`]>[0][`commit`]
+        invalidateLoadedSubsets: () => void
       }
     | undefined
   const id = `eager-window-${Math.random()}`
@@ -5026,8 +5039,14 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
           syncMode: testCase.path === `on-demand` ? `on-demand` : `eager`,
           startSync: true,
           sync: {
-            sync: ({ begin, write, commit, markReady }) => {
-              syncControls = { begin, write, commit }
+            sync: ({
+              begin,
+              write,
+              commit,
+              markReady,
+              invalidateLoadedSubsets,
+            }) => {
+              syncControls = { begin, write, commit, invalidateLoadedSubsets }
               if (testCase.path === `on-demand`) {
                 markReady()
                 return {
@@ -5052,7 +5071,9 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
   // values, so its behavior never depends on the Collection under test. It
   // evaluates predicates with the reference evaluator, not production's.
   const refetching =
-    testCase.path === `on-demand` && testCase.provider === `refetch`
+    testCase.path === `on-demand` &&
+    (testCase.provider === `refetch` || testCase.provider === `refetch-signal`)
+  const signalsRefetch = refetching && testCase.provider === `refetch-signal`
   let providerRequests = 0
   const sent = new Map<number, Row>()
   // Rows the provider returns, the on-demand transfer the work law bounds,
@@ -5273,11 +5294,26 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
     const removed = [...sent.keys()].filter((rowId) => !kept.has(rowId))
     if (removed.length > 0) void send([], removed)
   }
+  // A signalling refetch re-runs each served request alone, so a row that
+  // now sorts between two answers is in neither. It reports the shift once
+  // the rows apply, and only when some answer changed; the contract lets a
+  // sync adapter report whenever its pages may have shifted, so this
+  // provider judges the loader's response, not query-db's gate.
   async function refetch(): Promise<void> {
     const current = new Map<number, Row>()
+    let changed = false
     for (const request of servedRequests) {
-      const covered = coverage(request)
-      lastAnswered.set(request, new Set(covered.map((row) => row.id)))
+      const covered = signalsRefetch ? pageFor(request) : coverage(request)
+      const ids = new Set(covered.map((row) => row.id))
+      const before = lastAnswered.get(request)
+      if (
+        !before ||
+        before.size !== ids.size ||
+        [...ids].some((rowId) => !before.has(rowId))
+      ) {
+        changed = true
+      }
+      lastAnswered.set(request, ids)
       for (const row of covered) current.set(row.id, row)
     }
     const applied = send(
@@ -5286,6 +5322,11 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
     )
     if (applied !== true) await applied
     stale = false
+    if (signalsRefetch && changed) {
+      syncControls!.invalidateLoadedSubsets()
+      // Core reports in a microtask; the repair then runs its requests.
+      await flushPromises()
+    }
   }
   function pageFor(options: LoadSubsetOptions): Array<Row> {
     let page = [...rows.values()].filter(
@@ -5833,7 +5874,17 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
       const visibleBefore = JSON.stringify(visibleIds())
       stepChangedInFlight = false
       if (command.type === `refetch`) {
+        const fullSourceBefore = fullSourceRequests
         await refetch()
+        // The repair a report starts reads each window's bounded prefix,
+        // tie, and refill; a whole-source read would be the cost the report
+        // exists to avoid.
+        if (signalsRefetch) {
+          expect(
+            fullSourceRequests,
+            `full-source requests after a signalling refetch at step ${step}`,
+          ).toBe(fullSourceBefore)
+        }
       } else if (command.type === `move`) {
         shown = { ...testCase, offset: command.offset, limit: command.limit }
         // A held load can block the move's settlement, so a holding history
@@ -6219,6 +6270,66 @@ describe(`eager indexed ordered windows`, () => {
         { type: `upsert`, id: 10, rank: 5, eligible: true },
         { type: `flip`, id: 0 },
         { type: `upsert`, id: 11, rank: 6, eligible: false },
+        { type: `refetch` },
+      ],
+    })
+  })
+
+  // The same trace with a provider that refetches each page alone and then
+  // reports the shift. Row 10 is in no answer after the refetch; the
+  // report makes the loader re-establish the window with a bounded repair.
+  it(`shows a row that moved between two served pages after a signalling refetch`, async () => {
+    await checkEagerWindow({
+      path: `on-demand`,
+      provider: `refetch-signal`,
+      filter: `joined`,
+      via: `marker`,
+      indexed: true,
+      direction: `desc`,
+      nulls: `first`,
+      terms: 1,
+      limit: 2,
+      offset: 0,
+      initial: [
+        { id: 0, rank: Number.NaN, eligible: true },
+        { id: 1, rank: 0, eligible: true },
+        { id: 2, rank: 4, eligible: true },
+        { id: 3, rank: 1, eligible: true },
+      ],
+      history: [
+        { type: `upsert`, id: 10, rank: 5, eligible: true },
+        { type: `flip`, id: 0 },
+        { type: `upsert`, id: 11, rank: 6, eligible: false },
+        { type: `refetch` },
+      ],
+    })
+  })
+
+  // A page with no later page whose end moves earlier. Two rank-0 rows
+  // arrive while the provider lags; the refetched page ends at rank 0, but
+  // the tie request still holds the rank-1 row, so the loader sees no
+  // delete. The report repairs the window.
+  it(`repairs a signalling refetch whose page now ends before its tie`, async () => {
+    await checkEagerWindow({
+      path: `on-demand`,
+      provider: `refetch-signal`,
+      filter: `anti-joined`,
+      via: `marker`,
+      indexed: true,
+      direction: `asc`,
+      nulls: `first`,
+      terms: 1,
+      limit: 3,
+      offset: 0,
+      initial: [
+        { id: 0, rank: 0, eligible: true },
+        { id: 1, rank: 0, eligible: true },
+        { id: 2, rank: 1, eligible: true },
+        { id: 5, rank: 13, eligible: false },
+      ],
+      history: [
+        { type: `upsert`, id: 10, rank: 0, eligible: false },
+        { type: `upsert`, id: 11, rank: 0, eligible: true },
         { type: `refetch` },
       ],
     })
