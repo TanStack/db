@@ -20,6 +20,7 @@ import {
 import { useLiveQuery } from '../src/useLiveQuery'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import type { Accessor } from 'solid-js'
+import type { Collection } from '@tanstack/db'
 
 type Person = {
   id: string
@@ -2123,6 +2124,87 @@ describe(`Query Collections`, () => {
   })
 
   describe(`Suspense Integration`, () => {
+    /**
+     * A resource that becomes ready while a sibling still suspends has
+     * completed its preload but has not committed its effect subscription.
+     * The preload is temporary ownership: it must keep the live-query
+     * Collection alive through that gap, then hand ownership to the committed
+     * observer so ordinary 1 ms retirement still applies after unmount.
+     */
+    it.each([`commit`, `abandon`] as const)(
+      `retains a ready sibling until the Suspense boundary reaches %s`,
+      async (outcome) => {
+        type Controls = { markReady: () => void }
+        const controls: Array<Controls> = []
+        const makePendingSource = (id: string, person: Person) =>
+          createCollection<Person>({
+            id,
+            getKey: (row) => row.id,
+            sync: {
+              sync: ({ begin, write, commit, markReady }) => {
+                begin()
+                write({ type: `insert`, value: person })
+                commit()
+                controls.push({ markReady })
+              },
+            },
+          })
+        const first = makePendingSource(
+          `solid-suspense-retained-first`,
+          initialPersons[0]!,
+        )
+        const second = makePendingSource(
+          `solid-suspense-retained-second`,
+          initialPersons[1]!,
+        )
+        let firstQueryCollection: Collection<any, any, any> | undefined
+
+        function First() {
+          const query = useLiveQuery((q) => q.from({ person: first }))
+          firstQueryCollection = query.collection
+          return <span data-testid="suspense-first">{query()[0]?.name}</span>
+        }
+
+        function Second() {
+          const query = useLiveQuery((q) => q.from({ person: second }))
+          return <span data-testid="suspense-second">{query()[0]?.name}</span>
+        }
+
+        const view = render(() => (
+          <Suspense fallback={<div data-testid="sibling-waiting">Waiting</div>}>
+            <First />
+            <Second />
+          </Suspense>
+        ))
+
+        try {
+          await waitFor(() => expect(controls).toHaveLength(2))
+          controls[0]!.markReady()
+          await new Promise((resolve) => setTimeout(resolve, 100))
+          expect(firstQueryCollection!.status).not.toBe(`cleaned-up`)
+
+          if (outcome === `commit`) {
+            controls[1]!.markReady()
+            expect(
+              (await view.findByTestId(`suspense-first`)).textContent,
+            ).toBe(`John Doe`)
+            expect(
+              (await view.findByTestId(`suspense-second`)).textContent,
+            ).toBe(`Jane Doe`)
+          }
+
+          view.unmount()
+          await waitFor(() =>
+            expect(firstQueryCollection!.status).toBe(`cleaned-up`),
+          )
+        } finally {
+          view.unmount()
+          await first.cleanup()
+          await second.cleanup()
+        }
+      },
+    )
+
     it.each([
       {
         name: `immediate persisted fallback`,

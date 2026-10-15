@@ -5,7 +5,6 @@ import { SvelteMap } from 'svelte/reactivity'
 import {
   BaseQueryBuilder,
   UnhashableQueryIRError,
-  createLiveQueryCollection,
   createLiveQueryObserver,
   getLiveQueryHash,
   getPublicCollection,
@@ -432,10 +431,9 @@ export function useLiveQuery(
         pool: !dbClient,
       })
     } else {
-      collection = createLiveQueryCollection({
+      collection = resolveLiveQueryValue(preparedValue, {
         gcTime: DEFAULT_GC_TIME_MS,
-        ...(preparedValue as LiveQueryCollectionConfig<any>),
-        startSync: true,
+        pool: !dbClient,
       })
     }
 

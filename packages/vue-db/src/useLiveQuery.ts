@@ -10,7 +10,6 @@ import {
 } from 'vue'
 import {
   BaseQueryBuilder,
-  createLiveQueryCollection,
   createLiveQueryObserver,
   getPublicCollection,
   isCollection,
@@ -346,10 +345,8 @@ export function useLiveQuery(
         { gcTime: DEFAULT_GC_TIME_MS },
       )
     } else {
-      return createLiveQueryCollection({
+      return resolveLiveQueryValue(unwrappedParam, {
         gcTime: DEFAULT_GC_TIME_MS,
-        ...unwrappedParam,
-        startSync: true,
       })
     }
   })

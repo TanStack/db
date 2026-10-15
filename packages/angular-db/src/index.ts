@@ -8,7 +8,6 @@ import {
 } from '@angular/core'
 import {
   BaseQueryBuilder,
-  createLiveQueryCollection,
   createLiveQueryObserver,
   getPublicCollection,
   isCollection,
@@ -214,11 +213,7 @@ export function injectLiveQuery(opts: any) {
     // match the query-fn and reactive-options paths, but let an explicit value
     // in the config win — otherwise a bare `{ query }` never syncs.
     if (opts && typeof opts === `object` && typeof opts.query === `function`) {
-      return createLiveQueryCollection({
-        startSync: true,
-        gcTime: DEFAULT_GC_TIME_MS,
-        ...opts,
-      })
+      return resolveLiveQueryValue(opts, { gcTime: DEFAULT_GC_TIME_MS })
     }
 
     throw new Error(`Invalid options provided to injectLiveQuery`)

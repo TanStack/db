@@ -72,6 +72,10 @@ async function expectRetired(collection: ConformanceCollection): Promise<void> {
     .toBe(`cleaned-up`)
 }
 
+async function wait(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 const SEED: Array<Row> = [
   { id: `1`, name: `John Doe`, age: 30, team: `a` },
   { id: `2`, name: `Jane Doe`, age: 25, team: `b` },
@@ -368,6 +372,12 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           [],
         ])
         for (const h of [teamA, teamB, olderA]) h.unmount()
+        await expect
+          .poll(() => source.collection.subscriberCount, {
+            interval: 5,
+            timeout: 500,
+          })
+          .toBe(0)
       },
     )
 
@@ -573,6 +583,47 @@ export function runSuite(rawDriver: LiveQueryDriver) {
         await mounted.flush()
         expect(supplied.subscriberCount).toBe(0)
         expect(supplied.status).not.toBe(`cleaned-up`)
+      },
+    )
+
+    scenario(
+      `undefined-retention-is-omitted`,
+      `an explicit undefined retention uses the adapter-owned default`,
+      async () => {
+        const source = driver.makeSource(SEED)
+        const h = driver.mountConfig(
+          (q) => q.from({ items: source.collection }),
+          { gcTime: undefined },
+        )
+        await h.flush()
+        const collection = h.collection()
+        expectAdapterOwnedCollection(collection)
+
+        h.unmount()
+        expect(collection.subscriberCount).toBe(0)
+        await expectRetired(collection)
+      },
+    )
+
+    scenario(
+      `positive-caller-owned-retention`,
+      `a positive caller retention survives before expiry and retires afterward`,
+      async () => {
+        const source = driver.makeSource(SEED)
+        const h = driver.mountConfig(
+          (q) => q.from({ items: source.collection }),
+          { gcTime: 100 },
+        )
+        await h.flush()
+        const collection = h.collection()
+        expect(collection).not.toBeNull()
+        expect(collection!.config.gcTime).toBe(100)
+
+        h.unmount()
+        expect(collection!.subscriberCount).toBe(0)
+        await wait(20)
+        expect(collection!.status).not.toBe(`cleaned-up`)
+        await expectRetired(collection!)
       },
     )
 
@@ -1218,7 +1269,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
     )
 
     it(`registers every distinct scenario without whole-test waivers`, () => {
-      expect(registry.size).toBe(35)
+      expect(registry.size).toBe(37)
     })
   })
 }
