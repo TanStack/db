@@ -1167,9 +1167,15 @@ export function queryCollectionOptions(
      * result (#2136). It reports the shift; the ordered loader then
      * re-establishes the window with a bounded repair.
      *
-     * Only one change can open such a gap: a page that has a later page after
-     * it returns different keys. A one-page window, a change to the last page,
-     * or a value change that keeps every page's keys cannot. A loader's own
+     * A gap needs a page whose keys change, and one of two shapes:
+     * - the page has a later page after it, which still starts where the page
+     *   used to end; or
+     * - the page's end moves earlier in the order. Rows that arrive ahead push
+     *   its old last row out, and if another answer such as a tie request
+     *   still holds that row, the loader sees no delete and still treats rows
+     *   through the old boundary as loaded.
+     * A change that keeps every page's keys cannot open one: a value change
+     * reaches the loader through its order-change path. A loader's own
      * acquisition (`refetch: true`) never reports, so its repair cannot loop.
      */
     const orderedPageResults = new WeakMap<
@@ -1206,10 +1212,12 @@ export function queryCollectionOptions(
         previous.last === undefined
       )
         return
+      const compare = makeComparator(orderBy[0]!.compareOptions)
+      const endMovedEarlier =
+        next.last === undefined || compare(next.last, previous.last) < 0
       // The page has a later page when another page with its predicate and
       // order ends deeper in the order. An empty page counts: it continues
       // from where an earlier page ended.
-      const compare = makeComparator(orderBy[0]!.compareOptions)
       const hasLaterPage = [...state.observers.values()].some((observer) => {
         const other = orderedPageResults.get(observer.getCurrentQuery())
         return (
@@ -1220,7 +1228,10 @@ export function queryCollectionOptions(
         )
       })
       // One report per burst of refetched pages, after their rows apply.
-      if (hasLaterPage && invalidationTimer === undefined) {
+      if (
+        (endMovedEarlier || hasLaterPage) &&
+        invalidationTimer === undefined
+      ) {
         invalidationTimer = setTimeout(() => {
           invalidationTimer = undefined
           if (activeSyncSession === syncSession) invalidateLoadedSubsets()

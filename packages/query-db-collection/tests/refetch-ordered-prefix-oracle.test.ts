@@ -791,6 +791,40 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
     },
   )
 
+  // A page with no later page whose end moves earlier in the order. Rows that
+  // arrive ahead of the page push its old last row out, but a tie request
+  // still holds that row, so the loader sees no delete and still treats rows
+  // through the old boundary as loaded. A new row that ties at the page's new
+  // end sorts before that boundary and is in neither result. (Found by the
+  // ordered-work oracle's refetch-then-signal provider.)
+  it.each([`cursor`, `offset`] as const)(
+    `shows a row that ties at a page's new, earlier end (%s encoding)`,
+    async (encoding) => {
+      await checkCase({
+        scenario: {
+          encoding,
+          functionKey: false,
+          orderKey: `rank`,
+          pageCap: undefined,
+          terms: 2,
+          limit: 3,
+          offset: 0,
+        },
+        initial: [
+          { id: 0, rank: 5, marked: true },
+          { id: 1, rank: 5, marked: true },
+          { id: 2, rank: 4, marked: true },
+          { id: 5, rank: 0, marked: false },
+        ],
+        history: [
+          { type: `upsert`, id: 10, rank: 5 },
+          { type: `upsert`, id: 11, rank: 5 },
+          { type: `flip`, id: 11 },
+        ],
+      })
+    },
+  )
+
   // A changed first page whose only later page is empty. The empty
   // continuation still starts where the first page used to end, so a row
   // that now sorts between them is in neither result.
