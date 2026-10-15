@@ -138,6 +138,15 @@ export function prepareLiveQueryValue(
   return value
 }
 
+function getLiveQueryConfig(
+  value: unknown,
+): LiveQueryCollectionConfig<any> | undefined {
+  if (value && typeof value === `object` && `query` in value) {
+    return value as LiveQueryCollectionConfig<any>
+  }
+  return undefined
+}
+
 /** Concrete source objects in query-position order for a prepared value. */
 export function getPreparedLiveQuerySources(
   value: unknown,
@@ -147,9 +156,7 @@ export function getPreparedLiveQuerySources(
   const query =
     value instanceof BaseQueryBuilder
       ? value
-      : value && typeof value === `object` && `query` in value
-        ? value.query
-        : value
+      : (getLiveQueryConfig(value)?.query ?? value)
   if (query instanceof BaseQueryBuilder) {
     return collectSourceRefs(query._getQuery()).map((source) =>
       source.type === `descriptorRef`
@@ -172,8 +179,8 @@ export function getPreparedLiveQueryIdentity(value: unknown): unknown {
       ? [`query`, getStableQueryBuilderHash(value)]
       : [`pooled`, pooled]
   }
-  if (value && typeof value === `object` && `query` in value) {
-    const config = value as LiveQueryCollectionConfig<any>
+  const config = getLiveQueryConfig(value)
+  if (config) {
     return [
       `config`,
       getPreparedLiveQueryIdentity(config.query),
@@ -195,23 +202,19 @@ export function getLiveQueryHash(
   preparedValue: unknown,
   queryKey?: LiveQueryKey,
 ): string {
-  const identity = queryKey?.length
+  let identity = queryKey?.length
     ? [`queryKey`, queryKey]
     : isCollection(preparedValue)
       ? [`collection`, preparedValue.id]
       : [`derived`, getPreparedLiveQueryIdentity(preparedValue)]
 
-  const skipsAutoLoad =
-    preparedValue &&
-    typeof preparedValue === `object` &&
-    `autoLoad` in preparedValue &&
-    preparedValue.autoLoad === false
-  return getStableValueHash(
-    skipsAutoLoad && queryKey?.length
-      ? [identity, [`autoLoad`, false]]
-      : identity,
-    `queryKey`,
-  )
+  if (
+    queryKey?.length &&
+    getLiveQueryConfig(preparedValue)?.autoLoad === false
+  ) {
+    identity = [identity, [`autoLoad`, false]]
+  }
+  return getStableValueHash(identity, `queryKey`)
 }
 
 /**
