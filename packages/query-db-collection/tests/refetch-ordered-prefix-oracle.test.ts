@@ -758,6 +758,13 @@ async function startRun(testCase: Case): Promise<Run> {
     refetch: (opts) => items.utils.refetch(opts),
     cleanup: async () => {
       const failures: Array<unknown> = []
+      // A failed history can stop inside a hold. Release it, so its
+      // transaction does not outlive this run.
+      try {
+        await apply({ type: `release` })
+      } catch (error) {
+        failures.push(error)
+      }
       for (const collection of [
         ...observers,
         window,
@@ -1510,63 +1517,88 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
     expect(failures).toEqual([])
   })
 
-  // The report gate keeps an empty page apart from a page whose last row has
-  // no order value. Rows without `rank` sort last, so the first page ends on
-  // one. A row that arrives ahead moves that page's end earlier, so the
-  // refetch must report. This drives the sync boundary directly: the
-  // generated campaigns give every row a rank.
-  it(`a refetch reports a page whose end moves earlier from a row without an order value`, async () => {
-    type Row = { id: number; rank?: number }
-    const backend: Array<Row> = [{ id: 0, rank: 3 }, { id: 1 }, { id: 2 }]
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { staleTime: Infinity, retry: false } },
-    })
-    const items = createCollection(
-      queryCollectionOptions<Row>({
-        id: `refetch-ordered-prefix-unranked-${collectionSequence++}`,
-        queryClient,
-        queryKey: [`unranked`],
-        syncMode: `on-demand`,
-        getKey: (row) => row.id,
-        queryFn: (ctx) => {
-          const options = ctx.meta?.loadSubsetOptions as LoadSubsetOptions
-          const offset = options.offset ?? 0
-          return [...backend]
-            .sort(
-              (a, b) =>
-                (b.rank ?? -Infinity) - (a.rank ?? -Infinity) || a.id - b.id,
-            )
-            .slice(offset, offset + options.limit!)
+  // A row that arrives ahead moves a one-page window's end earlier, so the
+  // refetch must report. The report gate judges a page's end by order, not
+  // by how the provider returned it:
+  // - Rows without `rank` sort last, so the first page ends on one. An empty
+  //   page and a page whose last row has no order value stay distinct.
+  // - A provider may return a page's rows in any order. Its last array row
+  //   is then not the page's end.
+  // These drive the sync boundary directly: the generated campaigns give
+  // every row a rank, and their provider returns rows in order.
+  it.each([
+    {
+      name: `from a row without an order value`,
+      initial: [{ id: 0, rank: 3 }, { id: 1 }, { id: 2 }],
+      arrival: { id: 3, rank: 2 },
+      reversed: false,
+    },
+    {
+      name: `when the provider returns the page in reverse order`,
+      initial: [
+        { id: 0, rank: 10 },
+        { id: 1, rank: 4 },
+        { id: 2, rank: 1 },
+      ],
+      arrival: { id: 3, rank: 6 },
+      reversed: true,
+    },
+  ])(
+    `a refetch reports a page whose end moves earlier $name`,
+    async ({ initial, arrival, reversed }) => {
+      type Row = { id: number; rank?: number }
+      const backend: Array<Row> = [...initial]
+      const queryClient = new QueryClient({
+        defaultOptions: { queries: { staleTime: Infinity, retry: false } },
+      })
+      const items = createCollection(
+        queryCollectionOptions<Row>({
+          id: `refetch-ordered-prefix-unranked-${collectionSequence++}`,
+          queryClient,
+          queryKey: [`unranked`],
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          queryFn: (ctx) => {
+            const options = ctx.meta?.loadSubsetOptions as LoadSubsetOptions
+            const offset = options.offset ?? 0
+            const page = [...backend]
+              .sort(
+                (a, b) =>
+                  (b.rank ?? -Infinity) - (a.rank ?? -Infinity) || a.id - b.id,
+              )
+              .slice(offset, offset + options.limit!)
+            return reversed ? page.reverse() : page
+          },
+        }),
+      )
+      let reports = 0
+      items.on(`loadedSubsets:invalidated`, () => {
+        reports++
+      })
+      const orderBy: Array<IR.OrderByClause> = [
+        {
+          expression: new IR.PropRef([`rank`]),
+          compareOptions: {
+            direction: `desc`,
+            nulls: `last`,
+            stringSort: `lexical`,
+          },
         },
-      }),
-    )
-    let reports = 0
-    items.on(`loadedSubsets:invalidated`, () => {
-      reports++
-    })
-    const orderBy: Array<IR.OrderByClause> = [
-      {
-        expression: new IR.PropRef([`rank`]),
-        compareOptions: {
-          direction: `desc`,
-          nulls: `last`,
-          stringSort: `lexical`,
-        },
-      },
-    ]
-    try {
-      items.startSyncImmediate()
-      await items._sync.loadSubset({ orderBy, limit: 2 })
-      expect(items.toArray.map((row) => row.id).sort()).toEqual([0, 1])
-      backend.push({ id: 3, rank: 2 })
-      await items.utils.refetch()
-      await settle()
-      expect(reports).toBe(1)
-    } finally {
-      await items.cleanup()
-      queryClient.clear()
-    }
-  })
+      ]
+      try {
+        items.startSyncImmediate()
+        await items._sync.loadSubset({ orderBy, limit: 2 })
+        expect(items.toArray.map((row) => row.id).sort()).toEqual([0, 1])
+        backend.push(arrival)
+        await items.utils.refetch()
+        await settle()
+        expect(reports).toBe(1)
+      } finally {
+        await items.cleanup()
+        queryClient.clear()
+      }
+    },
+  )
 
   it(`a refetch settles when the provider honors neither cursor nor offset`, async () => {
     const run = await startRun({

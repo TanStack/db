@@ -1182,10 +1182,11 @@ export function queryCollectionOptions(
       AnyQuery,
       {
         readKey: string
-        leadingValue: (row: any) => unknown
+        leadingValue: ReturnType<typeof compileSingleRowExpression>
         compare: (a: unknown, b: unknown) => number
-        // The page's keys, and its last row's leading order value. An empty
-        // page has no last row.
+        // The page's keys as a set, and the leading order value of the row
+        // that sorts last. An empty page has no last row. Neither depends on
+        // the order in which the provider returned the rows.
         keys: string
         last: { value: unknown } | undefined
       }
@@ -1196,7 +1197,7 @@ export function queryCollectionOptions(
     const recordOrderedPageResult = (
       query: AnyQuery,
       hashedQueryKey: string,
-      rows: Array<any>,
+      rows: Array<Record<string, unknown>>,
     ): void => {
       const options = query.meta?.loadSubsetOptions
       if (
@@ -1215,10 +1216,16 @@ export function queryCollectionOptions(
           compileSingleRowExpression(orderBy[0]!.expression),
         compare:
           previous?.compare ?? makeComparator(orderBy[0]!.compareOptions),
-        keys: JSON.stringify(rows.map(getKey)),
+        keys: JSON.stringify(
+          rows.map((row) => JSON.stringify(getKey(row))).sort(),
+        ),
         last: undefined as { value: unknown } | undefined,
       }
-      if (rows.length > 0) next.last = { value: next.leadingValue(rows.at(-1)) }
+      for (const row of rows) {
+        const value: unknown = next.leadingValue(row)
+        if (next.last === undefined || next.compare(value, next.last.value) > 0)
+          next.last = { value }
+      }
       orderedPageResults.set(query, next)
       if (
         invalidationTimer !== undefined ||
