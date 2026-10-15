@@ -1302,7 +1302,18 @@ from the `@tanstack/db` package instance used by Query Collection. Fixed
 historical EQ and singleton-IN bytes prove that the package encoder recognizes
 those proxies. This premise passes with normal built-package resolution; the
 earlier source-only constructor fixture failed three historical-key comparisons
-there. The first eligible demand
+there. Row-bearing historical literal-proxy ownership remains open. In the real
+managed SQLite acquisition path, the single-process coordinator projects a
+literal reference proxy to an empty record before the provider receives the
+subset request. That detached record cannot satisfy the original proxy's
+identity-based equality, and SQLite also stores a proxy-valued row field as an
+empty record. A seeded row with that stored shape therefore does not establish
+a compliant historical proxy owner. The ownership oracle needs a legal
+row-bearing acquisition and cold receiving witness before claiming its
+migration; the SQLite persistence wire owner must first settle the transport
+semantics of such a literal. Current proxy migration coverage reaches empty
+retention markers, while the real SQLite row-bearing restart matrix covers
+historical singleton-IN owners. The first eligible demand
 requests one persisted-row metadata scan per sync run; the SQLite adapter still
 reads row values in that scan. Later eligible demands parse every persisted
 owner hash and retention marker. The oracle bounds scan count, not latency or

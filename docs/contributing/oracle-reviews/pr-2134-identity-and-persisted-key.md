@@ -1147,3 +1147,27 @@ attribution-enabled Query Core source `273eb2526`, and TypeScript passes with
 that source. Changed-file ESLint reports no errors, Prettier and
 `git diff --check` pass. This does not extend the green claim to later Query
 Core heads.
+
+## Literal-proxy row-bearing receiving audit at `ef9c19f52`
+
+The fixed historical EQ key remains valid for a literal reference proxy
+captured through public `Collection.createIndex`. A proposed real SQLite
+reach test tried to acquire a row whose `category` held that exact proxy,
+then use its durable owner as the seed for a cold upgrade matrix. The test
+failed before acquisition: `SingleProcessCoordinator` projected the request
+through `toTransportedLoadSubsetOptions`, and the provider received an empty
+record in `Value` instead of the original proxy. `Object.is` distinguished
+them. The original equality requires a row field containing the original
+proxy; a row satisfying the projected request does not establish that
+original demand's result. SQLite also serializes a proxy-valued field as an
+empty record. The proposed proxy row seeds were removed rather than treated
+as legal historical ownership.
+
+The existing proxy checks establish empty retention-marker retirement and
+same-path literal-key ambiguity. The real SQLite row-bearing restart matrix
+establishes historical singleton-IN owner retirement, with marker and peer
+controls. It does not establish a row-bearing historical proxy owner. That
+cell remains with the Query Collection ownership oracle and its SQLite
+receiver. Any change to proxy-literal wire admission or preservation needs a
+separate transport-law review in the SQLite persistence wire owner before a
+row-bearing migration expectation can be added.
