@@ -1385,6 +1385,7 @@ acquisition asynchronous. This cut does not apply to explicit window moves,
 full-source work started after the initial window publishes, repair other than
 a bounded prefix repair, truncate replay, or framework render timing, and it
 proves neither source exhaustion nor broader source coverage.
+Later full-source work without ordering-repair debt may finish synchronously.
 
 If any source subscriber adds input to the graph during a synchronous ordered
 continuation, core returns to graph work before deciding whether that ordered

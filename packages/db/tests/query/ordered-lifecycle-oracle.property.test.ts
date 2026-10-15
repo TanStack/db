@@ -1614,21 +1614,32 @@ describe(`initial locale-string fallback oracle`, () => {
 
 describe(`warm ordered readiness oracle`, () => {
   // The four remote rows have the ascending order [3, 4, 1, 2], with null
-  // last. A warm literal-true response to each required acquisition therefore
-  // owes that complete window and `ready` at the first preload call's return.
-  // The zero-limit neighbor owes an empty ready window without acquisition.
+  // last. When preload starts the live-query sync run, a warm literal-true
+  // response to each acquisition owes that complete window and `ready` before
+  // the call returns. A constructor-started sync run resumes deferred
+  // on-demand acquisition asynchronously, so it owes the same window after
+  // settlement. The zero-limit neighbor needs no acquisition.
   it.each([
-    { limit: 0, expectedRequests: [] },
+    { limit: 0, startsAtConstruction: false, expectedRequests: [] },
     {
       limit: 50,
+      startsAtConstruction: false,
+      expectedRequests: [
+        { ordered: true, filtered: false, limit: 50 },
+        { ordered: false, filtered: false, limit: undefined },
+      ],
+    },
+    {
+      limit: 50,
+      startsAtConstruction: true,
       expectedRequests: [
         { ordered: true, filtered: false, limit: 50 },
         { ordered: false, filtered: false, limit: undefined },
       ],
     },
   ])(
-    `settles a retained $limit-row window after an async cold prime`,
-    async ({ limit, expectedRequests }) => {
+    `settles a retained $limit-row window after an async cold prime (constructor start: $startsAtConstruction)`,
+    async ({ limit, startsAtConstruction, expectedRequests }) => {
       type DatedRow = { id: number; createdAt: Date | null }
       const remote: Array<DatedRow> = [
         { id: 1, createdAt: new Date(`2026-01-03T00:00:00.000Z`) },
@@ -1697,6 +1708,11 @@ describe(`warm ordered readiness oracle`, () => {
               filtered: boolean
               limit: number | undefined
             }>
+            requestsAfterSettlement: Array<{
+              ordered: boolean
+              filtered: boolean
+              limit: number | undefined
+            }>
             immediate: InitialSettlementObservation
             settled: InitialSettlementObservation
             isLoadingSubset: boolean
@@ -1706,9 +1722,11 @@ describe(`warm ordered readiness oracle`, () => {
       try {
         await coldQuery.preload()
         cold = false
-        warmQuery = query(limit, false)
-        // Preload starts this live-query sync run. Record the request trace and
-        // public state before awaiting, then compare after cleanup.
+        warmQuery = query(limit, startsAtConstruction)
+        // Preload starts a new sync run when startSync is false. When the
+        // constructor started it, preload resumes deferred on-demand work
+        // through the asynchronous subscription restart path. Both receive
+        // the same warm rows, but only the first owes the synchronous cut.
         const requestsBeforePreload = [...warmRequests]
         const preload = warmQuery.preload()
         const requestsAtCut = [...warmRequests]
@@ -1719,6 +1737,7 @@ describe(`warm ordered readiness oracle`, () => {
         await preload
         observation = {
           requestsAtCut,
+          requestsAfterSettlement: [...warmRequests],
           immediate,
           settled: {
             status: warmQuery.status,
@@ -1739,10 +1758,13 @@ describe(`warm ordered readiness oracle`, () => {
         ],
         `Warm ordered readiness oracle cleanup failed`,
       )
-      expect(observation!.requestsAtCut).toEqual(expectedRequests)
+      expect(observation!.requestsAtCut).toEqual(
+        startsAtConstruction ? expectedRequests.slice(0, 1) : expectedRequests,
+      )
+      expect(observation!.requestsAfterSettlement).toEqual(expectedRequests)
       expect(observation!.immediate).toEqual({
-        status: `ready`,
-        rows: limit === 0 ? [] : [3, 4, 1, 2],
+        status: startsAtConstruction ? `loading` : `ready`,
+        rows: startsAtConstruction || limit === 0 ? [] : [3, 4, 1, 2],
       })
       expect(observation!.settled).toEqual({
         status: `ready`,

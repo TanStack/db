@@ -72,10 +72,10 @@ at that assertion. Empty readiness callbacks do not count as row publication.
 
 The original `!hasSettledSourceRequest` gate is the calibrated wrong design:
 it reaches both acquisitions but fails the immediate comparison, then passes
-after settlement. The production repair also excludes ordering repair debt
-and an explicit window operation from the synchronous path. Its production
-diff is five added and three removed lines, net two; test and contract prose
-are accounted for separately.
+after settlement. The production repair preserves the existing exclusions for
+ordering repair debt and explicit window operations from the synchronous path.
+Its original production diff is five added and three removed lines, net two.
+Test and contract prose are accounted for separately.
 
 ## ORC-001 through ORC-014
 
@@ -107,3 +107,46 @@ The event assertion covers the eight controlled fallback histories. It does
 not establish every event ordering or another provider's publication path.
 No reachable counterexample remains in the executed core and receiving paths
 at their stated checkpoints.
+
+## Follow-up review of the readiness proxy
+
+A seven-item code-reading review targeted `6bc943992`; the evaluation used
+`1e4bba40c` after a type-only test fix. The
+accepted law promises a synchronous result for a first ordered window whose
+required acquisitions return literal `true` after their writes apply. It does
+not require a later full-source acquisition to settle asynchronously. A later
+request without ordering-repair debt may finish in the same graph turn.
+
+A public probe reached the reviewer's publication/readiness distinction: a
+joined-filter window published row 1 while a pending child demand kept the
+live-query Collection `loading`. Removing row 1's join match requested another
+ordered page, received a null boundary, then requested the full source after
+that first publication. The original `!canRetryRepair()` check classified it
+as initial, but its public rows and change event remained coherent. The
+reviewer's suggested insert alone did not make a full window need more data.
+In a separate ready post-publication probe, dropping the check changed only a
+transient `isLoadingSubset` observation: the final row was 2 in both versions.
+The revised loader uses `isFullSource && !needsOrderingRepair` for synchronous
+eligibility, leaving retry policy with its own callback. The full-source
+repair and explicit-window exclusions remain in place.
+
+An async first page followed by a literal-`true` fallback tested the claimed
+request/observe race through a public live-query Collection. Synchronous
+fallback writes left status `loading` and rows unpublished until `observe()`
+ran; after preload settled, it was `ready` with the expected row. A direct
+loader probe could flip a mock callback during `request()` and change the
+branch, but did not establish that transition on a legal public path. Removing
+the callback from this branch also removes that sensitivity.
+
+The old ordered lifecycle owner accepted a mutant that removed the readiness
+clause: all 276 tests passed. That mutant is permitted by the documented
+timing law, so its survival does not expose a missing required timing
+assertion. The retained initial cells still reject the old
+`!hasSettledSourceRequest` gate at the immediate public checkpoint. A new warm
+null-boundary cell covers a constructor-started on-demand sync run: it sees the
+first ordered request, but not the fallback or publication, at the immediate
+preload cut; after settlement it sees both requests, the four expected rows,
+and `ready`. The adjacent preload-started cell remains synchronously ready.
+The focused warm cells and all 277 ordered lifecycle tests passed with no type
+errors. Other adapters and a real on-demand React first commit remain outside
+these witnesses.

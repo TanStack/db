@@ -623,21 +623,15 @@ export class OrderedSourceLoader {
     const orderedLoadGeneration = this.orderedLoadGeneration
     const orderingInvalidationGeneration = this.orderingInvalidationGeneration
     const settlesAsync = result instanceof Promise
-    // A full-source fallback still belongs to the initial load when an
-    // ordered request settled but the first window is not ready yet.
-    const isInitialFullSource =
-      isFullSource &&
-      !this.needsOrderingRepair &&
-      (!this.hasSettledSourceRequest || !this.canRetryRepair())
     const canSettleSynchronously =
       !settlesAsync &&
       windowOperationGeneration === undefined &&
-      // An initial full-source load shares the initial synchronous cut. A
-      // bounded prefix repair reads only installed rows, so its whole chain
-      // can finish inside the graph run that publishes the window. Every other
-      // repair, including a full-source repair, keeps asynchronous settlement.
+      // A full-source request without ordering-repair debt can finish in the
+      // current graph turn, including an initial fallback. A bounded prefix
+      // repair reads only installed rows and can also finish in that turn.
+      // Other repairs keep asynchronous settlement.
       (!isAuthoritativeRepair ||
-        isInitialFullSource ||
+        (isFullSource && !this.needsOrderingRepair) ||
         (this.readsBoundedPrefix && !isFullSource)) &&
       requestGraphInputRevision !== undefined
     let synchronousCompletionFailure: { error: unknown } | undefined
