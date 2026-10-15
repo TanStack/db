@@ -20,21 +20,21 @@ export const Route = createFileRoute(`/trailbase`)({
 })
 
 function TrailBasePage() {
-  // Get data using live queries with Electric collections
-  const { data: todos } = useLiveQuery((q) =>
+  // Get data using live queries with TrailBase collections
+  const todos = useLiveQuery((q) =>
     q
       .from({ todo: trailBaseTodoCollection })
       .orderBy(({ todo }) => todo.created_at, `asc`),
   )
 
-  const { data: configData } = useLiveQuery((q) =>
+  const configData = useLiveQuery((q) =>
     q.from({ config: trailBaseConfigCollection }),
   )
 
   return (
     <TodoApp
-      todos={todos}
-      configData={configData}
+      todos={todos()}
+      configData={configData()}
       todoCollection={trailBaseTodoCollection}
       configCollection={trailBaseConfigCollection}
       title="todos (TrailBase)"
