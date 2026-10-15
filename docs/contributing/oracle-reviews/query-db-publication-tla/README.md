@@ -52,8 +52,10 @@ states would merge legal histories with different promised observations.
 
 ## Checks and hostile controls
 
-`OnlyLiveOwnersPublish` and `LivePeerKeepsRow` compare row claims after each
-transition. `NoEarlyLoadFulfillment` and `NoUnacceptedPublication` compare
+`OnlyLiveOwnersPublish` and `LiveOwnersKeepRow` compare row claims after each
+transition. The second rule quantifies over both active owners, so either
+release order must preserve the surviving owner's row.
+`NoEarlyLoadFulfillment` and `NoUnacceptedPublication` compare
 load and row observations with the applied-receipt boundary.
 `NoEarlyPhysicalAbort` checks the physical Query signal against remaining
 leases. `AcceptedEventuallyApplies` checks the accepted transaction under weak
@@ -66,12 +68,13 @@ comparison and produced a counterexample:
 | Configuration | Deliberate wrong rule | Failed property |
 | --- | --- | --- |
 | `wrong-early-fulfill.cfg` | Fulfill on acceptance before application | `NoEarlyLoadFulfillment` |
-| `wrong-drop-peer.cfg` | Remove the peer's row when `a` releases | `LivePeerKeepsRow` |
+| `wrong-drop-peer.cfg` | Remove the peer's row when `a` releases | `LiveOwnersKeepRow` |
+| `wrong-drop-first.cfg` | Remove `a`'s row when `b` releases | `LiveOwnersKeepRow` |
 | `wrong-late-publish.cfg` | Publish after final release | `OnlyLiveOwnersPublish` |
 | `wrong-early-physical-abort.cfg` | Abort the physical fetch when any caller leaves | `NoEarlyPhysicalAbort` |
 | `wrong-abort-accepted.cfg` | Abandon an accepted transaction on caller abort | `AcceptedEventuallyApplies` |
 
-The first four controls failed as invariant counterexamples; the final one
+The first five controls failed as invariant counterexamples; the final one
 failed as a temporal counterexample. None was a timeout, setup failure, or
 unreached path. Run from this directory with
 `java -cp tla2tools.jar tlc2.TLC -deadlock -config safe.cfg QueryDbPublication.tla`,
@@ -96,4 +99,5 @@ cut. It also does not prove that a provider consumes its signal. The real
 production oracles and the [repair plan](../2026-10-15-query-db-lifecycle-repair-plan.md)
 own those receiving witnesses. The older
 [lease model](../query-db-published-core-tla/QueryDbLeases.tla) covers a
-full-versus-exact Query route split, which this one-Query model omits.
+full-versus-exact Query route split and the final-release abort obligation for
+a consumed physical signal, which this one-Query model omits.

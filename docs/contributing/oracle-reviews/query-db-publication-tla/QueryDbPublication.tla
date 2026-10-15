@@ -10,7 +10,7 @@ EXTENDS FiniteSets, TLC
 \* made inside observer-removal cleanup after an already applied result.
 \* Persistence, cache reuse, multiple result generations, and source values
 \* are outside this bounded publication model.
-CONSTANTS WrongEarlyFulfill, WrongDropPeer, WrongLatePublish,
+CONSTANTS WrongEarlyFulfill, WrongDropPeer, WrongDropFirst, WrongLatePublish,
           WrongEarlyPhysicalAbort, WrongAbortAccepted
 
 Owners == {"a", "b"}
@@ -119,6 +119,9 @@ Release(owner) ==
   /\ rowOwners' =
        IF WrongDropPeer /\ owner = "a" /\ "b" \in active /\
           phase = "applied"
+       THEN {}
+       ELSE IF WrongDropFirst /\ owner = "b" /\ "a" \in active /\
+          phase = "applied"
        THEN {} ELSE rowOwners \ {owner}
   /\ outcome' = [outcome EXCEPT ![owner] =
        IF @ = "pending" /\ phase # "accepted"
@@ -154,10 +157,11 @@ TypeOK ==
   /\ acceptedEver \in BOOLEAN
   /\ appliedEver \in BOOLEAN
 
-\* A departed lease cannot keep a row public, and a live peer keeps its row.
+\* A departed lease cannot keep a row public, and every live lease keeps its
+\* promised row. Quantification covers either release order.
 OnlyLiveOwnersPublish == rowOwners \subseteq active
-LivePeerKeepsRow == (phase = "applied" /\ "b" \in active) =>
-  "b" \in rowOwners
+LiveOwnersKeepRow == phase = "applied" =>
+  \A owner \in active : owner \in rowOwners
 
 \* A load and a row need an applied receipt. An accepted transaction remains
 \* obligated even when its last caller aborts; weak fairness only requires

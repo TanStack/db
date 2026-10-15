@@ -678,7 +678,11 @@ the full Query survives the full-source owner's release. Replacing the lease
 stack's pop with FIFO shift fails at that public
 row checkpoint. Core supplies a distinct options object per public
 acquisition. These direct same-object calls cannot identify a caller beyond
-that release order.
+that release order. During startup retention maintenance, two direct calls
+with the same object followed by one unload reject the newer pending load
+and let the older one fetch and publish. The previous oldest-first release
+failed at the first load-outcome checkpoint. Pre-start requests still queued
+inside Collection Core are a separate boundary.
 An eager Query with finite `gcTime` is now observed after its last public
 subscriber leaves and Query Core's timer evicts it. With no public subscriber,
 `utils.refetch()` recreates the Query, calls the provider once, and applies its
@@ -707,8 +711,9 @@ records the production controls, guide audit, and remaining receiving paths.
 The separate [publication design model](oracle-reviews/query-db-publication-tla/README.md)
 checks two Query DB leases, one physical fetch, one row, and the
 unaccepted/accepted/applied transaction boundary. Its 156-state safe run passes;
-early fulfillment, peer-row loss, late publication, early physical abort, and
-abandonment after acceptance each produce a bounded counterexample. Its atomic
+early fulfillment, row loss after either owner's release, late publication,
+early physical abort, and abandonment after acceptance each produce a bounded
+counterexample. Its atomic
 reentrant step and absence of persistence or multiple physical Queries leave
 the corresponding production histories with the load-lifecycle and ownership
 oracle owners; the model is not evidence that those paths run in production.
@@ -744,7 +749,8 @@ distinct witnesses.
 Four additional retained-row histories release the final acquisition from
 `getKey` while its provider result is applying, with and without a prior
 retention marker and with and without a surviving equal peer. They compare
-pre-response pending load, public and durable rows, durable owners, and marker
+pre-response pending load, the complete hot public row set, durable rows,
+durable owners, and the exact `until-revalidated` marker
 after settlement, then clone storage into a cold run whose empty source
 retires the remaining row. Final release writes a marker even when none was
 seeded; a peer lets the fresh row apply and clears the old marker. A temporary

@@ -7138,6 +7138,48 @@ describe(`query collection ownership lifecycle`, () => {
     },
   )
 
+  /**
+   * A returned load promise transfers one acquisition lease even while
+   * retention maintenance holds its start. Reusing the same options object
+   * does not merge those leases: one unload retires the newest call, so the
+   * older call may still fetch and publish its source row. The test enters
+   * Query DB after sync starts; Core's earlier deferred-request queue is a
+   * separate boundary.
+   */
+  it(`releases the newest same-options acquisition during startup maintenance`, async () => {
+    const id = `repeated-options-startup-retention`
+    const subset = { where: eq(new IR.PropRef([`category`]), `shared`) }
+    const scopeHash = hashKey([id, getLoadSubsetDemandKey(subset)])
+    const retentionKey = `queryCollection:gc:${scopeHash}`
+    const { collection, queryFn } = createOwnershipFixture({
+      id,
+      results: [[shared]],
+      setupMetadata: (metadata) =>
+        metadata.collection.set(retentionKey, {
+          queryHash: scopeHash,
+          mode: `until-revalidated`,
+        }),
+    })
+    collection.startSyncImmediate()
+    const first = Promise.resolve(collection._sync.loadSubset(subset)).then(
+      () => `ready`,
+      (error: unknown) => error,
+    )
+    const second = Promise.resolve(collection._sync.loadSubset(subset)).then(
+      () => `ready`,
+      (error: unknown) => error,
+    )
+
+    collection._sync.unloadSubset(subset)
+    await expect(first).resolves.toBe(`ready`)
+    await expect(second).resolves.toMatchObject({ name: `AbortError` })
+    expect(queryFn).toHaveBeenCalledOnce()
+    expect(rows(collection)).toEqual([shared.id])
+
+    collection._sync.unloadSubset(subset)
+    expect(rows(collection)).toEqual([])
+  })
+
   it.each([false, true])(
     `removes owned cache entries on cleanup with custom hash %s`,
     async (customHash) => {
@@ -12335,7 +12377,9 @@ describe(`query collection ownership lifecycle`, () => {
       if (peerLoad) await peerLoad
       expect(released).toBe(true)
       expect(queryFn).toHaveBeenCalledOnce()
-      expect(collection.has(freshRow.id)).toBe(peer)
+      expect(itemIds(collection.toArray)).toEqual(
+        peer ? [freshRow.id] : [oldRow.id],
+      )
       const hotSnapshot = storage.snapshot()
       expect(storedItems(storage)).toEqual([peer ? freshRow : oldRow])
       expect(
@@ -12344,7 +12388,11 @@ describe(`query collection ownership lifecycle`, () => {
           peer ? freshRow.id : oldRow.id,
         ),
       ).toEqual([scopeHash])
-      expect(hotSnapshot.collectionMetadata.has(retentionKey)).toBe(!peer)
+      expect(hotSnapshot.collectionMetadata.get(retentionKey)).toEqual(
+        peer
+          ? undefined
+          : { queryHash: scopeHash, mode: `until-revalidated` },
+      )
 
       const coldStorage = createOwnershipStorage(hotSnapshot)
       const cold = createPersistedOwnershipFixture(id, coldStorage, [])

@@ -3827,7 +3827,7 @@ export function queryCollectionOptions(
       // No observer lease exists until startup maintenance has finished.
       const pending = pendingStartupLoads.get(options)
       if (pending) {
-        pending.delete(pending.values().next().value!)
+        pending.delete([...pending].at(-1)!)
         if (pending.size === 0) pendingStartupLoads.delete(options)
         return
       }

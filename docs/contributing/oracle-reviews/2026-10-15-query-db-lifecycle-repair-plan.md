@@ -29,8 +29,9 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
       generated-history and hostile-control work below remains open.
 - [ ] Expand generated histories and TLA+ publication/abort coverage; kill
       plausible wrong designs at the intended comparisons.
-  - [x] Bounded publication model: 156 safe reachable states; five hostile
-        configurations reach the intended invariant or temporal violation.
+  - [x] Bounded publication model: 156 safe reachable states; six hostile
+        configurations reach the intended invariant or temporal violation,
+        including row loss after either owner releases.
         The [mapping and limits](query-db-publication-tla/README.md) keep this
         design result distinct from production-history coverage (2026-10-15).
   - [ ] Generated production histories and public-checkpoint hostile controls.
@@ -51,6 +52,10 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
         first post-unload public-row checkpoint. Core's public path supplies
         distinct objects; direct same-object calls cannot name a specific
         caller beyond this order (2026-10-15).
+    - [x] During startup retention maintenance, a returned pending load also
+          owns a lease. Two same-object calls followed by one unload now
+          reject the newer call and let the older call publish; the witness
+          failed on the previous oldest-first release path (2026-10-15).
   - [x] Request shape: signal-free and explicit-signal requests check the
         physical signal, own keys, descriptor, cloning, JSON, and deletion.
         The new configurable-descriptor assertion failed before the one-line
@@ -62,6 +67,8 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
         persistence wrapper's upstream unload fails at the public fresh-row
         checkpoint; bypassing only Query DB's local owner checks survives
         because the wrapper independently fences this path (2026-10-15).
+        The hot checkpoint now compares the complete public row set and exact
+        `until-revalidated` marker.
   - [ ] Cleanup failure fidelity across older fixtures.
     - [x] The shared checker now returns observations while preserving a
           primary mismatch and every secondary cleanup error. A dual-fault
