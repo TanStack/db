@@ -57,7 +57,7 @@ mutants are possible, confirming that it owns a narrower boundary.
 | ID | Claim | Verdict and action |
 | --- | --- | --- |
 | ER-001 | An uncommitted render can replace the optimistic callback used by the visible component. | Confirmed by the after-render/suspended histories; fixed by the reviewed product and covered by the React oracle. |
-| ER-002 | An uncommitted render can replace the persistence callback for an admitted mutation. | Confirmed by the before-render/suspended histories; fixed and covered. The committed neighbor intentionally selects the newly committed callback. |
+| ER-002 | An uncommitted render can replace the persistence callback for an admitted mutation. | Confirmed by the before-render/suspended histories; fixed and covered. The oracle does not select callback ownership when another render commits between admission and persistence. |
 | ER-003 | A parent layout effect publishes too late for a descendant layout mutation. | Confirmed by the layout-effect mutant; insertion-effect production and descendant histories cover it. |
 | ER-004 | Callback refresh must preserve mutate identity. | Already preserved; retained as a neighboring assertion on every committed history. |
 | ER-005 | Eight submitted examples close the reported class. | Refuted as test-integrity evidence. They reproduce faults but have no independent model or hostile timing challenges. Replaced with the bounded oracle. |
@@ -70,7 +70,7 @@ mutants are possible, confirming that it owns a narrower boundary.
 | Requirement | Result |
 | --- | --- |
 | ORC-001 | The opening prose states the committed-callback law, authority, and limits. Transaction-admission affinity stays open. |
-| ORC-002 | The model tracks only the latest committed document and never reads production refs or effect choice. |
+| ORC-002 | The model tracks only the document committed at transaction admission and never reads production refs or effect choice. |
 | ORC-003 | Contract, model, bounded grammar, public driver, observations, and checkpoints are distinguishable in the executable file. |
 | ORC-004 | No generated property is claimed. The finite grammar reconstructs both reported faults and the layout neighbor; StrictMode supplies the alternate React schedule. |
 | ORC-005 | The public hook and real Collection run. Ordered traces retain wrong callback ownership, and assertions run before and after persistence. |
@@ -90,8 +90,8 @@ The evidence closes callback ownership for the ten named React histories. It
 does not cover arbitrary transition interleavings, errors, unmount during a
 pending write, multiple independently changing callback contexts, server
 delivery, or other frameworks. Callback affinity to transaction admission is
-an unresolved design question; it does not contradict the explicit latest-
-committed-callback contract reviewed here.
+an unresolved design question. These histories do not commit another render
+between admission and persistence.
 
 All eight raw review items are accounted for: three fixed-now, one already
 fixed and retained, one repaired test-integrity gap, one repaired coverage gap,
