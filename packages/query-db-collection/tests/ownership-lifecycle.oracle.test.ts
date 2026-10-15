@@ -2,8 +2,10 @@ import {
   CancelledError,
   QueryClient,
   QueryObserver,
+  dehydrate,
   focusManager,
   hashKey,
+  hydrate,
   isCancelledError,
 } from '@tanstack/query-core'
 import {
@@ -57,8 +59,9 @@ import type { QueryCollectionUtils } from '../src/query.js'
  * mode, a direct write leaves a Query owned by another Collection untouched;
  * a later peer cannot publish another writer's patched cache as a server
  * result. A later physical fetch may replace the direct row, while a disabled
- * on-demand peer waits for explicit refetch. These claims cover one
- * QueryClient; hydration into another client loses local-patch provenance.
+ * on-demand peer waits for explicit refetch. The shared-cache rules cover one
+ * QueryClient. A separate cold history below requires physical revalidation
+ * when hydration into another client loses local-patch provenance.
  *
  * The reference view is an ownership graph: query scope and demand nodes point
  * to row keys. Sync-run lifetime fences, direct-write key positions, and
@@ -1350,8 +1353,8 @@ function createPersistedOwnershipFixture(
   storage: ReturnType<typeof createOwnershipStorage>,
   serverRows: Array<Item>,
   syncMode: `eager` | `on-demand` = `on-demand`,
+  queryClient = createQueryClient(),
 ) {
-  const queryClient = createQueryClient()
   const providerRows = structuredClone(serverRows)
   const queryFn = vi.fn((context: QueryFunctionContext) =>
     Promise.resolve(
@@ -6219,6 +6222,86 @@ describe(`query collection ownership lifecycle`, () => {
     expect(storedItems(storage)[0]?.name).toBe(manual.name)
     expect(queryFn).toHaveBeenCalledTimes(1)
     collection._sync.unloadSubset(request)
+  })
+
+  /**
+   * A Query result fetched on one client predates a direct write stored by a
+   * separate Collection. Dehydrate/hydrate carries that old result into a new
+   * QueryClient but cannot prove it is newer than the durable row. The safe
+   * independent account keeps Manual through the held physical request, then
+   * accepts Fresh from that request. This real restart observes public and
+   * durable values at both checkpoints; Query Core hydration supplies the old
+   * cache entry, and the controlled provider supplies the later response.
+   */
+  it(`revalidates a hydrated Query result against a persisted direct write`, async () => {
+    const id = `persisted-direct-hydrated-query`
+    const queryKey = [id]
+    const oldClient = createQueryClient()
+    await oldClient.fetchQuery({
+      queryKey,
+      queryFn: () => Promise.resolve([shared]),
+    })
+    const dehydrated = dehydrate(oldClient)
+    oldClient.clear()
+
+    const hotStorage = createOwnershipStorage()
+    const hot = createPersistedOwnershipFixture(id, hotStorage, [shared])
+    const hotRequest = {}
+    await hot.collection._sync.loadSubset(hotRequest)
+    const manual = { ...shared, name: `Manual` }
+    await hot.collection.utils.writeUpdate(manual)
+    expect(storedItems(hotStorage)[0]?.name).toBe(manual.name)
+    hot.collection._sync.unloadSubset(hotRequest)
+    await hot.collection.cleanup()
+
+    const coldStorage = createOwnershipStorage(hotStorage.snapshot())
+    const coldClient = createQueryClient()
+    hydrate(coldClient, dehydrated)
+    expect(coldClient.getQueryData<Array<Item>>(queryKey)).toEqual([shared])
+    const cold = createPersistedOwnershipFixture(
+      id,
+      coldStorage,
+      [{ ...shared, name: `Fresh` }],
+      `on-demand`,
+      coldClient,
+    )
+    const response = createDeferred<Array<Item>>()
+    const providerStarted = createDeferred<void>()
+    cold.queryFn.mockImplementation(() => {
+      providerStarted.resolve()
+      return response.promise
+    })
+    cleanups.push(() => Promise.resolve(response.resolve([])))
+    const publicNames: Array<string | undefined> = []
+    const subscription = cold.collection.subscribeChanges(
+      () => publicNames.push(cold.collection.get(shared.id)?.name),
+      { includeInitialState: false },
+    )
+    cleanups.push(() => Promise.resolve(subscription.unsubscribe()))
+    expect(storedItems(coldStorage)[0]?.name).toBe(`Manual`)
+
+    const coldRequest = {}
+    const load = Promise.resolve(cold.collection._sync.loadSubset(coldRequest))
+    void load.catch(() => undefined)
+    const firstCut = await Promise.race([
+      load.then(
+        () => `load-fulfilled` as const,
+        () => `load-rejected` as const,
+      ),
+      providerStarted.promise.then(() => `provider-started` as const),
+    ])
+    expect(firstCut).toBe(`provider-started`)
+    expect(cold.queryFn).toHaveBeenCalledTimes(1)
+    expect(cold.collection.get(shared.id)?.name).not.toBe(shared.name)
+    expect(storedItems(coldStorage)[0]?.name).toBe(`Manual`)
+    expect(publicNames).not.toContain(shared.name)
+
+    response.resolve([{ ...shared, name: `Fresh` }])
+    await load
+    expect(cold.collection.get(shared.id)?.name).toBe(`Fresh`)
+    expect(storedItems(coldStorage)[0]?.name).toBe(`Fresh`)
+    expect(publicNames).not.toContain(shared.name)
+    cold.collection._sync.unloadSubset(coldRequest)
   })
 
   it(`settles a direct write only after its persisted commit applies`, async () => {

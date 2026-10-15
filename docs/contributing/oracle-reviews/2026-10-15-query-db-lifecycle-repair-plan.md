@@ -34,7 +34,11 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
       decisions.
   - [x] Automatic Query GC: finite `gcTime` evicts an unobserved eager Query;
         `utils.refetch()` recreates it and applies a new row (2026-10-15).
-  - [ ] Cross-client hydration authority.
+  - [x] Cross-client hydration authority: a real dehydrated Query result older
+        than a persisted direct write must wait for a new physical response on
+        cold acquisition. The cold boundary has no shared order position, so
+        revalidation supplies authority; disabling the guard made the load
+        fulfill before the provider started (2026-10-15).
   - [ ] Repeated direct acquisitions with one options object.
   - [ ] Request shape and retained persistence controls.
   - [ ] Cleanup failure fidelity across older fixtures.

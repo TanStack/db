@@ -565,6 +565,16 @@ counterexamples do not by themselves establish an `origin/main` failure.
 
 The Query DB ownership oracle owns the direct-write no-automatic-refetch law
 ([review](oracle-reviews/issue-1935-direct-write-refetch.md)).
+Its cross-client receiving history fetches an old Query result, dehydrates it,
+persists a later direct write, then hydrates that old result into a fresh
+QueryClient. Cold acquisition must wait for a physical provider response;
+neither the hydrated cache nor its timestamp establishes order against the
+durable write. The held-response checkpoint keeps the old cached value out of
+public and durable rows, and the later response replaces the direct value.
+Disabling the unknown-order revalidation guard makes the load fulfill before
+the provider starts, so the oracle rejects that mutant at a public settlement
+checkpoint. This controlled Map-backed persistence path does not prove native
+SQLite restart or offline acquisition policy.
 The load-lifecycle owner checks the bounded static-key full-source reuse law
 through live-query subscriptions: a settled full request serves a later
 filtered demand with no second provider call; after the full view releases,
