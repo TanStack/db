@@ -52,14 +52,15 @@ const randomCampaign = (property: string) =>
  * source evidence and starts no physical acquisition. On-demand readiness is
  * insufficient; one settled acquisition supplies the evidence instead.
  *
- * The independent model in the lifecycle grammar crosses both sync modes with
- * empty and nonempty replacements and with or without an eager loader. The
- * production driver publishes an old row, creates a direct subscription,
- * cleans up its source, requests a snapshot, and restarts the real Collection.
- * It holds eager readiness to prove the wait cannot fulfill early. Before that
- * release and after restart settlement, the returned wait, acquisition count,
- * subscription status, and public rows must match the model. This fixed matrix
- * does not claim failure or competing-owner coverage.
+ * The independent model in the lifecycle grammar crosses explicit eager,
+ * default eager, and on-demand configuration with empty and nonempty
+ * replacements and with or without an eager loader. The production driver
+ * publishes an old row, creates a direct subscription, cleans up its source,
+ * requests a snapshot, and restarts the real Collection. It holds eager
+ * readiness to prove the wait cannot fulfill early. Before that release and
+ * after restart settlement, the returned wait, acquisition count, subscription
+ * status, and public rows must match the model. This fixed matrix does not claim
+ * failure or competing-owner coverage.
  */
 describe(`demand created while its Collection is cleaned up`, () => {
   it.each(cleanedRestartDemandCases)(
@@ -84,7 +85,9 @@ describe(`demand created while its Collection is cleaned up`, () => {
       const collection = createCollection<{ id: string }>({
         id: `cleaned-restart-${history.syncMode}-${history.loader}-${history.replacement}`,
         getKey: ({ id }) => id,
-        syncMode: history.syncMode,
+        ...(history.syncMode === `default-eager`
+          ? {}
+          : { syncMode: history.syncMode }),
         sync: {
           sync: (operations) => {
             const syncRun = syncRuns++
@@ -93,7 +96,7 @@ describe(`demand created while its Collection is cleaned up`, () => {
             commit = operations.commit
             if (syncRun === 0) {
               operations.markReady()
-            } else if (history.syncMode === `eager`) {
+            } else if (history.syncMode !== `on-demand`) {
               releaseEagerReady = () => {
                 publishReplacement()
                 operations.markReady()

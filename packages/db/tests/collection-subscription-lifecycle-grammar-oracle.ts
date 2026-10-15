@@ -763,17 +763,18 @@ export const releasedObsoleteResolveHistory: ReadonlyArray<LifecycleCommand> = [
  * it through one settled acquisition. Either mode must reconcile the complete
  * replacement rows before the caller's wait fulfills.
  *
- * These six cases are a bounded history grammar, not a projection of the
- * subscription implementation. Empty and nonempty replacements must remove an
- * older public row. An optional eager loader proves that eager mode bypasses it;
- * the absent-loader cases preserve the valid Query Collection boundary. The
- * model predicts only the public wait, rows, subscription readiness, and
- * physical acquisition count before eager readiness and at restart settlement;
- * failures, concurrent owners, and asynchronous acquisitions stay with the
- * broader lifecycle histories above.
+ * These ten cases are a bounded history grammar, not a projection of the
+ * subscription implementation. Explicit and default eager configuration must
+ * have the same behavior. Empty and nonempty replacements must remove an older
+ * public row. An optional eager loader proves that eager mode bypasses it; the
+ * absent-loader cases preserve the valid Query Collection boundary. The model
+ * predicts only the public wait, rows, subscription readiness, and physical
+ * acquisition count before eager readiness and at restart settlement; failures,
+ * concurrent owners, and asynchronous acquisitions stay with the broader
+ * lifecycle histories above.
  */
 export type CleanedRestartDemandCase = {
-  syncMode: `eager` | `on-demand`
+  syncMode: `default-eager` | `eager` | `on-demand`
   loader: `absent` | `present`
   replacement: `empty` | `row`
 }
@@ -781,11 +782,13 @@ export type CleanedRestartDemandCase = {
 export const cleanedRestartDemandCases: ReadonlyArray<CleanedRestartDemandCase> =
   ([`empty`, `row`] as const)
     .flatMap((replacement) =>
-      ([`absent`, `present`] as const).map((loader) => ({
-        syncMode: `eager` as const,
-        loader,
-        replacement,
-      })),
+      ([`default-eager`, `eager`] as const).flatMap((syncMode) =>
+        ([`absent`, `present`] as const).map((loader) => ({
+          syncMode,
+          loader,
+          replacement,
+        })),
+      ),
     )
     .concat(
       ([`empty`, `row`] as const).map((replacement) => ({
@@ -812,7 +815,7 @@ export function expectedCleanedRestartDemand(
   }
 } {
   return {
-    ...(history.syncMode === `eager`
+    ...(history.syncMode !== `on-demand`
       ? {
           beforeEagerReady: {
             physicalAcquisitions: 0 as const,
