@@ -1008,7 +1008,10 @@ replacement chain succeeds.
 Full-source reads can be very expensive, so a repair avoids one whenever a
 bounded read is available. An invalidation that overlaps unfinished page or tie
 work after the source has settled once does not force one: the bounded repair
-starts at once, and that work's later result is ignored for its boundary. A failed or canceled request, an invalidation before any request has
+starts at once, and that work's later result is ignored for its boundary.
+Such a prefix also cannot retire the repair's acquisitions: it was issued before
+the invalidation, so it proves no current coverage, and it stays held until a
+later repair or a larger current prefix retires it. A failed or canceled request, an invalidation before any request has
 settled, or a boundary that cannot be expressed still requires the full-source
 recovery above. A bounded repair failure likewise upgrades its
 next attempt to full-source recovery because partial writes cannot establish

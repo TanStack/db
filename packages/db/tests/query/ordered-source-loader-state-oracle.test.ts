@@ -883,6 +883,108 @@ describe(`Ordered source request ownership`, () => {
     },
   )
 
+  // The same overlap with an in-flight prefix read. A prefix acquisition
+  // normally supersedes every smaller settled prefix, because it covers their
+  // rows. A prefix issued before an ordering invalidation proves no current
+  // coverage, so its later result is ignored for the boundary, and for the
+  // same reason it must not release the repair's acquisitions. A refetching
+  // provider removes the rows only a released request holds, so releasing the
+  // repair's prefix can drop a row the stale read never saw. The stale prefix
+  // itself is released once a later repair or prefix covers it.
+  it.each([`older-first`, `repair-first`] as const)(
+    `keeps the repair's prefix when an older prefix read settles %s`,
+    async (order) => {
+      const requests: Array<Observed> = []
+      const releases: Array<LoadSubsetOptions> = []
+      const participants: Array<Promise<unknown>> = []
+      const subscription = fakeSubscription(requests, releases)
+      subscription.readOrderedSnapshot = () => [
+        { type: `insert`, key: 1, value: { id: 1, rank: 1 } },
+      ]
+      const info = createOrderByInfo({ index: undefined, dataNeeded: () => 0 })
+      const loader = new OrderedSourceLoader(
+        info,
+        subscription,
+        `row`,
+        (result) => {
+          if (result instanceof Promise) {
+            participants.push(result.catch(() => undefined))
+          }
+        },
+      )
+      const flush = async () => {
+        for (let turn = 0; turn < 5; turn++) await Promise.resolve()
+      }
+      const settle = async (index: number) => {
+        requests[index]!.deferred.resolve()
+        await flush()
+      }
+      const isPrefix = ({ options }: Observed) =>
+        options.orderBy !== undefined && options.cursor === undefined
+      try {
+        loader.start()
+        for (let index = 0; index < requests.length; index++) {
+          await settle(index)
+        }
+        const initial = requests.length
+
+        // A window move reads a longer prefix; it is still in flight when an
+        // order change invalidates the source.
+        info.limit = 3
+        loader.loadMore(1)
+        expect(requests).toHaveLength(initial + 1)
+        const olderIndex = initial
+        expect(requests[olderIndex]!.options.limit).toBe(3)
+        loader.invalidateSourceOrdering()
+        loader.loadMore()
+        const repairIndex = initial + 1
+        expect(requests).toHaveLength(initial + 2)
+        expect(requests[repairIndex]!.options).toMatchObject({
+          refetch: true,
+          limit: 3,
+        })
+
+        const runRepair = async () => {
+          for (let index = repairIndex; index < requests.length; index++) {
+            if (index !== olderIndex) await settle(index)
+          }
+        }
+        if (order === `older-first`) {
+          await settle(olderIndex)
+          await runRepair()
+        } else {
+          await runRepair()
+          await settle(olderIndex)
+        }
+
+        const repairAcquisitions = requests
+          .slice(repairIndex)
+          .map(({ acquisition }) => acquisition)
+        expect(requests.slice(repairIndex).filter(isPrefix)).toHaveLength(1)
+        expect(
+          releases.filter((release) => repairAcquisitions.includes(release)),
+        ).toEqual([])
+        expect(releases).toEqual(
+          expect.arrayContaining(
+            requests.slice(0, initial).map(({ acquisition }) => acquisition),
+          ),
+        )
+
+        // The next repair covers the stale prefix and releases it.
+        loader.invalidateSourceOrdering()
+        loader.loadMore()
+        for (let index = 0; index < requests.length; index++) {
+          await settle(index)
+        }
+        expect(releases).toContain(requests[olderIndex]!.acquisition)
+      } finally {
+        loader.dispose()
+        for (const request of requests) request.deferred.resolve()
+        await Promise.allSettled(participants)
+      }
+    },
+  )
+
   it.each(
     [false, true].flatMap((fullFirst) =>
       [false, true].flatMap((replayed) =>

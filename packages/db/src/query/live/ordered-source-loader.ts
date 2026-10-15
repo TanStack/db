@@ -733,9 +733,14 @@ export class OrderedSourceLoader {
             if (!continuesOrderedPrefixRepair) {
               this.retireSettledFiniteAcquisitions()
             }
+            // A prefix issued before an ordering invalidation proves no
+            // current coverage, so it cannot supersede the repair's prefix.
             if (
               !continuesOrderedPrefixRepair &&
               orderedLoadGeneration === this.orderedLoadGeneration &&
+              (isAuthoritativeRepair ||
+                orderingInvalidationGeneration ===
+                  this.orderingInvalidationGeneration) &&
               prefixCount !== undefined
             ) {
               this.retireSettledFiniteAcquisitions({
