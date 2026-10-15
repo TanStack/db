@@ -43,9 +43,10 @@ import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
  * One composed fixed regression injects sibling-source input during a
  * synchronous ordered continuation. It requires graph processing before the
  * loader decides whether another acquisition is needed.
- * A separate two-action joined history checks public rows and change events
- * when a null-boundary full-source fallback starts after first publication
- * while child demand still holds Collection readiness.
+ * A separate joined history checks public rows and change events when a
+ * null-boundary full-source fallback starts after first publication. It
+ * crosses two marker actions with literal, Promise, and held-receipt responses;
+ * the held receipt also runs after child demand settles.
  * A second product adds nullable multi-term ordering, including null placement
  * for both terms. A four-cell overlay varies both directions independently
  * without multiplying that lifecycle product. The initial-settlement cells are
@@ -1628,18 +1629,27 @@ describe(`initial locale-string fallback oracle`, () => {
  * it does not give the later request an initial synchronous timing cut.
  *
  * The finite history grammar removes the first marker or retargets it to an
- * absent root. The independent model joins marker IDs to the three fixed root
- * rows, sorts eligible roots with null last, and takes one winner. The provider
- * honors predicates, cursor, order, offset, and limit: its first page delivers
- * root 1, its next page delivers ineligible root 2 at a null boundary, and the
- * unfiltered fallback delivers eligible root 3. The driver records requests,
- * public snapshots, and callback-visible rows. The comparison requires the
- * published first window while status is still `loading`, reaches the later
- * fallback, and checks every public event against its callback snapshot and
- * the model's final delta. It permits coherent intermediate publications.
+ * absent root, crossed with a literal-true response, a Promise response after
+ * applied writes, or a response held on the establishing applied receipt. The
+ * held receipt also runs after the child demand settles, so the live-query
+ * Collection's public loading flag isolates the root fallback. The
+ * independent model joins marker IDs to the three fixed root rows, sorts
+ * eligible roots with null last, and takes one winner. The provider honors
+ * predicates, cursor, order, offset, and limit: its first page delivers root 1,
+ * its next page delivers ineligible root 2 at a null boundary, and the
+ * unfiltered fallback delivers eligible root 3. The held-receipt case parks
+ * root 3's sync transaction behind an unrelated optimistic update, then
+ * releases that update so the accepted root write becomes visible. The driver
+ * records requests, public snapshots, and callback-visible rows. The
+ * comparison requires the published first window while status is still
+ * `loading`, reaches the later fallback, and checks every public event against
+ * its callback snapshot and the model's final delta. It permits coherent
+ * intermediate publications and assigns no synchronous cut to later work.
  */
 type LaterFallbackMutation = `delete-marker` | `retarget-marker`
-type LaterFallbackRoot = { id: number; at: number | null }
+type LaterFallbackResponse = `literal-true` | `promise` | `held-receipt`
+type LaterFallbackChildDemand = `pending` | `settled`
+type LaterFallbackRoot = { id: number; at: number | null; note: string }
 type LaterFallbackMarker = { id: number; rootId: number }
 type LaterFallbackChild = { id: number; rootId: number }
 type LaterFallbackRow = { id: number; children: Array<number> }
@@ -1654,20 +1664,47 @@ type LaterFallbackPublication = {
   rows: Array<LaterFallbackRow>
 }
 type LaterFallbackObservation = {
+  response: LaterFallbackResponse
+  childDemand: LaterFallbackChildDemand
   initial: { rows: Array<LaterFallbackRow>; status: string }
   initialChildLoads: number
   initialChildPending: boolean
+  readyChildCut:
+    | {
+        rows: Array<LaterFallbackRow>
+        status: string
+        rootLoading: boolean
+        liveLoading: boolean
+      }
+    | undefined
   beforeMutation: Array<LoadSubsetOptions>
   afterMutation: Array<{ options: LoadSubsetOptions; served: Array<number> }>
   fallbackEntry: { rows: Array<LaterFallbackRow>; status: string } | undefined
-  final: { rows: Array<LaterFallbackRow>; status: string }
+  heldCut:
+    | {
+        rows: Array<LaterFallbackRow>
+        status: string
+        sourceHasRoot3: boolean
+        blockerStarted: boolean
+        blockerPending: boolean
+        receiptPending: boolean
+        rootLoading: boolean
+        liveLoading: boolean
+      }
+    | undefined
+  final: {
+    rows: Array<LaterFallbackRow>
+    status: string
+    rootLoading: boolean
+    liveLoading: boolean
+  }
   publications: Array<LaterFallbackPublication>
 }
 
 const laterFallbackRoots: ReadonlyArray<LaterFallbackRoot> = [
-  { id: 1, at: 1 },
-  { id: 2, at: null },
-  { id: 3, at: null },
+  { id: 1, at: 1, note: `base` },
+  { id: 2, at: null, note: `base` },
+  { id: 3, at: null, note: `base` },
 ]
 const laterFallbackInitialMarkers: ReadonlyArray<LaterFallbackMarker> = [
   { id: 1, rootId: 1 },
@@ -1713,6 +1750,8 @@ function laterFallbackMarkersAfter(
 
 async function observeLaterFallback(
   mutation: LaterFallbackMutation,
+  response: LaterFallbackResponse,
+  childDemand: LaterFallbackChildDemand,
   assertObservation: (observed: LaterFallbackObservation) => void,
 ): Promise<void> {
   type RootSync = Parameters<SyncConfig<LaterFallbackRoot, number>[`sync`]>[0]
@@ -1720,22 +1759,34 @@ async function observeLaterFallback(
     SyncConfig<LaterFallbackMarker, number>[`sync`]
   >[0]
   const childGate = createDeferred<void>()
+  const blockerGate = createDeferred<void>()
+  const fallbackEntered = createDeferred<void>()
   const finalPublication = createDeferred<void>()
+  const loadSettled = createDeferred<void>()
   const delivered = new Set<number>()
   const requests: Array<{ options: LoadSubsetOptions; served: Array<number> }> =
     []
   const publications: Array<LaterFallbackPublication> = []
   let childLoads = 0
   let markerSync!: MarkerSync
+  let blockerStarted = false
+  let blockerPersistence: Promise<unknown> | undefined
+  let receiptPending = false
   let fallbackEntry:
     { rows: Array<LaterFallbackRow>; status: string } | undefined
   let observer: ReturnType<typeof live.subscribeChanges> | undefined
+  let unsubscribeRootLoading: (() => void) | undefined
+  let unsubscribeLiveLoading: (() => void) | undefined
   const rootCollection = createCollection<LaterFallbackRoot, number>({
     id: `later-null-fallback-root-${mutation}`,
     getKey: ({ id }) => id,
     syncMode: `on-demand`,
     autoIndex: `eager`,
     defaultIndexType: BTreeIndex,
+    onUpdate: () => {
+      blockerStarted = true
+      return blockerGate.promise
+    },
     sync: {
       sync: (sync: RootSync) => {
         sync.markReady()
@@ -1768,12 +1819,13 @@ async function observeLaterFallback(
                 page = page.slice(0, options.limit)
             }
             requests.push({ options, served: page.map(({ id }) => id) })
-            if (
+            const isFullSource =
               !options.orderBy &&
               !options.where &&
               !options.cursor &&
-              options.limit === undefined
-            ) {
+              options.limit === undefined &&
+              options.offset === undefined
+            if (isFullSource) {
               fallbackEntry = {
                 rows: live.toArray.map(({ id, children }) => ({
                   id,
@@ -1789,7 +1841,36 @@ async function observeLaterFallback(
                 delivered.add(row.id)
                 sync.write({ type: `insert`, value: row })
               }
-              expect(sync.commit()).toBe(true)
+              const receipt = sync.commit()
+              if (isFullSource && response === `held-receipt`) {
+                expect(receipt).not.toBe(true)
+                receiptPending = true
+                if (receipt !== true)
+                  void receipt.then(
+                    () => (receiptPending = false),
+                    () => (receiptPending = false),
+                  )
+                fallbackEntered.resolve()
+                return receipt
+              }
+              expect(receipt).toBe(true)
+              if (
+                response === `held-receipt` &&
+                options.orderBy &&
+                options.cursor &&
+                page.some(({ id }) => id === 2)
+              ) {
+                // The page's own receipt applied. Only the later full-source
+                // transaction waits behind this unrelated optimistic update.
+                blockerPersistence = rootCollection.update(1, (draft) => {
+                  draft.note = `pending`
+                }).isPersisted.promise
+                void blockerPersistence.catch(() => {})
+              }
+            }
+            if (isFullSource) {
+              fallbackEntered.resolve()
+              if (response === `promise`) return Promise.resolve()
             }
             return true
           },
@@ -1860,7 +1941,18 @@ async function observeLaterFallback(
       id,
       children: children.map(({ id: childId }) => childId),
     }))
+  let afterFinalPublication = false
+  const maybeResolveLoadSettled = () => {
+    if (
+      afterFinalPublication &&
+      !rootCollection.isLoadingSubset &&
+      (childDemand === `pending` || !live.isLoadingSubset)
+    )
+      loadSettled.resolve()
+  }
   let primaryFailure: CapturedOracleFailure | undefined
+  let heldCut: LaterFallbackObservation[`heldCut`]
+  let readyChildCut: LaterFallbackObservation[`readyChildCut`]
   try {
     const preload = live.preload()
     void preload.catch(() => {})
@@ -1868,7 +1960,26 @@ async function observeLaterFallback(
     const initial = { rows: publicRows(), status: live.status }
     const initialChildLoads = childLoads
     const initialChildPending = childGate.isPending()
+    if (childDemand === `settled`) {
+      childGate.resolve()
+      await preload
+      await flushPromises()
+      readyChildCut = {
+        rows: publicRows(),
+        status: live.status,
+        rootLoading: rootCollection.isLoadingSubset,
+        liveLoading: live.isLoadingSubset,
+      }
+    }
     const beforeMutation = requests.map(({ options }) => options)
+    unsubscribeRootLoading = rootCollection.on(
+      `loadingSubset:change`,
+      maybeResolveLoadSettled,
+    )
+    unsubscribeLiveLoading = live.on(
+      `loadingSubset:change`,
+      maybeResolveLoadSettled,
+    )
     observer = live.subscribeChanges(
       (changes) => {
         if (changes.length === 0) return
@@ -1897,35 +2008,98 @@ async function observeLaterFallback(
         value: { id: 1, rootId: 99 },
       })
     expect(markerSync.commit()).toBe(true)
+    if (response === `held-receipt`) {
+      const entryLimit = setTimeout(() => fallbackEntered.resolve(), 1500)
+      try {
+        await fallbackEntered.promise
+      } finally {
+        clearTimeout(entryLimit)
+      }
+      await flushPromises()
+      heldCut = {
+        rows: publicRows(),
+        status: live.status,
+        sourceHasRoot3: rootCollection.get(3) !== undefined,
+        blockerStarted,
+        blockerPending: blockerGate.isPending(),
+        receiptPending,
+        rootLoading: rootCollection.isLoadingSubset,
+        liveLoading: live.isLoadingSubset,
+      }
+      blockerGate.resolve()
+    }
     // The later full-source cut has no synchronous scheduling promise. Wait
-    // for its public change, then allow the graph one drain turn. The timer
-    // only bounds a missing-event failure; the final model check diagnoses it.
+    // for its public change. The timer bounds a missing-event failure; the
+    // final model check diagnoses it.
     const waitLimit = setTimeout(() => finalPublication.resolve(), 1500)
     try {
       await finalPublication.promise
     } finally {
       clearTimeout(waitLimit)
     }
+    // Row publication can precede provider settlement. Observe the public
+    // loading-end event instead of assuming one graph turn is enough.
+    afterFinalPublication = true
+    maybeResolveLoadSettled()
+    const settlementLimit = setTimeout(() => loadSettled.resolve(), 1500)
+    try {
+      await loadSettled.promise
+    } finally {
+      clearTimeout(settlementLimit)
+    }
     await flushPromises()
     const observation: LaterFallbackObservation = {
+      response,
+      childDemand,
       initial,
       initialChildLoads,
       initialChildPending,
+      readyChildCut,
       beforeMutation,
       afterMutation: requests.slice(beforeMutation.length),
       fallbackEntry,
-      final: { rows: publicRows(), status: live.status },
+      heldCut,
+      final: {
+        rows: publicRows(),
+        status: live.status,
+        rootLoading: rootCollection.isLoadingSubset,
+        liveLoading: live.isLoadingSubset,
+      },
       publications: [...publications],
     }
     assertObservation(observation)
   } catch (error) {
     primaryFailure = { error }
   }
+  blockerGate.resolve()
   childGate.resolve()
+  // A persistence failure is a distinct cleanup diagnostic if the public
+  // comparison already failed. Bound the wait so cleanup still reports it.
+  const awaitBlockerPersistence = async () => {
+    if (!blockerPersistence) return
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    try {
+      await Promise.race([
+        blockerPersistence,
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(
+            () =>
+              reject(new Error(`Later null fallback blocker did not settle`)),
+            1500,
+          )
+        }),
+      ])
+    } finally {
+      if (timeout) clearTimeout(timeout)
+    }
+  }
   await finishOracleCleanup(
     primaryFailure,
     [
+      awaitBlockerPersistence,
       () => observer?.unsubscribe(),
+      () => unsubscribeRootLoading?.(),
+      () => unsubscribeLiveLoading?.(),
       () => live.cleanup(),
       () => markerCollection.cleanup(),
       () => childCollection.cleanup(),
@@ -1947,6 +2121,14 @@ function assertLaterFallbackObservation(
   })
   expect(observed.initialChildLoads).toBeGreaterThan(0)
   expect(observed.initialChildPending).toBe(true)
+  if (observed.childDemand === `settled`) {
+    expect(observed.readyChildCut).toEqual({
+      rows: initial.map(({ row }) => row),
+      status: `ready`,
+      rootLoading: false,
+      liveLoading: false,
+    })
+  } else expect(observed.readyChildCut).toBeUndefined()
   expect(observed.beforeMutation[0]?.orderBy).toHaveLength(1)
   expect(observed.beforeMutation[0]?.limit).toBe(1)
   expect(observed.beforeMutation[0]?.offset).toBe(0)
@@ -1985,14 +2167,29 @@ function assertLaterFallbackObservation(
   expect(observed.afterMutation.indexOf(fullSource[0]!)).toBeGreaterThan(
     orderedPageIndex,
   )
-  expect(observed.fallbackEntry).toEqual({
-    rows: initial.map(({ row }) => row),
-    status: `loading`,
-  })
-  expect(observed.final).toEqual({
-    rows: final.map(({ row }) => row),
-    status: `loading`,
-  })
+  // The old window can remain until the later load settles, or a coherent
+  // empty window can publish when its marker disappears. Neither is an
+  // initial-load timing promise; callback replay checks either publication.
+  const allowedIntermediateRows = [initial.map(({ row }) => row), []]
+  expect(allowedIntermediateRows).toContainEqual(observed.fallbackEntry?.rows)
+  expect([`loading`, `ready`]).toContain(observed.fallbackEntry?.status)
+  if (observed.response === `held-receipt`) {
+    expect(allowedIntermediateRows).toContainEqual(observed.heldCut?.rows)
+    expect(observed.heldCut).toMatchObject({
+      sourceHasRoot3: false,
+      blockerStarted: true,
+      blockerPending: true,
+      receiptPending: true,
+      rootLoading: true,
+      liveLoading: true,
+    })
+    expect([`loading`, `ready`]).toContain(observed.heldCut?.status)
+  } else expect(observed.heldCut).toBeUndefined()
+  expect(observed.final.rows).toEqual(final.map(({ row }) => row))
+  expect(observed.final.rootLoading).toBe(false)
+  if (observed.childDemand === `settled`)
+    expect(observed.final.liveLoading).toBe(false)
+  expect([`loading`, `ready`]).toContain(observed.final.status)
   // Changes may be split across publications. At each callback, applying
   // its changes to the prior public snapshot must match the rows a reader
   // sees there; the flattened delta must match the finite join model.
@@ -2019,10 +2216,20 @@ function assertLaterFallbackObservation(
 }
 
 describe(`post-publication null fallback oracle`, () => {
-  it.each([`delete-marker`, `retarget-marker`] as const)(
-    `keeps the public window and change events coherent after %s`,
-    async (mutation) => {
-      await observeLaterFallback(mutation, (observed) =>
+  const cases: Array<{
+    mutation: LaterFallbackMutation
+    response: LaterFallbackResponse
+    childDemand: LaterFallbackChildDemand
+  }> = ([`delete-marker`, `retarget-marker`] as const).flatMap((mutation) => [
+    { mutation, response: `literal-true`, childDemand: `pending` },
+    { mutation, response: `promise`, childDemand: `pending` },
+    { mutation, response: `held-receipt`, childDemand: `pending` },
+    { mutation, response: `held-receipt`, childDemand: `settled` },
+  ])
+  it.each(cases)(
+    `keeps the public window and change events coherent after $mutation with $response and $childDemand child demand`,
+    async ({ mutation, response, childDemand }) => {
+      await observeLaterFallback(mutation, response, childDemand, (observed) =>
         assertLaterFallbackObservation(mutation, observed),
       )
     },
