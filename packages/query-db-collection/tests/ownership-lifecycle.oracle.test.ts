@@ -12389,9 +12389,7 @@ describe(`query collection ownership lifecycle`, () => {
         ),
       ).toEqual([scopeHash])
       expect(hotSnapshot.collectionMetadata.get(retentionKey)).toEqual(
-        peer
-          ? undefined
-          : { queryHash: scopeHash, mode: `until-revalidated` },
+        peer ? undefined : { queryHash: scopeHash, mode: `until-revalidated` },
       )
 
       const coldStorage = createOwnershipStorage(hotSnapshot)
