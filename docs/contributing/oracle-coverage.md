@@ -1015,7 +1015,10 @@ models the overlapping equal-demand lease and physical full-Query signal rules;
 its TLA+ safe configuration passes, while hash-only release and per-acquisition
 abort weakenings produce counterexamples. It does not model result application
 or persisted row reconciliation. The [exact-commit oracle review](oracle-reviews/2026-10-14-query-db-published-core-review.md)
-records the production controls, guide audit, and remaining receiving paths.
+records the earlier production controls and receiving paths. The
+[PR #2158 lifecycle review](oracle-reviews/2026-10-15-pr-2158-lifecycle-efeaf8104.md)
+binds the repaired acquisition and publication laws, ORC-001–014 audit, and
+remaining limits to executable head `efeaf8104`.
 The separate [publication design model](oracle-reviews/query-db-publication-tla/README.md)
 checks two Query DB leases, one physical fetch, one row, and the
 unaccepted/accepted/applied transaction boundary. Its 276-state safe run passes;
