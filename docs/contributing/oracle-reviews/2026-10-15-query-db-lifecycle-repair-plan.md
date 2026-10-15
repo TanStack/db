@@ -63,10 +63,13 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
       generated-history and hostile-control work below remains open.
 - [x] Expand the listed generated histories and TLA+ publication/abort
       coverage; kill plausible wrong designs at the intended comparisons.
-  - [x] Bounded publication model: 226 safe reachable states; seven hostile
+  - [x] Bounded publication model: 276 safe reachable states; eight hostile
         configurations reach the intended invariant or temporal violation,
         including row loss after either owner releases and failure to abandon
-        an accepted pending receipt on Collection cleanup.
+        an accepted pending receipt on Collection cleanup. A departed raw
+        adapter load is unobserved; a new cleanup-claim snapshot proves active
+        or caller-aborted pending loads still reject, and a hostile model that
+        drops a claimed load fails that invariant.
         The [mapping and limits](query-db-publication-tla/README.md) keep this
         design result distinct from production-history coverage (2026-10-15).
   - [x] Generated production histories and public-checkpoint hostile controls.
@@ -81,12 +84,18 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
           lease on a duplicate unload, failed at the physical-signal and
           intermediate public-row checkpoints (2026-10-15). The refetch
           caller-cancellation cell is covered separately below.
-    - [x] Public refetch lease grammar: twelve named histories and fixed/random
+    - [x] Public refetch lease grammar: thirteen named histories and fixed/random
           48-run campaigns vary caller abort and unload order, Collection
-          cleanup, baseline and equal-peer release, signal consumption, and
+          cleanup, baseline release before or after caller abort, equal-peer
+          release, signal consumption, and
           provider success or failure. It compares load outcome, public rows,
-          physical signal, and the captured Query's observer count at release
-          checkpoints. Direct seed/path replay and the replay manifest pass;
+          transient public change events, Collection status, physical signal,
+          and the captured Query's observer count at release checkpoints.
+          A positive baseline insert proves the event recorder is active;
+          wrong-result controls reject a brief unowned insert and missed
+          cleanup status. A same-subscription witness aborts only a held
+          refetch while its baseline lease and row survive. Direct seed/path
+          replay and the replay manifest pass;
           temporary early-fulfillment, caller-abort bypass, and skipped
           observer-unsubscribe mutants failed at their intended comparisons.
           The grammar does not check ignored-signal cache completion or an
@@ -122,10 +131,15 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
           An independent oracle reviewer found and helped close timing,
           replacement-fetch, and early-publication false-greens (2026-10-15).
           Collection cleanup during this accepted interval has a separate
-          two-history receiving witness: both receipt and pending load reject
+          four-history receiving witness: both receipt and every pending load reject
           with `AbortError`, and no source row appears before or after the
           optimistic gate opens. A temporary built-Core mutant that resolved
-          the receipt on cleanup failed at the receipt comparison. It does not
+          the receipt on cleanup failed at the receipt comparison. The expanded
+          witness crosses one/two source rows with one/two equal subscriptions,
+          observes `cleaned-up` and zero Query observers as cleanup settles,
+          and records load settlement without awaiting a stranded promise.
+          Wrong-result controls reject a retained observer and pending load.
+          It does not
           cover restart or persistence after cleanup (2026-10-15).
     - [x] Synchronous provider throw receiving witness: a second public
           acquisition joins inside the query function before its first call
@@ -183,6 +197,19 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
           affected-file lint, and whitespace checks pass (2026-10-15).
 - [ ] Run independent oracle review, package verification, and CI; record the
       exact covered boundary and remaining limits.
+  - [x] Repair the first review's refetch, accepted-cleanup, model, and contract
+        gaps. The refetch grammar checks a later baseline release, transient
+        public events, and status. The cleanup witness checks four row/subscriber
+        combinations and prompt settlement. Contract prose names the cleanup
+        exception; TLA+ distinguishes an unobserved raw load from a claimed
+        load. The two primary oracles pass 522 tests, direct refetch replay and
+        the 37-test replay manifest pass, and the safe model and eight hostile
+        configurations reach their intended results (2026-10-15).
+  - [x] Package verification: all 943 Query DB tests pass, both Query DB and
+        DB TypeScript checks pass, and affected-file lint, formatting, and
+        whitespace checks pass (2026-10-15).
+  - [ ] Review the repaired exact head independently, record ORC-001–014
+        evidence, and check CI outcome.
 - [ ] Integrate the repaired #2158 behavior into #2134 and verify its combined
       tree.
 

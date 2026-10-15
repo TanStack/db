@@ -630,7 +630,8 @@ the repair. The held-commit history checks the new owner's applied row after
 the old transaction is released; it does not require the new owner to wait for
 the delayed old `commit()` call. The generated grammar below checks the old
 transaction's receipt separately. [Issue #2160](https://github.com/TanStack/db/issues/2160)
-remains open for post-acceptance reentry and other uncovered lifecycle cuts.
+remains open while the repaired boundary undergoes final review and the
+remaining external-cancellation and public creator-settlement cuts are checked.
 An application-release grammar now runs the same independent source-row model,
 real public `requestSnapshot` driver, and exact-row comparison over twelve
 named histories plus fixed-seed and random 48-run campaigns. It varies the
@@ -744,8 +745,9 @@ mutation checks that the aborted load waits for its receipt and the peer's row
 applies. The original sole-owner history failed at the signal, load, and row
 checkpoint; the immediate-rejection candidate failed the accepted-receipt
 checkpoint. These fixed cuts do not establish arbitrary callback reentry or
-all abort/unload orderings; [issue #2162](https://github.com/TanStack/db/issues/2162)
-remains open for the generated grammar and hostile controls.
+all abort/unload orderings; the generated grammar and hostile controls below
+extend them. [Issue #2162](https://github.com/TanStack/db/issues/2162)
+remains open pending final review of that bounded claim.
 An initial-fetch lease grammar now varies an equal peer, consumed versus
 ignored physical signal, six first-caller actions (including both abort/unload
 orders and Collection cleanup), peer release before provider settlement, and
@@ -768,15 +770,22 @@ public-row checkpoint. Both are assertion failures after the intended public
 path. The grammar
 holds one initial provider result; the fixed ignored-signal witness checks the
 installed Query Core's optional cache completion behavior. A public refetch
-lease grammar runs twelve named histories and fixed-seed and random 48-run
+lease grammar runs thirteen named histories and fixed-seed and random 48-run
 campaigns through `requestSnapshot({ refetch: true, signal })`. It varies six
-caller abort/unload/cleanup actions, baseline release, an equal peer and its
+caller abort/unload/cleanup actions, baseline release before or after caller
+abort, an equal peer and its
 early or later release, signal consumption, and provider success or failure.
 The independent reference counts live public subscriptions and takes row
 values from the scripted provider. It compares the caller's outcome while it
 is still entitled to one, the physical signal, exact public rows before and
 after the held answer and each final release, and the captured Query's observer
-count. Direct seed/path replay passed. Early-fulfillment, caller-abort bypass,
+count. A passive public change listener sees the baseline insert and checks
+that no transient source insert reaches it after the last owner leaves. The
+Collection status is checked at cleanup settlement and after a failed refetch.
+A separate public witness keeps a baseline and a held refetch in one
+subscription: aborting only the refetch leaves the baseline row and physical
+observer until that subscription releases. Direct seed/path replay passed.
+Early-fulfillment, caller-abort bypass,
 and observer-unsubscribe mutants failed at those intended comparisons. The
 grammar does not assert Query-cache completion after an ignored-signal final
 release; a separate fixed witness checks that installed Query Core path. A second
@@ -844,25 +853,22 @@ or persisted row reconciliation. The [exact-commit oracle review](oracle-reviews
 records the production controls, guide audit, and remaining receiving paths.
 The separate [publication design model](oracle-reviews/query-db-publication-tla/README.md)
 checks two Query DB leases, one physical fetch, one row, and the
-unaccepted/accepted/applied transaction boundary. Its 226-state safe run passes;
+unaccepted/accepted/applied transaction boundary. Its 276-state safe run passes;
 early fulfillment, row loss after either owner's release, late publication,
 early physical abort, abandonment after acceptance on caller abort, and failure
-to abandon a pending receipt on Collection cleanup each produce a bounded
-counterexample. Its atomic
+to abandon a pending receipt on Collection cleanup, and dropping a claimed
+load at cleanup each produce a bounded counterexample. Its atomic
 reentrant step and absence of persistence or multiple physical Queries leave
 the corresponding production histories with the load-lifecycle and ownership
-oracle owners; the model is not evidence that those paths run in production.
-The new public cleanup witnesses preserve a primary mismatch and each cleanup
-failure separately. Older fixed histories in the load-lifecycle owner still use
-`finally`; a cleanup throw can mask the original assertion or skip later
-releases. The load-lifecycle oracle owns a dual-fault cleanup diagnostic and
-aggregation across those older fixtures.
+oracle owners. It treats an unsubscribed raw adapter load as unobserved while
+Collection cleanup rejects owned pending loads and abandoned caller-abort
+loads. The model is not evidence that those paths run in production.
 The shared cleanup checker now returns a recorded observation and aggregates
 all secondary cleanup errors under the primary mismatch. Its dual-fault
 control makes two cleanup steps fail and still reaches the final release.
-Four older identity, shared-fetch, peer-join, and retired-endpoint helpers now
-use it; the remaining `finally` paths still need conversion before the
-cleanup-fidelity cell is closed.
+All 28 older `finally` cleanup paths in the load-lifecycle owner now use it, so
+a cleanup throw cannot replace an earlier public mismatch or skip later
+releases in those fixtures.
 The ownership owner seeds a persisted `until-revalidated` subset owner, then
 applies a complete full-source result and acquires that subset. An omitted,
 unchanged, or moved source row must match public and durable rows at settlement,
@@ -908,9 +914,7 @@ history also needs a public live-query preload checkpoint for the retired
 creator, separate from the surviving peer's load. The raw internal
 `_sync.loadSubset` creator promise can fulfill in the current fixture; its
 settlement policy is unresolved at that boundary. Neither observation alone
-establishes a public cancellation bug. The load-lifecycle owner also needs a
-cleanup-fault calibration that preserves a primary row mismatch and reports
-secondary cleanup failure separately.
+establishes a public cancellation bug.
 Its real QueryClient witness loads ten disjoint on-demand subsets, then checks
 `writeUpsert`, `writeUpdate`, `writeDelete`, `writeInsert`, and a mixed
 `writeBatch`. After each accepted write it compares public live-query rows with

@@ -21,7 +21,11 @@ and the [glossary](../../glossary.md) supply the vocabulary and promises:
 ## Model vocabulary and history grammar
 
 `active` projects Query DB **observer leases**, not Core's logical subset
-owners. `outcome` records each acquisition's load settlement. `phase` combines
+owners. `outcome` records a publicly observed load settlement. An unsubscribed
+adapter load becomes `unobserved`: its raw promise has no promised settlement,
+and a later Collection cleanup does not turn that into a public rejection.
+Caller abort remains observable; if its accepted receipt is abandoned, its
+pending load rejects. `phase` combines
 the provider result, sync transaction acceptance, and applied-receipt boundary
 into `none`, `unaccepted`, `accepted`, `applied`, and `abandoned`. Cleanup can
 abandon a pending transaction; the caller-abort hostile control can abandon an
@@ -53,6 +57,12 @@ consumed fetch on final observer removal while an ignored signal can finish
 into cache. It retains per-owner leases and outcomes because a peer's release
 and settlement can differ from the first caller's. Collapsing any of those
 states would merge legal histories with different promised observations.
+`unobserved` differs from `pending`: cleanup must reject an owned pending load,
+while it makes no claim about an unsubscribed raw adapter promise.
+`cleanupClaimed` is a model-only snapshot of owners active at cleanup and
+caller-aborted loads still waiting on an accepted receipt. Cleanup clears
+`active`, so the snapshot is necessary to distinguish those owed settlements
+from previously unsubscribed raw adapter promises.
 
 ## Checks and hostile controls
 
@@ -67,8 +77,11 @@ or cleanup under weak fairness of `Apply`. `CleanupClearsOwners` and
 `CleanupAbandonsPendingReceipt` require cleanup to retire every lease and reject
 the receipt if it has not applied. The model's `phase = "abandoned"` represents
 that receipt rejection; production compares the actual receipt separately.
+`CleanupSettlesClaimedLoads` separately requires owned pending loads and
+caller-aborted loads awaiting an accepted receipt to reject when cleanup
+abandons that receipt. It leaves departed raw adapter loads unobserved.
 
-TLC 2.19 checked `safe.cfg` with **226 distinct reachable states** and found
+TLC checked `safe.cfg` with **276 distinct reachable states** and found
 no violation. Each one-rule hostile configuration reached its intended
 comparison and produced a counterexample:
 
@@ -81,8 +94,9 @@ comparison and produced a counterexample:
 | `wrong-early-physical-abort.cfg` | Abort the physical fetch when any caller leaves | `NoEarlyPhysicalAbort` |
 | `wrong-abort-accepted.cfg` | Abandon an accepted transaction on caller abort | `AcceptedEventuallySettles` |
 | `wrong-cleanup-keeps-accepted.cfg` | Leave an accepted receipt pending after Collection cleanup | `CleanupAbandonsPendingReceipt` |
+| `wrong-cleanup-drops-claimed-load.cfg` | Make a claimed pending load unobserved at cleanup | `CleanupSettlesClaimedLoads` |
 
-Six controls failed as invariant counterexamples; `wrong-abort-accepted` failed
+Seven controls failed as invariant counterexamples; `wrong-abort-accepted` failed
 as a temporal counterexample. None was a timeout, setup failure, or
 unreached path. Run from this directory with
 `java -cp tla2tools.jar tlc2.TLC -deadlock -config safe.cfg QueryDbPublication.tla`,

@@ -5399,8 +5399,10 @@ describe(`loadSubset lifecycle oracle`, () => {
    * the scripted source answer. It does not inspect Query DB's lease registry.
    * These legal histories vary the refetch caller's release, baseline release,
    * an equal peer that may leave before the answer, signal consumption, and
-   * provider success or failure. Peer-first and caller-first final release
-   * are both legal. The
+   * provider success or failure. The baseline may release before or after a
+   * caller abort. Peer-first and caller-first final release are both legal. A
+   * passive public change listener records any source-row publication after
+   * the last lease leaves, including a transient insert later removed. The
    * real path is `requestSnapshot({ refetch: true, signal })`, not a direct
    * adapter call. Comparisons occur after the held provider settles and after
    * each remaining owner releases. The raw adapter promise after unsubscribe
@@ -5418,6 +5420,7 @@ describe(`loadSubset lifecycle oracle`, () => {
       | `unload-then-abort`
       | `cleanup`
     releaseBaseline: boolean
+    releaseBaselineAfterAction?: boolean
     peer: boolean
     releasePeerBeforeAnswer: boolean
     releasePeerFirst?: boolean
@@ -5460,6 +5463,10 @@ describe(`loadSubset lifecycle oracle`, () => {
       observerAfterBaselineRelease: livePeer ? 1 : 0,
       afterPeerReleaseRows: [] as Array<string>,
       observerAfterPeerRelease: 0,
+      statusAfterAction: history.action === `cleanup` ? `cleaned-up` : `ready`,
+      statusAfterAnswer: history.action === `cleanup` ? `cleaned-up` : `ready`,
+      recorderSawBaselineInsert: true,
+      unownedPublicationEvents: [] as Array<string>,
       providerCalls: 2,
     }
   }
@@ -5496,6 +5503,26 @@ describe(`loadSubset lifecycle oracle`, () => {
         retry: false,
       }),
     )
+    const liveOwners = { baseline: false, caller: false, peer: false }
+    let recorderSawBaselineInsert = false
+    const unownedPublicationEvents: Array<string> = []
+    const recorder = collection.subscribeChanges(
+      (changes) => {
+        for (const change of changes) {
+          if (change.key === `old` && change.type === `insert`)
+            recorderSawBaselineInsert = true
+          if (liveOwners.baseline || liveOwners.caller || liveOwners.peer)
+            continue
+          if (change.key === `new` && change.type !== `delete`)
+            unownedPublicationEvents.push(
+              `${change.type}:${String(change.key)}`,
+            )
+        }
+      },
+      {
+        includeInitialState: false,
+      },
+    )
     const baseline = collection.subscribeChanges(() => {}, {
       includeInitialState: false,
     })
@@ -5530,6 +5557,7 @@ describe(`loadSubset lifecycle oracle`, () => {
         },
       })
       await baselineLoad
+      liveOwners.baseline = true
       trackedQuery = queryClient
         .getQueryCache()
         .find({ queryKey: [id], exact: true })
@@ -5544,6 +5572,7 @@ describe(`loadSubset lifecycle oracle`, () => {
       })
       if (callerLoad === undefined || callerLoad === true)
         throw new Error(`The public refetch did not return a pending load`)
+      liveOwners.caller = true
       let callerFulfilledBeforeAnswer = false
       void callerLoad.then(
         () => {
@@ -5553,32 +5582,52 @@ describe(`loadSubset lifecycle oracle`, () => {
       )
       await started.promise
       peer?.requestSnapshot()
-      if (history.releaseBaseline) baseline.unsubscribe()
-      if (history.releasePeerBeforeAnswer && history.releasePeerFirst)
+      liveOwners.peer = peer !== undefined
+      if (history.releaseBaseline && !history.releaseBaselineAfterAction) {
+        liveOwners.baseline = false
+        baseline.unsubscribe()
+      }
+      if (history.releasePeerBeforeAnswer && history.releasePeerFirst) {
+        liveOwners.peer = false
         peer?.unsubscribe()
+      }
       switch (history.action) {
         case `none`:
           break
         case `abort`:
+          liveOwners.caller = false
           callerSignal.abort()
           break
         case `unload`:
+          liveOwners.caller = false
           caller.unsubscribe()
           break
         case `abort-then-unload`:
+          liveOwners.caller = false
           callerSignal.abort()
           caller.unsubscribe()
           break
         case `unload-then-abort`:
+          liveOwners.caller = false
           caller.unsubscribe()
           callerSignal.abort()
           break
         case `cleanup`:
+          liveOwners.baseline = false
+          liveOwners.caller = false
+          liveOwners.peer = false
           await collection.cleanup()
           break
       }
-      if (history.releasePeerBeforeAnswer && !history.releasePeerFirst)
+      if (history.releaseBaselineAfterAction) {
+        liveOwners.baseline = false
+        baseline.unsubscribe()
+      }
+      if (history.releasePeerBeforeAnswer && !history.releasePeerFirst) {
+        liveOwners.peer = false
         peer?.unsubscribe()
+      }
+      const statusAfterAction = collection.status
       // Flush the adapter, caller wrapper, and Core observation turns while
       // the provider is still held. A single microtask misses early settlement.
       await new Promise<void>((resolve) => setTimeout(resolve, 0))
@@ -5594,12 +5643,16 @@ describe(`loadSubset lifecycle oracle`, () => {
           : undefined
       await new Promise<void>((resolve) => setTimeout(resolve, 0))
       const afterAnswerRows = publicRows()
+      const statusAfterAnswer = collection.status
+      liveOwners.caller = false
       caller.unsubscribe()
       const afterCallerReleaseRows = publicRows()
       const observerAfterCallerRelease = observerCount()
+      liveOwners.baseline = false
       baseline.unsubscribe()
       const afterBaselineReleaseRows = publicRows()
       const observerAfterBaselineRelease = observerCount()
+      liveOwners.peer = false
       peer?.unsubscribe()
       const afterPeerReleaseRows = publicRows()
       const observerAfterPeerRelease = observerCount()
@@ -5619,6 +5672,10 @@ describe(`loadSubset lifecycle oracle`, () => {
         observerAfterBaselineRelease,
         afterPeerReleaseRows,
         observerAfterPeerRelease,
+        statusAfterAction,
+        statusAfterAnswer,
+        recorderSawBaselineInsert,
+        unownedPublicationEvents,
         providerCalls,
       }
       expect(observed, JSON.stringify({ history, observed, expected })).toEqual(
@@ -5630,6 +5687,7 @@ describe(`loadSubset lifecycle oracle`, () => {
       [`baseline subscription`, () => baseline.unsubscribe()],
       [`refetch subscription`, () => caller.unsubscribe()],
       [`peer subscription`, () => peer?.unsubscribe()],
+      [`public event recorder`, () => recorder.unsubscribe()],
       [`Collection`, () => collection.cleanup()],
       [`Query client`, () => queryClient.clear()],
     ])
@@ -5655,6 +5713,15 @@ describe(`loadSubset lifecycle oracle`, () => {
     {
       action: `abort`,
       releaseBaseline: true,
+      peer: false,
+      releasePeerBeforeAnswer: false,
+      consumesSignal: true,
+      outcome: `success`,
+    },
+    {
+      action: `abort`,
+      releaseBaseline: true,
+      releaseBaselineAfterAction: true,
       peer: false,
       releasePeerBeforeAnswer: false,
       consumesSignal: true,
@@ -5761,6 +5828,7 @@ describe(`loadSubset lifecycle oracle`, () => {
         `cleanup`,
       ),
       releaseBaseline: fc.boolean(),
+      releaseBaselineAfterAction: fc.boolean(),
       peer: fc.boolean(),
       releasePeerBeforeAnswer: fc.boolean(),
       releasePeerFirst: fc.boolean(),
@@ -5773,7 +5841,9 @@ describe(`loadSubset lifecycle oracle`, () => {
     const legalArbitrary = arbitrary.filter(
       (history) =>
         (!history.releasePeerBeforeAnswer || history.peer) &&
-        (!history.releasePeerFirst || history.releasePeerBeforeAnswer),
+        (!history.releasePeerFirst || history.releasePeerBeforeAnswer) &&
+        (!history.releaseBaselineAfterAction ||
+          (history.releaseBaseline && history.action === `abort`)),
     )
     const property = fc.asyncProperty(legalArbitrary, async (history) => {
       await observeRefetchLease(history, expectedRefetchLease(history))
@@ -5783,6 +5853,141 @@ describe(`loadSubset lifecycle oracle`, () => {
       await fc.assert(property, { ...options, seed: 2_162_2028 })
     await fc.assert(property, options)
   }, 20_000)
+
+  it(`rejects a transient unowned refetch publication and a missed cleanup status`, async () => {
+    const abandoned: RefetchLeaseHistory = {
+      action: `abort`,
+      releaseBaseline: true,
+      releaseBaselineAfterAction: true,
+      peer: false,
+      releasePeerBeforeAnswer: false,
+      consumesSignal: true,
+      outcome: `success`,
+    }
+    const expectedAbandoned = expectedRefetchLease(abandoned)
+    const observedAbandoned = await observeRefetchLease(
+      abandoned,
+      expectedAbandoned,
+    )
+    expect(() =>
+      expect({
+        ...observedAbandoned,
+        unownedPublicationEvents: [`insert:new`],
+      }).toEqual(expectedAbandoned),
+    ).toThrow()
+
+    const cleaned: RefetchLeaseHistory = {
+      ...abandoned,
+      action: `cleanup`,
+      releaseBaselineAfterAction: false,
+    }
+    const expectedCleaned = expectedRefetchLease(cleaned)
+    const observedCleaned = await observeRefetchLease(cleaned, expectedCleaned)
+    expect(() =>
+      expect({ ...observedCleaned, statusAfterAction: `ready` }).toEqual(
+        expectedCleaned,
+      ),
+    ).toThrow()
+  })
+
+  /**
+   * One subscription may request an applied baseline and then a fresh
+   * refetch. Aborting only the refetch's caller signal retires that attempt,
+   * not the baseline acquisition lease owned by the same subscription. The
+   * real public requestSnapshot path must keep the old row and Query observer
+   * while the provider is held; the provider's later row may refresh that
+   * baseline, and final subscription release removes it. This witness differs
+   * from the grammar above, which assigns baseline and refetch to separate
+   * subscriptions. It does not claim a result for a raw adapter promise after
+   * unsubscribe.
+   */
+  it(`keeps one subscription's baseline lease after aborting its refetch`, async () => {
+    const queryClient = createQueryClient()
+    const id = `same-subscription-refetch-abort-${collectionSequence++}`
+    const refetchStarted = createDeferred<void>()
+    const heldRefetch = createDeferred<Array<Row>>()
+    let physicalSignal: AbortSignal | undefined
+    let providerCalls = 0
+    const collection = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn: (context) => {
+          providerCalls++
+          if (providerCalls === 1) return Promise.resolve([{ id: `old` }])
+          physicalSignal = context.signal
+          refetchStarted.resolve()
+          return heldRefetch.promise
+        },
+        getKey: (row) => row.id,
+        startSync: true,
+        syncMode: `on-demand`,
+        retry: false,
+      }),
+    )
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    const caller = new AbortController()
+    let baselineLoad: true | Promise<void> | undefined
+    let refetchLoad: true | Promise<void> | undefined
+    const publicRows = () => collection.toArray.map((row) => row.id).sort()
+
+    await checkPublicCleanupWitness(async () => {
+      subscription.requestSnapshot({
+        onLoadSubsetResult: (result) => {
+          baselineLoad = result
+        },
+      })
+      await baselineLoad
+      const physicalQuery = queryClient
+        .getQueryCache()
+        .find({ queryKey: [id], exact: true })
+      if (!physicalQuery) throw new Error(`The baseline has no physical Query`)
+
+      subscription.requestSnapshot({
+        refetch: true,
+        signal: caller.signal,
+        onLoadSubsetResult: (result) => {
+          refetchLoad = result
+        },
+      })
+      if (refetchLoad === undefined || refetchLoad === true)
+        throw new Error(`The refetch did not return a pending load`)
+      const refetchOutcome = refetchLoad.then(
+        () => `fulfilled`,
+        (error: unknown) =>
+          error instanceof Error ? error.name : `non-Error rejection`,
+      )
+      await refetchStarted.promise
+      caller.abort()
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect({
+        rows: publicRows(),
+        physicalAborted: physicalSignal?.aborted,
+        observers: physicalQuery.getObserversCount(),
+      }).toEqual({ rows: [`old`], physicalAborted: false, observers: 1 })
+
+      heldRefetch.resolve([{ id: `new` }])
+      expect(await refetchOutcome).toBe(`AbortError`)
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect({ rows: publicRows(), providerCalls }).toEqual({
+        rows: [`new`],
+        providerCalls: 2,
+      })
+      subscription.unsubscribe()
+      expect({
+        rows: publicRows(),
+        observers: physicalQuery.getObserversCount(),
+      }).toEqual({ rows: [], observers: 0 })
+    }, [
+      [`provider`, () => heldRefetch.resolve([])],
+      [`subscription`, () => subscription.unsubscribe()],
+      [`Collection`, () => collection.cleanup()],
+      [`Query client`, () => queryClient.clear()],
+    ])
+  })
 
   /**
    * A peer acquired synchronously from a release callback owns its pending
@@ -6596,16 +6801,25 @@ describe(`loadSubset lifecycle oracle`, () => {
    * cannot prove the caller received the promised cancellation.
    *
    * The exception comes from the public SyncAppliedReceipt contract and the
-   * core cleanup oracle. The two legal histories use one or two scripted source
-   * rows. A wrapping sync records the real `commit()` receipt without changing
-   * it; a pending committed transaction is only a reach witness. The public
-   * checks are receipt cause and settlement count, load outcome, Collection
-   * status, and exact rows before and after the gate. This does not model a
+   * core cleanup oracle. The legal histories cross one or two scripted source
+   * rows with one or two equal subscriptions. A wrapping sync records the real
+   * `commit()` receipt without changing it; a pending committed transaction is
+   * only a reach witness. The public checks are receipt cause and settlement
+   * count, every load outcome, status and observer count at cleanup settlement
+   * while the gate is still held, and exact rows before and after the gate.
+   * Recording settlement rather than awaiting a possibly stranded load makes
+   * a missing rejection fail at the cleanup checkpoint. This does not model a
    * new sync run or durable persistence after cleanup.
    */
-  it.each([1, 2] as const)(
-    `abandons an accepted source receipt during Collection cleanup, rows=%i`,
-    async (rowCount) => {
+  const acceptedCleanupHistories = ([1, 2] as const).flatMap((rowCount) =>
+    ([1, 2] as const).map((subscriptionCount) => ({
+      rowCount,
+      subscriptionCount,
+    })),
+  )
+  it.each(acceptedCleanupHistories)(
+    `abandons an accepted source receipt during Collection cleanup: %j`,
+    async ({ rowCount, subscriptionCount }) => {
       const queryClient = createQueryClient()
       const id = `accepted-collection-cleanup-${collectionSequence++}`
       const serverRows: Array<Row> =
@@ -6673,27 +6887,40 @@ describe(`loadSubset lifecycle oracle`, () => {
             }),
         },
       })
-      const subscription = collection.subscribeChanges(() => {}, {
-        includeInitialState: false,
-      })
-      let load: true | Promise<void> | undefined
+      const subscriptions = Array.from({ length: subscriptionCount }, () =>
+        collection.subscribeChanges(() => {}, { includeInitialState: false }),
+      )
+      const loadStates: Array<string> = []
+      const loadSettlements: Array<number> = []
       await checkPublicCleanupWitness(async () => {
         const mutation = collection.insert({ id: `local` })
         await handlerEntered.promise
-        subscription.requestSnapshot({
-          onLoadSubsetResult: (result) => {
-            load = result
-          },
-        })
-        if (load === undefined || load === true)
-          throw new Error(
-            `The source acquisition did not return a pending load`,
+        for (const subscription of subscriptions) {
+          let load: true | Promise<void> | undefined
+          subscription.requestSnapshot({
+            onLoadSubsetResult: (result) => {
+              load = result
+            },
+          })
+          if (load === undefined || load === true)
+            throw new Error(
+              `The source acquisition did not return a pending load`,
+            )
+          const index = loadStates.length
+          loadStates.push(`pending`)
+          loadSettlements.push(0)
+          void load.then(
+            () => {
+              loadStates[index] = `fulfilled`
+              loadSettlements[index] = (loadSettlements[index] ?? 0) + 1
+            },
+            (error: unknown) => {
+              loadStates[index] =
+                error instanceof Error ? error.name : `non-Error rejection`
+              loadSettlements[index] = (loadSettlements[index] ?? 0) + 1
+            },
           )
-        const loadOutcome = load.then(
-          () => `fulfilled`,
-          (error: unknown) =>
-            error instanceof Error ? error.name : `non-Error rejection`,
-        )
+        }
         await vi.waitFor(() =>
           expect(
             collection._state.pendingSyncedTransactions.some(
@@ -6711,22 +6938,50 @@ describe(`loadSubset lifecycle oracle`, () => {
         expect(receiptState).toBe(`pending`)
         const cleanup = collection.cleanup()
         await cleanup
+        const atCleanupSettlement = {
+          status: collection.status,
+          observers: physicalQuery.getObserversCount(),
+        }
+        const expectedAtCleanupSettlement = {
+          status: `cleaned-up`,
+          observers: 0,
+        }
+        expect(atCleanupSettlement).toEqual(expectedAtCleanupSettlement)
         await new Promise<void>((resolve) => setTimeout(resolve, 0))
-        expect({
+        const settledAfterCleanup = {
           receiptState,
           receiptErrorName,
           receiptSettlements,
-          loadOutcome: await loadOutcome,
+          loadStates,
+          loadSettlements,
           rows: collection.toArray
             .map((row) => row.id)
             .filter((rowId) => rowId.startsWith(`server-`)),
-        }).toEqual({
+        }
+        const expectedAfterCleanup = {
           receiptState: `rejected`,
           receiptErrorName: `AbortError`,
           receiptSettlements: 1,
-          loadOutcome: `AbortError`,
+          loadStates: Array.from(
+            { length: subscriptionCount },
+            () => `AbortError`,
+          ),
+          loadSettlements: Array.from({ length: subscriptionCount }, () => 1),
           rows: [],
-        })
+        }
+        expect(settledAfterCleanup).toEqual(expectedAfterCleanup)
+        if (rowCount === 1 && subscriptionCount === 1) {
+          expect(() =>
+            expect({ ...atCleanupSettlement, observers: 1 }).toEqual(
+              expectedAtCleanupSettlement,
+            ),
+          ).toThrow()
+          expect(() =>
+            expect({ ...settledAfterCleanup, loadStates: [`pending`] }).toEqual(
+              expectedAfterCleanup,
+            ),
+          ).toThrow()
+        }
 
         releaseHandler.resolve()
         await mutation.isPersisted.promise
@@ -6749,8 +7004,13 @@ describe(`loadSubset lifecycle oracle`, () => {
         })
       }, [
         [`mutation handler`, () => releaseHandler.resolve()],
-        [`load`, () => Promise.resolve(load).catch(() => undefined)],
-        [`subscription`, () => subscription.unsubscribe()],
+        ...subscriptions.map(
+          (subscription, index) =>
+            [
+              `subscription ${index}`,
+              () => subscription.unsubscribe(),
+            ] as const,
+        ),
         [`Collection`, () => collection.cleanup()],
         [`Query client`, () => queryClient.clear()],
       ])
