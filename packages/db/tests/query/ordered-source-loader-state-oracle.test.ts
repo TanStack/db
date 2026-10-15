@@ -765,9 +765,14 @@ describe(`Ordered source request ownership`, () => {
   // settled requests. The older tie's later success is ignored for that
   // boundary. When both succeed, the repair chain runs to its fixed point and
   // retires exactly the acquisitions it replaced, once each, with no
-  // full-source request. A failed request keeps today's failure law: nothing
-  // retries eagerly, and an explicit retry releases exactly the failed
-  // acquisitions, in failure order, and recovers from the full source.
+  // full-source request. When the repair succeeds but the older tie fails,
+  // the tie's partial writes need the full-source read that the overlap
+  // replaced, so the loader starts it at once, in either settlement order,
+  // and needs no explicit retry; on main, the overlapping full-source read
+  // recovered this case. When the repair itself fails, today's failure law
+  // holds: nothing retries eagerly, and an explicit retry releases exactly
+  // the failed acquisitions, in failure order, and recovers from the full
+  // source.
   it.each(
     ([`older-first`, `repair-first`] as const).flatMap((order) =>
       ([`success`, `failure`] as const).flatMap((outcome) =>
@@ -851,8 +856,25 @@ describe(`Ordered source request ownership`, () => {
           return
         }
 
-        // A failure: nothing retries eagerly. Repair-chain work already in
-        // flight settles first; an explicit retry then waits for no request.
+        if (outcome === `success`) {
+          // The older tie failed: the loader recovers from the full source.
+          for (let index = repairIndex + 1; index < requests.length; index++) {
+            if (isFullSource(requests[index]!)) break
+            await settle(index, true)
+          }
+          const full = requests.findIndex(isFullSource)
+          expect(full).toBeGreaterThan(repairIndex)
+          expect(requests.filter(isFullSource)).toHaveLength(1)
+          await settle(full, true)
+          const settled = requests.length
+          loader.loadMore()
+          expect(requests).toHaveLength(settled)
+          return
+        }
+
+        // The repair failed: nothing retries eagerly. Repair-chain work
+        // already in flight settles first; an explicit retry then waits for
+        // no request.
         for (let index = repairIndex + 1; index < requests.length; index++) {
           await settle(index, true)
         }
@@ -890,7 +912,8 @@ describe(`Ordered source request ownership`, () => {
   // same reason it must not release the repair's acquisitions. A refetching
   // provider removes the rows only a released request holds, so releasing the
   // repair's prefix can drop a row the stale read never saw. The stale prefix
-  // itself is released once a later repair or prefix covers it.
+  // itself is superseded by the repair, so it is released too, in either
+  // settlement order; holding it would make every later refetch read it.
   it.each([`older-first`, `repair-first`] as const)(
     `keeps the repair's prefix when an older prefix read settles %s`,
     async (order) => {
@@ -970,7 +993,12 @@ describe(`Ordered source request ownership`, () => {
           ),
         )
 
-        // The next repair covers the stale prefix and releases it.
+        // A stale prefix that settles after the repair finished is already
+        // superseded, so it is released at once. One that settled first is
+        // covered by the repair's own retirement.
+        expect(releases).toContain(requests[olderIndex]!.acquisition)
+
+        // A later repair still runs normally.
         loader.invalidateSourceOrdering()
         loader.loadMore()
         for (let index = 0; index < requests.length; index++) {

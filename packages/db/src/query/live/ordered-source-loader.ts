@@ -770,6 +770,24 @@ export class OrderedSourceLoader {
                 count: prefixCount,
               })
             }
+            // A request issued before an ordering invalidation that settles
+            // after the repair finished is already superseded by that repair.
+            if (
+              !isAuthoritativeRepair &&
+              orderedLoadGeneration === this.orderedLoadGeneration &&
+              orderingInvalidationGeneration !==
+                this.orderingInvalidationGeneration &&
+              this.authoritativeRequestState === `none` &&
+              !this.needsOrderingRepair &&
+              this.settledFiniteAcquisitions.delete(releaseAcquisition)
+            ) {
+              this.retiringSupersededAcquisitions = true
+              try {
+                releaseAcquisition()
+              } finally {
+                this.retiringSupersededAcquisitions = false
+              }
+            }
           }
         },
         () => {
@@ -796,6 +814,8 @@ export class OrderedSourceLoader {
             this.failedRequest
           ) {
             this.abandonOrderedPrefixRepair()
+            // The overlap replaced a full-source read; recover with one now.
+            this.loadFullSource(windowOperationGeneration)
             return
           }
           this.failedRequest = undefined
@@ -863,6 +883,16 @@ export class OrderedSourceLoader {
         this.pending = undefined
       }
       if (!this.active) return
+      // A request issued before an ordering invalidation can fail after the
+      // bounded repair that superseded it has finished. Its partial writes
+      // still need a full-source read, which the overlap used to start.
+      const recoversAfterRepair =
+        !isAuthoritativeRepair &&
+        orderingInvalidationGeneration !==
+          this.orderingInvalidationGeneration &&
+        this.failedRequest === undefined &&
+        this.authoritativeRequestState === `none` &&
+        !this.needsOrderingRepair
       // A failed request may already have written only part of its result.
       // None of those rows is a safe continuation boundary.
       this.requireFullSourceRepair()
@@ -882,6 +912,12 @@ export class OrderedSourceLoader {
       this.recordRequestFailure(windowOperationGeneration)
       this.failedAcquisitions.set(releaseAcquisition, kind)
       if (retryRepair) this.scheduleRepairRetry()
+      if (
+        recoversAfterRepair &&
+        orderedLoadGeneration === this.orderedLoadGeneration
+      ) {
+        this.loadFullSource(windowOperationGeneration)
+      }
       throw error
     }
     if (canSettleSynchronously) {
