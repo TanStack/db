@@ -822,14 +822,14 @@ function useLiveQueryImpl(
       ? preparedQueryValue
       : configOrQueryOrCollection
   const autoLoad = modeConfig?.autoLoad !== false
-  if (!autoLoad && streamIdentity !== undefined && queryKey) {
-    streamIdentity = [...streamIdentity, [`autoLoad`, false]]
-  }
-
   let queryHash: string | undefined
   if (streamIdentity !== undefined) {
     try {
-      queryHash = getStableValueHash(streamIdentity, `queryKey`)
+      const identity = [
+        ...streamIdentity,
+        ...(queryKey && !autoLoad ? [[`autoLoad`, false]] : []),
+      ]
+      queryHash = getStableValueHash(identity, `queryKey`)
     } catch (error) {
       if (error instanceof UnhashableQueryIRError) {
         if (queryKey !== undefined) throw error

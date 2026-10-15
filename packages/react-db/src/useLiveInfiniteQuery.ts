@@ -173,7 +173,7 @@ export function useLiveInfiniteQuery<
   TUtils extends Record<string, any>,
 >(
   liveQueryCollection: Collection<TResult, TKey, TUtils> & NonSingleResult,
-  config: Omit<UseLiveInfiniteQueryConfig<any>, `autoLoad`>,
+  config: Omit<UseLiveInfiniteQueryConfig<Context>, `autoLoad`>,
 ): UseLiveInfiniteQueryReturnWithCollection<TResult, TKey, TUtils>
 
 // Overload for query function
@@ -281,9 +281,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     identityDeps,
   )
   const sameConfiguration =
-    committed !== null &&
-    committed.client === dbClient &&
-    committed.autoLoad === autoLoad
+    committed?.client === dbClient && committed?.autoLoad === autoLoad
   const dependenciesChanged =
     !inputIsCollection &&
     !queryIdentityMatches(

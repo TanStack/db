@@ -105,19 +105,16 @@ export function prepareLiveQueryValue(
     )
   }
 
-  if (
-    value &&
-    typeof value === `object` &&
-    !isCollection(value) &&
-    !(value instanceof BaseQueryBuilder) &&
-    `query` in value
-  ) {
+  if (isCollection(value)) return value
+
+  const queryConfig = getLiveQueryConfig(value)
+  if (queryConfig) {
     const {
       query,
       queryKey: _queryKey,
       client: _client,
       ...config
-    } = value as PreparedLiveQueryConfigInput
+    } = queryConfig
 
     const preparedQuery = prepareLiveQueryValue(
       query,
