@@ -3,9 +3,10 @@ title: Migrating to the 1.0 RC
 id: migrate-to-1-0-rc
 ---
 
-This guide covers the API changes in `1.0.0-rc.1` for apps upgrading from a
-pre-1.0 TanStack DB release. For the earlier `DbClient` and SSR migration, see
-the [SSR and Hydration guide](./ssr.md#migration-guide).
+This guide covers the API changes in `1.0.0-rc.1` and the changes shipped since
+`@tanstack/db@0.9.2` in September 2026 that may require changes to an app. For
+the earlier `DbClient` and SSR migration, see the
+[SSR and Hydration guide](./ssr.md#migration-guide).
 
 ## Update your packages
 
@@ -175,3 +176,114 @@ Status fields remain reactive properties, such as `todosQuery.isLoading`. See th
 `DuplicateAliasInSubqueryError` has been removed. Nested queries may reuse an
 ancestor's alias; aliases must still be unique within one lexical scope.
 Remove imports and catches for this obsolete error.
+
+## Changes since `@tanstack/db@0.9.2`
+
+The following changes shipped before the RC. Check the sections that match the
+packages and APIs your app uses when upgrading directly from an older release.
+
+### Await Query Collection direct writes
+
+`writeInsert`, `writeUpdate`, `writeDelete`, `writeUpsert`, and `writeBatch` now
+return promises whose validation errors reject. Catch errors from an awaited
+write, including `DuplicateKeySyncError` when `writeInsert` uses an existing key
+in a persisted Collection:
+
+```ts
+try {
+  await todosCollection.utils.writeInsert(todo)
+} catch (error) {
+  // Handle the rejected write.
+}
+```
+
+Direct writes no longer automatically refetch active on-demand Query subsets.
+They update Collection and Query cache rows where the write can be represented.
+Call `await todosCollection.utils.refetch()` when you need current server rows.
+This change concerns the `write*` utilities; the handler auto-refetch behavior
+described above still applies to Query Collection 1.x. Use TanStack Query Core
+5.90.15 or later for post-write refetch replacement and error recovery. See
+[Direct Writes](../collections/query-collection.md#direct-writes).
+
+### Import IndexedDB APIs from core
+
+The standalone `@tanstack/indexeddb-db-collection` package was removed. Import
+`createIndexedDB` and `indexedDBCollectionOptions` from `@tanstack/db` and
+remove the old package dependency. See the
+[IndexedDB Collection guide](../collections/indexed-db-collection.md).
+
+### Update sync and persistence integrations
+
+- Remove the `immediate` argument from `begin({ immediate: true })` in sync
+  callbacks. Call `begin()` instead. Sync writes made while a mutation persists
+  now queue behind it; code must not rely on them appearing immediately.
+- Custom SQLite `PersistenceAdapter` implementations must implement
+  `loadResumeSnapshot`. A custom sync wrapper must forward
+  `metadata.persistence` unchanged. When metadata is present, its `persistence`
+  field is required and is `null` when there is no persistence capability.
+- Lower-level SQLite adapter data operations now take an explicit
+  `PersistedStorageTarget`, such as `eagerStorageTarget(collectionId)` or a
+  claim-bound `managedStorageTarget(storageCollectionId, claimId)`, instead of a
+  bare Collection ID. Ordinary Collection configuration does not need a target.
+- Keep Electron persistence code in the main and renderer processes on matching
+  package versions; mixed IPC protocol versions fail closed.
+- `openBrowserWASQLiteOPFSDatabase` now rejects if opening takes more than 30
+  seconds. Set `timeoutMs: 0` only if the previous unlimited wait is required.
+- If a custom React Native op-sqlite wrapper returns ambiguous bare arrays, set
+  `arrayResultMode` to `rows` or `statement-results`. These arrays now reject
+  without an explicit mode.
+
+### Review query windows, joins, and aggregates
+
+- An ordered `findOne` keeps its compiled limit of one, or zero after
+  `.limit(0).findOne()`. `setWindow` may move its offset but cannot change its
+  limit. An unordered `findOne` stays at offset zero. Move to an ordered,
+  limited multi-row query if the result needs a larger or movable window.
+  `setWindow` controls only the outer query's own window, not a window inside a
+  subquery or include.
+- Joined row keys now use JSON arrays of source keys, with `null` for a missing
+  side. Code that constructs a key to call `collection.get()` must use the new
+  format. Reading the published row's `$key` avoids reconstructing it,
+  especially for non-finite numeric keys.
+- A source field selected outside an aggregate or `groupBy` key now throws
+  `NonAggregateExpressionNotInGroupByError`; the same rule applies in `having`.
+  Aggregate the field or include it in `groupBy`. Nested includes inside a
+  grouped or aggregate select now throw as well.
+- Clean up the owning live query rather than calling `cleanup()` on one of its
+  included child Collections. The child cleanup now rejects because several
+  parent rows can share that Collection.
+
+### Check stricter inputs and adapter requirements
+
+- A custom index `compareFn` or collation `compare` must return a number other
+  than `NaN`. Invalid comparator results now throw instead of silently
+  misordering an index.
+- Browser development builds now detect two loaded copies of `@tanstack/db`
+  and throw `DuplicateDbInstanceError`. Deduplicate the package if the check
+  appears after upgrading.
+- Pass fresh persisted or LocalStorage sync options to each direct
+  `createCollection` call. Reusing mutable options across Collections now
+  rejects. Reusable `DbClient` descriptors are unaffected.
+- `Collection.update` keys must match the Collection's declared key type.
+  Narrow possibly undefined keys, and use the branded key type if the
+  Collection declares one. Reusable `Ref<T>` helpers that require virtual row
+  metadata should set their third type parameter to `true`.
+- Upgrade to PowerSync 2 before updating `@tanstack/powersync-db-collection`,
+  and to RxDB 17 before updating `@tanstack/rxdb-db-collection`.
+- Vue live-query `data.value` is a snapshot. Read `data.value` again to get
+  later rows instead of keeping a previously read array.
+- A default auto-committed offline transaction accepts only its first
+  `mutate()` call. Create a new offline transaction for each later write;
+  calling `mutate()` again on the committed transaction now throws
+  `TransactionNotPendingMutateError`.
+- If you import `@tanstack/db-ivm` directly, update removed operator imports.
+  The old join helpers become `join(other, type)`; use
+  `orderByWithFractionalIndex` or `groupedOrderByWithFractionalIndex` in place
+  of the removed ordering helpers. See the
+  [0.2.0 release notes](https://github.com/TanStack/db/blob/main/packages/db-ivm/CHANGELOG.md#020)
+  for the full list.
+
+Production error messages now contain a short code and a link to the
+[error reference](../errors.md). Code that compared the old message text should
+use error classes, names, or fields instead. The development messages remain
+descriptive.
