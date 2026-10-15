@@ -66,9 +66,7 @@ function expectAdapterOwnedCollection(
   expect(collection!.config.gcTime).toBe(ADAPTER_OWNED_GC_TIME_MS)
 }
 
-async function expectRetired(
-  collection: ConformanceCollection,
-): Promise<void> {
+async function expectRetired(collection: ConformanceCollection): Promise<void> {
   await expect
     .poll(() => collection.status, { interval: 5, timeout: 500 })
     .toBe(`cleaned-up`)
