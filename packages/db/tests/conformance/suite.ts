@@ -1069,6 +1069,8 @@ export function runSuite(rawDriver: LiveQueryDriver) {
             final: true,
             message: source.expectedError.message,
           })
+          // The binding exposes the exact value the sync adapter gave up with.
+          expect(result.errors?.error?.cause).toBe(source.expectedError)
         }
         h.unmount()
       },
@@ -1091,12 +1093,12 @@ export function runSuite(rawDriver: LiveQueryDriver) {
       `health-after-readiness`,
       `health reports after readiness appear only in the error tree`,
       async () => {
-        type Problem = { final: boolean; message: string; serial: number }
+        type Problem = { final: boolean; cause: Error; serial: number }
         let problem: Problem | null = null
         let serial = 0
-        const report = (message: string, final: boolean) => {
+        const report = (cause: Error, final: boolean) => {
           if (problem?.final) return
-          problem = { final, message, serial: ++serial }
+          problem = { final, cause, serial: ++serial }
         }
         const healthy = () => {
           if (problem && !problem.final) problem = null
@@ -1148,10 +1150,14 @@ export function runSuite(rawDriver: LiveQueryDriver) {
               error: problem && {
                 phase: `sync`,
                 final: problem.final,
-                message: problem.message,
+                message: problem.cause.message,
               },
             },
           })
+          // The binding exposes the exact value the sync adapter reported.
+          expect(node?.error?.cause, `${step}: error cause`).toBe(
+            problem?.cause,
+          )
           const current = { tree, serial: problem?.serial ?? null }
           if (previous) {
             if (previous.serial === current.serial)
@@ -1179,8 +1185,9 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           [
             `a health error that is not final`,
             () => {
-              source.reportError(new Error(`stream stalled`))
-              report(`stream stalled`, false)
+              const stalled = new Error(`stream stalled`)
+              source.reportError(stalled)
+              report(stalled, false)
             },
           ],
           [
@@ -1193,8 +1200,9 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           [
             `a final health error`,
             () => {
-              source.markError(new Error(`stream ended`))
-              report(`stream ended`, true)
+              const ended = new Error(`stream ended`)
+              source.markError(ended)
+              report(ended, true)
             },
           ],
           [
@@ -1207,8 +1215,9 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           [
             `a later report cannot replace a final health error`,
             () => {
-              source.reportError(new Error(`late`))
-              report(`late`, false)
+              const late = new Error(`late`)
+              source.reportError(late)
+              report(late, false)
             },
           ],
         ]
