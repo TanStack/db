@@ -49,6 +49,7 @@ was executed.
 | Reviewed code commit, broader tests | 427 ordered DB tests passed across the lifecycle, loader-state, and work owners; 78 React conformance tests passed. Both package TypeScript checks, Prettier, and `git diff --check` passed. ESLint had no errors and two warnings on unchanged lines. |
 | Adversarial follow-up, controlled adapter | All 268 ordered lifecycle tests passed, including eight index × settlement × row-order cells. The fallback request has no predicate, order, limit, cursor, or offset. The public rows remain empty and status stays `loading` at fallback entry. |
 | Adversarial follow-up, Query DB receiver | Both focused warm ordered tests passed. A warm cache returned literal `true` on both raw adapter calls. Row 2 was visible at the first return, rows 1 and 2 at the fallback return, and the receiving `findOne()` was immediately ready with row 2 without another fetch. Vitest reported no type errors. |
+| Event follow-up, controlled adapter | All 276 ordered lifecycle tests passed, including eight subscriber-event cells. Each observes one completed-window insert after fallback settlement, with the complete row visible in its callback. Promise cells have no nonempty event at the immediate cut. A temporary duplicate-event fault fails all eight cells at the publication comparison. |
 
 Four independent oracle reviewers challenged the contract, request path,
 observation checkpoints, and receiving boundary. They found three false-green
@@ -63,9 +64,11 @@ The locale-string cursor mutant now fails all eight cells at the request-shape
 assertion. The dropped-fallback-changes mutant fails all four tied-row cells at
 the public-row comparison: it returns row 2 instead of row 1. A synthetic
 early-publication fault fails all eight cells at the fallback-entry read. These
-were comparison failures, not setup failures or timeouts. The early-publication
-check reads state once. It does not count change events or reject a transient
-or duplicate event after that read when the later snapshots are correct.
+were comparison failures, not setup failures or timeouts. That state read alone
+cannot reject a transient or duplicate event after fallback entry. A separate
+subscriber-event assertion now records nonempty change batches across the same
+eight histories. A temporary duplicate-event fault fails all eight new cells
+at that assertion. Empty readiness callbacks do not count as row publication.
 
 The original `!hasSettledSourceRequest` gate is the calibrated wrong design:
 it reaches both acquisitions but fails the immediate comparison, then passes
@@ -80,17 +83,17 @@ are accounted for separately.
 | --- | --- |
 | ORC-001 | The authority is the architecture's initial-readiness cut. The owner states that source exhaustion and React render timing are outside the controlled oracle. The separate Query DB test covers a warm real adapter handoff. |
 | ORC-002 | Expected ids come from two fixed ISO dates, a descending singleton, and the public-key tie-breaker; synchronous versus Promise readiness comes from the contract. Neither the loader's cursor classifier nor production comparator computes the reference. |
-| ORC-003 | Opening and local prose distinguish the law, eight-cell grammar, independent reference, live Collection driver, fallback-entry and immediate observations, and refinement checks. The warm test explains its no-input continuation. |
-| ORC-004 | The added grammar is a complete finite index × fallback-settlement × row-order matrix, not a new generated-history claim. Its eight cells are enumerated, and request offsets establish distinct index paths. The existing generated lifecycle grammar was unchanged. |
-| ORC-005 | `createLiveQueryCollection()` and `preload()` execute the real core path. The recorder captures both requests before the immediate public `toArray`/`status` comparison. The controlled adapter honors predicates, and its writes and `commit()` precede literal `true`. |
-| ORC-006 | Unchanged production fails three assertions at the intended immediate checkpoint and passes after the fix. Two plausible production mutants and one synthetic early-publication fault fail at their intended comparisons in the stronger cells. None is a timeout or setup failure. |
+| ORC-003 | Opening and local prose distinguish the law, eight-cell grammar, independent reference, live Collection driver, fallback-entry and immediate observations, subscriber changes, and refinement checks. The warm test explains its no-input continuation. |
+| ORC-004 | The finite index × fallback-settlement × row-order matrix runs eight state cells and eight event cells, not a new generated-history claim. Request offsets establish distinct index paths. The existing generated lifecycle grammar was unchanged. |
+| ORC-005 | `createLiveQueryCollection()` and `preload()` execute the real core path. The recorder captures both requests before the immediate public `toArray`/`status` comparison. A subscriber registered before the first source write records public change batches without moving the preload cut. The controlled adapter honors predicates, and its writes and `commit()` precede literal `true`. |
+| ORC-006 | Unchanged production fails three assertions at the intended immediate checkpoint and passes after the fix. Two plausible production mutants and two synthetic publication faults fail at their intended comparisons in the stronger cells. None is a timeout or setup failure. |
 | ORC-007 | Not triggered by the new finite cells. The owner's pre-existing fixed and random campaigns are unchanged and ran in the broad suite. |
 | ORC-008 | No stateful reference-model state was introduced or revised; the new reference is a stateless observation over settlement and row order. |
 | ORC-009 | “Initial chain” maps to the ordered acquisition plus fallback before first publication. `rows` and `status` are public observations, not model state with a production counterpart. |
-| ORC-010 | `finishOracleCleanup` releases live and source Collections while retaining a primary mismatch and separate cleanup errors. The owner's failure-fidelity test remains in the passing broad run; no shrinking is used for the finite cells. |
+| ORC-010 | `finishOracleCleanup` releases the event observer, live Collection, and source Collection while retaining a primary mismatch and separate cleanup errors. The owner's failure-fidelity test remains in the passing broad run; no shrinking is used for the finite cells. |
 | ORC-011 | A locale-string cursor mutant exposed a shared request-shape blind spot in the original oracle. The revised oracle rejects it and requires the controlled provider to honor the request predicate. The Query DB warm-cache receiver checks a separate adapter path. |
 | ORC-012 | This record identifies applicable obligations, non-applicable triggers, the exact reviewed code commit, and the bounded bug-class result. |
-| ORC-013 | Literal `true` versus Promise separates the synchronous boundary; indexed versus unindexed acquisition, distinct versus tied dates, and a warm null boundary are adjacent legal witnesses. The old gate fails two string cells and the warm cell at the named cut. |
+| ORC-013 | Literal `true` versus Promise separates the synchronous boundary; indexed versus unindexed acquisition, distinct versus tied dates, and a warm null boundary are adjacent legal witnesses. The event cells require one final publication after fallback settlement and no Promise publication at the immediate cut. The old gate fails two string cells and the warm cell at the named cut. |
 | ORC-014 | The controlled adapter's premise is an applied receipt followed by literal `true`. The Query DB warm-cache test witnesses two real adapter returns of literal `true` with source rows visible at each return and an immediately ready receiver. React's eager source supplies a separate first-commit witness. |
 
 ## Bounded result
@@ -99,6 +102,8 @@ The repair is evidenced for the fixed indexed and unindexed locale-string
 `findOne()` histories, distinct and tied rows, a warm null boundary, Promise
 fallbacks, an eager React first layout commit, and a warm Query DB adapter
 handoff. The Query DB witness covers cached subsets. It does not establish a
-first-commit React result for a real on-demand provider, other adapters, or
-change-event behavior after fallback entry. No reachable counterexample
-remains in the executed core and receiving paths at their stated checkpoints.
+first-commit React result for a real on-demand provider or other adapters.
+The event assertion covers the eight controlled fallback histories. It does
+not establish every event ordering or another provider's publication path.
+No reachable counterexample remains in the executed core and receiving paths
+at their stated checkpoints.

@@ -1368,11 +1368,25 @@ describe(`ordered lifecycle product`, () => {
  * the unindexed prefix, so the two index cells cannot collapse to one path.
  * The request trace must reach both acquisitions by the immediate checkpoint;
  * a deferred acquisition or a test that checks before preload cannot pass.
+ * A subscriber registered by the controlled provider before its first row
+ * write observes the same preload history. It must receive one nonempty insert
+ * of the model's final singleton, after the fallback result settles, and read
+ * that complete window in its callback. Empty readiness callbacks are not row
+ * publications.
  * This owner does not establish React's render timing or adapter-specific
  * cache behavior.
  */
 type InitialFallbackRow = { id: number; at: string }
 type InitialFallbackOrder = `distinct` | `tied`
+type InitialFallbackPublication = {
+  changes: Array<{
+    type: `insert` | `update` | `delete`
+    key: number
+    value: InitialFallbackRow
+  }>
+  rows: Array<InitialFallbackRow>
+  afterFallbackResult: boolean
+}
 
 function initialFallbackRows(
   order: InitialFallbackOrder,
@@ -1396,10 +1410,13 @@ async function observeInitialFallback(
   autoIndex: `eager` | `off`,
   settlement: InitialSettlementShape,
   order: InitialFallbackOrder,
+  recordEvents = false,
 ) {
   const requests: Array<LoadSubsetOptions> = []
   const delivered = new Set<number>()
   const rows = initialFallbackRows(order)
+  const publications: Array<InitialFallbackPublication> = []
+  let fallbackResultSettled = false
   let atFallbackEntry: InitialSettlementObservation | undefined
   const source = createCollection<InitialFallbackRow, number>({
     id: `initial-locale-fallback-${autoIndex}-${settlement}-${order}`,
@@ -1424,6 +1441,25 @@ async function observeInitialFallback(
             const served = options.orderBy ? matching.slice(1) : matching
             const fresh = served.filter(({ id }) => !delivered.has(id))
             if (fresh.length > 0) {
+              if (recordEvents && !observer)
+                observer = live.subscribeChanges(
+                  (changes) => {
+                    if (changes.length === 0) return
+                    publications.push({
+                      changes: changes.map((change) => ({
+                        type: change.type,
+                        key: change.key,
+                        value: {
+                          id: change.value.id,
+                          at: change.value.at,
+                        },
+                      })),
+                      rows: live.toArray.map(({ id, at }) => ({ id, at })),
+                      afterFallbackResult: fallbackResultSettled,
+                    })
+                  },
+                  { includeInitialState: false },
+                )
               begin()
               for (const row of fresh) {
                 delivered.add(row.id)
@@ -1431,9 +1467,15 @@ async function observeInitialFallback(
               }
               expect(commit()).toBe(true)
             }
-            return options.orderBy || settlement === `synchronous`
-              ? true
-              : Promise.resolve()
+            const result =
+              options.orderBy || settlement === `synchronous`
+                ? true
+                : Promise.resolve()
+            if (recordEvents && !options.orderBy) {
+              if (result === true) fallbackResultSettled = true
+              else void result.then(() => (fallbackResultSettled = true))
+            }
+            return result
           },
         }
       },
@@ -1453,12 +1495,15 @@ async function observeInitialFallback(
       status: live.status,
     }
   }
+  let observer: ReturnType<typeof live.subscribeChanges> | undefined
   let observation:
     | {
         immediate: InitialSettlementObservation
         settled: InitialSettlementObservation
         atFallbackEntry: InitialSettlementObservation | undefined
         requestsAtCut: Array<LoadSubsetOptions>
+        publicationsAtCut: Array<InitialFallbackPublication>
+        publications: Array<InitialFallbackPublication>
       }
     | undefined
   let primaryFailure: CapturedOracleFailure | undefined
@@ -1466,19 +1511,26 @@ async function observeInitialFallback(
     const preload = live.preload()
     const immediate = observeCurrent()
     const requestsAtCut = [...requests]
+    const publicationsAtCut = [...publications]
     await preload
     observation = {
       immediate,
       settled: observeCurrent(),
       atFallbackEntry,
       requestsAtCut,
+      publicationsAtCut,
+      publications: [...publications],
     }
   } catch (error) {
     primaryFailure = { error }
   }
   await finishOracleCleanup(
     primaryFailure,
-    [() => live.cleanup(), () => source.cleanup()],
+    [
+      () => observer?.unsubscribe(),
+      () => live.cleanup(),
+      () => source.cleanup(),
+    ],
     `Initial locale fallback oracle cleanup failed`,
   )
   return observation!
@@ -1527,6 +1579,35 @@ describe(`initial locale-string fallback oracle`, () => {
         rows: [order === `tied` ? 1 : 2],
         status: `ready`,
       })
+    },
+  )
+
+  it.each(cells)(
+    `emits one completed $autoIndex $order initial window change with $settlement fallback`,
+    async ({ autoIndex, order, settlement }) => {
+      const observed = await observeInitialFallback(
+        autoIndex,
+        settlement,
+        order,
+        true,
+      )
+      const id = order === `tied` ? 1 : 2
+      expect(observed.requestsAtCut).toHaveLength(2)
+      expect(observed.atFallbackEntry).toEqual({ rows: [], status: `loading` })
+      expect(observed.immediate).toEqual(
+        expectedInitialFallback(settlement, order),
+      )
+      if (settlement === `promise`)
+        expect(observed.publicationsAtCut).toEqual([])
+      expect(observed.settled).toEqual({ rows: [id], status: `ready` })
+      const winner = { id, at: `2026-10-02` }
+      expect(observed.publications).toEqual([
+        {
+          changes: [{ type: `insert`, key: id, value: winner }],
+          rows: [winner],
+          afterFallbackResult: true,
+        },
+      ])
     },
   )
 })
