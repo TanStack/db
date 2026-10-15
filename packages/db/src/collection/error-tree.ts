@@ -1,3 +1,4 @@
+import { getCollectionBuilder } from '../query/live/collection-registry.js'
 import type { CollectionErrorInfo, ErrorTreeNode } from '../types'
 import type { CollectionImpl } from './index.js'
 
@@ -31,7 +32,9 @@ export function buildErrorTree(
     alias: `root`,
   },
 ): ErrorTreeNode {
-  const sources = collection._errorTreeSources?.() ?? []
+  // A live query's tree shape comes from its query definition.
+  const builder = getCollectionBuilder(collection)
+  const sources = builder?.errorTreeSources() ?? []
   const lifecycle = collection._lifecycle
   const error: CollectionErrorInfo | null =
     lifecycle.gateProblem ?? lifecycle.health.error
@@ -41,7 +44,7 @@ export function buildErrorTree(
   return errorTreeNode(collection, id, {
     alias,
     collectionId: collection.id,
-    kind: kind ?? (collection._errorTreeSources ? `live-query` : `source`),
+    kind: kind ?? (builder ? `live-query` : `source`),
     status: collection.status,
     error,
     ...(instances ? { instances: countInstances(instances()) } : {}),

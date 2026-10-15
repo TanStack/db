@@ -18,7 +18,6 @@ import { CollectionIndexesManager } from './indexes'
 import { CollectionMutationsManager } from './mutations'
 import { CollectionEventsManager } from './events.js'
 import { buildErrorTree } from './error-tree.js'
-import type { ErrorTreeSource } from './error-tree.js'
 import type { SortedMap } from '../SortedMap.js'
 import type { PublicationDeferral } from './changes'
 import type { CollectionSubscription } from './subscription'
@@ -578,9 +577,6 @@ export class CollectionImpl<
   public _emitHealthChange(): void {
     this._events.emitHealthChange()
   }
-
-  /** @internal Set by a live query: the sources its error tree lists. */
-  public _errorTreeSources: (() => ReadonlyArray<ErrorTreeSource>) | undefined
 
   /**
    * Get the number of subscribers that ask for this collection's data. A live

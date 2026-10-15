@@ -32,8 +32,6 @@ export function registerCollectionBuilder(
   builder: CollectionConfigBuilder<any, any>,
 ): void {
   collectionBuilderRegistry.set(collection, builder)
-  // The error tree's shape comes from the query, so it is fixed from creation.
-  collection._errorTreeSources = () => builder.errorTreeSources()
 }
 
 /**
