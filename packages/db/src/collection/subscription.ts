@@ -823,6 +823,11 @@ export class CollectionSubscription
     return this.truncateReplacementPending
   }
 
+  /** Whether the source accepted sync rows that are not yet visible. */
+  public get hasHeldSyncTransaction(): boolean {
+    return this.collection._hasHeldSyncTransaction()
+  }
+
   public get pendingTruncateReplacement(): Promise<void> | undefined {
     const completion = this.truncateReplayState?.completion
     return completion?.isPending() ? completion.promise : undefined

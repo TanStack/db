@@ -88,7 +88,9 @@ import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
  *   need a row that now sorts between the page's new and old end. But a
  *   window whose rows are all in its own first page, as after an ordinary
  *   insert into a top-N list, starts no repair: rows the page left out sort
- *   after its end. Then the refetch sends only the refetched Queries.
+ *   after its end. Then the refetch sends only the refetched Queries. The
+ *   loader can judge that only from visible rows: while a persisting
+ *   optimistic transaction holds the refetched rows back, it repairs.
  * Each request also carries a Query key that matches its own request data,
  * so a `queryFn` may read either one.
  *
@@ -320,6 +322,10 @@ type Run = {
   // Make the next change application fail once: a change subscriber throws
   // while the refetched rows commit.
   failNextApplication: () => void
+  // Start an optimistic update of a loaded row whose handler waits until the
+  // returned release is called. While it persists, the Collection holds
+  // every sync transaction back.
+  holdUpdate: (id: number) => () => Promise<void>
   refetch: (opts?: { throwOnError?: boolean }) => Promise<unknown>
   cleanup: () => Promise<Array<unknown>>
 }
@@ -423,8 +429,15 @@ async function startRun(testCase: Case): Promise<Run> {
       getKey: (row) => row.id,
       autoIndex: `eager`,
       defaultIndexType: BTreeIndex,
+      // A held optimistic update stays persisting until released; the
+      // backend does not change.
+      onUpdate: async () => {
+        await heldUpdate
+        return { refetch: false }
+      },
     }),
   )
+  let heldUpdate: Promise<void> = Promise.resolve()
 
   let reports = 0
   items.on(`loadedSubsets:invalidated`, () => {
@@ -545,6 +558,20 @@ async function startRun(testCase: Case): Promise<Run> {
     changedReanswers: () => changedReanswers,
     failNextApplication: () => {
       failApplication = true
+    },
+    holdUpdate: (rowId) => {
+      let release!: () => void
+      heldUpdate = new Promise((resolve) => {
+        release = resolve
+      })
+      const transaction = items.update(rowId, (draft) => {
+        draft.label += `!`
+      })
+      return async () => {
+        release()
+        await transaction.isPersisted.promise
+        await settle()
+      }
     },
     refetch: (opts) => items.utils.refetch(opts),
     cleanup: async () => {
@@ -965,6 +992,52 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
         { type: `upsert`, id: 4, rank: 1 },
       ],
     })
+  })
+
+  // The same shape while an optimistic update persists. The Collection
+  // accepts the refetched rows at once but holds them back until the update
+  // settles, so the report arrives while the old rows are still visible.
+  // Other live queries hold rows 0, 1 and 2, so row 0 stays after it leaves
+  // the page and no delete starts the loader's own repair. Once the rows
+  // apply, unmarked row 4 heads the page and row 3 sorts between it and
+  // row 0; only a repair after the rows become visible can load row 3.
+  it(`shows a row that lands between a page's new and old end while an optimistic update persists`, async () => {
+    const scenario: Scenario = {
+      encoding: `cursor`,
+      functionKey: false,
+      orderKey: `rank`,
+      pageCap: undefined,
+      terms: 1,
+      limit: 1,
+      offset: 0,
+    }
+    const run = await startRun({
+      scenario,
+      initial: [
+        { id: 0, rank: 1, marked: true },
+        { id: 1, rank: 0, marked: true },
+        { id: 2, rank: 0, marked: true },
+        { id: 3, rank: 0, marked: true },
+      ],
+      history: [],
+    })
+    let primary: unknown
+    try {
+      for (const id of [0, 1, 2]) await run.apply({ type: `observe`, id })
+      await run.apply({ type: `upsert`, id: 3, rank: 1 })
+      await run.apply({ type: `upsert`, id: 4, rank: 1 })
+      const release = run.holdUpdate(1)
+      await run.apply({ type: `refetch` })
+      await release()
+      expect(run.windowIds()).toEqual(
+        expectedWindow(run.backend, run.markers, scenario),
+      )
+    } catch (error) {
+      primary = error
+    }
+    const failures = await run.cleanup()
+    if (primary !== undefined) throw primary
+    expect(failures).toEqual([])
   })
 
   // The ordinary insert into a top-N list. The page's end moves earlier, so

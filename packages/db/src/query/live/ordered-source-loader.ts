@@ -504,7 +504,14 @@ export class OrderedSourceLoader {
   // the window is not proven.
   private windowIsInsideOwnPrefix(): boolean {
     const size = this.info.offset + this.info.limit
-    if ((this.ownPrefixCount ?? 0) < size || !this.info.dataNeeded) {
+    // A report can arrive while the refetched rows are accepted but held
+    // back, as behind a persisting optimistic transaction. The visible rows
+    // then predate the refetch and prove nothing about its page.
+    if (
+      (this.ownPrefixCount ?? 0) < size ||
+      !this.info.dataNeeded ||
+      this.subscription.hasHeldSyncTransaction
+    ) {
       return false
     }
     const rows = this.subscription.readOrderedSnapshot({
