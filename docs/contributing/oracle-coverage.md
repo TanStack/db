@@ -761,15 +761,18 @@ checkpoint. These fixed cuts do not establish arbitrary callback reentry or
 all abort/unload orderings; the generated grammar and hostile controls below
 extend them. [Issue #2162](https://github.com/TanStack/db/issues/2162)
 remains open pending final review of that bounded claim.
-Three more accepted-result histories hold A's applied receipt while a later B
+Four more accepted-result histories hold A's applied receipt while a later B
 result or a replay of A enters an unaccepted commit. A direct caller aborts
 after A's acceptance. Each history records A's receipt state and the complete
 public rows inside that caller's rejection handler; it must remain pending
 before A applies and reject with A visible afterward. One history starts B by
 refetch, one writes B into Query cache during A's commit callback before the
 waiter records A, and one replays the same observer result after a passive
-subscriber remounts. Restoring the latest-controller lookup fails all three
-at the held-gate outcome checkpoint. Allowing the replay to overwrite A's
+subscriber remounts. The fourth starts A by explicit refetch of an existing
+Query. Query Core can return B's result object after the reentrant cache edit;
+the caller must still wait for A's accepted receipt. The previous result-object
+lookup failed at the held-gate outcome checkpoint. Restoring the latest-controller
+lookup fails the first three at that checkpoint. Allowing the replay to overwrite A's
 result controller fails the same-result history there. These controlled
 histories do not establish arbitrary later accepted-result ordering.
 An initial-fetch lease grammar now varies an equal peer, consumed versus
@@ -864,6 +867,13 @@ physical signal while B remains live and later publishes its row; B's unload
 leaves A's row until A releases. Selecting the last promoted lease instead
 fails at C's signal checkpoint. The same-Query startup witness establishes
 aggregate ownership but cannot distinguish A's lease from C's by public rows.
+A release from a function-built Query key during startup promotion checks the
+gap between pending-token removal and Query lease recording through both direct
+adapter and public subscription paths. The old direct path left its source row
+public; the repaired path leaves no source row or Query observer. The public
+path checks Core's deferred unload at the same callback cut. Earlier startup
+witnesses release before or after promotion. The direct history does not claim
+the raw released load's outcome.
 Two or three pending direct calls that reuse both one options object and one
 AbortSignal must each release their own acquisition when the signal aborts.
 The load-lifecycle owner crosses whether the provider consumes the physical

@@ -7369,6 +7369,96 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   /**
+   * A pending acquisition remains releasable while startup maintenance
+   * promotes it to a Query lease. The function-built key is a legal synchronous
+   * callback between those states: it unloads the direct request or retires a
+   * public subscription before Query DB records the lease. The raw direct load
+   * outcome is outside this law. Once work settles, no source row or Query
+   * observer may remain. Neighboring startup tests release before and after
+   * this handoff.
+   */
+  it.each([`direct`, `public`] as const)(
+    `retires a %s acquisition released during startup key generation`,
+    async (path) => {
+      const id = `${path}-startup-key-release`
+      const request: LoadSubsetOptions = {
+        where: eq(new IR.PropRef([`category`]), `shared`),
+      }
+      const queryClient = createQueryClient()
+      let releaseOwner = () => {}
+      let releasedFromKey = false
+      const provider = vi.fn(() => Promise.resolve([shared]))
+      const baseOptions = queryCollectionOptions<Item>({
+        id,
+        queryClient,
+        queryKey: (options) => {
+          if (options.where && !releasedFromKey) {
+            releasedFromKey = true
+            releaseOwner()
+          }
+          return options.where ? [id, `filtered`] : [id]
+        },
+        queryFn: provider,
+        getKey: (item) => item.id,
+        startSync: true,
+        syncMode: `on-demand`,
+      })
+      const originalSync = baseOptions.sync
+      const collection = createCollection({
+        ...baseOptions,
+        sync: {
+          sync: (params: Parameters<typeof originalSync.sync>[0]) => {
+            params.begin()
+            params.metadata!.collection.set(`queryCollection:gc:startup`, {
+              queryHash: `startup`,
+              mode: `until-revalidated`,
+            })
+            params.commit()
+            return originalSync.sync(params)
+          },
+        },
+      })
+      const subscriber =
+        path === `public`
+          ? collection.subscribeChanges(() => {}, {
+              includeInitialState: false,
+            })
+          : undefined
+      releaseOwner = subscriber
+        ? () => subscriber.unsubscribe()
+        : () => collection._sync.unloadSubset(request)
+      cleanups.push(async () => {
+        subscriber?.unsubscribe()
+        await collection.cleanup()
+        queryClient.clear()
+      })
+
+      collection.startSyncImmediate()
+      let load: true | Promise<void> | undefined
+      if (subscriber) {
+        subscriber.requestSnapshot({
+          ...request,
+          onLoadSubsetResult: (result) => {
+            load = result
+            void Promise.resolve(result).catch(() => undefined)
+          },
+        })
+      } else {
+        load = collection._sync.loadSubset(request)
+      }
+      if (load !== undefined) await Promise.resolve(load).catch(() => undefined)
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect(releasedFromKey).toBe(true)
+      expect(rows(collection)).toEqual([])
+      const query = queryClient.getQueryCache().find({
+        queryKey: [id, `filtered`],
+        exact: true,
+      })
+      expect(query?.getObserversCount() ?? 0).toBe(0)
+    },
+  )
+
+  /**
    * The newest direct call owns the next options-only unload, even while an
    * older call remains in startup retention maintenance. The first pending
    * call promotes to a Query lease and its query function synchronously adds

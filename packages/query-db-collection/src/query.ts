@@ -849,6 +849,9 @@ export function queryCollectionOptions(
   // obligation merely because it happened before the call returned.
   type FetchApplicationRecord = {
     result?: QueryObserverResult<any, any>
+    // Query Core may return a later cache edit from observer.refetch(). Keep
+    // the first terminal result that Query DB applied for this physical fetch.
+    applicationResult?: QueryObserverResult<any, any>
     settlement?: Promise<void>
   }
   const resultApplicationSettlements = new WeakMap<
@@ -1051,6 +1054,7 @@ export function queryCollectionOptions(
     order: number
     lease?: AcquisitionLease
     result?: QueryObserverResult<any, any>
+    fetchRecord?: FetchApplicationRecord
   }
   let nextAcquisitionOrder = 0
   let acquisitionLeasesByOptions = new WeakMap<
@@ -2102,7 +2106,17 @@ export function queryCollectionOptions(
           for (;;) {
             if (!active) return
             try {
-              const result = await observer.refetch({ throwOnError: true })
+              const fetch = observer.refetch({ throwOnError: true })
+              const query = observer.getCurrentQuery()
+              const fetchStart = queryCollectionCurrentFetchStarts.get(query)
+              if (handle && fetchStart !== undefined) {
+                handle.fetchRecord = getFetchApplicationRecord(
+                  query,
+                  fetchStart,
+                  hashedQueryKey,
+                )
+              }
+              const result = await fetch
               if (handle) handle.result = result
             } catch (error) {
               const fetchStart = queryCollectionCurrentFetchStarts.get(
@@ -2205,10 +2219,28 @@ export function queryCollectionOptions(
       )
     }
 
+    const getLegacyOwnerDemandKey = (
+      opts: LoadSubsetOptions,
+    ): string | undefined => {
+      if (
+        !metadata ||
+        syncMode !== `on-demand` ||
+        typeof queryKey === `function`
+      )
+        return undefined
+      const demandKey = getLoadSubsetDemandKey(opts)
+      return demandKey !== undefined &&
+        (getLegacyLoadSubsetDemandKey(opts) !== undefined ||
+          demandKey.includes(`"name":"eq"`))
+        ? demandKey
+        : undefined
+    }
+
     const createQueryFromOpts = (
       opts: LoadSubsetOptions = {},
       queryFunction: typeof queryFn = queryFn,
       handle?: AcquisitionHandle,
+      promotion?: AcquisitionHandle,
     ): true | Promise<void> => {
       const deferUntil = (work: Promise<unknown>): Promise<void> => {
         // Discovery of historical keys does not establish an observer lease.
@@ -2226,10 +2258,26 @@ export function queryCollectionOptions(
         }
         return work.then(
           () => {
-            if (!releasePending() || opts.signal?.aborted) {
+            if (!pendingStartupLoads.get(opts)?.has(acquisition)) {
               throw new LoadSubsetOperationAbortedError()
             }
-            const resumed = createQueryFromOpts(opts, queryFunction, handle)
+            // Keep the pending token until its Query lease exists. A queryKey
+            // or Query-cache callback can unload this request during promotion.
+            let resumed: true | Promise<void>
+            try {
+              resumed = createQueryFromOpts(
+                opts,
+                queryFunction,
+                handle,
+                acquisition,
+              )
+            } finally {
+              if (pendingStartupLoads.get(opts)?.has(acquisition)) {
+                releasePending()
+              } else if (handle?.lease) {
+                releaseAcquisitionLease(opts, handle.lease)
+              }
+            }
             return resumed === true ? undefined : resumed
           },
           (error: unknown) => {
@@ -2242,33 +2290,42 @@ export function queryCollectionOptions(
         return Promise.reject(new LoadSubsetOperationAbortedError())
       }
       if (!startupRetentionSettled) {
-        return deferUntil(startupRetentionMaintenancePromise)
+        return deferUntil(
+          startupRetentionMaintenancePromise.then(() => {
+            if (
+              (pendingStartupLoads.get(opts)?.size ?? 0) > 0 &&
+              persistence?.scanPersistedRows &&
+              !persistedOwnerHashes &&
+              getLegacyOwnerDemandKey(opts) !== undefined
+            ) {
+              return scanPersistedOwnerHashes()
+            }
+            return undefined
+          }),
+        )
       }
 
       const requestedKey = generateQueryKeyFromOptions(opts)
       if (opts.signal?.aborted) {
         return Promise.reject(new LoadSubsetOperationAbortedError())
       }
+      if (promotion && !pendingStartupLoads.get(opts)?.has(promotion)) {
+        throw new LoadSubsetOperationAbortedError()
+      }
       const requestedHash = hashKey(requestedKey)
       let legacyAliases: Set<string> | undefined
-      if (
-        metadata &&
-        syncMode === `on-demand` &&
-        typeof queryKey !== `function`
-      ) {
-        const demandKey = getLoadSubsetDemandKey(opts)
-        if (
-          demandKey !== undefined &&
-          (getLegacyLoadSubsetDemandKey(opts) !== undefined ||
-            demandKey.includes(`"name":"eq"`))
-        ) {
-          if (persistence?.scanPersistedRows && !persistedOwnerHashes)
-            return deferUntil(scanPersistedOwnerHashes())
-          legacyAliases = getLegacyOwnerHashes(demandKey, requestedHash, opts)
-          if (legacyAliases.size > 0) {
-            legacyPersistedOwnerHashes.set(requestedHash, legacyAliases)
-            legacyAliases.forEach(cancelPersistedRetentionExpiry)
-          }
+      const legacyDemandKey = getLegacyOwnerDemandKey(opts)
+      if (legacyDemandKey !== undefined) {
+        if (persistence?.scanPersistedRows && !persistedOwnerHashes)
+          return deferUntil(scanPersistedOwnerHashes())
+        legacyAliases = getLegacyOwnerHashes(
+          legacyDemandKey,
+          requestedHash,
+          opts,
+        )
+        if (legacyAliases.size > 0) {
+          legacyPersistedOwnerHashes.set(requestedHash, legacyAliases)
+          legacyAliases.forEach(cancelPersistedRetentionExpiry)
         }
       }
       const fullObserver =
@@ -2499,7 +2556,10 @@ export function queryCollectionOptions(
       const localQuery = localObserver.getCurrentQuery()
       // QueryCache's `added` notification runs inside the constructor. It
       // can clean up this Collection before we register the new Query.
-      if (activeSyncSession !== syncSession) {
+      if (
+        activeSyncSession !== syncSession ||
+        (promotion && !pendingStartupLoads.get(opts)?.has(promotion))
+      ) {
         if (
           cachedQueryBeforeObserver !== localQuery &&
           localQuery.getObserversCount() === 0 &&
@@ -3272,6 +3332,17 @@ export function queryCollectionOptions(
         applicationToken: ResultApplicationController,
       ) => true | Promise<void>,
     ): void => {
+      if (!result.isFetching) {
+        const query = state.observers.get(hashedQueryKey)?.getCurrentQuery()
+        const fetchStart = query && queryCollectionCurrentFetchStarts.get(query)
+        if (query && fetchStart !== undefined) {
+          const record = fetchApplicationRecords
+            .get(query)
+            ?.get(fetchStart)
+            ?.get(hashedQueryKey)
+          if (record) record.applicationResult ??= result
+        }
+      }
       const priorCommit = retiringCommitSettlements.get(hashedQueryKey)
       invalidatePendingResultApplication(hashedQueryKey)
       const currentErrorRevision = errorRevision
@@ -4426,9 +4497,11 @@ export function queryCollectionOptions(
                   aborting = true
                   let controller: ResultApplicationController | undefined
                   if (lease) {
-                    controller = handle.result
+                    const causalResult =
+                      handle.fetchRecord?.applicationResult ?? handle.result
+                    controller = causalResult
                       ? resultApplicationControllersByResult
-                          .get(handle.result)
+                          .get(causalResult)
                           ?.get(lease.hashedQueryKey)
                       : resultApplicationControllers.get(lease.hashedQueryKey)
                   }
