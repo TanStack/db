@@ -1041,11 +1041,14 @@ export function queryCollectionOptions(
   type AcquisitionLease = {
     requestedHash: string
     hashedQueryKey: string
+    order: number
   }
   type AcquisitionHandle = {
-    pending?: object
+    order: number
     lease?: AcquisitionLease
+    result?: QueryObserverResult<any, any>
   }
+  let nextAcquisitionOrder = 0
   let acquisitionLeasesByOptions = new WeakMap<
     LoadSubsetOptions,
     Array<AcquisitionLease>
@@ -1056,11 +1059,12 @@ export function queryCollectionOptions(
     hashedQueryKey: string,
     handle?: AcquisitionHandle,
   ) => {
-    const lease = { requestedHash, hashedQueryKey }
-    if (handle) {
-      handle.pending = undefined
-      handle.lease = lease
+    const lease = {
+      requestedHash,
+      hashedQueryKey,
+      order: handle?.order ?? ++nextAcquisitionOrder,
     }
+    if (handle) handle.lease = lease
     const optionsLeases = acquisitionLeasesByOptions.get(options) ?? []
     optionsLeases.push(lease)
     acquisitionLeasesByOptions.set(options, optionsLeases)
@@ -1211,7 +1215,10 @@ export function queryCollectionOptions(
     // Track whether sync has been started
     let syncStarted = false
     let startupRetentionSettled = false
-    const pendingStartupLoads = new Map<LoadSubsetOptions, Set<object>>()
+    const pendingStartupLoads = new Map<
+      LoadSubsetOptions,
+      Set<AcquisitionHandle>
+    >()
     const retainedQueriesPendingRevalidation = new Set<string>()
     const observedErrorUpdates = new WeakMap<AnyQuery, number>()
     let errorRevision = 0
@@ -1244,10 +1251,15 @@ export function queryCollectionOptions(
         committed: boolean
         applied: { promise: Promise<void> }
       }
+      applicationSettled?: boolean
     }
     const resultApplicationControllers = new Map<
       string,
       ResultApplicationController
+    >()
+    const resultApplicationControllersByResult = new WeakMap<
+      QueryObserverResult<any, any>,
+      Map<string, ResultApplicationController>
     >()
     // A newer result may replace an application without releasing its Query.
     // A commit held by a wrapping sync is canceled only when the Query owner
@@ -1329,6 +1341,7 @@ export function queryCollectionOptions(
       settleResult?: (
         result: QueryObserverResult<Array<any>, any>,
       ) => true | Promise<void>,
+      captureResult?: (result: QueryObserverResult<Array<any>, any>) => void,
     ): Promise<QueryObserverResult<Array<any>, any>> =>
       new Promise((resolve, reject) => {
         let active = true
@@ -1355,6 +1368,14 @@ export function queryCollectionOptions(
         const observedQuery = observer.getCurrentQuery()
         const ownedBeforeCleanup = ownedCacheQueries.has(observedQuery)
         unsubscribe = observer.subscribe((result) => {
+          if (
+            active &&
+            !settling &&
+            result.isSuccess &&
+            !collection.deferDataRefresh
+          ) {
+            captureResult?.(result)
+          }
           queueMicrotask(() => {
             if (
               (result.isSuccess && !collection.deferDataRefresh) ||
@@ -1863,6 +1884,7 @@ export function queryCollectionOptions(
       observer: QueryObserver<Array<any>, any, Array<any>, Array<any>, any>,
       hashedQueryKey: string,
       acceptsResult?: (result: QueryObserverResult<any, any>) => boolean,
+      handle?: AcquisitionHandle,
     ): Promise<void> =>
       waitForAuthoritativeObserverResult(
         observer,
@@ -1871,13 +1893,20 @@ export function queryCollectionOptions(
         acceptsResult,
         (result) => {
           if (result.isError) throw result.error
+          if (handle) handle.result = result
           return getResultApplicationSettlement(hashedQueryKey)
         },
+        handle && acceptsResult === undefined
+          ? (result) => {
+              if (handle.result === undefined) handle.result = result
+            }
+          : undefined,
       ).then(() => undefined)
 
     const refetchAndWaitForApplication = async (
       observer: QueryObserver<Array<any>, any, Array<any>, Array<any>, any>,
       hashedQueryKey: string,
+      handle?: AcquisitionHandle,
     ): Promise<void> =>
       new Promise<void>((resolve, reject) => {
         let active = true
@@ -1904,7 +1933,8 @@ export function queryCollectionOptions(
           for (;;) {
             if (!active) return
             try {
-              await observer.refetch({ throwOnError: true })
+              const result = await observer.refetch({ throwOnError: true })
+              if (handle) handle.result = result
             } catch (error) {
               const fetchStart = queryCollectionCurrentFetchStarts.get(
                 observer.getCurrentQuery(),
@@ -1935,7 +1965,12 @@ export function queryCollectionOptions(
             waitsForDeferredApplication ||
             !hasCurrentCacheGenerationFetch(observer.getCurrentQuery())
           ) {
-            await waitForQueryReadyAndApplied(observer, hashedQueryKey)
+            await waitForQueryReadyAndApplied(
+              observer,
+              hashedQueryKey,
+              undefined,
+              handle,
+            )
             return
           }
           const settlement = getResultApplicationSettlement(hashedQueryKey)
@@ -1950,27 +1985,33 @@ export function queryCollectionOptions(
     const refetchOrWaitForEnabledQuery = (
       observer: QueryObserver<Array<any>, any, Array<any>, Array<any>, any>,
       hashedQueryKey: string,
+      handle?: AcquisitionHandle,
     ): Promise<void> => {
       const query = observer.getCurrentQuery()
       const queryEnabled =
         typeof enabled === `function` ? enabled(query) : enabled !== false
       if (queryEnabled)
-        return refetchAndWaitForApplication(observer, hashedQueryKey)
+        return refetchAndWaitForApplication(observer, hashedQueryKey, handle)
 
       // An explicit utility refetch can still start this disabled Query. Until
       // then, neither a locally edited cache nor an old cache generation may
       // settle its acquisition as though a physical result had arrived.
       const cachedVersion = query.state.dataUpdateCount
-      return waitForQueryReadyAndApplied(observer, hashedQueryKey, (result) => {
-        if (result.isError) return true
-        const current = observer.getCurrentQuery()
-        return (
-          current.state.dataUpdateCount > cachedVersion &&
-          queryCollectionSuccessfulFetchVersions.get(current) ===
-            current.state.dataUpdateCount &&
-          hasCurrentCacheGenerationFetch(current)
-        )
-      })
+      return waitForQueryReadyAndApplied(
+        observer,
+        hashedQueryKey,
+        (result) => {
+          if (result.isError) return true
+          const current = observer.getCurrentQuery()
+          return (
+            current.state.dataUpdateCount > cachedVersion &&
+            queryCollectionSuccessfulFetchVersions.get(current) ===
+              current.state.dataUpdateCount &&
+            hasCurrentCacheGenerationFetch(current)
+          )
+        },
+        handle,
+      )
     }
 
     const createQueryFromOpts = (
@@ -1980,9 +2021,9 @@ export function queryCollectionOptions(
     ): true | Promise<void> => {
       if (!startupRetentionSettled) {
         // Immutable request data may be reused; ownership belongs to each call.
-        const acquisition = handle?.pending ?? {}
-        if (handle) handle.pending = acquisition
-        const pending = pendingStartupLoads.get(opts) ?? new Set<object>()
+        const acquisition = handle ?? { order: ++nextAcquisitionOrder }
+        const pending =
+          pendingStartupLoads.get(opts) ?? new Set<AcquisitionHandle>()
         pending.add(acquisition)
         pendingStartupLoads.set(opts, pending)
         return startupRetentionMaintenancePromise.then(() => {
@@ -2087,7 +2128,7 @@ export function queryCollectionOptions(
         const currentResult = observer.getCurrentResult()
 
         if (opts.refetch) {
-          return refetchAndWaitForApplication(observer, hashedQueryKey)
+          return refetchAndWaitForApplication(observer, hashedQueryKey, handle)
         }
 
         const query = observer.getCurrentQuery()
@@ -2102,23 +2143,34 @@ export function queryCollectionOptions(
             query.state.dataUpdateCount >
               (queryCollectionSuccessfulFetchVersions.get(query) ?? 0))
         ) {
-          return refetchOrWaitForEnabledQuery(observer, hashedQueryKey)
+          return refetchOrWaitForEnabledQuery(observer, hashedQueryKey, handle)
         }
 
         if (!hasCurrentCacheGenerationFetch(observer.getCurrentQuery())) {
-          return refetchOrWaitForEnabledQuery(observer, hashedQueryKey)
+          return refetchOrWaitForEnabledQuery(observer, hashedQueryKey, handle)
         }
 
         if (currentResult.isSuccess) {
           if (collection.deferDataRefresh) {
-            return waitForQueryReadyAndApplied(observer, hashedQueryKey)
+            return waitForQueryReadyAndApplied(
+              observer,
+              hashedQueryKey,
+              undefined,
+              handle,
+            )
           }
+          if (handle) handle.result = currentResult
           return getResultApplicationSettlement(hashedQueryKey)
         } else if (currentResult.isError && !currentResult.isFetching) {
           // Error already occurred, reject immediately
           return Promise.reject(currentResult.error)
         } else {
-          return waitForQueryReadyAndApplied(observer, hashedQueryKey)
+          return waitForQueryReadyAndApplied(
+            observer,
+            hashedQueryKey,
+            undefined,
+            handle,
+          )
         }
       }
 
@@ -2301,21 +2353,44 @@ export function queryCollectionOptions(
           unknownPersistedRowOrder
         ) {
           return opts.refetch
-            ? refetchAndWaitForApplication(localObserver, hashedQueryKey)
-            : refetchOrWaitForEnabledQuery(localObserver, hashedQueryKey)
+            ? refetchAndWaitForApplication(
+                localObserver,
+                hashedQueryKey,
+                handle,
+              )
+            : refetchOrWaitForEnabledQuery(
+                localObserver,
+                hashedQueryKey,
+                handle,
+              )
         }
         if (!hasCurrentCacheGenerationFetch(localObserver.getCurrentQuery())) {
-          return refetchOrWaitForEnabledQuery(localObserver, hashedQueryKey)
+          return refetchOrWaitForEnabledQuery(
+            localObserver,
+            hashedQueryKey,
+            handle,
+          )
         }
         if (currentResult.isError && !currentResult.isFetching) {
           return Promise.reject(currentResult.error)
         }
         if (!currentResult.isSuccess) {
-          return waitForQueryReadyAndApplied(localObserver, hashedQueryKey)
+          return waitForQueryReadyAndApplied(
+            localObserver,
+            hashedQueryKey,
+            undefined,
+            handle,
+          )
         }
         if (collection.deferDataRefresh) {
-          return waitForQueryReadyAndApplied(localObserver, hashedQueryKey)
+          return waitForQueryReadyAndApplied(
+            localObserver,
+            hashedQueryKey,
+            undefined,
+            handle,
+          )
         }
+        if (handle) handle.result = currentResult
         return getResultApplicationSettlement(hashedQueryKey)
       }
 
@@ -2326,13 +2401,19 @@ export function queryCollectionOptions(
         if (syncStarted || collection.subscriberCount > 0) {
           subscribeToQuery(localObserver, hashedQueryKey)
         }
-        return refetchOrWaitForEnabledQuery(localObserver, hashedQueryKey)
+        return refetchOrWaitForEnabledQuery(
+          localObserver,
+          hashedQueryKey,
+          handle,
+        )
       }
 
       // Create a promise that resolves when the query result is first available
       const readyPromise = waitForQueryReadyAndApplied(
         localObserver,
         hashedQueryKey,
+        undefined,
+        handle,
       )
 
       // If sync has started or there are subscribers to the collection, subscribe to the query straight away
@@ -2911,6 +2992,13 @@ export function queryCollectionOptions(
       })
       controller.settleRefetchAtFetchBoundary = settleRefetchAtFetchBoundary
       resultApplicationControllers.set(hashedQueryKey, controller)
+      const controllersByHash =
+        resultApplicationControllersByResult.get(result) ?? new Map()
+      const priorResultController = controllersByHash.get(hashedQueryKey)
+      if (!priorResultController || priorResultController.applicationSettled) {
+        controllersByHash.set(hashedQueryKey, controller)
+      }
+      resultApplicationControllersByResult.set(result, controllersByHash)
       let application: true | Promise<void>
       try {
         application = priorCommit
@@ -2927,6 +3015,7 @@ export function queryCollectionOptions(
         application = Promise.reject(error)
       }
       if (application === true) {
+        controller.applicationSettled = true
         // Keep a causal witness for refetch callers without turning the
         // Collection's synchronous readiness signal back into a Promise.
         if (resultApplicationControllers.get(hashedQueryKey) === controller) {
@@ -2956,6 +3045,7 @@ export function queryCollectionOptions(
         refetchSettlement,
       )
       const cleanupController = () => {
+        controller.applicationSettled = true
         if (resultApplicationControllers.get(hashedQueryKey) === controller) {
           resultApplicationControllers.delete(hashedQueryKey)
         }
@@ -3836,7 +3926,7 @@ export function queryCollectionOptions(
      */
     const releasePendingStartupLoad = (
       options: LoadSubsetOptions,
-      acquisition: object,
+      acquisition: AcquisitionHandle,
     ) => {
       const pending = pendingStartupLoads.get(options)
       if (!pending?.delete(acquisition)) return false
@@ -3876,13 +3966,17 @@ export function queryCollectionOptions(
     }
 
     const unloadSubset = (options: LoadSubsetOptions) => {
-      // No observer lease exists until startup maintenance has finished.
       const pending = pendingStartupLoads.get(options)
-      if (pending) {
-        releasePendingStartupLoad(options, [...pending].at(-1)!)
+      const newestPending = pending ? [...pending].at(-1) : undefined
+      const lease = acquisitionLeasesByOptions
+        .get(options)
+        ?.reduce((newest, current) =>
+          current.order > newest.order ? current : newest,
+        )
+      if (newestPending && (!lease || newestPending.order > lease.order)) {
+        releasePendingStartupLoad(options, newestPending)
         return
       }
-      const lease = acquisitionLeasesByOptions.get(options)?.at(-1)
       if (lease) releaseAcquisitionLease(options, lease)
     }
 
@@ -3934,7 +4028,9 @@ export function queryCollectionOptions(
       syncMode === `eager`
         ? undefined
         : (opts: LoadSubsetOptions = {}): true | Promise<void> => {
-            const handle: AcquisitionHandle = {}
+            const handle: AcquisitionHandle = {
+              order: ++nextAcquisitionOrder,
+            }
             const result = createQueryFromOpts(opts, queryFn, handle)
             if (result === true || !opts.signal) return result
 
@@ -3955,23 +4051,26 @@ export function queryCollectionOptions(
                 queueMicrotask(() => {
                   if (settled) return
                   const lease = handle.lease
-                  const pending = handle.pending
                   const stillAcquired = lease
                     ? acquisitionLeasesByOptions.get(opts)?.includes(lease)
-                    : pending !== undefined &&
-                      pendingStartupLoads.get(opts)?.has(pending)
+                    : pendingStartupLoads.get(opts)?.has(handle)
                   if (!stillAcquired) return
                   aborting = true
-                  const transaction = lease
-                    ? resultApplicationControllers.get(lease.hashedQueryKey)
-                        ?.resultTransaction
-                    : undefined
+                  let controller: ResultApplicationController | undefined
+                  if (lease) {
+                    controller = handle.result
+                      ? resultApplicationControllersByResult
+                          .get(handle.result)
+                          ?.get(lease.hashedQueryKey)
+                      : resultApplicationControllers.get(lease.hashedQueryKey)
+                  }
+                  const transaction = controller?.resultTransaction
                   const acceptedReceipt = transaction?.committed
                     ? transaction.applied.promise
                     : undefined
                   try {
                     if (lease) releaseAcquisitionLease(opts, lease)
-                    else if (pending) releasePendingStartupLoad(opts, pending)
+                    else releasePendingStartupLoad(opts, handle)
                   } catch (error) {
                     finish(() => reject(error))
                     return
