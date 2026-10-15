@@ -140,9 +140,9 @@ export function prepareLiveQueryValue(
 
 function getLiveQueryConfig(
   value: unknown,
-): LiveQueryCollectionConfig<any> | undefined {
+): PreparedLiveQueryConfigInput | undefined {
   if (value && typeof value === `object` && `query` in value) {
-    return value as LiveQueryCollectionConfig<any>
+    return value as PreparedLiveQueryConfigInput
   }
   return undefined
 }
@@ -202,18 +202,17 @@ export function getLiveQueryHash(
   preparedValue: unknown,
   queryKey?: LiveQueryKey,
 ): string {
-  let identity = queryKey?.length
+  const baseIdentity = queryKey?.length
     ? [`queryKey`, queryKey]
     : isCollection(preparedValue)
       ? [`collection`, preparedValue.id]
       : [`derived`, getPreparedLiveQueryIdentity(preparedValue)]
 
-  if (
-    queryKey?.length &&
-    getLiveQueryConfig(preparedValue)?.autoLoad === false
-  ) {
-    identity = [identity, [`autoLoad`, false]]
-  }
+  const autoLoad = getLiveQueryConfig(preparedValue)?.autoLoad !== false
+  const identity = [
+    ...baseIdentity,
+    ...(queryKey?.length && !autoLoad ? [[`autoLoad`, false]] : []),
+  ]
   return getStableValueHash(identity, `queryKey`)
 }
 

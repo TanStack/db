@@ -765,7 +765,7 @@ function useLiveQueryImpl(
   let preparedQueryValue: unknown | typeof unpreparedQueryValue =
     unpreparedQueryValue
   let identityDeps: ReadonlyArray<unknown>
-  let streamIdentity: unknown = undefined
+  let streamIdentity: ReadonlyArray<unknown> | undefined
   let identityError: UnhashableQueryIRError | undefined
 
   if (queryKey) {
@@ -823,7 +823,7 @@ function useLiveQueryImpl(
       : configOrQueryOrCollection
   const autoLoad = modeConfig?.autoLoad !== false
   if (!autoLoad && streamIdentity !== undefined && queryKey) {
-    streamIdentity = [streamIdentity, [`autoLoad`, false]]
+    streamIdentity = [...streamIdentity, [`autoLoad`, false]]
   }
 
   let queryHash: string | undefined
