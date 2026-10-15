@@ -1350,17 +1350,20 @@ describe(`ordered lifecycle product`, () => {
  * The architecture's initial synchronous cut covers the whole first-window
  * request chain. An ordered prefix ending at a locale string cannot express
  * its boundary as a cursor, so a full-source acquisition completes that same
- * initial chain. Two ISO date strings have a known descending singleton:
- * row 2. The independent reference predicts `ready` with row 2 when both
- * acquisitions return literal `true`, and `loading` with no rows when the
- * fallback returns a Promise. Neither result claims source exhaustion from
- * the ordered prefix alone.
+ * initial chain. Distinct ISO dates select row 2. Equal dates select row 1 by
+ * the public-key tie-breaker, even when the provider's first page contains
+ * only row 2. The independent reference predicts `ready` with that singleton
+ * when both acquisitions return literal `true`, and `loading` with no rows
+ * when the fallback returns a Promise. Neither result claims source exhaustion
+ * from the ordered prefix alone.
  *
- * The finite grammar crosses indexed and unindexed ordered requests with
- * synchronous and Promise full-source fallbacks. The controlled on-demand
- * adapter delivers only row 2 for the ordered request, then row 1 for the
- * filtered full-source request. The real live-query Collection is observed
- * immediately after preload starts its sync run and after preload settles.
+ * The finite grammar crosses indexed and unindexed ordered requests, distinct
+ * and tied rows, and synchronous and Promise full-source fallbacks. The
+ * controlled on-demand adapter delivers only row 2 for the ordered request,
+ * then row 1 for the unfiltered full-source request. It honors request
+ * predicates so a tie request cannot masquerade as that fallback. The real
+ * live-query Collection is observed at fallback entry, immediately after
+ * preload starts its sync run, and after preload settles.
  * An offset of zero identifies the indexed first page; no offset identifies
  * the unindexed prefix, so the two index cells cannot collapse to one path.
  * The request trace must reach both acquisitions by the immediate checkpoint;
@@ -1369,27 +1372,37 @@ describe(`ordered lifecycle product`, () => {
  * cache behavior.
  */
 type InitialFallbackRow = { id: number; at: string }
-const initialFallbackRows: ReadonlyArray<InitialFallbackRow> = [
-  { id: 1, at: `2026-10-01` },
-  { id: 2, at: `2026-10-02` },
-]
+type InitialFallbackOrder = `distinct` | `tied`
+
+function initialFallbackRows(
+  order: InitialFallbackOrder,
+): ReadonlyArray<InitialFallbackRow> {
+  return [
+    { id: 1, at: order === `tied` ? `2026-10-02` : `2026-10-01` },
+    { id: 2, at: `2026-10-02` },
+  ]
+}
 
 function expectedInitialFallback(
   settlement: InitialSettlementShape,
+  order: InitialFallbackOrder,
 ): InitialSettlementObservation {
   return settlement === `synchronous`
-    ? { rows: [2], status: `ready` }
+    ? { rows: [order === `tied` ? 1 : 2], status: `ready` }
     : { rows: [], status: `loading` }
 }
 
 async function observeInitialFallback(
   autoIndex: `eager` | `off`,
   settlement: InitialSettlementShape,
+  order: InitialFallbackOrder,
 ) {
   const requests: Array<LoadSubsetOptions> = []
   const delivered = new Set<number>()
+  const rows = initialFallbackRows(order)
+  let atFallbackEntry: InitialSettlementObservation | undefined
   const source = createCollection<InitialFallbackRow, number>({
-    id: `initial-locale-fallback-${autoIndex}-${settlement}`,
+    id: `initial-locale-fallback-${autoIndex}-${settlement}-${order}`,
     getKey: ({ id }) => id,
     syncMode: `on-demand`,
     autoIndex,
@@ -1401,9 +1414,14 @@ async function observeInitialFallback(
         return {
           loadSubset: (options) => {
             requests.push(options)
-            const served = options.orderBy
-              ? initialFallbackRows.slice(1)
-              : initialFallbackRows
+            if (!options.orderBy) atFallbackEntry = observeCurrent()
+            const matching = options.where
+              ? rows.filter(
+                  (row) =>
+                    evaluateReferenceExpression(options.where!, row) === true,
+                )
+              : rows
+            const served = options.orderBy ? matching.slice(1) : matching
             const fresh = served.filter(({ id }) => !delivered.has(id))
             if (fresh.length > 0) {
               begin()
@@ -1429,14 +1447,17 @@ async function observeInitialFallback(
         .orderBy(({ row }) => row.at, `desc`)
         .findOne(),
   })
-  const observeCurrent = (): InitialSettlementObservation => ({
-    rows: live.toArray.map(({ id }) => id),
-    status: live.status,
-  })
+  function observeCurrent(): InitialSettlementObservation {
+    return {
+      rows: live.toArray.map(({ id }) => id),
+      status: live.status,
+    }
+  }
   let observation:
     | {
         immediate: InitialSettlementObservation
         settled: InitialSettlementObservation
+        atFallbackEntry: InitialSettlementObservation | undefined
         requestsAtCut: Array<LoadSubsetOptions>
       }
     | undefined
@@ -1446,7 +1467,12 @@ async function observeInitialFallback(
     const immediate = observeCurrent()
     const requestsAtCut = [...requests]
     await preload
-    observation = { immediate, settled: observeCurrent(), requestsAtCut }
+    observation = {
+      immediate,
+      settled: observeCurrent(),
+      atFallbackEntry,
+      requestsAtCut,
+    }
   } catch (error) {
     primaryFailure = { error }
   }
@@ -1460,21 +1486,28 @@ async function observeInitialFallback(
 
 describe(`initial locale-string fallback oracle`, () => {
   const cells = ([`eager`, `off`] as const).flatMap((autoIndex) =>
-    ([`synchronous`, `promise`] as const).map((settlement) => ({
-      autoIndex,
-      settlement,
-    })),
+    ([`synchronous`, `promise`] as const).flatMap((settlement) =>
+      ([`distinct`, `tied`] as const).map((order) => ({
+        autoIndex,
+        settlement,
+        order,
+      })),
+    ),
   )
 
-  it(`enumerates every index and fallback-settlement cell exactly once`, () => {
-    expect(cells).toHaveLength(4)
-    expect(new Set(cells.map((cell) => JSON.stringify(cell))).size).toBe(4)
+  it(`enumerates every index, settlement, and row-order cell exactly once`, () => {
+    expect(cells).toHaveLength(8)
+    expect(new Set(cells.map((cell) => JSON.stringify(cell))).size).toBe(8)
   })
 
   it.each(cells)(
-    `publishes the $autoIndex locale-string singleton at the $settlement checkpoint`,
-    async ({ autoIndex, settlement }) => {
-      const observed = await observeInitialFallback(autoIndex, settlement)
+    `publishes the $autoIndex $order locale-string singleton at the $settlement checkpoint`,
+    async ({ autoIndex, settlement, order }) => {
+      const observed = await observeInitialFallback(
+        autoIndex,
+        settlement,
+        order,
+      )
       expect(observed.requestsAtCut).toHaveLength(2)
       expect(observed.requestsAtCut[0]).toMatchObject({ limit: 1 })
       expect(observed.requestsAtCut[0]?.orderBy).toHaveLength(1)
@@ -1483,10 +1516,17 @@ describe(`initial locale-string fallback oracle`, () => {
       )
       expect(observed.requestsAtCut[1]?.orderBy).toBeUndefined()
       expect(observed.requestsAtCut[1]?.limit).toBeUndefined()
+      expect(observed.requestsAtCut[1]?.where).toBeUndefined()
       expect(observed.requestsAtCut[1]?.cursor).toBeUndefined()
       expect(observed.requestsAtCut[1]?.offset).toBeUndefined()
-      expect(observed.immediate).toEqual(expectedInitialFallback(settlement))
-      expect(observed.settled).toEqual({ rows: [2], status: `ready` })
+      expect(observed.atFallbackEntry).toEqual({ rows: [], status: `loading` })
+      expect(observed.immediate).toEqual(
+        expectedInitialFallback(settlement, order),
+      )
+      expect(observed.settled).toEqual({
+        rows: [order === `tied` ? 1 : 2],
+        status: `ready`,
+      })
     },
   )
 })
