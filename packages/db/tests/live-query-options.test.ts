@@ -19,6 +19,33 @@ import { collectSourceRefs } from '../src/query/ir.js'
 import type { DeferredLiveQueryCollections } from '../src/live-query-options.js'
 
 describe(`live query preparation`, () => {
+  it.each([
+    { configured: undefined, expected: 1 },
+    { configured: 0, expected: 0 },
+    { configured: 100, expected: 100 },
+  ])(
+    `resolves config gcTime $configured against an adapter default`,
+    async ({ configured, expected }) => {
+      const source = createCollection({
+        id: `resolved-gc-${String(configured)}`,
+        getKey: (row: { id: string }) => row.id,
+        sync: { sync: ({ markReady }) => markReady() },
+      })
+      const query = new BaseQueryBuilder().from({ item: source })
+      const live = resolveLiveQueryValue(
+        { query, gcTime: configured },
+        { gcTime: 1, pool: false },
+      )!
+
+      try {
+        expect(live.config.gcTime).toBe(expected)
+      } finally {
+        await live.cleanup()
+        await source.cleanup()
+      }
+    },
+  )
+
   it(`collects the same concrete source from a bare builder and a config`, async () => {
     const source = createCollection({
       id: `prepared-source-shapes`,
