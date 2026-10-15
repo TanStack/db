@@ -19,7 +19,7 @@ import {
   syncLifecycleHistory,
   syncLifecycleHistoryArbitrary,
 } from './collection-subscription-lifecycle-grammar-oracle.js'
-import { flushPromises } from './utils.js'
+import { flushPromises, withOracleCleanup } from './utils.js'
 import {
   oraclePropertyOptions,
   oracleRandomParameters,
@@ -126,7 +126,7 @@ describe(`demand created while its Collection is cleaned up`, () => {
         { includeInitialState: false },
       )
 
-      try {
+      await withOracleCleanup(async () => {
         publishRow(`old`)
         expect([...visible.values()]).toEqual([{ id: `old` }])
         await collection.cleanup()
@@ -193,10 +193,7 @@ describe(`demand created while its Collection is cleaned up`, () => {
           rows: [...visible.values()],
           collectionStatus: collection.status,
         }).toEqual(expected.settled)
-      } finally {
-        subscription.unsubscribe()
-        await collection.cleanup()
-      }
+      }, [() => subscription.unsubscribe(), () => collection.cleanup()])
     },
   )
 })
