@@ -4880,6 +4880,99 @@ describe(`loadSubset lifecycle oracle`, () => {
   )
 
   /**
+   * Every pending direct acquisition has its own cancellation claim even when
+   * callers reuse one options object and one AbortSignal. Aborting that signal
+   * retires all pending claims, not merely the newest lease once. The held
+   * provider crosses the abort checkpoint before returning a row. Both load
+   * outcomes and the physical Query observer count before the held provider
+   * settles distinguish an orphaned lease from prompt full release. Public
+   * rows after provider settlement reject late unowned publication.
+   * Signal consumption varies whether Query Core cancels the transport or
+   * lets an unobserved result enter its cache.
+   */
+  it.each([
+    { acquisitionCount: 2, consumesSignal: false },
+    { acquisitionCount: 2, consumesSignal: true },
+    { acquisitionCount: 3, consumesSignal: false },
+    { acquisitionCount: 3, consumesSignal: true },
+  ])(
+    `retires every pending same-object acquisition on shared signal abort: %j`,
+    async ({ acquisitionCount, consumesSignal }) => {
+      const queryClient = createQueryClient()
+      const id = `same-object-caller-abort-${collectionSequence++}`
+      const caller = new AbortController()
+      const request: LoadSubsetOptions = { signal: caller.signal }
+      const held = createDeferred<Array<Row>>()
+      let physicalSignal: AbortSignal | undefined
+      const collection = createCollection(
+        queryCollectionOptions<Row>({
+          id,
+          queryClient,
+          queryKey: [id],
+          queryFn: (context) => {
+            if (consumesSignal) physicalSignal = context.signal
+            return held.promise
+          },
+          getKey: (row) => row.id,
+          startSync: true,
+          syncMode: `on-demand`,
+          retry: false,
+        }),
+      )
+      await checkPublicCleanupWitness(async () => {
+        const loads = Array.from({ length: acquisitionCount }, () =>
+          Promise.resolve(collection._sync.loadSubset(request)),
+        )
+        const settlements: Array<`pending` | `fulfilled` | `rejected`> =
+          Array(acquisitionCount).fill(`pending`)
+        loads.forEach((load, index) => {
+          void load.then(
+            () => {
+              settlements[index] = `fulfilled`
+            },
+            () => {
+              settlements[index] = `rejected`
+            },
+          )
+        })
+        const physicalQuery = queryClient.getQueryCache().find({
+          queryKey: [id],
+          exact: true,
+        })
+        if (!physicalQuery) throw new Error(`The first load made no Query`)
+
+        caller.abort()
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        expect(settlements).toEqual(Array(acquisitionCount).fill(`rejected`))
+        expect(physicalQuery.getObserversCount()).toBe(0)
+        held.resolve([{ id: `late` }])
+        const outcomes = await Promise.allSettled(loads)
+        expect(outcomes.map((outcome) => outcome.status)).toEqual(
+          Array(acquisitionCount).fill(`rejected`),
+        )
+        for (const outcome of outcomes) {
+          if (outcome.status === `rejected`)
+            expect(outcome.reason).toMatchObject({ name: `AbortError` })
+        }
+        expect(physicalQuery.getObserversCount()).toBe(0)
+        expect(physicalSignal?.aborted).toBe(consumesSignal ? true : undefined)
+        expect(collection.toArray).toEqual([])
+      }, [
+        [`provider`, () => held.resolve([])],
+        [
+          `acquisitions`,
+          () => {
+            for (let i = 0; i < acquisitionCount; i++)
+              collection._sync.unloadSubset(request)
+          },
+        ],
+        [`Collection`, () => collection.cleanup()],
+        [`Query client`, () => queryClient.clear()],
+      ])
+    },
+  )
+
+  /**
    * A provider can read the physical Query signal lazily through request
    * metadata. That derived signal is hidden from enumerable request data even
    * when a direct caller supplied an acquisition signal. Query Core may reuse
@@ -5624,9 +5717,10 @@ describe(`loadSubset lifecycle oracle`, () => {
    * The independent account counts the three public subscriptions and uses
    * the scripted source answer. It does not inspect Query DB's lease registry.
    * These legal histories vary the refetch caller's release, baseline release,
-   * an equal peer that may leave before the answer, signal consumption, and
-   * provider success or failure. The baseline may release before or after a
-   * caller abort. Peer-first and caller-first final release are both legal. A
+   * an equal peer that may leave before the answer or first after it, signal
+   * consumption, and provider success or failure. The baseline may release
+   * before or after a caller abort. Peer-first and caller-first final release
+   * are both legal. A
    * passive public change listener records any source-row publication after
    * the last lease leaves, including a transient insert later removed. The
    * real path is `requestSnapshot({ refetch: true, signal })`, not a direct
@@ -5650,6 +5744,7 @@ describe(`loadSubset lifecycle oracle`, () => {
     peer: boolean
     releasePeerBeforeAnswer: boolean
     releasePeerFirst?: boolean
+    releasePeerAfterAnswerFirst?: boolean
     consumesSignal: boolean
     outcome: `success` | `error`
   }
@@ -5662,6 +5757,7 @@ describe(`loadSubset lifecycle oracle`, () => {
       history.peer &&
       history.action !== `cleanup` &&
       !history.releasePeerBeforeAnswer
+    const livePeerAfterAnswer = livePeer && !history.releasePeerAfterAnswerFirst
     const sourceRow = history.outcome === `success` ? `new` : `old`
     const rows = (live: boolean) => (live ? [sourceRow] : [])
     return {
@@ -5683,10 +5779,16 @@ describe(`loadSubset lifecycle oracle`, () => {
           }
         : {}),
       afterAnswerRows: rows(liveBaseline || liveCaller || livePeer),
-      afterCallerReleaseRows: rows(liveBaseline || livePeer),
-      observerAfterCallerRelease: liveBaseline || livePeer ? 1 : 0,
-      afterBaselineReleaseRows: rows(livePeer),
-      observerAfterBaselineRelease: livePeer ? 1 : 0,
+      ...(history.releasePeerAfterAnswerFirst
+        ? {
+            afterEarlyPeerReleaseRows: rows(liveBaseline || liveCaller),
+            observerAfterEarlyPeerRelease: liveBaseline || liveCaller ? 1 : 0,
+          }
+        : {}),
+      afterCallerReleaseRows: rows(liveBaseline || livePeerAfterAnswer),
+      observerAfterCallerRelease: liveBaseline || livePeerAfterAnswer ? 1 : 0,
+      afterBaselineReleaseRows: rows(livePeerAfterAnswer),
+      observerAfterBaselineRelease: livePeerAfterAnswer ? 1 : 0,
       afterPeerReleaseRows: [] as Array<string>,
       observerAfterPeerRelease: 0,
       statusAfterAction: history.action === `cleanup` ? `cleaned-up` : `ready`,
@@ -5870,6 +5972,16 @@ describe(`loadSubset lifecycle oracle`, () => {
       await new Promise<void>((resolve) => setTimeout(resolve, 0))
       const afterAnswerRows = publicRows()
       const statusAfterAnswer = collection.status
+      if (history.releasePeerAfterAnswerFirst) {
+        liveOwners.peer = false
+        peer?.unsubscribe()
+      }
+      const afterEarlyPeerReleaseRows = history.releasePeerAfterAnswerFirst
+        ? publicRows()
+        : undefined
+      const observerAfterEarlyPeerRelease = history.releasePeerAfterAnswerFirst
+        ? observerCount()
+        : undefined
       liveOwners.caller = false
       caller.unsubscribe()
       const afterCallerReleaseRows = publicRows()
@@ -5892,6 +6004,9 @@ describe(`loadSubset lifecycle oracle`, () => {
           ? { callerOutcome }
           : {}),
         afterAnswerRows,
+        ...(history.releasePeerAfterAnswerFirst
+          ? { afterEarlyPeerReleaseRows, observerAfterEarlyPeerRelease }
+          : {}),
         afterCallerReleaseRows,
         observerAfterCallerRelease,
         afterBaselineReleaseRows,
@@ -5958,6 +6073,15 @@ describe(`loadSubset lifecycle oracle`, () => {
       releaseBaseline: true,
       peer: true,
       releasePeerBeforeAnswer: false,
+      consumesSignal: true,
+      outcome: `success`,
+    },
+    {
+      action: `abort`,
+      releaseBaseline: false,
+      peer: true,
+      releasePeerBeforeAnswer: false,
+      releasePeerAfterAnswerFirst: true,
       consumesSignal: true,
       outcome: `success`,
     },
@@ -6058,6 +6182,7 @@ describe(`loadSubset lifecycle oracle`, () => {
       peer: fc.boolean(),
       releasePeerBeforeAnswer: fc.boolean(),
       releasePeerFirst: fc.boolean(),
+      releasePeerAfterAnswerFirst: fc.boolean(),
       consumesSignal: fc.boolean(),
       outcome: fc.constantFrom<RefetchLeaseHistory[`outcome`]>(
         `success`,
@@ -6068,6 +6193,10 @@ describe(`loadSubset lifecycle oracle`, () => {
       (history) =>
         (!history.releasePeerBeforeAnswer || history.peer) &&
         (!history.releasePeerFirst || history.releasePeerBeforeAnswer) &&
+        (!history.releasePeerAfterAnswerFirst ||
+          (history.peer &&
+            !history.releasePeerBeforeAnswer &&
+            history.action !== `cleanup`)) &&
         (!history.releaseBaselineAfterAction ||
           (history.releaseBaseline && history.action === `abort`)),
     )
@@ -6119,6 +6248,27 @@ describe(`loadSubset lifecycle oracle`, () => {
       expect({ ...observedCleaned, statusAfterAction: `ready` }).toEqual(
         expectedCleaned,
       ),
+    ).toThrow()
+
+    const peerFirst: RefetchLeaseHistory = {
+      action: `abort`,
+      releaseBaseline: false,
+      peer: true,
+      releasePeerBeforeAnswer: false,
+      releasePeerAfterAnswerFirst: true,
+      consumesSignal: true,
+      outcome: `success`,
+    }
+    const expectedPeerFirst = expectedRefetchLease(peerFirst)
+    const observedPeerFirst = await observeRefetchLease(
+      peerFirst,
+      expectedPeerFirst,
+    )
+    expect(() =>
+      expect({
+        ...observedPeerFirst,
+        afterEarlyPeerReleaseRows: [],
+      }).toEqual(expectedPeerFirst),
     ).toThrow()
   })
 
@@ -6724,7 +6874,7 @@ describe(`loadSubset lifecycle oracle`, () => {
    * The driver uses public requestSnapshot and an optimistic mutation to hold
    * the accepted transaction. The internal pending-transaction flag only
    * witnesses that the intended cut was reached. Public load outcomes and
-   * exact server rows are compared after release while publication remains
+   * complete public rows are compared after release while publication remains
    * held, after the hold, and after the peer releases. A wrapping sync records
    * the applied receipt for the source-result transaction. A callback
    * acquisition joins during caller abort or Query-cache observer removal,
@@ -6746,7 +6896,7 @@ describe(`loadSubset lifecycle oracle`, () => {
       reachedAcceptedCommit: true,
       providerCalls: 1,
       releaseCallbackCount: history.peerTiming === `release-callback` ? 1 : 0,
-      beforeGateRows: [] as Array<string>,
+      beforeGateRows: [`local`],
       receiptAppliedBeforeGate: false,
       receiptAppliedAfterGate: true,
       peerSettledBeforeGate: false,
@@ -6839,11 +6989,7 @@ describe(`loadSubset lifecycle oracle`, () => {
     let peerLoad: true | Promise<void> | undefined
     let releaseCallbackCount = 0
     let observingFirstRelease = false
-    const publicServerRows = () =>
-      collection.toArray
-        .map((row) => row.id)
-        .filter((rowId) => rowId.startsWith(`server-`))
-        .sort()
+    const publicRows = () => collection.toArray.map((row) => row.id).sort()
     const acquirePeer = () => {
       peer = collection.subscribeChanges(() => {}, {
         includeInitialState: false,
@@ -6917,7 +7063,7 @@ describe(`loadSubset lifecycle oracle`, () => {
         void firstLoad.then(
           () => {
             firstOutcome = `fulfilled`
-            firstRowsAtSettlement = publicServerRows()
+            firstRowsAtSettlement = publicRows()
             receiptAppliedAtFirstSettlement = receiptApplied
           },
           (error: unknown) => {
@@ -6925,7 +7071,7 @@ describe(`loadSubset lifecycle oracle`, () => {
               error instanceof Error && error.name === `AbortError`
                 ? `AbortError`
                 : `other-error`
-            firstRowsAtSettlement = publicServerRows()
+            firstRowsAtSettlement = publicRows()
             receiptAppliedAtFirstSettlement = receiptApplied
           },
         )
@@ -6944,7 +7090,7 @@ describe(`loadSubset lifecycle oracle`, () => {
         peerSettledBeforeGate = true
       })
       await new Promise<void>((resolve) => setTimeout(resolve, 0))
-      const beforeGateRows = publicServerRows()
+      const beforeGateRows = publicRows()
       const receiptAppliedBeforeGate = receiptApplied
       const firstSettledBeforeGate = firstOutcome !== undefined
       const peerSettledBeforeGateObserved = peerSettledBeforeGate
@@ -6954,10 +7100,10 @@ describe(`loadSubset lifecycle oracle`, () => {
         await Promise.resolve(firstLoad).catch(() => undefined)
       }
       const observedPeerOutcome = await peerOutcome
-      const afterGateRows = publicServerRows()
+      const afterGateRows = publicRows()
       const receiptAppliedAfterGate = receiptApplied
       peer?.unsubscribe()
-      const afterPeerReleaseRows = publicServerRows()
+      const afterPeerReleaseRows = publicRows()
       const observed = {
         reachedAcceptedCommit,
         providerCalls,

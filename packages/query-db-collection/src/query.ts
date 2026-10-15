@@ -1042,6 +1042,10 @@ export function queryCollectionOptions(
     requestedHash: string
     hashedQueryKey: string
   }
+  type AcquisitionHandle = {
+    pending?: object
+    lease?: AcquisitionLease
+  }
   let acquisitionLeasesByOptions = new WeakMap<
     LoadSubsetOptions,
     Array<AcquisitionLease>
@@ -1050,8 +1054,13 @@ export function queryCollectionOptions(
     options: LoadSubsetOptions,
     requestedHash: string,
     hashedQueryKey: string,
+    handle?: AcquisitionHandle,
   ) => {
     const lease = { requestedHash, hashedQueryKey }
+    if (handle) {
+      handle.pending = undefined
+      handle.lease = lease
+    }
     const optionsLeases = acquisitionLeasesByOptions.get(options) ?? []
     optionsLeases.push(lease)
     acquisitionLeasesByOptions.set(options, optionsLeases)
@@ -1967,10 +1976,12 @@ export function queryCollectionOptions(
     const createQueryFromOpts = (
       opts: LoadSubsetOptions = {},
       queryFunction: typeof queryFn = queryFn,
+      handle?: AcquisitionHandle,
     ): true | Promise<void> => {
       if (!startupRetentionSettled) {
         // Immutable request data may be reused; ownership belongs to each call.
-        const acquisition = {}
+        const acquisition = handle?.pending ?? {}
+        if (handle) handle.pending = acquisition
         const pending = pendingStartupLoads.get(opts) ?? new Set<object>()
         pending.add(acquisition)
         pendingStartupLoads.set(opts, pending)
@@ -1979,7 +1990,7 @@ export function queryCollectionOptions(
             throw new LoadSubsetOperationAbortedError()
           }
           if (pending.size === 0) pendingStartupLoads.delete(opts)
-          const resumed = createQueryFromOpts(opts, queryFunction)
+          const resumed = createQueryFromOpts(opts, queryFunction, handle)
           return resumed === true ? undefined : resumed
         })
       }
@@ -2066,7 +2077,7 @@ export function queryCollectionOptions(
           hashedQueryKey,
           (queryRefCounts.get(hashedQueryKey) || 0) + 1,
         )
-        recordAcquisitionLease(opts, requestedHash, hashedQueryKey)
+        recordAcquisitionLease(opts, requestedHash, hashedQueryKey, handle)
 
         // Get the current result and return based on its state
         const observer = state.observers.get(hashedQueryKey)!
@@ -2227,7 +2238,7 @@ export function queryCollectionOptions(
         hashedQueryKey,
         (queryRefCounts.get(hashedQueryKey) || 0) + 1,
       )
-      recordAcquisitionLease(opts, requestedHash, hashedQueryKey)
+      recordAcquisitionLease(opts, requestedHash, hashedQueryKey, handle)
 
       // Check if data already exists in QueryClient cache (persisted within gcTime from
       // a previous observer). This avoids creating unnecessary promises and subscription
@@ -3823,16 +3834,25 @@ export function queryCollectionOptions(
      * its final owner rejects that caller and unsubscribes this observer, which lets Query
      * cancel the transport when no peer observer still owns it.
      */
-    const unloadSubset = (options: LoadSubsetOptions) => {
-      // No observer lease exists until startup maintenance has finished.
+    const releasePendingStartupLoad = (
+      options: LoadSubsetOptions,
+      acquisition: object,
+    ) => {
       const pending = pendingStartupLoads.get(options)
-      if (pending) {
-        pending.delete([...pending].at(-1)!)
-        if (pending.size === 0) pendingStartupLoads.delete(options)
-        return
-      }
-      const lease = acquisitionLeasesByOptions.get(options)?.pop()
-      if (!lease) return
+      if (!pending?.delete(acquisition)) return false
+      if (pending.size === 0) pendingStartupLoads.delete(options)
+      return true
+    }
+
+    const releaseAcquisitionLease = (
+      options: LoadSubsetOptions,
+      lease: AcquisitionLease,
+    ) => {
+      const leases = acquisitionLeasesByOptions.get(options)
+      const index = leases?.indexOf(lease) ?? -1
+      if (!leases || index < 0) return false
+      leases.splice(index, 1)
+      if (leases.length === 0) acquisitionLeasesByOptions.delete(options)
       const { requestedHash, hashedQueryKey } = lease
       if (hashedQueryKey !== requestedHash) {
         const dependentCount = fullSourceDependents.get(requestedHash) ?? 0
@@ -3852,6 +3872,18 @@ export function queryCollectionOptions(
         // Still have other references, just decrement
         queryRefCounts.set(hashedQueryKey, newCount)
       }
+      return true
+    }
+
+    const unloadSubset = (options: LoadSubsetOptions) => {
+      // No observer lease exists until startup maintenance has finished.
+      const pending = pendingStartupLoads.get(options)
+      if (pending) {
+        releasePendingStartupLoad(options, [...pending].at(-1)!)
+        return
+      }
+      const lease = acquisitionLeasesByOptions.get(options)?.at(-1)
+      if (lease) releaseAcquisitionLease(options, lease)
     }
 
     const restartAfterScopedRecovery = async (
@@ -3902,11 +3934,11 @@ export function queryCollectionOptions(
       syncMode === `eager`
         ? undefined
         : (opts: LoadSubsetOptions = {}): true | Promise<void> => {
-            const result = createQueryFromOpts(opts)
+            const handle: AcquisitionHandle = {}
+            const result = createQueryFromOpts(opts, queryFn, handle)
             if (result === true || !opts.signal) return result
 
             const signal = opts.signal
-            const acquisition = acquisitionLeasesByOptions.get(opts)?.at(-1)
             return new Promise<void>((resolve, reject) => {
               let settled = false
               let aborting = false
@@ -3922,23 +3954,24 @@ export function queryCollectionOptions(
                 // from a caller abort by the exact acquisition still present.
                 queueMicrotask(() => {
                   if (settled) return
-                  const stillAcquired = acquisition
-                    ? acquisitionLeasesByOptions
-                        .get(opts)
-                        ?.includes(acquisition)
-                    : pendingStartupLoads.has(opts)
+                  const lease = handle.lease
+                  const pending = handle.pending
+                  const stillAcquired = lease
+                    ? acquisitionLeasesByOptions.get(opts)?.includes(lease)
+                    : pending !== undefined &&
+                      pendingStartupLoads.get(opts)?.has(pending)
                   if (!stillAcquired) return
                   aborting = true
-                  const transaction = acquisition
-                    ? resultApplicationControllers.get(
-                        acquisition.hashedQueryKey,
-                      )?.resultTransaction
+                  const transaction = lease
+                    ? resultApplicationControllers.get(lease.hashedQueryKey)
+                        ?.resultTransaction
                     : undefined
                   const acceptedReceipt = transaction?.committed
                     ? transaction.applied.promise
                     : undefined
                   try {
-                    unloadSubset(opts)
+                    if (lease) releaseAcquisitionLease(opts, lease)
+                    else if (pending) releasePendingStartupLoad(opts, pending)
                   } catch (error) {
                     finish(() => reject(error))
                     return

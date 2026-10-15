@@ -171,6 +171,14 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
           owns a lease. Two same-object calls followed by one unload now
           reject the newer call and let the older call publish; the witness
           failed on the previous oldest-first release path (2026-10-15).
+    - [x] Shared-signal abort now releases each pending direct call's exact
+          lease, even when two or three calls reuse one options object. The
+          pushed `b0a7d2b7b` implementation failed the new witness: one call
+          rejected while another fulfilled and retained a row. Four cases
+          cross signal consumption and call count; they check prompt caller
+          rejection and zero observers before the held provider returns, then
+          no late public row. A retained-startup witness covers promotion from
+          pending calls to Query leases (2026-10-15).
   - [x] Request shape: signal-free and explicit-signal requests check the
         physical signal, own keys, descriptor, cloning, JSON, and deletion.
         The configurable-descriptor assertion failed before its repair.

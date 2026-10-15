@@ -6228,10 +6228,11 @@ describe(`query collection ownership lifecycle`, () => {
    * A Query result fetched on one client predates a direct write stored by a
    * separate Collection. Dehydrate/hydrate carries that old result into a new
    * QueryClient but cannot prove it is newer than the durable row. The safe
-   * independent account keeps Manual through the held physical request, then
-   * accepts Fresh from that request. This real restart observes public and
-   * durable values at both checkpoints; Query Core hydration supplies the old
-   * cache entry, and the controlled provider supplies the later response.
+   * independent account excludes the old hydrated value while the physical
+   * request is held and keeps the cold load pending until that response, then
+   * accepts Fresh from it. This real restart observes public and durable
+   * values at both checkpoints; Query Core hydration supplies the old cache
+   * entry, and the controlled provider supplies the later response.
    */
   it(`revalidates a hydrated Query result against a persisted direct write`, async () => {
     const id = `persisted-direct-hydrated-query`
@@ -6283,6 +6284,15 @@ describe(`query collection ownership lifecycle`, () => {
     const coldRequest = {}
     const load = Promise.resolve(cold.collection._sync.loadSubset(coldRequest))
     void load.catch(() => undefined)
+    let loadSettlement: `pending` | `fulfilled` | `rejected` = `pending`
+    void load.then(
+      () => {
+        loadSettlement = `fulfilled`
+      },
+      () => {
+        loadSettlement = `rejected`
+      },
+    )
     const firstCut = await Promise.race([
       load.then(
         () => `load-fulfilled` as const,
@@ -6291,6 +6301,9 @@ describe(`query collection ownership lifecycle`, () => {
       providerStarted.promise.then(() => `provider-started` as const),
     ])
     expect(firstCut).toBe(`provider-started`)
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    expect(loadSettlement).toBe(`pending`)
+    expect(() => expect(`fulfilled`).toBe(loadSettlement)).toThrow()
     expect(cold.queryFn).toHaveBeenCalledTimes(1)
     expect(cold.collection.get(shared.id)?.name).not.toBe(shared.name)
     expect(storedItems(coldStorage)[0]?.name).toBe(`Manual`)
@@ -7177,6 +7190,60 @@ describe(`query collection ownership lifecycle`, () => {
     expect(rows(collection)).toEqual([shared.id])
 
     collection._sync.unloadSubset(subset)
+    expect(rows(collection)).toEqual([])
+  })
+
+  /**
+   * Each pending caller keeps its own abort claim when startup retention
+   * maintenance promotes repeated calls with one options object into Query
+   * observer leases. Once the held provider starts, a shared caller signal
+   * must retire both promoted leases. A late source row may enter Query cache,
+   * but cannot become public without an owner. Load outcomes, observer count,
+   * and exact public rows at provider settlement check that handoff.
+   */
+  it(`retires same-options callers after startup maintenance promotes their leases`, async () => {
+    const id = `repeated-options-startup-abort`
+    const caller = new AbortController()
+    const request: LoadSubsetOptions = {
+      where: eq(new IR.PropRef([`category`]), `shared`),
+      signal: caller.signal,
+    }
+    const scopeHash = hashKey([id, getLoadSubsetDemandKey(request)])
+    const held = createDeferred<Array<Item>>()
+    const { collection, queryClient, queryFn } = createOwnershipFixture({
+      id,
+      results: [held.promise],
+      setupMetadata: (metadata) =>
+        metadata.collection.set(`queryCollection:gc:${scopeHash}`, {
+          queryHash: scopeHash,
+          mode: `until-revalidated`,
+        }),
+    })
+    collection.startSyncImmediate()
+    const loads = Array.from({ length: 2 }, () =>
+      Promise.resolve(collection._sync.loadSubset(request)),
+    )
+    const outcomes = Promise.allSettled(loads)
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledOnce())
+
+    caller.abort()
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    held.resolve([shared])
+    const settled = await outcomes
+    expect(settled.map((outcome) => outcome.status)).toEqual([
+      `rejected`,
+      `rejected`,
+    ])
+    for (const outcome of settled) {
+      if (outcome.status === `rejected`)
+        expect(outcome.reason).toMatchObject({ name: `AbortError` })
+    }
+    expect(
+      queryClient
+        .getQueryCache()
+        .findAll({ queryKey: [id] })[0]
+        ?.getObserversCount(),
+    ).toBe(0)
     expect(rows(collection)).toEqual([])
   })
 

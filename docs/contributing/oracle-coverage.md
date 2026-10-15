@@ -842,6 +842,16 @@ with the same object followed by one unload reject the newer pending load
 and let the older one fetch and publish. The previous oldest-first release
 failed at the first load-outcome checkpoint. Pre-start requests still queued
 inside Collection Core are a separate boundary.
+Two or three pending direct calls that reuse both one options object and one
+AbortSignal must each release their own acquisition when the signal aborts.
+The load-lifecycle owner crosses whether the provider consumes the physical
+Query signal. It checks every caller's `AbortError` and zero Query observers
+before the held result returns, then checks that a late result adds no public
+row. The previous options-stack release rejected only the first caller and
+left another lease and row behind. A persisted startup witness repeats the
+same-signal abort after retention maintenance promotes both calls to Query
+leases. These direct-call histories do not prove that Collection Core passes
+the same options object to two public subscriptions.
 An eager Query with finite `gcTime` is now observed after its last public
 subscriber leaves and Query Core's timer evicts it. With no public subscriber,
 `utils.refetch()` recreates the Query, calls the provider once, and applies its
