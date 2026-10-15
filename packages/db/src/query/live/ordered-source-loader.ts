@@ -77,6 +77,7 @@ export class OrderedSourceLoader {
   // until a continuation reads past it.
   private ownPrefixCount: number | undefined
   private lastBoundary: unknown
+  private retiringSupersededAcquisitions = false
   private repairRetries = 0
   private repairTimer: ReturnType<typeof setTimeout> | undefined
   private stagedContinuation: OrderedContinuation | undefined
@@ -87,6 +88,10 @@ export class OrderedSourceLoader {
       }
     | undefined
   private drainingNoInputContinuations = false
+  // The graph input revision at which a graph turn asked for more data while
+  // a synchronous request was running. That turn has already processed the
+  // request's writes, and it will not ask again.
+  private graphCheckedDuringRequest: number | undefined
   // An eager source holds every row, so an index on a single order term can
   // answer a prefix with only the first rows of the window.
   private readonly readsBoundedPrefix: boolean
@@ -122,6 +127,11 @@ export class OrderedSourceLoader {
     let hasNewRows = false
     for (const change of changes) {
       const previous = sentRows?.get(change.key)
+      // A finished repair holds every row through its boundary, so releasing
+      // what it superseded removes only rows outside its coverage.
+      if (change.type === `delete` && this.retiringSupersededAcquisitions) {
+        continue
+      }
       if (
         change.type !== `insert` &&
         previous !== undefined &&
@@ -157,6 +167,9 @@ export class OrderedSourceLoader {
     windowOperationGeneration?: number,
     continuesOrderedPrefixRepair = false,
   ): Promise<void> | undefined {
+    if (this.requesting) {
+      this.graphCheckedDuringRequest = this.getGraphInputRevision?.()
+    }
     if (!this.active || this.info.limit === 0 || this.requesting) return
     windowOperationGeneration ??=
       this.blockedLoadMore?.windowOperationGeneration
@@ -550,9 +563,11 @@ export class OrderedSourceLoader {
       return
     }
     const retained = this.orderedRepairAcquisitions
+    this.retiringSupersededAcquisitions = true
     try {
       this.retireSettledFiniteAcquisitions(undefined, retained)
     } finally {
+      this.retiringSupersededAcquisitions = false
       const hasSupersededAcquisition = [
         ...this.settledFiniteAcquisitions.keys(),
       ].some((release) => !retained.has(release))
@@ -881,7 +896,7 @@ export class OrderedSourceLoader {
           () => {
             if (
               !synchronousCompletionFailure &&
-              this.getGraphInputRevision?.() === requestGraphInputRevision
+              this.graphHasProcessedInput(requestGraphInputRevision)
             ) {
               this.drainNoInputContinuations(requestGraphInputRevision)
             }
@@ -949,6 +964,19 @@ export class OrderedSourceLoader {
     this.runContinuation(continuation, windowOperationGeneration)
   }
 
+  // A staged continuation waits for the graph to process the writes that
+  // staged it; the graph turn that does so resumes it. If no write arrived
+  // since `graphInputRevision`, or a graph turn already processed every
+  // write while the request ran and asked for more, no turn will resume it,
+  // so the loader continues now.
+  private graphHasProcessedInput(graphInputRevision: number): boolean {
+    const revision = this.getGraphInputRevision?.()
+    return (
+      revision === graphInputRevision ||
+      revision === this.graphCheckedDuringRequest
+    )
+  }
+
   private drainNoInputContinuations(graphInputRevision: number): void {
     if (this.drainingNoInputContinuations) return
     this.drainingNoInputContinuations = true
@@ -956,7 +984,7 @@ export class OrderedSourceLoader {
       while (
         this.stagedContinuation &&
         !this.pending &&
-        this.getGraphInputRevision?.() === graphInputRevision
+        this.graphHasProcessedInput(graphInputRevision)
       ) {
         this.consumeStagedContinuation()
       }
@@ -1150,6 +1178,7 @@ export class OrderedSourceLoader {
         }
       | undefined
     this.requesting = true
+    this.graphCheckedDuringRequest = undefined
     let observing = false
     const graphInputRevision = this.getGraphInputRevision?.()
     try {

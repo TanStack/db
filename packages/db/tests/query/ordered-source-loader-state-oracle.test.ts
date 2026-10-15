@@ -985,6 +985,144 @@ describe(`Ordered source request ownership`, () => {
     },
   )
 
+  // When a bounded repair finishes, it releases the acquisitions it
+  // superseded. A refetching provider then removes the rows only those
+  // acquisitions held, and the loader sees a delete of a row it sent. That
+  // removal is the repair's own retirement, not a source change: every row
+  // through the repair's boundary is held by the repair. The repair's
+  // boundary must survive it. Otherwise the loader restarts paging from the
+  // start of the order with a smaller first page that cannot retire the
+  // repair's larger prefix, and every later refetch reads both prefixes.
+  // Law: once a chain settles, the loader holds at most one acquisition that
+  // reads from the start of the order.
+  it(`keeps a repair's boundary when its retirement removes a row the loader sent`, async () => {
+    const requests: Array<Observed> = []
+    const releases: Array<LoadSubsetOptions> = []
+    const participants: Array<Promise<unknown>> = []
+    let removedOnRelease = false
+    // Releasing the first tie request removes row 9, which only it held.
+    const subscription = fakeSubscription(requests, releases, () => {
+      if (removedOnRelease || releases.at(-1)?.where === undefined) return
+      removedOnRelease = true
+      const row = { id: 9, rank: 2 }
+      loader.onSourceChanges(
+        [{ type: `delete`, key: 9, value: row }],
+        new Map([[9, row]]),
+      )
+    })
+    subscription.readOrderedSnapshot = () => [
+      { type: `insert`, key: 1, value: { id: 1, rank: 1 } },
+      { type: `insert`, key: 2, value: { id: 2, rank: 2 } },
+    ]
+    let needed = 0
+    const info = createOrderByInfo({ limit: 2, dataNeeded: () => needed })
+    const loader = new OrderedSourceLoader(
+      info,
+      subscription,
+      `row`,
+      (result) => {
+        if (result instanceof Promise) {
+          participants.push(result.catch(() => undefined))
+        }
+      },
+    )
+    const settleAll = async () => {
+      for (let index = 0; index < requests.length; index++) {
+        requests[index]!.deferred.resolve()
+        for (let turn = 0; turn < 5; turn++) await Promise.resolve()
+      }
+    }
+    const heldPrefixes = () =>
+      requests.filter(
+        ({ options, acquisition }) =>
+          options.orderBy !== undefined &&
+          options.where === undefined &&
+          options.minValues === undefined &&
+          !releases.includes(acquisition),
+      )
+    try {
+      loader.start()
+      await settleAll()
+      expect(heldPrefixes()).toHaveLength(1)
+
+      loader.invalidateSourceOrdering()
+      loader.loadMore()
+      await settleAll()
+      expect(removedOnRelease).toBe(true)
+      expect(heldPrefixes()).toHaveLength(1)
+
+      // The window now needs one more row. It continues after the repair's
+      // boundary instead of restarting from the start of the order.
+      needed = 1
+      const before = requests.length
+      loader.loadMore()
+      await settleAll()
+      expect(requests.length).toBeGreaterThan(before)
+      expect(requests[before]!.options.minValues).toEqual([2])
+      expect(heldPrefixes()).toHaveLength(1)
+    } finally {
+      loader.dispose()
+      for (const request of requests) request.deferred.resolve()
+      await Promise.allSettled(participants)
+    }
+  })
+
+  // A provider can answer a request synchronously, as Query DB does when it
+  // reacquires a released Query from its cache. Its writes run a graph turn
+  // inside the request; that turn asks the loader for more, but the loader
+  // is still requesting and ignores it. The continuation it then stages has
+  // no later graph turn to resume it. When a turn has already processed the
+  // request's writes, the loader must continue at once, or a short window
+  // stops paging and treats unread rows as loaded.
+  it(`continues a chain whose synchronous answer the graph already processed`, async () => {
+    const requests: Array<Observed> = []
+    const releases: Array<LoadSubsetOptions> = []
+    let revision = 0
+    const subscription = fakeSubscription(requests, releases)
+    const asyncRequest = subscription.requestSnapshot
+    subscription.readOrderedSnapshot = () => [
+      { type: `insert`, key: 1, value: { id: 1, rank: 1 } },
+    ]
+    // Tie requests answer synchronously: they write a row, the graph turn
+    // processes it and asks for more, and the request returns `true`.
+    subscription.requestSnapshot = ((options: RequestOptions) => {
+      if (options.where === undefined) return asyncRequest(options)
+      const acquisition: LoadSubsetOptions = { where: options.where }
+      requests.push({
+        method: `snapshot`,
+        options,
+        acquisition,
+        deferred: createDeferred(),
+      })
+      revision++
+      loader.loadMore()
+      options.onLoadSubsetResult?.(true, acquisition, () => {
+        releases.push(acquisition)
+      })
+    }) as typeof subscription.requestSnapshot
+    const loader = new OrderedSourceLoader(
+      createOrderByInfo({ limit: 3, dataNeeded: () => 1 }),
+      subscription,
+      `row`,
+      () => {},
+      () => false,
+      () => revision,
+    )
+    try {
+      loader.start()
+      requests[0]!.deferred.resolve()
+      await flushPromises()
+      expect(
+        requests.map(({ options }) => options.where !== undefined),
+      ).toEqual([false, true, false])
+      expect(requests[2]!.options.minValues).toEqual([1])
+    } finally {
+      loader.dispose()
+      for (const request of requests) request.deferred.resolve()
+      await flushPromises()
+    }
+  })
+
   it.each(
     [false, true].flatMap((fullFirst) =>
       [false, true].flatMap((replayed) =>

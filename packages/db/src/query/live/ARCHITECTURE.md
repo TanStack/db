@@ -1006,7 +1006,11 @@ before the obsolete chain can issue another tie or refill. A repeated prefix or
 page fixed point ends the repair when no more data is needed; it cannot leave a
 held repair without pending work.
 The finite prefix and tie acquisitions they replace retire after the whole
-replacement chain succeeds.
+replacement chain succeeds. That retirement can make the adapter remove rows
+only the replaced acquisitions held. The chain holds every row through its
+boundary, so such a removal is not a source-order change, and the repair keeps
+its boundary. A loader that discarded it would restart paging from the start
+of the order with a smaller first page that cannot retire the repair's prefix.
 Full-source reads can be very expensive, so a repair avoids one whenever a
 bounded read is available. An invalidation that overlaps unfinished page or tie
 work after the source has settled once does not force one: the bounded repair
@@ -1105,7 +1109,11 @@ provider capability negotiation, comparator exception policy, and backend
 collation fidelity are outside this contract.
 
 An ordered request cannot start another ordered request through its own
-synchronous writes. If the adapter then throws, graph callbacks scheduled by
+synchronous writes. A graph turn that those writes run inside the request may
+ask for more data; the loader ignores that call, stages its continuation, and
+resumes it once the request returns, because that turn has already processed
+the writes and no later turn will ask again. A continuation staged with input
+the graph has not yet processed waits for the graph turn that processes it. If the adapter then throws, graph callbacks scheduled by
 those writes still belong to the failed window operation and cannot retry it.
 A public `setWindow()` call made from inside that synchronous operation throws
 `SetWindowReentrancyError`; it must not claim that a nested window settled after
