@@ -136,6 +136,8 @@ const staticOracleProperties = [
   `load-subset-full-flow.multi-source-statistics`,
   `load-subset-full-flow.truncate-evidence`,
   `load-subset-lifecycle.state-machine`,
+  `query-db.accepted-release-history`,
+  `query-db.application-release-history`,
   `query-db.lease-history`,
   `load-subset.async-settlement`,
   `load-subset.changing-predicate`,

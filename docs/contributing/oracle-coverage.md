@@ -618,8 +618,8 @@ also releases the final subscription while a direct-write merge holds a
 temporary Query observer listener. The fetched-only row leaves when its last
 acquisition lease does. A zero-lease listener on Query DB's observer is not an
 owner. These public-row assertions failed before the respective repairs.
-Release after commit acceptance while publication remains held has no witness
-in this owner.
+The accepted-release grammar below witnesses release after commit acceptance
+while publication remains held.
 Three previously failing public histories now pass as ordinary load-lifecycle
 checks: final release from `getKey` leaves no hidden row owner; an acquisition
 from a held commit's abort listener receives its row after the old commit
@@ -628,9 +628,42 @@ its row through the old owner's release. Each checks load settlement and public
 rows after acquisition or final release. They failed at those assertions before
 the repair. The held-commit history also distinguishes waiting for the old
 aborted transaction from diffing against its still-open row projection. These
-fixed histories do not yet cover all reentrant callbacks or release after
-commit acceptance; [issue #2160](https://github.com/TanStack/db/issues/2160)
+fixed histories do not yet cover all reentrant callbacks; [issue #2160](https://github.com/TanStack/db/issues/2160)
 remains open until the broader history grammar and hostile controls run.
+An application-release grammar now runs the same independent source-row model,
+real public `requestSnapshot` driver, and exact-row comparison over twelve
+named histories plus fixed-seed and random 48-run campaigns. It varies the
+`getKey`/`write()` callback cut, a peer present before the result or acquired
+at the cut, and one or two provider rows. It compares public rows after result
+settlement, peer release, a later filtered acquisition, and its final release.
+The later provider adds a fresh row and its exact scope is recorded, so stale
+full-Query cache reuse cannot pass as renewed coverage. The retired first
+load's raw outcome is unclaimed. An existing peer's pending load must fulfill;
+a peer acquired inside the callback must receive a load result and is judged
+by public rows and matching release; the installed Core returns immediate
+`true` at this nested cut.
+Direct seed and shrink
+path replay are registered. Against pre-repair `b5c55a2a4`, three named
+histories failed at the later final-release row checkpoint, including a
+two-row `write()` trace with one stranded row. This grammar does not cover
+commit-abort or Query-cache callback reentry, accepted commits, or source
+failure; the fixed witnesses above own the original cases.
+An accepted-release grammar varies caller abort versus unsubscribe and one
+versus two source-result rows. Four named histories and matching fixed-seed and
+random 48-run campaigns use public `requestSnapshot` acquisitions with an
+equal surviving peer. A held optimistic mutation delays publication after the
+source-result sync transaction is accepted. The driver observes that the
+transaction contains `server-a`; a wrapping sync records its original applied
+receipt without changing it. After first-owner release and before opening the
+publication gate, neither the peer load nor an aborted first load may settle,
+the receipt remains pending, and no server row is public. After the gate opens,
+the one original provider result must apply in full for the peer. An aborted
+first load must reject with `AbortError` only after that receipt and the server
+rows become visible. Releasing the peer removes those rows. A second provider
+call would return a distinct row and fail the provider-call comparison. The
+unsubscribed first adapter promise has no claimed outcome. Collection cleanup
+and reentrant callbacks during this accepted interval remain outside the
+grammar.
 An applied direct cache patch permits reuse or one exact filtered revalidation
 for a new demand, but cannot trigger a redundant full request. The bounded
 history has no retry, invalidation, or explicit refetch; a duplicate filtered

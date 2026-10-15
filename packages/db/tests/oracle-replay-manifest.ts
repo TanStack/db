@@ -187,6 +187,16 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [
     `query-db-collection/tests/load-subset-lifecycle-oracle.test.ts`,
     `query-db`,
+    `accepted-release-history`,
+  ],
+  [
+    `query-db-collection/tests/load-subset-lifecycle-oracle.test.ts`,
+    `query-db`,
+    `application-release-history`,
+  ],
+  [
+    `query-db-collection/tests/load-subset-lifecycle-oracle.test.ts`,
+    `query-db`,
     `lease-history`,
   ],
   [
@@ -292,6 +302,10 @@ function directReplayTestName(property: string): string | undefined {
     return `executes the replay calibration property`
   if (property === `query-db.lease-history`)
     return `refines generated caller and peer lease histories`
+  if (property === `query-db.application-release-history`)
+    return `refines generated application release histories`
+  if (property === `query-db.accepted-release-history`)
+    return `refines generated accepted release histories`
   if (property.startsWith(`pagination.matrix.`))
     return `\\[${property.replaceAll(`.`, `\\.`)}\\]`
   return indexReplayTestNames.get(property)

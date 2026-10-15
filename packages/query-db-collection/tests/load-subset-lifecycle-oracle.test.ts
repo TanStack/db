@@ -3050,6 +3050,269 @@ describe(`loadSubset lifecycle oracle`, () => {
   })
 
   /**
+   * A fetched result can invoke user code while Query DB extracts a key or
+   * writes a sync change. That callback may retire the first acquisition and
+   * leave no owner, retain an existing peer, or acquire a peer reentrantly.
+   * The independent model retains each provider row exactly while a public
+   * acquisition owns it. A later filtered acquisition must not inherit a
+   * hidden owner from the retired result. Its provider adds a fresh row, so a
+   * stale full-Query cache result cannot impersonate renewed exact coverage.
+   * The two-row case distinguishes a partial application from a complete
+   * source result.
+   *
+   * The grammar holds one initial provider result and varies the callback
+   * cut, peer arrival, and row count. It excludes release before the callback
+   * and a provider failure because neither reaches this application boundary.
+   * The driver uses real requestSnapshot acquisitions and a wrapping sync for
+   * the write cut. It compares the complete public row set after initial load
+   * settlement, after peer release, after a fresh exact-scope filtered
+   * acquisition, and after that acquisition releases. The raw adapter promise handed to
+   * onLoadSubsetResult has no specified outcome after unsubscribe. A peer
+   * acquired during the callback may receive immediate `true` rather than a
+   * pending load. The model checks delivery of its result callback, public
+   * rows, and final release without requiring a pending peer promise. This
+   * grammar does not model accepted commits or Query-cache notification reentry.
+   */
+  type ApplicationReleaseHistory = {
+    cut: `getKey` | `write`
+    peerArrival: `none` | `before-result` | `at-cut`
+    rowCount: 1 | 2
+  }
+
+  function expectedApplicationRelease(history: ApplicationReleaseHistory) {
+    const sourceRows = history.rowCount === 1 ? [`a`] : [`a`, `b`]
+    return {
+      reachedCut: true,
+      ...(history.peerArrival === `before-result`
+        ? { peerOutcome: `fulfilled` }
+        : {}),
+      afterInitialRows: history.peerArrival === `none` ? [] : sourceRows,
+      afterPeerReleaseRows: [] as Array<string>,
+      requestedFreshFilteredScope: true,
+      afterReacquireRows: [...sourceRows, `fresh`],
+      afterLaterReleaseRows: [] as Array<string>,
+    }
+  }
+
+  async function observeApplicationRelease(
+    history: ApplicationReleaseHistory,
+    expected: ReturnType<typeof expectedApplicationRelease>,
+  ) {
+    const queryClient = createQueryClient()
+    const id = `application-release-history-${collectionSequence++}`
+    const sourceRows: Array<Row> =
+      history.rowCount === 1
+        ? [{ id: `a`, group: `g` }]
+        : [
+            { id: `a`, group: `g` },
+            { id: `b`, group: `g` },
+          ]
+    const refreshedRows: Array<Row> = [
+      ...sourceRows,
+      { id: `fresh`, group: `g` },
+    ]
+    const firstResult = createDeferred<Array<Row>>()
+    let providerCalls = 0
+    const requestedScopes: Array<`full` | `filtered`> = []
+    let reachedCut = false
+    let onCut = () => {}
+    const baseOptions = queryCollectionOptions<Row>({
+      id,
+      queryClient,
+      queryKey: [id],
+      queryFn: (context) => {
+        const scope = context.meta?.loadSubsetOptions?.where
+          ? `filtered`
+          : `full`
+        requestedScopes.push(scope)
+        return ++providerCalls === 1
+          ? firstResult.promise
+          : Promise.resolve(scope === `filtered` ? refreshedRows : sourceRows)
+      },
+      getKey: (row) => {
+        if (history.cut === `getKey`) onCut()
+        return row.id
+      },
+      syncMode: `on-demand`,
+      startSync: true,
+    })
+    const originalSync = baseOptions.sync
+    const collection = createCollection({
+      ...baseOptions,
+      sync: {
+        sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+          originalSync.sync({
+            ...params,
+            write: (change) => {
+              if (history.cut === `write`) onCut()
+              params.write(change)
+            },
+          }),
+      },
+    })
+    const first = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    let peer: ReturnType<typeof collection.subscribeChanges> | undefined
+    let later: ReturnType<typeof collection.subscribeChanges> | undefined
+    let firstLoad: true | Promise<void> | undefined
+    let peerLoad: true | Promise<void> | undefined
+    let laterLoad: true | Promise<void> | undefined
+    const requestPeer = () => {
+      peer = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+      peer.requestSnapshot({
+        onLoadSubsetResult: (load) => {
+          peerLoad = load
+        },
+      })
+    }
+    onCut = () => {
+      if (reachedCut) return
+      reachedCut = true
+      first.unsubscribe()
+      if (history.peerArrival === `at-cut`) requestPeer()
+    }
+    const rowIds = () => collection.toArray.map((row) => row.id).sort()
+
+    return checkPublicCleanupWitness(async () => {
+      first.requestSnapshot({
+        onLoadSubsetResult: (load) => {
+          firstLoad = load
+        },
+      })
+      if (firstLoad === undefined || firstLoad === true)
+        throw new Error(`The first acquisition did not return a pending load`)
+      void firstLoad.catch(() => undefined)
+      if (history.peerArrival === `before-result`) requestPeer()
+      firstResult.resolve(sourceRows)
+      if (history.peerArrival === `before-result`) {
+        if (peerLoad === undefined || peerLoad === true)
+          throw new Error(`The existing peer did not return a pending load`)
+        await peerLoad
+      } else if (history.peerArrival === `at-cut`) {
+        await vi.waitFor(() => expect(reachedCut).toBe(true))
+        if (peerLoad === undefined)
+          throw new Error(`The reentrant peer did not receive a load result`)
+        if (peerLoad !== true) await peerLoad
+      }
+      // One host turn drains this controlled provider continuation before the
+      // public-row checkpoint; the retired adapter promise need not settle.
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect(reachedCut).toBe(true)
+      const afterInitialRows = rowIds()
+      const peerOutcome =
+        history.peerArrival !== `before-result`
+          ? undefined
+          : await Promise.resolve(peerLoad).then(
+              () => `fulfilled` as const,
+              () => `rejected` as const,
+            )
+      peer?.unsubscribe()
+      const afterPeerReleaseRows = rowIds()
+
+      const filter = new IR.Func<boolean>(`eq`, [
+        new IR.PropRef([`group`]),
+        new IR.Value(`g`),
+      ])
+      later = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+      const scopesBeforeLater = requestedScopes.length
+      later.requestSnapshot({
+        where: filter,
+        onLoadSubsetResult: (load) => {
+          laterLoad = load
+        },
+      })
+      if (laterLoad === undefined)
+        throw new Error(`The later filtered acquisition did not return a load`)
+      await laterLoad
+      const requestedFreshFilteredScope = requestedScopes
+        .slice(scopesBeforeLater)
+        .includes(`filtered`)
+      const afterReacquireRows = rowIds()
+      later.unsubscribe()
+      const afterLaterReleaseRows = rowIds()
+      const observed = {
+        reachedCut,
+        ...(history.peerArrival === `before-result` ? { peerOutcome } : {}),
+        afterInitialRows,
+        afterPeerReleaseRows,
+        requestedFreshFilteredScope,
+        afterReacquireRows,
+        afterLaterReleaseRows,
+      }
+      expect(observed, JSON.stringify({ history, observed, expected })).toEqual(
+        expected,
+      )
+      return observed
+    }, [
+      [`first provider`, () => firstResult.resolve([])],
+      [`first subscription`, () => first.unsubscribe()],
+      [`peer subscription`, () => peer?.unsubscribe()],
+      [`later subscription`, () => later?.unsubscribe()],
+      [`Collection`, () => collection.cleanup()],
+      [`Query client`, () => queryClient.clear()],
+    ])
+  }
+
+  const applicationReleaseProperty = `query-db.application-release-history`
+  const applicationReleaseReplay = readOracleRunConfig()
+  const applicationReleaseArbitrary = fc.record({
+    cut: fc.constantFrom<ApplicationReleaseHistory[`cut`]>(`getKey`, `write`),
+    peerArrival: fc.constantFrom<ApplicationReleaseHistory[`peerArrival`]>(
+      `none`,
+      `before-result`,
+      `at-cut`,
+    ),
+    rowCount: fc.constantFrom<ApplicationReleaseHistory[`rowCount`]>(1, 2),
+  })
+  const namedApplicationReleaseHistories = (
+    [`getKey`, `write`] as const
+  ).flatMap((cut) =>
+    ([`none`, `before-result`, `at-cut`] as const).flatMap((peerArrival) =>
+      ([1, 2] as const).map((rowCount) => ({
+        cut,
+        peerArrival,
+        rowCount,
+      })),
+    ),
+  )
+
+  it.each(namedApplicationReleaseHistories)(
+    `reconstructs an application release history: %j`,
+    async (history) => {
+      await observeApplicationRelease(
+        history,
+        expectedApplicationRelease(history),
+      )
+    },
+  )
+
+  it(`refines generated application release histories`, async () => {
+    if (
+      applicationReleaseReplay.replayPath !== undefined &&
+      applicationReleaseReplay.replayProperty !== applicationReleaseProperty
+    )
+      return
+    const property = fc.asyncProperty(
+      applicationReleaseArbitrary,
+      async (history) => {
+        await observeApplicationRelease(
+          history,
+          expectedApplicationRelease(history),
+        )
+      },
+    )
+    const options = oraclePropertyOptions(48, applicationReleaseProperty)
+    if (applicationReleaseReplay.replaySeed === undefined)
+      await fc.assert(property, { ...options, seed: 2_160_2026 })
+    await fc.assert(property, options)
+  })
+
+  /**
    * Canceling the last owner's held commit fires its abort listeners inside
    * cleanup. A new public acquisition from that callback must keep the Query
    * and its row; the outer cleanup may retire only the departed lease.
@@ -4866,6 +5129,293 @@ describe(`loadSubset lifecycle oracle`, () => {
       [`Query client`, () => queryClient.clear()],
     ])
   })
+
+  /**
+   * Once Core accepts a source sync transaction, releasing one acquisition
+   * cannot revoke its applied receipt for a surviving peer. An optimistic
+   * mutation holds publication after that acceptance. The independent model
+   * predicts every server row from the provider result, regardless of which
+   * first-owner release action follows. An explicit caller abort must reject
+   * its own load only after the receipt; ordinary unsubscribe has no promised
+   * raw-adapter outcome. Both actions leave the peer's load pending until
+   * application and let that peer retain every server row afterward.
+   *
+   * The grammar varies abort versus unsubscribe and one versus two server
+   * rows. It excludes Collection cleanup because that action retires the peer
+   * and needs an event/receipt observer rather than a surviving-row check.
+   * The driver uses public requestSnapshot and an optimistic mutation to hold
+   * the accepted transaction. The internal pending-transaction flag only
+   * witnesses that the intended cut was reached. Public load outcomes and
+   * exact server rows are compared after release while publication remains
+   * held, after the hold, and after the peer releases. A wrapping sync records
+   * the applied receipt for the source-result transaction. A second provider
+   * call returns a distinct row, so replacement work cannot stand in for the
+   * accepted result. Recording rows and receipt state inside the first load's
+   * rejection handler checks that its settlement follows application.
+   */
+  type AcceptedReleaseHistory = {
+    action: `caller-abort` | `unsubscribe`
+    rowCount: 1 | 2
+  }
+
+  function expectedAcceptedRelease(history: AcceptedReleaseHistory) {
+    const serverRows =
+      history.rowCount === 1
+        ? [`server-a`]
+        : [`server-a`, `server-b`]
+    return {
+      reachedAcceptedCommit: true,
+      providerCalls: 1,
+      beforeGateRows: [] as Array<string>,
+      receiptAppliedBeforeGate: false,
+      receiptAppliedAfterGate: true,
+      peerSettledBeforeGate: false,
+      ...(history.action === `caller-abort`
+        ? {
+            firstSettledBeforeGate: false,
+            firstOutcome: `AbortError`,
+            firstRowsAtSettlement: serverRows,
+            receiptAppliedAtFirstSettlement: true,
+          }
+        : {}),
+      peerOutcome: `fulfilled`,
+      afterGateRows: serverRows,
+      afterPeerReleaseRows: [] as Array<string>,
+    }
+  }
+
+  async function observeAcceptedRelease(
+    history: AcceptedReleaseHistory,
+    expected: ReturnType<typeof expectedAcceptedRelease>,
+  ) {
+    const queryClient = createQueryClient()
+    const id = `accepted-release-history-${collectionSequence++}`
+    const serverRows: Array<Row> =
+      history.rowCount === 1
+        ? [{ id: `server-a` }]
+        : [{ id: `server-a` }, { id: `server-b` }]
+    const handlerEntered = createDeferred<void>()
+    const releaseHandler = createDeferred<void>()
+    let providerCalls = 0
+    let sourceTransactionHasServerRow = false
+    let receiptApplied = false
+    const baseOptions = queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn: () =>
+          Promise.resolve(
+            ++providerCalls === 1 ? serverRows : [{ id: `replacement` }],
+          ),
+        getKey: (row) => row.id,
+        startSync: true,
+        syncMode: `on-demand`,
+        onInsert: async () => {
+          handlerEntered.resolve()
+          await releaseHandler.promise
+          return { refetch: false }
+        },
+    })
+    const originalSync = baseOptions.sync
+    const collection = createCollection({
+      ...baseOptions,
+      sync: {
+        sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+          originalSync.sync({
+            ...params,
+            begin: () => {
+              sourceTransactionHasServerRow = false
+              params.begin()
+            },
+            write: (change) => {
+              if (
+                change.type !== `delete` &&
+                change.value.id === `server-a`
+              )
+                sourceTransactionHasServerRow = true
+              params.write(change)
+            },
+            commit: (signal) => {
+              const isSourceResult = sourceTransactionHasServerRow
+              const receipt = params.commit(signal)
+              if (isSourceResult) {
+                if (receipt === true) receiptApplied = true
+                else
+                  void receipt.then(
+                    () => {
+                      receiptApplied = true
+                    },
+                    () => undefined,
+                  )
+              }
+              return receipt
+            },
+          }),
+      },
+    })
+    const first = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    const peer = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    const caller = new AbortController()
+    let firstLoad: true | Promise<void> | undefined
+    let peerLoad: true | Promise<void> | undefined
+    const publicServerRows = () =>
+      collection.toArray
+        .map((row) => row.id)
+        .filter((rowId) => rowId.startsWith(`server-`))
+        .sort()
+
+    return checkPublicCleanupWitness(async () => {
+      const mutation = collection.insert({ id: `local` })
+      await handlerEntered.promise
+      first.requestSnapshot({
+        ...(history.action === `caller-abort` ? { signal: caller.signal } : {}),
+        onLoadSubsetResult: (result) => {
+          firstLoad = result
+        },
+      })
+      peer.requestSnapshot({
+        onLoadSubsetResult: (result) => {
+          peerLoad = result
+        },
+      })
+      if (firstLoad === undefined || firstLoad === true)
+        throw new Error(`The first acquisition did not return a pending load`)
+      if (peerLoad === undefined || peerLoad === true)
+        throw new Error(`The peer acquisition did not return a pending load`)
+      void firstLoad.catch(() => undefined)
+      const peerOutcome = peerLoad.then(
+        () => `fulfilled` as const,
+        () => `rejected` as const,
+      )
+      await vi.waitFor(() =>
+        expect(
+          collection._state.pendingSyncedTransactions.some(
+            (transaction) =>
+              transaction.committed &&
+              transaction.operations.some(({ key }) => key === `server-a`),
+          ),
+        ).toBe(true),
+      )
+      const reachedAcceptedCommit = true
+      let firstOutcome: `fulfilled` | `AbortError` | `other-error` | undefined
+      let firstRowsAtSettlement: Array<string> | undefined
+      let receiptAppliedAtFirstSettlement: boolean | undefined
+      let peerSettledBeforeGate = false
+      void peerOutcome.then(() => {
+        peerSettledBeforeGate = true
+      })
+      if (history.action === `caller-abort`) {
+        void firstLoad.then(
+          () => {
+            firstOutcome = `fulfilled`
+            firstRowsAtSettlement = publicServerRows()
+            receiptAppliedAtFirstSettlement = receiptApplied
+          },
+          (error: unknown) => {
+            firstOutcome =
+              error instanceof Error && error.name === `AbortError`
+                ? `AbortError`
+                : `other-error`
+            firstRowsAtSettlement = publicServerRows()
+            receiptAppliedAtFirstSettlement = receiptApplied
+          },
+        )
+        caller.abort()
+      } else first.unsubscribe()
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      const beforeGateRows = publicServerRows()
+      const receiptAppliedBeforeGate = receiptApplied
+      const firstSettledBeforeGate = firstOutcome !== undefined
+      const peerSettledBeforeGateObserved = peerSettledBeforeGate
+      releaseHandler.resolve()
+      await mutation.isPersisted.promise
+      if (history.action === `caller-abort`) {
+        await Promise.resolve(firstLoad).catch(() => undefined)
+      }
+      const observedPeerOutcome = await peerOutcome
+      const afterGateRows = publicServerRows()
+      const receiptAppliedAfterGate = receiptApplied
+      peer.unsubscribe()
+      const afterPeerReleaseRows = publicServerRows()
+      const observed = {
+        reachedAcceptedCommit,
+        providerCalls,
+        beforeGateRows,
+        receiptAppliedBeforeGate,
+        receiptAppliedAfterGate,
+        peerSettledBeforeGate: peerSettledBeforeGateObserved,
+        ...(history.action === `caller-abort`
+          ? {
+              firstSettledBeforeGate,
+              firstOutcome,
+              firstRowsAtSettlement,
+              receiptAppliedAtFirstSettlement,
+            }
+          : {}),
+        peerOutcome: observedPeerOutcome,
+        afterGateRows,
+        afterPeerReleaseRows,
+      }
+      expect(observed, JSON.stringify({ history, observed, expected })).toEqual(
+        expected,
+      )
+      return observed
+    }, [
+      [`mutation handler`, () => releaseHandler.resolve()],
+      [`first subscription`, () => first.unsubscribe()],
+      [`peer subscription`, () => peer.unsubscribe()],
+      [`Collection`, () => collection.cleanup()],
+      [`Query client`, () => queryClient.clear()],
+    ])
+  }
+
+  const acceptedReleaseProperty = `query-db.accepted-release-history`
+  const acceptedReleaseReplay = readOracleRunConfig()
+  const acceptedReleaseArbitrary = fc.record({
+    action: fc.constantFrom<AcceptedReleaseHistory[`action`]>(
+      `caller-abort`,
+      `unsubscribe`,
+    ),
+    rowCount: fc.constantFrom<AcceptedReleaseHistory[`rowCount`]>(1, 2),
+  })
+  const namedAcceptedReleaseHistories = (
+    [`caller-abort`, `unsubscribe`] as const
+  ).flatMap((action) =>
+    ([1, 2] as const).map((rowCount) => ({ action, rowCount })),
+  )
+
+  it.each(namedAcceptedReleaseHistories)(
+    `reconstructs an accepted release history: %j`,
+    async (history) => {
+      await observeAcceptedRelease(history, expectedAcceptedRelease(history))
+    },
+  )
+
+  it(
+    `refines generated accepted release histories`,
+    async () => {
+      if (
+        acceptedReleaseReplay.replayPath !== undefined &&
+        acceptedReleaseReplay.replayProperty !== acceptedReleaseProperty
+      )
+        return
+      const property = fc.asyncProperty(
+        acceptedReleaseArbitrary,
+        async (history) => {
+          await observeAcceptedRelease(history, expectedAcceptedRelease(history))
+        },
+      )
+      const options = oraclePropertyOptions(48, acceptedReleaseProperty)
+      if (acceptedReleaseReplay.replaySeed === undefined)
+        await fc.assert(property, { ...options, seed: 2_160_2027 })
+      await fc.assert(property, options)
+    },
+    20_000,
+  )
 
   it(`starts a fresh query after an aborted owner immediately remounts`, async () => {
     await expectRemountAfterAbortStartsFreshQuery()

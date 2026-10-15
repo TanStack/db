@@ -23,6 +23,18 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
       tests; full load-lifecycle and ownership oracles pass (2026-10-15).
 - [ ] Expand reentrant ownership histories and hostile controls before calling
       the #2160 bug class closed.
+  - [x] Application callback grammar: 12 named histories and matching fixed
+        and random 48-run campaigns vary `getKey` versus `write()`, no peer
+        versus an existing or reentrant peer, and one versus two provider rows.
+        A later filtered acquisition checks for hidden ownership after its
+        final release. Running the grammar against `b5c55a2a4` failed three
+        histories at that public-row checkpoint; the two-row `write()` case
+        exposed a partially staged owner. Direct seed/path replay passed;
+        an independent oracle reviewer found and helped remove two false
+        outcome claims about retired adapter promises and nested peer loads
+        (2026-10-15).
+  - [ ] Extend the process grammar to commit-abort and Query observer-removal
+        callbacks, then check each release order and applied settlement.
 - [x] Repair public caller abort (#2162) and turn its witness green. Four
       sole/peer and consumed/ignored-signal histories, two pre-acceptance
       histories, and one accepted-receipt history pass (2026-10-15). The broader
@@ -44,8 +56,20 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
           physical-signal, and public-row checkpoints. Two further production
           mutants, retaining an aborted caller's lease and stealing the peer's
           lease on a duplicate unload, failed at the physical-signal and
-          intermediate public-row checkpoints (2026-10-15). Reentry, refetch,
-          and accepted-commit cells remain.
+          intermediate public-row checkpoints (2026-10-15). Reentry and
+          refetch cells remain; accepted-commit reentry remains open below.
+    - [x] Accepted-commit release grammar: caller abort or unsubscribe after
+          source-result acceptance, crossed with one/two rows, runs four named
+          histories and matching fixed/random 48-run campaigns. The real
+          applied receipt, first-load settlement, peer settlement, one
+          provider call, public rows before/after the publication gate, and
+          final release are checked. Direct seed/path replay passed. A
+          temporary immediate-abort mutant failed both caller-abort histories
+          at the held-gate, receipt, and public-row checkpoints; two
+          unsubscribe controls passed. An independent oracle reviewer found
+          and helped close timing, replacement-fetch, and early-publication
+          false-greens (2026-10-15). Reentrant callbacks and cleanup during
+          this accepted interval remain open.
 - [ ] Close the automatic-GC, hydration, repeated-options, request-shape,
       persistence, and cleanup-harness cells with tests or explicit contract
       decisions.
