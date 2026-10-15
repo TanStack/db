@@ -68,7 +68,6 @@ export interface UseLiveInfiniteQueryReturn<
   fetchNextPage: () => Promise<void>
   hasNextPage: ComputedRef<boolean>
   isFetchingNextPage: ComputedRef<boolean>
-  error: ComputedRef<unknown>
   errors: ComputedRef<ErrorTreeNode | undefined>
 }
 
@@ -94,7 +93,6 @@ export interface UseLiveInfiniteQueryReturnWithCollection<
   fetchNextPage: () => Promise<void>
   hasNextPage: ComputedRef<boolean>
   isFetchingNextPage: ComputedRef<boolean>
-  error: ComputedRef<unknown>
   errors: ComputedRef<ErrorTreeNode | undefined>
 }
 
@@ -271,7 +269,6 @@ export function useLiveInfiniteQuery<
     fetchNextPage: () => fetchNextLiveQueryWindowPage(controller.value),
     hasNextPage: computed(() => snapshot.value.hasNextPage),
     isFetchingNextPage: computed(() => snapshot.value.isFetchingNextPage),
-    error: computed(() => snapshot.value.error),
     errors: computed(() => snapshot.value.errors),
   }
 }

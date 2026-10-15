@@ -45,7 +45,7 @@ export interface InfiniteQueryResult {
   pageParams: Array<number>
   hasNextPage: boolean
   isFetchingNextPage: boolean
-  error: unknown
+  isError: boolean
   status: string
   collection: Collection<any, any, any>
 }

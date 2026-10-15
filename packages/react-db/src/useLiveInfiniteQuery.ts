@@ -76,7 +76,6 @@ export type UseLiveInfiniteQueryReturn<TContext extends Context> = Omit<
   fetchNextPage: () => Promise<void>
   hasNextPage: boolean
   isFetchingNextPage: boolean
-  error: unknown
 }
 
 export type UseLiveInfiniteQueryReturnWithCollection<
@@ -102,7 +101,6 @@ export type UseLiveInfiniteQueryReturnWithCollection<
   fetchNextPage: () => Promise<void>
   hasNextPage: boolean
   isFetchingNextPage: boolean
-  error: unknown
   errors: ErrorTreeNode | undefined
 }
 
@@ -472,7 +470,6 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     fetchNextPage,
     hasNextPage: snapshot.hasNextPage,
     isFetchingNextPage: snapshot.isFetchingNextPage,
-    error: snapshot.error,
     errors: snapshot.errors,
   }
 }

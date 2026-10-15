@@ -2357,7 +2357,8 @@ const effect = createEffect({
 | `onExit` | `(event, ctx) => void \| Promise<void>` (optional) | Called once for each row exiting the query result. |
 | `onBatch` | `(events, ctx) => void \| Promise<void>` (optional) | Called once per graph run with the full unfiltered batch of delta events. |
 | `onError` | `(error, event) => void` (optional) | Called when `onEnter`, `onUpdate`, `onExit`, or `onBatch` throws or rejects. |
-| `onSourceError` | `(error) => void` (optional) | Called when a source collection enters an error or cleaned-up state. The effect is automatically disposed after this fires. If not provided, the error is logged to `console.error`. |
+| `onHealthChange` | `(errors) => void` (optional) | Called with the Effect's error tree when a source's health or a request changes after the Effect's initial load. |
+| `onSourceError` | `(error) => void` (optional) | Called when a source collection enters an error state (an initial error or a crash) or is cleaned up. The effect is automatically disposed after this fires. If not provided, the error is logged to `console.error`. |
 | `skipInitial` | `boolean` (optional) | When `true`, deltas from the initial data load are suppressed. Only subsequent changes fire handlers. Defaults to `false`. |
 
 ### Delta Events

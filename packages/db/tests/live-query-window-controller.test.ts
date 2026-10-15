@@ -496,16 +496,13 @@ describe(`createLiveQueryWindowController`, () => {
 
     expect(controller.getSnapshot().pages).toHaveLength(1)
     expect(controller.getSnapshot().hasNextPage).toBe(true)
-    expect((controller.getSnapshot() as { error?: unknown }).error).toBe(
-      failure,
-    )
 
     await controller.fetchNextPage()
     expect(controller.getSnapshot().pages).toHaveLength(2)
     controller.dispose()
   })
 
-  it(`clears a preload error after a successful retry`, async () => {
+  it(`keeps a rejected preload out of the window status`, async () => {
     const lq = makeOrderedLiveQuery(makeSource(), 2)
     const failure = new Error(`preload failed`)
     vi.spyOn(lq.utils, `setWindow`).mockRejectedValueOnce(failure)
@@ -514,11 +511,10 @@ describe(`createLiveQueryWindowController`, () => {
     })
 
     await expect(controller.preload()).rejects.toBe(failure)
-    expect(controller.getSnapshot().error).toBe(failure)
+    expect(controller.getSnapshot().isError).toBe(false)
 
     await controller.preload()
     expect(controller.getSnapshot().isError).toBe(false)
-    expect(controller.getSnapshot().error).toBeUndefined()
     controller.dispose()
   })
 
@@ -606,7 +602,7 @@ describe(`createLiveQueryWindowController`, () => {
         expect(await expansionOutcome).toBe(failure)
         expect(await preloadOutcome).toBe(failure)
         expect(controller.getSnapshot().pages).toHaveLength(1)
-        expect(controller.getSnapshot().error).toBe(failure)
+        expect(controller.getSnapshot().isError).toBe(false)
         await controller.fetchNextPage()
       } else {
         resolveExpansion()
@@ -713,7 +709,11 @@ describe(`createLiveQueryWindowController`, () => {
     rejectLoads = true
     await expect(controller.fetchNextPage()).rejects.toBe(failure)
     expect(controller.getSnapshot().pages).toHaveLength(1)
-    expect(controller.getSnapshot().error).toBe(failure)
+    // The failed load is a request error; the window keeps its status.
+    expect(controller.getSnapshot().isError).toBe(false)
+    expect(controller.getSnapshot().errors?.error).toMatchObject({
+      phase: `request`,
+    })
     expect(lq.utils.lastSubsetError).toBe(failure)
     expect(lq.utils.customUtility()).toBe(`custom`)
     controller.dispose()
@@ -859,7 +859,7 @@ describe(`createLiveQueryWindowController`, () => {
         if (outcome === `reject`) {
           expect(await resetOutcome).toBe(failure)
           expect(await expansionOutcome).toBe(failure)
-          expect(controller.getSnapshot().error).toBe(failure)
+          expect(controller.getSnapshot().isError).toBe(false)
           expect(ids(controller.getSnapshot())).toEqual([`1`, `2`])
           await controller.reset()
         } else {
@@ -1268,7 +1268,6 @@ describe(`createLiveQueryWindowController`, () => {
     await flush()
 
     expect(controller.getSnapshot().isError).toBe(false)
-    expect(controller.getSnapshot().error).toBeUndefined()
     controller.dispose()
   })
 
@@ -1430,7 +1429,7 @@ describe(`createLiveQueryWindowController`, () => {
     controller.dispose()
   })
 
-  it(`derives status flags from a pagination error status`, async () => {
+  it(`keeps ready status flags after a failed page request`, async () => {
     const lq = makeOrderedLiveQuery(makeSource(), 2)
     const controller = createLiveQueryWindowController<Row, string>(lq as any, {
       pageSize: 2,
@@ -1443,12 +1442,13 @@ describe(`createLiveQueryWindowController`, () => {
     )
     await expect(controller.fetchNextPage()).rejects.toThrow(`window failed`)
 
+    // A failed request after readiness is health, not status.
     expect(controller.getSnapshot()).toMatchObject({
-      status: `error`,
+      status: `ready`,
       isLoading: false,
-      isReady: false,
+      isReady: true,
       isIdle: false,
-      isError: true,
+      isError: false,
       isCleanedUp: false,
     })
     controller.dispose()
