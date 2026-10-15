@@ -55,7 +55,13 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
         physical signal, own keys, descriptor, cloning, JSON, and deletion.
         The new configurable-descriptor assertion failed before the one-line
         repair (2026-10-15).
-  - [ ] Retained persistence through final release during application.
+  - [x] Retained persistence through final release during application: four
+        histories cross prior marker present/absent with sole/peer ownership,
+        then restart against an empty authoritative source. They check public
+        and durable rows, owner metadata, and the marker. Skipping the
+        persistence wrapper's upstream unload fails at the public fresh-row
+        checkpoint; bypassing only Query DB's local owner checks survives
+        because the wrapper independently fences this path (2026-10-15).
   - [ ] Cleanup failure fidelity across older fixtures.
 - [ ] Run independent oracle review, package verification, and CI; record the
       exact covered boundary and remaining limits.

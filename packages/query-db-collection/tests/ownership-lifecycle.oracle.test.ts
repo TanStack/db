@@ -12216,6 +12216,149 @@ describe(`query collection ownership lifecycle`, () => {
     ).toEqual([])
   })
 
+  /**
+   * A retained row is a prior durable baseline, not authority for a provider
+   * result whose last acquisition releases during getKey. The independent
+   * source has replaced `old` with `fresh`. Without a peer, the attempted
+   * result is unaccepted: `fresh` must not become public or durable, and the
+   * old owner remains available for later revalidation. With a peer, that
+   * same physical result may apply for the peer and retire `old`. A cold run
+   * with an empty source then retires whichever row remained in storage.
+   * The provider, pre-response pending load, public rows, durable rows, owner
+   * metadata, and retention marker are compared at each settlement cut. The
+   * persisted wrapper may fulfill a released direct `_sync` promise after
+   * dropping its source result; this oracle does not assign that internal
+   * promise a caller-specific cancellation outcome.
+   */
+  it.each([
+    { marker: false, peer: false },
+    { marker: true, peer: false },
+    { marker: false, peer: true },
+    { marker: true, peer: true },
+  ])(
+    `revalidates a retained row after release during result application, marker=$marker, peer=$peer`,
+    async ({ marker, peer }) => {
+      const id = `retained-release-during-application-${marker}-${peer}`
+      const oldRow: Item = { id: `old`, category: `detail`, name: `Old` }
+      const freshRow: Item = { id: `fresh`, category: `detail`, name: `Fresh` }
+      const firstRequest = categorySubset(`detail`)
+      const peerRequest = categorySubset(`detail`)
+      const scopeHash = hashKey([id, getLoadSubsetDemandKey(firstRequest)])
+      const retentionKey = `queryCollection:gc:${scopeHash}`
+      const storage = createOwnershipStorage({
+        rows: new Map([[oldRow.id, oldRow]]),
+        rowMetadata: new Map([
+          [oldRow.id, { queryCollection: { owners: { [scopeHash]: true } } }],
+        ]),
+        collectionMetadata: new Map(
+          marker
+            ? [
+                [
+                  retentionKey,
+                  { queryHash: scopeHash, mode: `until-revalidated` },
+                ],
+              ]
+            : [],
+        ),
+      })
+      const response = createDeferred<Array<Item>>()
+      const queryClient = createQueryClient()
+      const queryFn = vi.fn((context: QueryFunctionContext) =>
+        response.promise.then((items) =>
+          selectOwnershipRows(items, context.meta?.loadSubsetOptions ?? {}),
+        ),
+      )
+      let releaseFirst: () => void = () => {
+        throw new Error(`The first acquisition is not ready for release`)
+      }
+      let released = false
+      const collection = createCollection(
+        persistedCollectionOptions<
+          Item,
+          string | number,
+          never,
+          QueryCollectionUtils<Item, string | number, Item, unknown>
+        >({
+          ...queryCollectionOptions<Item>({
+            id,
+            queryClient,
+            queryKey: [id],
+            queryFn,
+            getKey: (item) => {
+              if (item.id === freshRow.id && !released) {
+                released = true
+                releaseFirst()
+              }
+              return item.id
+            },
+            syncMode: `on-demand`,
+            persistedGcTime: Number.POSITIVE_INFINITY,
+            startSync: true,
+          }),
+          persistence: { adapter: storage.adapter },
+        }),
+      )
+      releaseFirst = () => collection._sync.unloadSubset(firstRequest)
+      cleanups.push(async () => {
+        response.resolve([])
+        collection._sync.unloadSubset(peerRequest)
+        collection._sync.unloadSubset(firstRequest)
+        try {
+          await collection.cleanup()
+        } finally {
+          queryClient.clear()
+        }
+      })
+
+      await vi.waitFor(() => expect(collection.status).toBe(`ready`))
+      const firstRequestResult = collection._sync.loadSubset(firstRequest)
+      expect(firstRequestResult).not.toBe(true)
+      const firstLoad = Promise.resolve(firstRequestResult)
+      void firstLoad.catch(() => undefined)
+      const peerLoad = peer
+        ? Promise.resolve(collection._sync.loadSubset(peerRequest))
+        : undefined
+      let firstSettled = false
+      void firstLoad.then(
+        () => {
+          firstSettled = true
+        },
+        () => {
+          firstSettled = true
+        },
+      )
+      await vi.waitFor(() => expect(queryFn).toHaveBeenCalledOnce())
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect(firstSettled).toBe(false)
+      response.resolve([freshRow])
+      await firstLoad.catch(() => undefined)
+      if (peerLoad) await peerLoad
+      expect(released).toBe(true)
+      expect(queryFn).toHaveBeenCalledOnce()
+      expect(collection.has(freshRow.id)).toBe(peer)
+      const hotSnapshot = storage.snapshot()
+      expect(storedItems(storage)).toEqual([peer ? freshRow : oldRow])
+      expect(
+        persistedOwners(
+          hotSnapshot.rowMetadata,
+          peer ? freshRow.id : oldRow.id,
+        ),
+      ).toEqual([scopeHash])
+      expect(hotSnapshot.collectionMetadata.has(retentionKey)).toBe(!peer)
+
+      const coldStorage = createOwnershipStorage(hotSnapshot)
+      const cold = createPersistedOwnershipFixture(id, coldStorage, [])
+      await cold.collection._sync.loadSubset(categorySubset(`detail`))
+      expect(cold.queryFn).toHaveBeenCalledOnce()
+      expect(itemIds(cold.collection.toArray)).toEqual([])
+      expect(storedItems(coldStorage)).toEqual([])
+      expect(coldStorage.snapshot().rowMetadata.size).toBe(0)
+      expect(coldStorage.snapshot().collectionMetadata.has(retentionKey)).toBe(
+        false,
+      )
+    },
+  )
+
   it(`emits metadata for every owner of rows shared by overlapping queries`, async () => {
     const metadata: MetadataRecorder = { rows: new Map(), writes: [] }
     const { collection } = createOwnershipFixture({

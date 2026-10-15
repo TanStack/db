@@ -735,6 +735,19 @@ accepted row when its persisted baseline had no value for the key. Arbitrary
 predicate containment, function-built Query keys, TTL retention, and other
 persisted startup histories with a shared full-source lease still need
 distinct witnesses.
+Four additional retained-row histories release the final acquisition from
+`getKey` while its provider result is applying, with and without a prior
+retention marker and with and without a surviving equal peer. They compare
+pre-response pending load, public and durable rows, durable owners, and marker
+after settlement, then clone storage into a cold run whose empty source
+retires the remaining row. Final release writes a marker even when none was
+seeded; a peer lets the fresh row apply and clears the old marker. A temporary
+wrapper mutant that omitted upstream unload fails at the public fresh-row
+checkpoint. Bypassing only Query DB's owner guard and commit signal survived
+this path because the persistence wrapper independently stops the released
+acquisition; this witness does not calibrate that local guard. The persisted
+wrapper may fulfill a released direct `_sync` promise after discarding its
+source result, so this history makes no caller-specific settlement claim.
 These tests do not prove every provider returns a complete full source,
 arbitrary observer-option selection, or the policy for a new equal demand after
 failed revalidation. The provider uses the physical Query signal; an
