@@ -736,11 +736,12 @@ real `deferDataRefresh` premise. The ownership oracle also owns a later-remount
 witness after an inactive prefetched entry is evicted, and direct-insert
 retention across persisted restore remains with its persisted-owner histories.
 An eager no-subscriber witness removes its Query from cache and verifies that
-`utils.refetch()` starts a new provider request and applies its row. A retained
-persisted-scope witness applies a direct write, then presents a `setQueryData`
-edit without any physical fetch. The public row stays manual; disabling the
-cache-edit authority guard makes it revert to the older value. This does not
-test an unknown fetch position from another QueryClient's hydration.
+`utils.refetch()` starts a new provider request and applies its row. A real
+persisted Collection applies a direct update, then receives a `setQueryData`
+edit without any physical fetch. Public and durable rows stay manual; disabling
+the cache-edit authority guard makes the public row revert to the older value.
+This does not test an unknown fetch position from another QueryClient's
+hydration.
 
 The ownership oracle also checks per-key precedence when a held on-demand
 refetch meets a later direct update, error and invalidation/freshness metadata
