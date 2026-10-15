@@ -1,9 +1,9 @@
 # PR #2134 identity and persisted-key oracle review
 
-**Latest executable evidence, 2026-10-15:** The integration note below binds
-the combined test result to merge head `2089e0630`. The last independent ORC
-disposition audits `7ebfb4dee`; later sections preserve the sequence of
-repairs and reviews, with each result bound to its stated executable head.
+**Latest executable evidence, 2026-10-15:** The integration and exact-merge
+review below bind the combined test result to merge head `2089e0630`.
+Earlier sections preserve the sequence of repairs and reviews, with each
+result bound to its stated executable head.
 The source-only proxy-fixture claim and the first held-fetch calibration were
 superseded by later receiving checks.
 
@@ -113,11 +113,10 @@ custom query-key functions, TTL expiry, nested predicates, and arbitrary
 overlapping application schedules still need receiving witnesses.
 
 Historical reference-proxy keys cannot be reconstructed safely. The old
-encoder represented a literal proxy as a row path and could collide with a
-valid row-reference query. The independent reviewer compared that old key
-with the repaired encoder's legacy output and found them different. Current
-object-valued identities also carry a
-per-runtime nonce and cannot identify the same object after a cold restart.
+encoder distinguished literal proxies from row references but gave distinct
+literal proxies with the same path one key. Current object-valued identities
+also carry a per-runtime nonce and cannot identify the same object after a
+cold restart.
 An old `until-revalidated` marker in those classes can remain indefinitely.
 Any broad invalidation or cache-format policy needs a separate contract
 decision and an oracle for that decision.
@@ -1197,3 +1196,29 @@ owner parsing cost remains open in
 [#2181](https://github.com/TanStack/db/issues/2181). The row-bearing proxy
 receiving gap above also remains open. This integration run does not replace
 the independent ORC disposition or extend its claims to those cells.
+
+## Exact-merge oracle disposition at `2089e0630`
+
+An independent reviewer checked the combined executable tree after the #2158
+merge. The IR identity oracle passed 70 checks, and the selected historical
+owner, singleton-demand, and proxy histories passed 86. The full merged Query
+DB run passed 1,060 runtime checks and 589 type assertions; direct DB and Query
+DB typechecks, replay-registry checks, and `check:mangle` also passed. No new
+in-scope identity or retained-owner defect was confirmed at this head.
+
+| Requirement | Exact-merge disposition |
+| --- | --- |
+| ORC-001–003 | The finite identity and upgrade laws, independent value and owner-edge accounts, and adjacent literate explanations remain intact. The #2158 merge changed Query DB lifecycle machinery, not IR identity. |
+| ORC-004, 007 | No new generated identity or upgrade grammar was claimed. The selected histories are fixed enumerations; #2158's separate lifecycle grammar retains its own review. |
+| ORC-005 | The focused runs reached the real IR compiler, QueryClient, Query Collection, and controlled retention path. The full package run also executed the existing SQLite restart receiver. |
+| ORC-006 | The original-implementation and hostile-mutant assertion kills recorded above still calibrate the unchanged identity and upgrade assertions. They were not rerun on the merge commit. |
+| ORC-008–009 | Old and current owner edges remain distinct until revalidation or expiry; the model's demand edge and retention marker still map to exact persisted metadata. |
+| ORC-010 | The held-scan dual-fault cleanup control remains in the merged suite. The file-level cleanup aggregator still has no simultaneous assertion-plus-cleanup injection in this audit. |
+| ORC-011 | `Object.is` for literal proxies, fixed historical bytes, and the owner-edge model remain separate from production classification. The earlier row-reference collision claim was incorrect: old keys distinguish that operand from a literal proxy. No new shared semantic fault was identified in the finite domain. |
+| ORC-012–013 | This record binds the exact merged head, the focused comparisons, prior wrong-design kills, and the remaining limits. The same-path proxy, nullish singleton, historical/current owner, and deadline controls retain their distinguishing observations. |
+| ORC-014 | The primitive singleton-IN upgrade has a real SQLite restart receiver. A legal row-bearing literal-proxy upgrade has not been established because the managed SQLite wire projects that literal to an empty record; [#2187](https://github.com/TanStack/db/issues/2187) tracks that separate transport contract. |
+
+The [coverage map](../oracle-coverage.md) also records receiving histories
+from the pre-merge ownership owner that were not retained in the combined
+executable tree. Those paths require their own adapted witnesses; this review
+does not treat the focused green runs as closure for them.

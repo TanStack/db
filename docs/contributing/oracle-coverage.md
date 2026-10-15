@@ -1313,8 +1313,9 @@ identity-based equality, and SQLite also stores a proxy-valued row field as an
 empty record. A seeded row with that stored shape therefore does not establish
 a compliant historical proxy owner. The ownership oracle needs a legal
 row-bearing acquisition and cold receiving witness before claiming its
-migration; the SQLite persistence wire owner must first settle the transport
-semantics of such a literal. Current proxy migration coverage reaches empty
+migration; [#2187](https://github.com/TanStack/db/issues/2187) tracks the
+SQLite persistence wire's transport semantics for such a literal. Current
+proxy migration coverage reaches empty
 retention markers, while the real SQLite row-bearing restart matrix covers
 historical singleton-IN owners. The first eligible demand
 requests one persisted-row metadata scan per sync run; the SQLite adapter still
