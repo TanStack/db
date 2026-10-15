@@ -45,7 +45,16 @@ import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
  * fixed point, the public window equals the window over the current backend
  * rows. A refetch is either `utils.refetch()` or a Query refetch of the
  * collection's pages, such as `invalidateQueries`. Between those checkpoints
- * the provider may lag the backend, so no window is owed.
+ * the provider may lag the backend, so no window is owed. While an
+ * optimistic transaction persists, core holds accepted sync rows back, so
+ * the checkpoint for a refetch during it moves to the transaction's release.
+ *
+ * Coverage law, at the same checkpoints: every backend row from the start of
+ * the order through the window's last row is in the source Collection with
+ * its current values, and every backend row is when the window is short.
+ * The loader treats those rows as loaded, so a missing one would never be
+ * requested. The window law sees such a row only once it joins the window;
+ * the coverage law sees it while it is latent.
  *
  * Neighboring laws bound how the refetch does its work:
  * - A refetch or invalidation never starts a new full-source request.
@@ -101,9 +110,9 @@ import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
  *   window size. That loader defect is separate from #2136 and is recorded as
  *   open in the coverage map. The named replays still run both encodings.
  * - It does not check the window after a marker flip, even when the provider
- *   is current. There the loader can stop refilling after a joined-side
- *   removal when its continuation returns only rows it already holds. That
- *   defect predates this fix and is recorded as open in the coverage map.
+ *   is current. The loader used to stop refilling after a joined-side
+ *   removal; a named replay now checks that trace, but the campaigns do not
+ *   check after flips.
  * - The generated campaigns use an uncapped provider. With a provider that
  *   caps pages, a row whose order changes can drop out of the window after a
  *   refetch even on main, through the loader's own repair. That defect is
@@ -126,6 +135,12 @@ import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
  *   results apart. No history here reaches it.
  * - It drives one runtime. Follower tabs of a multi-tab persisted collection
  *   do not receive the report (#2174).
+ * - Holds write a label change or a delete, and the backend never takes the
+ *   write. Optimistic inserts are not modeled, and no window is checked
+ *   during a hold, where an optimistic delete can leave a joined window short
+ *   (#2148, #2169).
+ * - A live query's preload waits until its rows are visible, so the harness
+ *   does not await one that starts during a hold until its release.
  * - It checks refetch cost only as relations between reads of the same state.
  *   The cursor-pagination integration oracle owns the zero-call law for a
  *   fresh `createCursorPager` cache.
@@ -182,6 +197,25 @@ function expectedWindow(
     .map((row) => row.id)
 }
 
+// The loader treats every row through its boundary as loaded, and its
+// boundary is at or after the window's last row. So every backend row from
+// the start of the order through that row must be in the source Collection,
+// with its current values. A window shorter than its limit read the whole
+// source, so then every backend row must be. The window law alone sees a
+// missing row only once a marker makes it a window row; this law sees it
+// while it is still latent.
+function expectedCoverage(
+  backend: ReadonlyMap<number, Item>,
+  markers: ReadonlySet<number>,
+  scenario: Scenario,
+): Array<Item> {
+  const rows = [...backend.values()].sort((a, b) => compareRows(a, b, scenario))
+  const window = expectedWindow(backend, markers, scenario)
+  if (window.length < scenario.limit) return rows
+  const end = backend.get(window.at(-1)!)!
+  return rows.filter((row) => compareRows(row, end, scenario) <= 0)
+}
+
 // ## History grammar
 //
 // - `upsert` and `delete` change only the backend. The provider sends nothing
@@ -193,6 +227,12 @@ function expectedWindow(
 //   its whole served prefix, and a later `refetch` must still cover the
 //   boundary the loader proved at serve time.
 // - `refetch` calls `utils.refetch()`, which makes the provider current.
+// - `hold` starts an optimistic update (a label change) or delete of a loaded
+//   row whose handler waits until `release`. The backend never takes the
+//   write, so after release the row shows its synced values again. While the
+//   transaction persists, core holds every accepted sync transaction back,
+//   so a refetch's rows and its report arrive before they are visible. No
+//   window is owed during a hold; the checkpoint moves to its release.
 //
 // - `observe` starts a second live query, `where id = n`, on the same source.
 //   Its own demand can load a row before a refetch does, so a page's result can
@@ -201,7 +241,9 @@ function expectedWindow(
 // A generated history is one to three rounds. Each round flips markers, which
 // makes the loader serve continuation pages, then changes the backend while
 // the provider lags, may flip or observe, may invalidate and change the
-// backend again, and ends with a refetch. Ids come from a small space, so
+// backend again, and ends with a refetch. A round may hold an optimistic
+// write from its start, or from just before its refetch, and releases it
+// after the refetch. Ids come from a small space, so
 // inserts often land between served pages and upserts often move a served
 // row. Named replays use the same commands in other orders. With one order
 // term, the fixture maps a generated rank to `rank * 100 + id`, so ranks stay
@@ -213,6 +255,8 @@ type Command =
   | { type: `observe`; id: number }
   | { type: `invalidate` }
   | { type: `refetch` }
+  | { type: `hold`; kind: `update` | `delete`; id: number }
+  | { type: `release` }
 
 type Case = {
   scenario: Scenario
@@ -271,11 +315,23 @@ const caseArbitrary: fc.Arbitrary<Case> = fc.record({
         fc.array(backendChange, { minLength: 1, maxLength: 4 }),
         fc.array(flipOrObserve, { maxLength: 2 }),
         fc.option(fc.array(backendChange, { minLength: 1, maxLength: 3 })),
+        fc.option(
+          fc.record({
+            command: fc.record({
+              type: fc.constant(`hold` as const),
+              kind: fc.constantFrom(`update` as const, `delete` as const),
+              id: ids,
+            }),
+            from: fc.constantFrom(`start` as const, `refetch` as const),
+          }),
+          { freq: 3 },
+        ),
       ),
       { minLength: 1, maxLength: 3 },
     )
     .map((rounds) =>
-      rounds.flatMap(([before, changes, after, afterInvalidate]) => [
+      rounds.flatMap(([before, changes, after, afterInvalidate, hold]) => [
+        ...(hold?.from === `start` ? [hold.command] : []),
         ...before,
         ...changes,
         ...after,
@@ -284,10 +340,93 @@ const caseArbitrary: fc.Arbitrary<Case> = fc.record({
         ...(afterInvalidate
           ? [{ type: `invalidate` as const }, ...afterInvalidate]
           : []),
+        ...(hold?.from === `refetch` ? [hold.command] : []),
         { type: `refetch` as const },
+        ...(hold ? [{ type: `release` as const }] : []),
       ]),
     ),
 })
+
+// A premise-directed grammar for the first-page skip under a hold. The skip
+// reads the local rows past the window's first page, and only another live
+// query keeps such rows loaded, so each round observes rows first. Every
+// initial row is marked, so the window starts inside its first page. Backend
+// changes then move rows ahead of the page's end, a hold starts just before
+// the refetch, and its release is the checkpoint. The general grammar rarely
+// draws several observations together with a hold.
+const heldCaseArbitrary: fc.Arbitrary<Case> = fc
+  .record({
+    scenario: fc.record({
+      encoding: fc.constant(`cursor` as const),
+      functionKey: fc.constant(false),
+      terms: fc.constantFrom(1 as const, 2 as const),
+      orderKey: fc.constant(`rank` as const),
+      pageCap: fc.constant(undefined),
+      limit: fc.constantFrom(1, 1, 2),
+      offset: fc.constant(0),
+    }),
+    initial: fc.uniqueArray(
+      fc.record({
+        id: ids,
+        rank: fc.integer({ min: 0, max: 2 }),
+        marked: fc.constant(true),
+      }),
+      { selector: (row) => row.id, minLength: 3, maxLength: 5 },
+    ),
+  })
+  .chain(({ scenario, initial }) => {
+    // Each round moves one row that no other query keeps loaded (the mover)
+    // ahead of the page's end, and puts a new, unmarked row further ahead.
+    // The other rows are observed, so they stay loaded past the page. That
+    // is the premise under which the skip, reading rows from before the
+    // refetch, would keep a window that misses the mover. The hold writes to
+    // the observed row that sorts last: the skip leaves rows with pending
+    // writes out of its read, so a write near the window ends the read
+    // short and hides the premise.
+    const initialIds = initial.map((row) => row.id)
+    const fixtureOrder = (id: number) => {
+      const rank = initial.find((row) => row.id === id)!.rank
+      return scenario.terms === 1 ? rank * 100 + id : rank * 100 - id
+    }
+    const sortsLast = (observed: Array<number>) =>
+      observed.reduce((last, id) =>
+        fixtureOrder(id) < fixtureOrder(last) ? id : last,
+      )
+    const newIds = [0, 1, 2, 3, 4, 5, 6, 7].filter(
+      (id) => !initialIds.includes(id),
+    )
+    const round = fc
+      .record({
+        mover: fc.constantFrom(...initialIds),
+        moverRank: fc.integer({ min: 3, max: 4 }),
+        arrival: fc.constantFrom(...newIds),
+        arrivalRank: fc.integer({ min: 4, max: 5 }),
+        flips: fc.array(flip, { maxLength: 1 }),
+      })
+      .chain((choice) =>
+        fc
+          .subarray(
+            initialIds.filter((id) => id !== choice.mover),
+            { minLength: 1 },
+          )
+          .map((observed): Array<Command> => [
+            ...observed.map((id) => ({ type: `observe` as const, id })),
+            { type: `upsert`, id: choice.mover, rank: choice.moverRank },
+            { type: `upsert`, id: choice.arrival, rank: choice.arrivalRank },
+            ...choice.flips,
+            { type: `hold`, kind: `update`, id: sortsLast(observed) },
+            { type: `refetch` },
+            { type: `release` },
+          ]),
+      )
+    return fc.record({
+      scenario: fc.constant(scenario),
+      initial: fc.constant(initial),
+      history: fc
+        .array(round, { minLength: 1, maxLength: 2 })
+        .map((rounds) => rounds.flat()),
+    })
+  })
 
 // ## Production driver
 //
@@ -326,6 +465,10 @@ type Run = {
   // returned release is called. While it persists, the Collection holds
   // every sync transaction back.
   holdUpdate: (id: number) => () => Promise<void>
+  // Whether a hold is running. No window is owed until its release.
+  holding: () => boolean
+  // The source Collection's rows, which the coverage law checks.
+  loadedRows: () => ReadonlyMap<number, Item>
   refetch: (opts?: { throwOnError?: boolean }) => Promise<unknown>
   cleanup: () => Promise<Array<unknown>>
 }
@@ -429,15 +572,39 @@ async function startRun(testCase: Case): Promise<Run> {
       getKey: (row) => row.id,
       autoIndex: `eager`,
       defaultIndexType: BTreeIndex,
-      // A held optimistic update stays persisting until released; the
+      // A held optimistic write stays persisting until released; the
       // backend does not change.
       onUpdate: async () => {
-        await heldUpdate
+        await heldWrite
+        return { refetch: false }
+      },
+      onDelete: async () => {
+        await heldWrite
         return { refetch: false }
       },
     }),
   )
-  let heldUpdate: Promise<void> = Promise.resolve()
+  let heldWrite: Promise<void> = Promise.resolve()
+  // The running hold's release, if any.
+  let releaseHold: (() => Promise<void>) | undefined
+  const heldPreloads: Array<Promise<void>> = []
+  const hold = (kind: `update` | `delete`, rowId: number) => {
+    let release!: () => void
+    heldWrite = new Promise((resolve) => {
+      release = resolve
+    })
+    const transaction =
+      kind === `update`
+        ? items.update(rowId, (draft) => {
+            draft.label += `!`
+          })
+        : items.delete(rowId)
+    return async () => {
+      release()
+      await transaction.isPersisted.promise
+      await settle()
+    }
+  }
 
   let reports = 0
   items.on(`loadedSubsets:invalidated`, () => {
@@ -521,7 +688,11 @@ async function startRun(testCase: Case): Promise<Run> {
             .select(({ item }) => ({ id: item.id })),
         )
         observers.push(observer)
-        await observer.preload()
+        // A preload waits until its rows are visible, so under a hold it
+        // settles only after the release.
+        const preload = observer.preload()
+        if (releaseHold === undefined) await preload
+        else heldPreloads.push(preload)
         await settle()
         return
       }
@@ -533,6 +704,22 @@ async function startRun(testCase: Case): Promise<Run> {
         await items.utils.refetch()
         await settle()
         return
+      // A row that is not loaded cannot take an optimistic write, so the
+      // hold is a no-op then.
+      case `hold`:
+        if (releaseHold === undefined && items.has(command.id)) {
+          releaseHold = hold(command.kind, command.id)
+          await settle()
+        }
+        return
+      case `release`: {
+        const release = releaseHold
+        releaseHold = undefined
+        await release?.()
+        await Promise.all(heldPreloads.splice(0))
+        await settle()
+        return
+      }
     }
   }
 
@@ -559,20 +746,15 @@ async function startRun(testCase: Case): Promise<Run> {
     failNextApplication: () => {
       failApplication = true
     },
-    holdUpdate: (rowId) => {
-      let release!: () => void
-      heldUpdate = new Promise((resolve) => {
-        release = resolve
-      })
-      const transaction = items.update(rowId, (draft) => {
-        draft.label += `!`
-      })
-      return async () => {
-        release()
-        await transaction.isPersisted.promise
-        await settle()
-      }
-    },
+    holdUpdate: (rowId) => hold(`update`, rowId),
+    holding: () => releaseHold !== undefined,
+    loadedRows: () =>
+      new Map(
+        items.toArray.map(({ id: rowId, rank, label }) => [
+          rowId,
+          { id: rowId, rank, label },
+        ]),
+      ),
     refetch: (opts) => items.utils.refetch(opts),
     cleanup: async () => {
       const failures: Array<unknown> = []
@@ -603,9 +785,16 @@ async function startRun(testCase: Case): Promise<Run> {
 // mistaken for a refetch defect.
 //
 // The run also records the premise of the gap: a refetch or invalidation of a
-// lagging provider after a continuation page was served. The campaigns must reach it.
+// lagging provider after a continuation page was served. The campaigns must
+// reach it, and must reach such a refetch while a hold is running.
 type Observation = {
   reachedLaggingRefetchAfterContinuation: boolean
+  // A refetch of a lagging provider while an optimistic write held sync rows
+  // back.
+  reachedLaggingRefetchDuringHold: boolean
+  // Such a refetch that also reported, so a loader may have judged the skip
+  // while the refetched rows were held back.
+  reachedReportDuringHold: boolean
   // Reports over the whole run.
   reports: number
 }
@@ -632,6 +821,8 @@ function checkReports(
 async function checkCase(testCase: Case): Promise<Observation> {
   const run = await startRun(testCase)
   let reachedLaggingRefetchAfterContinuation = false
+  let reachedLaggingRefetchDuringHold = false
+  let reachedReportDuringHold = false
   let primary: unknown
   const check = (checkpoint: string) => {
     const expected = expectedWindow(run.backend, run.markers, testCase.scenario)
@@ -639,6 +830,19 @@ async function checkCase(testCase: Case): Promise<Observation> {
     if (!sameOrderedIds(actual, expected)) {
       throw new Error(
         `window ${checkpoint} was ${JSON.stringify(actual)}; expected ${JSON.stringify(expected)}`,
+      )
+    }
+    const loaded = run.loadedRows()
+    const uncovered = expectedCoverage(
+      run.backend,
+      run.markers,
+      testCase.scenario,
+    ).filter(
+      (row) => JSON.stringify(loaded.get(row.id)) !== JSON.stringify(row),
+    )
+    if (uncovered.length > 0) {
+      throw new Error(
+        `coverage ${checkpoint}: rows ${JSON.stringify(uncovered)} sort at or before the window's end but are ${JSON.stringify(uncovered.map((row) => loaded.get(row.id) ?? null))} in the source Collection`,
       )
     }
   }
@@ -667,10 +871,20 @@ async function checkCase(testCase: Case): Promise<Observation> {
       ) {
         reachedLaggingRefetchAfterContinuation = true
       }
+      if (command.type === `refetch` && !providerCurrent && run.holding()) {
+        reachedLaggingRefetchDuringHold = true
+      }
       const requestsBefore = run.requests.length
       const reportsBefore = run.reports()
       const reanswersBefore = run.changedReanswers()
       await run.apply(command)
+      if (
+        command.type === `refetch` &&
+        run.holding() &&
+        run.reports() > reportsBefore
+      ) {
+        reachedReportDuringHold = true
+      }
       checkReports(
         command,
         run.reports() - reportsBefore,
@@ -682,9 +896,11 @@ async function checkCase(testCase: Case): Promise<Observation> {
       }
       if (command.type === `upsert` || command.type === `delete`) {
         providerCurrent = false
+      } else if (command.type === `release`) {
+        if (providerCurrent) check(`after release at step ${step}`)
       } else if (command.type === `refetch` || command.type === `invalidate`) {
         providerCurrent = true
-        check(`after ${command.type} at step ${step}`)
+        if (!run.holding()) check(`after ${command.type} at step ${step}`)
       }
     }
     // Repeat the refetch twice with the backend unchanged. The second read
@@ -761,7 +977,12 @@ async function checkCase(testCase: Case): Promise<Observation> {
   if (cleanupFailures.length > 0) {
     throw new AggregateError(cleanupFailures, `refetch prefix cleanup failed`)
   }
-  return { reachedLaggingRefetchAfterContinuation, reports: run.reports() }
+  return {
+    reachedLaggingRefetchAfterContinuation,
+    reachedLaggingRefetchDuringHold,
+    reachedReportDuringHold,
+    reports: run.reports(),
+  }
 }
 
 // A history that never settles is a progress failure, not a slow pass. The
@@ -835,6 +1056,35 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
           { type: `flip`, id: 10 },
           { type: `upsert`, id: 5, rank: 0 },
           { type: `flip`, id: 5 },
+          { type: `upsert`, id: 6, rank: 0 },
+        ],
+      })
+      expect(observation.reachedLaggingRefetchAfterContinuation).toBe(true)
+    },
+  )
+
+  // The issue's trace with rank 5 left unmarked. The window over the backend
+  // is still [4, 1], so the window law passes even when rank 5 is in no
+  // served page. The loader still treats rank 5 as loaded, because it sorts
+  // before the window's end; marking it later would never load it. Only the
+  // coverage law sees this gap while it is latent.
+  it.each([`cursor`, `offset`] as const)(
+    `loads a row that moved between two served pages before it joins the window (%s encoding)`,
+    async (encoding) => {
+      const observation = await checkCase({
+        scenario: {
+          encoding,
+          functionKey: false,
+          orderKey: `rank`,
+          pageCap: undefined,
+          terms: 1,
+          limit: 2,
+          offset: 0,
+        },
+        initial: [10, 4, 1, 0].map((id) => ({ id, rank: 0, marked: true })),
+        history: [
+          { type: `flip`, id: 10 },
+          { type: `upsert`, id: 5, rank: 0 },
           { type: `upsert`, id: 6, rank: 0 },
         ],
       })
@@ -1449,52 +1699,53 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
     },
   )
 
-  it.fails(
-    `a current provider refills a joined window after a marker removal (known loader defect)`,
-    async () => {
-      const testCase: Case = {
-        scenario: {
-          encoding: `cursor`,
-          functionKey: false,
-          orderKey: `rank`,
-          pageCap: undefined,
-          terms: 1,
-          limit: 2,
-          offset: 0,
-        },
-        initial: [
-          { id: 5, rank: 2, marked: true },
-          { id: 1, rank: 2, marked: false },
-          { id: 3, rank: 2, marked: false },
-        ],
-        history: [
-          { type: `flip`, id: 2 },
-          { type: `upsert`, id: 7, rank: 5 },
-          { type: `delete`, id: 1 },
-          { type: `refetch` },
-          { type: `flip`, id: 1 },
-          { type: `flip`, id: 7 },
-          { type: `upsert`, id: 1, rank: 1 },
-          { type: `upsert`, id: 2, rank: 0 },
-          { type: `upsert`, id: 6, rank: 1 },
-          { type: `upsert`, id: 7, rank: 3 },
-          { type: `flip`, id: 2 },
-          { type: `refetch` },
-          // The provider is current here; removing 7's marker must refill.
-          { type: `flip`, id: 7 },
-        ],
-      }
-      const run = await startRun(testCase)
-      try {
-        for (const command of testCase.history) await run.apply(command)
-        expect(run.windowIds()).toEqual(
-          expectedWindow(run.backend, run.markers, testCase.scenario),
-        )
-      } finally {
-        await run.cleanup()
-      }
-    },
-  )
+  // This trace was a known defect: after a joined-side removal the loader
+  // stopped refilling. A repair's retirement removed a row the loader had
+  // sent, which discarded the repair's boundary, and paging restarted from
+  // the start of the order. It now passes.
+  it(`a current provider refills a joined window after a marker removal`, async () => {
+    const testCase: Case = {
+      scenario: {
+        encoding: `cursor`,
+        functionKey: false,
+        orderKey: `rank`,
+        pageCap: undefined,
+        terms: 1,
+        limit: 2,
+        offset: 0,
+      },
+      initial: [
+        { id: 5, rank: 2, marked: true },
+        { id: 1, rank: 2, marked: false },
+        { id: 3, rank: 2, marked: false },
+      ],
+      history: [
+        { type: `flip`, id: 2 },
+        { type: `upsert`, id: 7, rank: 5 },
+        { type: `delete`, id: 1 },
+        { type: `refetch` },
+        { type: `flip`, id: 1 },
+        { type: `flip`, id: 7 },
+        { type: `upsert`, id: 1, rank: 1 },
+        { type: `upsert`, id: 2, rank: 0 },
+        { type: `upsert`, id: 6, rank: 1 },
+        { type: `upsert`, id: 7, rank: 3 },
+        { type: `flip`, id: 2 },
+        { type: `refetch` },
+        // The provider is current here; removing 7's marker must refill.
+        { type: `flip`, id: 7 },
+      ],
+    }
+    const run = await startRun(testCase)
+    try {
+      for (const command of testCase.history) await run.apply(command)
+      expect(run.windowIds()).toEqual(
+        expectedWindow(run.backend, run.markers, testCase.scenario),
+      )
+    } finally {
+      await run.cleanup()
+    }
+  })
 
   it.fails(
     `a capped provider keeps a moved row in the window after a refetch (known loader defect)`,
@@ -1527,14 +1778,152 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
     },
   )
 
+  // Found by the random campaign. A peer query loads row 0's new rank, which
+  // starts the loader's own repair. Finishing that repair releases the old
+  // tie request, and Query DB removes row 2, which only that request held.
+  // The repair still holds every row through its boundary, so that removal
+  // must not discard the boundary. When it did, the next marker flip read a
+  // new, smaller first page that could not retire the repair's prefix, and
+  // every later refetch of an unchanged backend read both.
+  it(`a repair that releases another request's row keeps one first page`, async () => {
+    await checkCase({
+      scenario: {
+        encoding: `cursor`,
+        functionKey: false,
+        terms: 1,
+        orderKey: `rank`,
+        pageCap: undefined,
+        limit: 2,
+        offset: 0,
+      },
+      initial: [
+        { id: 1, rank: 0, marked: true },
+        { id: 0, rank: 1, marked: true },
+        { id: 2, rank: 0, marked: false },
+      ],
+      history: [
+        { type: `upsert`, id: 0, rank: 2 },
+        { type: `upsert`, id: 1, rank: 1 },
+        { type: `observe`, id: 0 },
+        { type: `invalidate` },
+        { type: `delete`, id: 2 },
+        { type: `upsert`, id: 3, rank: 0 },
+        { type: `refetch` },
+        { type: `flip`, id: 0 },
+        { type: `delete`, id: 4 },
+      ],
+    })
+  })
+
+  // Found by the random campaign at four times the run count. A report's
+  // repair at step 10 releases the old tie and continuation Queries, so rows
+  // 0, 1 and 2 leave the Collection. Removing 7's marker then leaves a short
+  // window. Its continuation pages reacquire those Queries, which Query DB
+  // answers synchronously from its cache. The loader must keep paging after
+  // each such answer: if it stops, row 0 is never loaded, although a short
+  // window treats every row as read. Only the coverage law sees that.
+  it(`a short window keeps paging through Queries answered from the cache`, async () => {
+    await checkCase({
+      scenario: {
+        encoding: `cursor`,
+        functionKey: false,
+        terms: 1,
+        orderKey: `rank`,
+        pageCap: undefined,
+        limit: 2,
+        offset: 0,
+      },
+      initial: [
+        { id: 0, rank: 0, marked: false },
+        { id: 1, rank: 0, marked: true },
+      ],
+      history: [
+        { type: `upsert`, id: 0, rank: 0 },
+        { type: `flip`, id: 7 },
+        { type: `invalidate` },
+        { type: `upsert`, id: 2, rank: 0 },
+        { type: `refetch` },
+        { type: `flip`, id: 1 },
+        { type: `flip`, id: 3 },
+        { type: `upsert`, id: 7, rank: 0 },
+        { type: `invalidate` },
+        { type: `upsert`, id: 3, rank: 3 },
+        { type: `refetch` },
+        { type: `flip`, id: 7 },
+        { type: `upsert`, id: 3, rank: 3 },
+        { type: `refetch` },
+      ],
+    })
+  })
+
+  // A refetch while an optimistic delete persists. The delete is visible, so
+  // the loader repairs; that repair's rows and the refetch's rows are held
+  // back behind the delete. After the release, removing row 1's marker must
+  // page past rows the repair released. Query DB answers those pages from
+  // its cache synchronously, and the loader used to stop after one: it
+  // treated rows 2 and 7 as loaded, and the window showed [3, 0] instead of
+  // [3, 2]. That reproduced with this oracle's report and overlap changes
+  // reverted; the fix that resumes a continuation after a synchronous answer
+  // closed it. The generated grammar now holds deletes too.
+  it(`a refetch during a held optimistic delete keeps the window right after release`, async () => {
+    await checkCase({
+      scenario: {
+        encoding: `cursor`,
+        functionKey: false,
+        orderKey: `rank`,
+        pageCap: undefined,
+        terms: 1,
+        limit: 2,
+        offset: 0,
+      },
+      initial: [
+        { id: 1, rank: 2, marked: true },
+        { id: 7, rank: 1, marked: true },
+        { id: 0, rank: 0, marked: true },
+        { id: 2, rank: 1, marked: true },
+        { id: 3, rank: 1, marked: true },
+      ],
+      history: [
+        { type: `observe`, id: 0 },
+        { type: `upsert`, id: 7, rank: 0 },
+        { type: `hold`, kind: `delete`, id: 0 },
+        { type: `refetch` },
+        { type: `release` },
+        { type: `flip`, id: 1 },
+        { type: `hold`, kind: `update`, id: 0 },
+        { type: `release` },
+      ],
+    })
+  })
+
+  // The premise-directed campaign for the skip under a hold. Its reach
+  // witness requires refetches that report while a hold is running.
+  it.runIf(replay.replayPath === undefined)(
+    `generated refetch histories under a hold (fixed campaign)`,
+    async () => {
+      let reachedReport = 0
+      await fc.assert(
+        fc.asyncProperty(heldCaseArbitrary, async (testCase) => {
+          const observation = await withDeadline(checkCase(testCase))
+          if (observation.reachedReportDuringHold) reachedReport++
+        }),
+        { seed: 20261015, numRuns: oracleRuns(40) },
+      )
+      expect(reachedReport).toBeGreaterThan(0)
+    },
+    120_000,
+  )
+
   it.each(campaigns)(
     `generated refetch histories (%s campaign)`,
     async (campaign) => {
       let reached = 0
+      let reachedDuringHold = 0
       await fc.assert(
         fc.asyncProperty(caseArbitrary, async (testCase) => {
           const observation = await withDeadline(checkCase(testCase))
           if (observation.reachedLaggingRefetchAfterContinuation) reached++
+          if (observation.reachedLaggingRefetchDuringHold) reachedDuringHold++
         }),
         campaign === `fixed`
           ? { seed: 20261013, numRuns: oracleRuns(80) }
@@ -1545,7 +1934,10 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
       )
       // Positive reach witness: generated histories serve continuation pages
       // before a refetch, which is the premise of the gap.
-      if (campaign !== `replay`) expect(reached).toBeGreaterThan(0)
+      if (campaign !== `replay`) {
+        expect(reached).toBeGreaterThan(0)
+        expect(reachedDuringHold).toBeGreaterThan(0)
+      }
     },
     120_000,
   )

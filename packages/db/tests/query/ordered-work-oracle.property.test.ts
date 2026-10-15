@@ -4473,7 +4473,8 @@ describe(`ordered source work oracle`, () => {
  * `offset + limit + 1` rows. Its rows law holds beside the first query's at
  * every checkpoint; the work laws count one consumer, so they do not apply
  * to those cases. A peer over a refetching provider is excluded from the
- * grammar until #2155 is fixed; a pinned replay expects its exact symptom.
+ * grammar until #2155 is fixed: an indexed trace is fixed and pinned, but an
+ * unindexed peer still keeps a short joined window after a refetch.
  * Joined filters can match a row through several markers, by `dup`, so a
  * LEFT-joined filter and a full join keep one result row per matched
  * (row, marker) pair, and an anti-join keeps a row once.
@@ -4675,8 +4676,10 @@ const eagerCaseBase: fc.Arbitrary<EagerCase> = fc.record({
 })
 
 // A peer over a refetching on-demand provider can keep a short joined window
-// after a refetch (#2155). Each campaign excludes only that pairing, as its
-// last map, until the fix; a pinned replay keeps the trace.
+// after a refetch (#2155). An indexed plan's trace is fixed and pinned below,
+// but an unindexed one still fails (a peer shows [100] where the model shows
+// [100, 101]). Each campaign excludes only that pairing, as its last map,
+// until the fix.
 function withoutPeerRefetch(testCase: EagerCase): EagerCase {
   return testCase.path === `on-demand` &&
     (testCase.provider === `refetch` ||
@@ -6336,39 +6339,36 @@ describe(`eager indexed ordered windows`, () => {
     })
   })
 
-  // A second live-query Collection over a refetched on-demand source keeps
-  // a short joined window (#2155): after the refetch the peer shows ranks
-  // [0, 0] where the model shows [0, 0, 100]. Only that symptom satisfies
-  // this replay; when #2155 is fixed, flip it to expect the case to pass.
-  it(`shows the known short peer joined window after a refetch removes a tied row`, async () => {
-    await expect(
-      checkEagerWindow({
-        path: `on-demand`,
-        provider: `refetch`,
-        latency: `immediate`,
-        peer: true,
-        filter: `joined`,
-        via: `link`,
-        indexed: true,
-        direction: `asc`,
-        nulls: `first`,
-        terms: 1,
-        limit: 2,
-        offset: 0,
-        initial: [
-          { id: 9, rank: 0, eligible: true },
-          { id: 0, rank: 0, eligible: true },
-          { id: 1, rank: 0, eligible: true },
-          { id: 2, rank: 1, eligible: false },
-        ],
-        history: [
-          { type: `upsert`, id: 10, rank: 1, eligible: false },
-          { type: `flip`, id: 0 },
-        ],
-      }),
-    ).rejects.toThrow(
-      `peer rows after step 2: expected [ +0, +0 ] to deeply equal [ +0, +0, 100 ]`,
-    )
+  // A second live-query Collection over a refetched on-demand source kept a
+  // short joined window (#2155): after the refetch the peer showed ranks
+  // [0, 0] where the model shows [0, 0, 100]. The loader fix that resumes a
+  // staged continuation after a synchronous answer the graph already
+  // processed closed this trace.
+  it(`shows a peer's full joined window after a refetch removes a tied row`, async () => {
+    await checkEagerWindow({
+      path: `on-demand`,
+      provider: `refetch`,
+      latency: `immediate`,
+      peer: true,
+      filter: `joined`,
+      via: `link`,
+      indexed: true,
+      direction: `asc`,
+      nulls: `first`,
+      terms: 1,
+      limit: 2,
+      offset: 0,
+      initial: [
+        { id: 9, rank: 0, eligible: true },
+        { id: 0, rank: 0, eligible: true },
+        { id: 1, rank: 0, eligible: true },
+        { id: 2, rank: 1, eligible: false },
+      ],
+      history: [
+        { type: `upsert`, id: 10, rank: 1, eligible: false },
+        { type: `flip`, id: 0 },
+      ],
+    })
   })
 
   it(`publishes a full-join window that only loses a row`, async () => {
