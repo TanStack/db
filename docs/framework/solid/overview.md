@@ -19,7 +19,7 @@ For comprehensive documentation on writing queries (filtering, joins, aggregatio
 
 ### useLiveQuery
 
-The `useLiveQuery` primitive creates a live query that automatically updates your component when data changes. It returns an object where `data` is a plain array and status fields (e.g. `isLoading()`, `status()`) are accessors:
+The `useLiveQuery` primitive creates a live query that automatically updates your component when data changes. Call the returned accessor to read its data; status fields such as `isLoading` and `status` are reactive properties:
 
 ```tsx
 import { useLiveQuery } from '@tanstack/solid-db'
@@ -34,7 +34,7 @@ function TodoList() {
   )
 
   return (
-    <Show when={!query.isLoading()} fallback={<div>Loading...</div>}>
+    <Show when={!query.isLoading} fallback={<div>Loading...</div>}>
       <ul>
         <For each={query()}>
           {(todo) => <li>{todo.text}</li>}
@@ -45,7 +45,7 @@ function TodoList() {
 }
 ```
 
-**Note:** `query()` reads the array, while status fields such as `isLoading` and `status` are properties.
+**Note:** `query()` reads the array; `query.isLoading` and `query.status` read reactive status properties.
 
 ### Reactive Queries with Signals
 

@@ -27,6 +27,10 @@
       "label": "Guides",
       "children": [
         {
+          "label": "Migrate to the 1.0 RC",
+          "to": "guides/migrate-to-1-0-rc"
+        },
+        {
           "label": "Live Queries",
           "to": "guides/live-queries"
         },
