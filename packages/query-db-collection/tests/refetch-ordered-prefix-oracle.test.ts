@@ -63,6 +63,24 @@ import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
  *   request for the window's predicate and order, not one per served page.
  * - A provider that honors neither `cursor` nor `offset` breaks the request
  *   contract. Refetch must still settle, and requests must stop growing.
+ *
+ * Reports (`invalidateLoadedSubsets()`, seen as the Collection's
+ * `loadedSubsets:invalidated` event) start a bounded repair in every paging
+ * ordered live query on the source, so they must be rare:
+ * - A report needs a reason: some ordered request that was answered before
+ *   returned different rows when it was answered again in that step. Any
+ *   step can meet it. A `loadSubset` call can acquire a released page whose
+ *   Query an invalidation marked stale; the call settles on the cached rows,
+ *   and Query then refetches the page on its own, which is a refetch the
+ *   loader must hear about.
+ * - A step reports at most once, including any report its repair could
+ *   cause. A report says only that pages may have shifted, so a second one
+ *   in the same step would repeat the repair for nothing.
+ * - A refetch or invalidation of an unchanged backend never reports.
+ * - A page that only loses rows, or whose rows change only in place, still
+ *   starts at the same point and ends at or after its old end. With no later
+ *   page, no row can fall outside it, so the refetch does not report. A
+ *   visible delete or order change already starts the loader's own repair.
  * Each request also carries a Query key that matches its own request data,
  * so a `queryFn` may read either one.
  *
@@ -81,11 +99,18 @@ import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
  *   refetch even on main, through the loader's own repair. That defect is
  *   separate from #2136 and has an `it.fails` witness. The named replays run
  *   the issue trace with a page cap.
- * - It judges outcomes, not mechanism. It does not observe when or how often
- *   the sync adapter signals the loader, whether signals coalesce, which page
- *   change opens the gate, or how a repair overlaps in-flight work.
- *   Those are work properties of the production design; the oracle sees them
- *   only through the request-count and full-source laws.
+ * - The report laws bound when Query DB reports, not exactly when it must.
+ *   Whether a missing report leaves a gap is judged through the window law.
+ *   A page whose end moves earlier reports even when the order has no ties
+ *   there, so no row can be missing; no law forbids that report. The oracle
+ *   does not observe how a repair overlaps in-flight work; the ordered loader
+ *   state oracle owns that.
+ * - Query DB records a page's rows only after their sync transaction is
+ *   accepted, so a later successful retry still sees the change. No public
+ *   history distinguishes that from recording earlier: the failed attempt
+ *   reports on its own, and the repair it starts reads the provider again.
+ *   The application-failure replay checks only the window around a failed
+ *   application.
  * - It checks refetch cost only as relations between reads of the same state.
  *   The cursor-pagination integration oracle owns the zero-call law for a
  *   fresh `createCursorPager` cache.
@@ -273,6 +298,15 @@ type Run = {
   failAfter: (count: number | undefined) => void
   // The Query cache entries this Collection owns: one per tracked request.
   cachedQueries: () => number
+  // Reports that served pages may have shifted (`loadedSubsets:invalidated`
+  // events on the source Collection) so far.
+  reports: () => number
+  // Ordered requests answered again with different rows than their previous
+  // answer, so far. A report needs one of these.
+  changedReanswers: () => number
+  // Make the next change application fail once: a change subscriber throws
+  // while the refetched rows commit.
+  failNextApplication: () => void
   refetch: (opts?: { throwOnError?: boolean }) => Promise<unknown>
   cleanup: () => Promise<Array<unknown>>
 }
@@ -309,7 +343,23 @@ async function startRun(testCase: Case): Promise<Run> {
     return demandKey === undefined ? [id] : [id, demandKey]
   }
   let failFrom: number | undefined
+  const answers = new Map<string, string>()
+  let changedReanswers = 0
   const serve = (options: LoadSubsetOptions): Array<Item> => {
+    const page = answer(options)
+    if (options.orderBy) {
+      const request = JSON.stringify([
+        getLoadSubsetDemandKey(options),
+        options.offset,
+      ])
+      const rows = JSON.stringify(page.map((row) => row.id))
+      const previous = answers.get(request)
+      if (previous !== undefined && previous !== rows) changedReanswers++
+      answers.set(request, rows)
+    }
+    return page
+  }
+  const answer = (options: LoadSubsetOptions): Array<Item> => {
     requests.push(options)
     if (failFrom !== undefined && requests.length > failFrom) {
       throw new Error(`provider unavailable`)
@@ -362,6 +412,17 @@ async function startRun(testCase: Case): Promise<Run> {
       defaultIndexType: BTreeIndex,
     }),
   )
+
+  let reports = 0
+  items.on(`loadedSubsets:invalidated`, () => {
+    reports++
+  })
+  let failApplication = false
+  items.subscribeChanges(() => {
+    if (!failApplication) return
+    failApplication = false
+    throw new Error(`change subscriber failed`)
+  })
 
   let markerSync!: Parameters<SyncConfig<Marker, number>[`sync`]>[0]
   const markerCollection = createCollection<Marker, number>({
@@ -467,6 +528,11 @@ async function startRun(testCase: Case): Promise<Run> {
     },
     cachedQueries: () =>
       queryClient.getQueryCache().findAll({ queryKey: [id] }).length,
+    reports: () => reports,
+    changedReanswers: () => changedReanswers,
+    failNextApplication: () => {
+      failApplication = true
+    },
     refetch: (opts) => items.utils.refetch(opts),
     cleanup: async () => {
       const failures: Array<unknown> = []
@@ -500,6 +566,27 @@ async function startRun(testCase: Case): Promise<Run> {
 // lagging provider after a continuation page was served. The campaigns must reach it.
 type Observation = {
   reachedLaggingRefetchAfterContinuation: boolean
+  // Reports over the whole run.
+  reports: number
+}
+
+// A step's reports, checked against the report laws in the contract.
+function checkReports(
+  command: Command,
+  reports: number,
+  changedReanswers: number,
+  checkpoint: string,
+): void {
+  if (reports > 1) {
+    throw new Error(
+      `a ${command.type} at ${checkpoint} reported ${reports} times; expected at most 1`,
+    )
+  }
+  if (reports > 0 && changedReanswers === 0) {
+    throw new Error(
+      `a ${command.type} at ${checkpoint} reported, but no ordered request returned different rows`,
+    )
+  }
 }
 
 async function checkCase(testCase: Case): Promise<Observation> {
@@ -541,7 +628,15 @@ async function checkCase(testCase: Case): Promise<Observation> {
         reachedLaggingRefetchAfterContinuation = true
       }
       const requestsBefore = run.requests.length
+      const reportsBefore = run.reports()
+      const reanswersBefore = run.changedReanswers()
       await run.apply(command)
+      checkReports(
+        command,
+        run.reports() - reportsBefore,
+        run.changedReanswers() - reanswersBefore,
+        `step ${step}`,
+      )
       if (command.type === `refetch` || command.type === `invalidate`) {
         checkNoNewFullSource(requestsBefore, `${command.type} at step ${step}`)
       }
@@ -567,7 +662,14 @@ async function checkCase(testCase: Case): Promise<Observation> {
     const servedBy = async (command: Command) => {
       const before = run.servedRows()
       const requestsBefore = run.requests.length
+      const reportsBefore = run.reports()
       await run.apply(command)
+      const reports = run.reports() - reportsBefore
+      if (reports > 0) {
+        throw new Error(
+          `a ${command.type} of an unchanged backend reported ${reports} times`,
+        )
+      }
       // The backend is unchanged, so the loader starts no repair and every
       // first-page request comes from the refetch itself.
       const firstPages = firstPageRequests(requestsBefore)
@@ -619,7 +721,7 @@ async function checkCase(testCase: Case): Promise<Observation> {
   if (cleanupFailures.length > 0) {
     throw new AggregateError(cleanupFailures, `refetch prefix cleanup failed`)
   }
-  return { reachedLaggingRefetchAfterContinuation }
+  return { reachedLaggingRefetchAfterContinuation, reports: run.reports() }
 }
 
 // A history that never settles is a progress failure, not a slow pass. The
@@ -921,6 +1023,88 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
   // A provider that honors neither encoding returns the same page for every
   // continuation. That breaks the request contract, but a refetch must still
   // settle, and the loader must not keep requesting.
+  // Pages that keep their start and end at or after their old end, with no
+  // later page: no row can fall outside them, so no refetch reports. The
+  // delete is visible, so the loader repairs through its own path.
+  it.each([
+    {
+      name: `a one-page window loses a row`,
+      initial: [3, 2, 1, 1].map((rank, id) => ({ id, rank, marked: true })),
+      history: [{ type: `delete` as const, id: 1 }],
+    },
+    {
+      // Row 1 is unmarked, so the window pages past it; the delete is in
+      // the last page.
+      name: `the last page of a two-page window loses a row`,
+      initial: [
+        { id: 0, rank: 4, marked: true },
+        { id: 1, rank: 3, marked: false },
+        { id: 2, rank: 2, marked: true },
+        { id: 3, rank: 1, marked: true },
+      ],
+      history: [{ type: `delete` as const, id: 2 }],
+    },
+  ])(`a refetch does not report when $name`, async ({ initial, history }) => {
+    const observation = await checkCase({
+      scenario: {
+        encoding: `cursor`,
+        functionKey: false,
+        orderKey: `rank`,
+        pageCap: undefined,
+        terms: 1,
+        limit: 2,
+        offset: 0,
+      },
+      initial,
+      history,
+    })
+    expect(observation.reports).toBe(0)
+  })
+
+  // A change subscriber throws while the refetched first page commits, so
+  // that page's rows do not apply. The window then shows its last result or
+  // the right one, and the next refetch must restore it.
+  it(`a refetch whose page application fails keeps the last window until the next refetch`, async () => {
+    const scenario: Scenario = {
+      encoding: `cursor`,
+      functionKey: false,
+      orderKey: `rank`,
+      pageCap: undefined,
+      terms: 1,
+      limit: 2,
+      offset: 0,
+    }
+    const run = await startRun({
+      scenario,
+      initial: [10, 4, 1, 0].map((id) => ({ id, rank: 0, marked: true })),
+      history: [],
+    })
+    let primary: unknown
+    try {
+      for (const command of [
+        { type: `flip`, id: 10 },
+        { type: `upsert`, id: 5, rank: 0 },
+        { type: `flip`, id: 5 },
+        { type: `upsert`, id: 6, rank: 0 },
+      ] as const) {
+        await run.apply(command)
+      }
+      const last = run.windowIds()
+      run.failNextApplication()
+      await run.refetch({ throwOnError: false })
+      await settle()
+      const expected = expectedWindow(run.backend, run.markers, scenario)
+      expect([last, expected]).toContainEqual(run.windowIds())
+      await run.apply({ type: `refetch` })
+      expect(run.windowIds()).toEqual(expected)
+    } catch (error) {
+      primary = error
+    }
+    const failures = await run.cleanup()
+    if (primary !== undefined) throw primary
+    expect(failures).toEqual([])
+  })
+
   it(`a refetch settles when the provider honors neither cursor nor offset`, async () => {
     const run = await startRun({
       scenario: {
