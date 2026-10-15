@@ -3207,6 +3207,8 @@ describe(`loadSubset lifecycle oracle`, () => {
     { release: `subscription`, peer: false },
     { release: `Collection`, peer: false },
     { release: `subscription`, peer: true },
+    { release: `caller abort`, peer: false },
+    { release: `caller abort`, peer: true },
   ] as const)(
     `settles an unaccepted result commit after $release release, peer=$peer`,
     async ({ release, peer }) => {
@@ -3249,11 +3251,13 @@ describe(`loadSubset lifecycle oracle`, () => {
       const subscription = collection.subscribeChanges(() => {}, {
         includeInitialState: false,
       })
+      const caller = new AbortController()
       let peerSubscription: typeof subscription | undefined
 
       await checkPublicCleanupWitness(async () => {
         let load: true | Promise<void> | undefined
         subscription.requestSnapshot({
+          ...(release === `caller abort` ? { signal: caller.signal } : {}),
           onLoadSubsetResult: (result) => {
             load = result
           },
@@ -3291,7 +3295,8 @@ describe(`loadSubset lifecycle oracle`, () => {
         // Release in the same continuation that observes commit entry. An
         // extra microtask lets the final-owner waiter choose a different path.
         if (release === `subscription`) subscription.unsubscribe()
-        else await collection.cleanup()
+        else if (release === `Collection`) await collection.cleanup()
+        else caller.abort()
         expect(collection.has(`a`)).toBe(false)
         let beforeGate: Awaited<typeof outcome> | undefined
         void outcome.then((result) => {
@@ -3310,11 +3315,18 @@ describe(`loadSubset lifecycle oracle`, () => {
         const peerResult = await peerOutcome
         await new Promise<void>((resolve) => setTimeout(resolve, 0))
         if (peer) {
-          expect(settledBeforeGate).toBeUndefined()
+          if (release === `caller abort`)
+            expect(settledBeforeGate?.status).toBe(`rejected`)
+          else expect(settledBeforeGate).toBeUndefined()
           expect(peerSettledBeforeGate).toBeUndefined()
           expect(peerResult?.status).toBe(`fulfilled`)
           expect(queryFn).toHaveBeenCalledTimes(1)
           expect(collection.has(`a`)).toBe(true)
+          if (release === `caller abort`) {
+            expect(result.status).toBe(`rejected`)
+            if (result.status === `rejected`)
+              expect(result.error).toMatchObject({ name: `AbortError` })
+          }
         } else {
           expect(settledBeforeGate?.status).not.toBe(`fulfilled`)
           expect(result.status).toBe(`rejected`)
@@ -4002,14 +4014,23 @@ describe(`loadSubset lifecycle oracle`, () => {
   })
 
   /**
-   * A public snapshot signal retires its Collection acquisition. The Query
-   * transport then aborts when that acquisition was the final owner, and its
-   * pending rows never become visible.
+   * A public caller abort cancels that pending acquisition without requiring
+   * releaseSnapshot or unsubscribe. The Query signal follows physical observer
+   * ownership: it aborts for a final caller that consumed it, but remains live
+   * for an equal peer. An ignored signal may let Query cache the late response;
+   * it cannot give the aborted acquisition a public row. The model predicts
+   * each load outcome from its own caller and the final public rows from the
+   * remaining owners, not from Query DB's lease bookkeeping.
    * Known failure: https://github.com/TanStack/db/issues/2162
    */
-  it.fails(
-    `cancels the final public snapshot acquisition on caller abort`,
-    async () => {
+  it.each([
+    { peer: false, consumesSignal: true },
+    { peer: true, consumesSignal: true },
+    { peer: false, consumesSignal: false },
+    { peer: true, consumesSignal: false },
+  ])(
+    `cancels a public snapshot on caller abort, peer=$peer, consumesSignal=$consumesSignal`,
+    async ({ peer, consumesSignal }) => {
       const queryClient = createQueryClient()
       const id = `snapshot-caller-abort-${collectionSequence++}`
       const started = createDeferred<void>()
@@ -4021,10 +4042,14 @@ describe(`loadSubset lifecycle oracle`, () => {
           queryClient,
           queryKey: [id],
           queryFn: (context) => {
-            transportSignal = context.signal
-            transportSignal.addEventListener(`abort`, () => held.resolve([]), {
-              once: true,
-            })
+            if (consumesSignal) {
+              transportSignal = context.signal
+              transportSignal.addEventListener(
+                `abort`,
+                () => held.resolve([]),
+                { once: true },
+              )
+            }
             started.resolve()
             return held.promise
           },
@@ -4036,8 +4061,12 @@ describe(`loadSubset lifecycle oracle`, () => {
       const subscription = collection.subscribeChanges(() => {}, {
         includeInitialState: false,
       })
+      const peerSubscription = peer
+        ? collection.subscribeChanges(() => {}, { includeInitialState: false })
+        : undefined
       const caller = new AbortController()
       let load: true | Promise<void> | undefined
+      let peerLoad: true | Promise<void> | undefined
       try {
         subscription.requestSnapshot({
           signal: caller.signal,
@@ -4047,26 +4076,135 @@ describe(`loadSubset lifecycle oracle`, () => {
         })
         await started.promise
         expect(load).toBeDefined()
-        caller.abort()
-        const aborted = transportSignal?.aborted === true
-        held.resolve([{ id: `late` }])
-        const outcome = await Promise.resolve(load).then(
-          () => `fulfilled`,
-          () => `rejected`,
-        )
-        expect({ aborted, outcome, rows: collection.toArray }).toEqual({
-          aborted: true,
-          outcome: `rejected`,
-          rows: [],
+        peerSubscription?.requestSnapshot({
+          onLoadSubsetResult: (result) => {
+            peerLoad = result
+          },
         })
+        if (peer) expect(peerLoad).toBeDefined()
+        caller.abort()
+        await Promise.resolve()
+        if (consumesSignal) {
+          expect(transportSignal?.aborted).toBe(!peer)
+        }
+        await expect(Promise.resolve(load)).rejects.toMatchObject({
+          name: `AbortError`,
+        })
+        expect(collection.toArray).toEqual([])
+        held.resolve([{ id: `late` }])
+        if (peer) {
+          await Promise.resolve(peerLoad)
+          expect(collection.toArray.map(({ id: rowId }) => rowId)).toEqual([
+            `late`,
+          ])
+          peerSubscription?.unsubscribe()
+          await vi.waitFor(() => expect(collection.toArray).toEqual([]))
+        } else {
+          await vi.waitFor(() => expect(collection.toArray).toEqual([]))
+        }
       } finally {
         held.resolve([])
         subscription.unsubscribe()
+        peerSubscription?.unsubscribe()
         await collection.cleanup()
         queryClient.clear()
       }
     },
   )
+
+  /**
+   * An optimistic mutation holds publication after Core accepts the source
+   * sync transaction. The accepted write must still apply for a live peer.
+   * The aborted caller's load rejects only after that application receipt;
+   * otherwise a prompt rejection could hide a dropped accepted write. The
+   * pending transaction flag is a reach witness, while load outcomes and the
+   * peer's row are the comparison.
+   */
+  it(`waits for an accepted result receipt after caller abort`, async () => {
+    const queryClient = createQueryClient()
+    const id = `accepted-caller-abort-${collectionSequence++}`
+    const handlerEntered = createDeferred<void>()
+    const releaseHandler = createDeferred<void>()
+    const collection = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn: () => Promise.resolve([{ id: `server` }]),
+        getKey: (row) => row.id,
+        startSync: true,
+        syncMode: `on-demand`,
+        onInsert: async () => {
+          handlerEntered.resolve()
+          await releaseHandler.promise
+          return { refetch: false }
+        },
+      }),
+    )
+    const first = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    const peer = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    const caller = new AbortController()
+    let firstLoad: true | Promise<void> | undefined
+    let peerLoad: true | Promise<void> | undefined
+    try {
+      const mutation = collection.insert({ id: `local` })
+      await handlerEntered.promise
+      first.requestSnapshot({
+        signal: caller.signal,
+        onLoadSubsetResult: (result) => {
+          firstLoad = result
+        },
+      })
+      peer.requestSnapshot({
+        onLoadSubsetResult: (result) => {
+          peerLoad = result
+        },
+      })
+      expect(firstLoad).toBeDefined()
+      expect(peerLoad).toBeDefined()
+      await vi.waitFor(() =>
+        expect(
+          collection._state.pendingSyncedTransactions.some(
+            (transaction) =>
+              transaction.committed &&
+              transaction.operations.some(({ key }) => key === `server`),
+          ),
+        ).toBe(true),
+      )
+      expect(collection.has(`server`)).toBe(false)
+
+      let firstOutcome: `fulfilled` | `rejected` | undefined
+      void Promise.resolve(firstLoad).then(
+        () => {
+          firstOutcome = `fulfilled`
+        },
+        () => {
+          firstOutcome = `rejected`
+        },
+      )
+      caller.abort()
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect(firstOutcome).toBeUndefined()
+      releaseHandler.resolve()
+      await mutation.isPersisted.promise
+      await expect(Promise.resolve(firstLoad)).rejects.toMatchObject({
+        name: `AbortError`,
+      })
+      await Promise.resolve(peerLoad)
+      expect(firstOutcome).toBe(`rejected`)
+      expect(collection.has(`server`)).toBe(true)
+    } finally {
+      releaseHandler.resolve()
+      first.unsubscribe()
+      peer.unsubscribe()
+      await collection.cleanup()
+      queryClient.clear()
+    }
+  })
 
   it(`starts a fresh query after an aborted owner immediately remounts`, async () => {
     await expectRemountAfterAbortStartsFreshQuery()

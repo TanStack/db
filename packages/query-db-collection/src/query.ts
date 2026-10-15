@@ -1231,6 +1231,10 @@ export function queryCollectionOptions(
     type ResultApplicationController = AbortController & {
       rollback?: () => void
       settleRefetchAtFetchBoundary?: () => void
+      resultTransaction?: {
+        committed: boolean
+        applied: { promise: Promise<void> }
+      }
     }
     const resultApplicationControllers = new Map<
       string,
@@ -2551,7 +2555,13 @@ export function queryCollectionOptions(
         previousOwnersByRow.set(key, owners ? new Set(owners) : undefined)
       })
       let transactionActive = false
-      let resultTransaction: { applicationStarted: boolean } | undefined
+      let resultTransaction:
+        | {
+            committed: boolean
+            applicationStarted: boolean
+            applied: { promise: Promise<void> }
+          }
+        | undefined
 
       const restoreOwnershipTracking = () => {
         // Core flips this at its no-cancel point before publication can reenter.
@@ -2706,6 +2716,7 @@ export function queryCollectionOptions(
         })
 
         resultTransaction = collection._state.pendingSyncedTransactions.at(-1)
+        applicationToken.resultTransaction = resultTransaction
         // No asynchronous work occurs between this check and commit. If a
         // mutation started during fetch or baseline loading, explicit refetch
         // callers stop at the Query fetch boundary while the application stays
@@ -3882,11 +3893,78 @@ export function queryCollectionOptions(
       })
     }
 
-    // Create deduplicated loadSubset wrapper for non-eager modes
-    // This prevents redundant snapshot requests when multiple concurrent
-    // live queries request overlapping or subset predicates
+    // A caller's signal cancels its pending acquisition. The provider sees
+    // Query Core's separate physical signal, which remains live for peers.
+    // Core may later unload the same options during logical-demand release;
+    // that second unload is idempotent.
     const loadSubsetDedupe =
-      syncMode === `eager` ? undefined : createQueryFromOpts
+      syncMode === `eager`
+        ? undefined
+        : (opts: LoadSubsetOptions = {}): true | Promise<void> => {
+            const result = createQueryFromOpts(opts)
+            if (result === true || !opts.signal) return result
+
+            const signal = opts.signal
+            const acquisition = acquisitionLeasesByOptions.get(opts)?.at(-1)
+            return new Promise<void>((resolve, reject) => {
+              let settled = false
+              let aborting = false
+              const finish = (settle: () => void) => {
+                if (settled) return
+                settled = true
+                signal.removeEventListener(`abort`, abort)
+                settle()
+              }
+              const abort = () => {
+                // Core aborts this same signal immediately before an explicit
+                // unload. Let that synchronous unload run, then distinguish it
+                // from a caller abort by the exact acquisition still present.
+                queueMicrotask(() => {
+                  if (settled) return
+                  const stillAcquired = acquisition
+                    ? acquisitionLeasesByOptions.get(opts)?.includes(acquisition)
+                    : pendingStartupLoads.has(opts)
+                  if (!stillAcquired) return
+                  aborting = true
+                  const transaction = acquisition
+                    ? resultApplicationControllers.get(
+                        acquisition.hashedQueryKey,
+                      )?.resultTransaction
+                    : undefined
+                  const acceptedReceipt = transaction?.committed
+                    ? transaction.applied.promise
+                    : undefined
+                  try {
+                    unloadSubset(opts)
+                  } catch (error) {
+                    finish(() => reject(error))
+                    return
+                  }
+                  if (acceptedReceipt) {
+                    void acceptedReceipt.then(
+                      () =>
+                        finish(() =>
+                          reject(new LoadSubsetOperationAbortedError()),
+                        ),
+                      (error: unknown) => finish(() => reject(error)),
+                    )
+                  } else {
+                    finish(() => reject(new LoadSubsetOperationAbortedError()))
+                  }
+                })
+              }
+              signal.addEventListener(`abort`, abort, { once: true })
+              void result.then(
+                () => {
+                  if (!aborting) finish(resolve)
+                },
+                (error: unknown) => {
+                  if (!aborting) finish(() => reject(error))
+                },
+              )
+              if (signal.aborted) abort()
+            })
+          }
 
     return {
       loadSubset: loadSubsetDedupe,

@@ -23,7 +23,10 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
       tests; full load-lifecycle and ownership oracles pass (2026-10-15).
 - [ ] Expand reentrant ownership histories and hostile controls before calling
       the #2160 bug class closed.
-- [ ] Repair public caller abort (#2162) and turn its witness green.
+- [x] Repair public caller abort (#2162) and turn its witness green. Four
+      sole/peer and consumed/ignored-signal histories, two pre-acceptance
+      histories, and one accepted-receipt history pass (2026-10-15). The broader
+      generated-history and hostile-control work below remains open.
 - [ ] Expand generated histories and TLA+ publication/abort coverage; kill
       plausible wrong designs at the intended comparisons.
 - [ ] Close the automatic-GC, hydration, repeated-options, request-shape,

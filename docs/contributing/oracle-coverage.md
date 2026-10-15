@@ -643,12 +643,18 @@ and during a shared fetch. A synchronous provider throw caused by reentrant
 peer acquisition has no separate witness.
 A signal-free provider request keeps its options cloneable and its enumerable
 shape empty while exposing the physical Query signal by property access. The
-original enumerable accessor fails this request-shape witness. A public
-snapshot witness shows that caller abort currently leaves a sole transport
-live and permits a late row and fulfilled load; it is pinned in
-[issue #2162](https://github.com/TanStack/db/issues/2162). Existing peer
-histories abort and unload together, so they do not cover caller abort without
-explicit release or abort after commit acceptance.
+original enumerable accessor fails this request-shape witness. Public snapshot
+histories now abort a pending caller without explicit release, with and without
+an equal peer, and with a provider that consumes or ignores the physical Query
+signal. They compare each load outcome, signal lifetime, and public rows before
+and after the held response. An unaccepted wrapped commit crosses caller abort
+with and without a peer; an accepted Core commit held behind an optimistic
+mutation checks that the aborted load waits for its receipt and the peer's row
+applies. The original sole-owner history failed at the signal, load, and row
+checkpoint; the immediate-rejection candidate failed the accepted-receipt
+checkpoint. These fixed cuts do not establish arbitrary callback reentry or
+all abort/unload orderings; [issue #2162](https://github.com/TanStack/db/issues/2162)
+remains open for the generated grammar and hostile controls.
 Direct `_sync.loadSubset` calls that reuse one options object for several live
 acquisitions have no caller token at `unloadSubset(options)`. The current
 shared-fetch witness checks total transport lifetime, not which such caller
