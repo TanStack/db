@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { render, renderHook, waitFor } from '@solidjs/testing-library'
 import {
   Query,
@@ -2166,11 +2166,10 @@ describe(`Query Collections`, () => {
         expect(view.getByTestId(`pending-waiting`)).toBeTruthy()
         view.unmount()
         markReady!()
-        await Promise.resolve()
-        await Promise.resolve()
+        await queryCollection!.preload()
+        await waitFor(() => expect(queryCollection!.status).toBe(`cleaned-up`))
         expect(readAbandonedStatus!()).not.toBe(`error`)
         expect(readAbandoned!).not.toThrow()
-        await waitFor(() => expect(queryCollection!.status).toBe(`cleaned-up`))
       } finally {
         view.unmount()
         await source.cleanup()
@@ -2223,6 +2222,7 @@ describe(`Query Collections`, () => {
           return <span data-testid="suspense-second">{query()[0]?.name}</span>
         }
 
+        vi.useFakeTimers()
         const view = render(() => (
           <Suspense fallback={<div data-testid="sibling-waiting">Waiting</div>}>
             <First />
@@ -2231,9 +2231,11 @@ describe(`Query Collections`, () => {
         ))
 
         try {
-          await waitFor(() => expect(controls).toHaveLength(2))
+          expect(controls).toHaveLength(2)
           controls[0]!.markReady()
-          await new Promise((resolve) => setTimeout(resolve, 100))
+          await firstQueryCollection!.preload()
+          await vi.advanceTimersByTimeAsync(100)
+          vi.useRealTimers()
           expect(firstQueryCollection!.status).not.toBe(`cleaned-up`)
 
           if (outcome === `commit`) {
@@ -2251,6 +2253,7 @@ describe(`Query Collections`, () => {
             expect(firstQueryCollection!.status).toBe(`cleaned-up`),
           )
         } finally {
+          vi.useRealTimers()
           view.unmount()
           await first.cleanup()
           await second.cleanup()
