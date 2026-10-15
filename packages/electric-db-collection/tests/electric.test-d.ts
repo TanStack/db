@@ -124,21 +124,21 @@ describe(`Electric collection type resolution tests`, () => {
           collection.utils
         expectTypeOf(testCollectionUtils.awaitTxId).toBeFunction
         expectTypeOf(collection.utils.awaitTxId).toBeFunction
-        return Promise.resolve({ txid: 1 })
+        return Promise.resolve()
       },
       onUpdate: async ({ collection }) => {
         const testCollectionUtils: ElectricCollectionUtils<TodoType> =
           collection.utils
         expectTypeOf(testCollectionUtils.awaitTxId).toBeFunction
         expectTypeOf(collection.utils.awaitTxId).toBeFunction
-        return Promise.resolve({ txid: 1 })
+        return Promise.resolve()
       },
       onDelete: async ({ collection }) => {
         const testCollectionUtils: ElectricCollectionUtils<TodoType> =
           collection.utils
         expectTypeOf(testCollectionUtils.awaitTxId).toBeFunction
         expectTypeOf(collection.utils.awaitTxId).toBeFunction
-        return Promise.resolve({ txid: 1 })
+        return Promise.resolve()
       },
     })
 
@@ -175,13 +175,13 @@ describe(`Electric collection type resolution tests`, () => {
       schema: todoSchema,
       getKey: (item) => item.id,
       onInsert: async () => {
-        return Promise.resolve({ txid: 1 })
+        return Promise.resolve()
       },
       onUpdate: async () => {
-        return Promise.resolve({ txid: 1 })
+        return Promise.resolve()
       },
       onDelete: async () => {
-        return Promise.resolve({ txid: 1 })
+        return Promise.resolve()
       },
     })
 
@@ -217,7 +217,7 @@ describe(`Electric collection type resolution tests`, () => {
         ).toEqualTypeOf<AwaitTxIdFn>()
         // @ts-expect-error Electric Collection does not expose Query refetch utilities
         params.transaction.mutations[0].collection.utils.refetch()
-        return Promise.resolve({ txid: 1 })
+        return Promise.resolve()
       },
       onUpdate: (params) => {
         // Verify that the mutation value has the correct type
@@ -230,7 +230,7 @@ describe(`Electric collection type resolution tests`, () => {
         expectTypeOf(
           params.transaction.mutations[0].collection.utils.awaitTxId,
         ).toEqualTypeOf<AwaitTxIdFn>()
-        return Promise.resolve({ txid: 1 })
+        return Promise.resolve()
       },
       onDelete: (params) => {
         // Verify that the mutation value has the correct type
@@ -243,7 +243,7 @@ describe(`Electric collection type resolution tests`, () => {
         expectTypeOf(
           params.transaction.mutations[0].collection.utils.awaitTxId,
         ).toEqualTypeOf<AwaitTxIdFn>()
-        return Promise.resolve({ txid: 1 })
+        return Promise.resolve()
       },
     })
 
@@ -313,7 +313,7 @@ describe(`Electric collection type resolution tests`, () => {
           return mutation.original.id
         })
 
-        return Promise.resolve({ txid: 1 })
+        return Promise.resolve()
       },
       onInsert: (params) => {
         // Direct index access should be correctly typed
@@ -327,7 +327,7 @@ describe(`Electric collection type resolution tests`, () => {
           return mutation.modified.id
         })
 
-        return Promise.resolve({ txid: 1 })
+        return Promise.resolve()
       },
       onUpdate: (params) => {
         // Direct index access should be correctly typed
@@ -345,7 +345,7 @@ describe(`Electric collection type resolution tests`, () => {
           return mutation.modified.id
         })
 
-        return Promise.resolve({ txid: 1 })
+        return Promise.resolve()
       },
     })
 

@@ -318,7 +318,7 @@ describe(`Collection mutation startup oracle`, () => {
         ).toEqual(
           operation === `update` ? [{ id: `target`, value: `updated` }] : [],
         )
-        await transaction.isPersisted.promise
+        await transaction.when(`settled`)
         expect(onUpdate).toHaveBeenCalledTimes(operation === `update` ? 1 : 0)
         expect(onDelete).toHaveBeenCalledTimes(operation === `delete` ? 1 : 0)
       } finally {
@@ -475,7 +475,7 @@ describe(`Collection mutation startup oracle`, () => {
 
     try {
       const transaction = collection.insert(local)
-      await transaction.isPersisted.promise
+      await transaction.when(`settled`)
       expect(syncStarts).toBe(1)
       expect(onInsert).toHaveBeenCalledTimes(1)
       expect(
@@ -521,7 +521,7 @@ describe(`Collection mutation startup oracle`, () => {
       expect(syncStarts).toBe(1)
       expect(collection.status).toBe(`ready`)
       const second = collection.insert({ id: `second`, value: `second` })
-      await Promise.all([first.isPersisted.promise, second.isPersisted.promise])
+      await Promise.all([first.when(`settled`), second.when(`settled`)])
       expect(syncStarts).toBe(1)
       expect(collection.status).toBe(`ready`)
       expect(handlerCalls).toBe(2)
@@ -663,7 +663,7 @@ describe(`Collection readiness during a pending mutation`, () => {
         await handlerEntered
         if (source === `outside-handler`) startup()
         const settled = await Promise.race([
-          insert.isPersisted.promise.then(() => `settled` as const),
+          insert.when(`settled`).then(() => `settled` as const),
           new Promise<`pending`>((resolve) =>
             setTimeout(() => resolve(`pending`), 200),
           ),

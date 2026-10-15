@@ -2,10 +2,12 @@
  * # Which published values carry virtual row fields?
  *
  * Law and source: `VirtualRowProps` gives Collection and live-query row roots
- * `$hasPendingWrites`, `$synced`, `$origin`, `$key`, and `$collectionId`. The output contract
+ * `$hasPendingWrites`, `$origin`, `$key`, and `$collectionId`. The output contract
  * established by `includes.test.ts` keeps inline `toArray` and `materialize`
  * selections in their selected shape instead of publishing each selected value
- * as a Collection row.
+ * as a Collection row. Whole-row roots retain source metadata; ordinary
+ * projections receive the live-query Collection's metadata. An explicit
+ * selected virtual name cannot replace source metadata at root publication.
  *
  * `expectsVirtualFields` is the independent model: row roots and unprojected
  * whole-row children are rows. Projected children, nested values, and opaque
@@ -32,7 +34,7 @@
  * observations. `checkWithCleanup` retains the primary mismatch as the cause
  * when Collection cleanup also fails and attempts every cleanup.
  */
-import { describe, expect, test } from 'vitest'
+import { describe, expect, test, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import {
   createLiveQueryCollection,
@@ -64,7 +66,6 @@ type VirtualFieldSubject =
 const virtualFieldNames = [
   `$key`,
   `$hasPendingWrites`,
-  `$synced`,
   `$origin`,
   `$collectionId`,
 ] as const
@@ -118,6 +119,49 @@ async function checkWithCleanup(
 }
 
 describe(`virtual row field runtime boundary`, () => {
+  test(`keeps source write metadata authoritative over selected field names`, async () => {
+    const rows = createCollection(
+      mockSyncCollectionOptions<{ id: string; label: string }>({
+        id: `virtual-row-fields-colliding-projection-source`,
+        getKey: (row) => row.id,
+        initialData: [{ id: `row-1`, label: `before` }],
+      }),
+    )
+    const live = createLiveQueryCollection((q) =>
+      q.from({ row: rows }).select(({ row }) => ({
+        id: row.id,
+        label: row.label,
+        $hasPendingWrites: false,
+        $origin: `remote`,
+        $key: `selected-key`,
+        $collectionId: `selected-collection`,
+      })),
+    )
+
+    // The model is the source Collection's public row during a held optimistic
+    // update. Selection changes user fields, but cannot author system metadata.
+    await checkWithCleanup(async () => {
+      await live.preload()
+      const update = rows.update(`row-1`, (draft) => {
+        draft.label = `pending`
+      })
+      await vi.waitFor(() => {
+        expect(rows.get(`row-1`)?.$hasPendingWrites).toBe(true)
+        expect(live.toArray[0]?.label).toBe(`pending`)
+      })
+
+      expect(live.toArray[0]).toMatchObject({
+        $hasPendingWrites: true,
+        $origin: `local`,
+        $key: `row-1`,
+        $collectionId: rows.id,
+      })
+
+      rows.utils.resolveSync()
+      await update.when(`settled`)
+    }, [() => live.cleanup(), () => rows.cleanup()])
+  })
+
   test(`publishes every virtual field on implicit, expression, and functional root shapes`, async () => {
     const rows = createCollection(
       mockSyncCollectionOptions<Row>({
@@ -165,20 +209,21 @@ describe(`virtual row field runtime boundary`, () => {
         expect(row!.$hasPendingWrites, `${name} has no pending write`).toBe(
           false,
         )
-        expect(row!.$hasPendingWrites, `${name} legacy inverse`).toBe(
-          !row!.$synced,
-        )
+        expect(`$synced` in row!, `${name} omits the removed alias`).toBe(false)
       }
 
       expect(implicit.toArray[0]?.id).toBe(`row-1`)
+      expect(implicit.toArray[0]?.$collectionId).toBe(rows.id)
       expect(expression.toArray[0]).toMatchObject({
         id: `row-1`,
         label: `nested`,
       })
+      expect(expression.toArray[0]?.$collectionId).toBe(expression.id)
       expect(functional.toArray[0]).toMatchObject({
         id: `row-1`,
         label: `nested`,
       })
+      expect(functional.toArray[0]?.$collectionId).toBe(functional.id)
 
       // Wrong rule: functional projection outputs are treated as ordinary
       // values and never receive root fields. The direct field check above
@@ -398,13 +443,9 @@ describe(`virtual row field runtime boundary`, () => {
       }
 
       expect(result.$key).toBe(`row-1`)
-      expect(result.$hasPendingWrites).toBe(!result.$synced)
-      expect(result.wholeRows[0]!.$hasPendingWrites).toBe(
-        !result.wholeRows[0]!.$synced,
-      )
-      expect(result.selectedWholeRows[0]!.$hasPendingWrites).toBe(
-        !result.selectedWholeRows[0]!.$synced,
-      )
+      expect(result.$hasPendingWrites).toBe(false)
+      expect(result.wholeRows[0]!.$hasPendingWrites).toBe(false)
+      expect(result.selectedWholeRows[0]!.$hasPendingWrites).toBe(false)
 
       expect(result.profile).toEqual({ label: `nested` })
       expect(`$key` in result.profile).toBe(false)

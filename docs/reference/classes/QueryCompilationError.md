@@ -19,7 +19,6 @@ Defined in: [packages/db/src/errors.ts:677](https://github.com/TanStack/db/blob/
 - [`HavingRequiresGroupByError`](HavingRequiresGroupByError.md)
 - [`LimitOffsetRequireOrderByError`](LimitOffsetRequireOrderByError.md)
 - [`CollectionInputNotFoundError`](CollectionInputNotFoundError.md)
-- [`DuplicateAliasInSubqueryError`](DuplicateAliasInSubqueryError.md)
 - [`UnsupportedFromTypeError`](UnsupportedFromTypeError.md)
 - [`UnknownExpressionTypeError`](UnknownExpressionTypeError.md)
 - [`EmptyReferencePathError`](EmptyReferencePathError.md)

@@ -33,7 +33,6 @@ it(`separates only the five documented virtual fields from selected values`, () 
   const actual = rows.map((row) => ({
     ...row,
     $hasPendingWrites: false,
-    $synced: true,
     $origin: `remote`,
     $key: row.id,
     $collectionId: `source`,

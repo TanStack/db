@@ -67,7 +67,6 @@ const rootVirtualKeys = [
   `$hasPendingWrites`,
   `$key`,
   `$origin`,
-  `$synced`,
 ]
 
 const voteAt = (context: Context, alias: ChildAlias): Vote =>

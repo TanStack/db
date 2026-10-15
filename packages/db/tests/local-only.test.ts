@@ -744,7 +744,7 @@ describe(`LocalOnly Collection`, () => {
       }
 
       // Catch the rejected promise to avoid unhandled rejection
-      tx.isPersisted.promise.catch(() => {})
+      tx.when(`settled`).catch(() => {})
 
       // Item should be rolled back
       expect(collection.has(700)).toBe(false)
@@ -790,7 +790,7 @@ describe(`LocalOnly Collection`, () => {
           transaction.state === `persisting`
         )
           transaction.rollback()
-        await transaction.isPersisted.promise.catch(() => undefined)
+        await transaction.when(`settled`).catch(() => undefined)
         await replacementCollection.cleanup()
       }
     })

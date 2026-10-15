@@ -112,12 +112,10 @@ An explicit `queryKey` is the caller's identity contract. If its source object
 changes, change the key too, even when the source ID stays the same. Use a
 primitive scope token in the key; Collection objects cannot be hashed there.
 
-Before 1.0, an unhashable query warns in development and keeps its legacy
-mount-stable identity. The query still runs, but captured values inside opaque
-logic only become reactive when they are represented in `queryKey`. In 1.0, an
-unhashable query without `queryKey` will throw. If deriving identity becomes
-expensive across renders, the hook warns once and suggests adding a `queryKey`
-as a performance escape hatch.
+An unhashable query without `queryKey` throws. Include captured values from
+opaque logic in the key so changes to those values recreate the query. If
+deriving identity becomes expensive across renders, the hook warns once and
+suggests adding a `queryKey` as a performance escape hatch.
 
 #### What Happens When Identity Changes
 
@@ -160,8 +158,6 @@ const { data } = useLiveQuery({
 })
 ```
 
-Dependency arrays are still accepted for backwards compatibility, but they warn in development and will be removed in 1.0.
-
 For SSR setup, collection hydration, and migration details, see the [SSR and Hydration guide](../../guides/ssr.md).
 
 ### useLiveInfiniteQuery
@@ -189,7 +185,7 @@ or skip remote rows. For server pagination, use an on-demand Query Collection
 whose `queryFn` fulfills `meta.loadSubsetOptions`. See the
 [server pagination guide](../../collections/query-collection.md#server-pagination-with-live-queries).
 
-The deprecated dependency array is only available when using the query function variant, not when passing a pre-created collection.
+React hook dependency arrays were removed in the first 1.0 RC. Use derived query identity or an explicit `queryKey`.
 
 ### useLiveSuspenseQuery
 

@@ -951,17 +951,17 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           },
         })
 
-        let tx!: { isPersisted: { promise: Promise<any> } }
+        let tx!: { when: (state: 'settled') => Promise<any> }
         await h.apply(() => {
           tx = add()
-          void tx.isPersisted.promise.catch(() => undefined)
-          lifetime!.defer(() => tx.isPersisted.promise)
+          void tx.when(`settled`).catch(() => undefined)
+          lifetime!.defer(() => tx.when(`settled`))
         })
         // Optimistic row is visible before the server confirms.
         expect(h.current().data.find((r: any) => r.id === `temp`)).toBeDefined()
 
         confirmServer()
-        await tx.isPersisted.promise
+        await tx.when(`settled`)
         await h.flush()
         // Reconciled: temp replaced by the permanent key.
         expect(

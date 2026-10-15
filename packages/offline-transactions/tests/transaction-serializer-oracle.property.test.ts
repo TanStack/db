@@ -205,7 +205,7 @@ async function checkRoundtrip(
     autoCommit: false,
     mutationFn: async () => {},
   })
-  const rollback = transaction.isPersisted.promise.catch(() => undefined)
+  const rollback = transaction.when(`settled`).catch(() => undefined)
   let hasPrimaryFailure = false
   let primaryFailure: unknown
   try {

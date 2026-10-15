@@ -151,7 +151,7 @@ function mountControllable<P>(
   const hook = renderHook(
     ({ param }: { param: P }) =>
       // Param goes in the dependency list so the hook recompiles when it changes.
-      useLiveQuery((q: any) => build(q, param), [param]),
+      useLiveQuery({ query: (q: any) => build(q, param), queryKey: [param] }),
     { initialProps: { param: initial } },
   )
   const handle = makeHandle(hook)
@@ -267,13 +267,15 @@ it(`publishes a synchronous full-source ordered limit in the first layout commit
   ])
   const commits: Array<{ ids: Array<string>; status: string }> = []
   const hook = renderHook(() => {
-    const result = useLiveQuery((q) =>
-      q
-        .from({ row: source.collection })
-        .fn.where(({ row }) => row.rank > 0)
-        .orderBy(({ row }) => row.rank)
-        .limit(2),
-    )
+    const result = useLiveQuery({
+      queryKey: [source.collection.id, `ordered-function-filter`],
+      query: (q) =>
+        q
+          .from({ row: source.collection })
+          .fn.where(({ row }) => row.rank > 0)
+          .orderBy(({ row }) => row.rank)
+          .limit(2),
+    })
     useLayoutEffect(() => {
       commits.push({
         ids: result.data.map(({ id }) => id),

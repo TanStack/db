@@ -7,11 +7,9 @@ title: hasVirtualProps
 function hasVirtualProps(value): value is VirtualRowProps<string | number>;
 ```
 
-Defined in: [packages/db/src/virtual-props.ts:194](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L194)
+Defined in: [packages/db/src/virtual-props.ts:166](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L166)
 
-Checks if a value has virtual properties attached. Legacy rows with the
-original four properties still match; only rows published by this version
-are guaranteed to carry `$hasPendingWrites`.
+Checks if a value has all virtual properties attached.
 
 ## Parameters
 
@@ -30,7 +28,7 @@ true if the value has virtual properties
 ## Example
 
 ```typescript
-if (hasVirtualProps(row) && row.$hasPendingWrites !== undefined) {
+if (hasVirtualProps(row)) {
   console.log('Pending local writes:', row.$hasPendingWrites)
 }
 ```

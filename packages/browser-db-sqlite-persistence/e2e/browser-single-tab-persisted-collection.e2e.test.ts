@@ -82,15 +82,13 @@ function createPersistedCollection<T extends PersistableRow>(
 }
 
 type PersistedTransactionHandle = {
-  isPersisted: {
-    promise: Promise<unknown>
-  }
+  when: (state: 'settled') => Promise<unknown>
 }
 
 async function waitForPersisted(
   transaction: PersistedTransactionHandle,
 ): Promise<void> {
-  await transaction.isPersisted.promise
+  await transaction.when(`settled`)
 }
 
 async function seedCollection<T extends PersistableRow>(

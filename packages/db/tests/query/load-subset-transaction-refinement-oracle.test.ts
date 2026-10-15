@@ -190,7 +190,7 @@ describe(`loadSubset transaction refinement`, () => {
         }
 
         persistence.resolve()
-        await blocker.isPersisted.promise
+        await blocker.when(`settled`)
 
         if (expected.load === `rejects`) {
           await expect(load).rejects.toMatchObject({ name: `AbortError` })
@@ -212,7 +212,7 @@ describe(`loadSubset transaction refinement`, () => {
       } finally {
         persistence.resolve()
         try {
-          await blocker.isPersisted.promise
+          await blocker.when(`settled`)
         } catch (error) {
           cleanupFailures.push(error)
         }

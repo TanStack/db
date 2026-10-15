@@ -32,7 +32,6 @@ The result types are automatically inferred from your query structure, providing
 Live query results include computed, read-only virtual properties on every row:
 
 - `$hasPendingWrites`: `true` while a pending local optimistic mutation affects the row; otherwise `false`. It is always `false` for local-only collections. It does not indicate server acknowledgement.
-- `$synced` (deprecated): the inverse of `$hasPendingWrites`. It will be removed in the 1.0 RC. Replace `row.$synced` with `!row.$hasPendingWrites`, and `eq(row.$synced, true)` with `eq(row.$hasPendingWrites, false)`.
 - `$origin`: Collection attribution for the current row. Optimistic rows are `"local"`; source rows use key and timing, not a source client ID. A peer write can be `"local"`. A truncate does not consume an active mutation's attribution for an untouched key. See [VirtualOrigin](../reference/type-aliases/VirtualOrigin.md) for settlement, truncate, and overlap rules. Local-only Collections always use `"local"`.
 - `$key`: the row key for the result.
 - `$collectionId`: the source collection ID.
@@ -207,10 +206,8 @@ export class UserListComponent {
 ```
 
 > **Note:** React hooks derive query identity from structured query IR by
-> default. Dependency arrays are still accepted for backwards compatibility,
-> but warn in development and will be removed in 1.0. Unhashable queries also
-> warn and keep legacy mount-stable identity until 1.0; add `queryKey` to make
-> captured opaque values reactive. See the [React Adapter
+> default. An unhashable query requires `queryKey`; include captured opaque
+> values in the key to make them reactive. See the [React Adapter
 > documentation](../framework/react/overview#query-identity) for details.
 
 For server rendering and hydration, live query preloading transports the ordered
@@ -240,10 +237,8 @@ function UserSearch({ search }: { search: string }) {
 
 You can also provide a `queryKey` as a performance escape hatch for a very hot render path, but normal structured queries should omit it.
 
-React development builds detect both cases. Before 1.0, opaque, unhashable IR
-warns and keeps legacy mount-stable identity; repeated expensive identity
-derivation also warns once. Both warnings point to the same `queryKey` escape
-hatch.
+An opaque, unhashable query without `queryKey` throws. In development, repeated
+expensive identity derivation warns once and suggests an explicit `queryKey`.
 
 For more details on framework integration, see the [React](../framework/react/overview), [Vue](../framework/vue/overview), and [Angular](../framework/angular/overview) adapter documentation.
 

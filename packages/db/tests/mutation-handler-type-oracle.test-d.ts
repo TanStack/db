@@ -8,7 +8,7 @@ import type { Transaction, TransactionState } from '../src/index.js'
  * `docs/reference/interfaces/BaseCollectionConfig.md` document direct
  * insert/update/delete handlers with a typed transaction and sibling Collection.
  * Every nested mutation carries that operation's row, key, and utilities.
- * `docs/reference/interfaces/Transaction.md` documents `isPersisted.promise`
+ * `docs/reference/interfaces/Transaction.md` documents `when('settled')`
  * as local transaction settlement, not backend confirmation.
  *
  * Model and finite input grammar: independently declared Row, key, and utility
@@ -162,7 +162,7 @@ describe(`mutation handler type oracle`, () => {
         expectTypeOf(collection.utils).toEqualTypeOf<AuthoritativeSyncUtils>()
         expectTypeOf(collection.get).parameter(0).toEqualTypeOf<BrandedKey>()
         expectTypeOf(transaction.state).toEqualTypeOf<TransactionState>()
-        expectTypeOf(transaction.isPersisted.promise).toEqualTypeOf<
+        expectTypeOf(transaction.when(`settled`)).toEqualTypeOf<
           Promise<Transaction<Row<BrandedKey>>>
         >()
 

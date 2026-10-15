@@ -1643,7 +1643,6 @@ function expectNoRouteMetadata(row: object): void {
 // Public VirtualRowProps names these five keys, not arbitrary $-prefixed data.
 const publicMetadataKeys = new Set([
   `$hasPendingWrites`,
-  `$synced`,
   `$origin`,
   `$key`,
   `$collectionId`,

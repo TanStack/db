@@ -49,7 +49,7 @@ for (const capability of ['randomUUID', 'getRandomValues'] as const) {
         { id: 0, name: 'number' },
         { id: '1', name: 'string' },
       ]
-      await writer.insert(expected).isPersisted.promise
+      await writer.insert(expected).when(`settled`)
       expect(Channel.sent, 'one completed write notification').toHaveLength(1)
       expect(await Channel.deliver(), 'receiver path reached').toBe(1)
       assertRows(writer.values(), expected, 'writer after persistence')
@@ -84,7 +84,7 @@ for (const retired of ['first', 'second'] as const) {
         await first.preload()
         await second.preload()
         const expected: Array<Row> = [{ id: 1, name: 'before cleanup' }]
-        await first.insert(expected[0]!).isPersisted.promise
+        await first.insert(expected[0]!).when(`settled`)
         expect(
           await Channel.deliver(),
           'second client receives first write',
@@ -102,7 +102,7 @@ for (const retired of ['first', 'second'] as const) {
           'only the retired sync run releases its channel',
         ).toBe(1)
         const added: Row = { id: '1', name: 'after cleanup' }
-        await survivor.insert(added).isPersisted.promise
+        await survivor.insert(added).when(`settled`)
         expected.push(added)
         assertRows(survivor.values(), expected, 'survivor write')
         assertRows(
@@ -115,7 +115,7 @@ for (const retired of ['first', 'second'] as const) {
         await restored.preload()
         assertRows(restored.values(), expected, 'third client restore')
         const suffix: Row = { id: 2, name: 'new peer' }
-        await survivor.insert(suffix).isPersisted.promise
+        await survivor.insert(suffix).when(`settled`)
         expected.push(suffix)
         expect(
           await Channel.deliver(),
@@ -282,8 +282,7 @@ for (const idLocation of ['options', 'collection'] as const) {
         h.collections.push(c)
         await c.preload()
         const expected = [{ id: 1, name: 'owned' }]
-        if (entry === 'automatic')
-          await c.insert(expected[0]!).isPersisted.promise
+        if (entry === 'automatic') await c.insert(expected[0]!).when(`settled`)
         else {
           const tx = createTransaction({
             autoCommit: false,
@@ -357,9 +356,7 @@ for (const sharedId of [false, true]) {
               }
             },
           })
-          const outcome = tx.isPersisted.promise.catch(
-            (error: unknown) => error,
-          )
+          const outcome = tx.when(`settled`).catch((error: unknown) => error)
           tx.mutate(() =>
             collections.forEach((collection, index) =>
               collection.insert(rows[index]!),
@@ -452,14 +449,16 @@ for (const name of legalNames) {
         // Separate transactions isolate name routing from the already tracked
         // core same-transaction numeric/string key collision (HC005).
         for (const row of rows)
-          await writers[index]!.insert({ ...row }).isPersisted.promise
+          await writers[index]!.insert({ ...row }).when(`settled`)
         expected.set(store, rows)
       }
       await checkpoint()
       const versions = await readStore(db, '_versions')
-      await writers[0]!.update(0, (draft) => {
-        draft.name = 'changed'
-      }).isPersisted.promise
+      await writers[0]!
+        .update(0, (draft) => {
+          draft.name = 'changed'
+        })
+        .when(`settled`)
       expected.set(name, [
         { id: 0, name: 'changed' },
         { id: '0', name: name + ':string' },
@@ -570,9 +569,8 @@ for (const count of [2, 3]) {
         }
         const rows = collections.map((_, id) => ({ id, name: `writer-${id}` }))
         await Promise.all(
-          collections.map(
-            (collection, index) =>
-              collection.insert({ ...rows[index]! }).isPersisted.promise,
+          collections.map((collection, index) =>
+            collection.insert({ ...rows[index]! }).when(`settled`),
           ),
         )
         await Channel.deliver()

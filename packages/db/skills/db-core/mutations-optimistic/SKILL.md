@@ -6,7 +6,7 @@ description: >
   createPacedMutations with debounceStrategy, throttleStrategy, queueStrategy.
   createTransaction, getActiveTransaction, ambient transaction context.
   Transaction lifecycle (pending/persisting/completed/failed). Mutation merging.
-  onInsert/onUpdate/onDelete handlers. PendingMutation type. Transaction.isPersisted.
+  onInsert/onUpdate/onDelete handlers. PendingMutation type. Transaction.when('settled').
 type: sub-skill
 library: db
 library_version: '0.6.17'

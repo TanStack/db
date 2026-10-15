@@ -624,8 +624,8 @@ export function localStorageCollectionOptions(
 
   const persistAutomatic = (
     mutations: Array<PendingMutation<Record<string, unknown>>>,
-    handler?: () => unknown | Promise<unknown>,
-  ): Promise<unknown> => {
+    handler?: () => void | Promise<void>,
+  ): Promise<void> => {
     const { previous, retire } = reserveWrite()
 
     // Native Storage writes synchronously. With no handler or earlier write,
@@ -633,7 +633,7 @@ export function localStorageCollectionOptions(
     if (!handler && previous === undefined) {
       try {
         persistMutations(mutations)
-        return Promise.resolve({})
+        return Promise.resolve()
       } catch (error) {
         return Promise.reject(error)
       } finally {
@@ -641,7 +641,7 @@ export function localStorageCollectionOptions(
       }
     }
 
-    let result: unknown
+    let result: void | Promise<void>
     try {
       result = handler?.()
     } catch (error) {
@@ -650,11 +650,10 @@ export function localStorageCollectionOptions(
       return Promise.reject(error)
     }
     return Promise.resolve(result).then(
-      async (value) => {
+      async () => {
         await previous
         try {
           persistMutations(mutations)
-          return value ?? {}
         } finally {
           retire()
         }

@@ -515,13 +515,13 @@ function createPublicationDriver(
         if (action.type === `optimisticConfirm`) {
           context.sources.parents.write(`update`, next)
           context.sources.parents.resolveSync()
-          await transaction.isPersisted.promise
+          await transaction.when(`settled`)
         } else {
           const beforeRollbackCallbacks = context.callbacks.length
           context.model.parents.set(previous.id, previous)
           await settleRollback(
             context.sources.parents.rejectSync,
-            transaction.isPersisted.promise,
+            transaction.when(`settled`),
           )
           checkpointWithCallbackReach(beforeRollbackCallbacks)
         }

@@ -45,7 +45,7 @@ import type {
  * keys, and success or permanent failure at each position. Each transaction
  * either commits manually or auto-commits after its `mutate()` callback, with
  * `autoCommit: true`, with the option omitted, or as an `OfflineAction`. An
- * auto-commit has no `commit()` caller, so its `isPersisted` is the commit
+ * auto-commit has no `commit()` caller, so its `when('settled')` is the commit
  * receipt. No failure, manual or auto-committed, may escape as an unhandled
  * process rejection, be logged again, or write debug output. Any position may
  * be preceded by an empty transaction on the same commit path: its callback
@@ -82,7 +82,7 @@ import type {
  *
  * Held and failed deletion witnesses split named mutation function fulfillment
  * from durable outbox removal. At the held-delete checkpoint, the public caller
- * and `isPersisted` promises remain pending. A phase-write or deletion failure
+ * and `when('settled')` promises remain pending. A phase-write or deletion failure
  * rejects the caller promise with the storage error, stops the executor, and
  * holds queued peers. An offline executor restart removes a marked outbox entry
  * without another named mutation function call.
@@ -333,7 +333,7 @@ it.each(oracleSeeds(20260913, settlementOracle))(
             )
             const expectedStatuses = Object.fromEntries([
               ...emptyReceipts.map((name) => [name, `fulfilled`]),
-              // A plain rollback rejects isPersisted with no reason (core
+              // A plain rollback rejects when('settled') with no reason (core
               // contract); the waiter names the rollback with an Error.
               ...rolledBack.flatMap(({ wait, receipt }) => [
                 [receipt, undefined],
@@ -395,7 +395,7 @@ it.each(oracleSeeds(20260913, settlementOracle))(
           // Receipts of transactions rolled back before they commit.
           const rolledBack: Array<{ wait: string; receipt: string }> = []
           // Start a transaction on one commit path. An auto-commit has no
-          // commit() caller; its receipt is isPersisted, which settles like a
+          // commit() caller; its receipt is when('settled'), which settles like a
           // manual commit's.
           const start = (
             commit: SettlementCommit,
@@ -429,7 +429,7 @@ it.each(oracleSeeds(20260913, settlementOracle))(
           }
           let hasPrimaryFailure = false
           // No failure, manual or auto-committed, escapes as an unhandled
-          // process rejection, and none is logged again: isPersisted reports
+          // process rejection, and none is logged again: when('settled') reports
           // it.
           const { rejections: unhandled, cleanup: cleanupUnhandled } =
             captureUnhandledRejections()
@@ -757,7 +757,7 @@ it.each(oracleSeeds(20260913, settlementOracle))(
             },
           ],
           // A failed auto-commit with the default option, and a failed
-          // action, settle through isPersisted only.
+          // action, settle through when('settled') only.
           [
             {
               sharedKeys: false,
@@ -868,7 +868,7 @@ it.each([
         rollbackSeeds.push(() => {
           tx.rollback({ isSecondaryRollback: true })
         })
-        void tx.isPersisted.promise.catch(() => {})
+        void tx.when(`settled`).catch(() => {})
         tx.mutate(() => {
           if (sharedKey && index > 0)
             seed.update(row.id, (draft) => {
@@ -2906,7 +2906,7 @@ it(`keeps commit pending until successful outbox deletion`, async () => {
         updatedAt: new Date(0),
       }),
     )
-    observedPersistence = localTransaction.isPersisted.promise.then(
+    observedPersistence = localTransaction.when(`settled`).then(
       () => {
         persistedStatus = `fulfilled`
       },
@@ -3000,7 +3000,7 @@ it.each([`removeFromOutbox`, `clearOutbox`] as const)(
           updatedAt: new Date(0),
         }),
       )
-      observedPersistence = localTransaction.isPersisted.promise.then(
+      observedPersistence = localTransaction.when(`settled`).then(
         () => {
           persistedStatus = `fulfilled`
         },
@@ -3125,7 +3125,7 @@ it.each([
           updatedAt: new Date(0),
         }),
       )
-      headPersistence = localHead.isPersisted.promise.then(
+      headPersistence = localHead.when(`settled`).then(
         () => {
           headPersistenceResult = `fulfilled`
         },
@@ -3267,7 +3267,7 @@ it(`stops successful provider work when outbox deletion fails`, async () => {
         updatedAt: new Date(0),
       }),
     )
-    observedPersistence = localTransaction.isPersisted.promise.then(
+    observedPersistence = localTransaction.when(`settled`).then(
       () => {
         persistedStatus = `fulfilled`
       },
@@ -3440,7 +3440,7 @@ it(`stops after a failed deletion-pending write and holds its queued peer`, asyn
         updatedAt: new Date(0),
       }),
     )
-    observedPersistence = localTransaction.isPersisted.promise.then(
+    observedPersistence = localTransaction.when(`settled`).then(
       () => {
         persistedStatus = `fulfilled`
       },
@@ -3601,7 +3601,7 @@ it(`restarts a fulfilled provider transaction after a stopped deletion failure`,
         updatedAt: new Date(0),
       }),
     )
-    observedPersistence = localTransaction.isPersisted.promise.then(
+    observedPersistence = localTransaction.when(`settled`).then(
       () => {
         persistedStatus = `fulfilled`
       },
@@ -3723,7 +3723,7 @@ it(`replays an admitted row with no fulfilled-provider checkpoint`, async () => 
     autoCommit: false,
     mutationFn: () => Promise.resolve(),
   })
-  void seedTransaction.isPersisted.promise.catch(() => {})
+  void seedTransaction.when(`settled`).catch(() => {})
   try {
     seedTransaction.mutate(() =>
       seed.insert({

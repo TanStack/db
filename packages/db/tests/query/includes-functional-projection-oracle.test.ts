@@ -655,7 +655,7 @@ describe(`functional projection output compatibility`, () => {
             case `virtual-metadata`:
               ids = view.toArray.map((child) => {
                 expect(child.$collectionId).toBe(children.collection.id)
-                expect(child.$synced).toBe(true)
+                expect(child.$hasPendingWrites).toBe(false)
                 expect(child.$origin).toBe(`remote`)
                 return child.id
               })

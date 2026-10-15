@@ -3,7 +3,7 @@ id: SetWindowFindOneLimitError
 title: SetWindowFindOneLimitError
 ---
 
-Defined in: [packages/db/src/errors.ts:1141](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1141)
+Defined in: [packages/db/src/errors.ts:1122](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1122)
 
 Error thrown when setWindow would change the limit of a findOne() query.
 
@@ -19,7 +19,7 @@ Error thrown when setWindow would change the limit of a findOne() query.
 new SetWindowFindOneLimitError(): SetWindowFindOneLimitError;
 ```
 
-Defined in: [packages/db/src/errors.ts:1142](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1142)
+Defined in: [packages/db/src/errors.ts:1123](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1123)
 
 #### Returns
 

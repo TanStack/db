@@ -11,7 +11,6 @@ import {
   SyncTransactionAbortedError,
   and,
   validateSyncPersistenceCapability,
-  warnOnce,
   whenSyncAccepted,
   withCollectionConfigFactory,
   withCollectionSyncConfigCleanup,
@@ -289,20 +288,6 @@ export type MatchFunction<T extends Row<unknown>> = (
 ) => boolean
 
 /**
- * Matching strategies for Electric synchronization
- * Handlers can return:
- * - Txid strategy: { txid: number | number[], timeout?: number } (deprecated compatibility behavior)
- * - Void (no return value) - mutation completes without waiting
- *
- * The optional timeout property specifies how long to wait for the txid(s) in milliseconds.
- * If not specified, defaults to 15000ms.
- */
-export type MatchingStrategy = {
-  txid: Txid | Array<Txid>
-  timeout?: number
-} | void
-
-/**
  * Type representing a snapshot end message
  */
 type SnapshotEndMessage = ControlMessage & {
@@ -374,9 +359,6 @@ export interface ElectricCollectionConfig<
    *
    * @param params Object containing transaction and collection information
    * @returns Promise that should resolve after synchronization is complete
-   *
-   * **Deprecation notice:** Returning `{ txid }` from handlers is deprecated and will be removed in v1.0.
-   * Use `await collection.utils.awaitTxId(txid)` within the handler instead.
    *
    * @example
    * // Recommended: Wait for txid to sync
@@ -452,7 +434,7 @@ export interface ElectricCollectionConfig<
       string | number,
       ElectricCollectionUtils<T>
     >,
-  ) => Promise<MatchingStrategy>
+  ) => Promise<void>
 
   /**
    * Optional asynchronous handler function called before an update operation
@@ -467,9 +449,6 @@ export interface ElectricCollectionConfig<
    *
    * @param params Object containing transaction and collection information
    * @returns Promise that should resolve after synchronization is complete
-   *
-   * **Deprecation notice:** Returning `{ txid }` from handlers is deprecated and will be removed in v1.0.
-   * Use `await collection.utils.awaitTxId(txid)` within the handler instead.
    *
    * @example
    * // Recommended: Wait for txid to sync
@@ -502,7 +481,7 @@ export interface ElectricCollectionConfig<
       string | number,
       ElectricCollectionUtils<T>
     >,
-  ) => Promise<MatchingStrategy>
+  ) => Promise<void>
 
   /**
    * Optional asynchronous handler function called before a delete operation
@@ -517,9 +496,6 @@ export interface ElectricCollectionConfig<
    *
    * @param params Object containing transaction and collection information
    * @returns Promise that should resolve after synchronization is complete
-   *
-   * **Deprecation notice:** Returning `{ txid }` from handlers is deprecated and will be removed in v1.0.
-   * Use `await collection.utils.awaitTxId(txid)` within the handler instead.
    *
    * @example
    * // Recommended: Wait for txid to sync
@@ -551,7 +527,7 @@ export interface ElectricCollectionConfig<
       string | number,
       ElectricCollectionUtils<T>
     >,
-  ) => Promise<MatchingStrategy>
+  ) => Promise<void>
 }
 
 function isUpToDateMessage<T extends Row<unknown>>(
@@ -1231,107 +1207,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
     })
   const sync = createSync()
 
-  /**
-   * Process matching strategy and wait for synchronization
-   */
-  const processMatchingStrategy = async (
-    result: unknown,
-    waitForTxId: AwaitTxIdFn,
-  ): Promise<void> => {
-    const canHaveProperties =
-      (typeof result === `object` && result !== null) ||
-      typeof result === `function`
-
-    // Only wait if result contains txid
-    if (canHaveProperties && `txid` in result) {
-      const strategy = result as Exclude<MatchingStrategy, void>
-      // Warn about deprecated return value pattern
-      warnOnce(
-        'electric-collection-txid-return',
-        '[TanStack DB] DEPRECATED: Returning { txid } from mutation handlers is deprecated and will be removed in v1.0. ' +
-          'Use `await collection.utils.awaitTxId(txid)` instead of returning { txid }. ' +
-          'See migration guide: https://tanstack.com/db/latest/docs/collections/electric-collection#persistence-handlers--synchronization',
-      )
-
-      const timeout = strategy.timeout
-      // Handle both single txid and array of txids
-      if (Array.isArray(strategy.txid)) {
-        await Promise.all(
-          strategy.txid.map((txid) => waitForTxId(txid, timeout)),
-        )
-      } else {
-        await waitForTxId(strategy.txid, timeout)
-      }
-    }
-    // If result is void/undefined, don't wait - mutation completes immediately
-  }
-  const getMutationAwaitTxId = (params: unknown): AwaitTxIdFn => {
-    const collection = (
-      params as {
-        collection?: { utils?: { awaitTxId?: AwaitTxIdFn } }
-      }
-    ).collection
-    return collection?.utils?.awaitTxId ?? awaitTxId
-  }
-
-  // Create wrapper handlers for direct persistence operations that handle different matching strategies
-  // These wrappers process deprecated return values but don't pass them through
-  const wrappedOnInsert = config.onInsert
-    ? async (
-        params: InsertMutationFnParams<
-          any,
-          string | number,
-          ElectricCollectionUtils<T>
-        >,
-      ): Promise<void> => {
-        const handlerResult = await config.onInsert!(params)
-        await processMatchingStrategy(
-          handlerResult,
-          getMutationAwaitTxId(params),
-        )
-      }
-    : undefined
-
-  const wrappedOnUpdate = config.onUpdate
-    ? async (
-        params: UpdateMutationFnParams<
-          any,
-          string | number,
-          ElectricCollectionUtils<T>
-        >,
-      ): Promise<void> => {
-        const handlerResult = await config.onUpdate!(params)
-        await processMatchingStrategy(
-          handlerResult,
-          getMutationAwaitTxId(params),
-        )
-      }
-    : undefined
-
-  const wrappedOnDelete = config.onDelete
-    ? async (
-        params: DeleteMutationFnParams<
-          any,
-          string | number,
-          ElectricCollectionUtils<T>
-        >,
-      ): Promise<void> => {
-        const handlerResult = await config.onDelete!(params)
-        await processMatchingStrategy(
-          handlerResult,
-          getMutationAwaitTxId(params),
-        )
-      }
-    : undefined
-
-  // Extract standard Collection config properties
-  const {
-    shapeOptions: _shapeOptions,
-    onInsert: _onInsert,
-    onUpdate: _onUpdate,
-    onDelete: _onDelete,
-    ...restConfig
-  } = config
+  const { shapeOptions: _shapeOptions, ...restConfig } = config
 
   const utilityTemplate: ElectricCollectionUtils<T> = {
     awaitTxId,
@@ -1385,9 +1261,6 @@ export function electricCollectionOptions<T extends Row<unknown>>(
     ...restConfig,
     syncMode: finalSyncMode,
     sync: syncTemplate,
-    onInsert: wrappedOnInsert,
-    onUpdate: wrappedOnUpdate,
-    onDelete: wrappedOnDelete,
     utils: utilityTemplate,
   }
   Object.defineProperty(options, `utils`, {

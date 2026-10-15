@@ -117,7 +117,7 @@ describe(`includes subquery types`, () => {
       const result = collection.toArray[0]!
       expectTypeOf(result.id).toEqualTypeOf<number>()
       expectTypeOf(result.name).toEqualTypeOf<string>()
-      expectTypeOf(result.$synced).toEqualTypeOf<boolean>()
+      expectTypeOf(result.$hasPendingWrites).toEqualTypeOf<boolean>()
       expectTypeOf(result.$origin).toEqualTypeOf<`local` | `remote`>()
       expectTypeOf(result.$key).toEqualTypeOf<string | number>()
       expectTypeOf(result.$collectionId).toEqualTypeOf<string>()
@@ -136,7 +136,7 @@ describe(`includes subquery types`, () => {
 
       const result = collection.toArray[0]!
       expectTypeOf(result.id).toEqualTypeOf<number>()
-      expectTypeOf(result.$synced).toEqualTypeOf<boolean>()
+      expectTypeOf(result.$hasPendingWrites).toEqualTypeOf<boolean>()
       expectTypeOf(result.$origin).toEqualTypeOf<`local` | `remote`>()
       expectTypeOf(result.$key).toEqualTypeOf<string | number>()
       expectTypeOf(result.$collectionId).toEqualTypeOf<string>()
@@ -199,7 +199,9 @@ describe(`includes subquery types`, () => {
       const result = collection.toArray[0]!
       expectTypeOf(result.issues.toArray[0]!.id).toEqualTypeOf<number>()
       expectTypeOf(result.issues.toArray[0]!.title).toEqualTypeOf<string>()
-      expectTypeOf(result.issues.toArray[0]!.$synced).toEqualTypeOf<boolean>()
+      expectTypeOf(
+        result.issues.toArray[0]!.$hasPendingWrites,
+      ).toEqualTypeOf<boolean>()
       expectTypeOf(result.issues.toArray[0]!.$origin).toEqualTypeOf<
         `local` | `remote`
       >()
@@ -236,7 +238,7 @@ describe(`includes subquery types`, () => {
       const result = collection.toArray[0]!
       expectTypeOf(result.id).toEqualTypeOf<number>()
       expectTypeOf(result.name).toEqualTypeOf<string>()
-      expectTypeOf(result.$synced).toEqualTypeOf<boolean>()
+      expectTypeOf(result.$hasPendingWrites).toEqualTypeOf<boolean>()
       expectTypeOf(result.$origin).toEqualTypeOf<`local` | `remote`>()
       expectTypeOf(result.$key).toEqualTypeOf<string | number>()
       expectTypeOf(result.$collectionId).toEqualTypeOf<string>()
@@ -258,7 +260,7 @@ describe(`includes subquery types`, () => {
 
       const result = collection.toArray[0]!
       expectTypeOf(result.id).toEqualTypeOf<number>()
-      expectTypeOf(result.$synced).toEqualTypeOf<boolean>()
+      expectTypeOf(result.$hasPendingWrites).toEqualTypeOf<boolean>()
       expectTypeOf(result.$origin).toEqualTypeOf<`local` | `remote`>()
       expectTypeOf(result.$key).toEqualTypeOf<string | number>()
       expectTypeOf(result.$collectionId).toEqualTypeOf<string>()
@@ -292,7 +294,7 @@ describe(`includes subquery types`, () => {
 
       const result = collection.toArray[0]!
       expectTypeOf(result.id).toEqualTypeOf<number>()
-      expectTypeOf(result.$synced).toEqualTypeOf<boolean>()
+      expectTypeOf(result.$hasPendingWrites).toEqualTypeOf<boolean>()
       expectTypeOf(result.$origin).toEqualTypeOf<`local` | `remote`>()
       expectTypeOf(result.$key).toEqualTypeOf<string | number>()
       expectTypeOf(result.$collectionId).toEqualTypeOf<string>()

@@ -92,7 +92,7 @@ export interface DbOps {
   createOptimisticAction: (config: {
     onMutate: (variables: any) => void
     mutationFn: (variables: any) => Promise<any>
-  }) => (variables?: any) => { isPersisted: { promise: Promise<any> } }
+  }) => (variables?: any) => { when: (state: 'settled') => Promise<any> }
 }
 
 /** Normalized, adapter-agnostic view of a live query's current result. */

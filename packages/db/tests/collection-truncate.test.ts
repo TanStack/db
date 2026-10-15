@@ -85,7 +85,7 @@ describe(`Collection truncate operations`, () => {
     syncOps!.write({ type: `insert`, value: { id: 2, value: `initial-2` } })
     syncOps!.commit()
 
-    await tx.isPersisted.promise
+    await tx.when(`settled`)
 
     // Verify final state includes all items
     expect(collection.state.size).toBe(3)
@@ -144,7 +144,7 @@ describe(`Collection truncate operations`, () => {
     syncOps!.truncate()
     syncOps!.write({ type: `insert`, value: { id: 1, value: `initial-1` } })
 
-    await tx.isPersisted.promise
+    await tx.when(`settled`)
 
     syncOps!.commit()
 
@@ -205,7 +205,7 @@ describe(`Collection truncate operations`, () => {
     syncOps!.truncate()
     syncOps!.commit()
 
-    await tx.isPersisted.promise
+    await tx.when(`settled`)
 
     // Item should be present in final state
     expect(getStateValue(collection, 1)).toEqual({ id: 1, value: `user-item` })
@@ -286,7 +286,7 @@ describe(`Collection truncate operations`, () => {
 
     // Now explicitly complete the onInsert
     resolveOnInsert!()
-    await tx.isPersisted.promise
+    await tx.when(`settled`)
   })
 
   it(`should preserve optimistic inserts started after truncate begins`, async () => {
@@ -357,7 +357,7 @@ describe(`Collection truncate operations`, () => {
     while (onInsertResolvers.length > 0) {
       onInsertResolvers.pop()!()
     }
-    await lateTx.isPersisted.promise
+    await lateTx.when(`settled`)
   })
 
   it(`should preserve all optimistic inserts when truncate occurs during async mutation handler`, async () => {
@@ -411,7 +411,7 @@ describe(`Collection truncate operations`, () => {
     syncOps!.write({ type: `insert`, value: { id: 1, value: `server-item` } })
     syncOps!.commit()
 
-    await tx.isPersisted.promise
+    await tx.when(`settled`)
 
     // Both items should be present in final state
     expect(collection.state.size).toBe(2)
@@ -476,7 +476,7 @@ describe(`Collection truncate operations`, () => {
 
     // Clean up
     onDeleteResolvers.forEach((r) => r())
-    await deleteTx.isPersisted.promise
+    await deleteTx.when(`settled`)
   })
 
   it(`should preserve optimistic value over server value when transaction active during truncate`, async () => {
@@ -545,7 +545,7 @@ describe(`Collection truncate operations`, () => {
 
     // Clean up
     onUpdateResolvers.forEach((r) => r())
-    await updateTx.isPersisted.promise
+    await updateTx.when(`settled`)
   })
 
   it(`should handle multiple consecutive truncate operations`, async () => {
@@ -611,7 +611,7 @@ describe(`Collection truncate operations`, () => {
 
     // Clean up
     onInsertResolvers.forEach((r) => r())
-    await Promise.all([tx1.isPersisted.promise, tx2.isPersisted.promise])
+    await Promise.all([tx1.when(`settled`), tx2.when(`settled`)])
   })
 
   it(`should handle new mutation on same key after truncate snapshot`, async () => {
@@ -671,7 +671,7 @@ describe(`Collection truncate operations`, () => {
 
     // Clean up
     onUpdateResolvers.forEach((r) => r())
-    await Promise.all([tx1.isPersisted.promise, tx2.isPersisted.promise])
+    await Promise.all([tx1.when(`settled`), tx2.when(`settled`)])
   })
 
   it(`should handle transaction completing between truncate and commit`, async () => {
@@ -718,7 +718,7 @@ describe(`Collection truncate operations`, () => {
 
     // Transaction completes BEFORE commit
     onInsertResolver!()
-    await tx.isPersisted.promise
+    await tx.when(`settled`)
 
     // Now commit the truncate
     syncOps!.write({ type: `insert`, value: { id: 1, value: `initial` } })

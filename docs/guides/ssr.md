@@ -37,13 +37,13 @@ instances still exist. The migration is required when you want SSR-safe request
 isolation, hydration, incremental chunks, Suspense streaming, or the 1.0-ready
 React hook shape.
 
-The old dependency-array form now warns:
+The dependency-array form was removed in the first 1.0 RC:
 
 ```tsx
 useLiveQuery((q) => q.from({ todos }).where(...), [status])
 ```
 
-It still works, but warns in development and will be removed in 1.0. Prefer:
+Use the query config form instead:
 
 ```tsx
 useLiveQuery({
@@ -579,22 +579,13 @@ Common reasons to add `queryKey`:
   the structured query
 - a render path where derived identity becomes measurably expensive
 
-Before 1.0, DB warns when structured IR cannot be hashed and preserves the
-legacy mount-stable identity. The query still works, but captured values inside
-opaque logic are not reactive unless they are represented in `queryKey`. In 1.0,
-an unhashable query without `queryKey` will throw.
+An unhashable query without `queryKey` throws. Include captured values from
+opaque logic in `queryKey` so changes to those values recreate the query.
 
 DB also warns once in development if deriving identity becomes expensive enough
 that an explicit `queryKey` would be better.
 
-Dependency arrays are accepted for backwards compatibility:
-
-```tsx
-useLiveQuery((q) => q.from({ todo: todoCollection }), [status])
-```
-
-They warn in development and will be removed in 1.0. Migrate to the config
-object form:
+Use the config object form:
 
 ```tsx
 useLiveQuery({
@@ -757,23 +748,21 @@ rendering instead.
 
 ## Compatibility
 
-No existing public API is removed by this change.
+The SSR APIs remain available in the first 1.0 RC. React dependency-array hook forms have been removed.
 
 Still supported:
 
 - `createCollection(...)`
 - passing collection instances to `useLiveQuery(...)`
-- `useLiveQuery(queryFn, deps)`
-- `useLiveSuspenseQuery(queryFn, deps)`
 - mutation APIs such as `insert`, `update`, `delete`, `subscribe`, and
   optimistic mutation helpers
 
 Warnings:
 
-- React dependency arrays warn in development and will be removed in 1.0.
-- Opaque query IR without `queryKey` warns in development and keeps legacy
-  mount-stable identity until 1.0. In 1.0 it will throw.
 - Expensive derived identity warns in development and suggests `queryKey`.
+
+Opaque query IR without a serializable `queryKey` throws when React cannot
+derive a stable identity.
 
 Required for SSR:
 
@@ -789,7 +778,10 @@ Required for render-time Suspense streaming:
 - `useLiveSuspenseQuery(...)` inside a Suspense boundary
 - a stable derived query identity or explicit serializable `queryKey`
 
-## Detailed Changelog
+## SSR Introduction Changelog
+
+This section records the original SSR feature release. Its React dependency
+array deprecation was completed in the first 1.0 RC.
 
 ### Added
 
@@ -829,7 +821,7 @@ Required for render-time Suspense streaming:
   `from`, `join`, `leftJoin`, and `unionAll` sources when a `DbProvider` is
   present.
 - React live query identity is derived from normalized structured IR when no
-  explicit `queryKey` or legacy dependency array is supplied.
+  explicit `queryKey` is supplied.
 - Explicit collection preloading serializes normalized collection rows.
 - Live-query preloading and render-time discovery serialize ordered result
   snapshots without implicitly serializing source collections.
@@ -844,10 +836,10 @@ Required for render-time Suspense streaming:
 - Incremental chunks use the same collection payload shape as full dehydration.
 - Streamed live-query promises resolve to live-query result snapshots.
 
-### Deprecated
+### Since Removed
 
 - React dependency arrays for `useLiveQuery` and wrappers that delegate to it.
-  They still work and warn in development. They are planned for removal in 1.0.
+  They were removed in the first 1.0 RC.
 
 ### Not Changed
 

@@ -17,8 +17,7 @@ import {
   toArray,
 } from '@tanstack/db'
 import { useEffect } from 'react'
-import { useLiveQuery, useLiveQueryForSuspense } from '../src/useLiveQuery'
-import { getLiveQueryResultInfo } from '../src/live-query-internals'
+import { useLiveQuery } from '../src/useLiveQuery'
 import { DbProvider } from '../src/DbProvider'
 import {
   mockSyncCollectionOptions,
@@ -564,8 +563,8 @@ describe(`Query Collections`, () => {
 
     const { result, rerender } = renderHook(
       ({ minAge }: { minAge: number }) => {
-        return useLiveQuery(
-          (q) =>
+        return useLiveQuery({
+          query: (q) =>
             q
               .from({ collection })
               .where(({ collection: c }) => gt(c.age, minAge))
@@ -574,8 +573,8 @@ describe(`Query Collections`, () => {
                 name: c.name,
                 age: c.age,
               })),
-          [minAge],
-        )
+          queryKey: [minAge],
+        })
       },
       { initialProps: { minAge: 30 } },
     )
@@ -638,8 +637,8 @@ describe(`Query Collections`, () => {
 
     const { result, rerender } = renderHook(
       ({ minAge }: { minAge: number }) => {
-        return useLiveQuery(
-          (q) =>
+        return useLiveQuery({
+          query: (q) =>
             q
               .from({ collection })
               .where(({ collection: c }) => gt(c.age, minAge))
@@ -647,8 +646,8 @@ describe(`Query Collections`, () => {
                 id: c.id,
                 name: c.name,
               })),
-          [minAge],
-        )
+          queryKey: [minAge],
+        })
       },
       { initialProps: { minAge: 30 } },
     )
@@ -925,7 +924,7 @@ describe(`Query Collections`, () => {
     })
 
     // Wait for the transaction to be committed
-    await transaction.isPersisted.promise
+    await transaction.when(`settled`)
 
     await waitFor(() => {
       // Wait for the permanent key to appear
@@ -1545,8 +1544,8 @@ describe(`Query Collections`, () => {
 
       const { result, rerender } = renderHook(
         ({ minAge }: { minAge: number }) => {
-          return useLiveQuery(
-            (q) =>
+          return useLiveQuery({
+            query: (q) =>
               q
                 .from({ collection })
                 .where(({ collection: c }) => gt(c.age, minAge))
@@ -1554,8 +1553,8 @@ describe(`Query Collections`, () => {
                   id: c.id,
                   name: c.name,
                 })),
-            [minAge],
-          )
+            queryKey: [minAge],
+          })
         },
         { initialProps: { minAge: 30 } },
       )
@@ -2114,17 +2113,15 @@ describe(`Query Collections`, () => {
 
       const { result, rerender } = renderHook(
         ({ enabled }: { enabled: boolean }) =>
-          useLiveQuery(
-            {
-              query: (q) => {
-                if (!enabled) return undefined
-                return q
-                  .from({ persons: collection })
-                  .where(({ persons }) => gt(persons.age, 30))
-              },
+          useLiveQuery({
+            query: (q) => {
+              if (!enabled) return undefined
+              return q
+                .from({ persons: collection })
+                .where(({ persons }) => gt(persons.age, 30))
             },
-            [enabled],
-          ),
+            queryKey: [enabled],
+          }),
         { initialProps: { enabled: false } },
       )
 
@@ -2337,34 +2334,31 @@ describe(`Query Collections`, () => {
 
       const { result, rerender } = renderHook(
         ({ useConfig }: { useConfig: boolean }) => {
-          return useLiveQuery(
-            (q) => {
-              if (useConfig) {
-                return {
-                  query: q
-                    .from({ persons: collection })
-                    .where(({ persons }) => gt(persons.age, 30))
-                    .select(({ persons }) => ({
-                      id: persons.id,
-                      name: persons.name,
-                      age: persons.age,
-                    })),
-                  startSync: true,
-                  gcTime: 0,
-                }
+          return useLiveQuery((q) => {
+            if (useConfig) {
+              return {
+                query: q
+                  .from({ persons: collection })
+                  .where(({ persons }) => gt(persons.age, 30))
+                  .select(({ persons }) => ({
+                    id: persons.id,
+                    name: persons.name,
+                    age: persons.age,
+                  })),
+                startSync: true,
+                gcTime: 0,
               }
-              return q
-                .from({ persons: collection })
-                .where(({ persons }) => lte(persons.age, 30))
-                .select(({ persons }) => ({
-                  id: persons.id,
-                  name: persons.name,
-                  age: persons.age,
-                }))
-                .orderBy(({ persons }) => persons.age)
-            },
-            [useConfig],
-          )
+            }
+            return q
+              .from({ persons: collection })
+              .where(({ persons }) => lte(persons.age, 30))
+              .select(({ persons }) => ({
+                id: persons.id,
+                name: persons.name,
+                age: persons.age,
+              }))
+              .orderBy(({ persons }) => persons.age)
+          })
         },
         { initialProps: { useConfig: false } },
       )
@@ -2437,22 +2431,19 @@ describe(`Query Collections`, () => {
 
       const { result, rerender } = renderHook(
         ({ useCollection }: { useCollection: boolean }) => {
-          return useLiveQuery(
-            (q) => {
-              if (useCollection) {
-                return liveQueryCollection
-              }
-              return q
-                .from({ persons: collection })
-                .where(({ persons }) => lte(persons.age, 30))
-                .select(({ persons }) => ({
-                  id: persons.id,
-                  name: persons.name,
-                  age: persons.age,
-                }))
-            },
-            [useCollection],
-          )
+          return useLiveQuery((q) => {
+            if (useCollection) {
+              return liveQueryCollection
+            }
+            return q
+              .from({ persons: collection })
+              .where(({ persons }) => lte(persons.age, 30))
+              .select(({ persons }) => ({
+                id: persons.id,
+                name: persons.name,
+                age: persons.age,
+              }))
+          })
         },
         { initialProps: { useCollection: false } },
       )
@@ -2513,8 +2504,8 @@ describe(`Query Collections`, () => {
 
       const { result, rerender } = renderHook(
         ({ minAge, enabled }: { minAge: number; enabled: boolean }) => {
-          return useLiveQuery(
-            (q) => {
+          return useLiveQuery({
+            query: (q) => {
               if (!enabled) return undefined
               return q
                 .from({ persons: collection })
@@ -2525,8 +2516,8 @@ describe(`Query Collections`, () => {
                   age: persons.age,
                 }))
             },
-            [minAge, enabled],
-          )
+            queryKey: [minAge, enabled],
+          })
         },
         { initialProps: { minAge: 30, enabled: false } },
       )
@@ -2629,25 +2620,28 @@ describe(`Query Collections`, () => {
       )
 
       const { result } = renderHook(() => {
-        return useLiveQuery((q) => {
-          const issueCountSubquery = q
-            .from({ issues: issueCollection })
-            .groupBy(({ issues }) => issues.userId)
-            .select(({ issues }) => ({
-              userId: issues.userId,
-              issueCount: coalesce(count(issues.id), 0),
-            }))
+        return useLiveQuery({
+          query: (q) => {
+            const issueCountSubquery = q
+              .from({ issues: issueCollection })
+              .groupBy(({ issues }) => issues.userId)
+              .select(({ issues }) => ({
+                userId: issues.userId,
+                issueCount: coalesce(count(issues.id), 0),
+              }))
 
-          return q
-            .from({ persons: personCollection })
-            .leftJoin({ ic: issueCountSubquery }, ({ persons, ic }) =>
-              eq(persons.id, ic.userId),
-            )
-            .select(({ persons, ic }) => ({
-              name: persons.name,
-              issueCount: ic.issueCount,
-            }))
-        }, [])
+            return q
+              .from({ persons: personCollection })
+              .leftJoin({ ic: issueCountSubquery }, ({ persons, ic }) =>
+                eq(persons.id, ic.userId),
+              )
+              .select(({ persons, ic }) => ({
+                name: persons.name,
+                issueCount: ic.issueCount,
+              }))
+          },
+          queryKey: [],
+        })
       })
 
       await waitFor(() => {
@@ -3262,8 +3256,7 @@ describe(`Query Collections`, () => {
       expect(result.current.collection).not.toBe(firstCollection)
     })
 
-    it(`warns and preserves legacy behavior when a functional query has no queryKey`, () => {
-      const warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    it(`requires queryKey for a functional query`, () => {
       const collection = createCollection(
         mockSyncCollectionOptions<Person>({
           id: `derived-identity-functional-missing-key`,
@@ -3283,15 +3276,7 @@ describe(`Query Collections`, () => {
             }),
           { initialProps: { minAge: 25 } },
         ),
-      ).not.toThrow()
-
-      const warnings = warnSpy.mock.calls.filter(([message]) =>
-        String(message).includes(`cannot derive a stable identity`),
-      )
-      expect(warnings).toHaveLength(1)
-      expect(warnings[0]![0]).toContain(`queryKey`)
-      expect(warnings[0]![0]).toContain(`1.0`)
-      warnSpy.mockRestore()
+      ).toThrow(/Provide a serializable queryKey/)
     })
 
     it(`uses runtime identity for opaque values in a structured query without queryKey`, () => {
@@ -3328,7 +3313,7 @@ describe(`Query Collections`, () => {
       warnSpy.mockRestore()
     })
 
-    it(`does not emit identity warnings in production`, () => {
+    it(`requires queryKey for a functional query in production`, () => {
       const previousNodeEnv = process.env.NODE_ENV
       process.env.NODE_ENV = `production`
       const warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
@@ -3340,24 +3325,19 @@ describe(`Query Collections`, () => {
         }),
       )
 
-      let unmount: (() => void) | undefined
       try {
-        ;({ unmount } = renderHook(() =>
-          useLiveQuery({
-            query: (q) =>
-              q
-                .from({ people: collection })
-                .fn.where(({ people }) => people.age > 25),
-          }),
-        ))
-
-        expect(
-          warnSpy.mock.calls.some(([message]) =>
-            String(message).includes(`cannot derive a stable identity`),
+        expect(() =>
+          renderHook(() =>
+            useLiveQuery({
+              query: (q) =>
+                q
+                  .from({ people: collection })
+                  .fn.where(({ people }) => people.age > 25),
+            }),
           ),
-        ).toBe(false)
+        ).toThrow(/Provide a serializable queryKey/)
+        expect(warnSpy).not.toHaveBeenCalled()
       } finally {
-        unmount?.()
         process.env.NODE_ENV = previousNodeEnv
         warnSpy.mockRestore()
       }
@@ -3449,35 +3429,6 @@ describe(`Query Collections`, () => {
       expect(queryExecutions).toBe(1)
     })
 
-    it(`preserves reference semantics for deprecated dependency arrays`, async () => {
-      const collection = createCollection(
-        mockSyncCollectionOptions<Person>({
-          id: `legacy-deps-reference-semantics`,
-          getKey: (person: Person) => person.id,
-          initialData: initialPersons,
-        }),
-      )
-
-      const { result, rerender } = renderHook(
-        ({ filter }: { filter: { minAge: number } }) =>
-          useLiveQuery(
-            (q) =>
-              q
-                .from({ people: collection })
-                .where(({ people }) => gt(people.age, filter.minAge)),
-            [filter],
-          ),
-        { initialProps: { filter: { minAge: 25 } } },
-      )
-
-      await waitFor(() => expect(result.current.data).toHaveLength(2))
-      const firstCollection = result.current.collection
-
-      rerender({ filter: { minAge: 25 } })
-
-      expect(result.current.collection).not.toBe(firstCollection)
-    })
-
     it(`warns when derived query identity is slow enough to need queryKey`, () => {
       const warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
       const nowSpy = vi.spyOn(globalThis.performance, `now`)
@@ -3560,88 +3511,6 @@ describe(`Query Collections`, () => {
 
       nowSpy.mockRestore()
       warnSpy.mockRestore()
-    })
-
-    it(`warns once for the deprecated dependency-array form`, () => {
-      const warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
-      const collection = createCollection(
-        mockSyncCollectionOptions<Person>({
-          id: `deps-warning`,
-          getKey: (person: Person) => person.id,
-          initialData: initialPersons,
-        }),
-      )
-
-      const { rerender } = renderHook(
-        ({ minAge }) =>
-          useLiveQuery(
-            (q) =>
-              q
-                .from({ people: collection })
-                .where(({ people }) => gt(people.age, minAge)),
-            [minAge],
-          ),
-        { initialProps: { minAge: 25 } },
-      )
-
-      rerender({ minAge: 30 })
-      rerender({ minAge: 30 })
-
-      expect(warnSpy).toHaveBeenCalledTimes(1)
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining(`will be removed in 1.0`),
-      )
-
-      warnSpy.mockRestore()
-    })
-
-    it(`warns for an explicitly passed empty dependency array`, () => {
-      const warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
-      const collection = createCollection(
-        mockSyncCollectionOptions<Person>({
-          id: `empty-deps-warning`,
-          getKey: (person: Person) => person.id,
-          initialData: initialPersons,
-        }),
-      )
-
-      renderHook(() => useLiveQuery((q) => q.from({ people: collection }), []))
-
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining(`useLiveQuery({ query })`),
-      )
-
-      warnSpy.mockRestore()
-    })
-
-    it(`includes the query in legacy dependency-array SSR identity`, () => {
-      const collection = createCollection(
-        mockSyncCollectionOptions<Person>({
-          id: `legacy-deps-query-identity`,
-          getKey: (person) => person.id,
-          initialData: initialPersons,
-        }),
-      )
-      // Suspense is the reader of this identity; plain useLiveQuery skips it.
-      const first = renderHook(() =>
-        useLiveQueryForSuspense(
-          (q: any) => q.from({ people: collection }),
-          [1],
-        ),
-      )
-      const second = renderHook(() =>
-        useLiveQueryForSuspense(
-          (q: any) =>
-            q
-              .from({ people: collection })
-              .where(({ people }: any) => gt(people.age, 30)),
-          [1],
-        ),
-      )
-
-      expect(getLiveQueryResultInfo(first.result.current).queryHash).not.toBe(
-        getLiveQueryResultInfo(second.result.current).queryHash,
-      )
     })
   })
 })

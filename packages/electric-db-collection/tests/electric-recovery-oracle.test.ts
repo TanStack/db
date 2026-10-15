@@ -301,7 +301,6 @@ function fixture(
     Array.from(collection.values(), (row) => {
       const {
         $hasPendingWrites: _pending,
-        $synced: _synced,
         $origin: _origin,
         $key: _key,
         $collectionId: _collectionId,

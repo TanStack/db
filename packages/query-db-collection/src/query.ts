@@ -31,9 +31,12 @@ import type {
   BaseCollectionConfig,
   ChangeMessage,
   CollectionConfig,
+  DeleteMutationFnParams,
+  InsertMutationFnParams,
   LoadSubsetOptions,
   SyncAppliedReceipt,
   SyncConfig,
+  UpdateMutationFnParams,
 } from '@tanstack/db'
 import type {
   FetchStatus,
@@ -123,17 +126,57 @@ export interface QueryCollectionConfig<
   TKey extends string | number = string | number,
   TSchema extends StandardSchemaV1 = never,
   TQueryData = Awaited<ReturnType<TQueryFn>>,
-> extends BaseCollectionConfig<
-  T,
-  TKey,
-  TSchema,
-  QueryCollectionUtils<
+> extends Omit<
+  BaseCollectionConfig<
     T,
     TKey,
-    [TSchema] extends [never] ? T : InferSchemaInput<TSchema>,
-    TError
-  >
+    TSchema,
+    QueryCollectionUtils<
+      T,
+      TKey,
+      [TSchema] extends [never] ? T : InferSchemaInput<TSchema>,
+      TError
+    >
+  >,
+  `onInsert` | `onUpdate` | `onDelete`
 > {
+  // Query Collection retains its 1.x return-value compatibility at this adapter boundary.
+  onInsert?: (
+    params: InsertMutationFnParams<
+      T,
+      TKey,
+      QueryCollectionUtils<
+        T,
+        TKey,
+        [TSchema] extends [never] ? T : InferSchemaInput<TSchema>,
+        TError
+      >
+    >,
+  ) => Promise<unknown>
+  onUpdate?: (
+    params: UpdateMutationFnParams<
+      T,
+      TKey,
+      QueryCollectionUtils<
+        T,
+        TKey,
+        [TSchema] extends [never] ? T : InferSchemaInput<TSchema>,
+        TError
+      >
+    >,
+  ) => Promise<unknown>
+  onDelete?: (
+    params: DeleteMutationFnParams<
+      T,
+      TKey,
+      QueryCollectionUtils<
+        T,
+        TKey,
+        [TSchema] extends [never] ? T : InferSchemaInput<TSchema>,
+        TError
+      >
+    >,
+  ) => Promise<unknown>
   /** The query key used by TanStack Query to identify this query */
   queryKey: TQueryKey | TQueryKeyBuilder<TQueryKey>
   /** Function that fetches data from the server. Must return the complete collection state */

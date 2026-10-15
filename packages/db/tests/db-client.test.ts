@@ -61,7 +61,7 @@ describe(`DbClient`, () => {
     const peopleB = clientB.collection(descriptor)
 
     const transaction = peopleA.insert(people[0]!)
-    await transaction.isPersisted.promise
+    await transaction.when(`settled`)
 
     expect(peopleA.get(`1`)).toMatchObject(people[0]!)
     expect(peopleB.get(`1`)).toBeUndefined()
@@ -96,7 +96,7 @@ describe(`DbClient`, () => {
       autoCommit: false,
       mutationFn: async () => {},
     })
-    const rolledBack = transactionA.isPersisted.promise.catch(() => undefined)
+    const rolledBack = transactionA.when(`settled`).catch(() => undefined)
     let transactionB: ReturnType<typeof peopleB.insert> | undefined
 
     transactionA.mutate(() => {
@@ -107,7 +107,7 @@ describe(`DbClient`, () => {
       expect(clientB.activeTransaction).toBeUndefined()
     })
 
-    await transactionB!.isPersisted.promise
+    await transactionB!.when(`settled`)
     transactionA.rollback()
     await rolledBack
 
@@ -130,7 +130,7 @@ describe(`DbClient`, () => {
       autoCommit: false,
       mutationFn: async () => {},
     })
-    const rolledBack = transaction.isPersisted.promise.catch(() => undefined)
+    const rolledBack = transaction.when(`settled`).catch(() => undefined)
 
     transaction.mutate(() => {
       expect(peopleA.insert(people[0]!)).toBe(transaction)
@@ -1235,7 +1235,7 @@ describe(`DbClient`, () => {
     })
 
     collection.utils.resolveSync()
-    await tx.isPersisted.promise
+    await tx.when(`settled`)
   })
 
   it(`applies initialData precedence before hydrated rows`, () => {

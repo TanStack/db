@@ -806,7 +806,7 @@ fixedCase(
       mutation.mutate(() =>
         collection.insert({ id: 10, name: `optimistic`, stable: `stable-10` }),
       )
-      const handlerOutcome = mutation.isPersisted.promise.then(
+      const handlerOutcome = mutation.when(`settled`).then(
         () => undefined,
         (error: unknown) => error,
       )
@@ -1805,7 +1805,9 @@ fixedCase.each([`shared storage`, `distinct storage`] as const)(
       },
       getKey: (row) => row.id,
       startSync: false,
-      onInsert: () => Promise.resolve({ txid: 200, timeout: 100 }),
+      onInsert: async ({ collection }) => {
+        await collection.utils.awaitTxId(200, 100)
+      },
     })
     // The Electric descriptor is reusable; each persisted wrapper binds one
     // Collection so its receipt and sync controls cannot move to another owner.
@@ -1845,12 +1847,12 @@ fixedCase.each([`shared storage`, `distinct storage`] as const)(
         name: `own`,
         stable: `stable-1`,
       })
-      void transaction.isPersisted.promise.catch(() => undefined)
+      void transaction.when(`settled`).catch(() => undefined)
       streams[0]!.send([
         insert(1, `own`),
         { headers: { control: `up-to-date`, txids: [200] } },
       ])
-      await expect(transaction.isPersisted.promise).resolves.toBeDefined()
+      await expect(transaction.when(`settled`)).resolves.toBeDefined()
       expect(first.get(1)?.name).toBe(`own`)
       expect(second.has(1)).toBe(false)
     } finally {

@@ -462,7 +462,7 @@ const todoCollection = collectionOptions("todos", (client) =>
       // Handle the local write by sending it to your API.
       await api.todos.create(newTodo)
       await collection.utils.refetch()
-      // Prevent the pre-1.0 compatibility wrapper from refetching again.
+      // Prevent QueryCollection from refetching again.
       return { refetch: false }
     },
     // also add onUpdate, onDelete as needed.
@@ -483,7 +483,7 @@ const listCollection = collectionOptions("todo-lists", (client) =>
       // Handle the local write by sending it to your API.
       await api.todoLists.create(newTodo)
       await collection.utils.refetch()
-      // Prevent the pre-1.0 compatibility wrapper from refetching again.
+      // Prevent QueryCollection from refetching again.
       return { refetch: false }
     },
     // also add onUpdate, onDelete as needed.

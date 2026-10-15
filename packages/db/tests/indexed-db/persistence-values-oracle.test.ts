@@ -59,15 +59,19 @@ for (const kind of valueKinds) {
             expected,
           )
       }
-      await writer.insert({
-        id: 1,
-        name: 'initial',
-        nested: { value: createValue(kind) },
-      }).isPersisted.promise
+      await writer
+        .insert({
+          id: 1,
+          name: 'initial',
+          nested: { value: createValue(kind) },
+        })
+        .when(`settled`)
       await checkpoint('insert')
-      await writer.update(1, (draft) => {
-        draft.name = 'updated'
-      }).isPersisted.promise
+      await writer
+        .update(1, (draft) => {
+          draft.name = 'updated'
+        })
+        .when(`settled`)
       expected = expectedValueRows(kind, 'updated')
       await checkpoint('unrelated update')
       const exported = await writer.utils.exportData()
@@ -91,7 +95,7 @@ for (const kind of valueKinds) {
           }))
           const outcome =
             entry === 'insert'
-              ? writer.insert(batch).isPersisted.promise
+              ? writer.insert(batch).when(`settled`)
               : writer.utils.importData(batch)
           await expect(outcome).rejects.toBeDefined()
           await checkpoint(`${entry} rejection at ${badIndex}`)
@@ -101,9 +105,11 @@ for (const kind of valueKinds) {
           ).toEqual(before)
         }
       }
-      await writer.update(1, (draft) => {
-        draft.name = 'suffix'
-      }).isPersisted.promise
+      await writer
+        .update(1, (draft) => {
+          draft.name = 'suffix'
+        })
+        .when(`settled`)
       expected = expectedValueRows(kind, 'suffix')
       await checkpoint('successful suffix')
       const freshDb = await createIndexedDB({
@@ -176,8 +182,9 @@ for (const kind of valueKinds.filter((value) => value !== 'blob')) {
         const c = make(h.db)
         const peer = make(await h.connect())
         await Promise.all([c.preload(), peer.preload()])
-        await c.insert({ id: 1, name: 'before', nested: { value: null } })
-          .isPersisted.promise
+        await c
+          .insert({ id: 1, name: 'before', nested: { value: null } })
+          .when(`settled`)
         await Channel.deliver()
         const gate = holdStore(h.db.db)
         h.disposers.push(() => gate.release())
@@ -187,10 +194,12 @@ for (const kind of valueKinds.filter((value) => value !== 'blob')) {
         const pending =
           entry === 'import'
             ? c.utils.importData([row])
-            : c.update(1, (draft) => {
-                draft.name = row.name
-                draft.nested = row.nested
-              }).isPersisted.promise
+            : c
+                .update(1, (draft) => {
+                  draft.name = row.name
+                  draft.nested = row.nested
+                })
+                .when(`settled`)
         // Date, buffers, views and nested containers each have a native mutation
         // that preserves their shape but changes content. A shape-only check
         // would miss the bug; the independent byte/timestamp description cannot.

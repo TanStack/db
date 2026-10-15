@@ -576,7 +576,6 @@ describe(`live query scheduler`, () => {
         $key,
         $origin,
         $hasPendingWrites,
-        $synced,
       }: UserWithVirtual): UserWithVirtual => ({
         id,
         name: userName,
@@ -584,7 +583,6 @@ describe(`live query scheduler`, () => {
         $key,
         $origin,
         $hasPendingWrites,
-        $synced,
       })
       const source = createCollection<User>({
         id: `falsy-row-listener-${name.replaceAll(` `, `-`)}`,
@@ -675,7 +673,6 @@ describe(`live query scheduler`, () => {
             $key: 1,
             $origin: `remote`,
             $hasPendingWrites: false,
-            $synced: true,
           }
           return {
             changes: [

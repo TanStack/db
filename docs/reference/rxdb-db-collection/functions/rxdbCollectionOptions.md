@@ -53,7 +53,7 @@ Creates RxDB collection options for use with a standard Collection
 
 #### config
 
-`Omit`\<`BaseCollectionConfig`\<`T`, `string`, `never`, `UtilsRecord`, `any`\>, `"getKey"` \| `"onInsert"` \| `"onUpdate"` \| `"onDelete"`\> & `object` & `object`
+`Omit`\<`BaseCollectionConfig`\<`T`, `string`, `never`, `UtilsRecord`\>, `"getKey"` \| `"onInsert"` \| `"onUpdate"` \| `"onDelete"`\> & `object` & `object`
 
 Configuration options for the RxDB collection
 

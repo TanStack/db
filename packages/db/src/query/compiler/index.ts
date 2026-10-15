@@ -406,6 +406,12 @@ export function compileQuery(...args: CompileQueryArgs): CompilationResult {
   return compileQueryInternal(args, false)
 }
 
+export function compileCollectionQuery(
+  ...args: CompileQueryArgs
+): CompilationResult {
+  return compileQueryInternal(args, false, true)
+}
+
 function compileQueryInternal(
   [
     rawQuery,
@@ -423,6 +429,7 @@ function compileQueryInternal(
     ancestorHasTopK = false,
   ]: CompileQueryArgs,
   scopeValidated: boolean,
+  publishCollectionRoot = false,
 ): CompilationResult {
   // Check if the original raw query has already been compiled
   const cachedResult =
@@ -1196,6 +1203,8 @@ function compileQueryInternal(
     const finalResults = attachVirtualPropsToSelected(
       unwrapValue(row.$selected),
       row,
+      publishCollectionRoot && parentKeyStream === undefined,
+      mainSource,
     )
     // When in includes mode, embed the correlation key and parentContext
     if (parentKeyStream) {
@@ -2038,6 +2047,8 @@ function unwrapValue(value: any): any {
 function attachVirtualPropsToSelected(
   selected: any,
   row: Record<string, any>,
+  isCollectionRoot: boolean,
+  mainSource: string,
 ): any {
   if (
     !selected ||
@@ -2048,23 +2059,39 @@ function attachVirtualPropsToSelected(
   }
 
   const selectedRecord = selected as Record<PropertyKey, any>
-  let needsMerge = false
-  for (const prop of VIRTUAL_PROP_NAMES) {
-    if (selectedRecord[prop] == null && prop in row) {
-      needsMerge = true
-      break
+  const source = row[mainSource]
+  const sourceRecord =
+    isCollectionRoot && source !== null && typeof source === `object`
+      ? (source as Record<PropertyKey, any>)
+      : undefined
+  let result = selectedRecord
+  const copy = () => {
+    if (result === selectedRecord) {
+      result = Array.isArray(selected) ? [...selected] : { ...selected }
     }
   }
-
-  if (!needsMerge) {
-    return selected
-  }
-
-  const result = (
-    Array.isArray(selected) ? [...selected] : { ...selected }
-  ) as Record<PropertyKey, any>
   for (const prop of VIRTUAL_PROP_NAMES) {
-    if (selectedRecord[prop] == null && prop in row) {
+    if (isCollectionRoot && prop in selectedRecord) {
+      // An explicit virtual name in a root projection cannot replace source
+      // metadata. Ordinary projections acquire their own Collection metadata.
+      const owner =
+        prop in row
+          ? row
+          : sourceRecord && prop in sourceRecord
+            ? sourceRecord
+            : undefined
+      if (owner) {
+        const value = owner[prop]
+        if (selectedRecord[prop] !== value) {
+          copy()
+          result[prop] = value
+        }
+      } else {
+        copy()
+        delete result[prop]
+      }
+    } else if (selectedRecord[prop] == null && prop in row) {
+      copy()
       result[prop] = row[prop]
     }
   }

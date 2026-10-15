@@ -120,12 +120,12 @@ it.each([1, 99])(
       sync.write({ type: `insert`, value: { id: 3, value: 3 } })
       const blocked = sync.commit()
       first.resolve()
-      await tx1.isPersisted.promise
+      await tx1.when(`settled`)
       sync.begin()
       sync.write({ type: `insert`, value: { id: 1, value: echoValue } })
       const echo = sync.commit()
       second.resolve()
-      await tx2.isPersisted.promise
+      await tx2.when(`settled`)
       await blocked
       await echo
       await flushPromises()

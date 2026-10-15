@@ -87,7 +87,6 @@ type PublishedPublicationRow = PublicationRow & {
   $key: number
   $origin: `local` | `remote`
   $hasPendingWrites: boolean
-  $synced: boolean
 }
 
 // Grammar controls: the fixed same-key and cancellation witnesses below are
@@ -236,7 +235,6 @@ function selectPublishedRow(
     $key: published.$key,
     $origin: published.$origin,
     $hasPendingWrites: published.$hasPendingWrites,
-    $synced: published.$synced,
   }
 }
 
@@ -334,7 +332,7 @@ async function applyRound(
       draft.position = next.position
     })
   })
-  await transaction.isPersisted.promise
+  await transaction.when(`settled`)
 
   model.set(round.key, next)
   if (round.outcome === `commit`) {
@@ -350,26 +348,25 @@ async function applyRound(
   corruptCut?.(harness.cuts.slice(cutCountBefore))
   const virtualRow = (
     row: PublicationRow,
-    synced: boolean,
+    hasPendingWrites: boolean,
   ): PublishedPublicationRow => ({
     ...row,
     $collectionId: harness.rows.id,
     $key: row.id,
     $origin: `local`,
-    $hasPendingWrites: !synced,
-    $synced: synced,
+    $hasPendingWrites: hasPendingWrites,
   })
   const expectedOptimisticChange = keyWasPreviouslyPublished
     ? {
         type: `update`,
         key: round.key,
-        value: virtualRow(next, false),
-        previousValue: virtualRow(previous, true),
+        value: virtualRow(next, true),
+        previousValue: virtualRow(previous, false),
       }
     : {
         type: `insert`,
         key: round.key,
-        value: virtualRow(next, false),
+        value: virtualRow(next, true),
         previousValue: undefined,
       }
   expect(
@@ -382,8 +379,8 @@ async function applyRound(
       {
         type: `update`,
         key: round.key,
-        value: virtualRow(next, true),
-        previousValue: virtualRow(next, false),
+        value: virtualRow(next, false),
+        previousValue: virtualRow(next, true),
       },
     ],
   ])
@@ -550,7 +547,7 @@ async function expectMetadataCancellationOwnership(
           )
 
           persistence.resolve()
-          await heldTransaction.isPersisted.promise
+          await heldTransaction.when(`settled`)
           await expect(retained).resolves.toBeUndefined()
           expect(readMetadata(harness, [0, 1, 2])).toEqual(
             observableMetadata(expectedMetadata, [0, 1, 2]),
@@ -562,7 +559,7 @@ async function expectMetadataCancellationOwnership(
         },
         () => [
           () => persistence.resolve(),
-          () => heldTransaction.isPersisted.promise.catch(() => undefined),
+          () => heldTransaction.when(`settled`).catch(() => undefined),
           () => canceled.catch(() => undefined),
           () => retained.catch(() => undefined),
         ],

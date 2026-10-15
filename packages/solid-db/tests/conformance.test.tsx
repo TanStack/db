@@ -137,7 +137,7 @@ function makeHandle(
     current(): ConformanceResult {
       const result = getResult()
       return expectResultSurface({
-        data: result?.data,
+        data: result?.(),
         state: result?.state,
         status: result?.status,
         isReady: result?.isReady,
@@ -289,36 +289,36 @@ describe(`owned native scope setup`, () => {
 
 runSuite(solidDriver)
 it(`preserves raw result types through the actual driver reader`, () => {
-  const raw: Record<string, unknown> = {
-    data: [{ id: `a`, value: undefined }],
+  const rawData = [{ id: `a`, value: undefined }]
+  const raw = Object.assign(() => rawData, {
     state: new Map(),
     status: `disabled`,
     isReady: false,
     isError: false,
     isEnabled: false,
-  }
+  })
   const handle = makeHandle(
     () => raw,
     () => {},
   )
   try {
     const healthy = handle.current()
-    expect(healthy.data).toBe(raw.data)
+    expect(healthy.data).toBe(rawData)
     expect(healthy.state).toBe(raw.state)
     expect(healthy.isReady).toBe(false)
     expect(healthy.isError).toBe(false)
     expect(healthy.isEnabled).toBe(false)
-    for (const key of [`status`, `isReady`, `isError`]) {
+    for (const key of [`status`, `isReady`, `isError`] as const) {
       const original = raw[key]
-      delete raw[key]
+      Reflect.deleteProperty(raw, key)
       expect(() => handle.current()).toThrowError(new RegExp(`raw ${key}`))
       for (const invalid of key === `status`
         ? [undefined, 0]
         : [undefined, 0, ``]) {
-        raw[key] = invalid
+        Reflect.set(raw, key, invalid)
         expect(() => handle.current()).toThrowError(new RegExp(`raw ${key}`))
       }
-      raw[key] = original
+      Reflect.set(raw, key, original)
       expect(handle.current()[key as keyof ConformanceResult]).toBe(original)
     }
   } finally {

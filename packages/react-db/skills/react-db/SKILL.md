@@ -241,8 +241,8 @@ See db-core/live-queries/SKILL.md for full includes rules (correlation condition
 
 Live query results include computed, read-only virtual properties on every row:
 
-- `$synced`: `true` when no pending local optimistic write affects the row;
-  `false` while one does. It does not prove backend confirmation.
+- `$hasPendingWrites`: `true` while a pending local optimistic write affects
+  the row; `false` otherwise. It does not prove backend confirmation.
 - `$origin`: `"local"` if the last confirmed change came from this client, otherwise `"remote"`.
 - `$key`: the row key for the result.
 - `$collectionId`: the source collection ID.
@@ -254,7 +254,7 @@ const { data } = useLiveQuery({
   query: (q) =>
     q
       .from({ todo: todoCollection })
-      .where(({ todo }) => eq(todo.$synced, false)),
+      .where(({ todo }) => eq(todo.$hasPendingWrites, true)),
 })
 // Shows rows with pending local optimistic writes
 ```

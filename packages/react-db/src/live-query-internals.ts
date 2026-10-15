@@ -1,15 +1,10 @@
-import type {
-  DbClient,
-  LiveQueryObserver,
-  UnhashableQueryIRError,
-} from '@tanstack/db'
+import type { DbClient, LiveQueryObserver } from '@tanstack/db'
 
 const liveQueryResultInfo = Symbol(`liveQueryResultInfo`)
 
 export type LiveQueryResultInfo = {
   client: DbClient | undefined
   queryHash: string | undefined
-  identityError: UnhashableQueryIRError | undefined
   observer: LiveQueryObserver<object, string | number>
 }
 

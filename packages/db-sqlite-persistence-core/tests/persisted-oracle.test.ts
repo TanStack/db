@@ -665,7 +665,6 @@ const stripVirtualProps = <T extends Record<string, any> | undefined>(
   if (!value || typeof value !== `object`) return value
   const {
     $hasPendingWrites: _hasPendingWrites,
-    $synced: _synced,
     $origin: _origin,
     $key: _key,
     $collectionId: _collectionId,
@@ -2937,7 +2936,7 @@ async function runRejectedHydrationBufferWitness(
     const freshTransaction = reopened.insert(freshRow)
     await atPersistedOracleCheckpoint(
       (async () => {
-        await freshTransaction.isPersisted.promise
+        await freshTransaction.when(`settled`)
       })(),
       `${id} fresh transaction persisted`,
     )
@@ -4466,7 +4465,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         unexpectedThird = createCollection(options)
       }).toThrow(InvalidPersistedCollectionConfigError)
       const receipt = collection.insert({ id: `owned`, title: `Retried owner` })
-      await receipt.isPersisted.promise
+      await receipt.when(`settled`)
       expect(stripVirtualProps(collection.get(`owned`))).toEqual({
         id: `owned`,
         title: `Retried owner`,
@@ -4568,7 +4567,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           source.write({ type: `insert`, value: row })
           await source.commit()
         } else {
-          await collection.insert(row).isPersisted.promise
+          await collection.insert(row).when(`settled`)
         }
         expect(stripVirtualProps(collection.get(`owned`))).toEqual({
           id: `owned`,
@@ -4624,7 +4623,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         }).toThrow(InvalidPersistedCollectionConfigError)
 
         const receipt = first.insert({ id: `owned`, title: `First owner` })
-        await receipt.isPersisted.promise
+        await receipt.when(`settled`)
         expect(stripVirtualProps(first.get(`owned`))).toEqual({
           id: `owned`,
           title: `First owner`,
@@ -4751,8 +4750,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         if (mode === `sync-present`) {
           await Promise.resolve(source.commit())
         } else {
-          await first.insert({ id: `owned`, title: `First owner` }).isPersisted
-            .promise
+          await first
+            .insert({ id: `owned`, title: `First owner` })
+            .when(`settled`)
         }
         expect(first.has(`owned`)).toBe(true)
         expect(second.has(`owned`)).toBe(false)
@@ -4905,8 +4905,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           })
           await Promise.resolve(source.commit())
         } else {
-          await first.insert({ id: `after-restart`, title: `First owner` })
-            .isPersisted.promise
+          await first
+            .insert({ id: `after-restart`, title: `First owner` })
+            .when(`settled`)
         }
         expect(first.has(`after-restart`)).toBe(true)
         expect(second.has(`after-restart`)).toBe(false)
@@ -5004,7 +5005,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       title: `Phase 0`,
     })
 
-    await insertTx.isPersisted.promise
+    await insertTx.when(`settled`)
 
     expect(stripVirtualProps(collection.get(`1`))).toEqual({
       id: `1`,
@@ -5060,7 +5061,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         title: `Managed during startup`,
       })
       releaseInitialSnapshot()
-      await insert.isPersisted.promise
+      await insert.when(`settled`)
       await collection.stateWhenReady()
       await vi.waitFor(() => expect(snapshotCalls).toBeGreaterThanOrEqual(2))
 
@@ -6754,7 +6755,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       expect(receipt).toBeInstanceOf(Promise)
 
       releaseMutation()
-      await transaction.isPersisted.promise
+      await transaction.when(`settled`)
       await receipt
       subscription.unsubscribe()
 
@@ -6767,7 +6768,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       expect(adapter.applyCommittedTxCalls).toHaveLength(1)
     } finally {
       releaseMutation()
-      await transaction.isPersisted.promise.catch(() => undefined)
+      await transaction.when(`settled`).catch(() => undefined)
       await collection.cleanup()
     }
   })
@@ -6840,7 +6841,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       aborted.abort()
       expect(collection.get(`dependent`)).toBeUndefined()
       localPersistence.resolve()
-      await localTransaction.isPersisted.promise
+      await localTransaction.when(`settled`)
       const abortedOutcome = await atPersistedOracleCheckpoint(
         abortedReceipt.then(
           () => ({ status: `fulfilled` as const }),
@@ -6877,7 +6878,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       localPersistence.resolve()
       await cleanupPersistedOracle(
         [
-          () => localTransaction.isPersisted.promise.catch(() => undefined),
+          () => localTransaction.when(`settled`).catch(() => undefined),
           () => abortedReceipt?.catch(() => undefined),
           () => dependentReceipt?.catch(() => undefined),
           () => collection.cleanup(),
@@ -8973,7 +8974,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       releaseReplacementHydration.resolve()
       await cleanupPersistedOracle(
         [
-          () => localTransaction?.isPersisted.promise.catch(() => undefined),
+          () => localTransaction?.when(`settled`).catch(() => undefined),
           () => replacementReady,
           () => (cleanedUp ? undefined : collection.cleanup()),
         ],
@@ -9011,7 +9012,6 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         onInsert: async () => {
           hookEntered.resolve()
           await releaseHook.promise
-          return {}
         },
         persistence: { adapter, coordinator },
       }),
@@ -9039,7 +9039,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         id: `old-hook`,
         title: `must not enter replacement coordinator`,
       })
-      transactionOutcome = transaction.isPersisted.promise.then(
+      transactionOutcome = transaction.when(`settled`).then(
         () => ({ status: `fulfilled` as const }),
         (reason: unknown) => ({ status: `rejected` as const, reason }),
       )
@@ -9996,7 +9996,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         id: `local`,
         title: `durable before confirmation settles`,
       })
-      const transactionOutcome = transaction.isPersisted.promise.then(
+      const transactionOutcome = transaction.when(`settled`).then(
         () => ({ status: `fulfilled` as const }),
         (reason: unknown) => ({ status: `rejected` as const, reason }),
       )
@@ -10822,7 +10822,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         title: `must roll back`,
       })
       const firstOutcome = await atPersistedOracleCheckpoint(
-        firstTransaction.isPersisted.promise.then(
+        firstTransaction.when(`settled`).then(
           () => ({ status: `fulfilled` as const }),
           (reason: unknown) => ({ status: `rejected` as const, reason }),
         ),
@@ -10860,7 +10860,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
               id: `late-local`,
               title: `must not be admitted`,
             })
-            await lateTransaction.isPersisted.promise
+            await lateTransaction.when(`settled`)
           })
           .then(
             () => ({ status: `fulfilled` as const }),
@@ -12835,7 +12835,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     } finally {
       hydration.resolve()
       localPersistence.reject(appliedError)
-      await localTransaction.isPersisted.promise.catch(() => undefined)
+      await localTransaction.when(`settled`).catch(() => undefined)
       await cleanupPersistedOracle(
         [() => collection.cleanup()],
         hasPrimaryFailure,
@@ -12952,7 +12952,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         }
 
         outbound.reject(refused)
-        await expect(transaction.isPersisted.promise).rejects.toBe(refused)
+        await expect(transaction.when(`settled`)).rejects.toBe(refused)
         expect(transaction.state).toBe(`failed`)
         checkSource(`after refused mutation settled`)
         if (firstReceipt !== undefined) {
@@ -12985,7 +12985,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         if (transaction) outbound.reject(refused)
         await cleanupPersistedOracle(
           [
-            () => transaction?.isPersisted.promise.catch(() => undefined),
+            () => transaction?.when(`settled`).catch(() => undefined),
             () =>
               firstReceipt === undefined
                 ? undefined
@@ -13062,7 +13062,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
 
         releaseHandler.resolve()
         await atPersistedOracleCheckpoint(
-          transaction.isPersisted.promise.then(() => undefined),
+          transaction.when(`settled`).then(() => undefined),
           `successful persisted origin mutation settled`,
         )
         await Promise.all(receipts.map((receipt) => Promise.resolve(receipt)))
@@ -13080,7 +13080,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         releaseHandler.resolve()
         await cleanupPersistedOracle(
           [
-            () => transaction?.isPersisted.promise.catch(() => undefined),
+            () => transaction?.when(`settled`).catch(() => undefined),
             ...receipts.map(
               (receipt) => () =>
                 Promise.resolve(receipt).catch(() => undefined),
@@ -13171,7 +13171,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
 
       localPersistence.resolve()
       await atPersistedOracleCheckpoint(
-        localTransaction.isPersisted.promise,
+        localTransaction.when(`settled`),
         `local settlement publishes the source commit`,
       )
       expect(stripVirtualProps(collection.get(`remote`))).toEqual({
@@ -13270,7 +13270,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         `handler dependency submitted`,
       )
       await atPersistedOracleCheckpoint(
-        localTransaction.isPersisted.promise,
+        localTransaction.when(`settled`),
         `user persistence completes after its awaited source commit`,
       )
       await atPersistedOracleCheckpoint(
@@ -13314,7 +13314,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       normalAbort.abort()
       await cleanupPersistedOracle(
         [
-          () => localTransaction.isPersisted.promise.catch(() => undefined),
+          () => localTransaction.when(`settled`).catch(() => undefined),
           () => normalReceipt?.catch(() => undefined),
           () =>
             dependencyReceipt === true
@@ -13710,7 +13710,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       local.mutate(() => {
         collection.insert({ id: `local`, title: `optimistic local` })
       })
-      localReceipt = local.isPersisted.promise
+      localReceipt = local.when(`settled`)
       void localReceipt.catch(() => undefined)
       await mutationEntered.promise
 
@@ -13816,7 +13816,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       local.mutate(() => {
         collection.insert({ id: `local`, title: `optimistic local` })
       })
-      localReceipt = local.isPersisted.promise
+      localReceipt = local.when(`settled`)
       void localReceipt.catch(() => undefined)
       await mutationEntered.promise
 
@@ -22642,7 +22642,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       title: `Ack mismatch`,
     })
 
-    await expect(tx.isPersisted.promise).rejects.toThrow(
+    await expect(tx.when(`settled`)).rejects.toThrow(
       /partial acceptance is not supported/,
     )
     expect(collection.get(`ack-mismatch`)).toBeUndefined()
@@ -22720,7 +22720,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           id: `local-failure`,
           title: `Must not persist`,
         })
-        const rejection = await tx.isPersisted.promise.then(
+        const rejection = await tx.when(`settled`).then(
           () => undefined,
           (error: unknown) => error,
         )
@@ -22847,7 +22847,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         id: `primary-local`,
         title: `must install terminal state`,
       })
-      const primaryOutcome = await primary.isPersisted.promise.then(
+      const primaryOutcome = await primary.when(`settled`).then(
         () => ({ status: `fulfilled` as const }),
         (reason: unknown) => ({ status: `rejected` as const, reason }),
       )
@@ -22912,7 +22912,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         id: `old-local`,
         title: `durable only in the replaced lifecycle`,
       })
-      const settlement = transaction.isPersisted.promise.then(
+      const settlement = transaction.when(`settled`).then(
         () => ({ status: `fulfilled` as const }),
         (reason: unknown) => ({ status: `rejected` as const, reason }),
       )
@@ -25451,7 +25451,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         expect(publishedFreshTitles).toEqual([])
         releaseMutation.resolve()
         await atPersistedOracleCheckpoint<unknown>(
-          mutation.isPersisted.promise,
+          mutation.when(`settled`),
           `optimistic publication released`,
         )
         await atPersistedOracleCheckpoint(
@@ -25501,7 +25501,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       await cleanupPersistedOracle(
         [
           () => recovery,
-          () => mutation?.isPersisted.promise.catch(() => undefined),
+          () => mutation?.when(`settled`).catch(() => undefined),
           () => demand?.catch(() => undefined),
           () => collection.cleanup(),
         ],
@@ -28082,7 +28082,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       expect(collection.get(`local`)).toMatchObject({ id: `local` })
       expect(collection.get(`old`)).toBeUndefined()
       release.resolve()
-      await mutation.isPersisted.promise
+      await mutation.when(`settled`)
       source.begin()
       source.write({
         type: `insert`,
@@ -28099,7 +28099,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       ).toEqual([`optimistic-expiry-new`])
     } finally {
       release.resolve()
-      await mutation?.isPersisted.promise.catch(() => undefined)
+      await mutation?.when(`settled`).catch(() => undefined)
       await collection.cleanup()
     }
   })
@@ -28535,10 +28535,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       expect(recovery.read()).toEqual({ status: `fulfilled` })
       expect(collection.get(`local`)).toBeDefined()
       release.resolve()
-      await mutation.isPersisted.promise
+      await mutation.when(`settled`)
     } finally {
       release.resolve()
-      await mutation?.isPersisted.promise.catch(() => undefined)
+      await mutation?.when(`settled`).catch(() => undefined)
       await collection.cleanup()
     }
   })
@@ -29824,13 +29824,13 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       // so the load settles once that mutation does. It must not also wait
       // for the unrelated receipt.
       releaseMutation.resolve()
-      await mutation.isPersisted.promise
+      await mutation.when(`settled`)
       await expect(load).resolves.toBeUndefined()
       await unrelated.receipt.catch(() => undefined)
     } finally {
       unrelated?.abortController.abort()
       releaseMutation.resolve()
-      await mutation?.isPersisted.promise.catch(() => undefined)
+      await mutation?.when(`settled`).catch(() => undefined)
       await load?.catch(() => undefined)
       await collection.cleanup()
     }
@@ -30558,7 +30558,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         )
 
         const mutation = collection.insert({ id: `local`, title: `Pending` })
-        mutationPersisted = mutation.isPersisted.promise
+        mutationPersisted = mutation.when(`settled`)
         void mutationPersisted.catch(() => undefined)
         const bufferedCommit = await atPersistedOracleCheckpoint(
           bufferedCommitReturned.promise,

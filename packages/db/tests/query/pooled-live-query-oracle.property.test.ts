@@ -542,7 +542,7 @@ function describeFields(row: Record<string, unknown>) {
 }
 
 function describeRow(row: Record<string, unknown>) {
-  return `${describeFields(row)}:${String(row.$synced)}`
+  return `${describeFields(row)}:${String(row.$hasPendingWrites)}`
 }
 
 type Change = ChangeMessage<Record<string, unknown>, string | number>
@@ -821,7 +821,7 @@ async function runHistory(history: History): Promise<void> {
                   draft.g = op.g
                 })
               : source.delete(key)
-        const persisted = transaction.isPersisted.promise.catch(() => undefined)
+        const persisted = transaction.when(`settled`).catch(() => undefined)
         check(`${checkpoint} pending`)
         if (cleanupFirst) {
           // The write settles after cleanup, before the restart. The mock

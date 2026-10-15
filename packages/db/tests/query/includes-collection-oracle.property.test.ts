@@ -442,7 +442,7 @@ function createOptimisticCollectionDriver(
     }
     pending.add(entry)
     // Observe both outcomes before the first fallible optimistic checkpoint.
-    entry.receipt = transaction.isPersisted.promise.then(
+    entry.receipt = transaction.when(`settled`).then(
       () => {
         pending.delete(entry)
       },
@@ -473,13 +473,11 @@ function createOptimisticCollectionDriver(
           context.children.write(`insert`, action.row)
           pendingMutation.syncReleased = true
           context.children.resolveSync()
-          await transaction.isPersisted.promise
+          await transaction.when(`settled`)
         } else {
           context.model.children.delete(action.row.id)
           const message = `rollback insert`
-          const persisted = transaction.isPersisted.promise.catch(
-            () => undefined,
-          )
+          const persisted = transaction.when(`settled`).catch(() => undefined)
           await withExpectedRejection(message, async () => {
             pendingMutation.syncReleased = true
             context.children.rejectSync(new Error(message))
@@ -503,11 +501,11 @@ function createOptimisticCollectionDriver(
         context.children.write(`delete`, previous)
         pendingMutation.syncReleased = true
         context.children.resolveSync()
-        await transaction.isPersisted.promise
+        await transaction.when(`settled`)
       } else {
         context.model.children.set(action.id, previous)
         const message = `rollback delete`
-        const persisted = transaction.isPersisted.promise.catch(() => undefined)
+        const persisted = transaction.when(`settled`).catch(() => undefined)
         await withExpectedRejection(message, async () => {
           pendingMutation.syncReleased = true
           context.children.rejectSync(new Error(message))

@@ -2033,7 +2033,7 @@ describe(`query collection ownership lifecycle`, () => {
     })
     cleanups.push(async () => {
       persistence.resolve()
-      await transaction.isPersisted.promise.catch(() => undefined)
+      await transaction.when(`settled`).catch(() => undefined)
       consoleError.mockRestore()
       await collection.cleanup()
       queryClient.clear()
@@ -2081,7 +2081,7 @@ describe(`query collection ownership lifecycle`, () => {
     expect(collection.get(shared.id)?.name).toBe(`Optimistic`)
 
     persistence.resolve()
-    await transaction.isPersisted.promise
+    await transaction.when(`settled`)
     const results = await refetch
     model = reduceMutationRefreshLiveness(model, {
       type: `settle-application`,
@@ -2253,7 +2253,7 @@ describe(`query collection ownership lifecycle`, () => {
     cleanups.push(async () => {
       unsubscribeCache()
       persistence.resolve()
-      await transaction?.isPersisted.promise.catch(() => undefined)
+      await transaction?.when(`settled`).catch(() => undefined)
       await collection.cleanup()
       queryClient.clear()
     })
@@ -2305,7 +2305,7 @@ describe(`query collection ownership lifecycle`, () => {
       outcome: `rejected`,
     })
     persistence.resolve()
-    await transaction?.isPersisted.promise
+    await transaction?.when(`settled`)
     const results = await refetch
 
     expect(actualOutcome).toBe(observeRefetchCallSettlement(model).refetch)
@@ -2437,7 +2437,7 @@ describe(`query collection ownership lifecycle`, () => {
       })
       cleanups.push(async () => {
         persistence.resolve()
-        await transaction.isPersisted.promise
+        await transaction.when(`settled`)
       })
 
       let model: MutationRefreshLivenessModel = {
@@ -2485,7 +2485,7 @@ describe(`query collection ownership lifecycle`, () => {
       }).toEqual(observeMutationRefreshLiveness(model))
 
       persistence.resolve()
-      await transaction.isPersisted.promise
+      await transaction.when(`settled`)
       await refetch
       model = reduceMutationRefreshLiveness(model, {
         type: `settle-application`,
@@ -2543,7 +2543,7 @@ describe(`query collection ownership lifecycle`, () => {
       explicitResult.resolve([authoritative])
       persistence.resolve()
       if (transactionStarted) {
-        await transaction.isPersisted.promise.catch(() => undefined)
+        await transaction.when(`settled`).catch(() => undefined)
       }
       await Promise.allSettled([eager.cleanup(), onDemand.cleanup()])
       queryClient.clear()
@@ -2600,7 +2600,7 @@ describe(`query collection ownership lifecycle`, () => {
     }).toEqual(observeMutationRefreshLiveness(model))
 
     persistence.resolve()
-    await transaction.isPersisted.promise
+    await transaction.when(`settled`)
     const results = await refetch
     model = reduceMutationRefreshLiveness(model, {
       type: `settle-application`,
@@ -2718,7 +2718,7 @@ describe(`query collection ownership lifecycle`, () => {
       }).toEqual(observeMutationRefreshLiveness(model))
 
       releaseHandler.resolve()
-      await mutation.isPersisted.promise
+      await mutation.when(`settled`)
       await refresh
       model = reduceMutationRefreshLiveness(model, {
         type: `settle-application`,
@@ -2819,7 +2819,7 @@ describe(`query collection ownership lifecycle`, () => {
         mutationFn: () => persistence.promise,
       })
       transaction.mutate(() => collection.insert(optimistic))
-      void transaction.isPersisted.promise.catch(() => undefined)
+      void transaction.when(`settled`).catch(() => undefined)
       applicationScan.resolve([])
       model = reduceMutationRefreshLiveness(model, {
         type: `accept-application`,
@@ -2836,7 +2836,7 @@ describe(`query collection ownership lifecycle`, () => {
       expect(collection.get(shared.id)?.name).not.toBe(authoritative.name)
 
       persistence.resolve()
-      await transaction.isPersisted.promise
+      await transaction.when(`settled`)
       await refresh
       model = reduceMutationRefreshLiveness(model, {
         type: `settle-application`,
@@ -2951,7 +2951,7 @@ describe(`query collection ownership lifecycle`, () => {
           // breaks the deliberately reproduced cycle during RED cleanup.
           collection.utils.writeUpdate(authoritative)
           releaseMutation.resolve()
-          await transactionReference.current.isPersisted.promise
+          await transactionReference.current.when(`settled`)
         }
         await collection.cleanup()
         queryClient.clear()
@@ -2980,7 +2980,7 @@ describe(`query collection ownership lifecycle`, () => {
         transaction = action(`refresh`)
       }
       transactionReference.current = transaction
-      void transaction.isPersisted.promise.catch(() => undefined)
+      void transaction.when(`settled`).catch(() => undefined)
       await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
 
       let model: MutationRefreshLivenessModel = {
@@ -3070,7 +3070,7 @@ describe(`query collection ownership lifecycle`, () => {
         if (transactionReference.current) {
           collection.utils.writeUpdate(authoritative)
           releaseHandler.resolve()
-          await transactionReference.current.isPersisted.promise
+          await transactionReference.current.when(`settled`)
         }
         await collection.cleanup()
         queryClient.clear()
@@ -3081,7 +3081,7 @@ describe(`query collection ownership lifecycle`, () => {
         draft.name = `Optimistic`
       })
       transactionReference.current = transaction
-      void transaction.isPersisted.promise.catch(() => undefined)
+      void transaction.when(`settled`).catch(() => undefined)
       await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
 
       let model: MutationRefreshLivenessModel = {
@@ -3417,7 +3417,7 @@ describe(`query collection ownership lifecycle`, () => {
             : collection.delete(initial.map(({ id }) => id))
       externalTransactionReference.current = mutation
       inspectIdentity.resolve()
-      void mutation.isPersisted.promise.catch(() => undefined)
+      void mutation.when(`settled`).catch(() => undefined)
       await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
       expect(handlerOutcome).toBe(observeHandlerRefetchBoundary(model).refetch)
       if (!identityObservation) {
@@ -3444,7 +3444,7 @@ describe(`query collection ownership lifecycle`, () => {
         )
       })
 
-      await mutation.isPersisted.promise
+      await mutation.when(`settled`)
       model = reduceHandlerRefetchBoundary(model, {
         type: `settle-application`,
         outcome: `fulfilled`,
@@ -3592,7 +3592,7 @@ describe(`query collection ownership lifecycle`, () => {
     const mutation = collection.update(shared.id, (draft) => {
       draft.name = `Optimistic`
     })
-    await mutation.isPersisted.promise
+    await mutation.when(`settled`)
     model = reduceHandlerRefetchBoundary(model, {
       type: `accept-application`,
     })
@@ -5168,7 +5168,7 @@ describe(`query collection ownership lifecycle`, () => {
     await handlerEntered.promise
     await collection.cleanup()
     releaseHandler.resolve()
-    await expect(mutation.isPersisted.promise).rejects.toBeInstanceOf(
+    await expect(mutation.when(`settled`)).rejects.toBeInstanceOf(
       SyncNotInitializedError,
     )
 
@@ -5280,7 +5280,7 @@ describe(`query collection ownership lifecycle`, () => {
       const settled = new Set<number>()
       for (const transactionIndex of settlementOrder) {
         persistenceGates[transactionIndex]!.resolve()
-        await transactions[transactionIndex]!.isPersisted.promise
+        await transactions[transactionIndex]!.when(`settled`)
         settled.add(transactionIndex)
 
         const authoritativeIds = [...settled].map((index) => items[index]!.id)
@@ -5317,7 +5317,7 @@ describe(`query collection ownership lifecycle`, () => {
       )
 
       persistenceGates[2]!.resolve()
-      await third.isPersisted.promise
+      await third.when(`settled`)
 
       expect(queryFn).toHaveBeenCalledTimes(4)
       expectMutationLifecycleSnapshot(
@@ -5494,7 +5494,7 @@ describe(`query collection ownership lifecycle`, () => {
     )
 
     releaseHandler.resolve()
-    await mutation.isPersisted.promise
+    await mutation.when(`settled`)
     await waiter
     await vi.waitFor(() =>
       expect(itemIds(derived.toArray)).toEqual([initial.id, inserted.id]),
@@ -5589,7 +5589,7 @@ describe(`query collection ownership lifecycle`, () => {
     ])
 
     releaseHandler.resolve()
-    await mutation.isPersisted.promise
+    await mutation.when(`settled`)
     await collection._sync.loadSubset({})
 
     expect(queryFn).toHaveBeenCalledOnce()
@@ -5836,7 +5836,7 @@ describe(`query collection ownership lifecycle`, () => {
     ])
 
     releaseHandler.resolve()
-    await mutation.isPersisted.promise
+    await mutation.when(`settled`)
     await vi.waitFor(() => expect(unloaded).toBe(true))
     await vi.waitFor(() => {
       expect({
@@ -5915,7 +5915,7 @@ describe(`query collection ownership lifecycle`, () => {
       cleanups.push(async () => {
         released.resolve()
         if (holder === `mutation`)
-          await mutation.isPersisted.promise.catch(() => undefined)
+          await mutation.when(`settled`).catch(() => undefined)
         try {
           await collection.cleanup()
         } finally {
@@ -5962,7 +5962,7 @@ describe(`query collection ownership lifecycle`, () => {
       released.resolve()
       await Promise.all([first, second])
       if (holder === `mutation`)
-        await mutation.isPersisted.promise.catch(() => undefined)
+        await mutation.when(`settled`).catch(() => undefined)
       await vi.waitFor(() =>
         expect(observe()).toEqual({ visible: [`b`], stored: [`b`] }),
       )
@@ -6110,11 +6110,13 @@ describe(`query collection ownership lifecycle`, () => {
         await vi.waitFor(() => expect(held).toHaveLength(1))
         hold = false
         const fetched = server
-        await collection.update(writtenKey, (draft) => {
-          draft.value = `B-optimistic`
-        }).isPersisted.promise
+        await collection
+          .update(writtenKey, (draft) => {
+            draft.value = `B-optimistic`
+          })
+          .when(`settled`)
         held[0]!.resolve()
-        await first.isPersisted.promise
+        await first.when(`settled`)
         expected = merge(fetched, [{ id: writtenKey, value: `B` }])
       }
       await vi.waitFor(() => expect(visible()).toEqual(expected))
@@ -6576,7 +6578,7 @@ describe(`query collection ownership lifecycle`, () => {
 
     await collection.stateWhenReady()
     const mutation = collection.insert(inserted)
-    await mutation.isPersisted.promise
+    await mutation.when(`settled`)
     expect({
       cache: itemIds(queryClient.getQueryData<Array<Item>>(queryKey) ?? []),
       synced: itemIds(collection._state.syncedData.values()),
@@ -6723,7 +6725,7 @@ describe(`query collection ownership lifecycle`, () => {
     persistenceGate.resolve()
     await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(3))
     mutationRefetchResult.resolve([])
-    await mutation.isPersisted.promise
+    await mutation.when(`settled`)
 
     expect(queryFn).toHaveBeenCalledTimes(3)
     expect(commitRequests.some(({ writes }) => writes.includes(`delete`))).toBe(
