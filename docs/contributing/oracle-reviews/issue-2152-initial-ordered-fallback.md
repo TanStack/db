@@ -218,3 +218,54 @@ initial synchronous-cut histories above retain those separate limits.
 | ORC-012 | This section records the exact code revision, checks, faults, and bounded claim. |
 | ORC-013 | Not triggered: the evidence claims only two named marker actions and one null-boundary path, not a reusable timing or range law beyond them. |
 | ORC-014 | No real-provider handoff claim is made for this controlled later-fallback path. Other adapters and on-demand React remain separate receiving limits. |
+
+## Post-publication response schedules
+
+Reviewed oracle and coverage-map commit:
+`762a29a4e777629470b9011a6c17e537401f005d` (parent
+`06ba31eaeecd44e5172391bbde9d3a72957ea29e`). This section supplements
+the two-action post-publication record above; no production code changed.
+
+The finite grammar now runs eight histories. Marker deletion and retargeting
+each cross a literal-`true` fallback, a Promise result after applied writes,
+and a fallback returning its held applied receipt while child demand remains
+pending. Each action also runs the held receipt after the child demand settles.
+All histories first observe row 1 published while that child demand still keeps
+the live-query Collection `loading`. The ready-child histories then await the
+initial preload and observe row 1 with `ready` status and no subset load in
+flight before changing the marker.
+
+The held-receipt provider starts an optimistic update to an unselected root
+field after the ordered page applies. While its persistence is pending, root
+3's full-source sync transaction has a pending applied receipt and root 3 is
+absent from the root Collection. The ready-child histories observe the public
+root and live-query `isLoadingSubset` flags become true at this held cut. After
+releasing the update, the driver waits for the public row-3 change and the
+relevant public loading-end signals before comparing the final window and
+change events with the finite join model. The marker mutation may publish an
+empty intermediate window or retain row 1; callback replay checks that each
+observed event matches its public snapshot. The final net delta must contain
+one delete for row 1 and one insert for row 3.
+
+A temporary loader fault ignored the pending applied receipt while retaining
+the provider writes. All four held-receipt histories reached the comparison
+and failed at the public live-query loading flag: the faulty run reported
+`false` while the root receipt was still pending. The fault was removed. The
+normal eight focused histories and all 285 ordered lifecycle tests passed;
+DB test TypeScript, Prettier, and `git diff --check` passed. ESLint reported no
+errors and one warning on an unchanged line. Two independent oracle reviewers
+found and prompted repairs to an overstrict old-row intermediate assertion, a
+tautological response-kind check, unwitnessed blocker startup, dropped cleanup
+diagnostics, and a final checkpoint tied to one scheduler turn. A final
+read-only check found no race or cleanup defect in the revised event wait.
+
+The Promise-after-applied-writes history exercises the asynchronous callback
+path and checks eventual public coherence. The architecture gives later
+full-source work no initial synchronous cut, so this case does not distinguish
+that Promise from a literal return at an immediate public checkpoint. A held
+Promise after applied writes with overlapping source changes remains for this
+owner to witness. The held `isLoadingSubset` comparison proves the public load
+tracker retains the applied receipt; it does not alone prove that every ordered
+publication participant waits for it. The row and event comparisons cover the
+named final checkpoint. Real provider handoffs and an on-demand React first
+commit remain outside this controlled core witness.
