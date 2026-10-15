@@ -115,11 +115,13 @@ export class OrderedSourceLoader {
   onSourceChanges(
     changes: Array<ChangeMessage<Record<string, unknown>, string | number>>,
     sentRows: ReadonlyMap<string | number, Record<string, unknown>> | undefined,
+    hasOptimisticOverlay: (key: string | number) => boolean,
   ): void {
     let hasNewRows = false
     for (const change of changes) {
       const previous = sentRows?.get(change.key)
       if (
+        !hasOptimisticOverlay(change.key) &&
         change.type !== `insert` &&
         previous !== undefined &&
         (change.type === `delete` ||

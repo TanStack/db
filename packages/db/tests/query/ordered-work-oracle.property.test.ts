@@ -6097,7 +6097,10 @@ type OptimisticWindowShape = `source` | `joined` | `anti-joined`
 type OptimisticWindowMutation = `update` | `delete`
 type OptimisticWindowConsumer = `collection` | `effect`
 type OptimisticWindowOutcome = `acknowledge` | `rollback`
-type OptimisticWindowCheckpoint = `initial` | `optimistic` | `settled`
+type OptimisticWindowExtent = `missing` | `installed` | `non-prefix`
+type OptimisticWindowAcquisition = `required` | `forbidden` | `allowed`
+type OptimisticWindowCheckpoint =
+  `initial` | `optimistic` | `settled` | `restored`
 const MAX_OPTIMISTIC_WINDOW_REQUESTS = 8
 const OPTIMISTIC_ACQUISITION_OBSERVATION_TURNS = 8
 
@@ -6108,6 +6111,24 @@ type OptimisticWindowCase = {
   outcome: OptimisticWindowOutcome
   width: 1 | 2
   indexed: boolean
+  extent: OptimisticWindowExtent
+  installedIds: Array<number>
+  acquisition: OptimisticWindowAcquisition
+  answerTiming?: `before-settlement` | `after-settlement`
+  mutationSource?: `root` | `marker`
+  rankMove?: boolean
+  rankDeparture?: boolean
+  direction?: `asc` | `desc`
+}
+
+type OptimisticWindowPublication = {
+  rows: Array<number>
+}
+
+function copyOptimisticWindowPublication(
+  publication: OptimisticWindowPublication,
+): OptimisticWindowPublication {
+  return { rows: [...publication.rows] }
 }
 
 type OptimisticWindowObservation = {
@@ -6116,40 +6137,75 @@ type OptimisticWindowObservation = {
   acquiring: Array<number>
   answerQueued: Array<number>
   settled: Array<number>
-  preSettlementPublications: Array<Array<number>>
-  allPublications: Array<Array<number>>
+  afterAnswer?: Array<number>
+  afterRestore?: Array<number>
+  afterRestorePublications?: Array<OptimisticWindowPublication>
+  rowsAfterFirstTurn: Array<number>
+  rowsAfterSecondTurn: Array<number>
+  immediatePublications: Array<OptimisticWindowPublication>
+  preSettlementPublications: Array<OptimisticWindowPublication>
+  publicationsAtSettlement: Array<OptimisticWindowPublication>
+  publicationsAfterSettlement: Array<OptimisticWindowPublication>
   attempts: Array<{
     submittedRows: Array<number>
+    limit: number | undefined
+    direction: string | undefined
     appliedReceiptPending: boolean
     providerPending: boolean
   }>
-  requestsStableAcrossTwoTurns: boolean
+  acquisitionStartedBeforeSettlement?: boolean
+  requestHistory?: Array<{
+    identity: string
+    newRows: number
+    phase?: string
+    submittedRows?: Array<number>
+    limit?: number
+    direction?: string
+    allowsRejectedRoot?: boolean
+    selectedRanks?: Array<number>
+  }>
+  settlementOutcome: `fulfilled` | `rejected`
 }
 
 function referenceOptimisticWindow(
-  shape: OptimisticWindowShape,
-  outcome: OptimisticWindowOutcome,
+  testCase: OptimisticWindowCase,
   checkpoint: OptimisticWindowCheckpoint,
-  width: 1 | 2,
-  indexed: boolean,
 ): Array<number> {
-  if (checkpoint === `initial`) return width === 1 ? [3] : [3, 2]
-  if (checkpoint === `optimistic`) {
-    if (indexed || shape === `source`) return width === 1 ? [] : [2]
-    return width === 1 ? [2] : [2, 1]
-  }
-  if (outcome === `rollback`) return width === 1 ? [3] : [3, 2]
-  return width === 1 ? [2] : [2, 1]
-}
-
-function expectedInitialProviderRows(
-  shape: OptimisticWindowShape,
-  width: 1 | 2,
-  indexed: boolean,
-): Array<number> {
-  if (shape === `source`) return width === 1 ? [3] : [3, 2]
-  if (!indexed) return width === 1 ? [4, 1, 2, 3] : [4, 3, 1, 2]
-  return width === 1 ? [4, 3] : [4, 3, 2]
+  // All three predicates accept 1, 2, and 3 in the remote ledger; 4 is the
+  // rejected leading root. The model starts from installed keys, applies the
+  // one overlay, and recomputes the window without the loader's prefix logic.
+  const authoritative =
+    (checkpoint === `settled` || checkpoint === `restored`) &&
+    testCase.outcome === `acknowledge`
+  const installed = authoritative
+    ? testCase.rankMove
+      ? [1, 2, 3, 4]
+      : testCase.mutationSource === `marker`
+        ? [1, 2, 3, 4]
+        : [1, 2, 4]
+    : testCase.installedIds
+  const overlayActive = checkpoint === `optimistic`
+  const markerDeparturePersisted =
+    checkpoint === `settled` &&
+    testCase.outcome === `acknowledge` &&
+    testCase.mutationSource === `marker`
+  return installed
+    .filter(
+      (id) =>
+        id !== 4 &&
+        !(
+          (overlayActive || markerDeparturePersisted) &&
+          id === 3 &&
+          (!testCase.rankMove || testCase.rankDeparture)
+        ),
+    )
+    .sort((left, right) => {
+      const moved = (overlayActive || authoritative) && testCase.rankMove
+      const leftRank = moved && left === 3 ? 0 : left
+      const rightRank = moved && right === 3 ? 0 : right
+      return rightRank - leftRank
+    })
+    .slice(0, testCase.width)
 }
 
 async function observeAcquisitionAcrossTaskTurns(
@@ -6163,37 +6219,63 @@ async function observeAcquisitionAcrossTaskTurns(
   return currentRequests() > initialRequests
 }
 
+// A stalled held event must report its named checkpoint and enter cleanup;
+// an outer test timeout would strand the provider and obscure the violated law.
+async function awaitOptimisticCheckpoint<T>(
+  checkpoint: string,
+  pending: Promise<T>,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      pending,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`optimistic ${checkpoint} stalled`)),
+          2000,
+        )
+      }),
+    ])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
 /**
  * An optimistic row that leaves an on-demand ordered window is public before
  * its mutation settles. This law does not depend on whether departure comes
  * from a source predicate, a joined or anti-joined predicate, an update, or a
  * delete. It also applies to both live-query Collections and Effects.
  *
- * The independent reference table states the five public cuts for one
- * four-row base ledger and one pending departure. The legal-history grammar
+ * The independent installed-row model states the public cuts for one
+ * six-row base ledger and one pending departure. The legal-history grammar
  * crosses one- and two-row windows, indexed and unindexed loading, all three
  * predicate shapes, both departure operations, both consumers, and
- * acknowledgement or rollback. Production receives each history through a
- * controlled on-demand provider and a real live-query plan.
+ * acknowledgement or rollback. Two extra histories install replacement extent
+ * behind indexed plans, independently of query shape. Production receives each
+ * history through a controlled on-demand provider and a real live-query plan.
  *
- * Four observation cuts keep distinct responsibilities distinguishable:
- * mutation admission must recompute over the installed rows; missing extent
- * must start acquisition before persistence settles; a provider answer whose
- * real applied receipt is still pending must remain private; and settlement
- * must publish the complete acknowledged window or restore the original
- * rollback window. Public Collection changes and Effect callbacks record the
- * same law. The request budget rejects a repeated-refill loop.
+ * The observation cuts keep distinct responsibilities distinguishable:
+ * mutation admission must update rows and callback membership synchronously;
+ * missing extent must start one useful acquisition before persistence settles;
+ * a provider answer whose real applied receipt is still pending must remain
+ * private; and transaction settlement must publish the complete acknowledged
+ * window or restore the original rollback window. Later task turns check for
+ * immediate repeated work. Collection order and Effect membership are the
+ * public observations; exact callback payload coherence remains separately
+ * owned.
  */
 async function checkOptimisticWindow(
   testCase: OptimisticWindowCase,
 ): Promise<OptimisticWindowObservation> {
-  const { shape, mutation, consumer, outcome, width, indexed } = testCase
+  const { shape, mutation, consumer, outcome, width, indexed, extent } =
+    testCase
   const remote = new Map<number, Row>(
-    [1, 2, 3, 4].map((id) => [
+    [-1, 0, 1, 2, 3, 4].map((id) => [
       id,
       {
         id,
-        rank: id,
+        rank: testCase.direction === `asc` ? -id : id,
         eligible: id !== 4,
         label: `row`,
         link: id,
@@ -6207,10 +6289,17 @@ async function checkOptimisticWindow(
   const answerSubmitted = createDeferred<void>()
   const persistence = createDeferred<void>()
   let holdLaterAcquisition = false
+  let settlementPhase = `pending`
+  const requestHistory: NonNullable<
+    OptimisticWindowObservation[`requestHistory`]
+  > = []
   const attempts: Array<{
     submittedRows: Array<number>
+    limit: number | undefined
+    direction: string | undefined
     appliedReceiptSettled: boolean
     providerSettled: boolean
+    provider: Promise<unknown>
   }> = []
   let requests = 0
   const persistAuthoritativeMutation = async () => {
@@ -6218,8 +6307,12 @@ async function checkOptimisticWindow(
     const previous = remote.get(3)!
     const next = {
       ...previous,
-      eligible: shape === `source` ? false : previous.eligible,
+      eligible:
+        shape === `source` && (!testCase.rankMove || testCase.rankDeparture)
+          ? false
+          : previous.eligible,
       link: shape === `source` ? previous.link : -previous.id,
+      rank: testCase.rankMove ? 0 : previous.rank,
     }
     if (mutation === `delete`) remote.delete(3)
     else remote.set(3, next)
@@ -6251,11 +6344,52 @@ async function checkOptimisticWindow(
             const attempt = holdLaterAcquisition
               ? {
                   submittedRows: [] as Array<number>,
+                  limit: options.limit,
+                  direction: options.orderBy?.[0]?.compareOptions.direction,
                   appliedReceiptSettled: false,
                   providerSettled: false,
+                  provider: Promise.resolve(),
                 }
               : undefined
             if (attempt) attempts.push(attempt)
+            const requestRecord = holdLaterAcquisition
+              ? {
+                  identity: JSON.stringify({
+                    phase: settlementPhase,
+                    where: options.where,
+                    orderBy: options.orderBy,
+                    cursor: options.cursor,
+                    offset: options.offset,
+                    limit: options.limit,
+                    refetch: options.refetch,
+                  }),
+                  newRows: 0,
+                  phase: settlementPhase,
+                  submittedRows: [] as Array<number>,
+                  limit: options.limit,
+                  direction: options.orderBy?.[0]?.compareOptions.direction,
+                  allowsRejectedRoot:
+                    !options.where ||
+                    evaluateReferenceExpression(options.where, {
+                      ...remote.get(2)!,
+                      eligible: false,
+                    }) === true,
+                  selectedRanks: [...remote.values()]
+                    .filter(
+                      (row) =>
+                        (!options.where ||
+                          evaluateReferenceExpression(options.where, row) ===
+                            true) &&
+                        (!options.cursor ||
+                          evaluateReferenceExpression(
+                            options.cursor.whereFrom,
+                            row,
+                          ) === true),
+                    )
+                    .map(({ rank }) => rank),
+                }
+              : undefined
+            if (requestRecord) requestHistory.push(requestRecord)
             const answer = () => {
               try {
                 let page = [...remote.values()].filter(
@@ -6279,6 +6413,12 @@ async function checkOptimisticWindow(
                   if (!options.cursor) page = page.slice(options.offset ?? 0)
                   if (options.limit !== undefined)
                     page = page.slice(0, options.limit)
+                }
+                if (requestRecord) {
+                  requestRecord.newRows = page.filter(
+                    ({ id }) => !sent.has(id),
+                  ).length
+                  requestRecord.submittedRows.push(...page.map(({ id }) => id))
                 }
                 controls.begin()
                 for (const row of page) {
@@ -6309,7 +6449,10 @@ async function checkOptimisticWindow(
             }
             if (!holdLaterAcquisition) return answer()
             refillStarted.resolve()
-            const provider = providerAnswer.promise.then(answer)
+            const provider = providerAnswer.promise
+              .then(answer)
+              .then(() => undefined)
+            attempt!.provider = provider
             void provider.then(
               () => (attempt!.providerSettled = true),
               () => (attempt!.providerSettled = true),
@@ -6345,6 +6488,9 @@ async function checkOptimisticWindow(
                 { id: 3, rowId: -3 },
               ]
             : [],
+      onUpdate: async () => {
+        await persistence.promise
+      },
     }),
   )
   markers.createIndex((marker) => marker.rowId, { indexType: BTreeIndex })
@@ -6363,14 +6509,16 @@ async function checkOptimisticWindow(
         : shape === `joined`
           ? left.where(({ marker }) => not(isUndefined(marker.rowId)))
           : left.where(({ marker }) => isUndefined(marker.rowId))
-    return filtered.orderBy(({ row }) => row.rank, `desc`).limit(width)
+    return filtered
+      .orderBy(({ row }) => row.rank, testCase.direction ?? `desc`)
+      .limit(width)
   }
   const query =
     consumer === `collection`
       ? createLiveQueryCollection({ query: buildQuery })
       : undefined
   const effectRows = new Map<number, Row>()
-  const publications: Array<Array<number>> = []
+  const publications: Array<OptimisticWindowPublication> = []
   const resultRow = (value: unknown): Row => {
     const result = value as Row & { row?: Row }
     return result.row ?? result
@@ -6381,8 +6529,15 @@ async function checkOptimisticWindow(
     // changes. Keep their membership deterministic without claiming that the
     // callback API reports an ordered sequence.
     return [...effectRows.values()]
-      .sort((left, right) => right.rank - left.rank)
+      .sort((left, right) =>
+        testCase.direction === `asc`
+          ? left.rank - right.rank
+          : right.rank - left.rank,
+      )
       .map(({ id }) => id)
+  }
+  const recordPublication = () => {
+    publications.push({ rows: ids() })
   }
   const effect =
     consumer === `effect`
@@ -6394,7 +6549,7 @@ async function checkOptimisticWindow(
               if (event.type === `exit`) effectRows.delete(row.id)
               else effectRows.set(row.id, row)
             }
-            publications.push(ids())
+            recordPublication()
           },
         })
       : undefined
@@ -6402,48 +6557,82 @@ async function checkOptimisticWindow(
   let settled: Promise<void> = Promise.resolve()
   return withHistoryCleanup(
     async () => {
-      if (query) await query.preload()
+      if (query) await awaitOptimisticCheckpoint(`preload`, query.preload())
       else
         await vi.waitFor(() =>
-          expect(ids()).toEqual(
-            referenceOptimisticWindow(
-              shape,
-              outcome,
-              `initial`,
-              width,
-              indexed,
-            ),
-          ),
+          expect(ids()).toEqual(referenceOptimisticWindow(testCase, `initial`)),
         )
       const initial = ids()
       expect(initial, `initial rows`).toEqual(
-        referenceOptimisticWindow(shape, outcome, `initial`, width, indexed),
+        referenceOptimisticWindow(testCase, `initial`),
       )
+      const initialProviderRows = [...sent.keys()]
       expect(
-        [...sent.keys()],
-        `initial provider rows include the leading rejected row`,
-      ).toEqual(expectedInitialProviderRows(shape, width, indexed))
+        initialProviderRows,
+        `initial provider rows include row 3`,
+      ).toContain(3)
+      if (shape !== `source`) {
+        expect(
+          initialProviderRows,
+          `initial provider rows include the leading rejected row`,
+        ).toContain(4)
+      }
+      if (extent === `missing` || extent === `non-prefix`) {
+        expect(
+          initialProviderRows,
+          `initial provider rows omit the replacement row`,
+        ).not.toContain(width === 1 ? 2 : 1)
+      }
+      for (const installedId of testCase.installedIds) {
+        if (!sent.has(installedId)) {
+          const replacement = remote.get(installedId)!
+          sync.begin()
+          sync.write({ type: `insert`, value: { ...replacement } })
+          const applied = sync.commit()
+          if (applied !== true) await applied
+          sent.set(installedId, { ...replacement })
+        }
+      }
       const initialRequests = requests
       if (query) {
-        const subscription = query.subscribeChanges(() => {
-          publications.push(ids())
-        })
+        const subscription = query.subscribeChanges(
+          () => {
+            recordPublication()
+          },
+          { includeInitialState: true },
+        )
         unsubscribe = () => subscription.unsubscribe()
+        publications.length = 0
       } else publications.length = 0
       holdLaterAcquisition = true
 
       const transaction =
-        mutation === `delete`
-          ? source.delete(3)
-          : source.update(3, (draft) => {
-              if (shape === `source`) draft.eligible = false
-              else draft.link = -draft.id
+        testCase.mutationSource === `marker`
+          ? markers.update(3, (draft) => {
+              draft.rowId = shape === `joined` ? -3 : 3
             })
+          : mutation === `delete`
+            ? source.delete(3)
+            : source.update(3, (draft) => {
+                if (testCase.rankMove) draft.rank = 0
+                if (
+                  shape === `source` &&
+                  (!testCase.rankMove || testCase.rankDeparture)
+                )
+                  draft.eligible = false
+                else if (shape !== `source`) draft.link = -draft.id
+              })
+      let settlementOutcome: `fulfilled` | `rejected` = `fulfilled`
       settled = transaction.isPersisted.promise.then(
         () => undefined,
-        () => undefined,
+        () => {
+          settlementOutcome = `rejected`
+        },
       )
       const immediate = ids()
+      const immediatePublications = publications.map(
+        copyOptimisticWindowPublication,
+      )
       const acquisitionStarted = await observeAcquisitionAcrossTaskTurns(
         initialRequests,
         () => requests,
@@ -6451,45 +6640,115 @@ async function checkOptimisticWindow(
       const acquiring = ids()
       let answerQueued = acquiring
       if (acquisitionStarted) {
-        await refillStarted.promise
-        providerAnswer.resolve()
-        await answerSubmitted.promise
-        await flushPromises()
-        answerQueued = ids()
+        await awaitOptimisticCheckpoint(`refill start`, refillStarted.promise)
+        if (testCase.answerTiming !== `after-settlement`) {
+          providerAnswer.resolve()
+          await awaitOptimisticCheckpoint(
+            `provider submission`,
+            answerSubmitted.promise,
+          )
+          await flushPromises()
+          answerQueued = ids()
+        }
       } else providerAnswer.resolve()
-      const attemptsBeforeSettlement = attempts.map((attempt) => ({
+      const attemptsAtQueuedAnswer = attempts.map((attempt) => ({
         submittedRows: [...attempt.submittedRows],
+        limit: attempt.limit,
+        direction: attempt.direction,
         appliedReceiptPending: !attempt.appliedReceiptSettled,
         providerPending: !attempt.providerSettled,
       }))
-      const preSettlementPublications = publications.map((window) => [
-        ...window,
-      ])
+      const preSettlementPublications = publications.map(
+        copyOptimisticWindowPublication,
+      )
 
+      settlementPhase = outcome
       if (outcome === `acknowledge`) persistence.resolve()
       else persistence.reject(new Error(`rollback`))
-      await settled
+      await awaitOptimisticCheckpoint(`settlement`, settled)
+      const settledRows = ids()
+      const publicationsAtSettlement = publications.map(
+        copyOptimisticWindowPublication,
+      )
+      const publicationCountAtSettlement = publications.length
+      if (testCase.answerTiming === `after-settlement` && acquisitionStarted) {
+        providerAnswer.resolve()
+        await awaitOptimisticCheckpoint(
+          `late provider submission`,
+          answerSubmitted.promise,
+        )
+        await awaitOptimisticCheckpoint(
+          `late provider completion`,
+          Promise.all(attempts.map((attempt) => attempt.provider)),
+        )
+        await flushPromises()
+      }
+      const afterAnswer = ids()
+      const observedAttempts =
+        testCase.answerTiming === `after-settlement`
+          ? attempts.map((attempt) => ({
+              submittedRows: [...attempt.submittedRows],
+              limit: attempt.limit,
+              direction: attempt.direction,
+              appliedReceiptPending: !attempt.appliedReceiptSettled,
+              providerPending: !attempt.providerSettled,
+            }))
+          : attemptsAtQueuedAnswer
       await flushPromises()
-      const requestsAtSettlement = requests
+      const rowsAfterFirstTurn = ids()
       await flushPromises()
+      const rowsAfterSecondTurn = ids()
+      await awaitOptimisticCheckpoint(
+        `provider completion`,
+        Promise.all(attempts.map((attempt) => attempt.provider)),
+      )
+      const publicationsAfterSettlement = publications
+        .slice(publicationCountAtSettlement)
+        .map(copyOptimisticWindowPublication)
+      let afterRestore: Array<number> | undefined
+      let afterRestorePublications:
+        Array<OptimisticWindowPublication> | undefined
+      if (testCase.mutationSource === `marker` && outcome === `acknowledge`) {
+        const beforeRestore = publications.length
+        const restoration = markers.update(3, (draft) => {
+          draft.rowId = shape === `joined` ? 3 : -3
+        })
+        afterRestore = ids()
+        afterRestorePublications = publications
+          .slice(beforeRestore)
+          .map(copyOptimisticWindowPublication)
+        await awaitOptimisticCheckpoint(
+          `marker restoration`,
+          restoration.isPersisted.promise,
+        )
+      }
 
       return {
         initial,
         immediate,
         acquiring,
         answerQueued,
-        settled: ids(),
+        settled: settledRows,
+        afterAnswer,
+        afterRestore,
+        afterRestorePublications,
+        rowsAfterFirstTurn,
+        rowsAfterSecondTurn,
+        immediatePublications,
         preSettlementPublications,
-        allPublications: publications.map((window) => [...window]),
-        attempts: attemptsBeforeSettlement,
-        requestsStableAcrossTwoTurns: requests === requestsAtSettlement,
+        publicationsAtSettlement,
+        publicationsAfterSettlement,
+        attempts: observedAttempts,
+        acquisitionStartedBeforeSettlement: acquisitionStarted,
+        requestHistory: requestHistory.map((entry) => ({ ...entry })),
+        settlementOutcome,
       }
     },
     () => [
       () => unsubscribe?.(),
       () => persistence.resolve(),
       () => providerAnswer.resolve(),
-      () => settled,
+      () => awaitOptimisticCheckpoint(`settlement cleanup`, settled),
       () => effect?.dispose(),
       () => query?.cleanup(),
       () => source.cleanup(),
@@ -6507,21 +6766,12 @@ function optimisticWindowViolations(
   testCase: OptimisticWindowCase,
 ): Array<string> {
   const violations: Array<string> = []
-  const { outcome, width, indexed } = testCase
-  const optimistic = referenceOptimisticWindow(
-    testCase.shape,
-    outcome,
-    `optimistic`,
-    width,
-    indexed,
-  )
-  const settled = referenceOptimisticWindow(
-    testCase.shape,
-    outcome,
-    `settled`,
-    width,
-    indexed,
-  )
+  const { outcome, width } = testCase
+  const optimistic = referenceOptimisticWindow(testCase, `optimistic`)
+  const settled = referenceOptimisticWindow(testCase, `settled`)
+  const lateAnswer = testCase.answerTiming === `after-settlement`
+  const expectedAtSettlement =
+    lateAnswer && outcome === `acknowledge` ? optimistic : settled
   const compare = (label: string, actual: unknown, expected: unknown) => {
     if (JSON.stringify(actual) !== JSON.stringify(expected)) {
       violations.push(
@@ -6530,29 +6780,71 @@ function optimisticWindowViolations(
     }
   }
   compare(`immediate rows`, observation.immediate, optimistic)
+  compare(
+    `immediate publications`,
+    observation.immediatePublications.map(({ rows }) => rows),
+    [optimistic],
+  )
   compare(`acquiring rows`, observation.acquiring, optimistic)
   compare(`queued-answer rows`, observation.answerQueued, optimistic)
   compare(
     `first optimistic publication`,
-    observation.preSettlementPublications[0],
+    observation.preSettlementPublications[0]?.rows,
     optimistic,
   )
   compare(
     `other pre-settlement publications`,
-    observation.preSettlementPublications.slice(1),
+    observation.preSettlementPublications.slice(1).map(({ rows }) => rows),
     [],
   )
-  compare(`settled rows`, observation.settled, settled)
+  compare(`settled rows`, observation.settled, expectedAtSettlement)
+  if (lateAnswer)
+    compare(`rows after late answer`, observation.afterAnswer, settled)
+  if (testCase.mutationSource === `marker` && outcome === `acknowledge`) {
+    compare(
+      `rows after marker restoration`,
+      observation.afterRestore,
+      referenceOptimisticWindow(testCase, `restored`),
+    )
+    compare(
+      `marker restoration publications`,
+      observation.afterRestorePublications?.map(({ rows }) => rows),
+      [referenceOptimisticWindow(testCase, `restored`)],
+    )
+  }
+  compare(
+    `rows after first settlement turn`,
+    observation.rowsAfterFirstTurn,
+    settled,
+  )
+  compare(
+    `rows after second settlement turn`,
+    observation.rowsAfterSecondTurn,
+    settled,
+  )
   const expectedSettledPublications =
-    JSON.stringify(optimistic) === JSON.stringify(settled) ? [] : [settled]
+    JSON.stringify(optimistic) === JSON.stringify(expectedAtSettlement)
+      ? []
+      : [expectedAtSettlement]
   compare(
     `settled publications`,
-    observation.allPublications.slice(
-      observation.preSettlementPublications.length,
-    ),
+    observation.publicationsAtSettlement
+      .slice(observation.preSettlementPublications.length)
+      .map(({ rows }) => rows),
     expectedSettledPublications,
   )
-  const needsAcquisition = indexed || testCase.shape === `source`
+  compare(
+    `post-settlement publications`,
+    observation.publicationsAfterSettlement.map(({ rows }) => rows),
+    lateAnswer && outcome === `acknowledge` ? [settled] : [],
+  )
+  const needsAcquisition = testCase.acquisition === `required`
+  if (
+    needsAcquisition &&
+    observation.acquisitionStartedBeforeSettlement === false
+  ) {
+    violations.push(`refill acquisition did not start before settlement`)
+  }
   if (needsAcquisition && observation.attempts.length === 0) {
     violations.push(`refill acquisition did not start`)
   }
@@ -6562,64 +6854,55 @@ function optimisticWindowViolations(
   )
   if (needsAcquisition && !refillAttempt) {
     violations.push(`refill answer did not submit row ${refillId}`)
-  } else if (refillAttempt && !refillAttempt.appliedReceiptPending) {
+  } else if (
+    needsAcquisition &&
+    (refillAttempt?.direction !== (testCase.direction ?? `desc`) ||
+      refillAttempt.limit === undefined ||
+      refillAttempt.limit > width + 2)
+  ) {
+    violations.push(`refill used an unbounded provider request`)
+  } else if (
+    !lateAnswer &&
+    refillAttempt &&
+    !refillAttempt.appliedReceiptPending
+  ) {
     violations.push(`applied receipt was not pending at the queued-answer cut`)
   }
-  if (refillAttempt && !refillAttempt.providerPending) {
+  if (!lateAnswer && refillAttempt && !refillAttempt.providerPending) {
     violations.push(`provider was not pending at the queued-answer cut`)
   }
-  if (!needsAcquisition && observation.attempts.length > 0) {
+  if (testCase.acquisition === `forbidden` && observation.attempts.length > 0) {
     violations.push(`refill acquisition started with complete local extent`)
   }
-  if (!observation.requestsStableAcrossTwoTurns) {
-    violations.push(
-      `provider requests changed across two post-settlement turns`,
-    )
+  const requested = new Set<string>()
+  for (const request of observation.requestHistory ?? []) {
+    if (request.phase === `pending` && testCase.indexed) {
+      const finiteOrdered =
+        request.direction === (testCase.direction ?? `desc`) &&
+        request.limit !== undefined &&
+        request.limit <= width + 2
+      const boundaryTie =
+        request.direction === undefined &&
+        request.selectedRanks !== undefined &&
+        new Set(request.selectedRanks).size === 1
+      if (!finiteOrdered && !boundaryTie) {
+        violations.push(`optimistic acquisition used a broad provider request`)
+      }
+      if (testCase.shape === `source` && request.allowsRejectedRoot) {
+        violations.push(`source refill omitted the source predicate`)
+      }
+    }
+    if (requested.has(request.identity) && request.newRows === 0) {
+      violations.push(`repeated an unchanged provider request without progress`)
+      break
+    }
+    requested.add(request.identity)
   }
-  return violations
-}
-
-function knownOptimisticWindowViolations(
-  testCase: OptimisticWindowCase,
-): Array<string> {
-  const { shape, mutation, consumer, outcome, width, indexed } = testCase
-  if (!indexed && shape !== `source`) return []
-  if (shape !== `source` && mutation === `update` && consumer === `effect`) {
-    return []
-  }
-  const optimistic = referenceOptimisticWindow(
-    shape,
-    outcome,
-    `optimistic`,
-    width,
-    indexed,
+  compare(
+    `settlement outcome`,
+    observation.settlementOutcome,
+    outcome === `acknowledge` ? `fulfilled` : `rejected`,
   )
-  if (shape !== `source` && mutation === `update`) {
-    return [
-      `first optimistic publication: undefined instead of ${JSON.stringify(optimistic)}`,
-    ]
-  }
-  const retained = referenceOptimisticWindow(
-    shape,
-    outcome,
-    `initial`,
-    width,
-    indexed,
-  )
-  const violations = [
-    `immediate rows: ${JSON.stringify(retained)} instead of ${JSON.stringify(optimistic)}`,
-    `acquiring rows: ${JSON.stringify(retained)} instead of ${JSON.stringify(optimistic)}`,
-    `queued-answer rows: ${JSON.stringify(retained)} instead of ${JSON.stringify(optimistic)}`,
-    `first optimistic publication: undefined instead of ${JSON.stringify(optimistic)}`,
-  ]
-  if (outcome === `rollback`) {
-    violations.push(
-      `settled publications: [] instead of ${JSON.stringify([retained])}`,
-    )
-  }
-  if (shape !== `source`) {
-    violations.push(`refill answer did not submit row ${width === 1 ? 2 : 1}`)
-  }
   return violations
 }
 
@@ -6841,37 +7124,189 @@ describe(`eager indexed ordered windows`, () => {
     })
   })
 
-  const optimisticWindowCases = (
+  const baseOptimisticWindowCases = (
     [`source`, `joined`, `anti-joined`] as const
   ).flatMap((shape) =>
     ([`update`, `delete`] as const).flatMap((mutation) =>
       ([`collection`, `effect`] as const).flatMap((consumer) =>
         ([`acknowledge`, `rollback`] as const).flatMap((outcome) =>
           ([1, 2] as const).flatMap((width) =>
-            [true, false].map((indexed) => ({
-              shape,
-              mutation,
-              consumer,
-              outcome,
-              width,
-              indexed,
-            })),
+            [true, false].map((indexed): OptimisticWindowCase => {
+              const extent: OptimisticWindowExtent = indexed
+                ? `missing`
+                : `installed`
+              return {
+                shape,
+                mutation,
+                consumer,
+                outcome,
+                width,
+                indexed,
+                extent,
+                installedIds: indexed
+                  ? shape === `source`
+                    ? width === 1
+                      ? [3]
+                      : [3, 2]
+                    : width === 1
+                      ? [4, 3]
+                      : [4, 3, 2]
+                  : [1, 2, 3, 4],
+                acquisition: extent === `missing` ? `required` : `forbidden`,
+              }
+            }),
           ),
         ),
       ),
     ),
   )
+  const optimisticWindowCases: Array<OptimisticWindowCase> = [
+    ...baseOptimisticWindowCases,
+    ...([`joined`, `anti-joined`] as const).flatMap((shape) =>
+      ([`acknowledge`, `rollback`] as const).flatMap((outcome) =>
+        ([`collection`, `effect`] as const).map((consumer) => ({
+          shape,
+          mutation: `update` as const,
+          mutationSource: `marker` as const,
+          consumer,
+          outcome,
+          width: 2 as const,
+          indexed: true,
+          extent: `missing` as const,
+          installedIds: [4, 3, 2],
+          acquisition: `required` as const,
+          answerTiming: `after-settlement` as const,
+        })),
+      ),
+    ),
+    ...([`source`, `joined`] as const).flatMap((shape) =>
+      ([`acknowledge`, `rollback`] as const).flatMap((outcome) =>
+        ([`collection`, `effect`] as const).map((consumer) => ({
+          shape,
+          mutation: `delete` as const,
+          consumer,
+          outcome,
+          width: 2 as const,
+          indexed: true,
+          extent: `missing` as const,
+          installedIds: shape === `source` ? [3, 2] : [4, 3, 2],
+          acquisition: `required` as const,
+          answerTiming: `after-settlement` as const,
+        })),
+      ),
+    ),
+    {
+      shape: `source`,
+      mutation: `update`,
+      consumer: `collection`,
+      outcome: `acknowledge`,
+      width: 2,
+      indexed: true,
+      extent: `installed`,
+      installedIds: [3, 2, 1],
+      acquisition: `allowed`,
+    },
+    {
+      shape: `joined`,
+      mutation: `delete`,
+      consumer: `collection`,
+      outcome: `acknowledge`,
+      width: 2,
+      indexed: true,
+      extent: `installed`,
+      installedIds: [4, 3, 2, 1],
+      acquisition: `allowed`,
+    },
+    {
+      shape: `source`,
+      mutation: `delete`,
+      consumer: `collection`,
+      outcome: `acknowledge`,
+      width: 1,
+      indexed: true,
+      extent: `non-prefix`,
+      installedIds: [3, 1],
+      acquisition: `required`,
+    },
+  ]
 
   it.each(optimisticWindowCases)(
-    `characterizes a width-$width $indexed indexed optimistic $shape $mutation for a $consumer before $outcome`,
+    `characterizes a width-$width $indexed indexed optimistic $shape $mutation from $mutationSource with $extent replacement extent for a $consumer before $outcome ($answerTiming)`,
     async (testCase) => {
       const observation = await checkOptimisticWindow(testCase)
-      // Compare every obligation before accepting the reviewed base's exact
-      // mismatch ledger. The production repair replaces the expected ledger
-      // with [] without changing the observation or law computations.
-      expect(optimisticWindowViolations(observation, testCase)).toEqual(
-        knownOptimisticWindowViolations(testCase),
-      )
+      const actual = optimisticWindowViolations(observation, testCase)
+      // Each legal history must refine the independent public-window model.
+      expect(actual).toEqual([])
+    },
+  )
+
+  it(`refills an optimistic rank move that leaves a full installed window`, async () => {
+    // Moving the leading row below a missing source row does not shrink the
+    // installed window. A local row-count check alone cannot discover that
+    // the remote ordered prefix now contains row 1.
+    const testCase: OptimisticWindowCase = {
+      shape: `source`,
+      mutation: `update`,
+      consumer: `collection`,
+      outcome: `acknowledge`,
+      width: 2,
+      indexed: true,
+      extent: `missing`,
+      installedIds: [3, 2],
+      acquisition: `required`,
+      rankMove: true,
+    }
+    const observation = await checkOptimisticWindow(testCase)
+    expect(optimisticWindowViolations(observation, testCase)).toEqual([])
+  })
+
+  it(`restores an optimistic membership departure with a rank change on rollback`, async () => {
+    // This is a membership departure, so the short-window law applies even
+    // though its source row also changes order. Rollback must remove both
+    // overlay effects at the same public cut.
+    const testCase: OptimisticWindowCase = {
+      shape: `source`,
+      mutation: `update`,
+      consumer: `collection`,
+      outcome: `rollback`,
+      width: 2,
+      indexed: true,
+      extent: `missing`,
+      installedIds: [3, 2],
+      acquisition: `required`,
+      rankMove: true,
+      rankDeparture: true,
+    }
+    const observation = await checkOptimisticWindow(testCase)
+    expect(optimisticWindowViolations(observation, testCase)).toEqual([])
+  })
+
+  it.each(
+    ([`joined`, `anti-joined`] as const).flatMap((shape) =>
+      ([`acknowledge`, `rollback`] as const).map((outcome) => ({
+        shape,
+        outcome,
+      })),
+    ),
+  )(
+    `publishes an ascending $shape limit-one optimistic delete before $outcome`,
+    async ({ shape, outcome }) => {
+      // Negated ranks make row 3 the ascending head and row 2 its provider
+      // successor. The leading rejected row 4 remains ahead of both.
+      const testCase: OptimisticWindowCase = {
+        shape,
+        mutation: `delete`,
+        consumer: `collection`,
+        outcome,
+        width: 1,
+        indexed: true,
+        extent: `missing`,
+        installedIds: [4, 3],
+        acquisition: `required`,
+        direction: `asc`,
+      }
+      const observation = await checkOptimisticWindow(testCase)
+      expect(optimisticWindowViolations(observation, testCase)).toEqual([])
     },
   )
 
@@ -6883,6 +7318,9 @@ describe(`eager indexed ordered windows`, () => {
       outcome: `acknowledge`,
       width: 2,
       indexed: true,
+      extent: `missing`,
+      installedIds: [4, 3, 2],
+      acquisition: `required`,
     }
     const observation: OptimisticWindowObservation = {
       initial: [3, 2],
@@ -6890,10 +7328,14 @@ describe(`eager indexed ordered windows`, () => {
       acquiring: [2],
       answerQueued: [2],
       settled: [2, 1],
-      preSettlementPublications: [[2]],
-      allPublications: [[2], [2, 1]],
+      rowsAfterFirstTurn: [2, 1],
+      rowsAfterSecondTurn: [2, 1],
+      immediatePublications: [{ rows: [2] }],
+      preSettlementPublications: [{ rows: [2] }],
+      publicationsAtSettlement: [{ rows: [2] }, { rows: [2, 1] }],
+      publicationsAfterSettlement: [],
       attempts: [],
-      requestsStableAcrossTwoTurns: true,
+      settlementOutcome: `fulfilled`,
     }
 
     expect(optimisticWindowViolations(observation, testCase)).toEqual([
@@ -6901,6 +7343,328 @@ describe(`eager indexed ordered windows`, () => {
       `refill answer did not submit row 1`,
     ])
   })
+
+  it(`rejects a delayed Collection publication`, () => {
+    const testCase: OptimisticWindowCase = {
+      shape: `joined`,
+      mutation: `update`,
+      consumer: `collection`,
+      outcome: `acknowledge`,
+      width: 2,
+      indexed: true,
+      extent: `missing`,
+      installedIds: [4, 3, 2],
+      acquisition: `required`,
+    }
+    const observation: OptimisticWindowObservation = {
+      initial: [3, 2],
+      immediate: [2],
+      acquiring: [2],
+      answerQueued: [2],
+      settled: [2, 1],
+      rowsAfterFirstTurn: [2, 1],
+      rowsAfterSecondTurn: [2, 1],
+      immediatePublications: [],
+      preSettlementPublications: [{ rows: [2] }],
+      publicationsAtSettlement: [{ rows: [2] }, { rows: [2, 1] }],
+      publicationsAfterSettlement: [],
+      attempts: [
+        {
+          submittedRows: [1],
+          limit: 2,
+          direction: `desc`,
+          appliedReceiptPending: true,
+          providerPending: true,
+        },
+      ],
+      settlementOutcome: `fulfilled`,
+    }
+
+    expect(optimisticWindowViolations(observation, testCase)).toEqual([
+      `immediate publications: [] instead of [[2]]`,
+    ])
+  })
+
+  it(`rejects a stale publication after transaction settlement`, () => {
+    const testCase: OptimisticWindowCase = {
+      shape: `joined`,
+      mutation: `update`,
+      consumer: `collection`,
+      outcome: `acknowledge`,
+      width: 2,
+      indexed: true,
+      extent: `missing`,
+      installedIds: [4, 3, 2],
+      acquisition: `required`,
+    }
+    const observation: OptimisticWindowObservation = {
+      initial: [3, 2],
+      immediate: [2],
+      acquiring: [2],
+      answerQueued: [2],
+      settled: [2, 1],
+      rowsAfterFirstTurn: [2, 1],
+      rowsAfterSecondTurn: [2],
+      immediatePublications: [{ rows: [2] }],
+      preSettlementPublications: [{ rows: [2] }],
+      publicationsAtSettlement: [{ rows: [2] }, { rows: [2, 1] }],
+      publicationsAfterSettlement: [{ rows: [2] }],
+      attempts: [
+        {
+          submittedRows: [1],
+          limit: 2,
+          direction: `desc`,
+          appliedReceiptPending: true,
+          providerPending: true,
+        },
+      ],
+      settlementOutcome: `fulfilled`,
+    }
+
+    expect(optimisticWindowViolations(observation, testCase)).toEqual([
+      `rows after second settlement turn: [2] instead of [2,1]`,
+      `post-settlement publications: [[2]] instead of []`,
+    ])
+  })
+
+  it(`rejects a full-source refill disguised as useful bounded progress`, () => {
+    const testCase: OptimisticWindowCase = {
+      shape: `joined`,
+      mutation: `delete`,
+      consumer: `collection`,
+      outcome: `acknowledge`,
+      width: 2,
+      indexed: true,
+      extent: `missing`,
+      installedIds: [4, 3, 2],
+      acquisition: `required`,
+    }
+    const observation: OptimisticWindowObservation = {
+      initial: [3, 2],
+      immediate: [2],
+      acquiring: [2],
+      answerQueued: [2],
+      settled: [2, 1],
+      rowsAfterFirstTurn: [2, 1],
+      rowsAfterSecondTurn: [2, 1],
+      immediatePublications: [{ rows: [2] }],
+      preSettlementPublications: [{ rows: [2] }],
+      publicationsAtSettlement: [{ rows: [2] }, { rows: [2, 1] }],
+      publicationsAfterSettlement: [],
+      attempts: [
+        {
+          submittedRows: [4, 3, 2, 1, 0, -1],
+          limit: 6,
+          direction: `desc`,
+          appliedReceiptPending: true,
+          providerPending: true,
+        },
+      ],
+      settlementOutcome: `fulfilled`,
+    }
+
+    expect(optimisticWindowViolations(observation, testCase)).toEqual([
+      `refill used an unbounded provider request`,
+    ])
+    const repeated = {
+      ...observation,
+      attempts: [{ ...observation.attempts[0]!, limit: 2 }],
+      requestHistory: [
+        { identity: `same ordered page`, newRows: 1 },
+        { identity: `same ordered page`, newRows: 0 },
+      ],
+    }
+    expect(optimisticWindowViolations(repeated, testCase)).toEqual([
+      `repeated an unchanged provider request without progress`,
+    ])
+  })
+
+  it(`rejects a source refill that omits eligibility or adds broad work`, async () => {
+    const testCase: OptimisticWindowCase = {
+      shape: `source`,
+      mutation: `delete`,
+      consumer: `collection`,
+      outcome: `acknowledge`,
+      width: 2,
+      indexed: true,
+      extent: `missing`,
+      installedIds: [3, 2],
+      acquisition: `required`,
+    }
+    const observation = await checkOptimisticWindow(testCase)
+    expect(optimisticWindowViolations(observation, testCase)).toEqual([])
+    const refill = observation.requestHistory!.find(
+      ({ phase, submittedRows }) =>
+        phase === `pending` && submittedRows?.includes(1),
+    )!
+
+    // A finite, ordered request that drops the source predicate still returns
+    // the needed row, but a rejected peer at the same rank exposes the omission.
+    const missingPredicate: OptimisticWindowObservation = {
+      ...observation,
+      requestHistory: observation.requestHistory!.map((request) =>
+        request === refill ? { ...request, allowsRejectedRoot: true } : request,
+      ),
+    }
+    expect(optimisticWindowViolations(missingPredicate, testCase)).toContain(
+      `source refill omitted the source predicate`,
+    )
+
+    // Useful progress from the first page cannot license a later, unrelated
+    // full-source fetch while the optimistic transaction remains pending.
+    const extraBroadRequest: OptimisticWindowObservation = {
+      ...observation,
+      requestHistory: [
+        ...observation.requestHistory!,
+        {
+          identity: `distinct full-source request`,
+          phase: `pending`,
+          newRows: 0,
+          submittedRows: [4, 3, 2, 1, 0, -1],
+          selectedRanks: [4, 3, 2, 1, 0, -1],
+          allowsRejectedRoot: true,
+        },
+      ],
+    }
+    expect(optimisticWindowViolations(extraBroadRequest, testCase)).toContain(
+      `optimistic acquisition used a broad provider request`,
+    )
+  })
+
+  it(`rejects acquisition deferred until after optimistic settlement`, async () => {
+    const testCase: OptimisticWindowCase = {
+      shape: `source`,
+      mutation: `delete`,
+      consumer: `collection`,
+      outcome: `acknowledge`,
+      width: 2,
+      indexed: true,
+      extent: `missing`,
+      installedIds: [3, 2],
+      acquisition: `required`,
+    }
+    const observation = await checkOptimisticWindow(testCase)
+    expect(optimisticWindowViolations(observation, testCase)).toEqual([])
+    expect(
+      optimisticWindowViolations(
+        { ...observation, acquisitionStartedBeforeSettlement: false },
+        testCase,
+      ),
+    ).toContain(`refill acquisition did not start before settlement`)
+  })
+
+  /**
+   * These complete-local-extent histories isolate the immediate publication
+   * law from provider timing. The reference filters one deleted key from a
+   * plain row list, orders it, then takes the requested slice. A tie deletes
+   * whichever equal-ranked key the initial window selected; the remaining
+   * peer is then the only valid top row, independent of tie-breaking policy.
+   */
+  it.each(
+    [
+      {
+        name: `ascending head`,
+        ranks: [1, 2, 3],
+        direction: `asc` as const,
+        offset: 0,
+        limit: 1,
+      },
+      {
+        name: `descending offset`,
+        ranks: [1, 2, 3, 4],
+        direction: `desc` as const,
+        offset: 1,
+        limit: 1,
+      },
+      {
+        name: `tied head`,
+        ranks: [2, 3, 3],
+        direction: `desc` as const,
+        offset: 0,
+        limit: 1,
+      },
+      {
+        name: `exhausted window`,
+        ranks: [1, 2, 3],
+        direction: `desc` as const,
+        offset: 0,
+        limit: 4,
+      },
+    ].flatMap((window) =>
+      ([`acknowledge`, `rollback`] as const).map((outcome) => ({
+        ...window,
+        outcome,
+      })),
+    ),
+  )(
+    `publishes an optimistic departure in an installed $name before $outcome`,
+    async ({ ranks, direction, offset, limit, outcome }) => {
+      const persistence = createDeferred<void>()
+      const rows = ranks.map((rank, index) => ({ id: index + 1, rank }))
+      const source = createCollection(
+        localOnlyCollectionOptions({
+          id: `optimistic-installed-${Math.random()}`,
+          getKey: (row) => row.id,
+          initialData: rows,
+          onDelete: async () => {
+            await persistence.promise
+          },
+        }),
+      )
+      source.createIndex((row) => row.rank, { indexType: BTreeIndex })
+      const query = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ row: source })
+            .orderBy(({ row }) => row.rank, direction)
+            .offset(offset)
+            .limit(limit),
+      })
+      const ids = () => query.toArray.map(({ id }) => id)
+      const order = (removed?: number) =>
+        rows
+          .filter(({ id }) => id !== removed)
+          .sort((left, right) =>
+            direction === `asc`
+              ? left.rank - right.rank
+              : right.rank - left.rank,
+          )
+          .slice(offset, offset + limit)
+          .map(({ id }) => id)
+      let unsubscribe: (() => void) | undefined
+      try {
+        await query.preload()
+        const initial = ids()
+        if (ranks[1] !== ranks[2]) expect(initial).toEqual(order())
+        const departed = initial[0]!
+        const publications: Array<Array<number>> = []
+        const subscription = query.subscribeChanges(
+          () => publications.push(ids()),
+          { includeInitialState: true },
+        )
+        unsubscribe = () => subscription.unsubscribe()
+        publications.length = 0
+
+        const transaction = source.delete(departed)
+        const expected = order(departed)
+        expect(ids(), `immediate installed rows`).toEqual(expected)
+        expect(publications, `synchronous installed publication`).toEqual([
+          expected,
+        ])
+        if (outcome === `acknowledge`) persistence.resolve()
+        else persistence.reject(new Error(`rollback`))
+        await transaction.isPersisted.promise.catch(() => undefined)
+        expect(ids(), `settled installed rows`).toEqual(
+          outcome === `acknowledge` ? expected : initial,
+        )
+      } finally {
+        persistence.resolve()
+        unsubscribe?.()
+        await query.cleanup()
+        await source.cleanup()
+      }
+    },
+  )
 
   it.each([
     [`sync`, 1],

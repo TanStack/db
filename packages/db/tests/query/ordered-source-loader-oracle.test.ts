@@ -449,6 +449,7 @@ describe(`OrderedSourceLoader`, () => {
         loader.onSourceChanges(
           [{ type: `update`, key: 1, value: { rank: 2 } }],
           sentRows,
+          () => false,
         )
       }
       options.onLoadSubsetResult?.(true, options, () => {})

@@ -798,9 +798,16 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     scheduleGraph = true,
   ): void {
     if (this.optimizableOrderByCollections[sourceId]) {
+      const source = this.collectionSources.find(
+        (candidate) => candidate.sourceId === sourceId,
+      )!
       this.orderedLoaders
         .get(sourceId)
-        ?.onSourceChanges(changes, this.sentToD2RowsBySource.get(sourceId))
+        ?.onSourceChanges(
+          changes,
+          this.sentToD2RowsBySource.get(sourceId),
+          (key) => source.collection._hasOptimisticOverlay(key),
+        )
       changes = [...splitUpdates(changes)]
     }
     this.sendChangesToD2(sourceId, changes)
