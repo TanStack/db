@@ -23,7 +23,7 @@ type OrderedContinuation = {
   kind: `boundary` | `more`
   orderedLoadGeneration: number
   orderingInvalidationGeneration: number
-  isAuthoritativeRepair: boolean
+  isAuthoritativeRequest: boolean
   windowOperationGeneration?: number
   continuesOrderedPrefixRepair: boolean
 }
@@ -178,7 +178,7 @@ export class OrderedSourceLoader {
       // so authoritative repair must supersede the stale finite chain.
       if (
         this.needsOrderingRepair &&
-        !this.stagedContinuation.isAuthoritativeRepair
+        !this.stagedContinuation.isAuthoritativeRequest
       ) {
         this.stagedContinuation = undefined
       } else {
@@ -449,7 +449,7 @@ export class OrderedSourceLoader {
   }
 
   invalidateCursor(): void {
-    if (!this.stagedContinuation?.isAuthoritativeRepair) {
+    if (!this.stagedContinuation?.isAuthoritativeRequest) {
       this.stagedContinuation = undefined
     }
     this.lastPage = undefined
@@ -613,10 +613,10 @@ export class OrderedSourceLoader {
   ): Promise<void> | undefined {
     const isFullSource = kind === `full-source`
     const isOrderedRepair = kind === `ordered-repair`
-    const isAuthoritativeRepair =
+    const isAuthoritativeRequest =
       isFullSource || isOrderedRepair || continuesOrderedPrefixRepair
     const retryRepair =
-      isAuthoritativeRepair &&
+      isAuthoritativeRequest &&
       this.hasSettledSourceRequest &&
       this.needsOrderingRepair &&
       windowOperationGeneration === undefined
@@ -630,9 +630,8 @@ export class OrderedSourceLoader {
       // current graph turn, including an initial fallback. A bounded prefix
       // repair reads only installed rows and can also finish in that turn.
       // Other repairs keep asynchronous settlement.
-      (!isAuthoritativeRepair ||
-        (isFullSource && !this.needsOrderingRepair) ||
-        (this.readsBoundedPrefix && !isFullSource)) &&
+      (!isAuthoritativeRequest ||
+        (isFullSource ? !this.needsOrderingRepair : this.readsBoundedPrefix)) &&
       requestGraphInputRevision !== undefined
     let synchronousCompletionFailure: { error: unknown } | undefined
     const continuation = (
@@ -641,7 +640,7 @@ export class OrderedSourceLoader {
       kind: continuationKind,
       orderedLoadGeneration,
       orderingInvalidationGeneration,
-      isAuthoritativeRepair,
+      isAuthoritativeRequest,
       windowOperationGeneration,
       continuesOrderedPrefixRepair,
     })
@@ -695,7 +694,7 @@ export class OrderedSourceLoader {
         () => {
           if (orderedLoadGeneration !== this.orderedLoadGeneration) return
           if (
-            !isAuthoritativeRepair &&
+            !isAuthoritativeRequest &&
             orderingInvalidationGeneration !==
               this.orderingInvalidationGeneration
           )
@@ -703,7 +702,7 @@ export class OrderedSourceLoader {
           // A finite request may finish behind an authoritative repair. It cannot
           // clear that repair's failure or resume finite refinement around it.
           if (
-            !isAuthoritativeRepair &&
+            !isAuthoritativeRequest &&
             (this.failedRequest || this.authoritativeRequestState !== `none`)
           )
             return
@@ -790,7 +789,7 @@ export class OrderedSourceLoader {
       // A failed request proves no full-source coverage. An explicit window
       // move or later replay may retry it, but an ordinary graph pass must
       // not start an eager retry loop.
-      if (isAuthoritativeRepair) {
+      if (isAuthoritativeRequest) {
         if (isFullSource) {
           this.authoritativeRequestState = `failed`
         } else {
@@ -842,7 +841,7 @@ export class OrderedSourceLoader {
     // pending without retaining every ancestor promise until the final page.
     this.onResult(
       tracked,
-      isAuthoritativeRepair && this.needsOrderingRepair,
+      isAuthoritativeRequest && this.needsOrderingRepair,
       settlesAsync,
     )
     return tracked
@@ -855,7 +854,7 @@ export class OrderedSourceLoader {
     if (
       !this.active ||
       continuation.orderedLoadGeneration !== this.orderedLoadGeneration ||
-      (!continuation.isAuthoritativeRepair &&
+      (!continuation.isAuthoritativeRequest &&
         continuation.orderingInvalidationGeneration !==
           this.orderingInvalidationGeneration)
     )
@@ -1022,7 +1021,7 @@ export class OrderedSourceLoader {
         }
       | undefined,
     error: Error,
-    isAuthoritativeRepair: boolean,
+    isAuthoritativeRequest: boolean,
     windowOperationGeneration?: number,
     cancelObservedSettlement = false,
   ): Error {
@@ -1032,7 +1031,7 @@ export class OrderedSourceLoader {
     }
     this.requireFullSourceRepair()
     this.recordRequestFailure(windowOperationGeneration)
-    if (isAuthoritativeRepair) {
+    if (isAuthoritativeRequest) {
       this.authoritativeRequestState = `none`
       this.authoritativeRequestKind = undefined
     }
@@ -1042,7 +1041,7 @@ export class OrderedSourceLoader {
       // Cleanup is attempted once and must not replace the request failure.
     }
     if (
-      isAuthoritativeRepair &&
+      isAuthoritativeRequest &&
       this.hasSettledSourceRequest &&
       windowOperationGeneration === undefined
     ) {
@@ -1075,7 +1074,7 @@ export class OrderedSourceLoader {
     requestedCount?: number,
   ): Promise<void> | undefined {
     const isFullSource = kind === `full-source`
-    const isAuthoritativeRepair =
+    const isAuthoritativeRequest =
       isFullSource || kind === `ordered-repair` || continuesOrderedPrefixRepair
     let observed:
       | {
@@ -1116,13 +1115,13 @@ export class OrderedSourceLoader {
         const failure = this.failRequest(
           observed,
           normalizeError(error),
-          isAuthoritativeRepair,
+          isAuthoritativeRequest,
           windowOperationGeneration,
           observing,
         )
         if (
           !observing &&
-          isAuthoritativeRepair &&
+          isAuthoritativeRequest &&
           this.hasSettledSourceRequest
         ) {
           // A synchronous repair failure has no transport promise, but must

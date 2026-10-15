@@ -1421,6 +1421,7 @@ async function observeInitialFallback(
   const delivered = new Set<number>()
   const rows = initialFallbackRows(order)
   const publications: Array<InitialFallbackPublication> = []
+  const commitReturnedImmediately: Array<boolean> = []
   let fallbackResultSettled = false
   let atFallbackEntry: InitialSettlementObservation | undefined
   const source = createCollection<InitialFallbackRow, number>({
@@ -1470,7 +1471,9 @@ async function observeInitialFallback(
                 delivered.add(row.id)
                 write({ type: `insert`, value: row })
               }
-              expect(commit()).toBe(true)
+              // Assertions here would be caught as provider failures. Compare
+              // the receipt at the oracle checkpoint instead.
+              commitReturnedImmediately.push(commit() === true)
             }
             const result =
               options.orderBy || settlement === `synchronous`
@@ -1509,6 +1512,7 @@ async function observeInitialFallback(
         requestsAtCut: Array<LoadSubsetOptions>
         publicationsAtCut: Array<InitialFallbackPublication>
         publications: Array<InitialFallbackPublication>
+        commitReturnedImmediately: Array<boolean>
       }
     | undefined
   let primaryFailure: CapturedOracleFailure | undefined
@@ -1525,6 +1529,7 @@ async function observeInitialFallback(
       requestsAtCut,
       publicationsAtCut,
       publications: [...publications],
+      commitReturnedImmediately: [...commitReturnedImmediately],
     }
   } catch (error) {
     primaryFailure = { error }
@@ -1565,6 +1570,7 @@ describe(`initial locale-string fallback oracle`, () => {
         settlement,
         order,
       )
+      expect(observed.commitReturnedImmediately).toEqual([true, true])
       expect(observed.requestsAtCut).toHaveLength(2)
       expect(observed.requestsAtCut[0]).toMatchObject({ limit: 1 })
       expect(observed.requestsAtCut[0]?.orderBy).toHaveLength(1)
@@ -1596,6 +1602,7 @@ describe(`initial locale-string fallback oracle`, () => {
         order,
         true,
       )
+      expect(observed.commitReturnedImmediately).toEqual([true, true])
       const id = order === `tied` ? 1 : 2
       expect(observed.requestsAtCut).toHaveLength(2)
       expect(observed.atFallbackEntry).toEqual({ rows: [], status: `loading` })
@@ -1644,7 +1651,9 @@ describe(`initial locale-string fallback oracle`, () => {
  * comparison requires the published first window while status is still
  * `loading`, reaches the later fallback, and checks every public event against
  * its callback snapshot and the model's final delta. It permits coherent
- * intermediate publications and assigns no synchronous cut to later work.
+ * intermediate publications and assigns no synchronous cut to later work. A
+ * separate cleanup-failure pair requires that retiring the first acquisition
+ * still leaves the successful replacement and reports the adapter error.
  */
 type LaterFallbackMutation = `delete-marker` | `retarget-marker`
 type LaterFallbackResponse = `literal-true` | `promise` | `held-receipt`
@@ -1666,6 +1675,8 @@ type LaterFallbackPublication = {
 type LaterFallbackObservation = {
   response: LaterFallbackResponse
   childDemand: LaterFallbackChildDemand
+  releaseError: boolean
+  releaseFailures: number
   initial: { rows: Array<LaterFallbackRow>; status: string }
   initialChildLoads: number
   initialChildPending: boolean
@@ -1699,6 +1710,12 @@ type LaterFallbackObservation = {
     liveLoading: boolean
   }
   publications: Array<LaterFallbackPublication>
+  commitReceipts: Array<{
+    served: Array<number>
+    fullSource: boolean
+    immediate: boolean
+  }>
+  markerCommitImmediate: boolean
 }
 
 const laterFallbackRoots: ReadonlyArray<LaterFallbackRoot> = [
@@ -1753,6 +1770,7 @@ async function observeLaterFallback(
   response: LaterFallbackResponse,
   childDemand: LaterFallbackChildDemand,
   assertObservation: (observed: LaterFallbackObservation) => void,
+  releaseError = false,
 ): Promise<void> {
   type RootSync = Parameters<SyncConfig<LaterFallbackRoot, number>[`sync`]>[0]
   type MarkerSync = Parameters<
@@ -1767,8 +1785,12 @@ async function observeLaterFallback(
   const requests: Array<{ options: LoadSubsetOptions; served: Array<number> }> =
     []
   const publications: Array<LaterFallbackPublication> = []
+  const commitReceipts: LaterFallbackObservation[`commitReceipts`] = []
+  const releaseFailure = new Error(`first ordered acquisition release failed`)
+  let releaseFailures = 0
   let childLoads = 0
   let markerSync!: MarkerSync
+  let markerCommitImmediate = false
   let blockerStarted = false
   let blockerPersistence: Promise<unknown> | undefined
   let receiptPending = false
@@ -1842,9 +1864,13 @@ async function observeLaterFallback(
                 sync.write({ type: `insert`, value: row })
               }
               const receipt = sync.commit()
+              commitReceipts.push({
+                served: fresh.map(({ id }) => id),
+                fullSource: isFullSource,
+                immediate: receipt === true,
+              })
               if (isFullSource && response === `held-receipt`) {
-                expect(receipt).not.toBe(true)
-                receiptPending = true
+                receiptPending = receipt !== true
                 if (receipt !== true)
                   void receipt.then(
                     () => (receiptPending = false),
@@ -1853,7 +1879,6 @@ async function observeLaterFallback(
                 fallbackEntered.resolve()
                 return receipt
               }
-              expect(receipt).toBe(true)
               if (
                 response === `held-receipt` &&
                 options.orderBy &&
@@ -1874,6 +1899,12 @@ async function observeLaterFallback(
             }
             return true
           },
+          unloadSubset: (options) => {
+            if (releaseError && options === requests[0]?.options) {
+              releaseFailures++
+              throw releaseFailure
+            }
+          },
         }
       },
     },
@@ -1889,7 +1920,7 @@ async function observeLaterFallback(
         sync.begin()
         for (const marker of laterFallbackInitialMarkers)
           sync.write({ type: `insert`, value: marker })
-        expect(sync.commit()).toBe(true)
+        markerCommitImmediate = sync.commit() === true
         sync.markReady()
       },
     },
@@ -2051,6 +2082,8 @@ async function observeLaterFallback(
     const observation: LaterFallbackObservation = {
       response,
       childDemand,
+      releaseError,
+      releaseFailures,
       initial,
       initialChildLoads,
       initialChildPending,
@@ -2066,6 +2099,8 @@ async function observeLaterFallback(
         liveLoading: live.isLoadingSubset,
       },
       publications: [...publications],
+      commitReceipts: [...commitReceipts],
+      markerCommitImmediate,
     }
     assertObservation(observation)
   } catch (error) {
@@ -2115,6 +2150,17 @@ function assertLaterFallbackObservation(
 ): void {
   const initial = expectedLaterFallbackWindow(laterFallbackInitialMarkers)
   const final = expectedLaterFallbackWindow(laterFallbackMarkersAfter(mutation))
+  expect(observed.releaseFailures).toBe(observed.releaseError ? 1 : 0)
+  expect(observed.markerCommitImmediate).toBe(true)
+  expect(observed.commitReceipts).toEqual([
+    { served: [1], fullSource: false, immediate: true },
+    { served: [2], fullSource: false, immediate: true },
+    {
+      served: [3],
+      fullSource: true,
+      immediate: observed.response !== `held-receipt`,
+    },
+  ])
   expect(observed.initial).toEqual({
     rows: initial.map(({ row }) => row),
     status: `loading`,
@@ -2189,7 +2235,8 @@ function assertLaterFallbackObservation(
   expect(observed.final.rootLoading).toBe(false)
   if (observed.childDemand === `settled`)
     expect(observed.final.liveLoading).toBe(false)
-  expect([`loading`, `ready`]).toContain(observed.final.status)
+  if (observed.releaseError) expect(observed.final.status).toBe(`error`)
+  else expect([`loading`, `ready`]).toContain(observed.final.status)
   // Changes may be split across publications. At each callback, applying
   // its changes to the prior public snapshot must match the rows a reader
   // sees there; the flattened delta must match the finite join model.
@@ -2231,6 +2278,19 @@ describe(`post-publication null fallback oracle`, () => {
     async ({ mutation, response, childDemand }) => {
       await observeLaterFallback(mutation, response, childDemand, (observed) =>
         assertLaterFallbackObservation(mutation, observed),
+      )
+    },
+  )
+
+  it.each([`delete-marker`, `retarget-marker`] as const)(
+    `reports the first lease's cleanup failure after the %s fallback publishes its replacement`,
+    async (mutation) => {
+      await observeLaterFallback(
+        mutation,
+        `literal-true`,
+        `pending`,
+        (observed) => assertLaterFallbackObservation(mutation, observed),
+        true,
       )
     },
   )

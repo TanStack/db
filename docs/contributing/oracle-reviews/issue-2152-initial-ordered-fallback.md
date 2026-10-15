@@ -269,3 +269,32 @@ tracker retains the applied receipt; it does not alone prove that every ordered
 publication participant waits for it. The row and event comparisons cover the
 named final checkpoint. Real provider handoffs and an on-demand React first
 commit remain outside this controlled core witness.
+
+## Later-fallback re-review at `cdc370b04`
+
+The initial synchronous cut ends when the first window publishes. A later
+full-source fallback without ordering-repair debt may complete in the same
+graph turn, but the contract does not require that timing. A controlled public
+probe observed row 3 and its change event before the marker transaction's
+`commit()` returned for literal `true`. Promise and held-receipt responses had
+not published row 3 at that cut. The oracle retains its coherence law across
+both schedules instead of turning the current later timing into a guarantee.
+
+Two additional histories make the first ordered acquisition's adapter unload
+throw while a later literal-`true` fallback replaces it. The marker
+transaction's `commit()` still returns `true`; the successful row-3 window and
+its change event remain, and the live-query Collection reports `error`. A
+temporary fault that rethrew the already reported release error from the
+subscriber failed both histories at the marker commit. The direct loader's
+release-error tests continue to check its separate caller boundary.
+
+The controlled providers now record applied-receipt shapes and compare them
+after production returns. Deliberately reversing one assertion inside the
+provider had previously produced six unrelated setup failures among the eight
+post-publication histories, showing how request-failure handling could hide
+the intended diagnostic. The architecture's prior statement that full-source
+repair keeps asynchronous settlement was restored; the untested broad
+publication-hold sentence added during this PR was removed. The changeset
+names the permitted later completion. Framework render timing remains outside
+the core cut, and the React first-layout-commit witness does not claim to
+cover Vue, Solid, Svelte, or Angular.

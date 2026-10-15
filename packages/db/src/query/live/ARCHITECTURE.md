@@ -1014,9 +1014,9 @@ repair (an eager source, an index, one order term, no joined filter) returns
 literal `true`, the
 repair settles synchronously,
 so its tie and refill steps finish inside the same graph run and a window move
-that consumes the repair still publishes once. A full-source repair holds the
-previous public window until its authoritative acquisition and graph work
-settle; its scheduling is not part of the initial synchronous cut. An initial
+that consumes the repair still publishes once. A full-source repair keeps
+asynchronous settlement; its scheduling is not part of the initial synchronous
+cut. An initial
 full-source load follows that cut as described under initial readiness. The
 ordered graph's top-K operator owns the local result window. Provider transfer
 remains bounded by `orderBy` and `limit`; local delivery cardinality is a
@@ -1385,7 +1385,10 @@ acquisition asynchronous. This cut does not apply to explicit window moves,
 full-source work started after the initial window publishes, repair other than
 a bounded prefix repair, truncate replay, or framework render timing, and it
 proves neither source exhaustion nor broader source coverage.
-Later full-source work without ordering-repair debt may finish synchronously.
+The first-publication boundary limits this guarantee; it does not require
+later full-source work to wait for a microtask. A later literal `true`
+full-source fallback without ordering-repair debt may finish in the current
+graph turn.
 
 If any source subscriber adds input to the graph during a synchronous ordered
 continuation, core returns to graph work before deciding whether that ordered
