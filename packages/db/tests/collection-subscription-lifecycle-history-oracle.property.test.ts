@@ -54,30 +54,30 @@ const randomCampaign = (property: string) =>
  *
  * The independent model in the lifecycle grammar crosses explicit eager,
  * default eager, and on-demand configuration with empty and nonempty
- * replacements and with or without an eager loader. The production driver
- * publishes an old row, creates a direct subscription, cleans up its source,
- * requests a snapshot, and restarts the real Collection. It holds eager
- * readiness to prove the wait cannot fulfill early. Before that release and
- * after restart settlement, the returned wait, acquisition count, subscription
- * status, and public rows must match the model. This fixed matrix does not claim
- * failure or competing-owner coverage.
+ * replacements and with or without an eager loader. Eager histories may also
+ * truncate the loading replacement or enter recoverable error before ready.
+ * The production driver publishes an old row, creates a direct subscription,
+ * cleans up its source, requests a snapshot, and restarts the real Collection.
+ * It holds eager readiness to prove the cleanup-detached
+ * `onLoadSubsetResult` promise cannot fulfill early. At every cut, the returned
+ * promise's settlement, acquisition count, subscription and Collection status,
+ * and subscriber-applied rows must match the model. Public preload failure and
+ * demands first admitted after restart remain outside this focused matrix.
  */
 describe(`demand created while its Collection is cleaned up`, () => {
   it.each(cleanedRestartDemandCases)(
-    `$syncMode source with $loader loader and a $replacement replacement`,
+    `$syncMode source with $loader loader, $replacement replacement, and $interruption`,
     async (history) => {
       const expected = expectedCleanedRestartDemand(history)
       let syncRuns = 0
       let physicalAcquisitions = 0
       let releaseEagerReady: (() => void) | undefined
-      let begin!: () => void
-      let write!: (message: { type: `insert`; value: { id: string } }) => void
-      let commit!: () => void
+      let operations!: Parameters<SyncConfig<{ id: string }>[`sync`]>[0]
 
       const publishRow = (id: string) => {
-        begin()
-        write({ type: `insert`, value: { id } })
-        commit()
+        operations.begin()
+        operations.write({ type: `insert`, value: { id } })
+        operations.commit()
       }
       const publishReplacement = () => {
         if (history.replacement === `row`) publishRow(`replacement`)
@@ -89,20 +89,20 @@ describe(`demand created while its Collection is cleaned up`, () => {
           ? {}
           : { syncMode: history.syncMode }),
         sync: {
-          sync: (operations) => {
+          sync: (next) => {
             const syncRun = syncRuns++
-            begin = operations.begin
-            write = operations.write
-            commit = operations.commit
+            // Keep the current run's public adapter boundary for the history
+            // commands below; the model does not read this object.
+            operations = next
             if (syncRun === 0) {
-              operations.markReady()
+              next.markReady()
             } else if (history.syncMode !== `on-demand`) {
               releaseEagerReady = () => {
                 publishReplacement()
-                operations.markReady()
+                next.markReady()
               }
             } else {
-              operations.markReady()
+              next.markReady()
             }
             if (history.loader === `absent`) return
             return {
@@ -161,8 +161,27 @@ describe(`demand created while its Collection is cleaned up`, () => {
             physicalAcquisitions,
             result: resultState,
             status: subscription.status,
-            rows: [...visible.values()],
+            collectionStatus: collection.status,
           }).toEqual(expected.beforeEagerReady)
+
+          if (history.interruption === `truncate`) {
+            operations.begin()
+            operations.truncate({ markReady: false })
+            const receipt = operations.commit()
+            if (receipt !== true) await receipt
+          } else if (history.interruption === `recoverable-error`) {
+            operations.markError(new Error(`recoverable restart failure`))
+          }
+          if (expected.afterInterruption) {
+            await flushPromises()
+            expect({
+              physicalAcquisitions,
+              result: resultState,
+              status: subscription.status,
+              collectionStatus: collection.status,
+            }).toEqual(expected.afterInterruption)
+          }
+
           releaseEagerReady!()
           await flushPromises()
         }
@@ -172,6 +191,7 @@ describe(`demand created while its Collection is cleaned up`, () => {
           result: resultState,
           status: subscription.status,
           rows: [...visible.values()],
+          collectionStatus: collection.status,
         }).toEqual(expected.settled)
       } finally {
         subscription.unsubscribe()

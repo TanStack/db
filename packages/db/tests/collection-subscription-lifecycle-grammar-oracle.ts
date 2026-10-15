@@ -761,39 +761,50 @@ export const releasedObsoleteResolveHistory: ReadonlyArray<LifecycleCommand> = [
  * run's evidence. An eager source supplies that evidence through Collection
  * readiness and starts no physical acquisition. An on-demand source supplies
  * it through one settled acquisition. Either mode must reconcile the complete
- * replacement rows before the caller's wait fulfills.
+ * replacement rows before the direct subscription's `onLoadSubsetResult`
+ * promise fulfills.
  *
- * These ten cases are a bounded history grammar, not a projection of the
+ * These cases are a bounded history grammar, not a projection of the
  * subscription implementation. Explicit and default eager configuration must
  * have the same behavior. Empty and nonempty replacements must remove an older
  * public row. An optional eager loader proves that eager mode bypasses it; the
- * absent-loader cases preserve the valid Query Collection boundary. The model
- * predicts only the public wait, rows, subscription readiness, and physical
- * acquisition count before eager readiness and at restart settlement; failures,
- * concurrent owners, and asynchronous acquisitions stay with the broader
- * lifecycle histories above.
+ * absent-loader cases preserve the valid Query Collection boundary. Truncate
+ * can revise the restarted run's private replacement, and `error` can pause it
+ * for legal same-run recovery; neither is eager readiness. The model predicts
+ * only the cleanup-detached `onLoadSubsetResult` promise settlement,
+ * subscriber-applied rows, subscription readiness, Collection status, and
+ * physical acquisition count. Public preload failure, demands first admitted
+ * after restart, terminal failure, retired owners, and asynchronous
+ * acquisitions remain outside this focused account.
  */
 export type CleanedRestartDemandCase = {
   syncMode: `default-eager` | `eager` | `on-demand`
   loader: `absent` | `present`
   replacement: `empty` | `row`
+  interruption: `none` | `truncate` | `recoverable-error`
 }
 
 export const cleanedRestartDemandCases: ReadonlyArray<CleanedRestartDemandCase> =
   [
     ...([`empty`, `row`] as const).flatMap((replacement) =>
       ([`default-eager`, `eager`] as const).flatMap((syncMode) =>
-        ([`absent`, `present`] as const).map((loader) => ({
-          syncMode,
-          loader,
-          replacement,
-        })),
+        ([`absent`, `present`] as const).flatMap((loader) =>
+          ([`none`, `truncate`, `recoverable-error`] as const).map(
+            (interruption) => ({
+              syncMode,
+              loader,
+              replacement,
+              interruption,
+            }),
+          ),
+        ),
       ),
     ),
     ...([`empty`, `row`] as const).map((replacement) => ({
       syncMode: `on-demand` as const,
       loader: `present` as const,
       replacement,
+      interruption: `none` as const,
     })),
   ]
 
@@ -804,13 +815,20 @@ export function expectedCleanedRestartDemand(
     physicalAcquisitions: 0
     result: `pending`
     status: `loadingSubset`
-    rows: []
+    collectionStatus: `loading`
+  }
+  afterInterruption?: {
+    physicalAcquisitions: 0
+    result: `pending`
+    status: `loadingSubset`
+    collectionStatus: `loading` | `error`
   }
   settled: {
     physicalAcquisitions: number
     result: `fulfilled`
     status: `ready`
     rows: Array<{ id: string }>
+    collectionStatus: `ready`
   }
 } {
   return {
@@ -820,7 +838,20 @@ export function expectedCleanedRestartDemand(
             physicalAcquisitions: 0 as const,
             result: `pending` as const,
             status: `loadingSubset` as const,
-            rows: [],
+            collectionStatus: `loading` as const,
+          },
+        }
+      : {}),
+    ...(history.syncMode !== `on-demand` && history.interruption !== `none`
+      ? {
+          afterInterruption: {
+            physicalAcquisitions: 0 as const,
+            result: `pending` as const,
+            status: `loadingSubset` as const,
+            collectionStatus:
+              history.interruption === `recoverable-error`
+                ? (`error` as const)
+                : (`loading` as const),
           },
         }
       : {}),
@@ -829,6 +860,7 @@ export function expectedCleanedRestartDemand(
       result: `fulfilled`,
       status: `ready`,
       rows: history.replacement === `row` ? [{ id: `replacement` }] : [],
+      collectionStatus: `ready`,
     },
   }
 }

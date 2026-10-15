@@ -395,14 +395,15 @@ export class CollectionSubscription
    * authoritative replay succeeds.
    */
   private handleTruncate() {
-    // Without a loader, replay only reconciles rows retained across cleanup.
-    const hasLoadSubsetHandler = this.collection._sync.syncLoadSubsetFn !== null
+    // Eager demand is satisfied by source readiness, even when the adapter
+    // happens to expose a loader. Only on-demand demand reacquires a subset.
+    const reloadsSubsets =
+      this.collection.config.syncMode === `on-demand` &&
+      this.collection._sync.syncLoadSubsetFn !== null
     // Deferred demand never acquired, so a truncate gives it nothing to
     // reload; it acquires the replacement rows when acquisition resumes.
     const demandsToReload =
-      hasLoadSubsetHandler && !this.defersAcquisition
-        ? [...this.subsetDemands]
-        : []
+      reloadsSubsets && !this.defersAcquisition ? [...this.subsetDemands] : []
 
     // Retained rows still need the committed replacement even without demand.
     if (demandsToReload.length === 0 && this.stalePublishedRows.size === 0) {
