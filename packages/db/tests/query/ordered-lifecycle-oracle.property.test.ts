@@ -9,6 +9,7 @@ import {
   eq,
   isUndefined,
   not,
+  toArray,
 } from '../../src/query/index.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import { flushPromises } from '../utils.js'
@@ -42,6 +43,9 @@ import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
  * One composed fixed regression injects sibling-source input during a
  * synchronous ordered continuation. It requires graph processing before the
  * loader decides whether another acquisition is needed.
+ * A separate two-action joined history checks public rows and change events
+ * when a null-boundary full-source fallback starts after first publication
+ * while child demand still holds Collection readiness.
  * A second product adds nullable multi-term ordering, including null placement
  * for both terms. A four-cell overlay varies both directions independently
  * without multiplying that lifecycle product. The initial-settlement cells are
@@ -1608,6 +1612,419 @@ describe(`initial locale-string fallback oracle`, () => {
           afterFallbackResult: true,
         },
       ])
+    },
+  )
+})
+
+/**
+ * ## Full-source fallback after the first window publishes
+ *
+ * Publication and Collection readiness are separate facts. An indexed root
+ * can publish its first joined window while an on-demand child keeps the
+ * live-query Collection `loading`. Removing that window row's join match
+ * needs another ordered page. Here the page ends at null, which cannot form a
+ * continuation cursor, so the loader requests the full source. The contract
+ * owes a coherent result and change events after that request's rows apply;
+ * it does not give the later request an initial synchronous timing cut.
+ *
+ * The finite history grammar removes the first marker or retargets it to an
+ * absent root. The independent model joins marker IDs to the three fixed root
+ * rows, sorts eligible roots with null last, and takes one winner. The provider
+ * honors predicates, cursor, order, offset, and limit: its first page delivers
+ * root 1, its next page delivers ineligible root 2 at a null boundary, and the
+ * unfiltered fallback delivers eligible root 3. The driver records requests,
+ * public snapshots, and callback-visible rows. The comparison requires the
+ * published first window while status is still `loading`, reaches the later
+ * fallback, and checks every public event against its callback snapshot and
+ * the model's final delta. It permits coherent intermediate publications.
+ */
+type LaterFallbackMutation = `delete-marker` | `retarget-marker`
+type LaterFallbackRoot = { id: number; at: number | null }
+type LaterFallbackMarker = { id: number; rootId: number }
+type LaterFallbackChild = { id: number; rootId: number }
+type LaterFallbackRow = { id: number; children: Array<number> }
+type LaterFallbackResult = { key: number; row: LaterFallbackRow }
+type LaterFallbackChange = {
+  type: `insert` | `update` | `delete`
+  key: string | number
+  value: LaterFallbackRow
+}
+type LaterFallbackPublication = {
+  changes: Array<LaterFallbackChange>
+  rows: Array<LaterFallbackRow>
+}
+type LaterFallbackObservation = {
+  initial: { rows: Array<LaterFallbackRow>; status: string }
+  initialChildLoads: number
+  initialChildPending: boolean
+  beforeMutation: Array<LoadSubsetOptions>
+  afterMutation: Array<{ options: LoadSubsetOptions; served: Array<number> }>
+  fallbackEntry: { rows: Array<LaterFallbackRow>; status: string } | undefined
+  final: { rows: Array<LaterFallbackRow>; status: string }
+  publications: Array<LaterFallbackPublication>
+}
+
+const laterFallbackRoots: ReadonlyArray<LaterFallbackRoot> = [
+  { id: 1, at: 1 },
+  { id: 2, at: null },
+  { id: 3, at: null },
+]
+const laterFallbackInitialMarkers: ReadonlyArray<LaterFallbackMarker> = [
+  { id: 1, rootId: 1 },
+  { id: 2, rootId: 3 },
+]
+
+// This finite recomputation knows no acquisition kind or loader state. A
+// missing child response gives each visible parent an empty child array.
+function expectedLaterFallbackWindow(
+  markers: ReadonlyArray<LaterFallbackMarker>,
+): Array<LaterFallbackResult> {
+  return laterFallbackRoots
+    .flatMap((root) =>
+      markers
+        .filter((marker) => marker.rootId === root.id)
+        .map((marker) => ({ root, marker })),
+    )
+    .sort(
+      (left, right) =>
+        (left.root.at === null ? 1 : 0) - (right.root.at === null ? 1 : 0) ||
+        (left.root.at ?? 0) - (right.root.at ?? 0) ||
+        left.root.id - right.root.id,
+    )
+    .slice(0, 1)
+    .map(({ root }) => ({
+      // The fixture gives the live-query Collection this public key rule.
+      // Its two histories have at most one joined result per root.
+      key: root.id,
+      row: { id: root.id, children: [] },
+    }))
+}
+
+function laterFallbackMarkersAfter(
+  mutation: LaterFallbackMutation,
+): Array<LaterFallbackMarker> {
+  return mutation === `delete-marker`
+    ? [{ id: 2, rootId: 3 }]
+    : [
+        { id: 1, rootId: 99 },
+        { id: 2, rootId: 3 },
+      ]
+}
+
+async function observeLaterFallback(
+  mutation: LaterFallbackMutation,
+  assertObservation: (observed: LaterFallbackObservation) => void,
+): Promise<void> {
+  type RootSync = Parameters<SyncConfig<LaterFallbackRoot, number>[`sync`]>[0]
+  type MarkerSync = Parameters<
+    SyncConfig<LaterFallbackMarker, number>[`sync`]
+  >[0]
+  const childGate = createDeferred<void>()
+  const finalPublication = createDeferred<void>()
+  const delivered = new Set<number>()
+  const requests: Array<{ options: LoadSubsetOptions; served: Array<number> }> =
+    []
+  const publications: Array<LaterFallbackPublication> = []
+  let childLoads = 0
+  let markerSync!: MarkerSync
+  let fallbackEntry:
+    { rows: Array<LaterFallbackRow>; status: string } | undefined
+  let observer: ReturnType<typeof live.subscribeChanges> | undefined
+  const rootCollection = createCollection<LaterFallbackRoot, number>({
+    id: `later-null-fallback-root-${mutation}`,
+    getKey: ({ id }) => id,
+    syncMode: `on-demand`,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (sync: RootSync) => {
+        sync.markReady()
+        return {
+          loadSubset: (options) => {
+            if (requests.length >= 12)
+              throw new Error(`later null fallback exceeded request bound`)
+            let page = laterFallbackRoots.filter(
+              (row) =>
+                (!options.where ||
+                  evaluateReferenceExpression(options.where, row) === true) &&
+                (!options.cursor ||
+                  evaluateReferenceExpression(options.cursor.whereFrom, row) ===
+                    true),
+            )
+            if (options.orderBy) {
+              page = [...page].sort((left, right) => {
+                for (const term of options.orderBy!) {
+                  const compared = compareNullable(
+                    evaluateReferenceExpression(term.expression, left),
+                    evaluateReferenceExpression(term.expression, right),
+                    term.compareOptions,
+                  )
+                  if (compared) return compared
+                }
+                return left.id - right.id
+              })
+              if (!options.cursor) page = page.slice(options.offset ?? 0)
+              if (options.limit !== undefined)
+                page = page.slice(0, options.limit)
+            }
+            requests.push({ options, served: page.map(({ id }) => id) })
+            if (
+              !options.orderBy &&
+              !options.where &&
+              !options.cursor &&
+              options.limit === undefined
+            ) {
+              fallbackEntry = {
+                rows: live.toArray.map(({ id, children }) => ({
+                  id,
+                  children: children.map(({ id: childId }) => childId),
+                })),
+                status: live.status,
+              }
+            }
+            const fresh = page.filter(({ id }) => !delivered.has(id))
+            if (fresh.length > 0) {
+              sync.begin()
+              for (const row of fresh) {
+                delivered.add(row.id)
+                sync.write({ type: `insert`, value: row })
+              }
+              expect(sync.commit()).toBe(true)
+            }
+            return true
+          },
+        }
+      },
+    },
+  })
+  const markerCollection = createCollection<LaterFallbackMarker, number>({
+    id: `later-null-fallback-markers-${mutation}`,
+    getKey: ({ id }) => id,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (sync: MarkerSync) => {
+        markerSync = sync
+        sync.begin()
+        for (const marker of laterFallbackInitialMarkers)
+          sync.write({ type: `insert`, value: marker })
+        expect(sync.commit()).toBe(true)
+        sync.markReady()
+      },
+    },
+  })
+  const childCollection = createCollection<LaterFallbackChild, number>({
+    id: `later-null-fallback-child-${mutation}`,
+    getKey: ({ id }) => id,
+    syncMode: `on-demand`,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: ({ markReady }) => {
+        markReady()
+        return {
+          loadSubset: () => {
+            childLoads++
+            return childGate.promise
+          },
+        }
+      },
+    },
+  })
+  const live = createLiveQueryCollection({
+    startSync: false,
+    getKey: ({ id }) => id,
+    query: (q) =>
+      q
+        .from({ root: rootCollection })
+        .leftJoin({ marker: markerCollection }, ({ root, marker }) =>
+          eq(root.id, marker.rootId),
+        )
+        .where(({ marker }) => not(isUndefined(marker.id)))
+        .orderBy(({ root }) => root.at, {
+          direction: `asc`,
+          nulls: `last`,
+        })
+        .limit(1)
+        .select(({ root }) => ({
+          id: root.id,
+          children: toArray(
+            q
+              .from({ child: childCollection })
+              .where(({ child }) => eq(child.rootId, root.id)),
+          ),
+        })),
+  })
+  const publicRows = (): Array<LaterFallbackRow> =>
+    live.toArray.map(({ id, children }) => ({
+      id,
+      children: children.map(({ id: childId }) => childId),
+    }))
+  let primaryFailure: CapturedOracleFailure | undefined
+  try {
+    const preload = live.preload()
+    void preload.catch(() => {})
+    await flushPromises()
+    const initial = { rows: publicRows(), status: live.status }
+    const initialChildLoads = childLoads
+    const initialChildPending = childGate.isPending()
+    const beforeMutation = requests.map(({ options }) => options)
+    observer = live.subscribeChanges(
+      (changes) => {
+        if (changes.length === 0) return
+        const rows = publicRows()
+        publications.push({
+          changes: changes.map((change) => ({
+            type: change.type,
+            key: change.key,
+            value: {
+              id: change.value.id,
+              children: change.value.children.map(({ id }) => id),
+            },
+          })),
+          rows,
+        })
+        if (rows.length === 1 && rows[0]?.id === 3) finalPublication.resolve()
+      },
+      { includeInitialState: false },
+    )
+    markerSync.begin()
+    if (mutation === `delete-marker`)
+      markerSync.write({ type: `delete`, key: 1 })
+    else
+      markerSync.write({
+        type: `update`,
+        value: { id: 1, rootId: 99 },
+      })
+    expect(markerSync.commit()).toBe(true)
+    // The later full-source cut has no synchronous scheduling promise. Wait
+    // for its public change, then allow the graph one drain turn. The timer
+    // only bounds a missing-event failure; the final model check diagnoses it.
+    const waitLimit = setTimeout(() => finalPublication.resolve(), 1500)
+    try {
+      await finalPublication.promise
+    } finally {
+      clearTimeout(waitLimit)
+    }
+    await flushPromises()
+    const observation: LaterFallbackObservation = {
+      initial,
+      initialChildLoads,
+      initialChildPending,
+      beforeMutation,
+      afterMutation: requests.slice(beforeMutation.length),
+      fallbackEntry,
+      final: { rows: publicRows(), status: live.status },
+      publications: [...publications],
+    }
+    assertObservation(observation)
+  } catch (error) {
+    primaryFailure = { error }
+  }
+  childGate.resolve()
+  await finishOracleCleanup(
+    primaryFailure,
+    [
+      () => observer?.unsubscribe(),
+      () => live.cleanup(),
+      () => markerCollection.cleanup(),
+      () => childCollection.cleanup(),
+      () => rootCollection.cleanup(),
+    ],
+    `Later null fallback oracle cleanup failed`,
+  )
+}
+
+function assertLaterFallbackObservation(
+  mutation: LaterFallbackMutation,
+  observed: LaterFallbackObservation,
+): void {
+  const initial = expectedLaterFallbackWindow(laterFallbackInitialMarkers)
+  const final = expectedLaterFallbackWindow(laterFallbackMarkersAfter(mutation))
+  expect(observed.initial).toEqual({
+    rows: initial.map(({ row }) => row),
+    status: `loading`,
+  })
+  expect(observed.initialChildLoads).toBeGreaterThan(0)
+  expect(observed.initialChildPending).toBe(true)
+  expect(observed.beforeMutation[0]?.orderBy).toHaveLength(1)
+  expect(observed.beforeMutation[0]?.limit).toBe(1)
+  expect(observed.beforeMutation[0]?.offset).toBe(0)
+  expect(observed.beforeMutation[0]?.cursor).toBeUndefined()
+  expect(
+    observed.beforeMutation.some(
+      (request) =>
+        !request.orderBy &&
+        !request.where &&
+        !request.cursor &&
+        request.limit === undefined,
+    ),
+  ).toBe(false)
+  expect(
+    observed.beforeMutation[0]?.orderBy?.[0]?.compareOptions,
+  ).toMatchObject({ direction: `asc`, nulls: `last` })
+  const orderedPageIndex = observed.afterMutation.findIndex(
+    ({ options }) => options.orderBy && options.cursor,
+  )
+  expect(orderedPageIndex).toBeGreaterThanOrEqual(0)
+  expect(observed.afterMutation[orderedPageIndex]?.served).toEqual([2])
+  expect(
+    observed.afterMutation[orderedPageIndex]?.options.orderBy?.[0]
+      ?.compareOptions,
+  ).toMatchObject({ direction: `asc`, nulls: `last` })
+  const fullSource = observed.afterMutation.filter(
+    ({ options }) =>
+      !options.orderBy &&
+      !options.where &&
+      !options.cursor &&
+      options.limit === undefined &&
+      options.offset === undefined,
+  )
+  expect(fullSource).toHaveLength(1)
+  expect(fullSource[0]?.served).toEqual([1, 2, 3])
+  expect(observed.afterMutation.indexOf(fullSource[0]!)).toBeGreaterThan(
+    orderedPageIndex,
+  )
+  expect(observed.fallbackEntry).toEqual({
+    rows: initial.map(({ row }) => row),
+    status: `loading`,
+  })
+  expect(observed.final).toEqual({
+    rows: final.map(({ row }) => row),
+    status: `loading`,
+  })
+  // Changes may be split across publications. At each callback, applying
+  // its changes to the prior public snapshot must match the rows a reader
+  // sees there; the flattened delta must match the finite join model.
+  const visible = new Map<string | number, LaterFallbackRow>(
+    initial.map(({ key, row }) => [key, row]),
+  )
+  const changes = observed.publications.flatMap(({ changes: batch, rows }) => {
+    for (const change of batch) {
+      if (change.type === `delete`) visible.delete(change.key)
+      else visible.set(change.key, change.value)
+    }
+    expect(rows.length).toBeLessThanOrEqual(1)
+    expect(rows).toEqual([...visible.values()])
+    return batch
+  })
+  const expectedChanges: Array<LaterFallbackChange> = [
+    { type: `delete`, key: initial[0]!.key, value: initial[0]!.row },
+    { type: `insert`, key: final[0]!.key, value: final[0]!.row },
+  ]
+  const byKey = (left: LaterFallbackChange, right: LaterFallbackChange) =>
+    Number(left.key) - Number(right.key)
+  expect([...changes].sort(byKey)).toEqual(expectedChanges.sort(byKey))
+  expect([...visible.values()]).toEqual(final.map(({ row }) => row))
+}
+
+describe(`post-publication null fallback oracle`, () => {
+  it.each([`delete-marker`, `retarget-marker`] as const)(
+    `keeps the public window and change events coherent after %s`,
+    async (mutation) => {
+      await observeLaterFallback(mutation, (observed) =>
+        assertLaterFallbackObservation(mutation, observed),
+      )
     },
   )
 })
