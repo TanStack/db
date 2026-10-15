@@ -90,6 +90,26 @@ that test identifiers must copy production's private data structures.
 
 ### Guide-audit boundary handoffs
 
+The Collection lifecycle history owner includes a 26-cell cleanup-restart
+matrix. It crosses explicit and default eager sources with absent or present
+loaders, empty or nonempty replacements, and no interruption, truncate during
+loading, or recoverable error before same-run readiness. On-demand controls use
+settled subset acquisition. A cleanup-detached eager demand remains active, its
+`onLoadSubsetResult` promise stays pending through these pre-ready cuts, and it
+starts no physical subset acquisition before fulfilling with the exact
+replacement. The focused Query Collection test receives the successful-restart
+law through automatic Collection GC, an eager Query Collection, and
+`DbClient.preloadLiveQuery`. Demands first admitted after eager restart,
+terminal eager failure, retired or concurrent eager owners, and same-turn
+interruption schedules remain open. The broader generated lifecycle histories
+cover those ownership operations only in on-demand mode.
+Before the truncate repair, the four eager loader-present truncate cells
+fulfilled at the loading checkpoint; their loader-absent controls stayed
+pending. This distinguishes sync mode from the adapter's incidental shape. The
+[issue #2163 audit](oracle-reviews/issue-2163-eager-restart-truncate-bb2122012.md)
+records the exact-head ORC-001–014 outcomes, RED/GREEN calibration, review
+ledger, and remaining limits.
+
 The includes-space owner (`packages/db/tests/query/includes-space-oracle.test.ts`)
 now varies leaves per twig across 0, 1, and 10. Public leaf rows change from
 0 to 10 to 100 while 13 Collection facades remain. This protects facade

@@ -318,6 +318,94 @@ describe(`QueryCollection`, () => {
     constructionClient.clear()
   })
 
+  it(`settles a DbClient preload after an eager Query source is automatically collected`, async () => {
+    vi.useFakeTimers()
+    try {
+      const receivingQueryClient = new QueryClient({
+        defaultOptions: {
+          queries: { gcTime: Infinity, retry: false, staleTime: Infinity },
+        },
+      })
+      const replacement = createDeferred<Array<TestItem>>()
+      const queryFn = vi
+        .fn<() => Promise<Array<TestItem>>>()
+        .mockResolvedValueOnce([{ id: `old`, name: `Old` }])
+        .mockImplementationOnce(() => replacement.promise)
+      const descriptor = collectionOptions(
+        `eager-query-restart-preload`,
+        (db) => ({
+          ...queryCollectionOptions<TestItem>({
+            id: `eager-query-restart-preload`,
+            queryClient: db.requireDependency<QueryClient>(`queryClient`),
+            queryKey: [`eager-query-restart-preload`],
+            queryFn,
+            getKey,
+            syncMode: `eager`,
+          }),
+          gcTime: 1,
+        }),
+      )
+      const db = new DbClient({ queryClient: receivingQueryClient })
+      const source = db.collection(descriptor)
+      const preloadState: {
+        outcome: `pending` | `fulfilled` | `rejected`
+      } = { outcome: `pending` }
+      let preload: Promise<void> | undefined
+
+      try {
+        await source.preload()
+        expect(observeLifecycleRows(source.values())).toEqual([
+          { id: `old`, name: `Old` },
+        ])
+
+        // An initially unsubscribed Collection receives a 50 ms GC grace period.
+        await vi.advanceTimersByTimeAsync(51)
+        expect(source.status).toBe(`cleaned-up`)
+
+        preload = db
+          .preloadLiveQuery({ query: (q) => q.from({ row: descriptor }) })
+          .then(
+            () => {
+              preloadState.outcome = `fulfilled`
+            },
+            () => {
+              preloadState.outcome = `rejected`
+            },
+          )
+        await vi.waitFor(() => {
+          expect(queryFn).toHaveBeenCalledTimes(2)
+          expect(source.status).toBe(`loading`)
+        })
+
+        expect(preloadState.outcome).toBe(`pending`)
+
+        replacement.resolve([{ id: `replacement`, name: `Replacement` }])
+        await vi.advanceTimersByTimeAsync(0)
+
+        expect({
+          fetches: queryFn.mock.calls.length,
+          outcome: preloadState.outcome,
+          rows: observeLifecycleRows(source.values()),
+          sourceStatus: source.status,
+        }).toEqual({
+          fetches: 2,
+          outcome: `fulfilled`,
+          rows: [{ id: `replacement`, name: `Replacement` }],
+          sourceStatus: `ready`,
+        })
+      } finally {
+        if (preloadState.outcome === `pending`) {
+          await source.cleanup()
+          await preload
+        }
+        await db.cleanup()
+        receivingQueryClient.clear()
+      }
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   afterEach(() => {
     // Ensure all queries are properly cleaned up after each test
     queryClient.clear()
