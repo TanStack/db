@@ -49,7 +49,9 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
         established multiple-lease contract. `unloadSubset(options)` retires
         the newest accepted lease for that exact object. A full/exact route
         split reaches distinct rows, and a FIFO-release mutant fails at the
-        first post-unload public-row checkpoint. Core's public path supplies
+        first post-unload public-row checkpoint. A held exact fetch also
+        checks lease order before the newer promise settles; the FIFO mutant
+        fails at its physical-signal checkpoint. Core's public path supplies
         distinct objects; direct same-object calls cannot name a specific
         caller beyond this order (2026-10-15).
     - [x] During startup retention maintenance, a returned pending load also

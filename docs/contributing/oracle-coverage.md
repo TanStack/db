@@ -675,8 +675,11 @@ cached-row and startup witnesses check aggregate ownership. A full/exact
 route-split witness now checks the specified newest-lease release order: the
 exact-only row leaves at the first unload while the older filtered owner of
 the full Query survives the full-source owner's release. Replacing the lease
-stack's pop with FIFO shift fails at that public
-row checkpoint. Core supplies a distinct options object per public
+stack's pop with FIFO shift fails at that public row checkpoint. A held exact
+provider repeats the route split before the newer load settles: the first
+unload aborts its physical signal, rejects that load, and cannot publish its
+late row. The FIFO mutant fails at the signal checkpoint in this pending case.
+Core supplies a distinct options object per public
 acquisition. These direct same-object calls cannot identify a caller beyond
 that release order. During startup retention maintenance, two direct calls
 with the same object followed by one unload reject the newer pending load
