@@ -6403,10 +6403,11 @@ describe(`query collection ownership lifecycle`, () => {
    * A Query result fetched on one client predates a direct write stored by a
    * separate Collection. Dehydrate/hydrate carries that old result into a new
    * QueryClient but cannot prove it is newer than the durable row. The safe
-   * independent account keeps Manual through the held physical request, then
-   * accepts Fresh from that request. This real restart observes public and
-   * durable values at both checkpoints; Query Core hydration supplies the old
-   * cache entry, and the controlled provider supplies the later response.
+   * independent account excludes the old hydrated value while the physical
+   * request is held and keeps the cold load pending until that response, then
+   * accepts Fresh from it. This real restart observes public and durable
+   * values at both checkpoints; Query Core hydration supplies the old cache
+   * entry, and the controlled provider supplies the later response.
    */
   it(`revalidates a hydrated Query result against a persisted direct write`, async () => {
     const id = `persisted-direct-hydrated-query`
@@ -6458,6 +6459,15 @@ describe(`query collection ownership lifecycle`, () => {
     const coldRequest = {}
     const load = Promise.resolve(cold.collection._sync.loadSubset(coldRequest))
     void load.catch(() => undefined)
+    let loadSettlement: `pending` | `fulfilled` | `rejected` = `pending`
+    void load.then(
+      () => {
+        loadSettlement = `fulfilled`
+      },
+      () => {
+        loadSettlement = `rejected`
+      },
+    )
     const firstCut = await Promise.race([
       load.then(
         () => `load-fulfilled` as const,
@@ -6466,6 +6476,9 @@ describe(`query collection ownership lifecycle`, () => {
       providerStarted.promise.then(() => `provider-started` as const),
     ])
     expect(firstCut).toBe(`provider-started`)
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    expect(loadSettlement).toBe(`pending`)
+    expect(() => expect(`fulfilled`).toBe(loadSettlement)).toThrow()
     expect(cold.queryFn).toHaveBeenCalledTimes(1)
     expect(cold.collection.get(shared.id)?.name).not.toBe(shared.name)
     expect(storedItems(coldStorage)[0]?.name).toBe(`Manual`)
@@ -7352,6 +7365,234 @@ describe(`query collection ownership lifecycle`, () => {
     expect(rows(collection)).toEqual([shared.id])
 
     collection._sync.unloadSubset(subset)
+    expect(rows(collection)).toEqual([])
+  })
+
+  /**
+   * The newest direct call owns the next options-only unload, even while an
+   * older call remains in startup retention maintenance. The first pending
+   * call promotes to a Query lease and its query function synchronously adds
+   * a third call before the second pending call promotes. Unload at that cut
+   * must retire the third call. The two still-owned load outcomes and public
+   * row after each later release distinguish call order from pending-versus-
+   * lease state. The raw third adapter promise has no promised outcome after
+   * its direct unload.
+   */
+  it(`releases the newest same-options call across startup promotion`, async () => {
+    const id = `repeated-options-mixed-startup`
+    const request: LoadSubsetOptions = {
+      where: eq(new IR.PropRef([`category`]), `shared`),
+    }
+    const scopeHash = hashKey([id, getLoadSubsetDemandKey(request)])
+    const { collection, queryClient, queryFn } = createOwnershipFixture({
+      id,
+      results: [],
+      setupMetadata: (metadata) =>
+        metadata.collection.set(`queryCollection:gc:${scopeHash}`, {
+          queryHash: scopeHash,
+          mode: `until-revalidated`,
+        }),
+    })
+    let third: Promise<void> | undefined
+    queryFn.mockImplementationOnce(() => {
+      const nested = Promise.resolve(collection._sync.loadSubset(request)).then(
+        () => undefined,
+      )
+      third = nested
+      void nested.catch(() => undefined)
+      collection._sync.unloadSubset(request)
+      return Promise.resolve([shared])
+    })
+    collection.startSyncImmediate()
+    const first = Promise.resolve(collection._sync.loadSubset(request)).then(
+      () => `ready`,
+      (error: unknown) => error,
+    )
+    const second = Promise.resolve(collection._sync.loadSubset(request)).then(
+      () => `ready`,
+      (error: unknown) => error,
+    )
+
+    await expect(first).resolves.toBe(`ready`)
+    await expect(second).resolves.toBe(`ready`)
+    if (!third) throw new Error(`The query function did not add a third call`)
+    expect(queryFn).toHaveBeenCalledOnce()
+    expect(rows(collection)).toEqual([shared.id])
+    const query = queryClient.getQueryCache().findAll({ queryKey: [id] })[0]
+    expect(query?.getObserversCount()).toBe(1)
+
+    collection._sync.unloadSubset(request)
+    expect(rows(collection)).toEqual([shared.id])
+    collection._sync.unloadSubset(request)
+    expect(rows(collection)).toEqual([])
+    expect(query?.getObserversCount()).toBe(0)
+  })
+
+  /**
+   * Call order, not startup-promotion order, selects a direct acquisition for
+   * options-only unload. The small reference history is A, B, then C: A and B
+   * wait for retention maintenance, while A's provider starts C before B
+   * promotes. After all three become Query leases, unloading once must retire
+   * C. A function-built key gives each call a distinct physical Query so the
+   * provider signals and public rows distinguish C from the older B. The
+   * unloaded C promise has no claimed outcome; B must still apply its row,
+   * then its own unload must leave A's row until A releases.
+   */
+  it(`releases the newest call after reentrant startup promotion reorders Query leases`, async () => {
+    const id = `repeated-options-promoted-order`
+    const request: LoadSubsetOptions = {
+      where: eq(new IR.PropRef([`category`]), `shared`),
+    }
+    const queryClient = createQueryClient()
+    const heldThird = createDeferred<Array<Item>>()
+    const heldSecond = createDeferred<Array<Item>>()
+    const physicalSignals = new Map<number, AbortSignal>()
+    let queryVersion = 1
+    let providerCalls = 0
+    let third: Promise<void> | undefined
+    let acquireThird: () => void = () => {
+      throw new Error(`The Collection has not been constructed`)
+    }
+    const provider = vi.fn((context: QueryFunctionContext) => {
+      const physicalKey = context.queryKey[1] as number
+      physicalSignals.set(physicalKey, context.signal)
+      providerCalls++
+      if (providerCalls === 1) {
+        queryVersion = 2
+        acquireThird()
+        queryVersion = 3
+        return Promise.resolve([{ ...shared, id: `A` }])
+      }
+      if (providerCalls === 2) return heldThird.promise
+      if (providerCalls === 3) return heldSecond.promise
+      throw new Error(`Unexpected provider call`)
+    })
+    const baseOptions = queryCollectionOptions<Item>({
+      id,
+      queryClient,
+      queryKey: (options) => (options.where ? [id, queryVersion] : [id]),
+      queryFn: provider,
+      getKey: (item) => item.id,
+      startSync: true,
+      syncMode: `on-demand`,
+    })
+    const originalSync = baseOptions.sync
+    const collection = createCollection({
+      ...baseOptions,
+      sync: {
+        sync: (params: Parameters<typeof originalSync.sync>[0]) => {
+          params.begin()
+          params.metadata!.collection.set(`queryCollection:gc:startup`, {
+            queryHash: `startup`,
+            mode: `until-revalidated`,
+          })
+          params.commit()
+          return originalSync.sync(params)
+        },
+      },
+    })
+    acquireThird = () => {
+      const nested = Promise.resolve(collection._sync.loadSubset(request)).then(
+        () => undefined,
+      )
+      third = nested
+      void nested.catch(() => undefined)
+    }
+    cleanups.push(async () => {
+      heldThird.resolve([])
+      heldSecond.resolve([])
+      await collection.cleanup()
+      queryClient.clear()
+    })
+
+    collection.startSyncImmediate()
+    const first = Promise.resolve(collection._sync.loadSubset(request))
+    const second = Promise.resolve(collection._sync.loadSubset(request))
+    await vi.waitFor(() => expect(provider).toHaveBeenCalledTimes(3))
+    if (!third) throw new Error(`The first provider did not start C`)
+    await first
+    expect(queryVersion).toBe(3)
+    expect(rows(collection)).toEqual([`A`])
+
+    collection._sync.unloadSubset(request)
+    expect(physicalSignals.get(2)?.aborted).toBe(true)
+    expect(physicalSignals.get(3)?.aborted).toBe(false)
+    expect(
+      queryClient
+        .getQueryCache()
+        .find({ queryKey: [id, 2], exact: true })
+        ?.getObserversCount(),
+    ).toBe(0)
+    expect(
+      queryClient
+        .getQueryCache()
+        .find({ queryKey: [id, 3], exact: true })
+        ?.getObserversCount(),
+    ).toBe(1)
+
+    heldSecond.resolve([{ ...shared, id: `B` }])
+    await second
+    expect(rows(collection)).toEqual([`A`, `B`])
+    collection._sync.unloadSubset(request)
+    expect(rows(collection)).toEqual([`A`])
+    collection._sync.unloadSubset(request)
+    expect(rows(collection)).toEqual([])
+  })
+
+  /**
+   * Each pending caller keeps its own abort claim when startup retention
+   * maintenance promotes repeated calls with one options object into Query
+   * observer leases. Once the held provider starts, a shared caller signal
+   * must retire both promoted leases. A late source row may enter Query cache,
+   * but cannot become public without an owner. Load outcomes, observer count,
+   * and exact public rows at provider settlement check that handoff.
+   */
+  it(`retires same-options callers after startup maintenance promotes their leases`, async () => {
+    const id = `repeated-options-startup-abort`
+    const caller = new AbortController()
+    const request: LoadSubsetOptions = {
+      where: eq(new IR.PropRef([`category`]), `shared`),
+      signal: caller.signal,
+    }
+    const scopeHash = hashKey([id, getLoadSubsetDemandKey(request)])
+    const held = createDeferred<Array<Item>>()
+    const { collection, queryClient, queryFn } = createOwnershipFixture({
+      id,
+      results: [held.promise],
+      setupMetadata: (metadata) =>
+        metadata.collection.set(`queryCollection:gc:${scopeHash}`, {
+          queryHash: scopeHash,
+          mode: `until-revalidated`,
+        }),
+    })
+    collection.startSyncImmediate()
+    const loads = Array.from({ length: 2 }, () =>
+      Promise.resolve(collection._sync.loadSubset(request)),
+    )
+    const outcomes = Promise.allSettled(loads)
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledOnce())
+
+    caller.abort()
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    held.resolve([shared])
+    const settled = await outcomes
+    expect(settled.map((outcome) => outcome.status)).toEqual([
+      `rejected`,
+      `rejected`,
+    ])
+    for (const outcome of settled) {
+      if (outcome.status === `rejected`)
+        expect(outcome.reason).toMatchObject({ name: `AbortError` })
+    }
+    const physicalQuery = queryClient
+      .getQueryCache()
+      .findAll({ queryKey: [id] })[0]
+    if (!physicalQuery) throw new Error(`The provider made no Query`)
+    // This fixture ignores the physical signal. The rejected load promises
+    // settle before its late result, so observe cache completion separately.
+    await vi.waitFor(() => expect(physicalQuery.state.data).toEqual([shared]))
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    expect(physicalQuery.getObserversCount()).toBe(0)
     expect(rows(collection)).toEqual([])
   })
 

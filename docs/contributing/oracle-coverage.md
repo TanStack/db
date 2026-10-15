@@ -761,6 +761,17 @@ checkpoint. These fixed cuts do not establish arbitrary callback reentry or
 all abort/unload orderings; the generated grammar and hostile controls below
 extend them. [Issue #2162](https://github.com/TanStack/db/issues/2162)
 remains open pending final review of that bounded claim.
+Three more accepted-result histories hold A's applied receipt while a later B
+result or a replay of A enters an unaccepted commit. A direct caller aborts
+after A's acceptance. Each history records A's receipt state and the complete
+public rows inside that caller's rejection handler; it must remain pending
+before A applies and reject with A visible afterward. One history starts B by
+refetch, one writes B into Query cache during A's commit callback before the
+waiter records A, and one replays the same observer result after a passive
+subscriber remounts. Restoring the latest-controller lookup fails all three
+at the held-gate outcome checkpoint. Allowing the replay to overwrite A's
+result controller fails the same-result history there. These controlled
+histories do not establish arbitrary later accepted-result ordering.
 An initial-fetch lease grammar now varies an equal peer, consumed versus
 ignored physical signal, six first-caller actions (including both abort/unload
 orders and Collection cleanup), peer release before provider settlement, and
@@ -782,7 +793,10 @@ unload mutant that steals the peer's observer lease fails at the intermediate
 public-row checkpoint. Both are assertion failures after the intended public
 path. The grammar
 holds one initial provider result; the fixed ignored-signal witness checks the
-installed Query Core's optional cache completion behavior. A public refetch
+installed Query Core's optional cache completion behavior by waiting for the
+late result to enter Query cache before comparing public rows. That cache
+completion is a reached-path premise, not a promise that every Query Core
+version must cache an unobserved result. A public refetch
 lease grammar runs thirteen named histories and fixed-seed and random 48-run
 campaigns through `requestSnapshot({ refetch: true, signal })`. It varies six
 caller abort/unload/cleanup actions, baseline release before or after caller
@@ -841,7 +855,25 @@ that release order. During startup retention maintenance, two direct calls
 with the same object followed by one unload reject the newer pending load
 and let the older one fetch and publish. The previous oldest-first release
 failed at the first load-outcome checkpoint. Pre-start requests still queued
-inside Collection Core are a separate boundary.
+inside Collection Core are a separate boundary. A second startup history lets
+A promote, start C reentrantly, and then lets B promote. A controlled
+function-built Query key changes its external version between calls, so A,
+C, and B own distinct physical Queries even though they share one immutable
+options object. Once all three are leases, the first unload must abort C's
+physical signal while B remains live and later publishes its row; B's unload
+leaves A's row until A releases. Selecting the last promoted lease instead
+fails at C's signal checkpoint. The same-Query startup witness establishes
+aggregate ownership but cannot distinguish A's lease from C's by public rows.
+Two or three pending direct calls that reuse both one options object and one
+AbortSignal must each release their own acquisition when the signal aborts.
+The load-lifecycle owner crosses whether the provider consumes the physical
+Query signal. It checks every caller's `AbortError` and zero Query observers
+before the held result returns, then checks that a late result adds no public
+row. The previous options-stack release rejected only the first caller and
+left another lease and row behind. A persisted startup witness repeats the
+same-signal abort after retention maintenance promotes both calls to Query
+leases. These direct-call histories do not prove that Collection Core passes
+the same options object to two public subscriptions.
 An eager Query with finite `gcTime` is now observed after its last public
 subscriber leaves and Query Core's timer evicts it. With no public subscriber,
 `utils.refetch()` recreates the Query, calls the provider once, and applies its

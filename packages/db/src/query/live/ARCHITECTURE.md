@@ -1482,8 +1482,9 @@ an explicit subset refetch retains its exact Query key. Function-built keys
 retain their caller-defined cache identity.
 When query-db acquisitions share a physical Query, releasing one acquisition
 must leave work needed by another active acquisition alive. A query function
-receives the physical fetch's native `AbortSignal` as the data property
-`meta.loadSubsetOptions.signal`, even when its first caller supplied no signal.
+receives the physical fetch's native `AbortSignal` through the nonenumerable
+`meta.loadSubsetOptions.signal` property on every fetch, including when its
+first caller supplied no signal.
 Each caller's own signal still determines its load outcome. An eager Collection
 or independent Query Core observer may also keep the fetch alive. The physical
 signal aborts when its final live owner leaves during the fetch. A provider

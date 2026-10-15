@@ -171,6 +171,30 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
           owns a lease. Two same-object calls followed by one unload now
           reject the newer call and let the older call publish; the witness
           failed on the previous oldest-first release path (2026-10-15).
+    - [x] Shared-signal abort now releases each pending direct call's exact
+          lease, even when two or three calls reuse one options object. The
+          pushed `b0a7d2b7b` implementation failed the new witness: one call
+          rejected while another fulfilled and retained a row. Four cases
+          cross signal consumption and call count; they check prompt caller
+          rejection and zero observers before the held provider returns. The
+          ignored-signal cases wait for Query cache success and a notification
+          turn before checking no late public row. Cache completion is a
+          controlled installed-Core path premise. A retained-startup witness
+          covers promotion from pending calls to Query leases (2026-10-15).
+    - [x] Mixed startup promotion: A and B begin as pending same-object calls;
+          A reentrantly starts C, so lease promotion order differs from call
+          order. The first witness failed the prior pending-first release path
+          at B's promised load outcome. A distinct-Query version-key witness
+          checks C's physical signal and B's public row after all three have
+          promoted; replacing maximum call order with last array element
+          fails at C's signal checkpoint (2026-10-15).
+    - [x] Accepted-result supersession: three fixed histories hold A's accepted
+          receipt while distinct B or a replay of A enters an unaccepted
+          commit. They record A's receipt and complete public rows inside the
+          aborting caller's settlement handler. The prior latest-controller
+          lookup fails all three at the pre-application outcome checkpoint;
+          overwriting A's controller on same-result replay fails that history
+          at the same checkpoint (2026-10-15).
   - [x] Request shape: signal-free and explicit-signal requests check the
         physical signal, own keys, descriptor, cloning, JSON, and deletion.
         The configurable-descriptor assertion failed before its repair.
@@ -213,7 +237,7 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
         load. The two primary oracles pass 522 tests, direct refetch replay and
         the 37-test replay manifest pass, and the safe model and eight hostile
         configurations reach their intended results (2026-10-15).
-  - [x] Package verification: all 948 Query DB runtime tests and 959 persisted
+  - [x] Package verification: all 959 Query DB runtime tests and 959 persisted
         oracle tests pass (one skipped, one todo). Query DB, DB, and persisted
         core TypeScript checks pass, as do affected-file lint (existing warnings
         only), formatting, and whitespace checks (2026-10-15). The package's
