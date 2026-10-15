@@ -821,12 +821,7 @@ function useLiveQueryImpl(
     typeof configOrQueryOrCollection === `function`
       ? preparedQueryValue
       : configOrQueryOrCollection
-  const autoLoad = !(
-    modeConfig &&
-    typeof modeConfig === `object` &&
-    `autoLoad` in modeConfig &&
-    modeConfig.autoLoad === false
-  )
+  const autoLoad = modeConfig?.autoLoad !== false
   if (!autoLoad && streamIdentity !== undefined && queryKey) {
     streamIdentity = [streamIdentity, [`autoLoad`, false]]
   }

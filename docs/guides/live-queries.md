@@ -160,12 +160,14 @@ bindings and reactive updates, use live queries instead.
 
 ### Controlling automatic loading
 
-Set `autoLoad: false` when your application owns fetching and ingestion. The
-query stays reactive to available collection rows without starting source sync
-or requesting subsets, including for joins, includes, and pagination.
-`autoLoad` defaults to `true`.
+Set `autoLoad: false` to query data already in your collections without loading
+more data. Results stay reactive, including for joins, includes, and pagination.
+The default is `true`.
 
-For example, combine a custom API search with a Query Collection:
+One use case is application-owned fetching when a remote API request cannot be
+derived from the query IR. This example ingests custom API results into a Query
+Collection named `tasks`, configured with `syncMode: 'on-demand'` so explicit
+startup does not trigger an eager fetch:
 
 ```tsx
 function useApiTasks(projectId: string) {
@@ -191,20 +193,21 @@ The same option works with `createLiveQueryCollection({ query, autoLoad: false }
 and `useLiveInfiniteQuery(query, { pageSize: 20, autoLoad: false })`.
 For an existing live-query Collection, configure `autoLoad` when creating it.
 
-`isReady` means the available rows have been evaluated, even if empty; it does
-not establish remote completeness. Provider errors do not fail this result,
-while query evaluation errors and explicit source cleanup still do. Infinite
-queries expand the local window; `hasNextPage` describes available rows. Manage
-server cursors and exhaustion in your API fetcher.
+`isReady` means the available rows have been evaluated, even if empty. It does
+not indicate whether all remote data has been loaded. Source loading errors do
+not fail this query; query evaluation errors and explicit source cleanup do.
+Infinite queries expand the window over available rows, and `hasNextPage`
+describes those rows. Track remote pagination separately in your API fetcher.
 
 Other consumers and explicit source startup can still load shared rows. A source
 that is itself a live-query Collection supplies its published rows under its own
 loading policy. This option does not disable loading globally.
 
-Queries with different `autoLoad` settings have separate identities, including
-with an explicit `queryKey`. Changing the option replaces the query and resets
-infinite-query pages. If a callback returns the configuration and uses a legacy
-dependency array, include changes to `autoLoad` in those dependencies.
+Queries with `autoLoad: false` have separate identities from queries using
+`true` or the default, even with the same explicit `queryKey`. Switching between
+these modes replaces the query and resets infinite-query pages. If a callback
+returns the configuration and uses a legacy dependency array, include `autoLoad`
+in those dependencies.
 
 ### Using with Frameworks
 

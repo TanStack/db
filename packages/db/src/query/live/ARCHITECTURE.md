@@ -697,20 +697,17 @@ retain the source Collections against GC, but do not count as acquiring
 subscribers, start base-source sync, resume acquisition, or invoke
 `loadSubset`/`unloadSubset`. Joins and includes receive available source rows;
 ordered windows run the graph's top-K operator without provider-prefix loading.
-Truncate replaces local input without initiating replay acquisition.
 
-Local-query readiness means the graph has evaluated its available inputs. It
-does not wait for source readiness or report provider errors. Graph failures
-and explicit source cleanup retain their normal error behavior. A source that
-is itself a live-query Collection supplies its published rows; local observation
-does not change that source's loading policy or expose its private graph state.
+Readiness means the graph has evaluated its available inputs, independently of
+source readiness or provider errors. Graph failures and explicit source cleanup
+retain their normal error behavior.
 
-Local and acquiring consumers share source rows, but not acquisition ownership.
-Other consumers, explicit source startup, or background sync may change those
-rows. `autoLoad` is part of query identity, including explicit framework keys;
-local and acquiring queries cannot share a query instance or readiness gate.
-Local queries create no adapter acquisitions to deduplicate. The default
-continues to acquire data after a subscriber or preload requests it.
+Other consumers, explicit source startup, or background sync may update shared
+source rows. A source that is itself a live-query Collection supplies its
+published rows under its own loading policy. Queries with `autoLoad: false`
+have separate identities from queries using `true` or the default, including
+with explicit framework keys, so their query instances and readiness remain
+separate.
 
 ### Demand grouping and ownership
 

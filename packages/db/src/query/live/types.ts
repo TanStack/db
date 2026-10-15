@@ -105,8 +105,8 @@ export interface LiveQueryCollectionConfig<
   startSync?: boolean
 
   /**
-   * Set to false to observe available rows without starting source sync or
-   * acquiring subsets. Readiness describes the local result.
+   * Set to false to query available rows without acquiring source data.
+   * Readiness describes the result over those rows.
    * Other consumers may still load and update the shared source rows.
    * @default true
    */
