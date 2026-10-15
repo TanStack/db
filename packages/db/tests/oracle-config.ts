@@ -139,7 +139,7 @@ const staticOracleProperties = [
   `load-subset-lifecycle.state-machine`,
   `query-db.accepted-release-history`,
   `query-db.application-release-history`,
-  `query-db.lease-history`,
+  `query-db.acquisition-lease-history`,
   `query-db.pending-reentry-history`,
   `query-db.refetch-lease-history`,
   `query-db.reentrant-release-history`,

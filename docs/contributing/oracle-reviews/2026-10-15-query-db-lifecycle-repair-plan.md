@@ -275,8 +275,17 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
         caller-outcome checkpoint; it passes with the repair. The package's
         combined Vitest typecheck mode still reports cross-package `rootDir`
         errors; its runtime run passed with that mode disabled (2026-10-15).
-  - [ ] Review the repaired exact head independently, record ORC-001–014
-        evidence, and check CI outcome.
+  - [x] Review the executable head independently and record ORC-001–014
+        evidence in the [versioned review](2026-10-15-pr-2158-lifecycle-efeaf8104.md).
+        The last semantic repair, settlement checkpoint, and minification-gate
+        field rename received independent code and oracle review with no new
+        confirmed in-scope defect. At `efeaf8104`, the 969-test Query DB suite,
+        direct Query DB and DB test typechecks, renamed-property replay,
+        replay-registry checks, and `check:mangle` pass (2026-10-15).
+  - [ ] Check GitHub CI on the final executable head. The first minified API
+        check failed because DB's private-name cache also contained `lease`;
+        `efeaf8104` renames Query DB's internal field and replay property while
+        keeping the gate intact. Await the rerun.
 - [ ] Integrate the repaired #2158 behavior into #2134 and verify its combined
       tree.
 
