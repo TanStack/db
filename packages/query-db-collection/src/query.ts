@@ -1028,21 +1028,9 @@ export function queryCollectionOptions(
   // Results deferred behind direct writes that have not applied yet.
   let deferredResults = 0
 
-  // queryKey → reference count (how many loadSubset calls are active)
-  // Reference counting for QueryObserver lifecycle management
-  // =========================================================
-  // Tracks how many live query subscriptions are using each QueryObserver.
-  // Multiple live queries with identical predicates share the same QueryObserver for efficiency.
-  //
-  // Lifecycle:
-  // - Increment: when createQueryFromOpts creates or reuses an observer
-  // - Decrement: when subscription.unsubscribe() passes predicates to collection._sync.unloadSubset()
-  // - Reset: when cleanupQuery() is triggered by TanStack Query's cache GC
-  //
-  // When refcount reaches 0, unloadSubset():
-  // 1. Computes the same queryKey from the predicates
-  // 2. Uses existing machinery (queryToRows map) to find rows that query loaded
-  // 3. Decrements refcount and GCs rows where count reaches 0
+  // Each acquisition retains its chosen physical Query observer. Release uses
+  // that recorded Query, since an equal predicate may route elsewhere later.
+  // The final release retires this Query's row ownership or persisted retention.
   const queryRefCounts = new Map<string, number>()
   // A completed full-source Query can own narrower demands without a second
   // transport. Pin each demand to its chosen Query until its final release.
@@ -2145,7 +2133,7 @@ export function queryCollectionOptions(
           const loadSubsetOptions = { ...requestOptions }
           Object.defineProperty(loadSubsetOptions, `signal`, {
             get: () => context.signal,
-            enumerable: true,
+            enumerable: Object.hasOwn(requestOptions, `signal`),
           })
           sharedContext.meta = {
             ...context.meta,
@@ -2688,8 +2676,8 @@ export function queryCollectionOptions(
         if (isMutationPublicationBlocked()) {
           applicationToken.settleRefetchAtFetchBoundary?.()
         }
-        // An accepted sync transaction always applies, so a later result or
-        // cleanup must not cancel it or roll back the ownership it records.
+        // A commit can still reject on this signal until it reaches Core's
+        // no-cancel point. After that point, cleanup cannot roll it back.
         const applied = commit(commitSignal)
         applicationToken.rollback = undefined
         transactionActive = false

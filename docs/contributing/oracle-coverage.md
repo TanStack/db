@@ -639,6 +639,18 @@ eager consumption of Query Core's lazy signal. The foreign closure
 witnesses verify the installed Query Core's option-selection path both before
 and during a shared fetch. A synchronous provider throw caused by reentrant
 peer acquisition has no separate witness.
+A signal-free provider request keeps its options cloneable and its enumerable
+shape empty while exposing the physical Query signal by property access. The
+original enumerable accessor fails this request-shape witness. A public
+snapshot witness shows that caller abort currently leaves a sole transport
+live and permits a late row and fulfilled load; it is pinned in
+[issue #2162](https://github.com/TanStack/db/issues/2162). Existing peer
+histories abort and unload together, so they do not cover caller abort without
+explicit release or abort after commit acceptance.
+Direct `_sync.loadSubset` calls that reuse one options object for several live
+acquisitions have no caller token at `unloadSubset(options)`. The current
+shared-fetch witness checks total transport lifetime, not which such caller
+releases first. Core supplies a distinct options object per public acquisition.
 Public Collection cleanup from a synchronous Query-cache fetch notification
 checks both the cached-result and uncached readiness-observer paths. At cleanup
 settlement and after an ignored-signal provider finishes, the Collection has no
@@ -723,6 +735,12 @@ offline-transactions owner still needs a full reconnect-replay witness for its
 real `deferDataRefresh` premise. The ownership oracle also owns a later-remount
 witness after an inactive prefetched entry is evicted, and direct-insert
 retention across persisted restore remains with its persisted-owner histories.
+An eager no-subscriber witness removes its Query from cache and verifies that
+`utils.refetch()` starts a new provider request and applies its row. A retained
+persisted-scope witness applies a direct write, then presents a `setQueryData`
+edit without any physical fetch. The public row stays manual; disabling the
+cache-edit authority guard makes it revert to the older value. This does not
+test an unknown fetch position from another QueryClient's hydration.
 
 The ownership oracle also checks per-key precedence when a held on-demand
 refetch meets a later direct update, error and invalidation/freshness metadata

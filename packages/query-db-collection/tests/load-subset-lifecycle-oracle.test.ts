@@ -3923,6 +3923,149 @@ describe(`loadSubset lifecycle oracle`, () => {
     ).toThrow()
   })
 
+  /**
+   * Request metadata keeps the supplied options' serializable shape. The
+   * physical Query signal remains readable for a provider, but a request that
+   * supplied no signal must still be cloneable and serialize as an empty
+   * options object.
+   */
+  it(`preserves the shape of signal-free provider request options`, async () => {
+    const queryClient = createQueryClient()
+    const id = `signal-free-request-options-${collectionSequence++}`
+    let observed = false
+    const collection = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn: (context) => {
+          const options = context.meta?.loadSubsetOptions
+          expect(options).toBeDefined()
+          expect(options?.signal).toBeInstanceOf(AbortSignal)
+          expect(Object.keys(options ?? {})).not.toContain(`signal`)
+          expect(structuredClone(options)).toEqual({})
+          expect(JSON.stringify(options)).toBe(`{}`)
+          observed = true
+          return Promise.resolve([])
+        },
+        getKey: (row) => row.id,
+        startSync: true,
+        syncMode: `on-demand`,
+      }),
+    )
+    const request = {}
+    try {
+      await collection._sync.loadSubset(request)
+      expect(observed).toBe(true)
+    } finally {
+      collection._sync.unloadSubset(request)
+      await collection.cleanup()
+      queryClient.clear()
+    }
+  })
+
+  /**
+   * Eager ownership survives Query cache eviction. An explicit refetch must
+   * start a new provider request from that state, even with no Collection
+   * subscriber currently asking for rows.
+   */
+  it(`refetches an eager Collection after its Query leaves the cache`, async () => {
+    const queryClient = createQueryClient()
+    const id = `eager-refetch-after-eviction-${collectionSequence++}`
+    const queryFn = vi
+      .fn()
+      .mockResolvedValueOnce([{ id: `before` }])
+      .mockResolvedValueOnce([{ id: `after` }])
+    const collection = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (row) => row.id,
+        startSync: true,
+      }),
+    )
+    try {
+      await collection.preload()
+      expect(collection.has(`before`)).toBe(true)
+      expect(collection.subscriberCount).toBe(0)
+      queryClient.removeQueries({ queryKey: [id], exact: true })
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect(queryClient.getQueryCache().find({ queryKey: [id], exact: true })).toBeUndefined()
+      await collection.utils.refetch()
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(collection.has(`after`)).toBe(true)
+    } finally {
+      await collection.cleanup()
+      queryClient.clear()
+    }
+  })
+
+  /**
+   * A public snapshot signal retires its Collection acquisition. The Query
+   * transport then aborts when that acquisition was the final owner, and its
+   * pending rows never become visible.
+   * Known failure: https://github.com/TanStack/db/issues/2162
+   */
+  it.fails(`cancels the final public snapshot acquisition on caller abort`, async () => {
+    const queryClient = createQueryClient()
+    const id = `snapshot-caller-abort-${collectionSequence++}`
+    const started = createDeferred<void>()
+    const held = createDeferred<Array<Row>>()
+    let transportSignal: AbortSignal | undefined
+    const collection = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn: (context) => {
+          transportSignal = context.signal
+          transportSignal.addEventListener(`abort`, () => held.resolve([]), {
+            once: true,
+          })
+          started.resolve()
+          return held.promise
+        },
+        getKey: (row) => row.id,
+        startSync: true,
+        syncMode: `on-demand`,
+      }),
+    )
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    const caller = new AbortController()
+    let load: true | Promise<void> | undefined
+    try {
+      subscription.requestSnapshot({
+        signal: caller.signal,
+        onLoadSubsetResult: (result) => {
+          load = result
+        },
+      })
+      await started.promise
+      expect(load).toBeDefined()
+      caller.abort()
+      const aborted = transportSignal?.aborted === true
+      held.resolve([{ id: `late` }])
+      const outcome = await Promise.resolve(load).then(
+        () => `fulfilled`,
+        () => `rejected`,
+      )
+      expect({ aborted, outcome, rows: collection.toArray }).toEqual({
+        aborted: true,
+        outcome: `rejected`,
+        rows: [],
+      })
+    } finally {
+      held.resolve([])
+      subscription.unsubscribe()
+      await collection.cleanup()
+      queryClient.clear()
+    }
+  })
+
   it(`starts a fresh query after an aborted owner immediately remounts`, async () => {
     await expectRemountAfterAbortStartsFreshQuery()
   })

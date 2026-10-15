@@ -1758,9 +1758,9 @@ describe(`QueryCollection`, () => {
     const context = queryFn.mock.calls[0]?.[0] as QueryFunctionContext
     expect(context.meta?.errorMessage).toBe(meta.errorMessage)
     expect(context.meta?.loadSubsetOptions?.signal).toBe(context.signal)
-    expect(Object.keys(context.meta?.loadSubsetOptions ?? {})).toEqual([
-      `signal`,
-    ])
+    // A derived signal is readable without changing a signal-free request's
+    // enumerable shape.
+    expect(Object.keys(context.meta?.loadSubsetOptions ?? {})).toEqual([])
   })
 
   describe(`loadSubsetOptions passed to queryFn`, () => {
@@ -9338,10 +9338,11 @@ describe(`QueryCollection`, () => {
         expect(collection.size).toBe(items.length)
       })
 
-      // Should call queryFn once with empty predicates and the Query signal
+      // The Query signal is available without adding a serializable request key.
       expect(queryFn).toHaveBeenCalledTimes(1)
       const call = queryFn.mock.calls[0]?.[0]
-      expect(call?.meta?.loadSubsetOptions).toEqual({ signal: call?.signal })
+      expect(call?.meta?.loadSubsetOptions?.signal).toBe(call?.signal)
+      expect(Object.keys(call?.meta?.loadSubsetOptions ?? {})).toEqual([])
     })
   })
 

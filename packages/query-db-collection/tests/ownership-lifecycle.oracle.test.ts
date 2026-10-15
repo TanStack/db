@@ -287,6 +287,7 @@ type OwnershipFixtureOptions = {
   syncMode?: `eager` | `on-demand`
   customHash?: boolean
   staleTime?: number
+  enabled?: boolean
   persistedGcTime?: number
   metadataRecorder?: MetadataRecorder
   setupMetadata?: (metadata: SyncMetadataApi<string | number>) => void
@@ -1055,6 +1056,7 @@ function createOwnershipFixture({
   scanPersistedRows,
   customHash,
   staleTime,
+  enabled,
   persistedGcTime,
 }: OwnershipFixtureOptions): OwnershipFixture {
   const queryClient = createQueryClient(customHash, staleTime)
@@ -1070,6 +1072,7 @@ function createOwnershipFixture({
     queryFn,
     getKey,
     syncMode,
+    enabled,
     startSync: true,
     persistedGcTime,
   })
@@ -6194,6 +6197,54 @@ describe(`query collection ownership lifecycle`, () => {
     } finally {
       unsubscribe()
     }
+  })
+
+  /**
+   * A cache edit has no server authority. With a retained persisted owner and
+   * a newer direct row, it must be rejected before baseline reconciliation.
+   * The provider is disabled so no physical fetch can supply that authority.
+   */
+  it(`does not reconcile a cache edit as a persisted server result`, async () => {
+    const id = `persisted-baseline-cache-notification`
+    const queryHash = hashKey([id])
+    const manual = { ...shared, name: `Manual` }
+    const scanPersistedRows = vi.fn(() =>
+      Promise.resolve([
+        {
+          key: shared.id,
+          value: shared,
+          metadata: { queryCollection: { owners: { [queryHash]: true } } },
+        },
+      ]),
+    )
+    const { collection, queryClient, queryFn } = createOwnershipFixture({
+      id,
+      results: [],
+      scanPersistedRows,
+      persistedGcTime: Number.POSITIVE_INFINITY,
+      enabled: false,
+      setupMetadata: (metadata) => {
+        metadata.collection.set(`queryCollection:gc:${queryHash}`, {
+          queryHash,
+          mode: `until-revalidated`,
+        })
+      },
+    })
+    await collection.utils.writeUpsert(shared)
+    await collection.utils.writeUpdate(manual)
+    expect(collection.get(shared.id)?.name).toBe(manual.name)
+
+    const request = {}
+    const reload = Promise.resolve(collection._sync.loadSubset(request))
+    void reload.catch(() => undefined)
+    expect(queryFn).not.toHaveBeenCalled()
+    queryClient.setQueryData([id], [shared])
+    await new Promise<void>((resolve) => queueMicrotask(resolve))
+    await new Promise<void>((resolve) => queueMicrotask(resolve))
+    expect(collection.get(shared.id)?.name).toBe(manual.name)
+    expect(scanPersistedRows).not.toHaveBeenCalled()
+    collection._sync.unloadSubset(request)
+    await reload.catch(() => undefined)
   })
 
   it(`settles a direct write only after its persisted commit applies`, async () => {
