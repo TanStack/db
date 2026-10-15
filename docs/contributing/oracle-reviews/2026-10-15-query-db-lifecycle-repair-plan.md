@@ -29,6 +29,11 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
       generated-history and hostile-control work below remains open.
 - [ ] Expand generated histories and TLA+ publication/abort coverage; kill
       plausible wrong designs at the intended comparisons.
+  - [x] Bounded publication model: 156 safe reachable states; five hostile
+        configurations reach the intended invariant or temporal violation.
+        The [mapping and limits](query-db-publication-tla/README.md) keep this
+        design result distinct from production-history coverage (2026-10-15).
+  - [ ] Generated production histories and public-checkpoint hostile controls.
 - [ ] Close the automatic-GC, hydration, repeated-options, request-shape,
       persistence, and cleanup-harness cells with tests or explicit contract
       decisions.

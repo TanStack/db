@@ -698,6 +698,14 @@ its TLA+ safe configuration passes, while hash-only release and per-acquisition
 abort weakenings produce counterexamples. It does not model result application
 or persisted row reconciliation. The [exact-commit oracle review](oracle-reviews/2026-10-14-query-db-published-core-review.md)
 records the production controls, guide audit, and remaining receiving paths.
+The separate [publication design model](oracle-reviews/query-db-publication-tla/README.md)
+checks two Query DB leases, one physical fetch, one row, and the
+unaccepted/accepted/applied transaction boundary. Its 156-state safe run passes;
+early fulfillment, peer-row loss, late publication, early physical abort, and
+abandonment after acceptance each produce a bounded counterexample. Its atomic
+reentrant step and absence of persistence or multiple physical Queries leave
+the corresponding production histories with the load-lifecycle and ownership
+oracle owners; the model is not evidence that those paths run in production.
 The new public cleanup witnesses preserve a primary mismatch and each cleanup
 failure separately. Older fixed histories in the load-lifecycle owner still use
 `finally`; a cleanup throw can mask the original assertion or skip later

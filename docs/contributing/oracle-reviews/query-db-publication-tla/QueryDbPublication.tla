@@ -1,0 +1,172 @@
+-------------------------- MODULE QueryDbPublication --------------------------
+EXTENDS FiniteSets, TLC
+
+\* One physical Query, two Query DB acquisition leases, and one source row.
+\* "active" projects Query DB leases, not Core's logical subset demands.
+\* "phase" projects a sync transaction's acceptance and application boundary;
+\* it is not Query DB's result-application controller. The provider's old
+\* response may arrive after final release, but only an accepted transaction
+\* can apply. The combined ReenterAtRelease action projects an acquisition
+\* made inside observer-removal cleanup after an already applied result.
+\* Persistence, cache reuse, multiple result generations, and source values
+\* are outside this bounded publication model.
+CONSTANTS WrongEarlyFulfill, WrongDropPeer, WrongLatePublish,
+          WrongEarlyPhysicalAbort, WrongAbortAccepted
+
+Owners == {"a", "b"}
+Phases == {"none", "unaccepted", "accepted", "applied", "abandoned"}
+Outcomes == {"idle", "pending", "fulfilled", "rejected"}
+
+VARIABLES active, callerAborted, rowOwners, phase, outcome,
+          fetchOpen, signalConsumed, physicalAborted,
+          acceptedEver, appliedEver
+vars == <<active, callerAborted, rowOwners, phase, outcome,
+          fetchOpen, signalConsumed, physicalAborted,
+          acceptedEver, appliedEver>>
+
+Init ==
+  /\ active = {"a"}
+  /\ callerAborted = {}
+  /\ rowOwners = {}
+  /\ phase = "none"
+  /\ outcome = [owner \in Owners |->
+       IF owner = "a" THEN "pending" ELSE "idle"]
+  /\ fetchOpen = TRUE
+  /\ signalConsumed = FALSE
+  /\ physicalAborted = FALSE
+  /\ acceptedEver = FALSE
+  /\ appliedEver = FALSE
+
+AcquirePeer ==
+  /\ "a" \in active
+  /\ "b" \notin active
+  /\ outcome["b"] = "idle"
+  /\ ~physicalAborted
+  /\ active' = active \cup {"b"}
+  /\ rowOwners' = IF phase = "applied"
+                  THEN rowOwners \cup {"b"} ELSE rowOwners
+  /\ outcome' = [outcome EXCEPT !["b"] =
+       IF phase = "applied" THEN "fulfilled" ELSE "pending"]
+  /\ UNCHANGED <<callerAborted, phase, fetchOpen, signalConsumed,
+                 physicalAborted, acceptedEver, appliedEver>>
+
+ConsumeSignal ==
+  /\ fetchOpen
+  /\ active # {}
+  /\ ~signalConsumed
+  /\ signalConsumed' = TRUE
+  /\ UNCHANGED <<active, callerAborted, rowOwners, phase, outcome,
+                 fetchOpen, physicalAborted, acceptedEver, appliedEver>>
+
+ProviderResult ==
+  /\ fetchOpen
+  /\ ~physicalAborted
+  /\ phase = "none"
+  /\ phase' = "unaccepted"
+  /\ fetchOpen' = FALSE
+  /\ UNCHANGED <<active, callerAborted, rowOwners, outcome,
+                 signalConsumed, physicalAborted, acceptedEver, appliedEver>>
+
+Accept ==
+  /\ phase = "unaccepted"
+  /\ active # {}
+  /\ phase' = "accepted"
+  /\ acceptedEver' = TRUE
+  /\ outcome' = IF WrongEarlyFulfill
+                THEN [owner \in Owners |->
+                  IF owner \in active /\ outcome[owner] = "pending"
+                  THEN "fulfilled" ELSE outcome[owner]]
+                ELSE outcome
+  /\ UNCHANGED <<active, callerAborted, rowOwners, fetchOpen,
+                 signalConsumed, physicalAborted, appliedEver>>
+
+Apply ==
+  /\ phase = "accepted"
+  /\ phase' = "applied"
+  /\ appliedEver' = TRUE
+  /\ rowOwners' = IF WrongLatePublish /\ active = {}
+                  THEN {"a"} ELSE active
+  /\ outcome' = [owner \in Owners |->
+       IF outcome[owner] = "pending"
+       THEN IF owner \in active THEN "fulfilled" ELSE "rejected"
+       ELSE outcome[owner]]
+  /\ UNCHANGED <<active, callerAborted, fetchOpen, signalConsumed,
+                 physicalAborted, acceptedEver>>
+
+AbortCaller(owner) ==
+  /\ owner \in active
+  /\ active' = active \ {owner}
+  /\ physicalAborted' =
+       (physicalAborted \/
+        (fetchOpen /\ signalConsumed /\
+         (WrongEarlyPhysicalAbort \/ (active \ {owner}) = {})))
+  /\ callerAborted' = callerAborted \cup {owner}
+  /\ rowOwners' = rowOwners \ {owner}
+  /\ phase' = IF WrongAbortAccepted /\ phase = "accepted"
+              THEN "abandoned" ELSE phase
+  /\ outcome' = [outcome EXCEPT ![owner] =
+       IF @ = "pending" /\ phase # "accepted"
+       THEN "rejected" ELSE @]
+  /\ UNCHANGED <<fetchOpen, signalConsumed, acceptedEver, appliedEver>>
+
+Release(owner) ==
+  /\ owner \in active
+  /\ active' = active \ {owner}
+  /\ physicalAborted' =
+       (physicalAborted \/
+        (fetchOpen /\ signalConsumed /\
+         (WrongEarlyPhysicalAbort \/ (active \ {owner}) = {})))
+  /\ rowOwners' =
+       IF WrongDropPeer /\ owner = "a" /\ "b" \in active /\
+          phase = "applied"
+       THEN {} ELSE rowOwners \ {owner}
+  /\ outcome' = [outcome EXCEPT ![owner] =
+       IF @ = "pending" /\ phase # "accepted"
+       THEN "rejected" ELSE @]
+  /\ UNCHANGED <<callerAborted, phase, fetchOpen, signalConsumed,
+                 acceptedEver, appliedEver>>
+
+ReenterAtRelease ==
+  /\ active = {"a"}
+  /\ phase = "applied"
+  /\ outcome["b"] = "idle"
+  /\ active' = {"b"}
+  /\ rowOwners' = {"b"}
+  /\ outcome' = [outcome EXCEPT !["b"] = "fulfilled"]
+  /\ UNCHANGED <<callerAborted, phase, fetchOpen, signalConsumed,
+                 physicalAborted, acceptedEver, appliedEver>>
+
+Next == AcquirePeer \/ ConsumeSignal \/ ProviderResult \/ Accept \/ Apply \/
+        ReenterAtRelease \/ (\E owner \in Owners : AbortCaller(owner)) \/
+        (\E owner \in Owners : Release(owner))
+Spec == Init /\ [][Next]_vars
+FairSpec == Spec /\ WF_vars(Apply)
+
+TypeOK ==
+  /\ active \subseteq Owners
+  /\ callerAborted \subseteq Owners
+  /\ rowOwners \subseteq Owners
+  /\ phase \in Phases
+  /\ outcome \in [Owners -> Outcomes]
+  /\ fetchOpen \in BOOLEAN
+  /\ signalConsumed \in BOOLEAN
+  /\ physicalAborted \in BOOLEAN
+  /\ acceptedEver \in BOOLEAN
+  /\ appliedEver \in BOOLEAN
+
+\* A departed lease cannot keep a row public, and a live peer keeps its row.
+OnlyLiveOwnersPublish == rowOwners \subseteq active
+LivePeerKeepsRow == (phase = "applied" /\ "b" \in active) =>
+  "b" \in rowOwners
+
+\* A load and a row need an applied receipt. An accepted transaction remains
+\* obligated even when its last caller aborts; weak fairness only requires
+\* the continuously enabled Apply action to run, not a scheduler deadline.
+NoEarlyLoadFulfillment == \A owner \in Owners :
+  outcome[owner] = "fulfilled" => appliedEver
+NoUnacceptedPublication == rowOwners # {} => phase = "applied"
+AcceptedEventuallyApplies == acceptedEver ~> appliedEver
+
+\* A consumed Query signal aborts only when no Query DB lease observes it.
+NoEarlyPhysicalAbort == physicalAborted => active = {}
+=============================================================================
