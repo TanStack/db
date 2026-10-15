@@ -670,10 +670,11 @@ histories at the first peer-release row checkpoint; forcing the aborted old
 commit to apply failed the receipt comparison. These in-memory cuts do not
 cover a peer present before the callback, caller abort, post-acceptance
 reentry, or transient publication between the named row checkpoints.
-An accepted-release grammar varies caller abort versus unsubscribe and one
-versus two source-result rows. Four named histories and matching fixed-seed and
-random 48-run campaigns use public `requestSnapshot` acquisitions with an
-equal surviving peer. A held optimistic mutation delays publication after the
+An accepted-release grammar varies caller abort versus unsubscribe, one versus
+two source-result rows, and a peer present before acceptance versus acquired
+from the release callback. Eight named histories and matching fixed-seed and
+random 48-run campaigns use public `requestSnapshot` acquisitions. A held
+optimistic mutation delays publication after the
 source-result sync transaction is accepted. The driver observes that the
 transaction contains `server-a`; a wrapping sync records its original applied
 receipt without changing it. After first-owner release and before opening the
@@ -683,9 +684,14 @@ the one original provider result must apply in full for the peer. An aborted
 first load must reject with `AbortError` only after that receipt and the server
 rows become visible. Releasing the peer removes those rows. A second provider
 call would return a distinct row and fail the provider-call comparison. The
-unsubscribed first adapter promise has no claimed outcome. Collection cleanup
-and reentrant callbacks during this accepted interval remain outside the
-grammar.
+unsubscribed first adapter promise has no claimed outcome. The callback cases
+acquire the peer from caller abort or Query-cache `observerRemoved` before the
+first release returns. A forced-retirement mutant reached the observer-removal
+cut and lost the peer's public row while its load still fulfilled; the two
+unsubscribe callback histories reject it at the after-gate row checkpoint.
+Removing only the outer refcount rechecks survived because the inner cleanup
+guard still protected the peer. Collection cleanup during the accepted
+interval remains outside this grammar.
 An applied direct cache patch permits reuse or one exact filtered revalidation
 for a new demand, but cannot trigger a redundant full request. The bounded
 history has no retry, invalidation, or explicit refetch; a duplicate filtered

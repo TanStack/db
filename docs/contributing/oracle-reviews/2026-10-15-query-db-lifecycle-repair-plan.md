@@ -46,8 +46,17 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
         found and helped close the
         pre-release cache-event reach gap, a missing old-receipt check, and
         the equal-scope identity false-green (2026-10-15).
-  - [ ] Cover post-acceptance callback reentry and any remaining reachable
-        ownership cuts before closing #2160.
+  - [x] Post-acceptance callback reentry: eight named histories and matching
+        fixed/random 48-run campaigns cross caller abort or unsubscribe, one
+        or two rows, and a peer present before acceptance or acquired in the
+        release callback. The peer remains pending behind the publication
+        gate, then receives the accepted rows from the one provider result;
+        the original applied receipt survives release. An observer-removal
+        mutant that force-retires the reentrant peer failed both unsubscribe
+        histories at the public-row checkpoint. Merely removing the outer
+        refcount rechecks survived because the inner cleanup guard still
+        protected the peer (2026-10-15).
+  - [ ] Cover remaining reachable ownership cuts before closing #2160.
 - [x] Repair public caller abort (#2162) and turn its witness green. Four
       sole/peer and consumed/ignored-signal histories, two pre-acceptance
       histories, and one accepted-receipt history pass (2026-10-15). The broader
@@ -72,14 +81,18 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
           intermediate public-row checkpoints (2026-10-15). Reentry and
           refetch cells remain; accepted-commit reentry remains open below.
     - [x] Accepted-commit release grammar: caller abort or unsubscribe after
-          source-result acceptance, crossed with one/two rows, runs four named
+          source-result acceptance, crossed with one/two rows and peer timing,
+          runs eight named
           histories and matching fixed/random 48-run campaigns. The real
           applied receipt, first-load settlement, peer settlement, one
           provider call, public rows before/after the publication gate, and
           final release are checked. Direct seed/path replay passed. A
           temporary immediate-abort mutant failed both caller-abort histories
           at the held-gate, receipt, and public-row checkpoints; two
-          unsubscribe controls passed. An independent oracle reviewer found
+          unsubscribe controls passed. Reentrant peer acquisition at caller
+          abort or Query-cache observer removal keeps the peer's accepted
+          rows; a forced-retirement mutant failed at the row comparison.
+          An independent oracle reviewer found
           and helped close timing, replacement-fetch, and early-publication
           false-greens (2026-10-15). Reentrant callbacks and cleanup during
           this accepted interval remain open.

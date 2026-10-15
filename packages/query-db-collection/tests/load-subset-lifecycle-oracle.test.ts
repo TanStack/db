@@ -5504,15 +5504,18 @@ describe(`loadSubset lifecycle oracle`, () => {
    * raw-adapter outcome. Both actions leave the peer's load pending until
    * application and let that peer retain every server row afterward.
    *
-   * The grammar varies abort versus unsubscribe and one versus two server
-   * rows. It excludes Collection cleanup because that action retires the peer
-   * and needs an event/receipt observer rather than a surviving-row check.
+   * The grammar varies abort versus unsubscribe, one versus two server rows,
+   * and a peer present before acceptance versus acquired from the release
+   * callback. It excludes Collection cleanup because that action retires the
+   * peer and needs an event/receipt observer rather than a surviving-row check.
    * The driver uses public requestSnapshot and an optimistic mutation to hold
    * the accepted transaction. The internal pending-transaction flag only
    * witnesses that the intended cut was reached. Public load outcomes and
    * exact server rows are compared after release while publication remains
    * held, after the hold, and after the peer releases. A wrapping sync records
-   * the applied receipt for the source-result transaction. A second provider
+   * the applied receipt for the source-result transaction. A callback
+   * acquisition joins during caller abort or Query-cache observer removal,
+   * before the original release returns. A second provider
    * call returns a distinct row, so replacement work cannot stand in for the
    * accepted result. Recording rows and receipt state inside the first load's
    * rejection handler checks that its settlement follows application.
@@ -5520,6 +5523,7 @@ describe(`loadSubset lifecycle oracle`, () => {
   type AcceptedReleaseHistory = {
     action: `caller-abort` | `unsubscribe`
     rowCount: 1 | 2
+    peerTiming: `before` | `release-callback`
   }
 
   function expectedAcceptedRelease(history: AcceptedReleaseHistory) {
@@ -5528,6 +5532,7 @@ describe(`loadSubset lifecycle oracle`, () => {
     return {
       reachedAcceptedCommit: true,
       providerCalls: 1,
+      releaseCallbackCount: history.peerTiming === `release-callback` ? 1 : 0,
       beforeGateRows: [] as Array<string>,
       receiptAppliedBeforeGate: false,
       receiptAppliedAfterGate: true,
@@ -5615,17 +5620,53 @@ describe(`loadSubset lifecycle oracle`, () => {
     const first = collection.subscribeChanges(() => {}, {
       includeInitialState: false,
     })
-    const peer = collection.subscribeChanges(() => {}, {
-      includeInitialState: false,
-    })
+    let peer: ReturnType<typeof collection.subscribeChanges> | undefined
     const caller = new AbortController()
     let firstLoad: true | Promise<void> | undefined
     let peerLoad: true | Promise<void> | undefined
+    let releaseCallbackCount = 0
+    let observingFirstRelease = false
     const publicServerRows = () =>
       collection.toArray
         .map((row) => row.id)
         .filter((rowId) => rowId.startsWith(`server-`))
         .sort()
+    const acquirePeer = () => {
+      peer = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+      peer.requestSnapshot({
+        onLoadSubsetResult: (result) => {
+          peerLoad = result
+        },
+      })
+    }
+    if (
+      history.peerTiming === `release-callback` &&
+      history.action === `caller-abort`
+    ) {
+      caller.signal.addEventListener(
+        `abort`,
+        () => {
+          releaseCallbackCount++
+          acquirePeer()
+        },
+        { once: true },
+      )
+    }
+    const stopCacheListener = queryClient.getQueryCache().subscribe((event) => {
+      if (
+        history.peerTiming === `release-callback` &&
+        history.action === `unsubscribe` &&
+        observingFirstRelease &&
+        releaseCallbackCount === 0 &&
+        event.type === `observerRemoved` &&
+        event.query.queryKey[0] === id
+      ) {
+        releaseCallbackCount++
+        acquirePeer()
+      }
+    })
 
     return checkPublicCleanupWitness(async () => {
       const mutation = collection.insert({ id: `local` })
@@ -5636,20 +5677,15 @@ describe(`loadSubset lifecycle oracle`, () => {
           firstLoad = result
         },
       })
-      peer.requestSnapshot({
-        onLoadSubsetResult: (result) => {
-          peerLoad = result
-        },
-      })
+      if (history.peerTiming === `before`) acquirePeer()
       if (firstLoad === undefined || firstLoad === true)
         throw new Error(`The first acquisition did not return a pending load`)
-      if (peerLoad === undefined || peerLoad === true)
+      if (
+        history.peerTiming === `before` &&
+        (peerLoad === undefined || peerLoad === true)
+      )
         throw new Error(`The peer acquisition did not return a pending load`)
       void firstLoad.catch(() => undefined)
-      const peerOutcome = peerLoad.then(
-        () => `fulfilled` as const,
-        () => `rejected` as const,
-      )
       await vi.waitFor(() =>
         expect(
           collection._state.pendingSyncedTransactions.some(
@@ -5664,9 +5700,6 @@ describe(`loadSubset lifecycle oracle`, () => {
       let firstRowsAtSettlement: Array<string> | undefined
       let receiptAppliedAtFirstSettlement: boolean | undefined
       let peerSettledBeforeGate = false
-      void peerOutcome.then(() => {
-        peerSettledBeforeGate = true
-      })
       if (history.action === `caller-abort`) {
         void firstLoad.then(
           () => {
@@ -5684,7 +5717,19 @@ describe(`loadSubset lifecycle oracle`, () => {
           },
         )
         caller.abort()
-      } else first.unsubscribe()
+      } else {
+        observingFirstRelease = true
+        first.unsubscribe()
+      }
+      if (peerLoad === undefined || peerLoad === true)
+        throw new Error(`The peer acquisition did not return a pending load`)
+      const peerOutcome = peerLoad.then(
+        () => `fulfilled` as const,
+        () => `rejected` as const,
+      )
+      void peerOutcome.then(() => {
+        peerSettledBeforeGate = true
+      })
       await new Promise<void>((resolve) => setTimeout(resolve, 0))
       const beforeGateRows = publicServerRows()
       const receiptAppliedBeforeGate = receiptApplied
@@ -5698,11 +5743,12 @@ describe(`loadSubset lifecycle oracle`, () => {
       const observedPeerOutcome = await peerOutcome
       const afterGateRows = publicServerRows()
       const receiptAppliedAfterGate = receiptApplied
-      peer.unsubscribe()
+      peer?.unsubscribe()
       const afterPeerReleaseRows = publicServerRows()
       const observed = {
         reachedAcceptedCommit,
         providerCalls,
+        releaseCallbackCount,
         beforeGateRows,
         receiptAppliedBeforeGate,
         receiptAppliedAfterGate,
@@ -5725,8 +5771,9 @@ describe(`loadSubset lifecycle oracle`, () => {
       return observed
     }, [
       [`mutation handler`, () => releaseHandler.resolve()],
+      [`cache listener`, stopCacheListener],
       [`first subscription`, () => first.unsubscribe()],
-      [`peer subscription`, () => peer.unsubscribe()],
+      [`peer subscription`, () => peer?.unsubscribe()],
       [`Collection`, () => collection.cleanup()],
       [`Query client`, () => queryClient.clear()],
     ])
@@ -5740,11 +5787,21 @@ describe(`loadSubset lifecycle oracle`, () => {
       `unsubscribe`,
     ),
     rowCount: fc.constantFrom<AcceptedReleaseHistory[`rowCount`]>(1, 2),
+    peerTiming: fc.constantFrom<AcceptedReleaseHistory[`peerTiming`]>(
+      `before`,
+      `release-callback`,
+    ),
   })
   const namedAcceptedReleaseHistories = (
     [`caller-abort`, `unsubscribe`] as const
   ).flatMap((action) =>
-    ([1, 2] as const).map((rowCount) => ({ action, rowCount })),
+    ([1, 2] as const).flatMap((rowCount) =>
+      ([`before`, `release-callback`] as const).map((peerTiming) => ({
+        action,
+        rowCount,
+        peerTiming,
+      })),
+    ),
   )
 
   it.each(namedAcceptedReleaseHistories)(
