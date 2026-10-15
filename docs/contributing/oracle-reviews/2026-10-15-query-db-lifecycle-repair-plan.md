@@ -33,8 +33,21 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
         an independent oracle reviewer found and helped remove two false
         outcome claims about retired adapter promises and nested peer loads
         (2026-10-15).
-  - [ ] Extend the process grammar to commit-abort and Query observer-removal
-        callbacks, then check each release order and applied settlement.
+  - [x] Reentrant release grammar: 16 named histories and matching fixed/random
+        48-run campaigns cross commit-abort and Query observer-removal callbacks,
+        one/two equal-scope rows, one/two new peers, and both release orders.
+        Four disjoint-scope histories distinguish which peer's observer lease
+        remains. Every new load checks its promised row at settlement; the
+        abandoned old transaction's receipt rejects with `AbortError`.
+        An old-version run failed the equal-scope histories at public-row or
+        load-settlement checkpoints. A wrong-owner unload mutant failed the
+        reverse-order disjoint histories at the first peer-release row
+        checkpoint. Direct seed/path replay passed. The independent reviewer
+        found and helped close the
+        pre-release cache-event reach gap, a missing old-receipt check, and
+        the equal-scope identity false-green (2026-10-15).
+  - [ ] Cover post-acceptance callback reentry and any remaining reachable
+        ownership cuts before closing #2160.
 - [x] Repair public caller abort (#2162) and turn its witness green. Four
       sole/peer and consumed/ignored-signal histories, two pre-acceptance
       histories, and one accepted-receipt history pass (2026-10-15). The broader

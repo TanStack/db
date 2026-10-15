@@ -626,10 +626,11 @@ from a held commit's abort listener receives its row after the old commit
 settles; and an acquisition from a Query-cache `observerRemoved` callback keeps
 its row through the old owner's release. Each checks load settlement and public
 rows after acquisition or final release. They failed at those assertions before
-the repair. The held-commit history also distinguishes waiting for the old
-aborted transaction from diffing against its still-open row projection. These
-fixed histories do not yet cover all reentrant callbacks; [issue #2160](https://github.com/TanStack/db/issues/2160)
-remains open until the broader history grammar and hostile controls run.
+the repair. The held-commit history checks the new owner's applied row after
+the old transaction is released; it does not require the new owner to wait for
+the delayed old `commit()` call. The generated grammar below checks the old
+transaction's receipt separately. [Issue #2160](https://github.com/TanStack/db/issues/2160)
+remains open for post-acceptance reentry and other uncovered lifecycle cuts.
 An application-release grammar now runs the same independent source-row model,
 real public `requestSnapshot` driver, and exact-row comparison over twelve
 named histories plus fixed-seed and random 48-run campaigns. It varies the
@@ -648,6 +649,27 @@ histories failed at the later final-release row checkpoint, including a
 two-row `write()` trace with one stranded row. This grammar does not cover
 commit-abort or Query-cache callback reentry, accepted commits, or source
 failure; the fixed witnesses above own the original cases.
+The reentrant-release grammar runs sixteen named histories and matching
+fixed-seed and random 48-run campaigns. Twelve equal-scope histories cross
+the abort of a held, unaccepted source-result commit with Query-cache
+`observerRemoved` reentry, one or two source rows, and one or two new peers.
+The two-peer histories include both release orders. Four more histories give
+two new peers disjoint predicates and
+different rows, so releasing the wrong peer leaves the wrong public row. The
+driver arms the cache listener only for the old owner's synchronous release,
+and the held commit is selected by its source-row write. Every new load must
+have its promised rows when it fulfills. After each peer release, public rows
+must match the still-owned scopes; equal-scope observer reentry also checks
+rows as the old unsubscribe returns. The old unaccepted transaction's applied
+receipt must reject with `AbortError`. The old adapter promise after
+unsubscribe has no claimed outcome, and a new peer may apply before the old
+wrapper's delayed `commit()` call. Against pre-repair `b5c55a2a4`, the
+equal-scope named histories failed at public-row or load-settlement
+checkpoints. A wrong-owner unload mutant failed the reverse-order disjoint
+histories at the first peer-release row checkpoint; forcing the aborted old
+commit to apply failed the receipt comparison. These in-memory cuts do not
+cover a peer present before the callback, caller abort, post-acceptance
+reentry, or transient publication between the named row checkpoints.
 An accepted-release grammar varies caller abort versus unsubscribe and one
 versus two source-result rows. Four named histories and matching fixed-seed and
 random 48-run campaigns use public `requestSnapshot` acquisitions with an

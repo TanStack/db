@@ -3486,6 +3486,374 @@ describe(`loadSubset lifecycle oracle`, () => {
   })
 
   /**
+   * A release callback may acquire one or two new public owners before the
+   * old release returns. The law is per observer lease: every accepted new
+   * owner retains the provider rows until its own release, regardless of
+   * which peer releases first. The independent model uses only the scripted
+   * source row IDs, each peer's scope, and the live owners; it has no Query
+   * cache, refcount, or ownership map.
+   *
+   * The legal grammar varies the callback cut (abort of a held, unaccepted
+   * source-result commit or Query observer removal), one/two equal-scope
+   * source rows, and one peer or either release order for two peers. A
+   * disjoint-scope pair uses one distinct row per peer to expose a release
+   * that retires the wrong observer lease. The held commit's old adapter
+   * promise has no promised result after unsubscribe, but its
+   * unaccepted sync transaction must reject its applied receipt after abort.
+   * The driver reaches each cut through public requestSnapshot and
+   * unsubscribe, records each new load's public rows at settlement, then
+   * compares the complete public row set after each release. For observer
+   * removal with equal-scope peers, rows also remain public as the old
+   * unsubscribe returns because the new acquisitions were accepted inside
+   * that synchronous call. The internal callback count witnesses reach only.
+   * A peer present before the callback, caller abort, and post-acceptance
+   * reentry are outside this grammar.
+   */
+  type ReentrantReleaseHistory = {
+    cut: `commit-abort` | `observer-removal`
+    rowCount: 1 | 2
+    releaseOrder: `only` | `first` | `second`
+    scope: `equal` | `disjoint`
+  }
+
+  function expectedReentrantRelease(history: ReentrantReleaseHistory) {
+    const sourceRows = history.rowCount === 1 ? [`a`] : [`a`, `b`]
+    const peerCount = history.releaseOrder === `only` ? 1 : 2
+    const peerRows =
+      history.scope === `disjoint`
+        ? [[`a`], [`b`]]
+        : Array.from({ length: peerCount }, () => sourceRows)
+    const firstReleasedIndex = history.releaseOrder === `second` ? 1 : 0
+    return {
+      callbackCount: 1,
+      ...(history.cut === `commit-abort`
+        ? { oldReceiptOutcome: `AbortError` }
+        : history.scope === `equal`
+          ? { afterOldReleaseRows: sourceRows }
+          : {}),
+      peerOutcomes: peerRows.map(() => ({
+        status: `fulfilled`,
+        promisedRowsPresent: true,
+      })),
+      afterPeerSettlementsRows: [...new Set(peerRows.flat())].sort(),
+      afterFirstPeerReleaseRows:
+        peerCount === 1 ? [] : peerRows[1 - firstReleasedIndex],
+      afterFinalReleaseRows: [] as Array<string>,
+    }
+  }
+
+  async function observeReentrantRelease(
+    history: ReentrantReleaseHistory,
+    expected: ReturnType<typeof expectedReentrantRelease>,
+  ) {
+    const queryClient = createQueryClient()
+    const id = `reentrant-release-history-${collectionSequence++}`
+    const sourceRows: Array<Row> =
+      history.scope === `disjoint`
+        ? [{ id: `old`, group: `old` }]
+        : history.rowCount === 1
+          ? [{ id: `a` }]
+          : [{ id: `a` }, { id: `b` }]
+    const peerProviderRows: Array<Array<Row>> =
+      history.scope === `disjoint`
+        ? [[{ id: `a`, group: `a` }], [{ id: `b`, group: `b` }]]
+        : [sourceRows, sourceRows]
+    const whereForGroup = (group: string) =>
+      new IR.Func<boolean>(`eq`, [
+        new IR.PropRef([`group`]),
+        new IR.Value(group),
+      ])
+    const oldWhere = whereForGroup(`old`)
+    const peerWheres = [whereForGroup(`a`), whereForGroup(`b`)]
+    const commitEntered = createDeferred<void>()
+    const commitGate = createDeferred<void>()
+    let heldFirstCommit = false
+    let sourceResultWritten = false
+    let oldReceiptOutcome: `applied` | `AbortError` | `other-error` | undefined
+    let reenter = () => {}
+    const baseOptions = queryCollectionOptions<Row>({
+      id,
+      queryClient,
+      queryKey: [id],
+      queryFn: (context) => {
+        if (history.scope === `equal`) return Promise.resolve(sourceRows)
+        const where = context.meta?.loadSubsetOptions?.where
+        if (where === oldWhere) return Promise.resolve(sourceRows)
+        if (where === peerWheres[0])
+          return Promise.resolve(peerProviderRows[0]!)
+        if (where === peerWheres[1])
+          return Promise.resolve(peerProviderRows[1]!)
+        throw new Error(`Unexpected disjoint subset scope`)
+      },
+      getKey: (row) => row.id,
+      startSync: true,
+      syncMode: `on-demand`,
+    })
+    const originalSync = baseOptions.sync
+    const collection = createCollection({
+      ...baseOptions,
+      sync: {
+        sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+          originalSync.sync({
+            ...params,
+            begin: () => {
+              sourceResultWritten = false
+              params.begin()
+            },
+            write: (change) => {
+              if (
+                change.type !== `delete` &&
+                change.value.id === sourceRows[0]?.id
+              )
+                sourceResultWritten = true
+              params.write(change)
+            },
+            commit: (signal) => {
+              if (
+                history.cut !== `commit-abort` ||
+                heldFirstCommit ||
+                !sourceResultWritten
+              )
+                return params.commit(signal)
+              heldFirstCommit = true
+              signal?.addEventListener(`abort`, () => reenter(), {
+                once: true,
+              })
+              commitEntered.resolve()
+              return commitGate.promise.then(() => {
+                const receipt = params.commit(signal)
+                if (receipt === true) {
+                  oldReceiptOutcome = `applied`
+                  return undefined
+                }
+                void receipt.then(
+                  () => {
+                    oldReceiptOutcome = `applied`
+                  },
+                  (error: unknown) => {
+                    oldReceiptOutcome =
+                      error instanceof Error && error.name === `AbortError`
+                        ? `AbortError`
+                        : `other-error`
+                  },
+                )
+                return receipt
+              })
+            },
+          }),
+      },
+    })
+    const first = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    const peers: Array<ReturnType<typeof collection.subscribeChanges>> = []
+    const peerOutcomes: Array<
+      Promise<{
+        status: `fulfilled` | `rejected`
+        promisedRowsPresent: boolean
+      }>
+    > = []
+    const rowIds = () => collection.toArray.map((row) => row.id).sort()
+    let callbackCount = 0
+    let observingFirstRelease = false
+    reenter = () => {
+      if (callbackCount > 0) return
+      callbackCount++
+      const peerCount = history.releaseOrder === `only` ? 1 : 2
+      for (let index = 0; index < peerCount; index++) {
+        const peer = collection.subscribeChanges(() => {}, {
+          includeInitialState: false,
+        })
+        peers.push(peer)
+        const promisedIds = peerProviderRows[index]!.map((row) => row.id)
+        const promisedRowsPresent = () =>
+          promisedIds.every((rowId) => rowIds().includes(rowId))
+        peer.requestSnapshot({
+          ...(history.scope === `disjoint`
+            ? { where: peerWheres[index] }
+            : {}),
+          onLoadSubsetResult: (load) => {
+            peerOutcomes.push(
+              load === true
+                ? Promise.resolve({
+                    status: `fulfilled`,
+                    promisedRowsPresent: promisedRowsPresent(),
+                  })
+                : load.then(
+                    () => ({
+                      status: `fulfilled`,
+                      promisedRowsPresent: promisedRowsPresent(),
+                    }),
+                    () => ({
+                      status: `rejected`,
+                      promisedRowsPresent: promisedRowsPresent(),
+                    }),
+                  ),
+            )
+          },
+        })
+      }
+    }
+    const stopCacheListener = queryClient.getQueryCache().subscribe((event) => {
+      if (
+        history.cut === `observer-removal` &&
+        observingFirstRelease &&
+        callbackCount === 0 &&
+        event.type === `observerRemoved` &&
+        event.query.queryKey[0] === id
+      )
+        reenter()
+    })
+
+    return checkPublicCleanupWitness(async () => {
+      let firstLoad: true | Promise<void> | undefined
+      first.requestSnapshot({
+        ...(history.scope === `disjoint` ? { where: oldWhere } : {}),
+        onLoadSubsetResult: (load) => {
+          firstLoad = load
+        },
+      })
+      if (firstLoad === undefined)
+        throw new Error(`The first acquisition did not return a load`)
+      if (history.cut === `commit-abort`) {
+        if (firstLoad === true)
+          throw new Error(`The held commit did not return a pending load`)
+        void firstLoad.catch(() => undefined)
+        await commitEntered.promise
+      } else {
+        await firstLoad
+        observingFirstRelease = true
+      }
+
+      first.unsubscribe()
+      const afterOldReleaseRows =
+        history.cut === `observer-removal` && history.scope === `equal`
+          ? rowIds()
+          : undefined
+      expect(callbackCount).toBe(1)
+      expect(peerOutcomes).toHaveLength(expected.peerOutcomes.length)
+      commitGate.resolve()
+      const observedPeerOutcomes = await Promise.all(peerOutcomes)
+      if (history.cut === `commit-abort`)
+        await vi.waitFor(() => expect(oldReceiptOutcome).toBeDefined())
+      const afterPeerSettlementsRows = rowIds()
+      const firstReleasedIndex = history.releaseOrder === `second` ? 1 : 0
+      peers[firstReleasedIndex]?.unsubscribe()
+      const afterFirstPeerReleaseRows = rowIds()
+      if (peers.length === 2) peers[1 - firstReleasedIndex]?.unsubscribe()
+      const afterFinalReleaseRows = rowIds()
+      const observed = {
+        callbackCount,
+        ...(history.cut === `observer-removal` && history.scope === `equal`
+          ? { afterOldReleaseRows }
+          : {}),
+        ...(history.cut === `commit-abort` ? { oldReceiptOutcome } : {}),
+        peerOutcomes: observedPeerOutcomes,
+        afterPeerSettlementsRows,
+        afterFirstPeerReleaseRows,
+        afterFinalReleaseRows,
+      }
+      expect(observed, JSON.stringify({ history, observed, expected })).toEqual(
+        expected,
+      )
+      return observed
+    }, [
+      [`commit gate`, () => commitGate.resolve()],
+      [`cache listener`, stopCacheListener],
+      [`first subscription`, () => first.unsubscribe()],
+      [`peer subscriptions`, () => peers.forEach((peer) => peer.unsubscribe())],
+      [`Collection`, () => collection.cleanup()],
+      [`Query client`, () => queryClient.clear()],
+    ])
+  }
+
+  const reentrantReleaseProperty = `query-db.reentrant-release-history`
+  const reentrantReleaseReplay = readOracleRunConfig()
+  const reentrantCutArbitrary = fc.constantFrom<ReentrantReleaseHistory[`cut`]>(
+    `commit-abort`,
+    `observer-removal`,
+  )
+  const reentrantReleaseArbitrary = fc.oneof(
+    fc
+      .record({
+        cut: reentrantCutArbitrary,
+        rowCount: fc.constantFrom<ReentrantReleaseHistory[`rowCount`]>(1, 2),
+        releaseOrder:
+          fc.constantFrom<ReentrantReleaseHistory[`releaseOrder`]>(
+            `only`,
+            `first`,
+            `second`,
+          ),
+      })
+      .map((history) => ({ ...history, scope: `equal` as const })),
+    fc
+      .record({
+        cut: reentrantCutArbitrary,
+        releaseOrder: fc.constantFrom<`first` | `second`>(`first`, `second`),
+      })
+      .map((history) => ({
+        ...history,
+        rowCount: 1 as const,
+        scope: `disjoint` as const,
+      })),
+  )
+  const namedEqualReentrantReleaseHistories = (
+    [`commit-abort`, `observer-removal`] as const
+  ).flatMap((cut) =>
+    ([1, 2] as const).flatMap((rowCount) =>
+      ([`only`, `first`, `second`] as const).map((releaseOrder) => ({
+        cut,
+        rowCount,
+        releaseOrder,
+        scope: `equal` as const,
+      })),
+    ),
+  )
+  const namedDisjointReentrantReleaseHistories = (
+    [`commit-abort`, `observer-removal`] as const
+  ).flatMap((cut) =>
+    ([`first`, `second`] as const).map((releaseOrder) => ({
+      cut,
+      rowCount: 1 as const,
+      releaseOrder,
+      scope: `disjoint` as const,
+    })),
+  )
+  const namedReentrantReleaseHistories = [
+    ...namedEqualReentrantReleaseHistories,
+    ...namedDisjointReentrantReleaseHistories,
+  ]
+
+  it.each(namedReentrantReleaseHistories)(
+    `reconstructs a reentrant release history: %j`,
+    async (history) => {
+      await observeReentrantRelease(history, expectedReentrantRelease(history))
+    },
+  )
+
+  it(
+    `refines generated reentrant release histories`,
+    async () => {
+      if (
+        reentrantReleaseReplay.replayPath !== undefined &&
+        reentrantReleaseReplay.replayProperty !== reentrantReleaseProperty
+      )
+        return
+      const property = fc.asyncProperty(
+        reentrantReleaseArbitrary,
+        async (history) => {
+          await observeReentrantRelease(history, expectedReentrantRelease(history))
+        },
+      )
+      const options = oraclePropertyOptions(48, reentrantReleaseProperty)
+      if (reentrantReleaseReplay.replaySeed === undefined)
+        await fc.assert(property, { ...options, seed: 2_160_2028 })
+      await fc.assert(property, options)
+    },
+    20_000,
+  )
+
+  /**
    * A direct write can overlap a fetched result. While merging that result,
    * Query DB briefly subscribes to its own Query observer. That temporary
    * listener is not an owner: final public release in the cache notification
