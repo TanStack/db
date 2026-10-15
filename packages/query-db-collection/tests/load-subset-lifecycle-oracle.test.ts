@@ -5617,7 +5617,7 @@ describe(`loadSubset lifecycle oracle`, () => {
         !history.peerReleaseBeforeProvider ||
         (history.peer && history.firstAction !== `cleanup`),
     )
-  const leaseHistoryProperty = `query-db.lease-history`
+  const leaseHistoryProperty = `query-db.acquisition-lease-history`
   const leaseHistoryReplay = readOracleRunConfig()
 
   // Each named history reaches one boundary that an independent axis changes:
@@ -7865,6 +7865,11 @@ describe(`loadSubset lifecycle oracle`, () => {
           expect({
             ...bAtSettlement,
             receiptApplied: false,
+          }).toEqual(expectedAtSettlement),
+        ).toThrow()
+        expect(() =>
+          expect({
+            ...bAtSettlement,
             rows: [`A`, `local`],
           }).toEqual(expectedAtSettlement),
         ).toThrow()

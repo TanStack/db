@@ -1081,7 +1081,7 @@ export function queryCollectionOptions(
   }
   type AcquisitionHandle = {
     order: number
-    lease?: AcquisitionLease
+    acquisitionLease?: AcquisitionLease
     result?: QueryObserverResult<any, any>
     fetchRecord?: FetchApplicationRecord
   }
@@ -1101,7 +1101,7 @@ export function queryCollectionOptions(
       hashedQueryKey,
       order: handle?.order ?? ++nextAcquisitionOrder,
     }
-    if (handle) handle.lease = lease
+    if (handle) handle.acquisitionLease = lease
     const optionsLeases = acquisitionLeasesByOptions.get(options) ?? []
     optionsLeases.push(lease)
     acquisitionLeasesByOptions.set(options, optionsLeases)
@@ -2091,8 +2091,8 @@ export function queryCollectionOptions(
           } finally {
             if (pendingStartupLoads.get(opts)?.has(acquisition)) {
               releasePendingStartupLoad(opts, acquisition)
-            } else if (handle?.lease) {
-              releaseAcquisitionLease(opts, handle.lease)
+            } else if (handle?.acquisitionLease) {
+              releaseAcquisitionLease(opts, handle.acquisitionLease)
             }
           }
           return resumed === true ? undefined : resumed
@@ -4152,7 +4152,7 @@ export function queryCollectionOptions(
                 // from a caller abort by the exact acquisition still present.
                 queueMicrotask(() => {
                   if (settled) return
-                  const lease = handle.lease
+                  const lease = handle.acquisitionLease
                   const stillAcquired = lease
                     ? acquisitionLeasesByOptions.get(opts)?.includes(lease)
                     : pendingStartupLoads.get(opts)?.has(handle)
