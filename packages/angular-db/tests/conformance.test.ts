@@ -104,10 +104,14 @@ function makeDeferredSource<
   }
 }
 
-function makePrecreated(build: QueryBuild, opts?: { startSync?: boolean }) {
+function makePrecreated(
+  build: QueryBuild,
+  opts?: { startSync?: boolean; gcTime?: number },
+) {
   const collection = createLiveQueryCollection({
     query: build as any,
     startSync: opts?.startSync ?? true,
+    gcTime: opts?.gcTime,
   })
   return { collection }
 }
@@ -142,6 +146,7 @@ async function settle() {
 
 function makeHandle(result: any, destroy: () => void): LiveQueryHandle {
   return {
+    collection: () => result.collection(),
     current(): ConformanceResult {
       return expectResultSurface({
         data: result.data(),
@@ -191,8 +196,10 @@ function mountCollection(collection: any) {
   return makeHandle(result, destroy)
 }
 
-function mountConfig(build: QueryBuild) {
-  const { result, destroy } = inCtx(() => injectLiveQuery({ query: build }))
+function mountConfig(build: QueryBuild, opts?: { gcTime?: number }) {
+  const { result, destroy } = inCtx(() =>
+    injectLiveQuery({ query: build, ...opts }),
+  )
   return makeHandle(result, destroy)
 }
 

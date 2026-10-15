@@ -8816,6 +8816,141 @@ describe(`QueryCollection`, () => {
       }
     })
 
+    it(`publishes a warm ordered date findOne from cached subsets in the initiating call stack`, async () => {
+      type DateRow = { id: string; at: string }
+      type RequestShape = {
+        ordered: boolean
+        filtered: boolean
+        limit: number | undefined
+      }
+
+      const rows: Array<DateRow> = [
+        { id: `1`, at: `2026-10-01` },
+        { id: `2`, at: `2026-10-02` },
+      ]
+      const localQueryClient = new QueryClient({
+        defaultOptions: {
+          queries: { retry: false, staleTime: Infinity, gcTime: Infinity },
+        },
+      })
+      const requestShape = (request: LoadSubsetOptions): RequestShape => ({
+        ordered: request.orderBy !== undefined,
+        filtered: request.where !== undefined,
+        limit: request.limit,
+      })
+      const fetchedRequests: Array<RequestShape> = []
+      const adapterReturns: Array<
+        RequestShape & {
+          result: true | Promise<void>
+          sourceRows: Array<string>
+        }
+      > = []
+      const options = queryCollectionOptions<DateRow>({
+        id: `warm-ordered-date-find-one-source`,
+        queryClient: localQueryClient,
+        queryKey: [`warm-ordered-date-find-one`],
+        queryFn: (context) => {
+          const request = context.meta?.loadSubsetOptions
+          fetchedRequests.push(requestShape(request ?? {}))
+          if (request?.where !== undefined) {
+            throw new Error(`This backend does not serve predicate requests`)
+          }
+          return Promise.resolve(request?.orderBy ? rows.slice(1) : rows)
+        },
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        defaultStringCollation: { stringSort: `locale` },
+        staleTime: Infinity,
+        gcTime: Infinity,
+      })
+      const originalSync = options.sync
+      const source = createCollection({
+        ...options,
+        sync: {
+          sync: (params: Parameters<typeof originalSync.sync>[0]) => {
+            const hooks = originalSync.sync(params)
+            if (typeof hooks !== `object` || !hooks.loadSubset) {
+              throw new Error(`Expected the Query DB adapter to load subsets`)
+            }
+            const loadSubset = hooks.loadSubset
+            return {
+              ...hooks,
+              loadSubset: (request: LoadSubsetOptions) => {
+                const result = loadSubset(request)
+                adapterReturns.push({
+                  ...requestShape(request),
+                  result,
+                  sourceRows: params.collection.toArray.map(({ id }) => id),
+                })
+                return result
+              },
+            }
+          },
+        },
+      })
+      const build = () =>
+        createLiveQueryCollection({
+          startSync: false,
+          query: (q) =>
+            q
+              .from({ row: source })
+              .orderBy(({ row }) => row.at, `desc`)
+              .findOne(),
+        })
+      const cold = build()
+      let warm: ReturnType<typeof build> | undefined
+
+      try {
+        await cold.preload()
+        expect(fetchedRequests).toEqual([
+          { ordered: true, filtered: false, limit: 1 },
+          { ordered: false, filtered: false, limit: undefined },
+        ])
+        expect(cold.toArray.map(({ id }) => id)).toEqual([`2`])
+        expect(cold.status).toBe(`ready`)
+        await cold.cleanup()
+        expect(source.toArray.map(({ id }) => id)).toEqual([])
+
+        adapterReturns.length = 0
+        fetchedRequests.length = 0
+        warm = build()
+        const preload = warm.preload()
+
+        // These are the raw adapter returns, before Collection normalizes them.
+        expect(adapterReturns).toEqual([
+          {
+            ordered: true,
+            filtered: false,
+            limit: 1,
+            result: true,
+            sourceRows: [`2`],
+          },
+          {
+            ordered: false,
+            filtered: false,
+            limit: undefined,
+            result: true,
+            sourceRows: [`1`, `2`],
+          },
+        ])
+        expect(fetchedRequests).toEqual([])
+        expect(warm.toArray.map(({ id }) => id)).toEqual([`2`])
+        expect(warm.status).toBe(`ready`)
+
+        await preload
+        expect(fetchedRequests).toEqual([])
+        expect(warm.toArray.map(({ id }) => id)).toEqual([`2`])
+        expect(warm.status).toBe(`ready`)
+      } finally {
+        await warm?.cleanup()
+        await cold.cleanup()
+        await source.cleanup()
+        localQueryClient.clear()
+      }
+    })
+
     it(`should process cached results immediately when QueryObserver resubscribes`, async () => {
       const queryKey = [`remount-cache-test`]
       const items: Array<TestItem> = [

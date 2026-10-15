@@ -9,6 +9,7 @@ import {
   eq,
   isUndefined,
   not,
+  toArray,
 } from '../../src/query/index.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import { flushPromises } from '../utils.js'
@@ -27,11 +28,12 @@ import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
  * query-readiness cut: an initial ordered load whose adapter returns literal
  * `true`, after synchronously applying every establishing receipt, installs its
  * completed window before the initiating call stack returns. The initial load
- * is an ordinary ordered request or, for a requiresFullSource plan, its first
- * full-source request. Promise settlement remains asynchronous. This does not
- * make a successful request prove source exhaustion or broader coverage, and it
- * does not change explicit window, later full-source fallback, repair, replay,
- * or framework render-time contracts.
+ * includes every request needed for the first window: an ordinary ordered
+ * request, a requiresFullSource plan's first full-source request, and a
+ * full-source fallback when the ordered boundary cannot be expressed. Promise
+ * settlement remains asynchronous. The cut proves neither source exhaustion
+ * nor broader source coverage. It does not govern explicit window moves, work
+ * after initial publication, repair, replay, or framework render timing.
  *
  * Ordered acquisition has six independent control dimensions: acquisition
  * path, delivery time, window change, provider-response outcome, sync run, and
@@ -41,6 +43,13 @@ import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
  * One composed fixed regression injects sibling-source input during a
  * synchronous ordered continuation. It requires graph processing before the
  * loader decides whether another acquisition is needed.
+ * A separate joined history checks public rows and change events when a
+ * null-boundary full-source fallback starts after first publication. It
+ * crosses two marker actions with literal, Promise, and held-receipt responses;
+ * the held receipt also runs after child demand settles. A held provider
+ * Promise after applied writes crosses a second marker change. A neighboring
+ * history writes another eligible root after its gate opens and before the
+ * returned provider Promise settles.
  * A second product adds nullable multi-term ordering, including null placement
  * for both terms. A four-cell overlay varies both directions independently
  * without multiplying that lifecycle product. The initial-settlement cells are
@@ -1007,8 +1016,8 @@ describe(`synchronous initial settlement refinement`, () => {
   // The synchronous cut covers the initial load. For a query that must read
   // its whole source first (here a function filter), the initial load is its
   // first full-source request. When the source answers with literal `true`,
-  // the query is ready with its rows at creation. A later full-source fallback
-  // and a full-source repair keep their asynchronous settlement.
+  // the query is ready with its rows at creation. Full-source work after that
+  // initial window and a full-source repair remain outside this guarantee.
   it(`publishes an eager full-source ordered window at creation`, async () => {
     const source = createCollection<{ id: number; rank: number }, number>({
       id: `full-source-initial-${Math.random()}`,
@@ -1343,19 +1352,1204 @@ describe(`ordered lifecycle product`, () => {
   )
 })
 
+/**
+ * ## Initial locale-string fallback
+ *
+ * The architecture's initial synchronous cut covers the whole first-window
+ * request chain. An ordered prefix ending at a locale string cannot express
+ * its boundary as a cursor, so a full-source acquisition completes that same
+ * initial chain. Distinct ISO dates select row 2. Equal dates select row 1 by
+ * the public-key tie-breaker, even when the provider's first page contains
+ * only row 2. The independent reference predicts `ready` with that singleton
+ * when both acquisitions return literal `true`, and `loading` with no rows
+ * when the fallback returns a Promise. Neither result claims source exhaustion
+ * from the ordered prefix alone.
+ *
+ * The finite grammar crosses indexed and unindexed ordered requests, distinct
+ * and tied rows, and synchronous and Promise full-source fallbacks. The
+ * controlled on-demand adapter delivers only row 2 for the ordered request,
+ * then row 1 for the unfiltered full-source request. It honors request
+ * predicates so a tie request cannot masquerade as that fallback. The real
+ * live-query Collection is observed at fallback entry, immediately after
+ * preload starts its sync run, and after preload settles.
+ * An offset of zero identifies the indexed first page; no offset identifies
+ * the unindexed prefix, so the two index cells cannot collapse to one path.
+ * The request trace must reach both acquisitions by the immediate checkpoint;
+ * a deferred acquisition or a test that checks before preload cannot pass.
+ * A subscriber registered by the controlled provider before its first row
+ * write observes the same preload history. It must receive one nonempty insert
+ * of the model's final singleton, after the fallback result settles, and read
+ * that complete window in its callback. Empty readiness callbacks are not row
+ * publications.
+ * This owner does not establish React's render timing or adapter-specific
+ * cache behavior.
+ */
+type InitialFallbackRow = { id: number; at: string }
+type InitialFallbackOrder = `distinct` | `tied`
+type InitialFallbackPublication = {
+  changes: Array<{
+    type: `insert` | `update` | `delete`
+    key: string | number
+    value: InitialFallbackRow
+  }>
+  rows: Array<InitialFallbackRow>
+  afterFallbackResult: boolean
+}
+
+function initialFallbackRows(
+  order: InitialFallbackOrder,
+): ReadonlyArray<InitialFallbackRow> {
+  return [
+    { id: 1, at: order === `tied` ? `2026-10-02` : `2026-10-01` },
+    { id: 2, at: `2026-10-02` },
+  ]
+}
+
+function expectedInitialFallback(
+  settlement: InitialSettlementShape,
+  order: InitialFallbackOrder,
+): InitialSettlementObservation {
+  return settlement === `synchronous`
+    ? { rows: [order === `tied` ? 1 : 2], status: `ready` }
+    : { rows: [], status: `loading` }
+}
+
+async function observeInitialFallback(
+  autoIndex: `eager` | `off`,
+  settlement: InitialSettlementShape,
+  order: InitialFallbackOrder,
+  recordEvents = false,
+) {
+  const requests: Array<LoadSubsetOptions> = []
+  const delivered = new Set<number>()
+  const rows = initialFallbackRows(order)
+  const publications: Array<InitialFallbackPublication> = []
+  const commitReturnedImmediately: Array<boolean> = []
+  let fallbackResultSettled = false
+  let atFallbackEntry: InitialSettlementObservation | undefined
+  const source = createCollection<InitialFallbackRow, number>({
+    id: `initial-locale-fallback-${autoIndex}-${settlement}-${order}`,
+    getKey: ({ id }) => id,
+    syncMode: `on-demand`,
+    autoIndex,
+    defaultIndexType: autoIndex === `eager` ? BTreeIndex : undefined,
+    defaultStringCollation: { stringSort: `locale` },
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        markReady()
+        return {
+          loadSubset: (options) => {
+            requests.push(options)
+            if (!options.orderBy) atFallbackEntry = observeCurrent()
+            const matching = options.where
+              ? rows.filter(
+                  (row) =>
+                    evaluateReferenceExpression(options.where!, row) === true,
+                )
+              : rows
+            const served = options.orderBy ? matching.slice(1) : matching
+            const fresh = served.filter(({ id }) => !delivered.has(id))
+            if (fresh.length > 0) {
+              if (recordEvents && !observer)
+                observer = live.subscribeChanges(
+                  (changes) => {
+                    if (changes.length === 0) return
+                    publications.push({
+                      changes: changes.map((change) => ({
+                        type: change.type,
+                        key: change.key,
+                        value: {
+                          id: change.value.id,
+                          at: change.value.at,
+                        },
+                      })),
+                      rows: live.toArray.map(({ id, at }) => ({ id, at })),
+                      afterFallbackResult: fallbackResultSettled,
+                    })
+                  },
+                  { includeInitialState: false },
+                )
+              begin()
+              for (const row of fresh) {
+                delivered.add(row.id)
+                write({ type: `insert`, value: row })
+              }
+              // Assertions here would be caught as provider failures. Compare
+              // the receipt at the oracle checkpoint instead.
+              commitReturnedImmediately.push(commit() === true)
+            }
+            const result =
+              options.orderBy || settlement === `synchronous`
+                ? true
+                : Promise.resolve()
+            if (recordEvents && !options.orderBy) {
+              if (result === true) fallbackResultSettled = true
+              else void result.then(() => (fallbackResultSettled = true))
+            }
+            return result
+          },
+        }
+      },
+    },
+  })
+  const live = createLiveQueryCollection({
+    startSync: false,
+    query: (q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.at, `desc`)
+        .findOne(),
+  })
+  function observeCurrent(): InitialSettlementObservation {
+    return {
+      rows: live.toArray.map(({ id }) => id),
+      status: live.status,
+    }
+  }
+  let observer: ReturnType<typeof live.subscribeChanges> | undefined
+  let observation:
+    | {
+        immediate: InitialSettlementObservation
+        settled: InitialSettlementObservation
+        atFallbackEntry: InitialSettlementObservation | undefined
+        requestsAtCut: Array<LoadSubsetOptions>
+        publicationsAtCut: Array<InitialFallbackPublication>
+        publications: Array<InitialFallbackPublication>
+        commitReturnedImmediately: Array<boolean>
+      }
+    | undefined
+  let primaryFailure: CapturedOracleFailure | undefined
+  try {
+    const preload = live.preload()
+    const immediate = observeCurrent()
+    const requestsAtCut = [...requests]
+    const publicationsAtCut = [...publications]
+    await preload
+    observation = {
+      immediate,
+      settled: observeCurrent(),
+      atFallbackEntry,
+      requestsAtCut,
+      publicationsAtCut,
+      publications: [...publications],
+      commitReturnedImmediately: [...commitReturnedImmediately],
+    }
+  } catch (error) {
+    primaryFailure = { error }
+  }
+  await finishOracleCleanup(
+    primaryFailure,
+    [
+      () => observer?.unsubscribe(),
+      () => live.cleanup(),
+      () => source.cleanup(),
+    ],
+    `Initial locale fallback oracle cleanup failed`,
+  )
+  return observation!
+}
+
+describe(`initial locale-string fallback oracle`, () => {
+  const cells = ([`eager`, `off`] as const).flatMap((autoIndex) =>
+    ([`synchronous`, `promise`] as const).flatMap((settlement) =>
+      ([`distinct`, `tied`] as const).map((order) => ({
+        autoIndex,
+        settlement,
+        order,
+      })),
+    ),
+  )
+
+  it(`enumerates every index, settlement, and row-order cell exactly once`, () => {
+    expect(cells).toHaveLength(8)
+    expect(new Set(cells.map((cell) => JSON.stringify(cell))).size).toBe(8)
+  })
+
+  it.each(cells)(
+    `publishes the $autoIndex $order locale-string singleton at the $settlement checkpoint`,
+    async ({ autoIndex, settlement, order }) => {
+      const observed = await observeInitialFallback(
+        autoIndex,
+        settlement,
+        order,
+      )
+      expect(observed.commitReturnedImmediately).toEqual([true, true])
+      expect(observed.requestsAtCut).toHaveLength(2)
+      expect(observed.requestsAtCut[0]).toMatchObject({ limit: 1 })
+      expect(observed.requestsAtCut[0]?.orderBy).toHaveLength(1)
+      expect(observed.requestsAtCut[0]?.offset).toBe(
+        autoIndex === `eager` ? 0 : undefined,
+      )
+      expect(observed.requestsAtCut[1]?.orderBy).toBeUndefined()
+      expect(observed.requestsAtCut[1]?.limit).toBeUndefined()
+      expect(observed.requestsAtCut[1]?.where).toBeUndefined()
+      expect(observed.requestsAtCut[1]?.cursor).toBeUndefined()
+      expect(observed.requestsAtCut[1]?.offset).toBeUndefined()
+      expect(observed.atFallbackEntry).toEqual({ rows: [], status: `loading` })
+      expect(observed.immediate).toEqual(
+        expectedInitialFallback(settlement, order),
+      )
+      expect(observed.settled).toEqual({
+        rows: [order === `tied` ? 1 : 2],
+        status: `ready`,
+      })
+    },
+  )
+
+  it.each(cells)(
+    `emits one completed $autoIndex $order initial window change with $settlement fallback`,
+    async ({ autoIndex, order, settlement }) => {
+      const observed = await observeInitialFallback(
+        autoIndex,
+        settlement,
+        order,
+        true,
+      )
+      expect(observed.commitReturnedImmediately).toEqual([true, true])
+      const id = order === `tied` ? 1 : 2
+      expect(observed.requestsAtCut).toHaveLength(2)
+      expect(observed.atFallbackEntry).toEqual({ rows: [], status: `loading` })
+      expect(observed.immediate).toEqual(
+        expectedInitialFallback(settlement, order),
+      )
+      if (settlement === `promise`)
+        expect(observed.publicationsAtCut).toEqual([])
+      expect(observed.settled).toEqual({ rows: [id], status: `ready` })
+      const winner = { id, at: `2026-10-02` }
+      expect(observed.publications).toEqual([
+        {
+          changes: [{ type: `insert`, key: id, value: winner }],
+          rows: [winner],
+          afterFallbackResult: true,
+        },
+      ])
+    },
+  )
+})
+
+/**
+ * ## Full-source fallback after the first window publishes
+ *
+ * Publication and Collection readiness are separate facts. An indexed root
+ * can publish its first joined window while an on-demand child keeps the
+ * live-query Collection `loading`. Removing that window row's join match
+ * needs another ordered page. Here the page ends at null, which cannot form a
+ * continuation cursor, so the loader requests the full source. The contract
+ * owes a coherent result and change events after that request's rows apply;
+ * it does not give the later request an initial synchronous timing cut.
+ *
+ * The finite history grammar removes the first marker or retargets it to an
+ * absent root, crossed with a literal-true response, a Promise response after
+ * applied writes, or a response held on the establishing applied receipt. The
+ * held receipt also runs after the child demand settles, so the live-query
+ * Collection's public loading flag isolates the root fallback. In the held
+ * Promise history, the provider applies root 3, then marker 2 retargets from
+ * root 3 to root 2 before the provider settles. In the late-write history,
+ * marker 2 instead targets root 4, which the provider writes after the held
+ * gate opens. The independent model joins marker IDs to the finite root rows,
+ * sorts eligible roots with null last, and takes one winner. The provider
+ * honors predicates, cursor, order, offset, and limit: its first page delivers
+ * root 1, its next page delivers ineligible root 2 at a null boundary, and the
+ * unfiltered fallback delivers eligible root 3. The held-receipt case parks
+ * root 3's sync transaction behind an unrelated optimistic update, then
+ * releases that update so the accepted root write becomes visible. The driver
+ * records requests, public snapshots, and callback-visible rows. The
+ * comparison requires the published first window while status is still
+ * `loading`, reaches the later fallback, and checks every public event against
+ * its callback snapshot and the model's final delta. It permits coherent
+ * intermediate publications and assigns no synchronous cut to later work. The
+ * Promise overlap checks the public window before and after its second marker
+ * action, then checks every callback and the final model result after provider
+ * settlement. The late-write history also checks the adapter's acquisition
+ * lease: the cursor page remains owned while the full-source provider Promise
+ * is pending, and retires after successful settlement. A separate
+ * cleanup-failure pair requires that retiring the first acquisition still
+ * leaves the successful replacement and reports the adapter error.
+ */
+type LaterFallbackMutation = `delete-marker` | `retarget-marker`
+type LaterFallbackResponse =
+  | `literal-true`
+  | `promise`
+  | `held-receipt`
+  | `held-promise`
+  | `held-promise-late-write`
+type LaterFallbackChildDemand = `pending` | `settled`
+type LaterFallbackRoot = { id: number; at: number | null; note: string }
+type LaterFallbackMarker = { id: number; rootId: number }
+type LaterFallbackChild = { id: number; rootId: number }
+type LaterFallbackRow = { id: number; children: Array<number> }
+type LaterFallbackResult = { key: number; row: LaterFallbackRow }
+type LaterFallbackChange = {
+  type: `insert` | `update` | `delete`
+  key: string | number
+  value: LaterFallbackRow
+}
+type LaterFallbackPublication = {
+  changes: Array<LaterFallbackChange>
+  rows: Array<LaterFallbackRow>
+}
+type LaterFallbackObservation = {
+  response: LaterFallbackResponse
+  childDemand: LaterFallbackChildDemand
+  releaseError: boolean
+  releaseFailures: number
+  initial: { rows: Array<LaterFallbackRow>; status: string }
+  initialChildLoads: number
+  initialChildPending: boolean
+  readyChildCut:
+    | {
+        rows: Array<LaterFallbackRow>
+        status: string
+        rootLoading: boolean
+        liveLoading: boolean
+      }
+    | undefined
+  beforeMutation: Array<LoadSubsetOptions>
+  afterMutation: Array<{ options: LoadSubsetOptions; served: Array<number> }>
+  fallbackEntry: { rows: Array<LaterFallbackRow>; status: string } | undefined
+  heldCut:
+    | {
+        rows: Array<LaterFallbackRow>
+        status: string
+        sourceHasRoot3: boolean
+        blockerStarted: boolean
+        blockerPending: boolean
+        receiptPending: boolean
+        rootLoading: boolean
+        liveLoading: boolean
+      }
+    | undefined
+  heldPromiseCut:
+    | {
+        sourceHasRoot3: boolean
+        sourceHasRoot4: boolean
+        providerPending: boolean
+        rootLoading: boolean
+        cursorPageReleased: boolean
+        rowsBeforeOverlap: Array<LaterFallbackRow>
+        rowsAfterOverlap: Array<LaterFallbackRow>
+        publicationsBeforeOverlap: number
+        overlapCommitImmediate: boolean
+      }
+    | undefined
+  final: {
+    rows: Array<LaterFallbackRow>
+    status: string
+    rootLoading: boolean
+    liveLoading: boolean
+  }
+  publications: Array<LaterFallbackPublication>
+  commitReceipts: Array<{
+    served: Array<number>
+    fullSource: boolean
+    immediate: boolean
+  }>
+  markerCommitImmediate: boolean
+  cursorPageReleasedAfterSettlement: boolean
+}
+
+const laterFallbackRoots: ReadonlyArray<LaterFallbackRoot> = [
+  { id: 1, at: 1, note: `base` },
+  { id: 2, at: null, note: `base` },
+  { id: 3, at: null, note: `base` },
+]
+const laterFallbackLateRoot: LaterFallbackRoot = {
+  id: 4,
+  at: null,
+  note: `late`,
+}
+const laterFallbackInitialMarkers: ReadonlyArray<LaterFallbackMarker> = [
+  { id: 1, rootId: 1 },
+  { id: 2, rootId: 3 },
+]
+
+// This finite recomputation knows no acquisition kind or loader state. A
+// missing child response gives each visible parent an empty child array.
+function expectedLaterFallbackWindow(
+  markers: ReadonlyArray<LaterFallbackMarker>,
+  roots: ReadonlyArray<LaterFallbackRoot> = laterFallbackRoots,
+): Array<LaterFallbackResult> {
+  return roots
+    .flatMap((root) =>
+      markers
+        .filter((marker) => marker.rootId === root.id)
+        .map((marker) => ({ root, marker })),
+    )
+    .sort(
+      (left, right) =>
+        (left.root.at === null ? 1 : 0) - (right.root.at === null ? 1 : 0) ||
+        (left.root.at ?? 0) - (right.root.at ?? 0) ||
+        left.root.id - right.root.id,
+    )
+    .slice(0, 1)
+    .map(({ root }) => ({
+      // The fixture gives the live-query Collection this public key rule.
+      // Its two histories have at most one joined result per root.
+      key: root.id,
+      row: { id: root.id, children: [] },
+    }))
+}
+
+function laterFallbackMarkersAfter(
+  mutation: LaterFallbackMutation,
+): Array<LaterFallbackMarker> {
+  return mutation === `delete-marker`
+    ? [{ id: 2, rootId: 3 }]
+    : [
+        { id: 1, rootId: 99 },
+        { id: 2, rootId: 3 },
+      ]
+}
+
+function laterFallbackMarkersAfterOverlap(
+  mutation: LaterFallbackMutation,
+  response: LaterFallbackResponse = `held-promise`,
+): Array<LaterFallbackMarker> {
+  return laterFallbackMarkersAfter(mutation).map((marker) =>
+    marker.id === 2
+      ? { id: 2, rootId: response === `held-promise-late-write` ? 4 : 2 }
+      : marker,
+  )
+}
+
+async function observeLaterFallback(
+  mutation: LaterFallbackMutation,
+  response: LaterFallbackResponse,
+  childDemand: LaterFallbackChildDemand,
+  assertObservation: (observed: LaterFallbackObservation) => void,
+  releaseError = false,
+): Promise<void> {
+  type RootSync = Parameters<SyncConfig<LaterFallbackRoot, number>[`sync`]>[0]
+  type MarkerSync = Parameters<
+    SyncConfig<LaterFallbackMarker, number>[`sync`]
+  >[0]
+  const childGate = createDeferred<void>()
+  const blockerGate = createDeferred<void>()
+  const providerGate = createDeferred<void>()
+  const fallbackEntered = createDeferred<void>()
+  const finalPublication = createDeferred<void>()
+  const loadSettled = createDeferred<void>()
+  const delivered = new Set<number>()
+  const unloaded = new Set<LoadSubsetOptions>()
+  const lateWrite = response === `held-promise-late-write`
+  const sourceRows = lateWrite
+    ? [...laterFallbackRoots, laterFallbackLateRoot]
+    : laterFallbackRoots
+  const requests: Array<{ options: LoadSubsetOptions; served: Array<number> }> =
+    []
+  const publications: Array<LaterFallbackPublication> = []
+  const commitReceipts: LaterFallbackObservation[`commitReceipts`] = []
+  const releaseFailure = new Error(`first ordered acquisition release failed`)
+  let releaseFailures = 0
+  let childLoads = 0
+  let markerSync!: MarkerSync
+  let markerCommitImmediate = false
+  let blockerStarted = false
+  let blockerPersistence: Promise<unknown> | undefined
+  let receiptPending = false
+  let fallbackEntry:
+    { rows: Array<LaterFallbackRow>; status: string } | undefined
+  let observer: ReturnType<typeof live.subscribeChanges> | undefined
+  let unsubscribeRootLoading: (() => void) | undefined
+  let unsubscribeLiveLoading: (() => void) | undefined
+  const rootCollection = createCollection<LaterFallbackRoot, number>({
+    id: `later-null-fallback-root-${mutation}`,
+    getKey: ({ id }) => id,
+    syncMode: `on-demand`,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    onUpdate: () => {
+      blockerStarted = true
+      return blockerGate.promise
+    },
+    sync: {
+      sync: (sync: RootSync) => {
+        sync.markReady()
+        return {
+          loadSubset: (options) => {
+            if (requests.length >= 12)
+              throw new Error(`later null fallback exceeded request bound`)
+            let page = sourceRows.filter(
+              (row) =>
+                (!options.where ||
+                  evaluateReferenceExpression(options.where, row) === true) &&
+                (!options.cursor ||
+                  evaluateReferenceExpression(options.cursor.whereFrom, row) ===
+                    true),
+            )
+            if (options.orderBy) {
+              page = [...page].sort((left, right) => {
+                for (const term of options.orderBy!) {
+                  const compared = compareNullable(
+                    evaluateReferenceExpression(term.expression, left),
+                    evaluateReferenceExpression(term.expression, right),
+                    term.compareOptions,
+                  )
+                  if (compared) return compared
+                }
+                return left.id - right.id
+              })
+              if (!options.cursor) page = page.slice(options.offset ?? 0)
+              if (options.limit !== undefined)
+                page = page.slice(0, options.limit)
+            }
+            requests.push({ options, served: page.map(({ id }) => id) })
+            const isFullSource =
+              !options.orderBy &&
+              !options.where &&
+              !options.cursor &&
+              options.limit === undefined &&
+              options.offset === undefined
+            if (isFullSource && !fallbackEntry) {
+              fallbackEntry = {
+                rows: live.toArray.map(({ id, children }) => ({
+                  id,
+                  children: children.map(({ id: childId }) => childId),
+                })),
+                status: live.status,
+              }
+            }
+            const fresh = page.filter(
+              ({ id }) =>
+                !delivered.has(id) && (!lateWrite || !isFullSource || id !== 4),
+            )
+            if (fresh.length > 0) {
+              sync.begin()
+              for (const row of fresh) {
+                delivered.add(row.id)
+                sync.write({ type: `insert`, value: row })
+              }
+              const receipt = sync.commit()
+              commitReceipts.push({
+                served: fresh.map(({ id }) => id),
+                fullSource: isFullSource,
+                immediate: receipt === true,
+              })
+              if (isFullSource && response === `held-receipt`) {
+                receiptPending = receipt !== true
+                if (receipt !== true)
+                  void receipt.then(
+                    () => (receiptPending = false),
+                    () => (receiptPending = false),
+                  )
+                fallbackEntered.resolve()
+                return receipt
+              }
+              if (
+                response === `held-receipt` &&
+                options.orderBy &&
+                options.cursor &&
+                page.some(({ id }) => id === 2)
+              ) {
+                // The page's own receipt applied. Only the later full-source
+                // transaction waits behind this unrelated optimistic update.
+                blockerPersistence = rootCollection.update(1, (draft) => {
+                  draft.note = `pending`
+                }).isPersisted.promise
+                void blockerPersistence.catch(() => {})
+              }
+            }
+            if (isFullSource) {
+              fallbackEntered.resolve()
+              if (response === `promise`) return Promise.resolve()
+              if (response === `held-promise`) return providerGate.promise
+              if (lateWrite)
+                return providerGate.promise.then(() => {
+                  sync.begin()
+                  delivered.add(4)
+                  sync.write({ type: `insert`, value: laterFallbackLateRoot })
+                  const receipt = sync.commit()
+                  commitReceipts.push({
+                    served: [4],
+                    fullSource: true,
+                    immediate: receipt === true,
+                  })
+                  return receipt === true ? undefined : receipt
+                })
+            }
+            return true
+          },
+          unloadSubset: (options) => {
+            unloaded.add(options)
+            if (releaseError && options === requests[0]?.options) {
+              releaseFailures++
+              throw releaseFailure
+            }
+          },
+        }
+      },
+    },
+  })
+  const markerCollection = createCollection<LaterFallbackMarker, number>({
+    id: `later-null-fallback-markers-${mutation}`,
+    getKey: ({ id }) => id,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (sync: MarkerSync) => {
+        markerSync = sync
+        sync.begin()
+        for (const marker of laterFallbackInitialMarkers)
+          sync.write({ type: `insert`, value: marker })
+        markerCommitImmediate = sync.commit() === true
+        sync.markReady()
+      },
+    },
+  })
+  const childCollection = createCollection<LaterFallbackChild, number>({
+    id: `later-null-fallback-child-${mutation}`,
+    getKey: ({ id }) => id,
+    syncMode: `on-demand`,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: ({ markReady }) => {
+        markReady()
+        return {
+          loadSubset: () => {
+            childLoads++
+            return childGate.promise
+          },
+        }
+      },
+    },
+  })
+  const live = createLiveQueryCollection({
+    startSync: false,
+    getKey: ({ id }) => id,
+    query: (q) =>
+      q
+        .from({ root: rootCollection })
+        .leftJoin({ marker: markerCollection }, ({ root, marker }) =>
+          eq(root.id, marker.rootId),
+        )
+        .where(({ marker }) => not(isUndefined(marker.id)))
+        .orderBy(({ root }) => root.at, {
+          direction: `asc`,
+          nulls: `last`,
+        })
+        .limit(1)
+        .select(({ root }) => ({
+          id: root.id,
+          children: toArray(
+            q
+              .from({ child: childCollection })
+              .where(({ child }) => eq(child.rootId, root.id)),
+          ),
+        })),
+  })
+  const publicRows = (): Array<LaterFallbackRow> =>
+    live.toArray.map(({ id, children }) => ({
+      id,
+      children: children.map(({ id: childId }) => childId),
+    }))
+  let afterFinalPublication = false
+  const maybeResolveLoadSettled = () => {
+    if (
+      afterFinalPublication &&
+      !rootCollection.isLoadingSubset &&
+      (childDemand === `pending` || !live.isLoadingSubset)
+    )
+      loadSettled.resolve()
+  }
+  let primaryFailure: CapturedOracleFailure | undefined
+  let heldCut: LaterFallbackObservation[`heldCut`]
+  let heldPromiseCut: LaterFallbackObservation[`heldPromiseCut`]
+  let readyChildCut: LaterFallbackObservation[`readyChildCut`]
+  try {
+    const preload = live.preload()
+    void preload.catch(() => {})
+    await flushPromises()
+    const initial = { rows: publicRows(), status: live.status }
+    const initialChildLoads = childLoads
+    const initialChildPending = childGate.isPending()
+    if (childDemand === `settled`) {
+      childGate.resolve()
+      await preload
+      await flushPromises()
+      readyChildCut = {
+        rows: publicRows(),
+        status: live.status,
+        rootLoading: rootCollection.isLoadingSubset,
+        liveLoading: live.isLoadingSubset,
+      }
+    }
+    const beforeMutation = requests.map(({ options }) => options)
+    unsubscribeRootLoading = rootCollection.on(
+      `loadingSubset:change`,
+      maybeResolveLoadSettled,
+    )
+    unsubscribeLiveLoading = live.on(
+      `loadingSubset:change`,
+      maybeResolveLoadSettled,
+    )
+    observer = live.subscribeChanges(
+      (changes) => {
+        if (changes.length === 0) return
+        const rows = publicRows()
+        publications.push({
+          changes: changes.map((change) => ({
+            type: change.type,
+            key: change.key,
+            value: {
+              id: change.value.id,
+              children: change.value.children.map(({ id }) => id),
+            },
+          })),
+          rows,
+        })
+        const finalId = lateWrite ? 4 : response === `held-promise` ? 2 : 3
+        if (rows.length === 1 && rows[0]?.id === finalId)
+          finalPublication.resolve()
+      },
+      { includeInitialState: false },
+    )
+    markerSync.begin()
+    if (mutation === `delete-marker`)
+      markerSync.write({ type: `delete`, key: 1 })
+    else
+      markerSync.write({
+        type: `update`,
+        value: { id: 1, rootId: 99 },
+      })
+    expect(markerSync.commit()).toBe(true)
+    if (response === `held-receipt`) {
+      const entryLimit = setTimeout(() => fallbackEntered.resolve(), 1500)
+      try {
+        await fallbackEntered.promise
+      } finally {
+        clearTimeout(entryLimit)
+      }
+      await flushPromises()
+      heldCut = {
+        rows: publicRows(),
+        status: live.status,
+        sourceHasRoot3: rootCollection.get(3) !== undefined,
+        blockerStarted,
+        blockerPending: blockerGate.isPending(),
+        receiptPending,
+        rootLoading: rootCollection.isLoadingSubset,
+        liveLoading: live.isLoadingSubset,
+      }
+      blockerGate.resolve()
+    }
+    if (response === `held-promise` || lateWrite) {
+      const entryLimit = setTimeout(() => fallbackEntered.resolve(), 1500)
+      try {
+        await fallbackEntered.promise
+      } finally {
+        clearTimeout(entryLimit)
+      }
+      await flushPromises()
+      const rowsBeforeOverlap = publicRows()
+      const publicationsBeforeOverlap = publications.length
+      const sourceHasRoot3 = rootCollection.get(3) !== undefined
+      const rootLoading = rootCollection.isLoadingSubset
+      markerSync.begin()
+      markerSync.write({
+        type: `update`,
+        value: { id: 2, rootId: lateWrite ? 4 : 2 },
+      })
+      const overlapCommitImmediate = markerSync.commit() === true
+      await flushPromises()
+      heldPromiseCut = {
+        sourceHasRoot3,
+        sourceHasRoot4: rootCollection.get(4) !== undefined,
+        providerPending: providerGate.isPending(),
+        rootLoading,
+        cursorPageReleased: requests.some(
+          ({ options }) =>
+            options.orderBy && options.cursor && unloaded.has(options),
+        ),
+        rowsBeforeOverlap,
+        rowsAfterOverlap: publicRows(),
+        publicationsBeforeOverlap,
+        overlapCommitImmediate,
+      }
+      providerGate.resolve()
+    }
+    // The later full-source cut has no synchronous scheduling promise. Wait
+    // for its public change. The timer bounds a missing-event failure; the
+    // final model check diagnoses it.
+    const waitLimit = setTimeout(() => finalPublication.resolve(), 1500)
+    try {
+      await finalPublication.promise
+    } finally {
+      clearTimeout(waitLimit)
+    }
+    // Row publication can precede provider settlement. Observe the public
+    // loading-end event instead of assuming one graph turn is enough.
+    afterFinalPublication = true
+    maybeResolveLoadSettled()
+    const settlementLimit = setTimeout(() => loadSettled.resolve(), 1500)
+    try {
+      await loadSettled.promise
+    } finally {
+      clearTimeout(settlementLimit)
+    }
+    await flushPromises()
+    const observation: LaterFallbackObservation = {
+      response,
+      childDemand,
+      releaseError,
+      releaseFailures,
+      initial,
+      initialChildLoads,
+      initialChildPending,
+      readyChildCut,
+      beforeMutation,
+      afterMutation: requests.slice(beforeMutation.length),
+      fallbackEntry,
+      heldCut,
+      heldPromiseCut,
+      final: {
+        rows: publicRows(),
+        status: live.status,
+        rootLoading: rootCollection.isLoadingSubset,
+        liveLoading: live.isLoadingSubset,
+      },
+      publications: [...publications],
+      commitReceipts: [...commitReceipts],
+      markerCommitImmediate,
+      cursorPageReleasedAfterSettlement: requests.some(
+        ({ options }) =>
+          options.orderBy && options.cursor && unloaded.has(options),
+      ),
+    }
+    assertObservation(observation)
+  } catch (error) {
+    primaryFailure = { error }
+  }
+  blockerGate.resolve()
+  providerGate.resolve()
+  childGate.resolve()
+  // A persistence failure is a distinct cleanup diagnostic if the public
+  // comparison already failed. Bound the wait so cleanup still reports it.
+  const awaitBlockerPersistence = async () => {
+    if (!blockerPersistence) return
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    try {
+      await Promise.race([
+        blockerPersistence,
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(
+            () =>
+              reject(new Error(`Later null fallback blocker did not settle`)),
+            1500,
+          )
+        }),
+      ])
+    } finally {
+      if (timeout) clearTimeout(timeout)
+    }
+  }
+  await finishOracleCleanup(
+    primaryFailure,
+    [
+      awaitBlockerPersistence,
+      () => observer?.unsubscribe(),
+      () => unsubscribeRootLoading?.(),
+      () => unsubscribeLiveLoading?.(),
+      () => live.cleanup(),
+      () => markerCollection.cleanup(),
+      () => childCollection.cleanup(),
+      () => rootCollection.cleanup(),
+    ],
+    `Later null fallback oracle cleanup failed`,
+  )
+}
+
+function assertLaterFallbackObservation(
+  mutation: LaterFallbackMutation,
+  observed: LaterFallbackObservation,
+): void {
+  const lateWrite = observed.response === `held-promise-late-write`
+  const heldPromise = observed.response === `held-promise` || lateWrite
+  const initial = expectedLaterFallbackWindow(laterFallbackInitialMarkers)
+  const afterFirst = expectedLaterFallbackWindow(
+    laterFallbackMarkersAfter(mutation),
+  )
+  const final = expectedLaterFallbackWindow(
+    heldPromise
+      ? laterFallbackMarkersAfterOverlap(mutation, observed.response)
+      : laterFallbackMarkersAfter(mutation),
+    lateWrite
+      ? [...laterFallbackRoots, laterFallbackLateRoot]
+      : laterFallbackRoots,
+  )
+  expect(observed.releaseFailures).toBe(observed.releaseError ? 1 : 0)
+  expect(observed.markerCommitImmediate).toBe(true)
+  const expectedReceipts = [
+    { served: [1], fullSource: false, immediate: true },
+    { served: [2], fullSource: false, immediate: true },
+    {
+      served: [3],
+      fullSource: true,
+      immediate: observed.response !== `held-receipt`,
+    },
+  ]
+  if (lateWrite)
+    expectedReceipts.push({ served: [4], fullSource: true, immediate: true })
+  expect(observed.commitReceipts).toEqual(expectedReceipts)
+  expect(observed.initial).toEqual({
+    rows: initial.map(({ row }) => row),
+    status: `loading`,
+  })
+  expect(observed.initialChildLoads).toBeGreaterThan(0)
+  expect(observed.initialChildPending).toBe(true)
+  if (observed.childDemand === `settled`) {
+    expect(observed.readyChildCut).toEqual({
+      rows: initial.map(({ row }) => row),
+      status: `ready`,
+      rootLoading: false,
+      liveLoading: false,
+    })
+  } else expect(observed.readyChildCut).toBeUndefined()
+  expect(observed.beforeMutation[0]?.orderBy).toHaveLength(1)
+  expect(observed.beforeMutation[0]?.limit).toBe(1)
+  expect(observed.beforeMutation[0]?.offset).toBe(0)
+  expect(observed.beforeMutation[0]?.cursor).toBeUndefined()
+  expect(
+    observed.beforeMutation.some(
+      (request) =>
+        !request.orderBy &&
+        !request.where &&
+        !request.cursor &&
+        request.limit === undefined,
+    ),
+  ).toBe(false)
+  expect(
+    observed.beforeMutation[0]?.orderBy?.[0]?.compareOptions,
+  ).toMatchObject({ direction: `asc`, nulls: `last` })
+  const orderedPageIndex = observed.afterMutation.findIndex(
+    ({ options }) => options.orderBy && options.cursor,
+  )
+  expect(orderedPageIndex).toBeGreaterThanOrEqual(0)
+  expect(observed.afterMutation[orderedPageIndex]?.served).toEqual([2])
+  expect(
+    observed.afterMutation[orderedPageIndex]?.options.orderBy?.[0]
+      ?.compareOptions,
+  ).toMatchObject({ direction: `asc`, nulls: `last` })
+  const fullSource = observed.afterMutation.filter(
+    ({ options }) =>
+      !options.orderBy &&
+      !options.where &&
+      !options.cursor &&
+      options.limit === undefined &&
+      options.offset === undefined,
+  )
+  if (heldPromise) expect(fullSource.length).toBeGreaterThanOrEqual(1)
+  else expect(fullSource).toHaveLength(1)
+  expect(fullSource[0]?.served).toEqual(lateWrite ? [1, 2, 3, 4] : [1, 2, 3])
+  expect(observed.afterMutation.indexOf(fullSource[0]!)).toBeGreaterThan(
+    orderedPageIndex,
+  )
+  // The old window can remain until the later load settles, or a coherent
+  // empty window can publish when its marker disappears. Neither is an
+  // initial-load timing promise; callback replay checks either publication.
+  const allowedIntermediateRows = [initial.map(({ row }) => row), []]
+  expect(allowedIntermediateRows).toContainEqual(observed.fallbackEntry?.rows)
+  expect([`loading`, `ready`]).toContain(observed.fallbackEntry?.status)
+  if (observed.response === `held-receipt`) {
+    expect(allowedIntermediateRows).toContainEqual(observed.heldCut?.rows)
+    expect(observed.heldCut).toMatchObject({
+      sourceHasRoot3: false,
+      blockerStarted: true,
+      blockerPending: true,
+      receiptPending: true,
+      rootLoading: true,
+      liveLoading: true,
+    })
+    expect([`loading`, `ready`]).toContain(observed.heldCut?.status)
+  } else expect(observed.heldCut).toBeUndefined()
+  if (heldPromise) {
+    expect(observed.heldPromiseCut).toMatchObject({
+      sourceHasRoot3: true,
+      sourceHasRoot4: false,
+      providerPending: true,
+      rootLoading: true,
+      overlapCommitImmediate: true,
+    })
+    if (lateWrite) {
+      expect(observed.heldPromiseCut?.cursorPageReleased).toBe(false)
+      expect(observed.cursorPageReleasedAfterSettlement).toBe(true)
+    }
+    const beforeOverlap = observed.heldPromiseCut?.rowsBeforeOverlap
+    const afterOverlap = observed.heldPromiseCut?.rowsAfterOverlap
+    expect([
+      initial.map(({ row }) => row),
+      [],
+      afterFirst.map(({ row }) => row),
+    ]).toContainEqual(beforeOverlap)
+    const allowedAfterOverlap = [initial.map(({ row }) => row), []]
+    if (!lateWrite) allowedAfterOverlap.push(final.map(({ row }) => row))
+    if (beforeOverlap?.[0]?.id === afterFirst[0]?.row.id)
+      allowedAfterOverlap.push(afterFirst.map(({ row }) => row))
+    expect(allowedAfterOverlap).toContainEqual(afterOverlap)
+  } else expect(observed.heldPromiseCut).toBeUndefined()
+  expect(observed.final.rows).toEqual(final.map(({ row }) => row))
+  expect(observed.final.rootLoading).toBe(false)
+  if (observed.childDemand === `settled`)
+    expect(observed.final.liveLoading).toBe(false)
+  if (observed.releaseError) expect(observed.final.status).toBe(`error`)
+  else expect([`loading`, `ready`]).toContain(observed.final.status)
+  // Changes may be split across publications. At each callback, applying
+  // its changes to the prior public snapshot must match the rows a reader
+  // sees there; the flattened delta must match the finite join model.
+  const visible = new Map<string | number, LaterFallbackRow>(
+    initial.map(({ key, row }) => [key, row]),
+  )
+  const changes = observed.publications.flatMap(({ changes: batch, rows }) => {
+    for (const change of batch) {
+      if (change.type === `delete`) visible.delete(change.key)
+      else visible.set(change.key, change.value)
+    }
+    expect(rows.length).toBeLessThanOrEqual(1)
+    expect(rows).toEqual([...visible.values()])
+    return batch
+  })
+  const expectedChanges: Array<LaterFallbackChange> = [
+    { type: `delete`, key: initial[0]!.key, value: initial[0]!.row },
+    { type: `insert`, key: final[0]!.key, value: final[0]!.row },
+  ]
+  if (heldPromise) {
+    const firstReplacement = afterFirst[0]!
+    const earlyChanges = observed.publications
+      .slice(0, observed.heldPromiseCut?.publicationsBeforeOverlap)
+      .flatMap(({ changes: batch }) => batch)
+    const firstReplacementPublished =
+      observed.heldPromiseCut?.rowsBeforeOverlap[0]?.id ===
+      firstReplacement.row.id
+    const firstInsert: LaterFallbackChange = {
+      type: `insert`,
+      key: firstReplacement.key,
+      value: firstReplacement.row,
+    }
+    expect(
+      earlyChanges.filter(({ key }) => key === firstReplacement.key),
+    ).toEqual(firstReplacementPublished ? [firstInsert] : [])
+    if (firstReplacementPublished) {
+      expectedChanges.push(firstInsert, {
+        type: `delete`,
+        key: firstReplacement.key,
+        value: firstReplacement.row,
+      })
+    }
+  }
+  const byKey = (left: LaterFallbackChange, right: LaterFallbackChange) =>
+    Number(left.key) - Number(right.key)
+  expect([...changes].sort(byKey)).toEqual(expectedChanges.sort(byKey))
+  expect([...visible.values()]).toEqual(final.map(({ row }) => row))
+}
+
+describe(`post-publication null fallback oracle`, () => {
+  const cases: Array<{
+    mutation: LaterFallbackMutation
+    response: LaterFallbackResponse
+    childDemand: LaterFallbackChildDemand
+  }> = ([`delete-marker`, `retarget-marker`] as const).flatMap((mutation) => [
+    { mutation, response: `literal-true`, childDemand: `pending` },
+    { mutation, response: `promise`, childDemand: `pending` },
+    { mutation, response: `held-receipt`, childDemand: `pending` },
+    { mutation, response: `held-receipt`, childDemand: `settled` },
+    { mutation, response: `held-promise`, childDemand: `pending` },
+    { mutation, response: `held-promise`, childDemand: `settled` },
+    { mutation, response: `held-promise-late-write`, childDemand: `pending` },
+    { mutation, response: `held-promise-late-write`, childDemand: `settled` },
+  ])
+  it.each(cases)(
+    `keeps the public window and change events coherent after $mutation with $response and $childDemand child demand`,
+    async ({ mutation, response, childDemand }) => {
+      await observeLaterFallback(mutation, response, childDemand, (observed) =>
+        assertLaterFallbackObservation(mutation, observed),
+      )
+    },
+  )
+
+  it(`rejects a stale window event after an overlapping held provider result`, async () => {
+    await observeLaterFallback(
+      `delete-marker`,
+      `held-promise`,
+      `settled`,
+      (observed) => {
+        assertLaterFallbackObservation(`delete-marker`, observed)
+        const final = expectedLaterFallbackWindow(
+          laterFallbackMarkersAfterOverlap(`delete-marker`),
+        )[0]!
+        const stale = expectedLaterFallbackWindow(
+          laterFallbackMarkersAfter(`delete-marker`),
+        )[0]!
+        // This wrong result leaves the final rows correct, but publishes the
+        // obsolete winner and then retracts it after the overlap.
+        const wrong: LaterFallbackObservation = {
+          ...observed,
+          publications: [
+            ...observed.publications,
+            {
+              changes: [
+                { type: `delete`, key: final.key, value: final.row },
+                { type: `insert`, key: stale.key, value: stale.row },
+              ],
+              rows: [stale.row],
+            },
+            {
+              changes: [
+                { type: `delete`, key: stale.key, value: stale.row },
+                { type: `insert`, key: final.key, value: final.row },
+              ],
+              rows: [final.row],
+            },
+          ],
+        }
+        expect(() =>
+          assertLaterFallbackObservation(`delete-marker`, wrong),
+        ).toThrow()
+      },
+    )
+  })
+
+  it.each([`delete-marker`, `retarget-marker`] as const)(
+    `reports the first lease's cleanup failure after the %s fallback publishes its replacement`,
+    async (mutation) => {
+      await observeLaterFallback(
+        mutation,
+        `literal-true`,
+        `pending`,
+        (observed) => assertLaterFallbackObservation(mutation, observed),
+        true,
+      )
+    },
+  )
+})
+
 describe(`warm ordered readiness oracle`, () => {
+  // The four remote rows have the ascending order [3, 4, 1, 2], with null
+  // last. When preload starts the live-query sync run, a warm literal-true
+  // response to each acquisition owes that complete window and `ready` before
+  // the call returns. A constructor-started sync run resumes deferred
+  // on-demand acquisition asynchronously, so it owes the same window after
+  // settlement. The zero-limit neighbor needs no acquisition.
   it.each([
-    { limit: 0, expectedRequests: [] },
+    { limit: 0, startsAtConstruction: false, expectedRequests: [] },
     {
       limit: 50,
+      startsAtConstruction: false,
+      expectedRequests: [
+        { ordered: true, filtered: false, limit: 50 },
+        { ordered: false, filtered: false, limit: undefined },
+      ],
+    },
+    {
+      limit: 50,
+      startsAtConstruction: true,
       expectedRequests: [
         { ordered: true, filtered: false, limit: 50 },
         { ordered: false, filtered: false, limit: undefined },
       ],
     },
   ])(
-    `settles a retained $limit-row window after an async cold prime`,
-    async ({ limit, expectedRequests }) => {
+    `settles a retained $limit-row window after an async cold prime (constructor start: $startsAtConstruction)`,
+    async ({ limit, startsAtConstruction, expectedRequests }) => {
       type DatedRow = { id: number; createdAt: Date | null }
       const remote: Array<DatedRow> = [
         { id: 1, createdAt: new Date(`2026-01-03T00:00:00.000Z`) },
@@ -1403,7 +2597,7 @@ describe(`warm ordered readiness oracle`, () => {
           },
         },
       })
-      const query = (queryLimit: number) =>
+      const query = (queryLimit: number, startSync = true) =>
         createLiveQueryCollection({
           query: (q) =>
             q
@@ -1413,34 +2607,80 @@ describe(`warm ordered readiness oracle`, () => {
                 nulls: `last`,
               })
               .limit(queryLimit),
-          startSync: true,
+          startSync,
         })
       const coldQuery = query(50)
+      let warmQuery: ReturnType<typeof query> | undefined
+      let observation:
+        | {
+            requestsAtCut: Array<{
+              ordered: boolean
+              filtered: boolean
+              limit: number | undefined
+            }>
+            requestsAfterSettlement: Array<{
+              ordered: boolean
+              filtered: boolean
+              limit: number | undefined
+            }>
+            immediate: InitialSettlementObservation
+            settled: InitialSettlementObservation
+            isLoadingSubset: boolean
+          }
+        | undefined
+      let primaryFailure: CapturedOracleFailure | undefined
       try {
         await coldQuery.preload()
         cold = false
-
-        const warmQuery = query(limit)
-        try {
-          if (limit > 0) {
-            // The null cursor requires a full-source fallback, outside the
-            // ordinary ordered chain's synchronous-readiness promise.
-            expect(warmQuery.status).toBe(`loading`)
-            await warmQuery.preload()
-          }
-          expect(warmQuery.status).toBe(`ready`)
-          expect(warmQuery.isLoadingSubset).toBe(false)
-          expect(warmQuery.toArray.map(({ id }) => id)).toEqual(
-            limit === 0 ? [] : [3, 4, 1, 2],
-          )
-          expect(warmRequests).toEqual(expectedRequests)
-        } finally {
-          await warmQuery.cleanup()
+        warmQuery = query(limit, startsAtConstruction)
+        // Preload starts a new sync run when startSync is false. When the
+        // constructor started it, preload resumes deferred on-demand work
+        // through the asynchronous subscription restart path. Both receive
+        // the same warm rows, but only the first owes the synchronous cut.
+        const requestsBeforePreload = [...warmRequests]
+        const preload = warmQuery.preload()
+        const requestsAtCut = [...warmRequests]
+        const immediate = {
+          status: warmQuery.status,
+          rows: warmQuery.toArray.map(({ id }) => id),
         }
-      } finally {
-        await coldQuery.cleanup()
-        await source.cleanup()
+        await preload
+        observation = {
+          requestsAtCut,
+          requestsAfterSettlement: [...warmRequests],
+          immediate,
+          settled: {
+            status: warmQuery.status,
+            rows: warmQuery.toArray.map(({ id }) => id),
+          },
+          isLoadingSubset: warmQuery.isLoadingSubset,
+        }
+        expect(requestsBeforePreload).toEqual([])
+      } catch (error) {
+        primaryFailure = { error }
       }
+      await finishOracleCleanup(
+        primaryFailure,
+        [
+          () => warmQuery?.cleanup(),
+          () => coldQuery.cleanup(),
+          () => source.cleanup(),
+        ],
+        `Warm ordered readiness oracle cleanup failed`,
+      )
+      expect(observation!.requestsAtCut).toEqual(
+        startsAtConstruction ? expectedRequests.slice(0, 1) : expectedRequests,
+      )
+      expect(observation!.requestsAfterSettlement).toEqual(expectedRequests)
+      expect(observation!.immediate).toEqual({
+        status: startsAtConstruction ? `loading` : `ready`,
+        rows: startsAtConstruction || limit === 0 ? [] : [3, 4, 1, 2],
+      })
+      expect(observation!.settled).toEqual({
+        status: `ready`,
+        rows: limit === 0 ? [] : [3, 4, 1, 2],
+      })
+      expect(observation!.isLoadingSubset).toBe(false)
     },
   )
 
@@ -1770,11 +3010,12 @@ describe(`nullable multi-term lifecycle product`, () => {
  * must be the predicate-only full-source shape, so a plan that silently took
  * the ordered path cannot pass.
  *
- * A later full-source fallback is also outside this cut. The warm readiness
- * oracle below pins one: an ordinary ordered chain whose null boundary cannot be
- * expressed as a cursor falls back to a full-source request after its first
- * request settles, and stays `loading` until that fallback settles. It rejects a
- * gate keyed on the request kind rather than the initial load.
+ * A fallback remains in the initial chain when its leading boundary cannot
+ * be expressed as a cursor. The warm readiness oracle above checks a null
+ * boundary after an ordered request. It observes the request trace and public
+ * status immediately after preload starts the sync run, rather than before
+ * acquisition. The locale-string cells check the same law for `findOne()`.
+ * A Promise result for the fallback keeps the window unpublished at that cut.
  *
  * Replay is outside this cut. After the initial window settles, a truncate
  * replays the same full-source request. Even when its provider answers with
