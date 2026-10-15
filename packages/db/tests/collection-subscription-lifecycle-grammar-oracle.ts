@@ -779,19 +779,21 @@ export type CleanedRestartDemandCase = {
 }
 
 export const cleanedRestartDemandCases: ReadonlyArray<CleanedRestartDemandCase> =
-  ([`empty`, `row`] as const).flatMap((replacement) =>
-    ([`absent`, `present`] as const).map((loader) => ({
-      syncMode: `eager` as const,
-      loader,
-      replacement,
-    })),
-  ).concat(
-    ([`empty`, `row`] as const).map((replacement) => ({
-      syncMode: `on-demand` as const,
-      loader: `present` as const,
-      replacement,
-    })),
-  )
+  ([`empty`, `row`] as const)
+    .flatMap((replacement) =>
+      ([`absent`, `present`] as const).map((loader) => ({
+        syncMode: `eager` as const,
+        loader,
+        replacement,
+      })),
+    )
+    .concat(
+      ([`empty`, `row`] as const).map((replacement) => ({
+        syncMode: `on-demand` as const,
+        loader: `present` as const,
+        replacement,
+      })),
+    )
 
 export function expectedCleanedRestartDemand(
   history: CleanedRestartDemandCase,
