@@ -670,9 +670,15 @@ checkpoint. These fixed cuts do not establish arbitrary callback reentry or
 all abort/unload orderings; [issue #2162](https://github.com/TanStack/db/issues/2162)
 remains open for the generated grammar and hostile controls.
 Direct `_sync.loadSubset` calls that reuse one options object for several live
-acquisitions have no caller token at `unloadSubset(options)`. The current
-shared-fetch witness checks total transport lifetime, not which such caller
-releases first. Core supplies a distinct options object per public acquisition.
+acquisitions have no caller token at `unloadSubset(options)`. The existing
+cached-row and startup witnesses check aggregate ownership. A full/exact
+route-split witness now checks the specified newest-lease release order: the
+exact-only row leaves at the first unload while the older filtered owner of
+the full Query survives the full-source owner's release. Replacing the lease
+stack's pop with FIFO shift fails at that public
+row checkpoint. Core supplies a distinct options object per public
+acquisition. These direct same-object calls cannot identify a caller beyond
+that release order.
 An eager Query with finite `gcTime` is now observed after its last public
 subscriber leaves and Query Core's timer evicts it. With no public subscriber,
 `utils.refetch()` recreates the Query, calls the provider once, and applies its

@@ -44,7 +44,13 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
         cold acquisition. The cold boundary has no shared order position, so
         revalidation supplies authority; disabling the guard made the load
         fulfill before the provider started (2026-10-15).
-  - [ ] Repeated direct acquisitions with one options object.
+  - [x] Repeated direct acquisitions with one options object: retain the
+        established multiple-lease contract. `unloadSubset(options)` retires
+        the newest accepted lease for that exact object. A full/exact route
+        split reaches distinct rows, and a FIFO-release mutant fails at the
+        first post-unload public-row checkpoint. Core's public path supplies
+        distinct objects; direct same-object calls cannot name a specific
+        caller beyond this order (2026-10-15).
   - [x] Request shape: signal-free and explicit-signal requests check the
         physical signal, own keys, descriptor, cloning, JSON, and deletion.
         The new configurable-descriptor assertion failed before the one-line
@@ -72,16 +78,15 @@ does not acquire a Query DB observer lease.
 | Direct cache edits do not certify a physical fetch. | A local cache edit cannot roll back a later accepted direct write; a later authoritative physical response may replace it. |
 | An eager Collection can refetch after cache eviction. | `utils.refetch()` starts a new provider request and applies its result even with no public subscriber. |
 
-Release of repeated direct acquisitions using the *same* options object needs
-an explicit contract decision. `unloadSubset(options)` has no caller token with
-which to identify one of those acquisitions. The public Core path creates a
-distinct options object per acquisition. Until a decision is made, claim only
-that public path and the aggregate transport lifetime checked by the existing
-direct-call test. If repeated same-object direct calls are supported, specify
-release order or add a token in a separate API review, then write an oracle that
-distinguishes the two callers. If they are unsupported, reject the second live
-acquisition before it takes a lease and document that boundary. Do not silently
-claim caller-specific release from an ambiguous input.
+Repeated direct acquisitions using the *same* options object remain supported.
+`unloadSubset(options)` has no caller token, so it retires the newest accepted
+lease for that exact object. This preserves the existing multiple-owner and
+startup histories. A new full/exact route-split witness distinguishes LIFO
+from FIFO release by the exact-only public row after the first unload; a
+temporary FIFO mutant failed there. The public Core path creates a distinct
+options object per acquisition. No claim of caller-specific identity is made
+for direct same-object calls beyond this specified release order. Changing
+that contract would need a separate adapter API decision.
 
 ## 1. Strengthen the independent account first
 

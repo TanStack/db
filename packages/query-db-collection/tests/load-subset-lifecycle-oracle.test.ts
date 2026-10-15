@@ -2429,9 +2429,12 @@ async function observeSharedInFlightQueryCancellation(): Promise<
       retry: false,
     }),
   )
-  const request: LoadSubsetOptions = {}
-  const first = Promise.resolve(collection._sync.loadSubset(request))
-  const second = Promise.resolve(collection._sync.loadSubset(request))
+  // Core supplies one options object per acquisition, even when both options
+  // describe the same demand. Their releases must preserve the shared fetch.
+  const firstRequest: LoadSubsetOptions = {}
+  const secondRequest: LoadSubsetOptions = {}
+  const first = Promise.resolve(collection._sync.loadSubset(firstRequest))
+  const second = Promise.resolve(collection._sync.loadSubset(secondRequest))
   // Observe rejections before the test releases either acquisition lease.
   void first.catch(() => undefined)
   void second.catch(() => undefined)
@@ -2447,11 +2450,11 @@ async function observeSharedInFlightQueryCancellation(): Promise<
   try {
     await started.promise
     capture(2)
-    collection._sync.unloadSubset(request)
+    collection._sync.unloadSubset(firstRequest)
     // Let Query process the first release while the provider remains held.
     await new Promise<void>((resolve) => setTimeout(resolve, 0))
     capture(1)
-    collection._sync.unloadSubset(request)
+    collection._sync.unloadSubset(secondRequest)
     capture(0)
     return snapshots
   } finally {
@@ -3930,6 +3933,98 @@ describe(`loadSubset lifecycle oracle`, () => {
         ),
       ),
     ).toThrow()
+  })
+
+  /**
+   * Direct adapter calls may reuse request data. With the same options object,
+   * unload cannot name a caller, so it retires the most recent acquisition.
+   * A full refresh makes the second equal demand choose an exact Query while
+   * the first still owns the full Query. The exact-only row must leave on the
+   * first unload; the older filtered owner of the full Query must survive
+   * even after the original full-source owner leaves.
+   */
+  it(`releases the newest lease when one options object spans full and exact Queries`, async () => {
+    const queryClient = createQueryClient()
+    const id = `repeated-options-${collectionSequence++}`
+    const heldFull = createDeferred<Array<Row>>()
+    const scopes: Array<`full` | `exact`> = []
+    const collection = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn: ({ meta }) => {
+          const scope = meta?.loadSubsetOptions?.where ? `exact` : `full`
+          scopes.push(scope)
+          if (scope === `exact`)
+            return Promise.resolve([
+              { id: `a1`, group: `a` },
+              { id: `a2`, group: `a` },
+            ])
+          return scopes.length === 1
+            ? Promise.resolve([
+                { id: `a1`, group: `a` },
+                { id: `b1`, group: `b` },
+              ])
+            : heldFull.promise
+        },
+        getKey: (row) => row.id,
+        startSync: true,
+        syncMode: `on-demand`,
+      }),
+    )
+    const fullRequest: LoadSubsetOptions = {}
+    const filteredRequest: LoadSubsetOptions = {
+      where: new IR.Func<boolean>(`eq`, [
+        new IR.PropRef([`group`]),
+        new IR.Value(`a`),
+      ]),
+    }
+    let fullRefresh: Promise<void> | undefined
+
+    await checkPublicCleanupWitness(async () => {
+      await collection._sync.loadSubset(fullRequest)
+      await collection._sync.loadSubset(filteredRequest)
+      expect(scopes).toEqual([`full`])
+      fullRefresh = queryClient.refetchQueries({ queryKey: [id], exact: true })
+      await vi.waitFor(() => expect(scopes).toEqual([`full`, `full`]))
+      await collection._sync.loadSubset(filteredRequest)
+      expect(scopes).toEqual([`full`, `full`, `exact`])
+      expect(collection.has(`a2`)).toBe(true)
+
+      collection._sync.unloadSubset(filteredRequest)
+      expect(collection.has(`a2`)).toBe(false)
+      expect(collection.has(`a1`)).toBe(true)
+      collection._sync.unloadSubset(fullRequest)
+      expect(collection.has(`a1`)).toBe(true)
+      heldFull.resolve([
+        { id: `a1`, group: `a` },
+        { id: `b1`, group: `b` },
+      ])
+      await fullRefresh
+      expect(collection.has(`a1`)).toBe(true)
+      collection._sync.unloadSubset(filteredRequest)
+      expect(collection.size).toBe(0)
+    }, [
+      [`full provider`, () => heldFull.resolve([])],
+      [
+        `full refresh`,
+        async () => {
+          await fullRefresh?.catch(() => undefined)
+        },
+      ],
+      [
+        `newer filtered acquisition`,
+        () => collection._sync.unloadSubset(filteredRequest),
+      ],
+      [
+        `older filtered acquisition`,
+        () => collection._sync.unloadSubset(filteredRequest),
+      ],
+      [`full acquisition`, () => collection._sync.unloadSubset(fullRequest)],
+      [`Collection`, () => collection.cleanup()],
+      [`Query client`, () => queryClient.clear()],
+    ])
   })
 
   /**
