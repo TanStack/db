@@ -389,15 +389,12 @@ export type LoadSubsetRequestResult = true | Promise<void>
  * `commit()` calls that establish the loaded subset. A result describes only
  * the exact `options` passed to this call.
  *
- * A sync adapter keeps each served ordered prefix whole (see
- * `LoadSubsetOptions`).
- * When it refetches loaded subsets without a new `loadSubset` call, it must
- * deliver every row that now sorts within a served prefix, even when the row
- * now falls between two served pages. Refetching each ordered page alone does
- * not satisfy this: a row that moves between two pages is in neither result,
- * and the loader receives no change that would request it. A sync adapter may
- * instead delete the rows of the later pages, so the loader requests them
- * again.
+ * When a sync adapter refetches loaded subsets without a new `loadSubset`
+ * call, it either keeps each served ordered prefix whole (see
+ * `LoadSubsetOptions`), or calls `invalidateLoadedSubsets()` once the
+ * refetched rows apply. Refetching each ordered page alone keeps neither
+ * promise: a row that now sorts between two served pages is in neither
+ * result, and the loader receives no change that would request it.
  */
 export type LoadSubsetFn = (options: LoadSubsetOptions) => true | Promise<void>
 
@@ -479,6 +476,14 @@ export interface SyncConfig<
      * The last truncate in a transaction supplies its readiness intent.
      */
     truncate: (options?: { markReady?: boolean }) => void
+    /**
+     * Report that rows this adapter serves for loaded subsets may have shifted
+     * between served pages, after a refetch that the adapter started on its
+     * own has applied. Each ordered live query then re-establishes its window
+     * with a bounded repair from the start of its order. Calls in one turn are
+     * coalesced. Do not call it for results that answer a `loadSubset` call.
+     */
+    invalidateLoadedSubsets: () => void
     metadata?: SyncMetadataApi<TKey>
   }) => void | CleanupFn | SyncConfigRes
 

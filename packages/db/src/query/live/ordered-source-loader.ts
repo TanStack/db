@@ -460,16 +460,34 @@ export class OrderedSourceLoader {
     this.orderingInvalidationGeneration++
     this.invalidateCursor()
     this.lastBoundary = undefined
+    // In-flight page or tie work does not force a full-source read. The
+    // bounded repair starts at once, and that work's later result is ignored
+    // for its boundary. Full-source reads can be very expensive.
     if (
       !this.needsOrderingRepair &&
       this.hasSettledSourceRequest &&
-      this.pending === undefined &&
       this.authoritativeRequestState === `none`
     ) {
       this.canRepairWithOrderedPrefix = true
     }
     this.settledSourceBoundary = undefined
     this.needsOrderingRepair = true
+  }
+
+  /**
+   * The source's sync adapter reports that served pages may have shifted.
+   * Coverage that one full-source acquisition established has no page
+   * boundary to repair, and the adapter's refetch has already re-read it.
+   */
+  revalidateLoadedCoverage(): void {
+    if (
+      !this.active ||
+      this.info.requiresFullSource ||
+      !this.hasSettledSourceRequest ||
+      this.authoritativeRequestState === `complete`
+    )
+      return
+    this.invalidateSourceOrdering()
   }
 
   private finishOrderedPrefixRepair(windowOperationGeneration?: number): void {

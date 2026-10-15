@@ -480,6 +480,12 @@ describe(`Ordered source request ownership`, () => {
     }
   })
 
+  // An order change while a tie request is in flight starts a bounded prefix
+  // repair at once; the tie's later result is ignored for the boundary. When
+  // that repair fails, the window move rejects with its error and the last
+  // public window stays, whatever the older tie request does. An explicit
+  // retry then recovers under today's failure law, from the full source, and
+  // publishes once.
   it.each([`success`, `failure`] as const)(
     `keeps a failed public window private when its older tie request ends in %s`,
     async (olderOutcome) => {
@@ -492,6 +498,7 @@ describe(`Ordered source request ownership`, () => {
       }> = []
       const releases: Array<LoadSubsetOptions> = []
       let hold = false
+      let holdRepair = false
       let update!: (row: Row) => void
       const source = createCollection<Row, number>({
         getKey: (row) => row.id,
@@ -517,7 +524,7 @@ describe(`Ordered source request ownership`, () => {
                     : `full`
                 const gate = createDeferred()
                 requests.push({ kind, options, gate })
-                if (!hold || kind === `page`) gate.resolve()
+                if (!hold || (kind === `page` && !holdRepair)) gate.resolve()
                 await gate.promise
                 if (options.signal?.aborted) return
                 const rows = truth
@@ -586,14 +593,17 @@ describe(`Ordered source request ownership`, () => {
         await flushPromises()
         const boundary = requests.at(-1)!
         expect(boundary.kind).toBe(`boundary`)
+        holdRepair = true
         truth[0] = { id: 1, rank: 10 }
         update(truth[0])
         await flushPromises()
-        const full = requests.at(-1)!
-        expect(full.kind).toBe(`full`)
+        const repair = requests.at(-1)!
+        expect(repair.kind).toBe(`page`)
+        expect(repair.options.limit).toBe(2)
+        expect(repair.options.cursor).toBeUndefined()
         const count = requests.length
         const failure = new Error(`authoritative repair failed`)
-        full.gate.reject(failure)
+        repair.gate.reject(failure)
         // The window still waits for its older publication participant to settle.
         await flushPromises()
         if (olderOutcome === `failure`)
@@ -608,8 +618,10 @@ describe(`Ordered source request ownership`, () => {
         expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
 
         hold = false
+        holdRepair = false
         await live.utils.setWindow({ limit: 2 })
         expect(requests).toHaveLength(count + 1)
+        expect(requests.at(-1)!.kind).toBe(`full`)
         expect(releases).toHaveLength(count)
         expect(new Set(releases)).toEqual(
           new Set(requests.slice(0, count).map(({ options }) => options)),
@@ -633,23 +645,24 @@ describe(`Ordered source request ownership`, () => {
   )
 
   // Finite success is not authority to repair a newer full-source failure.
-  // Cross request kind with settlement order instead of testing each alone.
+  // Cross settlement order with both outcomes instead of testing each alone.
+  // An invalidation while the first page is still in flight comes before any
+  // request has settled, so the loader still recovers from the full source.
+  // An overlap after the source has settled once repairs with a bounded
+  // prefix instead; the next property owns that case.
   it.each(
-    ([`page`, `boundary`] as const).flatMap((olderKind) =>
-      ([`older-first`, `full-first`] as const).flatMap((order) =>
-        ([`success`, `failure`] as const).flatMap((outcome) =>
-          ([`success`, `failure`] as const).map((olderOutcome) => ({
-            olderKind,
-            order,
-            outcome,
-            olderOutcome,
-          })),
-        ),
+    ([`older-first`, `full-first`] as const).flatMap((order) =>
+      ([`success`, `failure`] as const).flatMap((outcome) =>
+        ([`success`, `failure`] as const).map((olderOutcome) => ({
+          order,
+          outcome,
+          olderOutcome,
+        })),
       ),
     ),
   )(
-    `keeps full-source recovery authoritative across overlap: %j`,
-    async ({ olderKind, order, outcome, olderOutcome }) => {
+    `keeps full-source recovery authoritative across an initial page overlap: %j`,
+    async ({ order, outcome, olderOutcome }) => {
       const requests: Array<Observed> = []
       const releases: Array<LoadSubsetOptions> = []
       const participants: Array<Promise<unknown>> = []
@@ -667,12 +680,6 @@ describe(`Ordered source request ownership`, () => {
       )
       try {
         loader.start()
-        if (olderKind === `boundary`) {
-          requests[0]!.deferred.resolve()
-          await participants[0]
-          expect(requests).toHaveLength(2)
-          expect(requests[1]!.options.where).toBeDefined()
-        }
         const olderIndex = requests.length - 1
         loader.invalidateSourceOrdering()
         loader.loadMore()
@@ -744,6 +751,130 @@ describe(`Ordered source request ownership`, () => {
           requests[count]!.deferred.resolve()
           await participants[count]
         } else expect(requests).toHaveLength(count)
+      } finally {
+        loader.dispose()
+        for (const request of requests) request.deferred.resolve()
+        await Promise.allSettled(participants)
+      }
+    },
+  )
+
+  // An invalidation that overlaps an in-flight tie request, after the source
+  // has settled once, repairs with a bounded prefix: full-source reads can be
+  // very expensive, and the bounded repair sets its boundary from its own
+  // settled requests. The older tie's later success is ignored for that
+  // boundary. When both succeed, the repair chain runs to its fixed point and
+  // retires exactly the acquisitions it replaced, once each, with no
+  // full-source request. A failed request keeps today's failure law: nothing
+  // retries eagerly, and an explicit retry releases exactly the failed
+  // acquisitions, in failure order, and recovers from the full source.
+  it.each(
+    ([`older-first`, `repair-first`] as const).flatMap((order) =>
+      ([`success`, `failure`] as const).flatMap((outcome) =>
+        ([`success`, `failure`] as const).map((olderOutcome) => ({
+          order,
+          outcome,
+          olderOutcome,
+        })),
+      ),
+    ),
+  )(
+    `repairs a tie overlap with a bounded prefix: %j`,
+    async ({ order, outcome, olderOutcome }) => {
+      const requests: Array<Observed> = []
+      const releases: Array<LoadSubsetOptions> = []
+      const participants: Array<Promise<unknown>> = []
+      const subscription = fakeSubscription(requests, releases)
+      subscription.readOrderedSnapshot = () => [
+        { type: `insert`, key: 1, value: { id: 1, rank: 1 } },
+      ]
+      const loader = new OrderedSourceLoader(
+        createOrderByInfo(),
+        subscription,
+        `row`,
+        (result) => {
+          if (result instanceof Promise) {
+            participants.push(result.catch(() => undefined))
+          }
+        },
+      )
+      const flush = async () => {
+        for (let turn = 0; turn < 5; turn++) await Promise.resolve()
+      }
+      const settle = async (index: number, succeeds: boolean) => {
+        if (succeeds) requests[index]!.deferred.resolve()
+        else requests[index]!.deferred.reject(new Error(`request failed`))
+        await flush()
+      }
+      const isFullSource = ({ options }: Observed) =>
+        options.orderBy === undefined && options.where === undefined
+      try {
+        loader.start()
+        await settle(0, true)
+        expect(requests).toHaveLength(2)
+        expect(requests[1]!.options.where).toBeDefined()
+        const olderIndex = 1
+        loader.invalidateSourceOrdering()
+        loader.loadMore()
+        const repairIndex = 2
+        expect(requests).toHaveLength(3)
+        expect(requests[repairIndex]!.options.orderBy).toBeDefined()
+        expect(requests[repairIndex]!.options.limit).toBe(1)
+        expect(requests[repairIndex]!.options.where).toBeUndefined()
+
+        const settleOlder = () => settle(olderIndex, olderOutcome === `success`)
+        const settleRepair = () => settle(repairIndex, outcome === `success`)
+        if (order === `older-first`) {
+          await settleOlder()
+          await settleRepair()
+        } else {
+          await settleRepair()
+          await settleOlder()
+        }
+
+        if (outcome === `success` && olderOutcome === `success`) {
+          // Run the repair chain to its fixed point.
+          for (let index = repairIndex + 1; index < requests.length; index++) {
+            await settle(index, true)
+          }
+          const settled = requests.length
+          expect(settled).toBeGreaterThan(repairIndex + 1)
+          expect(requests.some(isFullSource)).toBe(false)
+          expect(releases).toEqual([
+            requests[0]!.acquisition,
+            requests[olderIndex]!.acquisition,
+          ])
+          loader.loadMore()
+          loader.loadMore(1)
+          expect(requests).toHaveLength(settled)
+          expect(releases).toHaveLength(2)
+          return
+        }
+
+        // A failure: nothing retries eagerly. Repair-chain work already in
+        // flight settles first; an explicit retry then waits for no request.
+        for (let index = repairIndex + 1; index < requests.length; index++) {
+          await settle(index, true)
+        }
+        const before = requests.length
+        loader.loadMore()
+        expect(requests).toHaveLength(before)
+        expect(requests.some(isFullSource)).toBe(false)
+        const failed = (
+          order === `older-first`
+            ? [olderIndex, repairIndex]
+            : [repairIndex, olderIndex]
+        ).filter(
+          (index) =>
+            (index === olderIndex ? olderOutcome : outcome) === `failure`,
+        )
+        const releasedBeforeRetry = releases.length
+        loader.loadMore(1)
+        expect(releases.slice(releasedBeforeRetry)).toEqual(
+          failed.map((index) => requests[index]!.acquisition),
+        )
+        expect(requests).toHaveLength(before + 1)
+        expect(isFullSource(requests[before]!)).toBe(true)
       } finally {
         loader.dispose()
         for (const request of requests) request.deferred.resolve()

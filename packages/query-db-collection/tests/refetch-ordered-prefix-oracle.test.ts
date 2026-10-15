@@ -20,7 +20,7 @@ import { queryCollectionOptions } from '../src/query'
 import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
 
 /**
- * # Does an on-demand refetch keep every served ordered prefix whole?
+ * # Does an on-demand refetch leave a gap between served ordered pages?
  *
  * ## Contract
  *
@@ -32,11 +32,13 @@ import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
  * (ARCHITECTURE.md, "Ordered requests, continuation, and recovery"). The
  * loader then treats every row through that boundary as loaded.
  *
- * The LoadSubset contract therefore requires the sync adapter to keep each
- * served prefix whole (issue #2136). After a refetch, the sync adapter must
- * deliver every row that now sorts at or before each served boundary. If it
- * refetches each page alone, a row that now sorts between two pages is in no
- * result, and the loader sees no change that would start another load.
+ * If a sync adapter refetches each page alone, a row that now sorts between
+ * two served pages is in neither result, and the loader sees no change that
+ * would start another load (issue #2136). The LoadSubset contract therefore
+ * requires a sync adapter that refetches loaded subsets on its own either to
+ * keep each served prefix whole, or to call `invalidateLoadedSubsets()` once
+ * the refetched rows apply. Query DB does the second; each ordered loader
+ * then re-establishes its window with a bounded repair from the start.
  *
  * Law: after preload, and after a refetch settles and the loader reaches its
  * fixed point, the public window equals the window over the current backend
@@ -45,13 +47,22 @@ import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
  * the provider may lag the backend, so no window is owed.
  *
  * Neighboring laws bound how the refetch does its work:
+ * - A refetch or invalidation never starts a new full-source request.
+ *   Full-source reads can be very expensive, and the repair always has a
+ *   bounded read available. Re-running a full-source request that already
+ *   existed is allowed.
+ * - When the read that repairs a window fails, the window shows its last
+ *   result or the right one, never another, and the refetch starts no
+ *   full-source request. The loader's automatic retry then restores the
+ *   window once the provider recovers.
+ *   That retry still reads the full source today; bounded failure recovery
+ *   is tracked separately in the coverage map.
  * - Repeating a refetch with an unchanged backend serves no more rows than the
- *   refetch before it. A refetch reads the served prefixes, not a prefix that
- *   grows with each read.
+ *   refetch before it, so a refetch's work does not grow with each read.
  * - A refetch or invalidation of an unchanged backend starts one first-page
  *   request for the window's predicate and order, not one per served page.
  * - A provider that honors neither `cursor` nor `offset` breaks the request
- *   contract. Refetch must then settle with an error, not request forever.
+ *   contract. Refetch must still settle, and requests must stop growing.
  * Each request also carries a Query key that matches its own request data,
  * so a `queryFn` may read either one.
  *
@@ -70,6 +81,11 @@ import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
  *   refetch even on main, through the loader's own repair. That defect is
  *   separate from #2136 and has an `it.fails` witness. The named replays run
  *   the issue trace with a page cap.
+ * - It judges outcomes, not mechanism. It does not observe when or how often
+ *   the sync adapter signals the loader, whether signals coalesce, which page
+ *   change opens the gate, or how a repair overlaps in-flight work.
+ *   Those are work properties of the production design; the oracle sees them
+ *   only through the request-count and full-source laws.
  * - It checks refetch cost only as relations between reads of the same state.
  *   The cursor-pagination integration oracle owns the zero-call law for a
  *   fresh `createCursorPager` cache.
@@ -138,17 +154,23 @@ function expectedWindow(
 //   boundary the loader proved at serve time.
 // - `refetch` calls `utils.refetch()`, which makes the provider current.
 //
+// - `observe` starts a second live query, `where id = n`, on the same source.
+//   Its own demand can load a row before a refetch does, so a page's result can
+//   change while no Collection row changes.
+//
 // A generated history is one to three rounds. Each round flips markers, which
-// makes the loader serve continuation pages, then changes the backend while the
-// provider lags, may flip again, may invalidate and change the backend again,
-// and ends with a refetch. Ids come from a small
-// space, so inserts often land between served pages and upserts often move a
-// served row. Named replays use the same commands in other orders. With one order term, the fixture maps a
-// generated rank to `rank * 100 + id`, so ranks stay unique.
+// makes the loader serve continuation pages, then changes the backend while
+// the provider lags, may flip or observe, may invalidate and change the
+// backend again, and ends with a refetch. Ids come from a small space, so
+// inserts often land between served pages and upserts often move a served
+// row. Named replays use the same commands in other orders. With one order
+// term, the fixture maps a generated rank to `rank * 100 + id`, so ranks stay
+// unique.
 type Command =
   | { type: `upsert`; id: number; rank: number }
   | { type: `delete`; id: number }
   | { type: `flip`; id: number }
+  | { type: `observe`; id: number }
   | { type: `invalidate` }
   | { type: `refetch` }
 
@@ -165,6 +187,13 @@ const flip: fc.Arbitrary<Command> = fc.record({
   type: fc.constant(`flip` as const),
   id: ids,
 })
+const flipOrObserve: fc.Arbitrary<Command> = fc.oneof(
+  { weight: 3, arbitrary: flip },
+  {
+    weight: 1,
+    arbitrary: fc.record({ type: fc.constant(`observe` as const), id: ids }),
+  },
+)
 const backendChange: fc.Arbitrary<Command> = fc.oneof(
   {
     weight: 3,
@@ -200,7 +229,7 @@ const caseArbitrary: fc.Arbitrary<Case> = fc.record({
       fc.tuple(
         fc.array(flip, { maxLength: 3 }),
         fc.array(backendChange, { minLength: 1, maxLength: 4 }),
-        fc.array(flip, { maxLength: 2 }),
+        fc.array(flipOrObserve, { maxLength: 2 }),
         fc.option(fc.array(backendChange, { minLength: 1, maxLength: 3 })),
       ),
       { minLength: 1, maxLength: 3 },
@@ -239,6 +268,11 @@ type Run = {
   // Requests whose Query key does not match their request data.
   keyMismatches: () => number
   setEncoding: (encoding: Scenario[`encoding`]) => void
+  // Fail every provider request after the next `count` requests, until
+  // cleared. A failed request rejects its Query function.
+  failAfter: (count: number | undefined) => void
+  // The Query cache entries this Collection owns: one per tracked request.
+  cachedQueries: () => number
   refetch: (opts?: { throwOnError?: boolean }) => Promise<unknown>
   cleanup: () => Promise<Array<unknown>>
 }
@@ -274,8 +308,12 @@ async function startRun(testCase: Case): Promise<Run> {
     const demandKey = getLoadSubsetDemandKey(options)
     return demandKey === undefined ? [id] : [id, demandKey]
   }
+  let failFrom: number | undefined
   const serve = (options: LoadSubsetOptions): Array<Item> => {
     requests.push(options)
+    if (failFrom !== undefined && requests.length > failFrom) {
+      throw new Error(`provider unavailable`)
+    }
     const usesCursor = encoding === `cursor` && options.cursor
     const predicates = [
       options.where,
@@ -365,6 +403,7 @@ async function startRun(testCase: Case): Promise<Run> {
       .select(({ item }) => ({ id: item.id }))
   })
 
+  const observers: Array<{ cleanup: () => Promise<void> }> = []
   const apply = async (command: Command): Promise<void> => {
     switch (command.type) {
       case `upsert`:
@@ -384,6 +423,18 @@ async function startRun(testCase: Case): Promise<Run> {
         })
         const receipt = markerSync.commit()
         if (receipt !== true) await receipt
+        await settle()
+        return
+      }
+      case `observe`: {
+        const observer = createLiveQueryCollection((q) =>
+          q
+            .from({ item: items })
+            .where(({ item }) => eq(item.id, command.id))
+            .select(({ item }) => ({ id: item.id })),
+        )
+        observers.push(observer)
+        await observer.preload()
         await settle()
         return
       }
@@ -411,10 +462,20 @@ async function startRun(testCase: Case): Promise<Run> {
     setEncoding: (next) => {
       encoding = next
     },
+    failAfter: (count) => {
+      failFrom = count === undefined ? undefined : requests.length + count
+    },
+    cachedQueries: () =>
+      queryClient.getQueryCache().findAll({ queryKey: [id] }).length,
     refetch: (opts) => items.utils.refetch(opts),
     cleanup: async () => {
       const failures: Array<unknown> = []
-      for (const collection of [window, items, markerCollection]) {
+      for (const collection of [
+        ...observers,
+        window,
+        items,
+        markerCollection,
+      ]) {
         try {
           await collection.cleanup()
         } catch (error) {
@@ -454,6 +515,19 @@ async function checkCase(testCase: Case): Promise<Observation> {
       )
     }
   }
+  // A full-source request names no predicate, order, limit, or cursor. A
+  // refetch may re-run one that already existed, but must not start the first.
+  const isFullSource = (options: LoadSubsetOptions) =>
+    options.where === undefined &&
+    options.orderBy === undefined &&
+    options.limit === undefined &&
+    options.cursor === undefined
+  const checkNoNewFullSource = (from: number, checkpoint: string) => {
+    if (run.requests.slice(0, from).some(isFullSource)) return
+    if (run.requests.slice(from).some(isFullSource)) {
+      throw new Error(`a ${checkpoint} started a full-source request`)
+    }
+  }
   try {
     check(`after preload`)
     let providerCurrent = true
@@ -466,7 +540,11 @@ async function checkCase(testCase: Case): Promise<Observation> {
       ) {
         reachedLaggingRefetchAfterContinuation = true
       }
+      const requestsBefore = run.requests.length
       await run.apply(command)
+      if (command.type === `refetch` || command.type === `invalidate`) {
+        checkNoNewFullSource(requestsBefore, `${command.type} at step ${step}`)
+      }
       if (command.type === `upsert` || command.type === `delete`) {
         providerCurrent = false
       } else if (command.type === `refetch` || command.type === `invalidate`) {
@@ -623,7 +701,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
   )
 
   // The issue's trace with a provider that returns one row per request. A
-  // short reply does not end the order, so the prefix read must continue.
+  // short reply does not end the order, so the repair must keep reading.
   it.each([`cursor`, `offset`] as const)(
     `shows a moved row after a refetch when the provider caps pages (%s encoding)`,
     async (encoding) => {
@@ -648,6 +726,100 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
       expect(observation.reachedLaggingRefetchAfterContinuation).toBe(true)
     },
   )
+
+  // Fracture scan witness. A second live query loads row 6 before the
+  // refetch, so the refetched first page changes while no Collection row
+  // does. A design that waits for a changed Collection row misses the gap.
+  it.each([`cursor`, `offset`] as const)(
+    `shows a moved row when another live query loaded the page's new row first (%s encoding)`,
+    async (encoding) => {
+      const observation = await checkCase({
+        scenario: {
+          encoding,
+          functionKey: false,
+          orderKey: `rank`,
+          pageCap: undefined,
+          terms: 1,
+          limit: 2,
+          offset: 0,
+        },
+        initial: [10, 4, 1, 0].map((id) => ({ id, rank: 0, marked: true })),
+        history: [
+          { type: `flip`, id: 10 },
+          { type: `upsert`, id: 6, rank: 0 },
+          { type: `upsert`, id: 5, rank: 0 },
+          { type: `flip`, id: 5 },
+          { type: `observe`, id: 6 },
+        ],
+      })
+      expect(observation.reachedLaggingRefetchAfterContinuation).toBe(true)
+    },
+  )
+
+  // The gate opens only when a page's keys change. A value change that keeps
+  // every page's keys reaches the loader as an update to a row it already
+  // sent; when the update moves that row in the order, the existing
+  // order-change path repairs the window. Here the first page keeps its keys
+  // while its last row's order value moves.
+  it.each([`cursor`, `offset`] as const)(
+    `repairs when a page keeps its keys but its last row moves (%s encoding)`,
+    async (encoding) => {
+      await checkCase({
+        scenario: {
+          encoding,
+          functionKey: false,
+          orderKey: `rank`,
+          pageCap: undefined,
+          terms: 2,
+          limit: 2,
+          offset: 0,
+        },
+        initial: [
+          { id: 0, rank: 6, marked: true },
+          { id: 1, rank: 4, marked: true },
+          { id: 2, rank: 1, marked: true },
+          { id: 3, rank: 0, marked: true },
+        ],
+        history: [
+          { type: `flip`, id: 0 },
+          { type: `upsert`, id: 1, rank: 2 },
+          { type: `refetch` },
+          { type: `upsert`, id: 7, rank: 3 },
+          { type: `flip`, id: 7 },
+        ],
+      })
+    },
+  )
+
+  // A changed first page whose only later page is empty. The empty
+  // continuation still starts where the first page used to end, so a row
+  // that now sorts between them is in neither result.
+  it(`shows a row that moved before an empty later page`, async () => {
+    await checkCase({
+      scenario: {
+        encoding: `cursor`,
+        functionKey: false,
+        orderKey: `rank`,
+        pageCap: undefined,
+        terms: 1,
+        limit: 1,
+        offset: 0,
+      },
+      initial: [
+        { id: 0, rank: 0, marked: false },
+        { id: 1, rank: 0, marked: false },
+      ],
+      history: [
+        { type: `upsert`, id: 0, rank: 0 },
+        { type: `flip`, id: 5 },
+        { type: `refetch` },
+        { type: `delete`, id: 0 },
+        { type: `invalidate` },
+        { type: `upsert`, id: 0, rank: 1 },
+        { type: `upsert`, id: 5, rank: 0 },
+      ],
+    })
+  })
 
   // The issue's trace again, but the pages refetch through a Query
   // invalidation instead of `utils.refetch()`. Each page refetches alone, so
@@ -713,9 +885,9 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
   )
 
   // A provider that honors neither encoding returns the same page for every
-  // continuation. Refetch must settle with an error instead of requesting
-  // forever (AGENTS.md: fail fast on a contradictory collaborator signal).
-  it(`refetch rejects when the provider honors neither cursor nor offset`, async () => {
+  // continuation. That breaks the request contract, but a refetch must still
+  // settle, and the loader must not keep requesting.
+  it(`a refetch settles when the provider honors neither cursor nor offset`, async () => {
     const run = await startRun({
       scenario: {
         encoding: `cursor`,
@@ -730,19 +902,90 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
       initial: [3, 2, 1, 0].map((id) => ({ id, rank: 0, marked: id === 0 })),
       history: [],
     })
-    // Query DB logs the rejected fetch; the rejection itself is the check.
-    const loggedError = vi.spyOn(console, `error`).mockImplementation(() => {})
     try {
       expect(run.requests.some((options) => options.cursor)).toBe(true)
       run.setEncoding(`ignore`)
-      await expect(
-        withDeadline(run.refetch({ throwOnError: true })),
-      ).rejects.toThrow(/did not advance/)
+      await run.apply({ type: `upsert`, id: 4, rank: 0 })
+      await withDeadline(run.apply({ type: `refetch` }))
+      const settled = run.requests.length
+      await settle()
+      expect(run.requests).toHaveLength(settled)
     } finally {
-      loggedError.mockRestore()
       await run.cleanup()
     }
   })
+
+  // Fault injection. The refetch's own page requests succeed, but every later
+  // request, which is the read that repairs the window, fails. The window
+  // shows no other result than its last one or the right one, and the refetch
+  // starts no full-source request. Once the provider recovers, the loader's
+  // automatic retry restores it.
+  it.each([`cursor`, `offset`] as const)(
+    `keeps the last window when the repair fails, and the retry restores it (%s encoding)`,
+    async (encoding) => {
+      const testCase: Case = {
+        scenario: {
+          encoding,
+          functionKey: false,
+          orderKey: `rank`,
+          pageCap: undefined,
+          terms: 1,
+          limit: 2,
+          offset: 0,
+        },
+        initial: [10, 4, 1, 0].map((id) => ({ id, rank: 0, marked: true })),
+        history: [
+          { type: `flip`, id: 10 },
+          { type: `upsert`, id: 5, rank: 0 },
+          { type: `flip`, id: 5 },
+          { type: `upsert`, id: 6, rank: 0 },
+        ],
+      }
+      const run = await startRun(testCase)
+      const loggedError = vi
+        .spyOn(console, `error`)
+        .mockImplementation(() => {})
+      try {
+        for (const command of testCase.history) await run.apply(command)
+        const before = run.windowIds()
+        const requestsBefore = run.requests.length
+        // Let each tracked Query refetch once, then fail everything after.
+        run.failAfter(run.cachedQueries())
+        await run.apply({ type: `refetch` })
+        // A failed repair publishes no other window: the result is the last
+        // window, or the right one when the refetched pages alone fix it, as
+        // they do for a provider that honors only the offset.
+        const expected = expectedWindow(
+          run.backend,
+          run.markers,
+          testCase.scenario,
+        )
+        expect([before, expected]).toContainEqual(run.windowIds())
+        expect(
+          run.requests
+            .slice(requestsBefore)
+            .some(
+              (options) =>
+                options.where === undefined &&
+                options.orderBy === undefined &&
+                options.limit === undefined &&
+                options.cursor === undefined,
+            ),
+        ).toBe(false)
+        // The provider recovers; the loader's automatic retry (250 ms, then
+        // 500 ms) restores the window.
+        run.failAfter(undefined)
+        await new Promise((resolve) => setTimeout(resolve, 900))
+        await settle()
+        expect(run.windowIds()).toEqual(
+          expectedWindow(run.backend, run.markers, testCase.scenario),
+        )
+      } finally {
+        loggedError.mockRestore()
+        await run.cleanup()
+      }
+    },
+  )
 
   // Known loader defects outside #2136. These witnesses fail today and
   // reproduce on main; `it.fails` turns green work into a red signal once the

@@ -6,8 +6,6 @@ import {
 } from '@tanstack/query-core'
 import {
   LoadSubsetOperationAbortedError,
-  and,
-  buildCursorExpressions,
   compileSingleRowExpression,
   deepEquals,
   getLoadSubsetDemandKey,
@@ -71,21 +69,6 @@ type TQueryKeyBuilder<TQueryKey> = (opts: LoadSubsetOptions) => TQueryKey
 function isStoredLoadSubsetOptions(value: unknown): value is LoadSubsetOptions {
   // This adapter stores typed request options in its observer metadata.
   return value !== null && typeof value === `object`
-}
-
-function withLoadSubsetOptions(
-  meta: Record<string, unknown> | undefined,
-  options: LoadSubsetOptions,
-): Record<string, unknown> {
-  const extendedMeta = { ...meta }
-  // Query functions need request options, but SSR must not serialize them.
-  Object.defineProperty(extendedMeta, `loadSubsetOptions`, {
-    value: options,
-    enumerable: false,
-    configurable: true,
-    writable: true,
-  })
-  return extendedMeta
 }
 
 const queryObserverOptionKeys = [
@@ -1145,29 +1128,6 @@ export function queryCollectionOptions(
     return nextOwnersByRow
   }
 
-  /**
-   * Generate a consistent query key from LoadSubsetOptions.
-   * CRITICAL: Must use identical logic in both createQueryFromOpts and unloadSubset
-   * so that refcount increment/decrement operations target the same hashedQueryKey.
-   * Inconsistent keys would cause refcount leaks and prevent proper cleanup.
-   */
-  const generateQueryKeyFromOptions = (opts: LoadSubsetOptions): QueryKey => {
-    if (typeof queryKey === `function`) {
-      // Refetch starts another acquisition for the same semantic demand. It
-      // must not create a second Query cache or unload identity.
-      const { refetch: _refetch, ...queryKeyOptions } = opts
-      return queryKey(queryKeyOptions)
-    } else if (syncMode === `on-demand`) {
-      // A static on-demand key is extended by exact semantic demand so
-      // equivalent predicates share one entry while distinct windows do not.
-      const demandKey = getLoadSubsetDemandKey(opts)
-      return demandKey !== undefined ? [...queryKey, demandKey] : queryKey
-    } else {
-      // Static queryKey in eager mode: use as-is
-      return queryKey
-    }
-  }
-
   const internalSync: SyncConfig<any>[`sync`] = (params) => {
     const syncSession = {}
     activeSyncSession = syncSession
@@ -1188,8 +1148,85 @@ export function queryCollectionOptions(
         )
       }
     }
-    const { begin, write, commit, markReady, markError, collection, metadata } =
-      params
+    const {
+      begin,
+      write,
+      commit,
+      markReady,
+      markError,
+      invalidateLoadedSubsets,
+      collection,
+      metadata,
+    } = params
+
+    /**
+     * The LoadSubset contract: a sync adapter that refetches loaded subsets on
+     * its own either keeps served prefixes whole, or reports that they may
+     * have shifted. Query DB refetches each ordered page alone, so after a
+     * refetch a row can sort between two served pages and be in neither
+     * result (#2136). It reports the shift; the ordered loader then
+     * re-establishes the window with a bounded repair.
+     *
+     * Only one change can open such a gap: a page that has a later page after
+     * it returns different keys. A one-page window, a change to the last page,
+     * or a value change that keeps every page's keys cannot. A loader's own
+     * acquisition (`refetch: true`) never reports, so its repair cannot loop.
+     */
+    const orderedPageResults = new WeakMap<
+      AnyQuery,
+      { readKey: string; keys: string; last: unknown }
+    >()
+    const acquisitionRefetches = new Set<string>()
+    let invalidationTimer: ReturnType<typeof setTimeout> | undefined
+    const recordOrderedPageResult = (
+      query: AnyQuery,
+      hashedQueryKey: string,
+      rows: Array<any>,
+    ): void => {
+      const options = query.meta?.loadSubsetOptions
+      if (
+        syncMode !== `on-demand` ||
+        !isStoredLoadSubsetOptions(options) ||
+        !options.orderBy?.length
+      )
+        return
+      const { where, orderBy } = options
+      const leadingValue = compileSingleRowExpression(orderBy[0]!.expression)
+      const previous = orderedPageResults.get(query)
+      const next = {
+        readKey: getLoadSubsetDemandKey({ where, orderBy })!,
+        keys: JSON.stringify(rows.map(getKey)),
+        last: rows.length > 0 ? leadingValue(rows.at(-1)) : undefined,
+      }
+      orderedPageResults.set(query, next)
+      if (
+        acquisitionRefetches.has(hashedQueryKey) ||
+        previous === undefined ||
+        previous.keys === next.keys ||
+        previous.last === undefined
+      )
+        return
+      // The page has a later page when another page with its predicate and
+      // order ends deeper in the order. An empty page counts: it continues
+      // from where an earlier page ended.
+      const compare = makeComparator(orderBy[0]!.compareOptions)
+      const hasLaterPage = [...state.observers.values()].some((observer) => {
+        const other = orderedPageResults.get(observer.getCurrentQuery())
+        return (
+          other !== undefined &&
+          other !== next &&
+          other.readKey === next.readKey &&
+          (other.last === undefined || compare(other.last, previous.last) > 0)
+        )
+      })
+      // One report per burst of refetched pages, after their rows apply.
+      if (hasLaterPage && invalidationTimer === undefined) {
+        invalidationTimer = setTimeout(() => {
+          invalidationTimer = undefined
+          if (activeSyncSession === syncSession) invalidateLoadedSubsets()
+        }, 0)
+      }
+    }
     const persistence =
       metadata === undefined
         ? null
@@ -1749,6 +1786,29 @@ export function queryCollectionOptions(
       }
     }
 
+    /**
+     * Generate a consistent query key from LoadSubsetOptions.
+     * CRITICAL: Must use identical logic in both createQueryFromOpts and unloadSubset
+     * so that refcount increment/decrement operations target the same hashedQueryKey.
+     * Inconsistent keys would cause refcount leaks and prevent proper cleanup.
+     */
+    const generateQueryKeyFromOptions = (opts: LoadSubsetOptions): QueryKey => {
+      if (typeof queryKey === `function`) {
+        // Refetch starts another acquisition for the same semantic demand. It
+        // must not create a second Query cache or unload identity.
+        const { refetch: _refetch, ...queryKeyOptions } = opts
+        return queryKey(queryKeyOptions)
+      } else if (syncMode === `on-demand`) {
+        // A static on-demand key is extended by exact semantic demand so
+        // equivalent predicates share one entry while distinct windows do not.
+        const demandKey = getLoadSubsetDemandKey(opts)
+        return demandKey !== undefined ? [...queryKey, demandKey] : queryKey
+      } else {
+        // Static queryKey in eager mode: use as-is
+        return queryKey
+      }
+    }
+
     const startupRetentionEntries = metadata?.collection.list(
       QUERY_COLLECTION_GC_PREFIX,
     )
@@ -1801,6 +1861,7 @@ export function queryCollectionOptions(
         const finish = (settle: () => void) => {
           if (!active) return
           active = false
+          acquisitionRefetches.delete(hashedQueryKey)
           pending.delete(cancel)
           if (pending.size === 0) {
             pendingReadyUnsubscribes.delete(hashedQueryKey)
@@ -1812,6 +1873,8 @@ export function queryCollectionOptions(
         }
         pending.add(cancel)
         pendingReadyUnsubscribes.set(hashedQueryKey, pending)
+        // This acquisition's result answers the loader; it reports no shift.
+        acquisitionRefetches.add(hashedQueryKey)
 
         const refetch = async () => {
           const waitsForDeferredApplication = !!collection.deferDataRefresh
@@ -1955,7 +2018,14 @@ export function queryCollectionOptions(
         refetch: _refetch,
         ...requestOptions
       } = opts
-      const extendedMeta = withLoadSubsetOptions(meta, requestOptions)
+      const extendedMeta = { ...meta }
+      // Query functions need request options, but SSR must not serialize them.
+      Object.defineProperty(extendedMeta, `loadSubsetOptions`, {
+        value: requestOptions,
+        enumerable: false,
+        configurable: true,
+        writable: true,
+      })
       const retainedEntry =
         hashedQueryKey === requestedHash
           ? retainedRequestedEntry
@@ -1991,8 +2061,6 @@ export function queryCollectionOptions(
         const currentResult = observer.getCurrentResult()
 
         if (opts.refetch) {
-          // The loader proves its boundary again from this acquisition.
-          servedBoundaries.delete(observer.getCurrentQuery())
           return refetchAndWaitForApplication(observer, hashedQueryKey)
         }
 
@@ -2062,12 +2130,6 @@ export function queryCollectionOptions(
               directWriteGeneration,
             ),
           )
-          // A refetch of a served ordered page reads its served prefix.
-          const page =
-            syncMode === `on-demand`
-              ? pagePrefix(localObserver.getCurrentQuery())
-              : undefined
-          if (page) return readServedPrefix(page, context)
           // A shared Query can outlive the acquisition that installed this
           // queryFn. Use the Query signal for shared fetches, but preserve its
           // lazy getter so an ignoring provider does not cause Query Core to
@@ -2227,7 +2289,6 @@ export function queryCollectionOptions(
           )
         }
         const currentResult = localObserver.getCurrentResult()
-        if (opts.refetch) servedBoundaries.delete(localQuery)
         if (
           opts.refetch ||
           unpatchedCacheVersions.has(localQuery) ||
@@ -2401,7 +2462,9 @@ export function queryCollectionOptions(
       const currentQuery = queryClient
         .getQueryCache()
         .find({ queryKey, exact: true })
-      if (currentQuery) recordServedBoundary(currentQuery, newItemsArray)
+      if (currentQuery) {
+        recordOrderedPageResult(currentQuery, hashedQueryKey, newItemsArray)
+      }
       const cachedRemoteFetchStart =
         currentQuery !== undefined &&
         queryCollectionSuccessfulFetchData.get(currentQuery) ===
@@ -3605,8 +3668,8 @@ export function queryCollectionOptions(
 
     const cleanup = () => {
       if (activeSyncSession === syncSession) activeSyncSession = undefined
-      prefixReadAbort.abort()
-      prefixReadAbort = new AbortController()
+      clearTimeout(invalidationTimer)
+      invalidationTimer = undefined
       pendingStartupLoads.clear()
       fullSourceDependents.clear()
       ensureEagerSubscription = () => {}
@@ -3777,205 +3840,6 @@ export function queryCollectionOptions(
         syncMode === `on-demand` ? restartAfterScopedRecovery : undefined,
       cleanup,
     }
-  }
-
-  /**
-   * The LoadSubset contract requires a sync adapter to keep each served
-   * ordered prefix whole. A page's prefix runs from the start of its order
-   * through its boundary: the leading order value of the last row it served,
-   * ties included. An empty page served none. The ordered loader established
-   * that boundary from the serve, so it stays fixed until the page unloads.
-   *
-   * Refetching each page alone can leave a gap: a row that now sorts between
-   * two pages is in neither result, and the loader sees no change. A refetch
-   * of a served page therefore reads its predicate and order's deepest served
-   * prefix with the request shapes the loader itself sends: a first page,
-   * then a tie and a cursor continuation from each last row, until a row
-   * sorts past the boundary or a page is empty. A provider may honor either
-   * the cursor or the offset, and may return fewer rows than a request's
-   * limit. Pages that refetch in one synchronous burst, such as one
-   * `refetch()` or one invalidation, share one read. Other requests refetch
-   * as themselves.
-   */
-  // One read of a served prefix, shared by the ordered pages that have the
-  // same predicate and order. It exists only in this adapter.
-  type PrefixRead = {
-    where: LoadSubsetOptions[`where`]
-    orderBy: NonNullable<LoadSubsetOptions[`orderBy`]>
-    boundary: unknown
-    firstLimit: number
-    pageSize: number
-  }
-
-  // Each ordered page's boundary, and how far its request reached in the
-  // order, from its first applied result. `null` records an empty result.
-  // Both stay fixed until the loader starts a new acquisition attempt for
-  // the page.
-  const servedBoundaries = new WeakMap<
-    AnyQuery,
-    { boundary: unknown; count: number } | null
-  >()
-  const recordServedBoundary = (
-    query: AnyQuery,
-    rows: Array<Record<string, unknown>>,
-  ): void => {
-    const options = query.meta?.loadSubsetOptions
-    if (
-      servedBoundaries.has(query) ||
-      !isStoredLoadSubsetOptions(options) ||
-      !options.orderBy?.length
-    )
-      return
-    const last = rows.at(-1)
-    servedBoundaries.set(
-      query,
-      last === undefined
-        ? null
-        : {
-            boundary: compileSingleRowExpression(
-              options.orderBy[0]!.expression,
-            )(last),
-            count: (options.offset ?? 0) + rows.length,
-          },
-    )
-  }
-
-  // One ordered page's served prefix, from its recorded boundary. A page with
-  // no recorded boundary, or an empty first result, has none.
-  const pagePrefix = (query: AnyQuery): PrefixRead | undefined => {
-    const options = query.meta?.loadSubsetOptions
-    const served = servedBoundaries.get(query)
-    // A selected response has no row array to combine.
-    if (select || !served || !isStoredLoadSubsetOptions(options)) return
-    const { where, orderBy } = options
-    if (!orderBy?.length) return
-    // The first request reads as far as the page's serve reached, so a
-    // repeated refetch reads the same rows rather than more.
-    return {
-      where,
-      orderBy,
-      boundary: served.boundary,
-      firstLimit: served.count,
-      pageSize: options.limit ?? served.count,
-    }
-  }
-
-  const readKey = ({ where, orderBy }: PrefixRead): string =>
-    getLoadSubsetDemandKey({ where, orderBy })!
-
-  // A read through the deepest boundary of every tracked page with the same
-  // predicate and order. Ordering uses the loader's own comparator.
-  const deepestPrefix = (first: PrefixRead): PrefixRead => {
-    const key = readKey(first)
-    const compare = makeComparator(first.orderBy[0]!.compareOptions)
-    const read = { ...first }
-    for (const observer of state.observers.values()) {
-      const page = pagePrefix(observer.getCurrentQuery())
-      if (!page || readKey(page) !== key) continue
-      if (compare(page.boundary, read.boundary) > 0) {
-        read.boundary = page.boundary
-      }
-      read.firstLimit = Math.max(read.firstLimit, page.firstLimit)
-      read.pageSize = Math.max(read.pageSize, page.pageSize)
-    }
-    return read
-  }
-
-  // Reads started in one synchronous burst, keyed by predicate and order.
-  // Query Core calls each page's Query function synchronously as its fetch
-  // starts, so one `refetch()` or invalidation shares one read.
-  const prefixReads = new Map<string, Promise<Array<Record<string, unknown>>>>()
-  // Cleanup aborts unfinished reads. A read serves several pages, so no one
-  // page's Query signal may cancel it.
-  let prefixReadAbort = new AbortController()
-
-  const readServedPrefix = (
-    page: PrefixRead,
-    context: QueryFunctionContext<any>,
-  ): Promise<Array<Record<string, unknown>>> => {
-    const key = readKey(page)
-    let read = prefixReads.get(key)
-    if (!read) {
-      read = fetchServedPrefix(deepestPrefix(page), context)
-      prefixReads.set(key, read)
-      queueMicrotask(() => prefixReads.delete(key))
-    }
-    return read
-  }
-
-  const fetchServedPrefix = async (
-    read: PrefixRead,
-    context: QueryFunctionContext<any>,
-  ): Promise<Array<Record<string, unknown>>> => {
-    const { where, orderBy, boundary } = read
-    const { signal } = prefixReadAbort
-    const request = async (options: LoadSubsetOptions) => {
-      const page: unknown = await queryFn({
-        client: context.client,
-        queryKey: generateQueryKeyFromOptions(options),
-        signal,
-        // `LoadSubsetOptions.signal` is the documented cancellation field.
-        meta: withLoadSubsetOptions(context.meta, { ...options, signal }),
-      })
-      signal.throwIfAborted()
-      if (!Array.isArray(page)) {
-        throw new InvalidQueryResultError(
-          `@tanstack/query-db-collection: queryFn must return an array of objects. Got: ${typeof page} for queryKey ${JSON.stringify(context.queryKey)}`,
-        )
-      }
-      return page as Array<Record<string, unknown>>
-    }
-    const rows = new Map<string | number, Record<string, unknown>>()
-    const add = (page: Array<Record<string, unknown>>) =>
-      page.forEach((row) => rows.set(getKey(row), row))
-    const leadingValue = compileSingleRowExpression(orderBy[0]!.expression)
-    const compare = makeComparator(orderBy[0]!.compareOptions)
-    let page = await request({ where, orderBy, limit: read.firstLimit })
-    let offset = 0
-    let previousKeys: string | undefined
-    for (;;) {
-      add(page)
-      offset += page.length
-      const last = page.at(-1)
-      // A short page does not prove source exhaustion; an empty one ends it.
-      if (last === undefined) break
-      const value = leadingValue(last)
-      const order = compare(value, boundary)
-      if (order > 0) break
-      const cursor = buildCursorExpressions(orderBy, value)
-      if (!cursor) {
-        // No cursor can continue from this value. Read the rest of the order.
-        add(await request({ where, orderBy, offset }))
-        break
-      }
-      // A cursor starts after the value, so first read the rest of its tie.
-      add(
-        await request({
-          where: where ? and(where, cursor.whereCurrent) : cursor.whereCurrent,
-        }),
-      )
-      if (order === 0) break
-      page = await request({
-        where,
-        orderBy,
-        cursor,
-        offset,
-        limit: read.pageSize,
-      })
-      // A provider that honors neither the cursor nor the offset returns the
-      // same page again. Fail instead of requesting forever.
-      const keys = JSON.stringify(page.map(getKey))
-      if (keys === previousKeys) {
-        throw new InvalidQueryResultError(
-          `@tanstack/query-db-collection: a continuation page did not advance past the previous page for queryKey ${JSON.stringify(context.queryKey)}`,
-        )
-      }
-      previousKeys = keys
-    }
-    // Keep only the served prefix, in its order.
-    return [...rows.values()]
-      .filter((row) => compare(leadingValue(row), boundary) <= 0)
-      .sort((a, b) => compare(leadingValue(a), leadingValue(b)))
   }
 
   /**

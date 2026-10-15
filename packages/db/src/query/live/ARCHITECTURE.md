@@ -974,7 +974,15 @@ before adapter code runs, and reentrant truncate or disposal stops the current
 retirement pass. No copied rows or additional cursor history are retained.
 
 A visible delete or source-order change after an otherwise settled,
-expressible window uses a narrower authoritative path. Core reissues the
+expressible window uses a narrower authoritative path. So does a sync adapter's
+`invalidateLoadedSubsets()` report: after a refetch that the adapter started on
+its own has applied, served pages may have shifted so that a row now sorts
+between two of them and is in neither result. The adapter reports that instead
+of keeping each served prefix whole (the `LoadSubsetFn` rule). Core emits
+`loadedSubsets:invalidated` once per turn, and each ordered loader on the
+Collection runs this repair. A loader whose coverage is one full-source
+acquisition, or a `requiresFullSource` plan, ignores the report: the refetch
+has already re-read that acquisition, and it has no page boundary to repair. Core reissues the
 ordered prefix from the start with the query predicate, order terms, and
 `limit = offset + limit`; the transport `offset` is omitted because this
 acquisition starts at the provider's source prefix. It then reacquires the
@@ -989,9 +997,12 @@ page fixed point ends the repair when no more data is needed; it cannot leave a
 held repair without pending work.
 The finite prefix and tie acquisitions they replace retire after the whole
 replacement chain succeeds.
-An invalidation that overlaps unfinished non-repair source work, a failed
-or canceled request, or a boundary that cannot be expressed still requires the
-full-source recovery above. A bounded repair failure likewise upgrades its
+Full-source reads can be very expensive, so a repair avoids one whenever a
+bounded read is available. An invalidation that overlaps unfinished page or tie
+work after the source has settled once does not force one: the bounded repair
+starts at once, and that work's later result is ignored for its boundary. A failed or canceled request, an invalidation before any request has
+settled, or a boundary that cannot be expressed still requires the full-source
+recovery above. A bounded repair failure likewise upgrades its
 next attempt to full-source recovery because partial writes cannot establish
 finite coverage.
 
