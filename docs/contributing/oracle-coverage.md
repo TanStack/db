@@ -872,7 +872,9 @@ A second-fetch witness starts B inside A's Collection commit callback, either
 fetching or paused offline, then holds B's accepted receipt behind an optimistic
 mutation. Query Core reports B's fetch action before A's cache success action.
 A later unaccepted cache edit aborts B's caller; the caller must stay pending
-until B's receipt applies, then reject with exactly B's row public. The
+until B's receipt applies, then reject with exactly B's row public inside its
+settlement callback. A wrong-result control rejects an early callback that
+still sees A's row or an unapplied B receipt. The
 neighboring deferred-start case reverses the cache-event order. The original
 retirement failed the fetching case; `43551b835` failed the paused case at the
 held-receipt caller-outcome checkpoint. These fixed histories do not establish
@@ -902,7 +904,7 @@ installed Query Core's optional cache completion behavior by waiting for the
 late result to enter Query cache before comparing public rows. That cache
 completion is a reached-path premise, not a promise that every Query Core
 version must cache an unobserved result. A public refetch
-lease grammar runs thirteen named histories and fixed-seed and random 48-run
+lease grammar runs fourteen named histories and fixed-seed and random 48-run
 campaigns through `requestSnapshot({ refetch: true, signal })`. It varies six
 caller abort/unload/cleanup actions, baseline release before or after caller
 abort, an equal peer and its

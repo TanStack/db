@@ -84,7 +84,7 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
           lease on a duplicate unload, failed at the physical-signal and
           intermediate public-row checkpoints (2026-10-15). The refetch
           caller-cancellation cell is covered separately below.
-    - [x] Public refetch lease grammar: thirteen named histories and fixed/random
+    - [x] Public refetch lease grammar: fourteen named histories and fixed/random
           48-run campaigns vary caller abort and unload order, Collection
           cleanup, baseline release before or after caller abort, equal-peer
           release, signal consumption, and
@@ -219,7 +219,10 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
           row. A deferred B start reverses the cache-event order as a control.
           The fetching case failed on `5e90ac9c9`; the paused case failed on
           `43551b835` at the held-receipt caller-outcome checkpoint. The
-          adjacent canceled-fetch record oracle still passes (2026-10-15).
+          rejection callback captures receipt application and the complete
+          public rows; an early-settlement wrong-result control fails there.
+          The adjacent canceled-fetch record oracle still passes
+          (2026-10-15).
   - [x] Request shape: signal-free and explicit-signal requests check the
         physical signal, own keys, descriptor, cloning, JSON, and deletion.
         The configurable-descriptor assertion failed before its repair.

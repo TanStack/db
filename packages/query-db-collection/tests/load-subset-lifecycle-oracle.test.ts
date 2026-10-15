@@ -7683,7 +7683,8 @@ describe(`loadSubset lifecycle oracle`, () => {
    * This real QueryClient/Collection history holds B's accepted receipt behind
    * an optimistic mutation, then lets a later unaccepted C cache edit abort
    * B's caller. The caller must remain pending while B is absent and reject
-   * only after B's receipt applies, with B as the complete public row set.
+   * only after B's receipt applies, with B as the complete public row set
+   * inside the rejection callback.
    * The cache event order is path evidence; the promise, receipt, and rows are
    * the public comparison. This controlled callback does not model storage.
    */
@@ -7725,6 +7726,9 @@ describe(`loadSubset lifecycle oracle`, () => {
       let writes: Array<string> = []
       let bLoad: Promise<void> | undefined
       let bOutcome: `pending` | `ready` | `abort` | `other` = `pending`
+      let bAtSettlement:
+        | { outcome: string; receiptApplied: boolean; rows: Array<string> }
+        | undefined
       let bReceiptApplied = false
       const base = queryCollectionOptions<Row>({
         id,
@@ -7772,17 +7776,27 @@ describe(`loadSubset lifecycle oracle`, () => {
                     if (pauseB) onlineManager.setOnline(false)
                     const load = Promise.resolve(
                       collection._sync.loadSubset(requestB),
-                    ).then(() => undefined)
-                    bLoad = load
+                    )
+                    bLoad = load.then(() => undefined)
                     void load.then(
                       () => {
                         bOutcome = `ready`
+                        bAtSettlement = {
+                          outcome: bOutcome,
+                          receiptApplied: bReceiptApplied,
+                          rows: rows(),
+                        }
                       },
                       (error: unknown) => {
                         bOutcome =
                           error instanceof Error && error.name === `AbortError`
                             ? `abort`
                             : `other`
+                        bAtSettlement = {
+                          outcome: bOutcome,
+                          receiptApplied: bReceiptApplied,
+                          rows: rows(),
+                        }
                       },
                     )
                   }
@@ -7835,11 +7849,25 @@ describe(`loadSubset lifecycle oracle`, () => {
         expect(rows()).toEqual([`A`, `local`])
         await new Promise<void>((resolve) => setTimeout(resolve, 0))
         expect(bOutcome).toBe(`pending`)
+        expect(bAtSettlement).toBeUndefined()
 
         mutationGate.resolve()
         await mutation.isPersisted.promise
         if (!bLoad) throw new Error(`The second fetch did not start`)
         await expect(bLoad).rejects.toMatchObject({ name: `AbortError` })
+        const expectedAtSettlement = {
+          outcome: `abort`,
+          receiptApplied: true,
+          rows: [`B`],
+        }
+        expect(bAtSettlement).toEqual(expectedAtSettlement)
+        expect(() =>
+          expect({
+            ...bAtSettlement,
+            receiptApplied: false,
+            rows: [`A`, `local`],
+          }).toEqual(expectedAtSettlement),
+        ).toThrow()
         expect(bReceiptApplied).toBe(true)
         expect(rows()).toEqual([`B`])
       }, [
