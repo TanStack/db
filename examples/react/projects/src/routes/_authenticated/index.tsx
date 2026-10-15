@@ -1,6 +1,6 @@
-import { createFileRoute, redirect } from "@tanstack/react-router"
-import { projectCollection, todoCollection } from "@/lib/collections"
-import { authClient } from "@/lib/auth-client"
+import { createFileRoute, redirect } from '@tanstack/react-router'
+import { projectCollection, todoCollection } from '@/lib/collections'
+import { authClient } from '@/lib/auth-client'
 
 export const Route = createFileRoute(`/_authenticated/`)({
   component: () => null,
