@@ -304,15 +304,13 @@ export function processOrderBy(
       // sufficient identities here.
       optimizableOrderByCollections[orderBySourceId] = info
 
-      // Set up lazy loading callback to track how much more data is needed
-      // This is used by loadMoreIfNeeded to determine if more data should be loaded
-      // Only enable when an index exists — without an index, lazy loading can't work
-      // and all data is loaded eagerly via requestSnapshot instead.
-      if (index) {
+      // loadMoreIfNeeded reads how many rows the window needs. Without an
+      // index, only an on-demand joined filter can leave the window short.
+      const needsCount =
+        info.joinedFilterSourceId !== undefined && !info.sourceHoldsAllRows
+      if (index || needsCount) {
         setSizeCallback = (getSize) => {
-          optimizableOrderByCollections[orderBySourceId]![`dataNeeded`] = (
-            boundary,
-          ) => {
+          info.dataNeeded = (boundary) => {
             // Window rows at or before the boundary are a leading run of
             // the window order.
             const size = getSize(

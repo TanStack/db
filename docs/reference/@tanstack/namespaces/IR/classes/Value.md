@@ -3,7 +3,7 @@ id: Value
 title: Value
 ---
 
-Defined in: [packages/db/src/query/ir.ts:187](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L187)
+Defined in: [packages/db/src/query/ir.ts:236](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L236)
 
 ## Extends
 
@@ -23,7 +23,7 @@ Defined in: [packages/db/src/query/ir.ts:187](https://github.com/TanStack/db/blo
 new Value<T>(value): Value<T>;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:189](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L189)
+Defined in: [packages/db/src/query/ir.ts:238](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L238)
 
 #### Parameters
 
@@ -49,7 +49,7 @@ BaseExpression<T>.constructor
 readonly __returnType: T;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:79](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L79)
+Defined in: [packages/db/src/query/ir.ts:83](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L83)
 
 **`Internal`**
 
@@ -69,7 +69,7 @@ BaseExpression.__returnType
 type: "val";
 ```
 
-Defined in: [packages/db/src/query/ir.ts:188](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L188)
+Defined in: [packages/db/src/query/ir.ts:237](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L237)
 
 #### Overrides
 
@@ -85,4 +85,4 @@ BaseExpression.type
 value: T;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:190](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L190)
+Defined in: [packages/db/src/query/ir.ts:239](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L239)

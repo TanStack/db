@@ -3,7 +3,7 @@ id: EffectConfig
 title: EffectConfig
 ---
 
-Defined in: [packages/db/src/query/effect.ts:107](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L107)
+Defined in: [packages/db/src/query/effect.ts:108](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L108)
 
 Effect configuration
 
@@ -25,7 +25,7 @@ Effect configuration
 optional id: string;
 ```
 
-Defined in: [packages/db/src/query/effect.ts:112](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L112)
+Defined in: [packages/db/src/query/effect.ts:113](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L113)
 
 Optional ID for debugging/tracing
 
@@ -37,7 +37,7 @@ Optional ID for debugging/tracing
 optional onBatch: EffectBatchHandler<TRow, TKey>;
 ```
 
-Defined in: [packages/db/src/query/effect.ts:127](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L127)
+Defined in: [packages/db/src/query/effect.ts:128](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L128)
 
 Called once per graph run with all delta events from that batch
 
@@ -49,7 +49,7 @@ Called once per graph run with all delta events from that batch
 optional onEnter: EffectEventHandler<TRow, TKey>;
 ```
 
-Defined in: [packages/db/src/query/effect.ts:118](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L118)
+Defined in: [packages/db/src/query/effect.ts:119](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L119)
 
 Called once for each row entering the query result
 
@@ -61,7 +61,7 @@ Called once for each row entering the query result
 optional onError: (error, event) => void;
 ```
 
-Defined in: [packages/db/src/query/effect.ts:130](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L130)
+Defined in: [packages/db/src/query/effect.ts:131](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L131)
 
 Error handler for exceptions thrown by effect callbacks
 
@@ -87,7 +87,7 @@ Error handler for exceptions thrown by effect callbacks
 optional onExit: EffectEventHandler<TRow, TKey>;
 ```
 
-Defined in: [packages/db/src/query/effect.ts:124](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L124)
+Defined in: [packages/db/src/query/effect.ts:125](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L125)
 
 Called once for each row exiting the query result
 
@@ -99,7 +99,7 @@ Called once for each row exiting the query result
 optional onSourceError: (error) => void;
 ```
 
-Defined in: [packages/db/src/query/effect.ts:137](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L137)
+Defined in: [packages/db/src/query/effect.ts:138](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L138)
 
 Called when a source collection enters an error or cleaned-up state.
 The effect is automatically disposed after this callback fires.
@@ -123,7 +123,7 @@ If not provided, the error is logged to console.error.
 optional onUpdate: EffectEventHandler<TRow, TKey>;
 ```
 
-Defined in: [packages/db/src/query/effect.ts:121](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L121)
+Defined in: [packages/db/src/query/effect.ts:122](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L122)
 
 Called once for each row updating within the query result
 
@@ -135,7 +135,7 @@ Called once for each row updating within the query result
 query: EffectQueryInput<any>;
 ```
 
-Defined in: [packages/db/src/query/effect.ts:115](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L115)
+Defined in: [packages/db/src/query/effect.ts:116](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L116)
 
 Query to watch for deltas
 
@@ -147,7 +147,7 @@ Query to watch for deltas
 optional skipInitial: boolean;
 ```
 
-Defined in: [packages/db/src/query/effect.ts:144](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L144)
+Defined in: [packages/db/src/query/effect.ts:145](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L145)
 
 Skip deltas during initial collection load.
 Defaults to false (process all deltas including initial sync).

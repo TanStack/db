@@ -13277,6 +13277,15 @@ it(`does not restart a released Query acquisition after cache rotation`, async (
 // holds the completed real-adapter scan so the check observes the fresh row
 // both before and after the stale maintenance continuation is released.
 it(`does not delete a fresh Query row from an old retention scan`, async () => {
+  // The old retention scan must start after the Collection is ready, however
+  // long startup takes. Startup cleans up an entry that has already expired,
+  // and that would hold the scan inside startup. So the entry expires a minute
+  // out on a fake clock that advances with real time, and the test moves the
+  // clock past it only after readiness.
+  vi.useFakeTimers({
+    toFake: [`setTimeout`, `clearTimeout`, `Date`],
+    shouldAdvanceTime: true,
+  })
   const id = `query-cache-claim-held-retention`
   const oldRow: Item = { id: `same`, category: `active`, name: `Old` }
   const freshRow: Item = { ...oldRow, name: `Fresh` }
@@ -13325,7 +13334,7 @@ it(`does not delete a fresh Query row from an old retention scan`, async () => {
           metadata.collection.set(`queryCollection:gc:${queryHash}`, {
             queryHash,
             mode: `ttl`,
-            expiresAt: Date.now() + 50,
+            expiresAt: Date.now() + 60_000,
           })
           params.commit()
           return originalSync({
@@ -13351,6 +13360,7 @@ it(`does not delete a fresh Query row from an old retention scan`, async () => {
     }),
   )
   cleanups.push(async () => {
+    vi.useRealTimers()
     releaseOldScan.resolve()
     await collection.cleanup()
     queryClient.clear()
@@ -13358,6 +13368,8 @@ it(`does not delete a fresh Query row from an old retention scan`, async () => {
   })
 
   await collection.stateWhenReady()
+  expect(scans).toBe(0)
+  await vi.advanceTimersByTimeAsync(60_001)
   await scanEntered.promise
   now += 10_001
   await collection._sync.loadSubset(subset)
