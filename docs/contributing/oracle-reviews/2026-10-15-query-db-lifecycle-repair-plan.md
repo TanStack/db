@@ -61,14 +61,15 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
       sole/peer and consumed/ignored-signal histories, two pre-acceptance
       histories, and one accepted-receipt history pass (2026-10-15). The broader
       generated-history and hostile-control work below remains open.
-- [ ] Expand generated histories and TLA+ publication/abort coverage; kill
-      plausible wrong designs at the intended comparisons.
-  - [x] Bounded publication model: 156 safe reachable states; six hostile
+- [x] Expand the listed generated histories and TLA+ publication/abort
+      coverage; kill plausible wrong designs at the intended comparisons.
+  - [x] Bounded publication model: 226 safe reachable states; seven hostile
         configurations reach the intended invariant or temporal violation,
-        including row loss after either owner releases.
+        including row loss after either owner releases and failure to abandon
+        an accepted pending receipt on Collection cleanup.
         The [mapping and limits](query-db-publication-tla/README.md) keep this
         design result distinct from production-history coverage (2026-10-15).
-  - [ ] Generated production histories and public-checkpoint hostile controls.
+  - [x] Generated production histories and public-checkpoint hostile controls.
     - [x] Initial-fetch caller/peer grammar: ten named histories plus matching
           fixed-seed and random 48-run campaigns cover six release/abort
           actions, peer ownership and early release, signal consumption, and
@@ -78,8 +79,18 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
           physical-signal, and public-row checkpoints. Two further production
           mutants, retaining an aborted caller's lease and stealing the peer's
           lease on a duplicate unload, failed at the physical-signal and
-          intermediate public-row checkpoints (2026-10-15). Refetch remains a
-          separate caller-cancellation cell.
+          intermediate public-row checkpoints (2026-10-15). The refetch
+          caller-cancellation cell is covered separately below.
+    - [x] Public refetch lease grammar: twelve named histories and fixed/random
+          48-run campaigns vary caller abort and unload order, Collection
+          cleanup, baseline and equal-peer release, signal consumption, and
+          provider success or failure. It compares load outcome, public rows,
+          physical signal, and the captured Query's observer count at release
+          checkpoints. Direct seed/path replay and the replay manifest pass;
+          temporary early-fulfillment, caller-abort bypass, and skipped
+          observer-unsubscribe mutants failed at their intended comparisons.
+          The grammar does not check ignored-signal cache completion or an
+          accepted transaction (2026-10-15).
     - [x] Pending-fetch callback reentry: twelve named histories and matching
           fixed/random 48-run campaigns cross caller abort versus Query-cache
           observer removal, one/two source rows, consumed versus ignored
@@ -110,7 +121,12 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
           rows; a forced-retirement mutant failed at the row comparison.
           An independent oracle reviewer found and helped close timing,
           replacement-fetch, and early-publication false-greens (2026-10-15).
-          Collection cleanup during this accepted interval remains open.
+          Collection cleanup during this accepted interval has a separate
+          two-history receiving witness: both receipt and pending load reject
+          with `AbortError`, and no source row appears before or after the
+          optimistic gate opens. A temporary built-Core mutant that resolved
+          the receipt on cleanup failed at the receipt comparison. It does not
+          cover restart or persistence after cleanup (2026-10-15).
     - [x] Synchronous provider throw receiving witness: a second public
           acquisition joins inside the query function before its first call
           throws. Both loads reject the exact provider error; after the first
@@ -118,7 +134,7 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
           the surviving peer. Final peer release removes it. A mutant that
           retires every lease on the first unload failed at the provider-call
           checkpoint (2026-10-15).
-- [ ] Close the automatic-GC, hydration, repeated-options, request-shape,
+- [x] Close the automatic-GC, hydration, repeated-options, request-shape,
       persistence, and cleanup-harness cells with tests or explicit contract
       decisions.
   - [x] Automatic Query GC: finite `gcTime` evicts an unobserved eager Query;
@@ -180,7 +196,7 @@ does not acquire a Query DB observer lease.
 | Law | Public consequence |
 | --- | --- |
 | An accepted acquisition keeps its own observer lease until its release. | Releasing one owner cannot retire a live peer or leave rows owned only by a departed owner. A fulfilled load has its promised row at the applied-settlement checkpoint. |
-| A caller's abort and an explicit unload are distinct actions. | Before sync-transaction acceptance, an aborted acquisition rejects and cannot publish its unaccepted row. A peer keeps shared physical work alive. After acceptance, the transaction applies, while the aborted caller's load rejects after its receipt. |
+| A caller's abort and an explicit unload are distinct actions. | Before sync-transaction acceptance, an aborted acquisition rejects and cannot publish its unaccepted row. A peer keeps shared physical work alive. After acceptance, the transaction applies, while the aborted caller's load rejects after its receipt. Collection cleanup can instead abandon a pending accepted receipt and reject the pending load. |
 | Query signal consumption is lazy. | A consumed physical signal aborts after the final Query DB observer leaves. A provider that never reads the signal may finish into Query cache, without republishing an unowned Collection row. |
 | Request options preserve their supplied shape. | A signal-free request exposes the physical Query signal by property access without adding an enumerable or serialized field. |
 | Direct cache edits do not certify a physical fetch. | A local cache edit cannot roll back a later accepted direct write; a later authoritative physical response may replace it. |

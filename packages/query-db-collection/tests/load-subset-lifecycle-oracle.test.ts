@@ -5388,6 +5388,403 @@ describe(`loadSubset lifecycle oracle`, () => {
   })
 
   /**
+   * A public refetch is a new acquisition even when an earlier subscription
+   * still owns the same Query. The caller's abort retires only that new
+   * acquisition. A baseline or equal peer keeps the physical fetch alive and
+   * receives its source result. When all owners leave, a consumed Query signal
+   * aborts; an ignored signal may complete without publishing an unowned row.
+   * A provider failure leaves the last applied source row for live owners.
+   *
+   * The independent account counts the three public subscriptions and uses
+   * the scripted source answer. It does not inspect Query DB's lease registry.
+   * These legal histories vary the refetch caller's release, baseline release,
+   * an equal peer that may leave before the answer, signal consumption, and
+   * provider success or failure. Peer-first and caller-first final release
+   * are both legal. The
+   * real path is `requestSnapshot({ refetch: true, signal })`, not a direct
+   * adapter call. Comparisons occur after the held provider settles and after
+   * each remaining owner releases. The raw adapter promise after unsubscribe
+   * or Collection cleanup has no promised outcome. This bounded grammar does
+   * not model a second refetch or an accepted sync transaction. It excludes
+   * peer release without a peer, reverse early-release order without an early
+   * peer release, and refetch before the baseline request applies.
+   */
+  type RefetchLeaseHistory = {
+    action:
+      | `none`
+      | `abort`
+      | `unload`
+      | `abort-then-unload`
+      | `unload-then-abort`
+      | `cleanup`
+    releaseBaseline: boolean
+    peer: boolean
+    releasePeerBeforeAnswer: boolean
+    releasePeerFirst?: boolean
+    consumesSignal: boolean
+    outcome: `success` | `error`
+  }
+
+  function expectedRefetchLease(history: RefetchLeaseHistory) {
+    const liveBaseline =
+      !history.releaseBaseline && history.action !== `cleanup`
+    const liveCaller = history.action === `none`
+    const livePeer =
+      history.peer &&
+      history.action !== `cleanup` &&
+      !history.releasePeerBeforeAnswer
+    const sourceRow = history.outcome === `success` ? `new` : `old`
+    const rows = (live: boolean) => (live ? [sourceRow] : [])
+    return {
+      initialRows: [`old`],
+      beforeAnswerRows: liveBaseline || liveCaller || livePeer ? [`old`] : [],
+      callerFulfilledBeforeAnswer: false,
+      ...(history.consumesSignal
+        ? { physicalAborted: !liveBaseline && !liveCaller && !livePeer }
+        : {}),
+      observerBeforeAnswer: liveBaseline || liveCaller || livePeer ? 1 : 0,
+      ...(history.action === `none` || history.action === `abort`
+        ? {
+            callerOutcome:
+              history.action === `abort`
+                ? `AbortError`
+                : history.outcome === `success`
+                  ? `fulfilled`
+                  : `provider-error`,
+          }
+        : {}),
+      afterAnswerRows: rows(liveBaseline || liveCaller || livePeer),
+      afterCallerReleaseRows: rows(liveBaseline || livePeer),
+      observerAfterCallerRelease: liveBaseline || livePeer ? 1 : 0,
+      afterBaselineReleaseRows: rows(livePeer),
+      observerAfterBaselineRelease: livePeer ? 1 : 0,
+      afterPeerReleaseRows: [] as Array<string>,
+      observerAfterPeerRelease: 0,
+      providerCalls: 2,
+    }
+  }
+
+  async function observeRefetchLease(
+    history: RefetchLeaseHistory,
+    expected: ReturnType<typeof expectedRefetchLease>,
+  ) {
+    const queryClient = createQueryClient()
+    const id = `refetch-lease-history-${collectionSequence++}`
+    const started = createDeferred<void>()
+    const held = createDeferred<Array<Row>>()
+    const providerError = new Error(`refetch provider failed`)
+    let physicalSignal: AbortSignal | undefined
+    let providerCalls = 0
+    const queryFn = vi.fn((context: QueryFunctionContext) => {
+      providerCalls++
+      if (providerCalls === 1) return Promise.resolve([{ id: `old` }])
+      if (providerCalls > 2)
+        return Promise.resolve([{ id: `unexpected-replacement` }])
+      if (history.consumesSignal) physicalSignal = context.signal
+      started.resolve()
+      return held.promise
+    })
+    const collection = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (row) => row.id,
+        startSync: true,
+        syncMode: `on-demand`,
+        retry: false,
+      }),
+    )
+    const baseline = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    const caller = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    const peer = history.peer
+      ? collection.subscribeChanges(() => {}, { includeInitialState: false })
+      : undefined
+    const callerSignal = new AbortController()
+    let baselineLoad: true | Promise<void> | undefined
+    let callerLoad: true | Promise<void> | undefined
+    const publicRows = () => collection.toArray.map((row) => row.id).sort()
+    let trackedQuery = queryClient
+      .getQueryCache()
+      .find({ queryKey: [id], exact: true })
+    const observerCount = () => trackedQuery?.getObserversCount() ?? 0
+    const loadOutcome = async (load: true | Promise<void> | undefined) => {
+      try {
+        await load
+        return `fulfilled`
+      } catch (error) {
+        if (error === providerError) return `provider-error`
+        return error instanceof Error ? error.name : `non-Error rejection`
+      }
+    }
+
+    return checkPublicCleanupWitness(async () => {
+      baseline.requestSnapshot({
+        onLoadSubsetResult: (result) => {
+          baselineLoad = result
+        },
+      })
+      await baselineLoad
+      trackedQuery = queryClient
+        .getQueryCache()
+        .find({ queryKey: [id], exact: true })
+      if (!trackedQuery) throw new Error(`The baseline has no physical Query`)
+      const initialRows = publicRows()
+      caller.requestSnapshot({
+        refetch: true,
+        signal: callerSignal.signal,
+        onLoadSubsetResult: (result) => {
+          callerLoad = result
+        },
+      })
+      if (callerLoad === undefined || callerLoad === true)
+        throw new Error(`The public refetch did not return a pending load`)
+      let callerFulfilledBeforeAnswer = false
+      void callerLoad.then(
+        () => {
+          callerFulfilledBeforeAnswer = true
+        },
+        () => undefined,
+      )
+      await started.promise
+      peer?.requestSnapshot()
+      if (history.releaseBaseline) baseline.unsubscribe()
+      if (history.releasePeerBeforeAnswer && history.releasePeerFirst)
+        peer?.unsubscribe()
+      switch (history.action) {
+        case `none`:
+          break
+        case `abort`:
+          callerSignal.abort()
+          break
+        case `unload`:
+          caller.unsubscribe()
+          break
+        case `abort-then-unload`:
+          callerSignal.abort()
+          caller.unsubscribe()
+          break
+        case `unload-then-abort`:
+          caller.unsubscribe()
+          callerSignal.abort()
+          break
+        case `cleanup`:
+          await collection.cleanup()
+          break
+      }
+      if (history.releasePeerBeforeAnswer && !history.releasePeerFirst)
+        peer?.unsubscribe()
+      // Flush the adapter, caller wrapper, and Core observation turns while
+      // the provider is still held. A single microtask misses early settlement.
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      const beforeAnswerRows = publicRows()
+      const callerFulfilledBeforeAnswerObserved = callerFulfilledBeforeAnswer
+      const physicalAborted = physicalSignal?.aborted
+      const observerBeforeAnswer = observerCount()
+      if (history.outcome === `success`) held.resolve([{ id: `new` }])
+      else held.reject(providerError)
+      const callerOutcome =
+        history.action === `none` || history.action === `abort`
+          ? await loadOutcome(callerLoad)
+          : undefined
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      const afterAnswerRows = publicRows()
+      caller.unsubscribe()
+      const afterCallerReleaseRows = publicRows()
+      const observerAfterCallerRelease = observerCount()
+      baseline.unsubscribe()
+      const afterBaselineReleaseRows = publicRows()
+      const observerAfterBaselineRelease = observerCount()
+      peer?.unsubscribe()
+      const afterPeerReleaseRows = publicRows()
+      const observerAfterPeerRelease = observerCount()
+      const observed = {
+        initialRows,
+        beforeAnswerRows,
+        callerFulfilledBeforeAnswer: callerFulfilledBeforeAnswerObserved,
+        ...(history.consumesSignal ? { physicalAborted } : {}),
+        observerBeforeAnswer,
+        ...(history.action === `none` || history.action === `abort`
+          ? { callerOutcome }
+          : {}),
+        afterAnswerRows,
+        afterCallerReleaseRows,
+        observerAfterCallerRelease,
+        afterBaselineReleaseRows,
+        observerAfterBaselineRelease,
+        afterPeerReleaseRows,
+        observerAfterPeerRelease,
+        providerCalls,
+      }
+      expect(observed, JSON.stringify({ history, observed, expected })).toEqual(
+        expected,
+      )
+      return observed
+    }, [
+      [`provider`, () => held.resolve([])],
+      [`baseline subscription`, () => baseline.unsubscribe()],
+      [`refetch subscription`, () => caller.unsubscribe()],
+      [`peer subscription`, () => peer?.unsubscribe()],
+      [`Collection`, () => collection.cleanup()],
+      [`Query client`, () => queryClient.clear()],
+    ])
+  }
+
+  const namedRefetchLeaseHistories = [
+    {
+      action: `none`,
+      releaseBaseline: false,
+      peer: false,
+      releasePeerBeforeAnswer: false,
+      consumesSignal: true,
+      outcome: `success`,
+    },
+    {
+      action: `abort`,
+      releaseBaseline: false,
+      peer: false,
+      releasePeerBeforeAnswer: false,
+      consumesSignal: true,
+      outcome: `success`,
+    },
+    {
+      action: `abort`,
+      releaseBaseline: true,
+      peer: false,
+      releasePeerBeforeAnswer: false,
+      consumesSignal: true,
+      outcome: `success`,
+    },
+    {
+      action: `abort`,
+      releaseBaseline: true,
+      peer: true,
+      releasePeerBeforeAnswer: false,
+      consumesSignal: true,
+      outcome: `success`,
+    },
+    {
+      action: `abort`,
+      releaseBaseline: true,
+      peer: false,
+      releasePeerBeforeAnswer: false,
+      consumesSignal: false,
+      outcome: `success`,
+    },
+    {
+      action: `unload`,
+      releaseBaseline: true,
+      peer: true,
+      releasePeerBeforeAnswer: false,
+      consumesSignal: true,
+      outcome: `error`,
+    },
+    {
+      action: `abort-then-unload`,
+      releaseBaseline: false,
+      peer: true,
+      releasePeerBeforeAnswer: false,
+      consumesSignal: false,
+      outcome: `success`,
+    },
+    {
+      action: `cleanup`,
+      releaseBaseline: true,
+      peer: true,
+      releasePeerBeforeAnswer: false,
+      consumesSignal: true,
+      outcome: `success`,
+    },
+    {
+      action: `none`,
+      releaseBaseline: true,
+      peer: false,
+      releasePeerBeforeAnswer: false,
+      consumesSignal: true,
+      outcome: `error`,
+    },
+    {
+      action: `unload-then-abort`,
+      releaseBaseline: false,
+      peer: true,
+      releasePeerBeforeAnswer: false,
+      consumesSignal: true,
+      outcome: `success`,
+    },
+    {
+      action: `abort`,
+      releaseBaseline: true,
+      peer: true,
+      releasePeerBeforeAnswer: true,
+      releasePeerFirst: true,
+      consumesSignal: true,
+      outcome: `success`,
+    },
+    {
+      action: `cleanup`,
+      releaseBaseline: true,
+      peer: true,
+      releasePeerBeforeAnswer: true,
+      releasePeerFirst: true,
+      consumesSignal: true,
+      outcome: `success`,
+    },
+  ] satisfies ReadonlyArray<RefetchLeaseHistory>
+
+  it.each(namedRefetchLeaseHistories)(
+    `reconstructs a public refetch lease history: %j`,
+    async (history) => {
+      await observeRefetchLease(history, expectedRefetchLease(history))
+    },
+  )
+
+  it(`refines generated public refetch lease histories`, async () => {
+    const propertyName = `query-db.refetch-lease-history`
+    const replay = readOracleRunConfig()
+    if (
+      replay.replayPath !== undefined &&
+      replay.replayProperty !== propertyName
+    )
+      return
+    const arbitrary = fc.record({
+      action: fc.constantFrom<RefetchLeaseHistory[`action`]>(
+        `none`,
+        `abort`,
+        `unload`,
+        `abort-then-unload`,
+        `unload-then-abort`,
+        `cleanup`,
+      ),
+      releaseBaseline: fc.boolean(),
+      peer: fc.boolean(),
+      releasePeerBeforeAnswer: fc.boolean(),
+      releasePeerFirst: fc.boolean(),
+      consumesSignal: fc.boolean(),
+      outcome: fc.constantFrom<RefetchLeaseHistory[`outcome`]>(
+        `success`,
+        `error`,
+      ),
+    })
+    const legalArbitrary = arbitrary.filter(
+      (history) =>
+        (!history.releasePeerBeforeAnswer || history.peer) &&
+        (!history.releasePeerFirst || history.releasePeerBeforeAnswer),
+    )
+    const property = fc.asyncProperty(legalArbitrary, async (history) => {
+      await observeRefetchLease(history, expectedRefetchLease(history))
+    })
+    const options = oraclePropertyOptions(48, propertyName)
+    if (replay.replaySeed === undefined)
+      await fc.assert(property, { ...options, seed: 2_162_2028 })
+    await fc.assert(property, options)
+  }, 20_000)
+
+  /**
    * A peer acquired synchronously from a release callback owns its pending
    * load, even if the old physical Query has no observer for an instant. The
    * independent model knows the scripted source rows and the two public
@@ -6189,6 +6586,176 @@ describe(`loadSubset lifecycle oracle`, () => {
       await fc.assert(property, { ...options, seed: 2_160_2027 })
     await fc.assert(property, options)
   }, 20_000)
+
+  /**
+   * Collection cleanup can abandon a sync transaction accepted but still held
+   * behind optimistic settlement. Its receipt and pending subset load reject
+   * with `AbortError` exactly once. Cleanup retires every Query DB owner and
+   * leaves no source row public, even after the optimistic gate opens. Receipt
+   * rejection and row absence are separate obligations: the latter alone
+   * cannot prove the caller received the promised cancellation.
+   *
+   * The exception comes from the public SyncAppliedReceipt contract and the
+   * core cleanup oracle. The two legal histories use one or two scripted source
+   * rows. A wrapping sync records the real `commit()` receipt without changing
+   * it; a pending committed transaction is only a reach witness. The public
+   * checks are receipt cause and settlement count, load outcome, Collection
+   * status, and exact rows before and after the gate. This does not model a
+   * new sync run or durable persistence after cleanup.
+   */
+  it.each([1, 2] as const)(
+    `abandons an accepted source receipt during Collection cleanup, rows=%i`,
+    async (rowCount) => {
+      const queryClient = createQueryClient()
+      const id = `accepted-collection-cleanup-${collectionSequence++}`
+      const serverRows: Array<Row> =
+        rowCount === 1
+          ? [{ id: `server-a` }]
+          : [{ id: `server-a` }, { id: `server-b` }]
+      const handlerEntered = createDeferred<void>()
+      const releaseHandler = createDeferred<void>()
+      let sourceTransactionHasServerRow = false
+      let receiptState: `missing` | `pending` | `applied` | `rejected` =
+        `missing`
+      let receiptErrorName: string | undefined
+      let receiptSettlements = 0
+      const baseOptions = queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn: () => Promise.resolve(serverRows),
+        getKey: (row) => row.id,
+        startSync: true,
+        syncMode: `on-demand`,
+        onInsert: async () => {
+          handlerEntered.resolve()
+          await releaseHandler.promise
+          return { refetch: false }
+        },
+      })
+      const originalSync = baseOptions.sync
+      const collection = createCollection({
+        ...baseOptions,
+        sync: {
+          sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+            originalSync.sync({
+              ...params,
+              begin: () => {
+                sourceTransactionHasServerRow = false
+                params.begin()
+              },
+              write: (change) => {
+                if (change.type !== `delete` && change.value.id === `server-a`)
+                  sourceTransactionHasServerRow = true
+                params.write(change)
+              },
+              commit: (signal) => {
+                const isSourceResult = sourceTransactionHasServerRow
+                const receipt = params.commit(signal)
+                if (isSourceResult) {
+                  receiptState = receipt === true ? `applied` : `pending`
+                  if (receipt !== true)
+                    void receipt.then(
+                      () => {
+                        receiptState = `applied`
+                        receiptSettlements++
+                      },
+                      (error: unknown) => {
+                        receiptState = `rejected`
+                        receiptErrorName =
+                          error instanceof Error ? error.name : `non-Error`
+                        receiptSettlements++
+                      },
+                    )
+                }
+                return receipt
+              },
+            }),
+        },
+      })
+      const subscription = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+      let load: true | Promise<void> | undefined
+      await checkPublicCleanupWitness(async () => {
+        const mutation = collection.insert({ id: `local` })
+        await handlerEntered.promise
+        subscription.requestSnapshot({
+          onLoadSubsetResult: (result) => {
+            load = result
+          },
+        })
+        if (load === undefined || load === true)
+          throw new Error(
+            `The source acquisition did not return a pending load`,
+          )
+        const loadOutcome = load.then(
+          () => `fulfilled`,
+          (error: unknown) =>
+            error instanceof Error ? error.name : `non-Error rejection`,
+        )
+        await vi.waitFor(() =>
+          expect(
+            collection._state.pendingSyncedTransactions.some(
+              (transaction) =>
+                transaction.committed &&
+                transaction.operations.some(({ key }) => key === `server-a`),
+            ),
+          ).toBe(true),
+        )
+        const physicalQuery = queryClient
+          .getQueryCache()
+          .find({ queryKey: [id], exact: true })
+        if (!physicalQuery)
+          throw new Error(`The accepted result has no physical Query`)
+        expect(receiptState).toBe(`pending`)
+        const cleanup = collection.cleanup()
+        await cleanup
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        expect({
+          receiptState,
+          receiptErrorName,
+          receiptSettlements,
+          loadOutcome: await loadOutcome,
+          rows: collection.toArray
+            .map((row) => row.id)
+            .filter((rowId) => rowId.startsWith(`server-`)),
+        }).toEqual({
+          receiptState: `rejected`,
+          receiptErrorName: `AbortError`,
+          receiptSettlements: 1,
+          loadOutcome: `AbortError`,
+          rows: [],
+        })
+
+        releaseHandler.resolve()
+        await mutation.isPersisted.promise
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        expect({
+          receiptState,
+          receiptSettlements,
+          status: collection.status,
+          observers: physicalQuery.getObserversCount(),
+          rows: collection.toArray
+            .map((row) => row.id)
+            .filter((rowId) => rowId.startsWith(`server-`))
+            .sort(),
+        }).toEqual({
+          receiptState: `rejected`,
+          receiptSettlements: 1,
+          status: `cleaned-up`,
+          observers: 0,
+          rows: [],
+        })
+      }, [
+        [`mutation handler`, () => releaseHandler.resolve()],
+        [`load`, () => Promise.resolve(load).catch(() => undefined)],
+        [`subscription`, () => subscription.unsubscribe()],
+        [`Collection`, () => collection.cleanup()],
+        [`Query client`, () => queryClient.clear()],
+      ])
+    },
+  )
 
   it(`starts a fresh query after an aborted owner immediately remounts`, async () => {
     await expectRemountAfterAbortStartsFreshQuery()

@@ -151,9 +151,10 @@ Begin a new sync transaction.
 (`signal?`) => [`SyncAppliedReceipt`](../type-aliases/SyncAppliedReceipt.md)
 
 Commit the active sync transaction in FIFO order. Core accepts it at
-once, and an accepted transaction always applies. Returns `true` when
-its writes are visible, or a receipt that resolves when they become
-visible. While an optimistic transaction is persisting, it becomes
+once. It applies unless Collection cleanup abandons it before
+application. Returns `true` when its writes are visible, or a receipt
+that resolves when they become visible. While an optimistic transaction
+is persisting, it becomes
 visible when that transaction settles, together with the drop of its
 optimistic state. A signal that is already aborted abandons the
 transaction before acceptance, and the receipt rejects with an error

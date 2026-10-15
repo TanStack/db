@@ -692,6 +692,16 @@ unsubscribe callback histories reject it at the after-gate row checkpoint.
 Removing only the outer refcount rechecks survived because the inner cleanup
 guard still protected the peer. Collection cleanup during the accepted
 interval remains outside this grammar.
+A separate two-history receiving witness cleans up the Collection after a
+source transaction is accepted but while an optimistic mutation holds its
+publication. With one or two source rows, it checks that the real applied
+receipt and pending public subset load reject with `AbortError`, exactly one
+receipt settlement occurs, no source row appears before or after the gate, and
+the captured physical Query has no observer after cleanup. A temporary Core
+build mutant that fulfilled the receipt during cleanup failed at the receipt
+comparison. The witness does not establish restart or durable persistence after
+cleanup. The Core sync-adapter contract permits this cleanup exception; an
+individual caller abort still leaves an accepted transaction to apply.
 An applied direct cache patch permits reuse or one exact filtered revalidation
 for a new demand, but cannot trigger a redundant full request. The bounded
 history has no retry, invalidation, or explicit refetch; a duplicate filtered
@@ -757,7 +767,21 @@ unload mutant that steals the peer's observer lease fails at the intermediate
 public-row checkpoint. Both are assertion failures after the intended public
 path. The grammar
 holds one initial provider result; the fixed ignored-signal witness checks the
-installed Query Core's optional cache completion behavior. A separate
+installed Query Core's optional cache completion behavior. A public refetch
+lease grammar runs twelve named histories and fixed-seed and random 48-run
+campaigns through `requestSnapshot({ refetch: true, signal })`. It varies six
+caller abort/unload/cleanup actions, baseline release, an equal peer and its
+early or later release, signal consumption, and provider success or failure.
+The independent reference counts live public subscriptions and takes row
+values from the scripted provider. It compares the caller's outcome while it
+is still entitled to one, the physical signal, exact public rows before and
+after the held answer and each final release, and the captured Query's observer
+count. Direct seed/path replay passed. Early-fulfillment, caller-abort bypass,
+and observer-unsubscribe mutants failed at those intended comparisons. The
+grammar does not assert Query-cache completion after an ignored-signal final
+release; a separate fixed witness checks that installed Query Core path. A second
+refetch, accepted commit, and provider-specific transport remain outside this
+grammar. A separate
 pending-fetch reentry grammar crosses caller-abort and Query-cache
 `observerRemoved` callbacks, one/two source rows, consumed/ignored Query
 signals, and both release orders after caller abort. Twelve named histories
@@ -820,9 +844,10 @@ or persisted row reconciliation. The [exact-commit oracle review](oracle-reviews
 records the production controls, guide audit, and remaining receiving paths.
 The separate [publication design model](oracle-reviews/query-db-publication-tla/README.md)
 checks two Query DB leases, one physical fetch, one row, and the
-unaccepted/accepted/applied transaction boundary. Its 156-state safe run passes;
+unaccepted/accepted/applied transaction boundary. Its 226-state safe run passes;
 early fulfillment, row loss after either owner's release, late publication,
-early physical abort, and abandonment after acceptance each produce a bounded
+early physical abort, abandonment after acceptance on caller abort, and failure
+to abandon a pending receipt on Collection cleanup each produce a bounded
 counterexample. Its atomic
 reentrant step and absence of persistence or multiple physical Queries leave
 the corresponding production histories with the load-lifecycle and ownership

@@ -8,10 +8,12 @@ EXTENDS FiniteSets, TLC
 \* response may arrive after final release, but only an accepted transaction
 \* can apply. The combined ReenterAtRelease action projects an acquisition
 \* made inside observer-removal cleanup after an already applied result.
-\* Persistence, cache reuse, multiple result generations, and source values
-\* are outside this bounded publication model.
+\* Collection cleanup can abandon a still-pending accepted receipt; it does
+\* not model a new sync run. Persistence, cache reuse, multiple result
+\* generations, and source values are outside this bounded publication model.
 CONSTANTS WrongEarlyFulfill, WrongDropPeer, WrongDropFirst, WrongLatePublish,
-          WrongEarlyPhysicalAbort, WrongAbortAccepted
+          WrongEarlyPhysicalAbort, WrongAbortAccepted,
+          WrongCleanupKeepsAccepted
 
 Owners == {"a", "b"}
 Phases == {"none", "unaccepted", "accepted", "applied", "abandoned"}
@@ -19,10 +21,10 @@ Outcomes == {"idle", "pending", "fulfilled", "rejected"}
 
 VARIABLES active, callerAborted, rowOwners, phase, outcome,
           fetchOpen, signalConsumed, physicalAborted,
-          acceptedEver, appliedEver
+          acceptedEver, appliedEver, cleaned
 vars == <<active, callerAborted, rowOwners, phase, outcome,
           fetchOpen, signalConsumed, physicalAborted,
-          acceptedEver, appliedEver>>
+          acceptedEver, appliedEver, cleaned>>
 
 Init ==
   /\ active = {"a"}
@@ -36,6 +38,7 @@ Init ==
   /\ physicalAborted = FALSE
   /\ acceptedEver = FALSE
   /\ appliedEver = FALSE
+  /\ cleaned = FALSE
 
 AcquirePeer ==
   /\ "a" \in active
@@ -48,7 +51,7 @@ AcquirePeer ==
   /\ outcome' = [outcome EXCEPT !["b"] =
        IF phase = "applied" THEN "fulfilled" ELSE "pending"]
   /\ UNCHANGED <<callerAborted, phase, fetchOpen, signalConsumed,
-                 physicalAborted, acceptedEver, appliedEver>>
+                 physicalAborted, acceptedEver, appliedEver, cleaned>>
 
 ConsumeSignal ==
   /\ fetchOpen
@@ -56,7 +59,8 @@ ConsumeSignal ==
   /\ ~signalConsumed
   /\ signalConsumed' = TRUE
   /\ UNCHANGED <<active, callerAborted, rowOwners, phase, outcome,
-                 fetchOpen, physicalAborted, acceptedEver, appliedEver>>
+                 fetchOpen, physicalAborted, acceptedEver, appliedEver,
+                 cleaned>>
 
 ProviderResult ==
   /\ fetchOpen
@@ -65,7 +69,8 @@ ProviderResult ==
   /\ phase' = "unaccepted"
   /\ fetchOpen' = FALSE
   /\ UNCHANGED <<active, callerAborted, rowOwners, outcome,
-                 signalConsumed, physicalAborted, acceptedEver, appliedEver>>
+                 signalConsumed, physicalAborted, acceptedEver, appliedEver,
+                 cleaned>>
 
 Accept ==
   /\ phase = "unaccepted"
@@ -78,10 +83,11 @@ Accept ==
                   THEN "fulfilled" ELSE outcome[owner]]
                 ELSE outcome
   /\ UNCHANGED <<active, callerAborted, rowOwners, fetchOpen,
-                 signalConsumed, physicalAborted, appliedEver>>
+                 signalConsumed, physicalAborted, appliedEver, cleaned>>
 
 Apply ==
   /\ phase = "accepted"
+  /\ ~cleaned
   /\ phase' = "applied"
   /\ appliedEver' = TRUE
   /\ rowOwners' = IF WrongLatePublish /\ active = {}
@@ -91,7 +97,7 @@ Apply ==
        THEN IF owner \in active THEN "fulfilled" ELSE "rejected"
        ELSE outcome[owner]]
   /\ UNCHANGED <<active, callerAborted, fetchOpen, signalConsumed,
-                 physicalAborted, acceptedEver>>
+                 physicalAborted, acceptedEver, cleaned>>
 
 AbortCaller(owner) ==
   /\ owner \in active
@@ -107,7 +113,8 @@ AbortCaller(owner) ==
   /\ outcome' = [outcome EXCEPT ![owner] =
        IF @ = "pending" /\ phase # "accepted"
        THEN "rejected" ELSE @]
-  /\ UNCHANGED <<fetchOpen, signalConsumed, acceptedEver, appliedEver>>
+  /\ UNCHANGED <<fetchOpen, signalConsumed, acceptedEver, appliedEver,
+                 cleaned>>
 
 Release(owner) ==
   /\ owner \in active
@@ -127,7 +134,7 @@ Release(owner) ==
        IF @ = "pending" /\ phase # "accepted"
        THEN "rejected" ELSE @]
   /\ UNCHANGED <<callerAborted, phase, fetchOpen, signalConsumed,
-                 acceptedEver, appliedEver>>
+                 acceptedEver, appliedEver, cleaned>>
 
 ReenterAtRelease ==
   /\ active = {"a"}
@@ -137,10 +144,27 @@ ReenterAtRelease ==
   /\ rowOwners' = {"b"}
   /\ outcome' = [outcome EXCEPT !["b"] = "fulfilled"]
   /\ UNCHANGED <<callerAborted, phase, fetchOpen, signalConsumed,
-                 physicalAborted, acceptedEver, appliedEver>>
+                 physicalAborted, acceptedEver, appliedEver, cleaned>>
+
+\* Cleanup closes this sync run. If the accepted receipt has not applied, Core
+\* rejects it and clears its queued writes. This differs from caller abort.
+Cleanup ==
+  /\ ~cleaned
+  /\ cleaned' = TRUE
+  /\ active' = {}
+  /\ rowOwners' = {}
+  /\ phase' = IF WrongCleanupKeepsAccepted /\ phase = "accepted"
+              THEN "accepted"
+              ELSE IF phase = "applied" THEN phase ELSE "abandoned"
+  /\ outcome' = [owner \in Owners |->
+       IF outcome[owner] = "pending" THEN "rejected" ELSE outcome[owner]]
+  /\ fetchOpen' = FALSE
+  /\ physicalAborted' = (physicalAborted \/ (fetchOpen /\ signalConsumed))
+  /\ UNCHANGED <<callerAborted, signalConsumed, acceptedEver, appliedEver>>
 
 Next == AcquirePeer \/ ConsumeSignal \/ ProviderResult \/ Accept \/ Apply \/
-        ReenterAtRelease \/ (\E owner \in Owners : AbortCaller(owner)) \/
+        ReenterAtRelease \/ Cleanup \/
+        (\E owner \in Owners : AbortCaller(owner)) \/
         (\E owner \in Owners : Release(owner))
 Spec == Init /\ [][Next]_vars
 FairSpec == Spec /\ WF_vars(Apply)
@@ -156,6 +180,7 @@ TypeOK ==
   /\ physicalAborted \in BOOLEAN
   /\ acceptedEver \in BOOLEAN
   /\ appliedEver \in BOOLEAN
+  /\ cleaned \in BOOLEAN
 
 \* A departed lease cannot keep a row public, and every live lease keeps its
 \* promised row. Quantification covers either release order.
@@ -169,7 +194,10 @@ LiveOwnersKeepRow == phase = "applied" =>
 NoEarlyLoadFulfillment == \A owner \in Owners :
   outcome[owner] = "fulfilled" => appliedEver
 NoUnacceptedPublication == rowOwners # {} => phase = "applied"
-AcceptedEventuallyApplies == acceptedEver ~> appliedEver
+AcceptedEventuallySettles == acceptedEver ~> (appliedEver \/ cleaned)
+CleanupClearsOwners == cleaned => active = {} /\ rowOwners = {}
+CleanupAbandonsPendingReceipt == cleaned /\ ~appliedEver =>
+  phase = "abandoned" /\ \A owner \in Owners : outcome[owner] # "fulfilled"
 
 \* A consumed Query signal aborts only when no Query DB lease observes it.
 NoEarlyPhysicalAbort == physicalAborted => active = {}

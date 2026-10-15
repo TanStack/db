@@ -140,6 +140,7 @@ const staticOracleProperties = [
   `query-db.application-release-history`,
   `query-db.lease-history`,
   `query-db.pending-reentry-history`,
+  `query-db.refetch-lease-history`,
   `query-db.reentrant-release-history`,
   `load-subset.async-settlement`,
   `load-subset.changing-predicate`,

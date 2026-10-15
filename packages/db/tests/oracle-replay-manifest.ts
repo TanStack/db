@@ -207,6 +207,11 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [
     `query-db-collection/tests/load-subset-lifecycle-oracle.test.ts`,
     `query-db`,
+    `refetch-lease-history`,
+  ],
+  [
+    `query-db-collection/tests/load-subset-lifecycle-oracle.test.ts`,
+    `query-db`,
     `reentrant-release-history`,
   ],
   [
@@ -314,6 +319,8 @@ function directReplayTestName(property: string): string | undefined {
     return `refines generated caller and peer lease histories`
   if (property === `query-db.pending-reentry-history`)
     return `refines generated pending reentry histories`
+  if (property === `query-db.refetch-lease-history`)
+    return `refines generated public refetch lease histories`
   if (property === `query-db.reentrant-release-history`)
     return `refines generated reentrant release histories`
   if (property === `query-db.application-release-history`)
