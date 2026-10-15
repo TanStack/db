@@ -2473,9 +2473,6 @@ export function queryCollectionOptions(
       const currentQuery = queryClient
         .getQueryCache()
         .find({ queryKey, exact: true })
-      if (currentQuery) {
-        recordOrderedPageResult(currentQuery, hashedQueryKey, newItemsArray)
-      }
       const cachedRemoteFetchStart =
         currentQuery !== undefined &&
         queryCollectionSuccessfulFetchData.get(currentQuery) ===
@@ -2731,6 +2728,11 @@ export function queryCollectionOptions(
         // Readiness counts accepted rows; the application, which settles a
         // subset load, waits for them to be visible.
         const finishApplication = () => {
+          // Record the page only once its rows are accepted. A failed
+          // application keeps the previous page, so a retry still reports.
+          if (currentQuery) {
+            recordOrderedPageResult(currentQuery, hashedQueryKey, newItemsArray)
+          }
           removedRows.forEach((key) => {
             if (collection._state.getAcceptedSyncedRow(key) === undefined)
               acceptedRowPositions.delete(key)
