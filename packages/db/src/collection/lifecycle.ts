@@ -56,7 +56,6 @@ export class CollectionLifecycleManager<
   private readyFailureSink: ((failure: { error: unknown }) => void) | undefined
   public onFirstReadyCallbacks: Array<() => void> = []
   private idleCallbackId: number | null = null
-  private syncError: unknown
   // Health is metadata after Collection readiness. The sync adapter's own report and a
   // live query's request failures are separate, so settling a request cannot
   // clear the sync adapter's problem.
@@ -64,7 +63,7 @@ export class CollectionLifecycleManager<
   // Error tree detail for the initial gate error, kept so readers see the
   // same object until the sync run ends.
   private initialProblem: CollectionErrorInfo | null = null
-  private requestProblem: CollectionErrorInfo | null = null
+  private requestErrors = new RequestErrors()
   private cleanupConfig: () => void
   private statusRevision = 0
   private cleaningUp = false
@@ -278,13 +277,12 @@ export class CollectionLifecycleManager<
     // The first error is final for the sync run.
     if (this.status === `error`) return
     this.validateStatusTransition(this.status, `error`)
-    this.syncError = error
     this.initialProblem = describeProblem(error, `initial`, true)
     this.setStatus(`error`)
   }
 
   public get health(): CollectionHealth {
-    const error = this.sourceProblem ?? this.requestProblem
+    const error = this.sourceProblem ?? this.requestErrors.problem
     return { isError: error !== null, error }
   }
 
@@ -310,17 +308,15 @@ export class CollectionLifecycleManager<
     this.events.emitHealthChange()
   }
 
-  /** @internal A live query's load failed after Collection readiness. */
-  public reportRequestError(error: unknown): void {
-    this.requestProblem = describeProblem(error, `request`, false)
+  /** @internal A live query's request failed after initial-query readiness. */
+  public reportRequestError(key: string, error: unknown): void {
+    this.requestErrors.fail(key, error)
     this.events.emitHealthChange()
   }
 
   /** @internal The failed request settled or was released. */
-  public clearRequestError(): void {
-    if (!this.requestProblem) return
-    this.requestProblem = null
-    this.events.emitHealthChange()
+  public clearRequestError(key: string): void {
+    if (this.requestErrors.settle(key)) this.events.emitHealthChange()
   }
 
   private assertReportable(operation: string): void {
@@ -335,7 +331,7 @@ export class CollectionLifecycleManager<
 
   /** Return the cause supplied by the current sync run, if any. */
   public getSyncError(): unknown {
-    return this.syncError
+    return this.initialProblem?.cause
   }
 
   public assertCanStartSync(): void {
@@ -570,10 +566,9 @@ export class CollectionLifecycleManager<
     CleanupQueue.getInstance().cancel(this)
 
     this.hasBeenReady = false
-    this.syncError = undefined
     // Health belongs to the discarded attempt.
     this.sourceProblem = null
-    this.requestProblem = null
+    this.requestErrors = new RequestErrors()
     this.initialProblem = null
     // Cleanup is not readiness. Sync cleanup rejects pending preload callers;
     // first-ready listeners belong to the discarded run.
@@ -614,6 +609,24 @@ export class CollectionLifecycleManager<
     // Return this exact retirement operation even if an event listener starts
     // a replacement run and cleanup while the first promise is still pending.
     return this.beginCleanup()
+  }
+}
+
+/** @internal Requests that failed after initial-query readiness, by issuer. */
+export class RequestErrors {
+  private readonly failed = new Set<string>()
+  problem: CollectionErrorInfo | null = null
+
+  fail(key: string, error: unknown): void {
+    this.failed.add(key)
+    this.problem = describeProblem(error, `request`, false)
+  }
+
+  /** Returns whether the last failed request settled. */
+  settle(key: string): boolean {
+    if (!this.failed.delete(key) || this.failed.size > 0) return false
+    this.problem = null
+    return true
   }
 }
 

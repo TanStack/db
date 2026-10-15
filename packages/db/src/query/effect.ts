@@ -6,7 +6,7 @@ import { normalizeError } from '../utils/error.js'
 import { deepEquals } from '../utils.js'
 import { codedMessage, devBuild } from '../error-message.js'
 import { buildErrorTree, errorTreeNode } from '../collection/error-tree.js'
-import { describeProblem } from '../collection/lifecycle.js'
+import { RequestErrors } from '../collection/lifecycle.js'
 import { compileQuery } from './compiler/index.js'
 import { normalizeExpressionPaths } from './compiler/expressions.js'
 import { getCollectionBuilder } from './live/collection-registry.js'
@@ -41,7 +41,6 @@ import type {
 } from './compiler/joins.js'
 import type {
   ChangeMessage,
-  CollectionErrorInfo,
   ErrorTreeNode,
   KeyedStream,
   StringCollationConfig,
@@ -475,8 +474,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   // initial load has settled, with or without skipInitial. After it,
   // a Collection health problem does not dispose the Effect.
   private reachedReady = false
-  private readonly failedRequests = new Set<string>()
-  private requestProblem: CollectionErrorInfo | null = null
+  private readonly requests = new RequestErrors()
   private readonly onHealthChange: ((errors: ErrorTreeNode) => void) | undefined
 
   // Scheduler integration
@@ -1080,16 +1078,12 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   // later load of that source settles.
   private failLoad(sourceId: string, error: Error): void {
     if (!this.reachedReady) return this.onSourceError(error)
-    this.failedRequests.add(sourceId)
-    this.requestProblem = describeProblem(error, `request`, false)
+    this.requests.fail(sourceId, error)
     this.reportHealth()
   }
 
   private settleLoad(sourceId: string): void {
-    if (!this.failedRequests.delete(sourceId) || this.failedRequests.size > 0)
-      return
-    this.requestProblem = null
-    this.reportHealth()
+    if (this.requests.settle(sourceId)) this.reportHealth()
   }
 
   /** The error tree for this effect's sources, in query order. */
@@ -1099,7 +1093,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       collectionId: `effect`,
       kind: `live-query`,
       status: this.reachedReady ? `ready` : `loading`,
-      error: this.requestProblem,
+      error: this.requests.problem,
       sources: this.collectionSources.map(({ sourceId, alias, collection }) =>
         buildErrorTree(collection, { alias, id: sourceId }),
       ),

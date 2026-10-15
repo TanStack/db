@@ -116,8 +116,6 @@ export class CollectionConfigBuilder<
   // Error state tracking
   private isInErrorState = false
   private fatalQueryError = false
-  // Lazy demand that failed after the first ready, as request errors.
-  private readonly failedRequests = new Set<string>()
   private lastSubsetError: unknown | undefined
 
   // Reference to the live query collection for error state transitions
@@ -595,15 +593,12 @@ export class CollectionConfigBuilder<
   private reportFailedRequest(key: string, error: Error): boolean {
     const lifecycle = this.liveQueryCollection?._lifecycle
     if (lifecycle?.status !== `ready`) return false
-    this.failedRequests.add(key)
-    lifecycle.reportRequestError(error)
+    lifecycle.reportRequestError(key, error)
     return true
   }
 
   private clearFailedRequest(key: string): void {
-    if (!this.failedRequests.delete(key)) return
-    if (this.failedRequests.size === 0)
-      this.liveQueryCollection?._lifecycle.clearRequestError()
+    this.liveQueryCollection?._lifecycle.clearRequestError(key)
   }
 
   hasPendingSourceRecovery(): boolean {
@@ -781,7 +776,6 @@ export class CollectionConfigBuilder<
     // Reset error state from any previous sync run so a restarted sync can become ready again.
     this.isInErrorState = false
     this.fatalQueryError = false
-    this.failedRequests.clear()
     this.lastSubsetError = undefined
     // Store config and syncState as instance properties for the duration of this sync run
     this.currentSyncConfig = config
@@ -864,7 +858,6 @@ export class CollectionConfigBuilder<
     this.settledWindow = this.initialWindow
     this.isInErrorState = false
     this.fatalQueryError = false
-    this.failedRequests.clear()
 
     // Reset caches so a fresh graph/pipeline is compiled on next start
     // This avoids reusing a finalized D2 graph across GC restarts
