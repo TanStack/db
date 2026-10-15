@@ -642,10 +642,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
             result,
             () => this.subscriptions[sourceId]?.pendingTruncateReplacement,
           )
-          void Promise.resolve(result).then(
-            () => this.settleLoad(sourceId),
-            () => {},
-          )
+          this.settleWhenLoaded(sourceId, result)
         },
       })
 
@@ -705,6 +702,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
               result,
               () => subscription.pendingTruncateReplacement,
             )
+            this.settleWhenLoaded(sourceId, result)
             const holdsInitialPublication =
               this.skipInitial && !this.initialLoadComplete
             if (holdPublication || holdsInitialPublication) {
@@ -1081,6 +1079,14 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     if (!this.reachedReady) return this.onSourceError(error)
     this.requests.fail(sourceId, error)
     this.reportHealth()
+  }
+
+  /** A load that later succeeds clears the source's request error. */
+  private settleWhenLoaded(sourceId: string, result: unknown): void {
+    void Promise.resolve(result).then(
+      () => this.settleLoad(sourceId),
+      () => {},
+    )
   }
 
   private settleLoad(sourceId: string): void {

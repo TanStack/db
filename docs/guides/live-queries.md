@@ -2479,7 +2479,7 @@ createEffect({
 })
 ```
 
-If a source collection enters an error or cleaned-up state, the effect automatically disposes itself. Use `onSourceError` to handle this:
+If a source collection enters an error state (an initial error or a crash) or is cleaned up, the effect automatically disposes itself. Use `onSourceError` to handle this. Other problems after the effect's initial load do not dispose it; they reach `onHealthChange`:
 
 ```ts
 createEffect({

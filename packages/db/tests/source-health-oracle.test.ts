@@ -1281,9 +1281,9 @@ describe(`include instances`, () => {
           },
         },
       })
-      const write = (row: Row) => {
+      const write = (row: Row, type: `insert` | `delete` = `insert`) => {
         params.begin()
-        params.write({ type: `insert`, value: row })
+        params.write({ type, value: row })
         params.commit()
       }
       return { collection, write, ready: () => params.markReady() }
@@ -1347,6 +1347,21 @@ describe(`include instances`, () => {
       expect(sameNode!.instances).toEqual({ total: 4, inError: 0 })
       expect(sameNode!.hasErrors).toBe(false)
       expect(query.errors.hasErrors).toBe(true)
+
+      // Removing the failing child's parent row retires that child, so it
+      // leaves the count and the query reports the change.
+      let retireEvents = 0
+      const stopRetire = query.on(`health:change`, () => {
+        retireEvents++
+      })
+      B.write({ id: 1, parentId: 1 }, `delete`)
+      await flushPromises()
+      stopRetire()
+      expect(retireEvents, `retiring a child in error relays`).toBeGreaterThan(
+        0,
+      )
+      expect(includes()[0]!.instances).toEqual({ total: 3, inError: 0 })
+      expect(query.errors.hasErrors).toBe(false)
     } finally {
       console.error = consoleError
       await query.cleanup()

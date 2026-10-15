@@ -1,7 +1,8 @@
 # Candidate: the source health channel and live-query error tree
 
-Status: candidate design, version 1. It came from a Field Lab design-grammar
-run and has not been accepted.
+Status: superseded candidate design, version 1. It came from a Field Lab
+design-grammar run. The shipped design differs; read `PLAN.md`, the shipped
+guides, and `packages/db/src/query/live/ARCHITECTURE.md` laws 16 and 17.
 
 ## Success standard (frozen, user-confirmed)
 

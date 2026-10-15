@@ -2458,6 +2458,7 @@ async function runProcessGrammar(
     runtime.resettingSnapshot = false
     runtime.reachedReadiness = false
     runtime.terminalError = false
+    runtime.terminalAfterReadiness = false
     runtime.active = true
     runtime.retired = false
   }
@@ -2550,6 +2551,7 @@ async function runProcessGrammar(
       runtime.resettingSnapshot = false
       runtime.reachedReadiness = false
       runtime.terminalError = false
+      runtime.terminalAfterReadiness = false
       return `cleaned up`
     }
     if (command.kind === `retired-callback`) {

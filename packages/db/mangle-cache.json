@@ -417,5 +417,6 @@
   "settleLoad": "gR",
   "endedProblem": "gS",
   "errorTree": "gT",
-  "failLoad": "gU"
+  "failLoad": "gU",
+  "settleWhenLoaded": "gV"
 }

@@ -1,7 +1,10 @@
 # Draft: what users would see (candidate v2)
 
-This is a proposal, not shipped behavior. It applies the repairs from the
-hostile assay and the fracture scan to `HEALTH-CANDIDATE.md`.
+This is a superseded proposal, not shipped behavior. It applies the repairs
+from the hostile assay and the fracture scan to `HEALTH-CANDIDATE.md`. The
+shipped API differs (for example, `reportError` has no `final` option, and
+query-db's error utilities are removed); read `PLAN.md` and the shipped
+guides.
 
 ---
 

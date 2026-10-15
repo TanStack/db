@@ -46,10 +46,9 @@ names and shapes.
 - **Two axes.** Gate: `status` (`idle | loading | ready | error |
   cleaned-up`), decided only by an attempt's initial sync. Health: per
   Collection, changed only by its sync adapter after Collection readiness.
-- **Adapter API.** Sync params gain `reportError(error, { final })` and
-  `reportHealthy()`. `markError` is for giving up before Collection readiness.
-  `markError` after Collection readiness is treated as
-  `reportError(error, { final: true })` with a development warning.
+- **Adapter API.** Sync params gain `reportError(error)` and
+  `reportHealthy()`. `markError` means the sync adapter gave up: an initial
+  error before Collection readiness, a final health error after it.
   `markReady()` after `markError()` in one sync run throws.
 - **Collection surface.** `collection.health` and a `health:change` event.
 - **Error info.** `{ phase: 'initial' | 'sync' | 'request', final, name,

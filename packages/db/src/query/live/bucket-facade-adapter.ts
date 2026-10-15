@@ -33,6 +33,8 @@ type FacadeEntry = {
   dispose: () => Promise<void>
   sync: FacadeSync | undefined
   order: WeakMap<object, string>
+  /** Whether the include node counts this facade as in error. */
+  readonly inError: boolean
 }
 
 type SnapshotRow = {
@@ -422,6 +424,8 @@ export class BucketFacadeAdapter {
     if (byBucket!.size === 0) this.entries.delete(edgeId)
     const retired = getOrCreate(this.retiredEntries, edgeId, () => new Map())
     retired.set(bucketKey, entry)
+    // A retired facade leaves the include node's count.
+    if (entry.inError) this.onInstanceHealthChange()
   }
 
   private getEntry(edgeId: string, bucketKey: string): FacadeEntry {
@@ -490,6 +494,9 @@ export class BucketFacadeAdapter {
       dispose,
       get sync() {
         return sync
+      },
+      get inError() {
+        return inError
       },
       order,
     }
