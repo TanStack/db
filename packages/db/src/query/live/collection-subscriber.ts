@@ -68,12 +68,12 @@ export class CollectionSubscriber<
   }
 
   private subscribeToChanges(whereExpression?: BasicExpression<boolean>) {
-    if (this.collectionConfigBuilder.localOnly) {
+    if (!this.collectionConfigBuilder.autoLoad) {
       // The graph owns filtering, joins and top-K over all available rows.
       // Local windows need all available rows, independent of provider coverage.
       const subscription = this.collection.subscribeChanges(
         (changes) => this.sendChangesToPipeline(changes),
-        { includeInitialState: true, whereExpression, localOnly: true },
+        { includeInitialState: true, whereExpression, autoLoad: false },
       )
       this.registerSubscriptionCleanup(subscription)
       return subscription
@@ -194,7 +194,6 @@ export class CollectionSubscriber<
     plan: LazyDemandPlan,
     keys: Set<unknown>,
   ): void {
-    if (this.collectionConfigBuilder.localOnly) return
     let update
     try {
       update = this.demand.setDemand(subscription, plan, keys)

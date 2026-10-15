@@ -1,8 +1,8 @@
 /**
- * Proposed local-query contract: subscribing, preloading, moving a window and
+ * Proposed automatic-loading contract: subscribing, preloading, moving a window and
  * restarting never start source sync or acquisition. Results equal array
  * evaluation over available rows, including while source readiness is pending.
- * Authority: local-only evaluation in query/live/ARCHITECTURE.md.
+ * Authority: automatic loading in query/live/ARCHITECTURE.md.
  * The model replaces independent arrays before each settled graph checkpoint.
  * Limits: controlled adapters, numeric order, one join or inline include;
  * provider behavior and framework scheduling have separate owners.
@@ -60,8 +60,8 @@ function source(syncMode: `eager` | `on-demand`, indexed: boolean) {
 // a window. IDs 1..6 exclude duplicate keys; ranks 0..3 include ties; parent IDs
 // 1..3 admit matching and unmatched children; limits 0..4 cross closed, full and
 // underfilled windows. Source mode changes acquisition semantics; explicit rank
-// indexes check parity with and without an available index. Local evaluation
-// bypasses provider order optimization. One to five replacements admit empty,
+// indexes check parity with and without an available index. Provider loading
+// plans stay inactive with autoLoad disabled. One to five replacements admit empty,
 // growing and shrinking inputs. Cleanup/restart follows every generated trace.
 const rowSet = fc.uniqueArray(
   fc.record({
@@ -72,11 +72,11 @@ const rowSet = fc.uniqueArray(
   { selector: (row) => row.id, maxLength: 6 },
 )
 
-describe(`local live-query evaluation`, () => {
+describe(`live queries with automatic loading disabled`, () => {
   it(`keeps local subscription readiness when another owner starts the source`, async () => {
     const src = source(`on-demand`, false)
     const subscription = src.collection.subscribeChanges(() => {}, {
-      localOnly: true,
+      autoLoad: false,
       includeInitialState: true,
     })
     await withOracleCleanup(() => {
@@ -93,7 +93,7 @@ describe(`local live-query evaluation`, () => {
     const src = source(`eager`, true)
     src.collection.startSyncImmediate()
     const query = createLiveQueryCollection({
-      localOnly: true,
+      autoLoad: false,
       query: (q) =>
         q
           .from({ row: src.collection })
@@ -125,7 +125,7 @@ describe(`local live-query evaluation`, () => {
   for (const syncMode of [`eager`, `on-demand`] as const) {
     for (const indexed of [false, true]) {
       for (const shape of [`window`, `join`, `include`] as const) {
-        const property = `local-live-query.${syncMode}.${indexed}.${shape}`
+        const property = `live-query-auto-load.${syncMode}.${indexed}.${shape}`
         const replay = readOracleRunConfig()
         for (const fixed of [true, false]) {
           const selected =
@@ -147,7 +147,7 @@ describe(`local live-query evaluation`, () => {
                     const leftSource = source(syncMode, indexed)
                     const rightSource = source(syncMode, indexed)
                     const query = createLiveQueryCollection({
-                      localOnly: true,
+                      autoLoad: false,
                       gcTime: 0,
                       query: (q) => {
                         if (shape === `join`)
@@ -285,7 +285,7 @@ describe(`local live-query evaluation`, () => {
         }),
     )
     const local = createLiveQueryCollection({
-      localOnly: true,
+      autoLoad: false,
       query: (q) => q.from({ row: src.collection }),
     })
     const remote = createLiveQueryCollection((q) =>

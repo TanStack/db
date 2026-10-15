@@ -7,7 +7,7 @@ import {
   getLiveQueryHash,
   prepareLiveQueryValue,
 } from '@tanstack/db'
-import { useLiveInfiniteQuery, useLiveQuery, useLocalLiveQuery } from '../src'
+import { useLiveInfiniteQuery, useLiveQuery } from '../src'
 import { useLiveQueryForSuspense } from '../src/useLiveQuery'
 import { getLiveQueryResultInfo } from '../src/live-query-internals'
 import type { InitialQueryBuilder, SyncConfig } from '@tanstack/db'
@@ -40,26 +40,26 @@ function source() {
   }
 }
 
-describe(`local React queries`, () => {
+describe(`React query automatic loading`, () => {
   for (const identity of [`key`, `deps`] as const) {
     it(`keeps the mode separate from caller ${identity} elements`, async () => {
       const src = source()
       const hook = renderHook(
-        ({ localOnly }) => {
-          const key = localOnly ? [`rows`] : [`rows`, `localOnly`]
+        ({ autoLoad }) => {
+          const key = autoLoad ? [`rows`, [`autoLoad`, false]] : [`rows`]
           return useLiveQuery(
             {
               query: (q) => q.from({ row: src.collection }),
-              localOnly,
+              autoLoad,
               ...(identity === `key` ? { queryKey: key } : {}),
             },
             identity === `deps` ? key : undefined,
           )
         },
-        { initialProps: { localOnly: true } },
+        { initialProps: { autoLoad: false as boolean | undefined } },
       )
       const local = hook.result.current.collection
-      hook.rerender({ localOnly: false })
+      hook.rerender({ autoLoad: true })
       const remote = hook.result.current.collection
       expect(remote).not.toBe(local)
       expect(src.load).toHaveBeenCalledTimes(1)
@@ -72,13 +72,15 @@ describe(`local React queries`, () => {
     const src = source()
     const hook = renderHook(
       ({ enabled }) =>
-        useLocalLiveQuery((q) =>
-          enabled
-            ? q
-                .from({ row: src.collection })
-                .where(({ row }) => eq(row.name, `a`))
-            : undefined,
-        ),
+        useLiveQuery({
+          autoLoad: false,
+          query: (q) =>
+            enabled
+              ? q
+                  .from({ row: src.collection })
+                  .where(({ row }) => eq(row.name, `a`))
+              : undefined,
+        }),
       { initialProps: { enabled: true }, wrapper: StrictMode },
     )
     expect(hook.result.current.data).toEqual([])
@@ -106,27 +108,30 @@ describe(`local React queries`, () => {
   })
 
   for (const identity of [`derived`, `key`, `deps`] as const) {
-    it(`switches local mode with ${identity} identity`, async () => {
+    it(`switches automatic loading with ${identity} identity`, async () => {
       const src = source()
       const hook = renderHook(
-        ({ localOnly }) =>
+        ({ autoLoad }) =>
           useLiveQuery(
             {
               query: (q) => q.from({ row: src.collection }),
-              localOnly,
+              autoLoad,
               ...(identity === `key` ? { queryKey: [`same`] } : {}),
             },
             identity === `deps` ? [] : undefined,
           ),
-        { initialProps: { localOnly: true } },
+        { initialProps: { autoLoad: false as boolean | undefined } },
       )
       const local = hook.result.current.collection
       expect(src.load).not.toHaveBeenCalled()
-      hook.rerender({ localOnly: false })
+      hook.rerender({ autoLoad: true })
       const remote = hook.result.current.collection
       expect(remote).not.toBe(local)
       expect(src.load).toHaveBeenCalledTimes(1)
-      hook.rerender({ localOnly: true })
+      hook.rerender({ autoLoad: undefined })
+      expect(hook.result.current.collection).toBe(remote)
+      expect(src.load).toHaveBeenCalledTimes(1)
+      hook.rerender({ autoLoad: false })
       expect(hook.result.current.collection).not.toBe(remote)
       expect(src.load).toHaveBeenCalledTimes(1)
       const last = hook.result.current.collection
@@ -143,7 +148,7 @@ describe(`local React queries`, () => {
       query: (q: InitialQueryBuilder) => q.from({ row: src.collection }),
     }
     const hook = renderHook(() => ({
-      local: useLiveQueryForSuspense({ ...config, localOnly: true }, undefined),
+      local: useLiveQueryForSuspense({ ...config, autoLoad: false }, undefined),
       remote: useLiveQueryForSuspense(config, undefined),
     }))
     const { local, remote } = hook.result.current
@@ -151,7 +156,7 @@ describe(`local React queries`, () => {
     expect(src.load).toHaveBeenCalledTimes(1)
     expect(getLiveQueryResultInfo(local).queryHash).toBe(
       getLiveQueryHash(
-        prepareLiveQueryValue({ ...config, localOnly: true }, undefined),
+        prepareLiveQueryValue({ ...config, autoLoad: false }, undefined),
         config.queryKey,
       ),
     )
@@ -167,12 +172,12 @@ describe(`local React queries`, () => {
     const src = source()
     src.ingest(Array.from({ length: 5 }, (_, id) => ({ id, name: `row` })))
     const hook = renderHook(
-      ({ localOnly }) =>
+      ({ autoLoad }) =>
         useLiveInfiniteQuery(
           (q) => q.from({ row: src.collection }).orderBy(({ row }) => row.id),
-          { localOnly, pageSize: 2, queryKey: [`pages`] },
+          { autoLoad, pageSize: 2, queryKey: [`pages`] },
         ),
-      { initialProps: { localOnly: true }, wrapper: StrictMode },
+      { initialProps: { autoLoad: false }, wrapper: StrictMode },
     )
     expect(hook.result.current.data.map((row) => row.id)).toEqual([0, 1])
     await act(() => hook.result.current.fetchNextPage())
@@ -181,7 +186,7 @@ describe(`local React queries`, () => {
     expect(hook.result.current.hasNextPage).toBe(false)
     expect(src.load).not.toHaveBeenCalled()
     const local = hook.result.current.collection
-    hook.rerender({ localOnly: false })
+    hook.rerender({ autoLoad: true })
     expect(hook.result.current.collection).not.toBe(local)
     expect(hook.result.current.pages).toHaveLength(1)
     expect(src.load).toHaveBeenCalled()

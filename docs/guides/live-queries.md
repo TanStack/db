@@ -158,48 +158,14 @@ Use `queryOnce` for scripts, background tasks, data export, or AI/LLM context
 building. `findOne()` resolves to `undefined` when no rows match. For UI
 bindings and reactive updates, use live queries instead.
 
-### Querying available local rows
+### Controlling automatic loading
 
-Use `useLocalLiveQuery` when your application owns fetching and ingestion, or
-when a view must observe shared collection contents without requesting data:
+Set `autoLoad: false` when your application owns fetching and ingestion. The
+query stays reactive to available collection rows without starting source sync
+or requesting subsets, including for joins, includes, and pagination.
+`autoLoad` defaults to `true`.
 
-```tsx
-import { eq, useLocalLiveQuery } from '@tanstack/react-db'
-
-const result = useLocalLiveQuery((q) =>
-  q.from({ task: tasks }).where(({ task }) => eq(task.projectId, projectId)),
-)
-```
-
-This is equivalent to `useLiveQuery({ query, localOnly: true })`. The hook
-accepts a query callback or configuration object, including conditional queries
-that return `undefined` or `null`. Pass a query over an existing Collection
-rather than passing the Collection directly.
-
-The same capability is available in core:
-
-```ts
-const localTasks = createLiveQueryCollection({
-  localOnly: true,
-  query: (q) => q.from({ task: tasks }),
-})
-await localTasks.preload() // Evaluates memory; does not fetch source rows.
-```
-
-Local queries remain reactive to ingestion, optimistic mutations, and changes
-loaded by other consumers. They never initiate source sync or subset requests,
-including for joins, includes, window changes, and truncate replay. Explicit
-source startup (`startSync: true`, `preload()`, or another consumer) can still
-load data. When a source is another live-query Collection, you observe its
-published rows; its own loading policy remains in force.
-
-`isReady` means the local result is available, even if empty. It does not mean
-that the server result is complete. Source loading failures do not fail local
-queries; query evaluation errors and explicit source cleanup still do.
-
-For example, an application can combine a custom API search with local
-reactive evaluation. Here `tasks` is a Query Collection, and
-`fetchProjectTasks` is your API function:
+For example, combine a custom API search with a Query Collection:
 
 ```tsx
 function useApiTasks(projectId: string) {
@@ -212,25 +178,33 @@ function useApiTasks(projectId: string) {
       return rows
     },
   })
-  const local = useLocalLiveQuery((q) =>
-    q.from({ task: tasks }).where(({ task }) => eq(task.projectId, projectId)),
-  )
-  return { ...local, isFetching: request.isFetching, fetchError: request.error }
+  const result = useLiveQuery({
+    autoLoad: false,
+    query: (q) =>
+      q.from({ task: tasks }).where(({ task }) => eq(task.projectId, projectId)),
+  })
+  return { ...result, isFetching: request.isFetching, fetchError: request.error }
 }
 ```
 
-Use `useLiveInfiniteQuery(query, { pageSize: 20, localOnly: true })` to paginate
-available local rows. `fetchNextPage` expands the local window and `hasNextPage`
-describes the available rows. Manage server cursors and server exhaustion in
-your API fetcher. For a pre-created live-query Collection, set `localOnly` when
-creating it.
+The same option works with `createLiveQueryCollection({ query, autoLoad: false })`
+and `useLiveInfiniteQuery(query, { pageSize: 20, autoLoad: false })`.
+For an existing live-query Collection, configure `autoLoad` when creating it.
 
-Local and fetching queries have separate identities even with the same explicit
-`queryKey`. Changing `localOnly` on a hook configuration replaces its query;
-infinite queries also reset their pages. With a callback-returned configuration
-and legacy dependency arrays, include loading-policy changes in the dependencies,
-as with other captured configuration. Local queries create no adapter requests
-to deduplicate. Source row storage remains shared.
+`isReady` means the available rows have been evaluated, even if empty; it does
+not establish remote completeness. Provider errors do not fail this result,
+while query evaluation errors and explicit source cleanup still do. Infinite
+queries expand the local window; `hasNextPage` describes available rows. Manage
+server cursors and exhaustion in your API fetcher.
+
+Other consumers and explicit source startup can still load shared rows. A source
+that is itself a live-query Collection supplies its published rows under its own
+loading policy. This option does not disable loading globally.
+
+Queries with different `autoLoad` settings have separate identities, including
+with an explicit `queryKey`. Changing the option replaces the query and resets
+infinite-query pages. If a callback returns the configuration and uses a legacy
+dependency array, include changes to `autoLoad` in those dependencies.
 
 ### Using with Frameworks
 

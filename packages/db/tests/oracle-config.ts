@@ -294,7 +294,7 @@ export const registeredOracleProperties = validateOraclePropertyRegistry([
   ...[`eager`, `on-demand`].flatMap((mode) =>
     [false, true].flatMap((indexed) =>
       [`window`, `join`, `include`].map(
-        (shape) => `local-live-query.${mode}.${indexed}.${shape}`,
+        (shape) => `live-query-auto-load.${mode}.${indexed}.${shape}`,
       ),
     ),
   ),

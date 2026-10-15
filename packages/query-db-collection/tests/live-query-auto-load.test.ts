@@ -17,7 +17,7 @@ it(`observes custom API ingestion without invoking the Query Collection fetcher`
     }),
   )
   const local = createLiveQueryCollection({
-    localOnly: true,
+    autoLoad: false,
     query: (q) =>
       q
         .from({ task: tasks })

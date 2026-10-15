@@ -105,12 +105,12 @@ export interface LiveQueryCollectionConfig<
   startSync?: boolean
 
   /**
-   * Evaluate only rows already held by source Collections, without starting
-   * source sync or acquiring subsets. Readiness describes the local result.
+   * Set to false to observe available rows without starting source sync or
+   * acquiring subsets. Readiness describes the local result.
    * Other consumers may still load and update the shared source rows.
-   * @default false
+   * @default true
    */
-  localOnly?: boolean
+  autoLoad?: boolean
 
   /**
    * GC time for the collection

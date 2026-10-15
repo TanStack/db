@@ -28,8 +28,8 @@ This architecture covers:
 - coherent publication to public Collections;
 - the boundaries with query-db ownership and physical query planning.
 
-Public boundary contracts include applied-settlement receipts and local-only
-evaluation. Optimistic transactions are another source of weighted input changes;
+Public boundary contracts include applied-settlement receipts and automatic
+loading control. Optimistic transactions are another source of weighted input changes;
 they do not have a separate routing model.
 
 ## One relational graph
@@ -689,9 +689,9 @@ render, nor does it relax the stable public Collection facade contract above.
 
 ## Demand plane
 
-### Local-only evaluation
+### Automatic loading
 
-`LiveQueryCollectionConfig.localOnly: true` evaluates the same relational graph
+`LiveQueryCollectionConfig.autoLoad: false` evaluates the same relational graph
 over available source rows without acquiring source data. Its subscriptions
 retain the source Collections against GC, but do not count as acquiring
 subscribers, start base-source sync, resume acquisition, or invoke
@@ -707,7 +707,7 @@ does not change that source's loading policy or expose its private graph state.
 
 Local and acquiring consumers share source rows, but not acquisition ownership.
 Other consumers, explicit source startup, or background sync may change those
-rows. `localOnly` is part of query identity, including explicit framework keys;
+rows. `autoLoad` is part of query identity, including explicit framework keys;
 local and acquiring queries cannot share a query instance or readiness gate.
 Local queries create no adapter acquisitions to deduplicate. The default
 continues to acquire data after a subscriber or preload requests it.
@@ -1599,7 +1599,7 @@ create recursive Collection machinery.
     counts as a preload. A deferring live query keeps its sources from
     garbage collection but is not counted in their `subscriberCount` or
     `subscribers:change`, which adapters read as a request for live data.
-16. **Local-only evaluation:** a query configured with `localOnly: true` never
+16. **Automatic loading:** a query configured with `autoLoad: false` never
     initiates source acquisition, including on subscription, preload, window
     changes, truncate, and query restart. It becomes ready on the evaluated
     local result independently of provider readiness. Laws about required
@@ -1661,7 +1661,7 @@ keep the meanings defined there.
 | Reachable nested shape                                                                  | `packages/query-db-collection/tests/includes-work-counter-oracle.test.ts`                                                       |
 | Cleanup-start invalidation, settlement, and restart admission                           | `packages/db/tests/collection-cleanup-restart-oracle.test.ts`                                                                   |
 | Pooled live queries match their live-query Collection, including cleanup                | `packages/db/tests/query/pooled-live-query-oracle.property.test.ts`                                                             |
-| Local-only evaluation, zero acquisition, local readiness, and coexistence with fetching consumers | `packages/db/tests/local-live-query-oracle.test.ts` |
+| Automatic loading disabled, zero acquisition, local readiness, and coexistence with fetching consumers | `packages/db/tests/live-query-auto-load-oracle.test.ts` |
 | Deferred acquisition before a subscriber or preload, readiness, and the synchronous cut | `packages/db/tests/live-query-deferred-acquisition-oracle.test.ts`                                                              |
 
 Each oracle identifies the first divergent checkpoint and compares either the

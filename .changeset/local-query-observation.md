@@ -3,4 +3,4 @@
 '@tanstack/react-db': minor
 ---
 
-Add `localOnly` live-query configuration and React's `useLocalLiveQuery` hook to reactively evaluate available collection rows without initiating source loading. Local queries support joins, includes and pagination, become ready independently of provider loading, and use separate query identities from fetching queries.
+Add `autoLoad: false` to live-query configuration and React query hooks to observe available rows without initiating source loading. Queries remain reactive across joins and pagination, become ready independently of provider loading, and have separate identities from queries that load data automatically.

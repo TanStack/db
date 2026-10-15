@@ -721,7 +721,7 @@ function createHookInstance(dbClient: DbClient | undefined) {
     deps: null as Array<unknown> | null,
     config: null as unknown,
     client: dbClient,
-    localOnly: false,
+    autoLoad: true,
     legacyUnhashableIdentity: [`legacy-unhashable`] as Array<unknown>,
     derivedIdentityProfiler: {
       renderCount: 0,
@@ -821,13 +821,14 @@ function useLiveQueryImpl(
     typeof configOrQueryOrCollection === `function`
       ? preparedQueryValue
       : configOrQueryOrCollection
-  const localOnly =
+  const autoLoad = !(
     modeConfig &&
     typeof modeConfig === `object` &&
-    `localOnly` in modeConfig &&
-    modeConfig.localOnly === true
-  if (localOnly && streamIdentity !== undefined && queryKey) {
-    streamIdentity = [streamIdentity, `localOnly`]
+    `autoLoad` in modeConfig &&
+    modeConfig.autoLoad === false
+  )
+  if (!autoLoad && streamIdentity !== undefined && queryKey) {
+    streamIdentity = [streamIdentity, [`autoLoad`, false]]
   }
 
   let queryHash: string | undefined
@@ -914,7 +915,7 @@ function useLiveQueryImpl(
     (inputIsCollection && instance.config !== configOrQueryOrCollection) ||
     (!inputIsCollection &&
       (instance.client !== dbClient ||
-        instance.localOnly !== (localOnly === true) ||
+        instance.autoLoad !== autoLoad ||
         identityChanged))
 
   if (needsNewCollection) {
@@ -1001,7 +1002,7 @@ function useLiveQueryImpl(
       instance.deps = [...identityDeps]
     }
     instance.client = dbClient
-    instance.localOnly = localOnly === true
+    instance.autoLoad = autoLoad
     instance.queryHash = queryHash
     instance.suspenseKey = suspenseKey
     instance.identityError = identityError

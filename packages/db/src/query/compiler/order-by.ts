@@ -76,8 +76,7 @@ export function processOrderBy(
   orderByClause: Array<OrderByClause>,
   selectClause: Select,
   collection: Collection,
-  optimizableOrderByCollections:
-    Record<string, OrderByOptimizationInfo> | undefined,
+  optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
   setWindowFn: (windowFn: (options: WindowOptions) => void) => void,
   limit?: number,
   offset?: number,
@@ -161,7 +160,6 @@ export function processOrderBy(
   // Skip this optimization when using grouped ordering (includes with limit),
   // because the limit is per-group, not global — the child collection needs all data loaded.
   if (
-    optimizableOrderByCollections !== undefined &&
     limit !== undefined &&
     orderByClause.length > 0 &&
     !groupKeyFn &&

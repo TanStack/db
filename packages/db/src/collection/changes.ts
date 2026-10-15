@@ -322,7 +322,7 @@ export class CollectionChangesManager<
     // Acquire ownership only after all fallible option validation and
     // user-provided predicate compilation has completed.
     const defersAcquisition =
-      opts.localOnly === true || opts.deferAcquisition === true
+      opts.autoLoad === false || opts.deferAcquisition === true
     this.addSubscriber(defersAcquisition)
 
     let subscription: CollectionSubscription | undefined

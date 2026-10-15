@@ -105,3 +105,12 @@ Merged precedents support the boundaries used here:
   an API proposal; ordinary fetching-query laws are unchanged.
 
 These are merged-code precedents, not maintainer endorsement of this API.
+
+## Automatic-loading API refactor
+
+The follow-up uses `autoLoad: false` and removes `useLocalLiveQuery`. The oracle
+owner is `packages/db/tests/live-query-auto-load-oracle.test.ts`; replay property
+names begin with `live-query-auto-load`. The earlier entries describe their
+recorded commits. The reference computation and generated history grammar are
+unchanged. Provider planning uses the ordinary compiler; subscriptions with
+`autoLoad: false` do not activate its loading callbacks.
