@@ -1,12 +1,23 @@
-# Local-only live-query review
+# Live-query automatic-loading review
 
-Implementation head: `4ec786c7f37c8cb92344292bf405626a4187d069`.
-The contract is the opt-in API proposal in the live-query architecture's
-“Local-only evaluation” section. This review establishes bounded implementation
-evidence, not upstream acceptance of that API.
+The API is `autoLoad: false` on live-query configuration, including React's
+`useLiveQuery` and `useLiveInfiniteQuery`. The proposed contract is described in
+the architecture's [Automatic loading](../../../packages/db/src/query/live/ARCHITECTURE.md#automatic-loading)
+section. The implementation head for the validation update below is
+`a47a73719a709d667d44374abfb1db7702df95a9`.
 
-The independent reviewer found an identity collision between local
-`queryKey: ['rows']` and fetching `queryKey: ['rows', 'localOnly']`.
+This update uses the current API and test names. Historical findings remain
+tied to their recorded commits; the [original review record](https://github.com/jchook/db/blob/a47a73719a709d667d44374abfb1db7702df95a9/docs/contributing/oracle-reviews/2026-10-14-local-live-query.md)
+preserves their original wording. This is bounded implementation evidence,
+not upstream acceptance of the API.
+
+## Review at `4ec786c7`
+
+The implementation reviewed in this section was
+`4ec786c7f37c8cb92344292bf405626a4187d069`.
+
+The independent reviewer found an identity collision when a caller's query key
+contained the same element used internally to distinguish loading modes.
 The regression failed before separate mode tracking and passes with it; the
 reviewer's reproduction returns different Collections and one fetching load.
 The local-subscription status regression likewise rejected `loadingSubset`
@@ -26,16 +37,16 @@ The numbered obligations refer to `docs/contributing/oracle-tests.md`.
   limits 0–4 and one to five replacements. Duplicate source keys are excluded.
   Empty/nonempty, matching/unmatched, ties, closed/underfilled windows and
   growth/shrink traces are reconstructible. Eager/on-demand changes loading
-  semantics; indexed/unindexed changes planning; window/join/include changes
-  relational shape. Every trace subscribes, preloads, replaces rows, moves
-  windows and restarts the query. Arbitrary interleavings are not claimed.
+  semantics; window/join/include changes relational shape. The index-availability
+  evidence is corrected below. Every trace subscribes, preloads, replaces rows,
+  moves windows and restarts the query. Arbitrary interleavings are not claimed.
 - ORC-005: real Collection and live-query entry points provide all modeled rows
   before settled window comparisons. Immediate post-subscribe observations check
   readiness and zero source startup. Pinned histories observe incremental
   reorder/delete, provider error, and a pending fetching peer. No missing source
   fact was identified for these local snapshots.
-- ORC-006: changing the local source subscription to `localOnly: false` fails
-  the source-start assertion, not setup or a timeout. Seed `112919`, path
+- ORC-006: forcing the source subscription to acquire data failed the
+  source-start assertion, not setup or a timeout. Seed `112919`, path
   `0:0:0:0:0`, shrinks to one empty replacement with limit zero. The mutation
   is restored; the ordinary suite passes.
 - ORC-007: all twelve mode/index/shape lanes run fixed seed `112919` and random
@@ -59,16 +70,16 @@ The numbered obligations refer to `docs/contributing/oracle-tests.md`.
   ingestion without invoking its fetcher. Remote provider protocols, arbitrary
   nested plans and non-React framework scheduling remain outside this evidence.
 
-Replay the captured generated case from `packages/db`:
+Replay the captured input from `packages/db` using the current test names:
 
 ```sh
-TANSTACK_DB_ORACLE_SEED=112919 TANSTACK_DB_ORACLE_PATH=0:0:0:0:0 TANSTACK_DB_ORACLE_PROPERTY=local-live-query.on-demand.false.window pnpm exec vitest run --coverage.enabled=false tests/local-live-query-oracle.test.ts
+TANSTACK_DB_ORACLE_SEED=112919 TANSTACK_DB_ORACLE_PATH=0:0:0:0:0 TANSTACK_DB_ORACLE_PROPERTY=live-query-auto-load.on-demand.false.window pnpm exec vitest run --coverage.enabled=false tests/live-query-auto-load-oracle.test.ts
 ```
 
-The restored implementation passes that history. Reapplying the described
-subscription mutation rejects it at source startup.
+The mutation result belongs to the historical review above. Running this
+command without the mutation checks the captured input against the implementation.
 
-## Validation
+## Validation at `4ec786c7`
 
 The local oracle passes 27 tests, including both generated campaigns. Selected
 core regression runs pass 1,450 and 575 tests respectively (overlapping suites).
@@ -84,7 +95,7 @@ Reviewed correction: `c17de4a0544e84d29d5e3d80098ec4b4586a7509`.
 The independent reviewer confirmed the fixture repair. All 27 local oracle
 tests, core test typechecking, scoped lint and formatting pass.
 
-This correction supersedes the ORC-004 index-planning claim above.
+This correction establishes the ORC-004 index-availability evidence.
 The independent comparison found a fixture reach gap: automatic indexing did
 not establish an index on the local window path. An index-presence assertion
 failed with the automatic-only fixture. The fixture explicitly creates a rank
@@ -101,16 +112,26 @@ Merged precedents support the boundaries used here:
 - [#2132](https://github.com/TanStack/db/pull/2132) checks that configured oracle
   dimensions actually reach the claimed cases, motivating the index assertion.
 - [#2119](https://github.com/TanStack/db/pull/2119) distinguishes product-law
-  proposals from defects under accepted contracts. The local-only law remains
-  an API proposal; ordinary fetching-query laws are unchanged.
+  proposals from defects under accepted contracts. Automatic-loading control
+  remains an API proposal; ordinary fetching-query laws are unchanged.
 
 These are merged-code precedents, not maintainer endorsement of this API.
 
-## Automatic-loading API refactor
+## API and validation at `a47a7371`
 
-The follow-up uses `autoLoad: false` and removes `useLocalLiveQuery`. The oracle
-owner is `packages/db/tests/live-query-auto-load-oracle.test.ts`; replay property
-names begin with `live-query-auto-load`. The earlier entries describe their
-recorded commits. The reference computation and generated history grammar are
-unchanged. Provider planning uses the ordinary compiler; subscriptions with
-`autoLoad: false` do not activate its loading callbacks.
+`autoLoad: false` queries available collection rows through the standard hooks;
+there is no dedicated hook. The oracle is
+`packages/db/tests/live-query-auto-load-oracle.test.ts`, and replay property names
+begin with `live-query-auto-load`. Provider planning uses the ordinary compiler;
+subscriptions with `autoLoad: false` do not activate its loading callbacks.
+
+The cleanup verification passed 33 core identity/preload tests and 153 React
+tests and type checks, including loading-mode isolation and infinite-query
+behavior. Scoped lint and formatting passed. The automatic-loading oracle
+passed all 27 tests at this head. The replay command above also passed its
+selected generated case and three pinned cases, with 23 tests skipped.
+
+The full workspace test run at `3f76b61b` stopped on four SQLite CLI runtime
+test timeouts. Those failures remain undiagnosed. A separate ordered-window
+timeout also reproduced on unchanged upstream code at `8660cc0e`; this does
+not establish that the SQLite timeouts have the same cause.
