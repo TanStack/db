@@ -2,6 +2,10 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import applyReleasePlan from '@changesets/apply-release-plan'
+import { read as readChangesetsConfig } from '@changesets/config'
+import getReleasePlan from '@changesets/get-release-plan'
+import { getPackages } from '@manypkg/get-packages'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const changesetPath = join(root, '.changeset', 'first-rc.md')
@@ -117,12 +121,114 @@ function seedFirstCandidate() {
   }
 }
 
-if (
-  existsSync(changesetPath) &&
-  !existsSync(join(root, '.changeset', 'pre.json'))
-)
-  seedFirstCandidate()
-else run('pnpm', ['exec', 'changeset', 'version'])
+/**
+ * Changesets tracks which changesets were consumed and determines dependent
+ * releases. Its prerelease counter does not distinguish patch from minor, so
+ * replace only the planned version for each package during the RC window.
+ */
+export function versionForRcRelease(release) {
+  if (release.type === 'none') return release.oldVersion
 
-run('pnpm', ['exec', 'tsx', 'scripts/update-example-deps.ts'])
-run('pnpm', ['install', '--no-frozen-lockfile'])
+  const candidate = /^1\.0\.0-rc\.(\d+)(?:\.(\d+))?$/.exec(release.oldVersion)
+  if (candidate) {
+    const generation = Number(candidate[1])
+    if (release.type === 'patch') {
+      const patch = Number(candidate[2] ?? 0) + 1
+      return `1.0.0-rc.${generation}.${patch}`
+    }
+    if (release.type === 'minor' || release.type === 'major') {
+      return `1.0.0-rc.${generation + 1}`
+    }
+  }
+
+  if (/^\d+\.\d+\.\d+$/.test(release.oldVersion)) {
+    const stableVersion = release.newVersion.replace(/-rc\.0$/, '')
+    if (/^\d+\.\d+\.\d+$/.test(stableVersion)) return stableVersion
+  }
+
+  throw new Error(
+    `Cannot calculate an RC version for ${release.name}: ${release.oldVersion} (${release.type}).`,
+  )
+}
+
+async function rcReleasePlan(rootDirectory) {
+  const packages = await getPackages(rootDirectory)
+  const config = await readChangesetsConfig(rootDirectory, packages)
+  const releaseConfig = {
+    ...config,
+    privatePackages: { version: false, tag: false },
+  }
+  const plan = await getReleasePlan(rootDirectory, undefined, releaseConfig)
+  return { packages, releaseConfig, plan }
+}
+
+export async function versionDuringRc(rootDirectory = root) {
+  const { packages, releaseConfig, plan } = await rcReleasePlan(rootDirectory)
+  if (plan.releases.length === 0) return
+
+  for (const release of plan.releases) {
+    release.newVersion = versionForRcRelease(release)
+  }
+  await applyReleasePlan(
+    plan,
+    packages,
+    releaseConfig,
+    undefined,
+    rootDirectory,
+  )
+}
+
+export async function versionOnRcExit(rootDirectory = root) {
+  const { packages, releaseConfig, plan } = await rcReleasePlan(rootDirectory)
+  const privatePackages = new Set(
+    packages.packages
+      .filter(({ packageJson }) => packageJson.private)
+      .map(({ packageJson }) => packageJson.name),
+  )
+  plan.releases = plan.releases.filter((release) => {
+    if (privatePackages.has(release.name)) return false
+    if (/^1\.0\.0-rc\.\d+(?:\.\d+)?$/.test(release.oldVersion)) {
+      release.newVersion = '1.0.0'
+      return true
+    }
+    if (/^\d+\.\d+\.\d+$/.test(release.oldVersion)) return false
+    throw new Error(
+      `Cannot exit RC mode for ${release.name}: ${release.oldVersion}.`,
+    )
+  })
+  if (plan.releases.length === 0) {
+    throw new Error('No 1.0 RC packages found while exiting prerelease mode.')
+  }
+  await applyReleasePlan(
+    plan,
+    packages,
+    releaseConfig,
+    undefined,
+    rootDirectory,
+  )
+}
+
+async function main() {
+  const preStatePath = join(root, '.changeset', 'pre.json')
+  const preState = existsSync(preStatePath)
+    ? JSON.parse(readFileSync(preStatePath, 'utf8'))
+    : undefined
+  if (existsSync(changesetPath) && preState === undefined) {
+    seedFirstCandidate()
+  } else if (preState?.mode === 'pre' && preState.tag === 'rc') {
+    await versionDuringRc()
+  } else if (preState?.mode === 'exit' && preState.tag === 'rc') {
+    await versionOnRcExit()
+  } else {
+    run('pnpm', ['exec', 'changeset', 'version'])
+  }
+
+  run('pnpm', ['exec', 'tsx', 'scripts/update-example-deps.ts'])
+  run('pnpm', ['install', '--no-frozen-lockfile'])
+}
+
+if (
+  process.argv[1] &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+)
+  await main()
