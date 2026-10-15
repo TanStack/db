@@ -35,6 +35,17 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
         The [mapping and limits](query-db-publication-tla/README.md) keep this
         design result distinct from production-history coverage (2026-10-15).
   - [ ] Generated production histories and public-checkpoint hostile controls.
+    - [x] Initial-fetch caller/peer grammar: ten named histories plus matching
+          fixed-seed and random 48-run campaigns cover six release/abort
+          actions, peer ownership and early release, signal consumption, and
+          source success or failure. The driver checks the original provider
+          error and public rows between both final releases. Direct seed/path
+          replay ran; removing the caller-abort listener failed at load,
+          physical-signal, and public-row checkpoints. Two further production
+          mutants, retaining an aborted caller's lease and stealing the peer's
+          lease on a duplicate unload, failed at the physical-signal and
+          intermediate public-row checkpoints (2026-10-15). Reentry, refetch,
+          and accepted-commit cells remain.
 - [ ] Close the automatic-GC, hydration, repeated-options, request-shape,
       persistence, and cleanup-harness cells with tests or explicit contract
       decisions.
@@ -71,14 +82,17 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
         because the wrapper independently fences this path (2026-10-15).
         The hot checkpoint now compares the complete public row set and exact
         `until-revalidated` marker.
-  - [ ] Cleanup failure fidelity across older fixtures.
+  - [x] Cleanup failure fidelity across older fixtures.
     - [x] The shared checker now returns observations while preserving a
           primary mismatch and every secondary cleanup error. A dual-fault
           control proves the final cleanup step still runs. Four older
           identity, shared-fetch, peer-join, and retired-endpoint helpers use
           it; their full oracle file, typecheck, and lint pass (2026-10-15).
-    - [ ] Convert the remaining older `finally` cleanup paths; a failure in
-          one of them can still mask the first oracle mismatch.
+    - [x] Converted the remaining 28 older `finally` cleanup paths. A dual
+          fault preserves the primary mismatch as the cause, retains separate
+          cleanup errors, and reaches the final cleanup step. The combined
+          lifecycle and ownership oracles pass 449 tests; package typecheck,
+          affected-file lint, and whitespace checks pass (2026-10-15).
 - [ ] Run independent oracle review, package verification, and CI; record the
       exact covered boundary and remaining limits.
 - [ ] Integrate the repaired #2158 behavior into #2134 and verify its combined

@@ -185,6 +185,11 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
     `exact-completion exact-inflight rejected-waiter`,
   ],
   [
+    `query-db-collection/tests/load-subset-lifecycle-oracle.test.ts`,
+    `query-db`,
+    `lease-history`,
+  ],
+  [
     `db/tests/query/ordered-lifecycle-oracle.property.test.ts`,
     `ordered-work`,
     `lifecycle nullable-lifecycle`,
@@ -285,6 +290,8 @@ function directReplayTestName(property: string): string | undefined {
     return `recomputes generated compound histories, seed=undefined`
   if (property === `oracle-replay.calibration`)
     return `executes the replay calibration property`
+  if (property === `query-db.lease-history`)
+    return `refines generated caller and peer lease histories`
   if (property.startsWith(`pagination.matrix.`))
     return `\\[${property.replaceAll(`.`, `\\.`)}\\]`
   return indexReplayTestNames.get(property)

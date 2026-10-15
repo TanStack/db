@@ -669,6 +669,30 @@ checkpoint; the immediate-rejection candidate failed the accepted-receipt
 checkpoint. These fixed cuts do not establish arbitrary callback reentry or
 all abort/unload orderings; [issue #2162](https://github.com/TanStack/db/issues/2162)
 remains open for the generated grammar and hostile controls.
+An initial-fetch lease grammar now varies an equal peer, consumed versus
+ignored physical signal, six first-caller actions (including both abort/unload
+orders and Collection cleanup), peer release before provider settlement, and
+provider success versus failure. Ten named histories reconstruct the
+distinguishing boundaries. The same reference,
+real `requestSnapshot` driver, and public-row comparison run in fixed-seed and
+random 48-run campaigns; seed and shrink path replay is accepted directly.
+The reference compares an active caller's result and an explicit abort's load
+outcome, physical abort after Core's propagation turn, exact public rows before
+and after provider settlement, after the first subscriber releases, and after
+the peer releases. An active failure must expose the provider's original error.
+The raw adapter promise's
+outcome after unsubscribe or cleanup is unclaimed: Core can retire its lease
+before that promise settles. Removing Query DB's caller-abort listener fails
+the named sole and peer histories at load and row checkpoints. A production
+mutant that rejects the aborted load but retains its observer lease fails the
+early peer-release history at the consumed-signal checkpoint. A duplicate
+unload mutant that steals the peer's observer lease fails at the intermediate
+public-row checkpoint. Both are assertion failures after the intended public
+path. The grammar
+holds one initial provider result; the fixed ignored-signal witness checks the
+installed Query Core's optional cache completion behavior. Late peer
+acquisition, refetch, accepted commit reentry, and provider-specific transport
+remain separate cells.
 Direct `_sync.loadSubset` calls that reuse one options object for several live
 acquisitions have no caller token at `unloadSubset(options)`. The existing
 cached-row and startup witnesses check aggregate ownership. A full/exact

@@ -1,4 +1,5 @@
 import { QueryClient } from '@tanstack/query-core'
+import fc from 'fast-check'
 import {
   BasicIndex,
   IR,
@@ -10,6 +11,10 @@ import {
 import { describe, expect, it, vi } from 'vitest'
 import { TraceAssertionError } from '../../db/tests/trace-runner.js'
 import { createDeferred } from '../../db/src/deferred.js'
+import {
+  oraclePropertyOptions,
+  readOracleRunConfig,
+} from '../../db/tests/oracle-config.js'
 import { queryCollectionOptions } from '../src/query.js'
 import type { QueryFunctionContext } from '@tanstack/query-core'
 import type { LoadSubsetOptions, SyncMetadataApi } from '@tanstack/db'
@@ -140,7 +145,7 @@ async function expectActiveFullSourceServesFilteredDemand(): Promise<void> {
       .where(({ row }) => eq(row.group, `a`))
       .select(({ row }) => ({ id: row.id })),
   )
-  try {
+  return checkPublicCleanupWitness(async () => {
     await full.preload()
     expect(collection.toArray.map(({ id: rowId }) => rowId).sort()).toEqual([
       `a1`,
@@ -182,13 +187,13 @@ async function expectActiveFullSourceServesFilteredDemand(): Promise<void> {
     ])
     collection._sync.unloadSubset(refetchRequest)
     await vi.waitFor(() => expect(collection.size).toBe(0))
-  } finally {
-    await full.cleanup()
-    await filtered.cleanup()
-    await filteredPeer.cleanup()
-    await collection.cleanup()
-    queryClient.clear()
-  }
+  }, [
+    ['await full.cleanup()', () => full.cleanup()],
+    ['await filtered.cleanup()', () => filtered.cleanup()],
+    ['await filteredPeer.cleanup()', () => filteredPeer.cleanup()],
+    ['await collection.cleanup()', () => collection.cleanup()],
+    ['queryClient.clear()', () => queryClient.clear()],
+  ])
 }
 
 /**
@@ -270,7 +275,7 @@ async function expectIneligibleFullRefreshNeedsNewCoverage(
   )
   const firstFiltered = hasPriorDependent ? makeFiltered() : undefined
   const nextFiltered = makeFiltered()
-  try {
+  return checkPublicCleanupWitness(async () => {
     await full.preload()
     await firstFiltered?.preload()
     expect(requests.map(({ scope }) => scope)).toEqual([`full`])
@@ -348,13 +353,13 @@ async function expectIneligibleFullRefreshNeedsNewCoverage(
       await nextFiltered.cleanup()
     }
     expect(collection.size).toBe(0)
-  } finally {
-    await nextFiltered.cleanup()
-    await firstFiltered?.cleanup()
-    await full.cleanup()
-    await collection.cleanup()
-    queryClient.clear()
-  }
+  }, [
+    ['await nextFiltered.cleanup()', () => nextFiltered.cleanup()],
+    ['await firstFiltered?.cleanup()', () => firstFiltered?.cleanup()],
+    ['await full.cleanup()', () => full.cleanup()],
+    ['await collection.cleanup()', () => collection.cleanup()],
+    ['queryClient.clear()', () => queryClient.clear()],
+  ])
 }
 
 /**
@@ -418,7 +423,7 @@ async function expectFullAndExactResultsKeepLaterValue(
     }),
   )
   let fullRefresh: Promise<void> | undefined
-  try {
+  return checkPublicCleanupWitness(async () => {
     await collection._sync.loadSubset(fullRequest)
     fullRefresh = queryClient.refetchQueries({ queryKey: [id], exact: true })
     await vi.waitFor(() => expect(calls).toEqual([`full`, `full`]))
@@ -447,14 +452,23 @@ async function expectFullAndExactResultsKeepLaterValue(
       collection._sync.unloadSubset(exactRequest)
     }
     expect(collection.size).toBe(0)
-  } finally {
-    heldFull.resolve([])
-    await fullRefresh?.catch(() => undefined)
-    collection._sync.unloadSubset(fullRequest)
-    collection._sync.unloadSubset(exactRequest)
-    await collection.cleanup()
-    queryClient.clear()
-  }
+  }, [
+    ['heldFull.resolve([])', () => heldFull.resolve([])],
+    [
+      'await fullRefresh?.catch(() => undefined)',
+      () => fullRefresh?.catch(() => undefined),
+    ],
+    [
+      'collection._sync.unloadSubset(fullRequest)',
+      () => collection._sync.unloadSubset(fullRequest),
+    ],
+    [
+      'collection._sync.unloadSubset(exactRequest)',
+      () => collection._sync.unloadSubset(exactRequest),
+    ],
+    ['await collection.cleanup()', () => collection.cleanup()],
+    ['queryClient.clear()', () => queryClient.clear()],
+  ])
 }
 
 /**
@@ -503,7 +517,7 @@ async function expectPendingFullSourceNeedsAppliedEvidence(): Promise<void> {
       .where(({ row }) => eq(row.group, `a`))
       .select(({ row }) => ({ id: row.id })),
   )
-  try {
+  return checkPublicCleanupWitness(async () => {
     const fullPreload = full.preload()
     await vi.waitFor(() => expect(requests).toEqual([`full`]))
     let filteredSettled = false
@@ -523,13 +537,13 @@ async function expectPendingFullSourceNeedsAppliedEvidence(): Promise<void> {
       `a1`,
       `b1`,
     ])
-  } finally {
-    resolveFull?.(fullRows)
-    await full.cleanup()
-    await filtered.cleanup()
-    await collection.cleanup()
-    queryClient.clear()
-  }
+  }, [
+    ['resolveFull?.(fullRows)', () => resolveFull?.(fullRows)],
+    ['await full.cleanup()', () => full.cleanup()],
+    ['await filtered.cleanup()', () => filtered.cleanup()],
+    ['await collection.cleanup()', () => collection.cleanup()],
+    ['queryClient.clear()', () => queryClient.clear()],
+  ])
 }
 
 /**
@@ -614,7 +628,7 @@ async function expectFullSourceReuseWaitsForApplication(
   let unsubscribe = () => {}
   let fullAcquisition: true | Promise<void> | undefined
   let revalidation: Promise<void> | undefined
-  try {
+  return checkPublicCleanupWitness(async () => {
     if (previousFullResult) {
       fullAcquisition = collection._sync.loadSubset(fullDemand)
       if (fullAcquisition !== true) await fullAcquisition
@@ -696,18 +710,34 @@ async function expectFullSourceReuseWaitsForApplication(
     if (fullAcquisition !== true) await fullAcquisition
     await revalidation
     expect(collection.has(`a2`)).toBe(true)
-  } finally {
-    holdCommit = false
-    commitGate.resolve()
-    collection.deferDataRefresh = null
-    application.resolve()
-    response.resolve(fullRows)
-    unsubscribe()
-    collection._sync.unloadSubset(filteredDemand)
-    collection._sync.unloadSubset(fullDemand)
-    await collection.cleanup()
-    queryClient.clear()
-  }
+  }, [
+    [
+      'holdCommit = false',
+      () => {
+        holdCommit = false
+      },
+    ],
+    ['commitGate.resolve()', () => commitGate.resolve()],
+    [
+      'collection.deferDataRefresh = null',
+      () => {
+        collection.deferDataRefresh = null
+      },
+    ],
+    ['application.resolve()', () => application.resolve()],
+    ['response.resolve(fullRows)', () => response.resolve(fullRows)],
+    ['unsubscribe()', () => unsubscribe()],
+    [
+      'collection._sync.unloadSubset(filteredDemand)',
+      () => collection._sync.unloadSubset(filteredDemand),
+    ],
+    [
+      'collection._sync.unloadSubset(fullDemand)',
+      () => collection._sync.unloadSubset(fullDemand),
+    ],
+    ['await collection.cleanup()', () => collection.cleanup()],
+    ['queryClient.clear()', () => queryClient.clear()],
+  ])
 }
 
 /**
@@ -756,7 +786,7 @@ async function expectFilteredDemandAfterDirectWriteAvoidsRedundantFetch(): Promi
       .where(({ row }) => eq(row.group, `b`))
       .select(({ row }) => ({ id: row.id })),
   )
-  try {
+  return checkPublicCleanupWitness(async () => {
     await full.preload()
     expect(requests).toEqual([`full`])
     const fullQuery = queryClient.getQueryCache().find({
@@ -775,12 +805,12 @@ async function expectFilteredDemandAfterDirectWriteAvoidsRedundantFetch(): Promi
       `a1`,
       `b1`,
     ])
-  } finally {
-    await full.cleanup()
-    await filtered.cleanup()
-    await collection.cleanup()
-    queryClient.clear()
-  }
+  }, [
+    ['await full.cleanup()', () => full.cleanup()],
+    ['await filtered.cleanup()', () => filtered.cleanup()],
+    ['await collection.cleanup()', () => collection.cleanup()],
+    ['queryClient.clear()', () => queryClient.clear()],
+  ])
 }
 
 /**
@@ -829,7 +859,7 @@ async function expectFinalFullSourceDependentCancelsFetch(): Promise<void> {
       .where(({ row }) => eq(row.group, `a`))
       .select(({ row }) => ({ id: row.id })),
   )
-  try {
+  return checkPublicCleanupWitness(async () => {
     await full.preload()
     await filtered.preload()
     expect(requests).toBe(1)
@@ -847,13 +877,13 @@ async function expectFinalFullSourceDependentCancelsFetch(): Promise<void> {
     await invalidation
     expect(collection.size).toBe(0)
     expect(collection.has(`late`)).toBe(false)
-  } finally {
-    resolveHeldFetch?.([])
-    await full.cleanup()
-    await filtered.cleanup()
-    await collection.cleanup()
-    queryClient.clear()
-  }
+  }, [
+    ['resolveHeldFetch?.([])', () => resolveHeldFetch?.([])],
+    ['await full.cleanup()', () => full.cleanup()],
+    ['await filtered.cleanup()', () => filtered.cleanup()],
+    ['await collection.cleanup()', () => collection.cleanup()],
+    ['queryClient.clear()', () => queryClient.clear()],
+  ])
 }
 
 /**
@@ -902,7 +932,7 @@ async function expectIgnoredSignalLetsSharedFetchFinish(
   const firstDemand: LoadSubsetOptions =
     scope === `full-source` ? {} : { where: filter }
   let invalidation: Promise<void> | undefined
-  try {
+  return checkPublicCleanupWitness(async () => {
     await collection._sync.loadSubset(firstDemand)
     await collection._sync.loadSubset(filteredDemand)
     expect(requests).toBe(1)
@@ -921,12 +951,15 @@ async function expectIgnoredSignalLetsSharedFetchFinish(
       expect(queryClient.getQueryData(sharedKey)).toEqual(replacement),
     )
     expect(collection.size).toBe(0)
-  } finally {
-    response.resolve(replacement)
-    await invalidation?.catch(() => undefined)
-    await collection.cleanup()
-    queryClient.clear()
-  }
+  }, [
+    ['response.resolve(replacement)', () => response.resolve(replacement)],
+    [
+      'await invalidation?.catch(() => undefined)',
+      () => invalidation?.catch(() => undefined),
+    ],
+    ['await collection.cleanup()', () => collection.cleanup()],
+    ['queryClient.clear()', () => queryClient.clear()],
+  ])
 }
 
 /**
@@ -977,7 +1010,7 @@ async function expectEqualQueryPeerGetsLiveSignal(
         )
   const first = makeView()
   const peer = makeView()
-  try {
+  return checkPublicCleanupWitness(async () => {
     await first.preload()
     await peer.preload()
     expect(queryFn).toHaveBeenCalledOnce()
@@ -995,12 +1028,12 @@ async function expectEqualQueryPeerGetsLiveSignal(
         (isFiltered) => isFiltered === (scope === `filtered`),
       ),
     ).toBe(true)
-  } finally {
-    await first.cleanup()
-    await peer.cleanup()
-    await collection.cleanup()
-    queryClient.clear()
-  }
+  }, [
+    ['await first.cleanup()', () => first.cleanup()],
+    ['await peer.cleanup()', () => peer.cleanup()],
+    ['await collection.cleanup()', () => collection.cleanup()],
+    ['queryClient.clear()', () => queryClient.clear()],
+  ])
 }
 
 /**
@@ -1058,7 +1091,7 @@ async function expectEqualFilteredPeerKeepsInFlightSignal(): Promise<void> {
   const first = makeView()
   const peer = makeView()
   let invalidation: Promise<void> | undefined
-  try {
+  return checkPublicCleanupWitness(async () => {
     await first.preload()
     await peer.preload()
     expect(queryFn).toHaveBeenCalledOnce()
@@ -1072,14 +1105,17 @@ async function expectEqualFilteredPeerKeepsInFlightSignal(): Promise<void> {
     response.resolve(replacement)
     await invalidation
     await vi.waitFor(() => expect(peer.has(`a2`)).toBe(true))
-  } finally {
-    response.resolve(replacement)
-    await invalidation?.catch(() => undefined)
-    await first.cleanup()
-    await peer.cleanup()
-    await collection.cleanup()
-    queryClient.clear()
-  }
+  }, [
+    ['response.resolve(replacement)', () => response.resolve(replacement)],
+    [
+      'await invalidation?.catch(() => undefined)',
+      () => invalidation?.catch(() => undefined),
+    ],
+    ['await first.cleanup()', () => first.cleanup()],
+    ['await peer.cleanup()', () => peer.cleanup()],
+    ['await collection.cleanup()', () => collection.cleanup()],
+    ['queryClient.clear()', () => queryClient.clear()],
+  ])
 }
 
 /**
@@ -1288,7 +1324,7 @@ async function expectForeignQueryFnUsesLiveSharedSignal(): Promise<void> {
   )
   let sourceB: ReturnType<typeof createSource> | undefined
   let fullB: ReturnType<typeof createLiveQueryCollection> | undefined
-  try {
+  return checkPublicCleanupWitness(async () => {
     await fullA.preload()
     await filteredA.preload()
     sourceB = createSource(`B`)
@@ -1305,14 +1341,14 @@ async function expectForeignQueryFnUsesLiveSharedSignal(): Promise<void> {
     await queryClient.invalidateQueries({ queryKey: [id], exact: true })
     expect(providerCalls.at(-1)).toEqual({ owner: `B`, aborted: false })
     await vi.waitFor(() => expect(filteredA.has(`a2`)).toBe(true))
-  } finally {
-    await fullA.cleanup()
-    await filteredA.cleanup()
-    await fullB?.cleanup()
-    await sourceA.cleanup()
-    await sourceB?.cleanup()
-    queryClient.clear()
-  }
+  }, [
+    ['await fullA.cleanup()', () => fullA.cleanup()],
+    ['await filteredA.cleanup()', () => filteredA.cleanup()],
+    ['await fullB?.cleanup()', () => fullB?.cleanup()],
+    ['await sourceA.cleanup()', () => sourceA.cleanup()],
+    ['await sourceB?.cleanup()', () => sourceB?.cleanup()],
+    ['queryClient.clear()', () => queryClient.clear()],
+  ])
 }
 
 /**
@@ -1372,7 +1408,7 @@ async function expectForeignOwnerReleaseKeepsInFlightSignal(
   let invalidation: Promise<void> | undefined
   let releasedB = false
   let releasedA = false
-  try {
+  return checkPublicCleanupWitness(async () => {
     await sourceA._sync.loadSubset(firstDemand)
     sourceB = makeSource(`B`)
     await sourceB._sync.loadSubset(secondDemand)
@@ -1404,21 +1440,34 @@ async function expectForeignOwnerReleaseKeepsInFlightSignal(
       await invalidation
       await vi.waitFor(() => expect(sourceA.has(`a2`)).toBe(true))
     }
-  } finally {
-    response.resolve(replacement)
-    await invalidation?.catch(() => undefined)
-    if (sourceB && !releasedB) {
-      secondSignal.abort()
-      sourceB._sync.unloadSubset(secondDemand)
-    }
-    if (!releasedA) {
-      firstSignal.abort()
-      sourceA._sync.unloadSubset(firstDemand)
-    }
-    await sourceA.cleanup()
-    await sourceB?.cleanup()
-    queryClient.clear()
-  }
+  }, [
+    ['response.resolve(replacement)', () => response.resolve(replacement)],
+    [
+      'await invalidation?.catch(() => undefined)',
+      () => invalidation?.catch(() => undefined),
+    ],
+    [
+      'release second source if still owned',
+      () => {
+        if (sourceB && !releasedB) {
+          secondSignal.abort()
+          sourceB._sync.unloadSubset(secondDemand)
+        }
+      },
+    ],
+    [
+      'release first source if still owned',
+      () => {
+        if (!releasedA) {
+          firstSignal.abort()
+          sourceA._sync.unloadSubset(firstDemand)
+        }
+      },
+    ],
+    ['await sourceA.cleanup()', () => sourceA.cleanup()],
+    ['await sourceB?.cleanup()', () => sourceB?.cleanup()],
+    ['queryClient.clear()', () => queryClient.clear()],
+  ])
 }
 
 async function expectInitialQueryFailureStatus(): Promise<void> {
@@ -1449,7 +1498,7 @@ async function expectInitialQueryFailureStatus(): Promise<void> {
     live.preload(),
   ])
 
-  try {
+  return checkPublicCleanupWitness(async () => {
     await vi.waitFor(() => {
       expect(collection.utils.lastError).toBe(error)
       expect(collection.utils.isError).toBe(true)
@@ -1475,12 +1524,12 @@ async function expectInitialQueryFailureStatus(): Promise<void> {
     })
     await expect(collection.preload()).resolves.toBeUndefined()
     await expect(live.preload()).resolves.toBeUndefined()
-  } finally {
-    await live.cleanup()
-    await collection.cleanup()
-    queryClient.clear()
-    loggedError.mockRestore()
-  }
+  }, [
+    ['await live.cleanup()', () => live.cleanup()],
+    ['await collection.cleanup()', () => collection.cleanup()],
+    ['queryClient.clear()', () => queryClient.clear()],
+    ['loggedError.mockRestore()', () => loggedError.mockRestore()],
+  ])
 }
 
 async function expectLateDependentObservesInitialFailure(): Promise<void> {
@@ -1509,16 +1558,21 @@ async function expectLateDependentObservesInitialFailure(): Promise<void> {
   const livePreload = live.preload()
   void livePreload.catch(() => undefined)
 
-  try {
+  return checkPublicCleanupWitness(async () => {
     expect(live.status).toBe(`error`)
     await expect(livePreload).rejects.toThrow()
-  } finally {
-    await live.cleanup()
-    await collection.cleanup()
-    await Promise.allSettled([livePreload])
-    queryClient.clear()
-    loggedError.mockRestore()
-  }
+  }, [
+    ['await live.cleanup()', () => live.cleanup()],
+    ['await collection.cleanup()', () => collection.cleanup()],
+    [
+      'await Promise.allSettled([livePreload])',
+      async () => {
+        await Promise.allSettled([livePreload])
+      },
+    ],
+    ['queryClient.clear()', () => queryClient.clear()],
+    ['loggedError.mockRestore()', () => loggedError.mockRestore()],
+  ])
 }
 
 async function expectEveryFailedSourceToRecover(): Promise<void> {
@@ -1572,7 +1626,7 @@ async function expectEveryFailedSourceToRecover(): Promise<void> {
   const preload = live.preload()
   void preload.catch(() => undefined)
 
-  try {
+  return checkPublicCleanupWitness(async () => {
     left.fail()
     right.fail()
     await expect(preload).rejects.toThrow()
@@ -1587,13 +1641,18 @@ async function expectEveryFailedSourceToRecover(): Promise<void> {
     await expect(live.preload()).resolves.toBeUndefined()
     expect(live.status).toBe(`ready`)
     expect(live.toArray.map((row) => row.id)).toEqual([`shared`])
-  } finally {
-    await live.cleanup()
-    await left.collection.cleanup()
-    await right.collection.cleanup()
-    await Promise.allSettled([preload])
-    loggedError.mockRestore()
-  }
+  }, [
+    ['await live.cleanup()', () => live.cleanup()],
+    ['await left.collection.cleanup()', () => left.collection.cleanup()],
+    ['await right.collection.cleanup()', () => right.collection.cleanup()],
+    [
+      'await Promise.allSettled([preload])',
+      async () => {
+        await Promise.allSettled([preload])
+      },
+    ],
+    ['loggedError.mockRestore()', () => loggedError.mockRestore()],
+  ])
 }
 
 async function expectRefetchFailureKeepsReadySnapshot(): Promise<void> {
@@ -1620,7 +1679,7 @@ async function expectRefetchFailureKeepsReadySnapshot(): Promise<void> {
     query.from({ row: collection }).select(({ row }) => ({ id: row.id })),
   )
 
-  try {
+  return checkPublicCleanupWitness(async () => {
     await live.preload()
     await collection.utils.refetch()
     await vi.waitFor(() => {
@@ -1630,12 +1689,12 @@ async function expectRefetchFailureKeepsReadySnapshot(): Promise<void> {
     expect(live.status).toBe(`ready`)
     expect(collection.get(`cached`)).toBeDefined()
     expect(live.get(`cached`)).toBeDefined()
-  } finally {
-    await live.cleanup()
-    await collection.cleanup()
-    queryClient.clear()
-    loggedError.mockRestore()
-  }
+  }, [
+    ['await live.cleanup()', () => live.cleanup()],
+    ['await collection.cleanup()', () => collection.cleanup()],
+    ['queryClient.clear()', () => queryClient.clear()],
+    ['loggedError.mockRestore()', () => loggedError.mockRestore()],
+  ])
 }
 
 async function expectDeferredStartupReadyDoesNotOverrideError(): Promise<void> {
@@ -1725,7 +1784,7 @@ async function expectDeferredStartupReadyDoesNotOverrideError(): Promise<void> {
   collection._lifecycle.setStatus(`loading`)
   const secondSync = originalSync.sync({ ...syncParams, metadata })
 
-  try {
+  return checkPublicCleanupWitness(async () => {
     expect(collection.status).toBe(`error`)
     await vi.waitFor(() => expect(scanPersistedRows).toHaveBeenCalledOnce())
     releaseScan()
@@ -1733,16 +1792,21 @@ async function expectDeferredStartupReadyDoesNotOverrideError(): Promise<void> {
     for (let turn = 0; turn < 10; turn++) await Promise.resolve()
     expect(collection.status).toBe(`error`)
     expect(collection.utils.lastError).toBe(queryError)
-  } finally {
-    if (typeof secondSync === `function`) {
-      await secondSync()
-    } else {
-      await secondSync?.cleanup?.()
-    }
-    await collection.cleanup()
-    queryClient.clear()
-    loggedError.mockRestore()
-  }
+  }, [
+    [
+      'finish second sync or clean up its Collection',
+      async () => {
+        if (typeof secondSync === `function`) {
+          await secondSync()
+        } else {
+          await secondSync?.cleanup?.()
+        }
+      },
+    ],
+    ['await collection.cleanup()', () => collection.cleanup()],
+    ['queryClient.clear()', () => queryClient.clear()],
+    ['loggedError.mockRestore()', () => loggedError.mockRestore()],
+  ])
 }
 
 async function expectEquivalentPredicatesShareOneLoad(
@@ -1777,7 +1841,7 @@ async function expectEquivalentPredicatesShareOneLoad(
       break
   }
 
-  try {
+  return checkPublicCleanupWitness(async () => {
     await collection._sync.loadSubset({ where: first })
     await collection._sync.loadSubset({ where: second })
     try {
@@ -1785,10 +1849,10 @@ async function expectEquivalentPredicatesShareOneLoad(
     } catch (error) {
       throw new TraceAssertionError(0, error)
     }
-  } finally {
-    await collection.cleanup()
-    queryClient.clear()
-  }
+  }, [
+    ['await collection.cleanup()', () => collection.cleanup()],
+    ['queryClient.clear()', () => queryClient.clear()],
+  ])
 }
 
 async function expectEquivalentComparisonValuesShareOneLoad(
@@ -1801,7 +1865,7 @@ async function expectEquivalentComparisonValuesShareOneLoad(
   )
   const value = new IR.PropRef([`value`])
 
-  try {
+  return checkPublicCleanupWitness(async () => {
     await collection._sync.loadSubset({
       where: new IR.Func(`eq`, [value, new IR.Value(firstValue)]),
     })
@@ -1809,10 +1873,10 @@ async function expectEquivalentComparisonValuesShareOneLoad(
       where: new IR.Func(`eq`, [value, new IR.Value(secondValue)]),
     })
     expect(queryFn).toHaveBeenCalledOnce()
-  } finally {
-    await collection.cleanup()
-    queryClient.clear()
-  }
+  }, [
+    ['await collection.cleanup()', () => collection.cleanup()],
+    ['queryClient.clear()', () => queryClient.clear()],
+  ])
 }
 
 function createOnDemandCollection(idPrefix: string, rows: Array<Row>) {
@@ -1860,7 +1924,7 @@ async function expectRefetchRevalidatesExistingDemand(): Promise<void> {
     }),
   )
 
-  try {
+  return checkPublicCleanupWitness(async () => {
     await collection._sync.loadSubset({})
     expect(collection.has(`initial`)).toBe(true)
 
@@ -1883,10 +1947,10 @@ async function expectRefetchRevalidatesExistingDemand(): Promise<void> {
     expect(
       queryClient.getQueryCache().findAll({ queryKey: [id] }),
     ).toHaveLength(1)
-  } finally {
-    await collection.cleanup()
-    queryClient.clear()
-  }
+  }, [
+    ['await collection.cleanup()', () => collection.cleanup()],
+    ['queryClient.clear()', () => queryClient.clear()],
+  ])
 }
 
 async function expectRefetchRevalidatesCachedDemand(): Promise<void> {
@@ -1916,15 +1980,15 @@ async function expectRefetchRevalidatesCachedDemand(): Promise<void> {
     }),
   )
 
-  try {
+  return checkPublicCleanupWitness(async () => {
     await collection._sync.loadSubset({ refetch: true })
     expect(queryFn).toHaveBeenCalledOnce()
     expect(collection.has(`cached`)).toBe(false)
     expect(collection.has(`fresh`)).toBe(true)
-  } finally {
-    await collection.cleanup()
-    queryClient.clear()
-  }
+  }, [
+    ['await collection.cleanup()', () => collection.cleanup()],
+    ['queryClient.clear()', () => queryClient.clear()],
+  ])
 }
 
 async function expectDeferredRefetchWaitsForApplication(
@@ -1951,7 +2015,7 @@ async function expectDeferredRefetchWaitsForApplication(
   const barrier = createDeferred<void>()
   let refetch: Promise<void> | undefined
 
-  try {
+  return checkPublicCleanupWitness(async () => {
     if (demand === `existing`) {
       await collection._sync.loadSubset({})
       expect(collection.has(`old`)).toBe(true)
@@ -1980,13 +2044,21 @@ async function expectDeferredRefetchWaitsForApplication(
     barrier.resolve()
     await refetch
     await vi.waitFor(() => expect(collection.has(`fresh`)).toBe(true))
-  } finally {
-    collection.deferDataRefresh = null
-    barrier.resolve()
-    await refetch?.catch(() => undefined)
-    await collection.cleanup()
-    queryClient.clear()
-  }
+  }, [
+    [
+      'collection.deferDataRefresh = null',
+      () => {
+        collection.deferDataRefresh = null
+      },
+    ],
+    ['barrier.resolve()', () => barrier.resolve()],
+    [
+      'await refetch?.catch(() => undefined)',
+      () => refetch?.catch(() => undefined),
+    ],
+    ['await collection.cleanup()', () => collection.cleanup()],
+    ['queryClient.clear()', () => queryClient.clear()],
+  ])
 }
 
 async function expectRefetchWaitsForPostWriteAuthority(): Promise<void> {
@@ -2019,7 +2091,7 @@ async function expectRefetchWaitsForPostWriteAuthority(): Promise<void> {
   let initialDemand: Promise<void> | undefined
   let refetchDemand: Promise<void> | undefined
 
-  try {
+  return checkPublicCleanupWitness(async () => {
     collection.utils.writeInsert({ id: `optimistic` })
     initialDemand = collection._sync.loadSubset({}) as Promise<void>
     await initialStarted.promise
@@ -2044,16 +2116,21 @@ async function expectRefetchWaitsForPostWriteAuthority(): Promise<void> {
     authoritativeResult.resolve([{ id: `authoritative` }])
     await Promise.all([initialDemand, refetchDemand])
     expect(collection.has(`authoritative`)).toBe(true)
-  } finally {
-    initialResult.resolve([])
-    authoritativeResult.resolve([])
-    await Promise.allSettled([
-      initialDemand ?? Promise.resolve(),
-      refetchDemand ?? Promise.resolve(),
-    ])
-    await collection.cleanup()
-    queryClient.clear()
-  }
+  }, [
+    ['initialResult.resolve([])', () => initialResult.resolve([])],
+    ['authoritativeResult.resolve([])', () => authoritativeResult.resolve([])],
+    [
+      'settle initial and refetch demands',
+      async () => {
+        await Promise.allSettled([
+          initialDemand ?? Promise.resolve(),
+          refetchDemand ?? Promise.resolve(),
+        ])
+      },
+    ],
+    ['await collection.cleanup()', () => collection.cleanup()],
+    ['queryClient.clear()', () => queryClient.clear()],
+  ])
 }
 
 async function expectReleasedRefetchRejects(): Promise<void> {
@@ -2089,7 +2166,7 @@ async function expectReleasedRefetchRejects(): Promise<void> {
   const request: LoadSubsetOptions = { refetch: true }
   let refetch: Promise<void> | undefined
 
-  try {
+  return checkPublicCleanupWitness(async () => {
     refetch = collection._sync.loadSubset(request) as Promise<void>
     await started.promise
     expect(signal?.aborted).toBe(false)
@@ -2098,11 +2175,14 @@ async function expectReleasedRefetchRejects(): Promise<void> {
 
     expect(signal?.aborted).toBe(true)
     await expect(refetch).rejects.toMatchObject({ name: `AbortError` })
-  } finally {
-    await collection.cleanup()
-    queryClient.clear()
-    await refetch?.catch(() => undefined)
-  }
+  }, [
+    ['await collection.cleanup()', () => collection.cleanup()],
+    ['queryClient.clear()', () => queryClient.clear()],
+    [
+      'await refetch?.catch(() => undefined)',
+      () => refetch?.catch(() => undefined),
+    ],
+  ])
 }
 
 type IdentityForm =
@@ -2398,19 +2478,24 @@ async function expectFinalOwnerCleanupAbortsQuery(): Promise<void> {
   )
   const preloadOutcome = live.preload().catch((error: unknown) => error)
 
-  try {
+  return checkPublicCleanupWitness(async () => {
     await started
     expect(queryFn).toHaveBeenCalledOnce()
     expect(capturedSignal?.aborted).toBe(false)
 
     await live.cleanup()
     expect(capturedSignal?.aborted).toBe(true)
-  } finally {
-    await live.cleanup()
-    await source.cleanup()
-    queryClient.clear()
-    await preloadOutcome
-  }
+  }, [
+    ['await live.cleanup()', () => live.cleanup()],
+    ['await source.cleanup()', () => source.cleanup()],
+    ['queryClient.clear()', () => queryClient.clear()],
+    [
+      'await preloadOutcome',
+      async () => {
+        await preloadOutcome
+      },
+    ],
+  ])
 }
 
 type SharedQueryCancellationSnapshot = {
@@ -2540,7 +2625,7 @@ async function expectRemountAfterAbortStartsFreshQuery(): Promise<void> {
   const firstOutcome = first.preload().catch((error: unknown) => error)
   let second: ReturnType<typeof buildLive> | undefined
 
-  try {
+  return checkPublicCleanupWitness(async () => {
     await firstStarted
     await first.cleanup()
     await firstOutcome
@@ -2549,12 +2634,12 @@ async function expectRemountAfterAbortStartsFreshQuery(): Promise<void> {
     const rows = await second.toArrayWhenReady()
     expect(queryFn).toHaveBeenCalledTimes(2)
     expect(rows.map(({ id: rowId }) => rowId)).toEqual([`fresh`])
-  } finally {
-    await first.cleanup()
-    await second?.cleanup()
-    await source.cleanup()
-    queryClient.clear()
-  }
+  }, [
+    ['await first.cleanup()', () => first.cleanup()],
+    ['await second?.cleanup()', () => second?.cleanup()],
+    ['await source.cleanup()', () => source.cleanup()],
+    ['queryClient.clear()', () => queryClient.clear()],
+  ])
 }
 
 type RetiredOutcome =
@@ -3202,7 +3287,7 @@ describe(`loadSubset lifecycle oracle`, () => {
             subscription.unsubscribe()
           }
         })
-      try {
+      return checkPublicCleanupWitness(async () => {
         nextResult.resolve([
           { id: `x`, group: `older` },
           { id: `y`, group: `fetched` },
@@ -3212,9 +3297,7 @@ describe(`loadSubset lifecycle oracle`, () => {
         expect(releaseCount).toBe(1)
         expect(collection.subscriberCount).toBe(0)
         expect(collection.has(`y`)).toBe(false)
-      } finally {
-        stopCacheListener()
-      }
+      }, [['stopCacheListener()', () => stopCacheListener()]])
     }, [
       [`provider`, () => nextResult.resolve([])],
       [`subscription`, () => subscription.unsubscribe()],
@@ -4172,7 +4255,7 @@ describe(`loadSubset lifecycle oracle`, () => {
         startSync: true,
       }),
     )
-    try {
+    return checkPublicCleanupWitness(async () => {
       await collection.preload()
       expect(collection.has(`before`)).toBe(true)
       expect(collection.subscriberCount).toBe(0)
@@ -4184,10 +4267,10 @@ describe(`loadSubset lifecycle oracle`, () => {
       await collection.utils.refetch()
       expect(queryFn).toHaveBeenCalledTimes(2)
       expect(collection.has(`after`)).toBe(true)
-    } finally {
-      await collection.cleanup()
-      queryClient.clear()
-    }
+    }, [
+      ['await collection.cleanup()', () => collection.cleanup()],
+      ['queryClient.clear()', () => queryClient.clear()],
+    ])
   })
 
   /**
@@ -4244,6 +4327,351 @@ describe(`loadSubset lifecycle oracle`, () => {
       [`Collection`, () => collection.cleanup()],
       [`Query client`, () => queryClient.clear()],
     ])
+  })
+
+  /**
+   * The generated lease grammar starts one real public snapshot against a
+   * held provider, optionally joins an equal peer, then retires the first
+   * caller by signal, subscription release, both orders, or Collection
+   * cleanup. A peer may also release while the provider is held. The provider
+   * succeeds or fails only after those actions. Joining after final release
+   * is excluded: it would start a different physical fetch and needs a
+   * second-result model. Both release orders exercise idempotence at distinct
+   * adapter boundaries.
+   *
+   * The independent model below counts active callers, not Query observers or
+   * Query DB owner maps. An active caller gets the source result; an explicit
+   * caller abort rejects its still-owned load. The raw adapter promise handed
+   * to onLoadSubsetResult has no specified caller outcome after unsubscribe or
+   * Collection cleanup. When both happen in one turn, Core's synchronous
+   * release can precede Query DB's queued abort handling in either authored
+   * order. Those outcome fields are omitted from comparison.
+   * A successful source row is public exactly while a caller still owns it.
+   * A consumed physical signal aborts only when no caller remains. The driver
+   * compares load outcomes where promised and complete Collection rows before
+   * delivery, after settlement, after the first subscriber releases, and
+   * after the peer releases. The intermediate checkpoint rejects a duplicate
+   * release that steals the peer's row. A peer release before provider
+   * settlement checks that an already aborted caller has no hidden observer
+   * lease. Query call count and a consumed physical signal show which path
+   * ran. The fixed ignored-signal cache witness above owns the installed
+   * Query Core behavior; an unobserved request is permitted to finish without
+   * retaining cache data. This initial-fetch grammar does not cover accepted
+   * commits, refetch, or synchronous callback reentry.
+   */
+  type LeaseHistory = {
+    peer: boolean
+    peerReleaseBeforeProvider?: boolean
+    consumesSignal: boolean
+    firstAction:
+      | `none`
+      | `unload`
+      | `abort`
+      | `abort-then-unload`
+      | `unload-then-abort`
+      | `cleanup`
+    providerOutcome: `success` | `error`
+  }
+
+  function expectedLeaseHistory(history: LeaseHistory) {
+    const firstActive = history.firstAction === `none`
+    const peerActive =
+      history.peer &&
+      history.firstAction !== `cleanup` &&
+      !history.peerReleaseBeforeProvider
+    const sourceSucceeded = history.providerOutcome === `success`
+    const firstOutcomePromised = firstActive || history.firstAction === `abort`
+    return {
+      beforeProviderRows: [] as Array<string>,
+      ...(history.consumesSignal
+        ? { physicalAborted: !firstActive && !peerActive }
+        : {}),
+      ...(firstOutcomePromised
+        ? {
+            firstOutcome: firstActive
+              ? sourceSucceeded
+                ? `fulfilled`
+                : `provider-error`
+              : `AbortError`,
+          }
+        : {}),
+      ...(peerActive
+        ? { peerOutcome: sourceSucceeded ? `fulfilled` : `provider-error` }
+        : {}),
+      afterProviderRows:
+        sourceSucceeded && (firstActive || peerActive) ? [`server`] : [],
+      afterFirstReleaseRows: sourceSucceeded && peerActive ? [`server`] : [],
+      afterFinalReleaseRows: [] as Array<string>,
+      providerCalls: 1,
+      collectionStatus:
+        history.firstAction === `cleanup` ? `cleaned-up` : `ready`,
+    }
+  }
+
+  async function observeLeaseHistory(
+    history: LeaseHistory,
+    expected: ReturnType<typeof expectedLeaseHistory>,
+  ) {
+    const queryClient = createQueryClient()
+    const id = `generated-lease-history-${collectionSequence++}`
+    const started = createDeferred<void>()
+    const held = createDeferred<Array<Row>>()
+    const providerError = new Error(`provider failed`)
+    let physicalSignal: AbortSignal | undefined
+    const queryFn = vi.fn((context: QueryFunctionContext) => {
+      if (history.consumesSignal) physicalSignal = context.signal
+      started.resolve()
+      return held.promise
+    })
+    const collection = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+      }),
+    )
+    const first = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    const peer = history.peer
+      ? collection.subscribeChanges(() => {}, { includeInitialState: false })
+      : undefined
+    const caller = new AbortController()
+    let firstLoad: true | Promise<void> | undefined
+    let peerLoad: true | Promise<void> | undefined
+    return checkPublicCleanupWitness(async () => {
+      first.requestSnapshot({
+        signal: caller.signal,
+        onLoadSubsetResult: (load) => {
+          firstLoad = load
+        },
+      })
+      await started.promise
+      if (firstLoad === undefined || firstLoad === true)
+        throw new Error(`The first acquisition did not return a pending load`)
+      void firstLoad.catch(() => undefined)
+      peer?.requestSnapshot({
+        onLoadSubsetResult: (load) => {
+          peerLoad = load
+        },
+      })
+      if (history.peer && (peerLoad === undefined || peerLoad === true))
+        throw new Error(`The peer did not join the pending load`)
+      if (peerLoad && peerLoad !== true) void peerLoad.catch(() => undefined)
+
+      switch (history.firstAction) {
+        case `none`:
+          break
+        case `unload`:
+          first.unsubscribe()
+          break
+        case `abort`:
+          caller.abort()
+          break
+        case `abort-then-unload`:
+          caller.abort()
+          first.unsubscribe()
+          break
+        case `unload-then-abort`:
+          first.unsubscribe()
+          caller.abort()
+          break
+        case `cleanup`:
+          await collection.cleanup()
+          break
+      }
+      if (history.peerReleaseBeforeProvider) peer?.unsubscribe()
+
+      // Core propagates a caller abort to its acquisition in a microtask.
+      await Promise.resolve()
+      const beforeProviderRows = collection.toArray.map((row) => row.id).sort()
+      const physicalAborted = physicalSignal?.aborted
+      if (history.providerOutcome === `success`)
+        held.resolve([{ id: `server` }])
+      else held.reject(providerError)
+      const outcome = async (load: true | Promise<void> | undefined) => {
+        try {
+          await load
+          return `fulfilled`
+        } catch (error) {
+          if (error === providerError) return `provider-error`
+          return error instanceof Error ? error.name : `non-Error rejection`
+        }
+      }
+      const firstOutcome =
+        history.firstAction === `none` || history.firstAction === `abort`
+          ? await outcome(firstLoad)
+          : undefined
+      const peerOutcome =
+        history.peer &&
+        history.firstAction !== `cleanup` &&
+        !history.peerReleaseBeforeProvider
+          ? await outcome(peerLoad)
+          : undefined
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      const afterProviderRows = collection.toArray.map((row) => row.id).sort()
+      first.unsubscribe()
+      const afterFirstReleaseRows = collection.toArray
+        .map((row) => row.id)
+        .sort()
+      peer?.unsubscribe()
+      const afterFinalReleaseRows = collection.toArray
+        .map((row) => row.id)
+        .sort()
+      const observed = {
+        beforeProviderRows,
+        ...(history.consumesSignal ? { physicalAborted } : {}),
+        ...(history.firstAction === `none` || history.firstAction === `abort`
+          ? { firstOutcome }
+          : {}),
+        ...(history.peer &&
+        history.firstAction !== `cleanup` &&
+        !history.peerReleaseBeforeProvider
+          ? { peerOutcome }
+          : {}),
+        afterProviderRows,
+        afterFirstReleaseRows,
+        afterFinalReleaseRows,
+        providerCalls: queryFn.mock.calls.length,
+        collectionStatus: collection.status,
+      }
+      expect(observed, JSON.stringify({ history, observed, expected })).toEqual(
+        expected,
+      )
+      return observed
+    }, [
+      [`provider`, () => held.resolve([])],
+      [`first subscription`, () => first.unsubscribe()],
+      [`peer subscription`, () => peer?.unsubscribe()],
+      [`Collection`, () => collection.cleanup()],
+      [`Query client`, () => queryClient.clear()],
+    ])
+  }
+
+  const leaseHistoryArbitrary = fc
+    .record({
+      peer: fc.boolean(),
+      peerReleaseBeforeProvider: fc.boolean(),
+      consumesSignal: fc.boolean(),
+      firstAction: fc.constantFrom<LeaseHistory[`firstAction`]>(
+        `none`,
+        `unload`,
+        `abort`,
+        `abort-then-unload`,
+        `unload-then-abort`,
+        `cleanup`,
+      ),
+      providerOutcome: fc.constantFrom<LeaseHistory[`providerOutcome`]>(
+        `success`,
+        `error`,
+      ),
+    })
+    .filter(
+      (history) =>
+        !history.peerReleaseBeforeProvider ||
+        (history.peer && history.firstAction !== `cleanup`),
+    )
+  const leaseHistoryProperty = `query-db.lease-history`
+  const leaseHistoryReplay = readOracleRunConfig()
+
+  // Each named history reaches one boundary that an independent axis changes:
+  // a peer preserves the physical fetch and row; signal consumption controls
+  // transport abort; source failure changes an active caller's outcome; both
+  // double-release orders must leave the peer's row after the first subscriber
+  // releases, then remove it on the peer's release. Cleanup removes both leases
+  // and changes the public Collection status.
+  const namedLeaseHistories = [
+    {
+      peer: false,
+      consumesSignal: false,
+      firstAction: `none`,
+      providerOutcome: `success`,
+    },
+    {
+      peer: false,
+      consumesSignal: true,
+      firstAction: `abort`,
+      providerOutcome: `success`,
+    },
+    {
+      peer: true,
+      consumesSignal: true,
+      firstAction: `abort`,
+      providerOutcome: `success`,
+    },
+    {
+      peer: true,
+      peerReleaseBeforeProvider: true,
+      consumesSignal: true,
+      firstAction: `abort`,
+      providerOutcome: `success`,
+    },
+    {
+      peer: true,
+      peerReleaseBeforeProvider: true,
+      consumesSignal: false,
+      firstAction: `abort`,
+      providerOutcome: `success`,
+    },
+    {
+      peer: false,
+      consumesSignal: false,
+      firstAction: `unload`,
+      providerOutcome: `success`,
+    },
+    {
+      peer: true,
+      consumesSignal: false,
+      firstAction: `abort-then-unload`,
+      providerOutcome: `success`,
+    },
+    {
+      peer: true,
+      consumesSignal: false,
+      firstAction: `unload-then-abort`,
+      providerOutcome: `success`,
+    },
+    {
+      peer: true,
+      consumesSignal: true,
+      firstAction: `cleanup`,
+      providerOutcome: `error`,
+    },
+    {
+      peer: false,
+      consumesSignal: true,
+      firstAction: `none`,
+      providerOutcome: `error`,
+    },
+  ] satisfies ReadonlyArray<LeaseHistory>
+
+  it.each(namedLeaseHistories)(
+    `reconstructs a named lease history: %j`,
+    async (history) => {
+      await observeLeaseHistory(history, expectedLeaseHistory(history))
+    },
+  )
+
+  it(`refines generated caller and peer lease histories`, async () => {
+    if (
+      leaseHistoryReplay.replayPath !== undefined &&
+      leaseHistoryReplay.replayProperty !== leaseHistoryProperty
+    )
+      return
+    const property = fc.asyncProperty(
+      leaseHistoryArbitrary,
+      async (history) => {
+        await observeLeaseHistory(history, expectedLeaseHistory(history))
+      },
+    )
+    const options = oraclePropertyOptions(48, leaseHistoryProperty)
+    if (leaseHistoryReplay.replaySeed === undefined)
+      await fc.assert(property, { ...options, seed: 2_162_2026 })
+    await fc.assert(property, options)
   })
 
   /**
