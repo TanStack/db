@@ -1015,9 +1015,10 @@ repair (an eager source, an index, one order term, no joined filter) returns
 literal `true`, the
 repair settles synchronously,
 so its tie and refill steps finish inside the same graph run and a window move
-that consumes the repair still publishes once. A full-source repair keeps its
-asynchronous settlement. An initial full-source load follows the initial
-synchronous cut described under initial readiness. The
+that consumes the repair still publishes once. A full-source repair keeps
+asynchronous settlement; its scheduling is not part of the initial synchronous
+cut. An initial
+full-source load follows that cut as described under initial readiness. The
 ordered graph's top-K operator owns the local result window. Provider transfer
 remains bounded by `orderBy` and `limit`; local delivery cardinality is a
 separate observation.
@@ -1368,8 +1369,11 @@ view built during a render defers it until a view has a subscriber or a
 preload.
 
 An initial ordered load also has a synchronous observation cut. The initial
-load is an ordinary ordered request or, for a plan that requires the full
-source, its first filtered full-source request. The cut holds when the first
+load is the request chain needed to complete the first ordered window. It may
+start with an ordinary ordered request or, for a plan that requires the full
+source, a filtered full-source request. A full-source fallback after an
+inexpressible boundary is still part of that initial chain while the window
+remains unpublished. The cut holds when the first
 subscriber or preload starts the live-query Collection's sync run, or when its
 source Collections are eager. A sync run that started earlier resumes deferred
 on-demand acquisition through the subscription's restart path, which settles
@@ -1378,10 +1382,14 @@ returns literal `true` after its establishing applied receipts are visible,
 core drains the remaining synchronous ordered continuations and graph work
 before the initiating call stack returns. The live-query Collection rows and
 initial-query readiness are observable at that cut. A Promise result keeps that
-acquisition asynchronous. This cut does not apply to explicit window moves, a
-later full-source fallback, repair other than a bounded prefix repair, truncate
-replay, or framework render timing, and it proves neither source exhaustion nor
-broader source coverage.
+acquisition asynchronous. This cut does not apply to explicit window moves,
+full-source work started after the initial window publishes, repair other than
+a bounded prefix repair, truncate replay, or framework render timing, and it
+proves neither source exhaustion nor broader source coverage.
+The first-publication boundary limits this guarantee; it does not require
+later full-source work to wait for a microtask. A later literal `true`
+full-source fallback without ordering-repair debt may finish in the current
+graph turn.
 
 If any source subscriber adds input to the graph during a synchronous ordered
 continuation, core returns to graph work before deciding whether that ordered
@@ -1526,6 +1534,29 @@ demands, materialization cells, and public facades are the relevant space
 units. Queries without includes retain their original pipeline unless a joined
 custom-key query needs contributor reduction. Inline materialization must not
 create recursive Collection machinery.
+
+A windowed query has an `orderBy`; its window is the ordered view, by offset
+and limit, that `setWindow` moves. A `findOne` is bounded by a top-K too: it
+keeps its compiled limit (1, or 0 for `.limit(0).findOne()`), and `setWindow`
+throws `SetWindowFindOneLimitError` for any other limit. An ordered `findOne`
+has a movable window. An unordered `findOne` is a fixed one-row result that
+accepts only its compiled limit at offset 0; a nonzero offset throws
+`SetWindowRequiresOrderByError`, as `.offset()` without `orderBy` does. A query
+that is neither windowed nor an ordered `findOne` rejects offset moves, and one
+that is neither windowed nor a `findOne` rejects `setWindow`. Only the query's
+own top-K answers `setWindow`; a top-K inside a `from` or joined subquery or an
+include child never does. A windowed query or a `findOne` adds route relations
+for the includes in its own `select` only from the rows it shows, so a row it
+drops activates no bucket and creates no demand. A static filter creates static
+child demand before the query runs only when no enclosing query is windowed or
+a `findOne`, and either the query is neither windowed nor a `findOne`, or it is
+a `findOne` that shows one row for one named correlation value, with no
+`offset`, and offset 0 at start if a window was requested before start. Within
+one graph run, an index-backed top-K can briefly hold a row outside the rows it
+shows once its ordered acquisition completes, and that row's children may load
+(a recorded limit, #2151; the public snapshot stays correct). Includes
+inherited from a `from` subquery and inputs to `fn.select` still route from
+every row before the top-K (a recorded limit).
 
 ## Normative laws
 

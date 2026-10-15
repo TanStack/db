@@ -5734,8 +5734,9 @@ describe(`loadSubset lifecycle oracle`, () => {
    * passive public change listener records any source-row publication after
    * the last lease leaves, including a transient insert later removed. The
    * real path is `requestSnapshot({ refetch: true, signal })`, not a direct
-   * adapter call. Comparisons occur after the held provider settles and after
-   * each remaining owner releases. The raw adapter promise after unsubscribe
+   * adapter call. A caller abort is compared while the provider is still held;
+   * rows and ownership are compared again after the provider settles and each
+   * remaining owner releases. The raw adapter promise after unsubscribe
    * or Collection cleanup has no promised outcome. This bounded grammar does
    * not model a second refetch or an accepted sync transaction. It excludes
    * peer release without a peer, reverse early-release order without an early
@@ -5773,7 +5774,12 @@ describe(`loadSubset lifecycle oracle`, () => {
     return {
       initialRows: [`old`],
       beforeAnswerRows: liveBaseline || liveCaller || livePeer ? [`old`] : [],
-      callerFulfilledBeforeAnswer: false,
+      ...(history.action === `none` || history.action === `abort`
+        ? {
+            callerOutcomeBeforeAnswer:
+              history.action === `abort` ? `AbortError` : `pending`,
+          }
+        : {}),
       ...(history.consumesSignal
         ? { physicalAborted: !liveBaseline && !liveCaller && !livePeer }
         : {}),
@@ -5911,12 +5917,15 @@ describe(`loadSubset lifecycle oracle`, () => {
       if (callerLoad === undefined || callerLoad === true)
         throw new Error(`The public refetch did not return a pending load`)
       liveOwners.caller = true
-      let callerFulfilledBeforeAnswer = false
+      let callerOutcomeBeforeAnswer = `pending`
       void callerLoad.then(
         () => {
-          callerFulfilledBeforeAnswer = true
+          callerOutcomeBeforeAnswer = `fulfilled`
         },
-        () => undefined,
+        (error: unknown) => {
+          callerOutcomeBeforeAnswer =
+            error instanceof Error ? error.name : `non-Error rejection`
+        },
       )
       await started.promise
       peer?.requestSnapshot()
@@ -5970,7 +5979,7 @@ describe(`loadSubset lifecycle oracle`, () => {
       // the provider is still held. A single microtask misses early settlement.
       await new Promise<void>((resolve) => setTimeout(resolve, 0))
       const beforeAnswerRows = publicRows()
-      const callerFulfilledBeforeAnswerObserved = callerFulfilledBeforeAnswer
+      const callerOutcomeBeforeAnswerObserved = callerOutcomeBeforeAnswer
       const physicalAborted = physicalSignal?.aborted
       const observerBeforeAnswer = observerCount()
       if (history.outcome === `success`) held.resolve([{ id: `new` }])
@@ -6007,7 +6016,9 @@ describe(`loadSubset lifecycle oracle`, () => {
       const observed = {
         initialRows,
         beforeAnswerRows,
-        callerFulfilledBeforeAnswer: callerFulfilledBeforeAnswerObserved,
+        ...(history.action === `none` || history.action === `abort`
+          ? { callerOutcomeBeforeAnswer: callerOutcomeBeforeAnswerObserved }
+          : {}),
         ...(history.consumesSignal ? { physicalAborted } : {}),
         observerBeforeAnswer,
         ...(history.action === `none` || history.action === `abort`
@@ -6219,7 +6230,7 @@ describe(`loadSubset lifecycle oracle`, () => {
     await fc.assert(property, options)
   }, 20_000)
 
-  it(`rejects transient unowned source publication and a missed cleanup status`, async () => {
+  it(`rejects delayed caller abort, transient publication, and missed cleanup`, async () => {
     const abandoned: RefetchLeaseHistory = {
       action: `abort`,
       releaseBaseline: true,
@@ -6234,6 +6245,12 @@ describe(`loadSubset lifecycle oracle`, () => {
       abandoned,
       expectedAbandoned,
     )
+    expect(() =>
+      expect({
+        ...observedAbandoned,
+        callerOutcomeBeforeAnswer: `pending`,
+      }).toEqual(expectedAbandoned),
+    ).toThrow()
     expect(() =>
       expect({
         ...observedAbandoned,
@@ -6356,6 +6373,10 @@ describe(`loadSubset lifecycle oracle`, () => {
         (error: unknown) =>
           error instanceof Error ? error.name : `non-Error rejection`,
       )
+      let refetchOutcomeBeforeAnswer = `pending`
+      void refetchOutcome.then((outcome) => {
+        refetchOutcomeBeforeAnswer = outcome
+      })
       await refetchStarted.promise
       caller.abort()
       await new Promise<void>((resolve) => setTimeout(resolve, 0))
@@ -6363,7 +6384,13 @@ describe(`loadSubset lifecycle oracle`, () => {
         rows: publicRows(),
         physicalAborted: physicalSignal?.aborted,
         observers: physicalQuery.getObserversCount(),
-      }).toEqual({ rows: [`old`], physicalAborted: false, observers: 1 })
+        refetchOutcomeBeforeAnswer,
+      }).toEqual({
+        rows: [`old`],
+        physicalAborted: false,
+        observers: 1,
+        refetchOutcomeBeforeAnswer: `AbortError`,
+      })
 
       heldRefetch.resolve([{ id: `new` }])
       expect(await refetchOutcome).toBe(`AbortError`)
@@ -7642,6 +7669,189 @@ describe(`loadSubset lifecycle oracle`, () => {
         [`Collection`, () => collection.cleanup()],
         [`Query client`, () => queryClient.clear()],
         [`Query client mount`, () => queryClient.unmount()],
+      ])
+    },
+  )
+
+  /**
+   * One Query can start fetch B inside fetch A's Collection commit callback.
+   * B may start fetching or pause offline. Query Core then reports B's fetch
+   * action before it reports A's cache success. A's late notification must
+   * not retire B's application record or claim that B succeeded. The
+   * neighboring deferred-start history reverses those cache events.
+   *
+   * This real QueryClient/Collection history holds B's accepted receipt behind
+   * an optimistic mutation, then lets a later unaccepted C cache edit abort
+   * B's caller. The caller must remain pending while B is absent and reject
+   * only after B's receipt applies, with B as the complete public row set.
+   * The cache event order is path evidence; the promise, receipt, and rows are
+   * the public comparison. This controlled callback does not model storage.
+   */
+  it.each([
+    { name: `inside callback`, startBAt: `inside-callback`, pauseB: false },
+    {
+      name: `inside callback while offline`,
+      startBAt: `inside-callback`,
+      pauseB: true,
+    },
+    { name: `after callback`, startBAt: `after-callback`, pauseB: false },
+  ] as const)(
+    `keeps a second fetch receipt when started $name`,
+    async ({ startBAt, pauseB }) => {
+      const id = `overlapping-success-${collectionSequence++}`
+      const queryClient = createQueryClient()
+      const providerB = createDeferred<Array<Row>>()
+      const mutationGate = createDeferred<void>()
+      const mutationStarted = createDeferred<void>()
+      const acceptedB = createDeferred<void>()
+      const laterCommitEntered = createDeferred<void>()
+      const laterCommitGate = createDeferred<void>()
+      const caller = new AbortController()
+      const requestB: LoadSubsetOptions = {
+        refetch: true,
+        signal: caller.signal,
+      }
+      const first: LoadSubsetOptions = {}
+      const cacheActions: Array<string> = []
+      const unsubscribeCache = queryClient
+        .getQueryCache()
+        .subscribe((event) => {
+          if (event.type === `updated`)
+            cacheActions.push(
+              `${event.action.type}:${event.query.state.fetchStatus}`,
+            )
+        })
+      let providerCalls = 0
+      let writes: Array<string> = []
+      let bLoad: Promise<void> | undefined
+      let bOutcome: `pending` | `ready` | `abort` | `other` = `pending`
+      let bReceiptApplied = false
+      const base = queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn: () =>
+          ++providerCalls === 1
+            ? Promise.resolve([{ id: `A` }])
+            : providerB.promise,
+        getKey: (row) => row.id,
+        startSync: true,
+        syncMode: `on-demand`,
+        retry: false,
+        onInsert: async () => {
+          mutationStarted.resolve()
+          await mutationGate.promise
+          return { refetch: false }
+        },
+      })
+      const originalSync = base.sync
+      const collection = createCollection({
+        ...base,
+        sync: {
+          sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+            originalSync.sync({
+              ...params,
+              begin: () => {
+                writes = []
+                params.begin()
+              },
+              write: (change) => {
+                if (change.type !== `delete`) writes.push(change.value.id)
+                params.write(change)
+              },
+              commit: (signal) => {
+                if (writes.includes(`C`)) {
+                  laterCommitEntered.resolve()
+                  return laterCommitGate.promise.then(async () => {
+                    await params.commit(signal)
+                  })
+                }
+                const receipt = params.commit(signal)
+                if (writes.includes(`A`) && !bLoad) {
+                  const startB = () => {
+                    if (pauseB) onlineManager.setOnline(false)
+                    const load = Promise.resolve(
+                      collection._sync.loadSubset(requestB),
+                    ).then(() => undefined)
+                    bLoad = load
+                    void load.then(
+                      () => {
+                        bOutcome = `ready`
+                      },
+                      (error: unknown) => {
+                        bOutcome =
+                          error instanceof Error && error.name === `AbortError`
+                            ? `abort`
+                            : `other`
+                      },
+                    )
+                  }
+                  if (startBAt === `inside-callback`) startB()
+                  else queueMicrotask(startB)
+                }
+                if (writes.includes(`B`)) {
+                  if (receipt === true) bReceiptApplied = true
+                  else
+                    void receipt.then(
+                      () => {
+                        bReceiptApplied = true
+                      },
+                      () => undefined,
+                    )
+                  acceptedB.resolve()
+                  queryClient.setQueryData([id], [{ id: `C` }])
+                  caller.abort()
+                }
+                return receipt
+              },
+            }),
+        },
+      })
+      const rows = () => collection.toArray.map((row) => row.id).sort()
+
+      await checkPublicCleanupWitness(async () => {
+        collection.startSyncImmediate()
+        const aLoad = Promise.resolve(collection._sync.loadSubset(first))
+        void aLoad.catch(() => undefined)
+        await vi.waitFor(() => expect(bLoad).toBeDefined())
+        if (pauseB) onlineManager.setOnline(true)
+        await vi.waitFor(() => expect(providerCalls).toBe(2))
+        const mutation = collection.insert({ id: `local` })
+        await mutationStarted.promise
+        providerB.resolve([{ id: `B` }])
+        await acceptedB.promise
+        await laterCommitEntered.promise
+        const secondFetch = cacheActions.findIndex(
+          (action, index) => index > 0 && action.startsWith(`fetch:`),
+        )
+        const firstSuccess = cacheActions.findIndex((action) =>
+          action.startsWith(`success:`),
+        )
+        expect(secondFetch).toBeGreaterThan(0)
+        expect(firstSuccess).toBeGreaterThan(0)
+        expect(secondFetch < firstSuccess).toBe(startBAt === `inside-callback`)
+        if (pauseB) expect(cacheActions[secondFetch]).toBe(`fetch:paused`)
+        expect(bReceiptApplied).toBe(false)
+        expect(rows()).toEqual([`A`, `local`])
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        expect(bOutcome).toBe(`pending`)
+
+        mutationGate.resolve()
+        await mutation.isPersisted.promise
+        if (!bLoad) throw new Error(`The second fetch did not start`)
+        await expect(bLoad).rejects.toMatchObject({ name: `AbortError` })
+        expect(bReceiptApplied).toBe(true)
+        expect(rows()).toEqual([`B`])
+      }, [
+        [`online manager`, () => onlineManager.setOnline(true)],
+        [`B provider`, () => providerB.resolve([])],
+        [`mutation`, () => mutationGate.resolve()],
+        [`later commit`, () => laterCommitGate.resolve()],
+        [`B acquisition`, () => collection._sync.unloadSubset(requestB)],
+        [`A acquisition`, () => collection._sync.unloadSubset(first)],
+        [`Collection`, () => collection.cleanup()],
+        [`cache listener`, () => unsubscribeCache()],
+        [`Query client`, () => queryClient.clear()],
       ])
     },
   )

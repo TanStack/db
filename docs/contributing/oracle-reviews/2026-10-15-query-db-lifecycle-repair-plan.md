@@ -211,6 +211,15 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
           every non-fetching result makes the paused retry reject early. Both
           controls fail at the held-receipt outcome checkpoint
           (2026-10-15).
+    - [x] Overlapping terminal notification: B starts synchronously inside
+          A's Collection commit callback, fetching or paused offline, so B's
+          fetch action precedes A's cache success action. With B's accepted
+          receipt held and a later unaccepted cache edit aborting its caller,
+          the caller stays pending until B applies and then sees exactly B's
+          row. A deferred B start reverses the cache-event order as a control.
+          The fetching case failed on `5e90ac9c9`; the paused case failed on
+          `43551b835` at the held-receipt caller-outcome checkpoint. The
+          adjacent canceled-fetch record oracle still passes (2026-10-15).
   - [x] Request shape: signal-free and explicit-signal requests check the
         physical signal, own keys, descriptor, cloning, JSON, and deletion.
         The configurable-descriptor assertion failed before its repair.
@@ -247,18 +256,22 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
       exact covered boundary and remaining limits.
   - [x] Repair the first review's refetch, accepted-cleanup, model, and contract
         gaps. The refetch grammar checks a later baseline release, transient
-        public events, and status. The cleanup witness checks four row/subscriber
-        combinations and prompt settlement. Contract prose names the cleanup
+        public events, status, and prompt caller abort while the provider is
+        held. A delayed-abort wrong-result control fails at that checkpoint.
+        The cleanup witness checks four row/subscriber combinations and prompt
+        settlement. Contract prose names the cleanup
         exception; TLA+ distinguishes an unobserved raw load from a claimed
-        load. The two primary oracles pass 522 tests, direct refetch replay and
-        the 37-test replay manifest pass, and the safe model and eight hostile
+        load. Direct refetch replay and the 37-test replay manifest pass, and
+        the safe model and eight hostile
         configurations reach their intended results (2026-10-15).
-  - [x] Package verification: all 965 Query DB runtime tests and 959 persisted
-        oracle tests pass (one skipped, one todo). Query DB, DB, and persisted
-        core TypeScript checks pass, as do affected-file lint (existing warnings
-        only), formatting, and whitespace checks (2026-10-15). The package's
+  - [x] Package verification after the paused-fetch repair: all 969 Query DB
+        runtime tests, the Query DB E2E suite, and 959 persisted oracle tests
+        pass (one skipped, one todo). Query DB TypeScript, affected-file lint
+        (two existing shadow warnings), formatting, and whitespace checks pass.
+        The paused successor failed on `43551b835` at B's held-receipt
+        caller-outcome checkpoint; it passes with the repair. The package's
         combined Vitest typecheck mode still reports cross-package `rootDir`
-        errors; its runtime run passed with that mode disabled.
+        errors; its runtime run passed with that mode disabled (2026-10-15).
   - [ ] Review the repaired exact head independently, record ORC-001–014
         evidence, and check CI outcome.
 - [ ] Integrate the repaired #2158 behavior into #2134 and verify its combined

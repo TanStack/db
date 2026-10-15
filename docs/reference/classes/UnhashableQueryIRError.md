@@ -3,7 +3,7 @@ id: UnhashableQueryIRError
 title: UnhashableQueryIRError
 ---
 
-Defined in: [packages/db/src/errors.ts:1150](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1150)
+Defined in: [packages/db/src/errors.ts:1163](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1163)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:1150](https://github.com/TanStack/db/blob
 new UnhashableQueryIRError(path, reason): UnhashableQueryIRError;
 ```
 
-Defined in: [packages/db/src/errors.ts:1151](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1151)
+Defined in: [packages/db/src/errors.ts:1164](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1164)
 
 #### Parameters
 
@@ -95,7 +95,7 @@ Error.name
 readonly path: string;
 ```
 
-Defined in: [packages/db/src/errors.ts:1152](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1152)
+Defined in: [packages/db/src/errors.ts:1165](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1165)
 
 ***
 
@@ -105,7 +105,7 @@ Defined in: [packages/db/src/errors.ts:1152](https://github.com/TanStack/db/blob
 readonly reason: string;
 ```
 
-Defined in: [packages/db/src/errors.ts:1153](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1153)
+Defined in: [packages/db/src/errors.ts:1166](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L1166)
 
 ***
 
