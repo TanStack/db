@@ -126,3 +126,22 @@ lease to an unrelated same-key Query Core caller.
 | ORC-012 review evidence | This record binds the claim, controls, validation, and remaining cells to executable head `6faabf4aa`, with production repair commits `1c4d6084a`, `2459bd94c`, `5bc47aab4`, `29ce0d2bf`, and `6faabf4aa`. |
 | ORC-013 boundary witness | Applied versus pending/failed full results, Query success versus deferred refresh versus held Collection commit, first versus final owner release, release during `write()` versus after entering `commit()`, peer present versus absent, marker versus markerless owner, acceptance versus invocation order, Query-cache `added` versus `fetch` reentry, and cached versus uncached reentrant observer installation distinguish nearby wrong rules. Release after commit acceptance while publication remains held has no witness here. |
 | ORC-014 controlled-premise handoff | Provider and storage fixture claims stop at those boundaries. Native SQLite covers the stated direct-value restart; real network cancellation and additional host paths stay open in the coverage map. |
+
+## Follow-up at `e392ab2d0`: open reentrant cleanup histories
+
+Three additional public histories fail on the pushed implementation. Final
+release from `getKey` leaves hidden ownership that keeps a later filtered row
+after its owner unloads. A new acquisition from a held commit's abort listener
+fulfills without its row. A new acquisition from Query Core's
+`observerRemoved` notification also fulfills without its row. The
+load-lifecycle oracle pins each as an expected failure linked to
+[issue #2160](https://github.com/TanStack/db/issues/2160). Without the
+expected-failure marker, all three fail at the stated public-row checkpoint;
+the filtered fixture returns a row that satisfies its predicate. They establish
+reachable counterexamples to broader reentrant final-release closure. The
+`write()` and temporary-listener cuts above remain the bounded passing claim.
+
+A local retirement-deferral repair made the `getKey` and `observerRemoved`
+histories pass but did not repair the abort-listener history. It was discarded
+from this PR. The issue owns a separate repair and must turn these three tests
+into ordinary passing tests. No broader oracle closure is claimed here.

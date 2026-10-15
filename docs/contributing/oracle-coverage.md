@@ -610,6 +610,15 @@ acquisition lease does. A zero-lease listener on Query DB's observer is not an
 owner. These public-row assertions failed before the respective repairs.
 Release after commit acceptance while publication remains held has no witness
 in this owner.
+Three reachable cleanup histories remain open in
+[issue #2160](https://github.com/TanStack/db/issues/2160). The load-lifecycle
+owner pins them as expected failures: final release from `getKey` can leave a
+hidden row owner; acquisition from a held commit's abort listener can fulfill
+without its row; and acquisition from a Query-cache `observerRemoved` callback
+can likewise fulfill without its row. Each checks public load settlement and
+rows after the new owner's acquisition or final release. These failures limit
+the reentrant final-release repair claim above to its tested `write()` and
+temporary-listener cuts.
 An applied direct cache patch permits reuse or one exact filtered revalidation
 for a new demand, but cannot trigger a redundant full request. The bounded
 history has no retry, invalidation, or explicit refetch; a duplicate filtered

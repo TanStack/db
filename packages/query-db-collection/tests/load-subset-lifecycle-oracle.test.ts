@@ -2845,6 +2845,273 @@ describe(`loadSubset lifecycle oracle`, () => {
   )
 
   /**
+   * getKey can release the final subscription before result bookkeeping
+   * starts. The rejected first load must leave no hidden owner that can keep
+   * a later, separately acquired row alive after its own final unload.
+   * Known failure: https://github.com/TanStack/db/issues/2160
+   */
+  it.fails(`does not retain an owner after release during getKey`, async () => {
+    const queryClient = createQueryClient()
+    const id = `release-during-get-key-${collectionSequence++}`
+    const firstResult = createDeferred<Array<Row>>()
+    let released = false
+    const queryFn = (context: QueryFunctionContext) =>
+      context.meta?.loadSubsetOptions?.where
+        ? Promise.resolve([{ id: `a`, group: `g` }] satisfies Array<Row>)
+        : firstResult.promise
+    const collection = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (row) => {
+          if (!released) {
+            released = true
+            first.unsubscribe()
+          }
+          return row.id
+        },
+        startSync: true,
+        syncMode: `on-demand`,
+      }),
+    )
+    const first = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    let second: ReturnType<typeof collection.subscribeChanges> | undefined
+
+    await checkPublicCleanupWitness(async () => {
+      let firstLoad: true | Promise<void> | undefined
+      first.requestSnapshot({
+        onLoadSubsetResult: (load) => {
+          firstLoad = load
+        },
+      })
+      expect(firstLoad).toBeDefined()
+      if (firstLoad === undefined || firstLoad === true)
+        throw new Error(`No pending first load`)
+      const firstOutcome = firstLoad.then(
+        () => `fulfilled` as const,
+        () => `rejected` as const,
+      )
+      firstResult.resolve([{ id: `a`, group: `g` }])
+      expect(await firstOutcome).toBe(`rejected`)
+      expect(released).toBe(true)
+      expect(collection.has(`a`)).toBe(false)
+
+      let secondLoad: true | Promise<void> | undefined
+      const filter = new IR.Func<boolean>(`eq`, [
+        new IR.PropRef([`group`]),
+        new IR.Value(`g`),
+      ])
+      second = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+      second.requestSnapshot({
+        where: filter,
+        onLoadSubsetResult: (load) => {
+          secondLoad = load
+        },
+      })
+      expect(secondLoad).toBeDefined()
+      if (secondLoad === undefined || secondLoad === true)
+        throw new Error(`No pending second load`)
+      expect(
+        await secondLoad.then(
+          () => `fulfilled`,
+          () => `rejected`,
+        ),
+      ).toBe(`fulfilled`)
+      expect(collection.has(`a`)).toBe(true)
+      second.unsubscribe()
+      expect(collection.has(`a`)).toBe(false)
+    }, [
+      [`provider`, () => firstResult.resolve([])],
+      [`first subscription`, () => first.unsubscribe()],
+      [`second subscription`, () => second?.unsubscribe()],
+      [`Collection`, () => collection.cleanup()],
+      [`Query client`, () => queryClient.clear()],
+    ])
+  })
+
+  /**
+   * Canceling the last owner's held commit fires its abort listeners inside
+   * cleanup. A new public acquisition from that callback must keep the Query
+   * and its row; the outer cleanup may retire only the departed lease.
+   * Known failure: https://github.com/TanStack/db/issues/2160
+   */
+  it.fails(
+    `keeps a new owner acquired from the commit abort callback`,
+    async () => {
+      const queryClient = createQueryClient()
+      const id = `commit-abort-reentry-${collectionSequence++}`
+      const commitEntered = createDeferred<void>()
+      const commitGate = createDeferred<void>()
+      let commits = 0
+      let aborts = 0
+      let second:
+        | ReturnType<ReturnType<typeof createCollection>[`subscribeChanges`]>
+        | undefined
+      let secondLoad: true | Promise<void> | undefined
+      const baseOptions = queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn: () => Promise.resolve([{ id: `a` }]),
+        getKey: (row) => row.id,
+        startSync: true,
+        syncMode: `on-demand`,
+      })
+      const originalSync = baseOptions.sync
+      const collection = createCollection({
+        ...baseOptions,
+        sync: {
+          sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+            originalSync.sync({
+              ...params,
+              commit: (signal) => {
+                commits++
+                if (commits > 1) return params.commit(signal)
+                signal?.addEventListener(
+                  `abort`,
+                  () => {
+                    aborts++
+                    second = collection.subscribeChanges(() => {}, {
+                      includeInitialState: false,
+                    })
+                    second.requestSnapshot({
+                      onLoadSubsetResult: (load) => {
+                        secondLoad = load
+                      },
+                    })
+                  },
+                  { once: true },
+                )
+                commitEntered.resolve()
+                return commitGate.promise.then(() => {
+                  const applied = params.commit(signal)
+                  return applied === true ? undefined : applied
+                })
+              },
+            }),
+        },
+      })
+      const first = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+
+      await checkPublicCleanupWitness(async () => {
+        let firstLoad: true | Promise<void> | undefined
+        first.requestSnapshot({
+          onLoadSubsetResult: (load) => {
+            firstLoad = load
+          },
+        })
+        expect(firstLoad).toBeDefined()
+        if (firstLoad === undefined || firstLoad === true)
+          throw new Error(`No pending first load`)
+        const firstOutcome = firstLoad.then(
+          () => `fulfilled` as const,
+          () => `rejected` as const,
+        )
+        await commitEntered.promise
+        first.unsubscribe()
+        expect(aborts).toBe(1)
+        expect(secondLoad).toBeDefined()
+        commitGate.resolve()
+        expect(await firstOutcome).toBe(`rejected`)
+        expect(
+          await Promise.resolve(secondLoad).then(
+            () => `fulfilled`,
+            () => `rejected`,
+          ),
+        ).toBe(`fulfilled`)
+        expect(collection.subscriberCount).toBe(1)
+        expect(collection.has(`a`)).toBe(true)
+        second?.unsubscribe()
+        expect(collection.has(`a`)).toBe(false)
+      }, [
+        [`commit gate`, () => commitGate.resolve()],
+        [`first subscription`, () => first.unsubscribe()],
+        [`second subscription`, () => second?.unsubscribe()],
+        [`Collection`, () => collection.cleanup()],
+        [`Query client`, () => queryClient.clear()],
+      ])
+    },
+  )
+
+  /**
+   * Query Core can notify cache listeners while Query DB removes its old
+   * observer. A new public subscriber at that cut owns a fresh lease even
+   * though the old cleanup began with no remaining leases.
+   * Known failure: https://github.com/TanStack/db/issues/2160
+   */
+  it.fails(`keeps a new owner acquired from observer removal`, async () => {
+    const queryClient = createQueryClient()
+    const id = `observer-removal-reentry-${collectionSequence++}`
+    const collection = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn: () => Promise.resolve([{ id: `a` }]),
+        getKey: (row) => row.id,
+        startSync: true,
+        syncMode: `on-demand`,
+      }),
+    )
+    const first = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    let second: ReturnType<typeof collection.subscribeChanges> | undefined
+    let secondLoad: true | Promise<void> | undefined
+    let joined = 0
+    const stopCacheListener = queryClient.getQueryCache().subscribe((event) => {
+      if (
+        joined === 0 &&
+        event.type === `observerRemoved` &&
+        event.query.queryKey[0] === id
+      ) {
+        joined++
+        second = collection.subscribeChanges(() => {}, {
+          includeInitialState: false,
+        })
+        second.requestSnapshot({
+          onLoadSubsetResult: (load) => {
+            secondLoad = load
+          },
+        })
+      }
+    })
+
+    await checkPublicCleanupWitness(async () => {
+      let firstLoad: true | Promise<void> | undefined
+      first.requestSnapshot({
+        onLoadSubsetResult: (load) => {
+          firstLoad = load
+        },
+      })
+      await firstLoad
+      expect(collection.has(`a`)).toBe(true)
+      first.unsubscribe()
+      expect(joined).toBe(1)
+      expect(secondLoad).toBeDefined()
+      await secondLoad
+      expect(collection.subscriberCount).toBe(1)
+      expect(collection.has(`a`)).toBe(true)
+      second?.unsubscribe()
+      expect(collection.has(`a`)).toBe(false)
+    }, [
+      [`cache listener`, stopCacheListener],
+      [`first subscription`, () => first.unsubscribe()],
+      [`second subscription`, () => second?.unsubscribe()],
+      [`Collection`, () => collection.cleanup()],
+      [`Query client`, () => queryClient.clear()],
+    ])
+  })
+
+  /**
    * A direct write can overlap a fetched result. While merging that result,
    * Query DB briefly subscribes to its own Query observer. That temporary
    * listener is not an owner: final public release in the cache notification
