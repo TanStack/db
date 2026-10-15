@@ -982,7 +982,15 @@ of keeping each served prefix whole (the `LoadSubsetFn` rule). Core emits
 `loadedSubsets:invalidated` once per turn, and each ordered loader on the
 Collection runs this repair. A loader whose coverage is one full-source
 acquisition, or a `requiresFullSource` plan, ignores the report: the refetch
-has already re-read that acquisition, and it has no page boundary to repair. Core reissues the
+has already re-read that acquisition, and it has no page boundary to repair.
+A loader whose coverage is still its own first ordered request, of at least
+`offset + limit` rows with no continuation past it, also ignores the report
+when its window is inside that page: every window row sorts at or before the
+`offset + limit`-th source row, and the next source row sorts strictly after
+it in the leading term. The refetched page holds every row from the start
+through its end, and any row it left out sorts after that end, so the window
+is proven. A window that needs a row past the page, such as one whose page
+holds rows a joined filter rejects, still repairs. Core reissues the
 ordered prefix from the start with the query predicate, order terms, and
 `limit = offset + limit`; the transport `offset` is omitted because this
 acquisition starts at the provider's source prefix. It then reacquires the

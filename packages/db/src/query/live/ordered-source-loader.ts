@@ -73,6 +73,9 @@ export class OrderedSourceLoader {
   private orderedPrefixRepairGeneration: number | undefined
   private lastPage: { count: number; boundary: unknown } | undefined
   private lastPrefixCount: number | undefined
+  // The count of the last request that read from the start of the order,
+  // until a continuation reads past it.
+  private ownPrefixCount: number | undefined
   private lastBoundary: unknown
   private repairRetries = 0
   private repairTimer: ReturnType<typeof setTimeout> | undefined
@@ -325,6 +328,7 @@ export class OrderedSourceLoader {
     this.orderedRepairAcquisitions = new Set()
     this.authoritativeRequestState = `held`
     this.authoritativeRequestKind = `ordered-repair`
+    this.ownPrefixCount = this.info.offset + this.info.limit
     this.requestAndObserve(
       (onLoadSubsetResult) => {
         this.subscription.requestSnapshot({
@@ -375,6 +379,7 @@ export class OrderedSourceLoader {
       count,
     )
     this.lastPrefixCount = count
+    this.ownPrefixCount = count
   }
 
   resetCursor(): void {
@@ -478,16 +483,41 @@ export class OrderedSourceLoader {
    * The source's sync adapter reports that served pages may have shifted.
    * Coverage that one full-source acquisition established has no page
    * boundary to repair, and the adapter's refetch has already re-read it.
+   * A window inside this loader's own first page needs no repair either.
    */
   revalidateLoadedCoverage(): void {
     if (
       !this.active ||
       this.info.requiresFullSource ||
       !this.hasSettledSourceRequest ||
-      this.authoritativeRequestState === `complete`
+      this.authoritativeRequestState === `complete` ||
+      this.windowIsInsideOwnPrefix()
     )
       return
     this.invalidateSourceOrdering()
+  }
+
+  // The refetched first page holds every row from the start of the order
+  // through its end, and any row it left out sorts after that end. So a
+  // window whose rows all sort at or before the end is right. A row after
+  // the page that ties with its end could sort before a window row; then
+  // the window is not proven.
+  private windowIsInsideOwnPrefix(): boolean {
+    const size = this.info.offset + this.info.limit
+    if ((this.ownPrefixCount ?? 0) < size || !this.info.dataNeeded) {
+      return false
+    }
+    const rows = this.subscription.readOrderedSnapshot({
+      orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
+      limit: size + 1,
+    })
+    // Optimistic rows are left out, so a short read proves nothing.
+    if (rows.length <= size) return false
+    const end = rows[size - 1]!.value
+    return (
+      this.info.comparator(rows[size]!.value, end) > 0 &&
+      this.info.dataNeeded(end) === 0
+    )
   }
 
   private finishOrderedPrefixRepair(windowOperationGeneration?: number): void {
@@ -598,6 +628,7 @@ export class OrderedSourceLoader {
       return
     }
     this.lastPage = { count, boundary }
+    this.ownPrefixCount = startsFromSourcePrefix ? count : undefined
     this.requestAndObserve(
       (onLoadSubsetResult) => {
         this.subscription.requestLimitedSnapshot({

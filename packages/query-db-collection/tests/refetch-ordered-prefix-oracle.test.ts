@@ -81,6 +81,11 @@ import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
  *   starts at the same point and ends at or after its old end. With no later
  *   page, no row can fall outside it, so the refetch does not report. A
  *   visible delete or order change already starts the loader's own repair.
+ * - A page whose end moves earlier reports, because a filtered window can
+ *   need a row that now sorts between the page's new and old end. But a
+ *   window whose rows are all in its own first page, as after an ordinary
+ *   insert into a top-N list, starts no repair: rows the page left out sort
+ *   after its end. Then the refetch sends only the refetched Queries.
  * Each request also carries a Query key that matches its own request data,
  * so a `queryFn` may read either one.
  *
@@ -101,8 +106,8 @@ import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
  *   the issue trace with a page cap.
  * - The report laws bound when Query DB reports, not exactly when it must.
  *   Whether a missing report leaves a gap is judged through the window law.
- *   A page whose end moves earlier reports even when the order has no ties
- *   there, so no row can be missing; no law forbids that report. The oracle
+ *   A page whose end moves earlier reports even when every window is inside
+ *   its first page; the no-repair law then bounds the cost, not the report. The oracle
  *   does not observe how a repair overlaps in-flight work; the ordered loader
  *   state oracle owns that.
  * - Query DB records a page's rows only after their sync transaction is
@@ -924,6 +929,75 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
           { type: `flip`, id: 11 },
         ],
       })
+    },
+  )
+
+  // A filtered one-page window whose page end moves earlier, with unique
+  // order values. Row 4 arrives ahead of the page without a marker, so the
+  // window needs a row past the page; row 3 now sorts between the page's
+  // new end and the loader's old boundary and is in neither result.
+  // (Found by the random campaign.)
+  it(`shows a row that lands between a filtered page's new and old end`, async () => {
+    await checkCase({
+      scenario: {
+        encoding: `cursor`,
+        functionKey: false,
+        orderKey: `rank`,
+        pageCap: undefined,
+        terms: 1,
+        limit: 1,
+        offset: 0,
+      },
+      initial: [
+        { id: 0, rank: 1, marked: true },
+        { id: 3, rank: 0, marked: true },
+      ],
+      history: [
+        { type: `upsert`, id: 3, rank: 1 },
+        { type: `upsert`, id: 4, rank: 1 },
+      ],
+    })
+  })
+
+  // The ordinary insert into a top-N list. The page's end moves earlier, so
+  // Query DB reports, but every window row is in the window's own first page:
+  // the refetch must send only the Queries it refetches, with no repair.
+  it.each([1, 2] as const)(
+    `a refetch of a window inside its first page starts no repair (%i order terms)`,
+    async (terms) => {
+      const scenario: Scenario = {
+        encoding: `cursor`,
+        functionKey: false,
+        orderKey: `rank`,
+        pageCap: undefined,
+        terms,
+        limit: 2,
+        offset: 0,
+      }
+      const run = await startRun({
+        scenario,
+        initial: [3, 2, 1, 0].map((rank, id) => ({ id, rank, marked: true })),
+        history: [],
+      })
+      let primary: unknown
+      try {
+        await run.apply({ type: `upsert`, id: 5, rank: 5 })
+        await run.apply({ type: `flip`, id: 5 })
+        const queries = run.cachedQueries()
+        const requestsBefore = run.requests.length
+        await run.apply({ type: `refetch` })
+        expect(run.windowIds()).toEqual(
+          expectedWindow(run.backend, run.markers, scenario),
+        )
+        expect(run.requests.length - requestsBefore).toBeLessThanOrEqual(
+          queries,
+        )
+      } catch (error) {
+        primary = error
+      }
+      const failures = await run.cleanup()
+      if (primary !== undefined) throw primary
+      expect(failures).toEqual([])
     },
   )
 
