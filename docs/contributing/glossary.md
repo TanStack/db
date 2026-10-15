@@ -28,7 +28,7 @@ production queues, caches, or semantic helpers merely to share their names.
 | sync transaction | The changes between one `begin()` and `commit()` pair. | Optimistic transaction or publication. |
 | optimistic transaction | A local mutation transaction whose intent may later complete or roll back. | Sync transaction. |
 | optimistic state | The rows an optimistic transaction overlays on the applied synced rows while its mutation function runs. It drops when the mutation function settles, whether it fulfills or rejects. | Retained snapshot or accepted local snapshot. |
-| accepted sync transaction | A committed sync transaction that core, or a wrapping sync after its durable step, has taken. It always applies, in commit order. While an optimistic transaction is persisting it is held, and it applies in the publication that drops that transaction's optimistic state. Handler-facing writes and Collection readiness wait for acceptance; commit receipts and subset loads wait for visibility. | Visible or applied sync transaction. |
+| accepted sync transaction | A committed sync transaction that core, or a wrapping sync after its durable step, has taken. It applies in commit order unless Collection cleanup abandons it before application. While an optimistic transaction is persisting it is held, and it applies in the publication that drops that transaction's optimistic state. Handler-facing writes and Collection readiness wait for acceptance; commit receipts and subset loads wait for visibility or reject if cleanup abandons them. | Visible or applied sync transaction. |
 | held optimistic row | A successful transaction's optimistic row kept only while a queued sync transaction touches its key, so the drop and that transaction publish together. Its source attribution follows the key-and-timing rules in [VirtualOrigin](../reference/type-aliases/VirtualOrigin.md), not source-client identity. | Retained or accepted snapshot. |
 | Collection status | One public Collection lifecycle value: `idle`, `loading`, `ready`, `error`, or `cleaned-up`. | Subscription status. |
 | subscription status | One subscription value: `ready` or `loadingSubset`. | Collection status. |
@@ -201,7 +201,8 @@ Use nouns for state and verbs for transitions:
   provider does so.
 - A promise **settles**; it **fulfills** or **rejects**.
 - Core **accepts** a sync transaction at `commit()`; a wrapping sync accepts
-  it after its durable step. An accepted sync transaction always applies.
+  it after its durable step. It applies unless Collection cleanup abandons it
+  before application.
 - A sync transaction **applies** when its writes and events become visible.
 - A replay or repair **publishes** one coherent public snapshot.
 - Cleanup start **invalidates** a sync run and **closes** restart admission.

@@ -876,21 +876,21 @@ describe(`QueryCollection`, () => {
       const transaction = createTransaction({
         mutationFn: () => persistence.promise,
       })
+      const request = {}
 
       try {
         // An unload releases the exact acquisition, even when another caller
         // requests the same semantic subset while this result is queued.
-        const demand = {}
         transaction.mutate(() =>
           collection.insert({ id: `local`, name: `Local` }),
         )
-        collection._sync.loadSubset(demand)
+        collection._sync.loadSubset(request)
         queryResult.resolve([{ id: `first`, name: `First` }])
         await flushPromises()
 
         queryClient.setQueryData(queryKey, [{ id: `second`, name: `Second` }])
         await flushPromises()
-        collection._sync.unloadSubset(demand)
+        collection._sync.unloadSubset(request)
 
         persistence.resolve()
         await transaction.isPersisted.promise
@@ -1756,12 +1756,13 @@ describe(`QueryCollection`, () => {
       expect(queryFn).toHaveBeenCalledTimes(1)
     })
 
-    // Verify queryFn was called with the correct context, including the meta object
-    expect(queryFn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        meta: expect.objectContaining({ ...meta, loadSubsetOptions: {} }),
-      }),
-    )
+    // The metadata signal follows the Query observed by this Collection.
+    const context = queryFn.mock.calls[0]?.[0] as QueryFunctionContext
+    expect(context.meta?.errorMessage).toBe(meta.errorMessage)
+    expect(context.meta?.loadSubsetOptions?.signal).toBe(context.signal)
+    // A derived signal is readable without changing a signal-free request's
+    // enumerable shape.
+    expect(Object.keys(context.meta?.loadSubsetOptions ?? {})).toEqual([])
   })
 
   describe(`loadSubsetOptions passed to queryFn`, () => {
@@ -7691,9 +7692,8 @@ describe(`QueryCollection`, () => {
             }),
         },
       })
-      const demand = {}
-      const load = collection._sync.loadSubset(demand)
-      void Promise.resolve(load).catch(() => undefined)
+      const request = {}
+      const load = collection._sync.loadSubset(request)
       await vi.waitFor(() => {
         expect(scanPersistedRows).toHaveBeenCalledOnce()
         expect(scanPersistedRows).toHaveBeenCalledWith()
@@ -7709,12 +7709,9 @@ describe(`QueryCollection`, () => {
       ])
       expect(whileScanHeld).toBe(`pending`)
 
-      collection._sync.unloadSubset(demand)
+      collection._sync.unloadSubset(request)
       persistedScan.resolve([])
-      // The last owner retired while startup retention work was pending.
-      await expect(Promise.resolve(load)).rejects.toMatchObject({
-        name: `AbortError`,
-      })
+      await expect(load).rejects.toMatchObject({ name: `AbortError` })
       await flushPromises()
 
       expect(collection.has(item.id)).toBe(false)
@@ -9353,10 +9350,11 @@ describe(`QueryCollection`, () => {
         expect(collection.size).toBe(items.length)
       })
 
-      // Should call queryFn once with empty predicates
+      // The Query signal is available without adding a serializable request key.
       expect(queryFn).toHaveBeenCalledTimes(1)
       const call = queryFn.mock.calls[0]?.[0]
-      expect(call?.meta?.loadSubsetOptions).toEqual({})
+      expect(call?.meta?.loadSubsetOptions?.signal).toBe(call?.signal)
+      expect(Object.keys(call?.meta?.loadSubsetOptions ?? {})).toEqual([])
     })
   })
 

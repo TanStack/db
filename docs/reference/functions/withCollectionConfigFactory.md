@@ -4,10 +4,13 @@ title: withCollectionConfigFactory
 ---
 
 ```ts
-function withCollectionConfigFactory<TConfig>(config, factory): CollectionConfigWithFactory<TConfig>;
+function withCollectionConfigFactory<TConfig>(
+   config,
+   factory,
+claim?): CollectionConfigWithFactory<TConfig>;
 ```
 
-Defined in: [packages/db/src/client.ts:83](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L83)
+Defined in: [packages/db/src/client.ts:96](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L96)
 
 Adds a fresh-config materializer to an adapter options object.
 
@@ -29,6 +32,10 @@ materialized safely by more than one DbClient.
 ### factory
 
 (`client`) => `TConfig`
+
+### claim?
+
+() => `void` \| () => `void`
 
 ## Returns
 

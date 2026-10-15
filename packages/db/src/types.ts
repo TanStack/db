@@ -386,8 +386,9 @@ export type LoadSubsetFn = (options: LoadSubsetOptions) => true | Promise<void>
 
 /**
  * Confirms that a committed sync transaction is visible, or resolves when it
- * becomes visible. An accepted transaction always applies in commit order. A
- * receipt rejects with an error named `AbortError` only if its signal aborted
+ * becomes visible. An accepted transaction applies in commit order unless
+ * Collection cleanup abandons it before application. A receipt rejects with
+ * an error named `AbortError` only if its signal aborted
  * before acceptance, or if cleanup abandons the transaction.
  */
 export type SyncAppliedReceipt = true | Promise<void>
@@ -439,9 +440,10 @@ export interface SyncConfig<
     write: (message: ChangeMessageOrDeleteKeyMessage<T, TKey>) => void
     /**
      * Commit the active sync transaction in FIFO order. Core accepts it at
-     * once, and an accepted transaction always applies. Returns `true` when
-     * its writes are visible, or a receipt that resolves when they become
-     * visible. While an optimistic transaction is persisting, it becomes
+     * once. It applies unless Collection cleanup abandons it before
+     * application. Returns `true` when its writes are visible, or a receipt
+     * that resolves when they become visible. While an optimistic transaction
+     * is persisting, it becomes
      * visible when that transaction settles, together with the drop of its
      * optimistic state. A signal that is already aborted abandons the
      * transaction before acceptance, and the receipt rejects with an error

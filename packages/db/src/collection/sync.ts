@@ -307,10 +307,10 @@ export class CollectionSyncManager<
             }
 
             pendingTransaction.committed = true
-            // An accepted transaction always applies in commit order. Core
-            // accepts it now; the receipt resolves when it is visible. One
-            // held by a persisting optimistic transaction becomes visible when
-            // that transaction settles.
+            // Core accepts the transaction now. It applies in commit order
+            // unless Collection cleanup abandons it first; the receipt resolves
+            // when it is visible. One held by a persisting optimistic
+            // transaction becomes visible when that transaction settles.
             this.state.commitPendingTransactions()
             if (!pendingTransaction.applied.isPending()) return true
             return withAcceptedReceipt(pendingTransaction.applied.promise, true)

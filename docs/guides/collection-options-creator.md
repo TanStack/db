@@ -178,7 +178,8 @@ The sync process follows this lifecycle:
 5. **markError(error?)** - Signal that initial sync failed before producing a usable snapshot; pass the cause so readiness waits reject with it
 
 `commit()` accepts the transaction and returns `true`. An accepted transaction
-always applies, in commit order. While an optimistic transaction is persisting,
+applies in commit order unless Collection cleanup abandons it before application.
+While an optimistic transaction is persisting,
 the accepted transaction waits. It becomes visible when that optimistic
 transaction settles, in the same publication that drops its optimistic state.
 A mutation handler can therefore await its own write without waiting for

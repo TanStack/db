@@ -33,6 +33,7 @@ import {
   decodePersistedStorageKey,
   encodePersistedStorageKey,
   persistedCollectionOptions,
+  toProcessLocalLoadSubsetOptions,
   toTransportedLoadSubsetOptions,
   validateRemoteSubsetOptions,
 } from '../src'
@@ -5575,6 +5576,102 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       expect(owner.unloadSubset).toHaveBeenCalledWith(delivered)
     } finally {
       unregisterOwner()
+    }
+  })
+
+  /**
+   * A public snapshot with no caller signal still gives its sync adapter an
+   * enumerable data signal for acquisition release. The process-local remote
+   * subset coordinator must accept it, and a spread-based adapter must retain
+   * that same signal. Provider metadata may hide its own derived signal, but
+   * this adapter boundary cannot: the wire projector requires a data field.
+   */
+  it(`forwards a public acquisition signal through process-local subset admission`, async () => {
+    const id = `public-snapshot-process-local-signal`
+    const coordinator = new SingleProcessCoordinator(id)
+    const owner = Object.assign(vi.fn(), {
+      unloadSubset: vi.fn(),
+      onError: vi.fn(),
+    })
+    const unregisterOwner = coordinator.registerRemoteSubsetOwner(id, owner)
+    let acquisitionOptions: LoadSubsetOptions | undefined
+    let forwardedSignal: AbortSignal | undefined
+    let release: Promise<void> | undefined
+    const collection = createCollection<Todo, string>({
+      id,
+      getKey: (row) => row.id,
+      startSync: true,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: (options) => {
+              acquisitionOptions = options
+              forwardedSignal = { ...options }.signal
+              return coordinator.requestEnsureRemoteSubset(id, options)
+            },
+            unloadSubset: (options) => {
+              release = coordinator.requestReleaseRemoteSubset(id, options)
+            },
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+
+    let hasPrimaryFailure = false
+    try {
+      let load: true | Promise<void> | undefined
+      subscription.requestSnapshot({
+        onLoadSubsetResult: (result) => {
+          load = result
+        },
+      })
+      if (load === undefined)
+        throw new Error(`The public snapshot did not start an acquisition`)
+      await load
+      if (!acquisitionOptions)
+        throw new Error(`The adapter received no acquisition options`)
+      const signal = acquisitionOptions.signal
+      expect(signal).toBeDefined()
+      expect(
+        Object.getOwnPropertyDescriptor(acquisitionOptions, `signal`),
+      ).toMatchObject({
+        enumerable: true,
+        value: signal,
+      })
+      expect(forwardedSignal).toBe(signal)
+      expect(owner).toHaveBeenCalledTimes(1)
+      const delivered = owner.mock.calls[0]?.[0] as LoadSubsetOptions
+      expect(delivered.signal).toBe(signal)
+      expect(signal?.aborted).toBe(false)
+
+      const hidden = { ...acquisitionOptions }
+      Object.defineProperty(hidden, `signal`, { enumerable: false })
+      expect(() => toProcessLocalLoadSubsetOptions(hidden)).toThrowError(
+        /options.signal: non-data property/,
+      )
+
+      subscription.unsubscribe()
+      await release
+      expect(signal?.aborted).toBe(true)
+      expect(owner.unloadSubset).toHaveBeenCalledTimes(1)
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      await cleanupPersistedOracle(
+        [
+          () => subscription.unsubscribe(),
+          () => release,
+          () => collection.cleanup(),
+          () => unregisterOwner(),
+        ],
+        hasPrimaryFailure,
+      )
     }
   })
 

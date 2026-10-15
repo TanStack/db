@@ -7,7 +7,7 @@ title: UpdateMutationFn
 type UpdateMutationFn<T, TKey, TUtils, TReturn> = (params) => Promise<TReturn>;
 ```
 
-Defined in: [packages/db/src/types.ts:672](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L672)
+Defined in: [packages/db/src/types.ts:693](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L693)
 
 ## Type Parameters
 

@@ -884,7 +884,8 @@ to one acquisition.
 Every sync `commit()` returns an applied receipt: `true` when that
 transaction's writes and events are already visible, or a promise when the
 transaction is parked in the causal queue. Commit accepts the transaction, and
-an accepted transaction always applies in commit order. The promise resolves
+an accepted transaction applies in commit order unless Collection cleanup
+abandons it before application. The promise resolves
 only after the writes and events become visible. It rejects with `AbortError`
 only if its signal aborted before acceptance or collection cleanup abandons
 the transaction; a later abort cannot withdraw its rows. A source discards a

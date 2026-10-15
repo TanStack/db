@@ -429,18 +429,13 @@ Do not edit expression nodes, ordering options, Dates, byte arrays, or membershi
 arrays. Build separate API parameters instead. Core retains request data without
 cloning it; changing submitted data can make the request disagree with its cache
 key. To change a query constant, supply a new value rather than mutating the old
-one. For on-demand requests, use `ctx.meta.loadSubsetOptions.signal` for the
-provider call. It is a native signal for the physical Query fetch, present even
-when the first acquisition has no caller signal. A peer that joins after fetch
-start shares it. For a fetch started by a Collection acquisition, releasing one
-acquisition does not abort work another acquisition still owns; the signal
-aborts when every acquisition cancels or releases while the fetch is in flight.
-When Query Core refetches a retained Query after every Collection acquisition
-releases or aborts, the metadata carries Query Core's signal and that
-independent result can enter Query cache.
-`ctx.signal` remains Query Core's transport signal for eager queries. If an
-on-demand provider ignores its physical signal, Query Core may let the fetch
-finish into cache after the final Collection owner releases.
+one. Cancellation through the request's `AbortSignal` remains supported.
+Use `ctx.signal` for the provider call. `ctx.meta.loadSubsetOptions.signal`
+exposes the same Query signal. An acquisition's supplied signal controls that
+acquisition's lifetime; it does not cancel a fetch while another Collection
+acquisition still owns the Query. When the final observer releases the Query,
+TanStack Query aborts a fetch whose provider consumed the signal. A provider
+that ignored it may finish into the Query cache.
 
 ### Type-Safe Meta Access
 
@@ -1159,10 +1154,10 @@ matches your API semantics:
 
 ### Empty Array Behavior
 
-When `queryFn` returns an empty array, **all items in the collection will be deleted**. This is because the collection interprets an empty array as "the server has no items".
+When `queryFn` returns an empty array, the rows owned only by that Query are removed. In on-demand mode, the empty result applies to the requested subset; rows outside that scope and rows with another active owner remain.
 
 ```typescript
-// This will delete all items in the collection
+// This removes rows owned only by this Query
 queryFn: async () => []
 ```
 
@@ -1236,14 +1231,13 @@ inserted row belongs in a scoped result or which row replaces a deleted item
 in a limited window. A new direct insert has no inferred subset owner and
 survives subset unload.
 
-Fetch order applies per key. A Query fetch reserves its position when the fetch
-is accepted, before its `queryFn` runs. A direct write reserves its position
-when called. An accepted fetch before the write cannot undo the write's claimed
-keys; a fetch accepted later may reconcile or replace them. Between overlapping
-successful fetched results, the later first `queryFn` invocation controls a
-continuously owned row even if that result settles first. Retries stay within
-their original accepted fetch and retain its first source invocation position.
-Once all owners release the row, reacquiring a subset projects
+Fetch order applies per key. A fetch starts when its `queryFn` is invoked,
+which can follow cache notification callbacks. A fetch started before an accepted direct write
+cannot undo that write's claimed keys; a fetch started later may reconcile or
+replace them. While a row remains continuously owned by at least one loaded
+subset, if overlapping subset fetches both return that key, the later-started
+successful fetch controls its Collection value even when the older request
+settles last. Once all owners release the row, reacquiring a subset projects
 that Query's retained cache entry under the usual `staleTime` and `gcTime`
 rules. A cache patch is not a successful fetch: it does not clear a recorded
 Query error, pending invalidation, or staleness.
@@ -1262,7 +1256,10 @@ and scope B overlaps A. Both scopes match row `x`:
 This is a lower-level API. Use `collection.utils.refetch()` to request current
 server rows for tracked scopes, but do not treat one scope's result as a global
 snapshot. If an older request for the same Query is still in flight, that
-explicit refetch starts a new request.
+explicit refetch starts a new request when a direct write was accepted after
+the older request began. Without a later write, it may join that request;
+a reacquired retained owner can still require another fetch to revalidate its
+persisted rows.
 
 Deleting a fetched row ends its existing subset ownership. Inserting or
 upserting the same key afterward creates a new direct row without inheriting

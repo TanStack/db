@@ -185,6 +185,36 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
     `exact-completion exact-inflight rejected-waiter`,
   ],
   [
+    `query-db-collection/tests/load-subset-lifecycle-oracle.test.ts`,
+    `query-db`,
+    `accepted-release-history`,
+  ],
+  [
+    `query-db-collection/tests/load-subset-lifecycle-oracle.test.ts`,
+    `query-db`,
+    `application-release-history`,
+  ],
+  [
+    `query-db-collection/tests/load-subset-lifecycle-oracle.test.ts`,
+    `query-db`,
+    `lease-history`,
+  ],
+  [
+    `query-db-collection/tests/load-subset-lifecycle-oracle.test.ts`,
+    `query-db`,
+    `pending-reentry-history`,
+  ],
+  [
+    `query-db-collection/tests/load-subset-lifecycle-oracle.test.ts`,
+    `query-db`,
+    `refetch-lease-history`,
+  ],
+  [
+    `query-db-collection/tests/load-subset-lifecycle-oracle.test.ts`,
+    `query-db`,
+    `reentrant-release-history`,
+  ],
+  [
     `db/tests/query/ordered-lifecycle-oracle.property.test.ts`,
     `ordered-work`,
     `lifecycle nullable-lifecycle`,
@@ -192,7 +222,7 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [
     `db/tests/query/ordered-work-oracle.property.test.ts`,
     `ordered-work`,
-    `consumer-parity`,
+    `consumer-parity eager-indexed-window eager-joined-window eager-joined-gap eager-full-join eager-held-load`,
   ],
   [
     `db/tests/query/pagination-oracle.property.test.ts`,
@@ -285,6 +315,18 @@ function directReplayTestName(property: string): string | undefined {
     return `recomputes generated compound histories, seed=undefined`
   if (property === `oracle-replay.calibration`)
     return `executes the replay calibration property`
+  if (property === `query-db.lease-history`)
+    return `refines generated caller and peer lease histories`
+  if (property === `query-db.pending-reentry-history`)
+    return `refines generated pending reentry histories`
+  if (property === `query-db.refetch-lease-history`)
+    return `refines generated public refetch lease histories`
+  if (property === `query-db.reentrant-release-history`)
+    return `refines generated reentrant release histories`
+  if (property === `query-db.application-release-history`)
+    return `refines generated application release histories`
+  if (property === `query-db.accepted-release-history`)
+    return `refines generated accepted release histories`
   if (property.startsWith(`pagination.matrix.`))
     return `\\[${property.replaceAll(`.`, `\\.`)}\\]`
   return indexReplayTestNames.get(property)

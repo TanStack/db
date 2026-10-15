@@ -22,8 +22,14 @@ function record(value: unknown, keys: ReadonlyArray<string>) {
   for (const key of Reflect.ownKeys(value)) {
     if (typeof key !== `string` || !keys.includes(key)) return invalid()
     const descriptor = Object.getOwnPropertyDescriptor(value, key)!
-    if (!(`value` in descriptor)) return invalid()
-    copy[key] = descriptor.value
+    if (`value` in descriptor) {
+      copy[key] = descriptor.value
+    } else if (key === `signal` && typeof descriptor.get === `function`) {
+      // Query DB exposes the physical Query signal lazily in request metadata.
+      copy[key] = descriptor.get.call(value)
+    } else {
+      return invalid()
+    }
   }
   return copy
 }
