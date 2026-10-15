@@ -211,6 +211,15 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
           every non-fetching result makes the paused retry reject early. Both
           controls fail at the held-receipt outcome checkpoint
           (2026-10-15).
+    - [x] Overlapping terminal notification: B starts synchronously inside
+          A's Collection commit callback, so B's fetch action precedes A's
+          cache success action. With B's accepted receipt held and a later
+          unaccepted cache edit aborting its caller, the caller stays pending
+          until B applies and then sees exactly B's row. A deferred B start
+          reverses the cache-event order as a control. On `5e90ac9c9`, the
+          inside-callback case rejected early at the held-receipt outcome
+          checkpoint. The adjacent canceled-fetch record oracle also passes
+          after correcting retirement-list timing (2026-10-15).
   - [x] Request shape: signal-free and explicit-signal requests check the
         physical signal, own keys, descriptor, cloning, JSON, and deletion.
         The configurable-descriptor assertion failed before its repair.
@@ -253,7 +262,7 @@ to `b5c55a2a4`; no prior fix or witness was discarded.
         load. The two primary oracles pass 522 tests, direct refetch replay and
         the 37-test replay manifest pass, and the safe model and eight hostile
         configurations reach their intended results (2026-10-15).
-  - [x] Package verification: all 965 Query DB runtime tests and 959 persisted
+  - [x] Package verification: all 967 Query DB runtime tests and 959 persisted
         oracle tests pass (one skipped, one todo). Query DB, DB, and persisted
         core TypeScript checks pass, as do affected-file lint (existing warnings
         only), formatting, and whitespace checks (2026-10-15). The package's

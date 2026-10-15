@@ -7646,6 +7646,176 @@ describe(`loadSubset lifecycle oracle`, () => {
     },
   )
 
+  /**
+   * One Query can start fetch B inside fetch A's Collection commit callback.
+   * Query Core then reports B's fetch action before it reports A's cache
+   * success. A's late notification must not retire B's application record or
+   * claim that B succeeded. The neighboring deferred-start history reverses
+   * those cache events and checks the ordinary boundary.
+   *
+   * This real QueryClient/Collection history holds B's accepted receipt behind
+   * an optimistic mutation, then lets a later unaccepted C cache edit abort
+   * B's caller. The caller must remain pending while B is absent and reject
+   * only after B's receipt applies, with B as the complete public row set.
+   * The cache event order is path evidence; the promise, receipt, and rows are
+   * the public comparison. This controlled callback does not model storage.
+   */
+  it.each([`inside-callback`, `after-callback`] as const)(
+    `keeps a second fetch receipt when started $0`,
+    async (startBAt) => {
+      const id = `overlapping-success-${collectionSequence++}`
+      const queryClient = createQueryClient()
+      const providerB = createDeferred<Array<Row>>()
+      const mutationGate = createDeferred<void>()
+      const mutationStarted = createDeferred<void>()
+      const acceptedB = createDeferred<void>()
+      const laterCommitEntered = createDeferred<void>()
+      const laterCommitGate = createDeferred<void>()
+      const caller = new AbortController()
+      const requestB: LoadSubsetOptions = {
+        refetch: true,
+        signal: caller.signal,
+      }
+      const first: LoadSubsetOptions = {}
+      const cacheActions: Array<string> = []
+      const unsubscribeCache = queryClient
+        .getQueryCache()
+        .subscribe((event) => {
+          if (event.type === `updated`)
+            cacheActions.push(
+              `${event.action.type}:${event.query.state.fetchStatus}`,
+            )
+        })
+      let providerCalls = 0
+      let writes: Array<string> = []
+      let bLoad: Promise<void> | undefined
+      let bOutcome: `pending` | `ready` | `abort` | `other` = `pending`
+      let bReceiptApplied = false
+      const base = queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn: () =>
+          ++providerCalls === 1
+            ? Promise.resolve([{ id: `A` }])
+            : providerB.promise,
+        getKey: (row) => row.id,
+        startSync: true,
+        syncMode: `on-demand`,
+        retry: false,
+        onInsert: async () => {
+          mutationStarted.resolve()
+          await mutationGate.promise
+          return { refetch: false }
+        },
+      })
+      const originalSync = base.sync
+      const collection = createCollection({
+        ...base,
+        sync: {
+          sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+            originalSync.sync({
+              ...params,
+              begin: () => {
+                writes = []
+                params.begin()
+              },
+              write: (change) => {
+                if (change.type !== `delete`) writes.push(change.value.id)
+                params.write(change)
+              },
+              commit: (signal) => {
+                if (writes.includes(`C`)) {
+                  laterCommitEntered.resolve()
+                  return laterCommitGate.promise.then(async () => {
+                    await params.commit(signal)
+                  })
+                }
+                const receipt = params.commit(signal)
+                if (writes.includes(`A`) && !bLoad) {
+                  const startB = () => {
+                    const load = Promise.resolve(
+                      collection._sync.loadSubset(requestB),
+                    ).then(() => undefined)
+                    bLoad = load
+                    void load.then(
+                      () => {
+                        bOutcome = `ready`
+                      },
+                      (error: unknown) => {
+                        bOutcome =
+                          error instanceof Error && error.name === `AbortError`
+                            ? `abort`
+                            : `other`
+                      },
+                    )
+                  }
+                  if (startBAt === `inside-callback`) startB()
+                  else queueMicrotask(startB)
+                }
+                if (writes.includes(`B`)) {
+                  if (receipt === true) bReceiptApplied = true
+                  else
+                    void receipt.then(
+                      () => {
+                        bReceiptApplied = true
+                      },
+                      () => undefined,
+                    )
+                  acceptedB.resolve()
+                  queryClient.setQueryData([id], [{ id: `C` }])
+                  caller.abort()
+                }
+                return receipt
+              },
+            }),
+        },
+      })
+      const rows = () => collection.toArray.map((row) => row.id).sort()
+
+      await checkPublicCleanupWitness(async () => {
+        collection.startSyncImmediate()
+        const aLoad = Promise.resolve(collection._sync.loadSubset(first))
+        void aLoad.catch(() => undefined)
+        await vi.waitFor(() => expect(providerCalls).toBe(2))
+        const mutation = collection.insert({ id: `local` })
+        await mutationStarted.promise
+        providerB.resolve([{ id: `B` }])
+        await acceptedB.promise
+        await laterCommitEntered.promise
+        const secondFetch = cacheActions.findIndex(
+          (action, index) => index > 0 && action.startsWith(`fetch:`),
+        )
+        const firstSuccess = cacheActions.findIndex((action) =>
+          action.startsWith(`success:`),
+        )
+        expect(secondFetch).toBeGreaterThan(0)
+        expect(firstSuccess).toBeGreaterThan(0)
+        expect(secondFetch < firstSuccess).toBe(startBAt === `inside-callback`)
+        expect(bReceiptApplied).toBe(false)
+        expect(rows()).toEqual([`A`, `local`])
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        expect(bOutcome).toBe(`pending`)
+
+        mutationGate.resolve()
+        await mutation.isPersisted.promise
+        if (!bLoad) throw new Error(`The second fetch did not start`)
+        await expect(bLoad).rejects.toMatchObject({ name: `AbortError` })
+        expect(bReceiptApplied).toBe(true)
+        expect(rows()).toEqual([`B`])
+      }, [
+        [`B provider`, () => providerB.resolve([])],
+        [`mutation`, () => mutationGate.resolve()],
+        [`later commit`, () => laterCommitGate.resolve()],
+        [`B acquisition`, () => collection._sync.unloadSubset(requestB)],
+        [`A acquisition`, () => collection._sync.unloadSubset(first)],
+        [`Collection`, () => collection.cleanup()],
+        [`cache listener`, () => unsubscribeCache()],
+        [`Query client`, () => queryClient.clear()],
+      ])
+    },
+  )
+
   it(`refines generated accepted release histories`, async () => {
     if (
       acceptedReleaseReplay.replayPath !== undefined &&

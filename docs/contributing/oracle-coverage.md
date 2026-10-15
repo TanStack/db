@@ -783,6 +783,15 @@ at that checkpoint.
 Allowing the replay to overwrite A's result controller fails the same-result
 history there. These controlled histories do not establish arbitrary later
 accepted-result ordering.
+A second-fetch witness starts B inside A's Collection commit callback, then
+holds B's accepted receipt behind an optimistic mutation. Query Core reports
+B's fetch action before A's cache success action. A later unaccepted cache
+edit aborts B's caller; the caller must stay pending until B's receipt applies,
+then reject with exactly B's row public. The neighboring deferred-start case
+reverses the cache-event order. The old terminal-record retirement failed the
+inside-callback case at the held-receipt caller-outcome checkpoint. These
+fixed histories do not establish arbitrary chains of reentrant fetches or
+provider failure during that overlap.
 An initial-fetch lease grammar now varies an equal peer, consumed versus
 ignored physical signal, six first-caller actions (including both abort/unload
 orders and Collection cleanup), peer release before provider settlement, and

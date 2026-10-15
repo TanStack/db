@@ -387,6 +387,7 @@ let nextQueryCollectionAuthorityPosition = 0
 const queryCollectionFetchActionStarts = new WeakMap<object, number>()
 const queryCollectionCurrentFetchActionStarts = new WeakMap<AnyQuery, number>()
 const queryCollectionCurrentFetchStarts = new WeakMap<AnyQuery, number>()
+const queryCollectionPreviousFetchStarts = new WeakMap<AnyQuery, number>()
 const queryCollectionSuccessfulFetchStarts = new WeakMap<AnyQuery, number>()
 const queryCollectionSuccessfulFetchData = new WeakMap<AnyQuery, unknown>()
 const queryCollectionSuccessfulFetchVersions = new WeakMap<AnyQuery, number>()
@@ -978,6 +979,30 @@ export function queryCollectionOptions(
     for (const fetchStart of fetchStarts) recordsByStart.delete(fetchStart)
     if (recordsByStart.size === 0) fetchApplicationRecords.delete(query)
   }
+
+  const completingFetch = (query: AnyQuery) => {
+    // A Collection commit can start the next fetch inside Query Core's
+    // observer callback, before Core reports the prior fetch's cache event.
+    const newerActionStart =
+      query.state.fetchStatus === `fetching`
+        ? queryCollectionCurrentFetchActionStarts.get(query)
+        : undefined
+    return {
+      start:
+        newerActionStart === undefined
+          ? queryCollectionCurrentFetchStarts.get(query)
+          : queryCollectionPreviousFetchStarts.get(query),
+      newerActionStart,
+    }
+  }
+
+  const terminalFetchStarts = (
+    query: AnyQuery,
+    newerActionStart: number | undefined,
+  ): Array<number> =>
+    [...(fetchApplicationRecords.get(query)?.keys() ?? [])].filter(
+      (start) => newerActionStart === undefined || start < newerActionStart,
+    )
 
   const hasCurrentCacheGenerationFetch = (query: AnyQuery): boolean =>
     requiredCacheGenerationFetchStart === undefined ||
@@ -3802,6 +3827,19 @@ export function queryCollectionOptions(
               if (observer.getCurrentQuery() === event.query)
                 fetchStartGenerations.set(logicalHash, fetchStart)
             })
+            if (
+              queryCollectionCurrentFetchActionStarts.get(event.query) !==
+              fetchStart
+            ) {
+              const previousStart = queryCollectionCurrentFetchStarts.get(
+                event.query,
+              )
+              if (previousStart !== undefined)
+                queryCollectionPreviousFetchStarts.set(
+                  event.query,
+                  previousStart,
+                )
+            }
             queryCollectionCurrentFetchActionStarts.set(event.query, fetchStart)
             queryCollectionCurrentFetchStarts.set(event.query, fetchStart)
             const obsoleteFetchStarts = [
@@ -3828,31 +3866,32 @@ export function queryCollectionOptions(
               event.query,
               event.query.state.dataUpdateCount,
             )
-            const fetchStart = queryCollectionCurrentFetchStarts.get(
-              event.query,
-            )
+            const completing = completingFetch(event.query)
+            const fetchStart = completing.start
             if (fetchStart !== undefined) {
               queryCollectionSuccessfulFetchStarts.set(event.query, fetchStart)
-              captureFetchResult(event.query, fetchStart)
+              if (completing.newerActionStart === undefined)
+                captureFetchResult(event.query, fetchStart)
               // The observer result handler may attach its application promise
               // after the cache success action. Capture again in the microtask.
-              const terminalStarts = [
-                ...(fetchApplicationRecords.get(event.query)?.keys() ?? []),
-              ]
+              const terminalStarts = terminalFetchStarts(
+                event.query,
+                completing.newerActionStart,
+              )
               queueMicrotask(() => {
                 captureFetchApplications(event.query, fetchStart)
                 retireFetchApplicationRecords(event.query, terminalStarts)
               })
             }
           } else if (event.action.type === `error`) {
-            const fetchStart = queryCollectionCurrentFetchStarts.get(
-              event.query,
-            )
-            if (fetchStart !== undefined) {
-              captureFetchResult(event.query, fetchStart)
-              const terminalStarts = [
-                ...(fetchApplicationRecords.get(event.query)?.keys() ?? []),
-              ]
+            const completing = completingFetch(event.query)
+            if (completing.start !== undefined) {
+              if (completing.newerActionStart === undefined)
+                captureFetchResult(event.query, completing.start)
+              const terminalStarts = terminalFetchStarts(
+                event.query,
+                completing.newerActionStart,
+              )
               queueMicrotask(() =>
                 retireFetchApplicationRecords(event.query, terminalStarts),
               )
@@ -3865,13 +3904,12 @@ export function queryCollectionOptions(
             // reverted cancellation restores the pre-fetch state. Reset also
             // reaches this terminal state. Neither path should retain causal
             // fetch records until another fetch happens.
-            const fetchStart = queryCollectionCurrentFetchStarts.get(
-              event.query,
-            )
-            if (fetchStart !== undefined) {
-              const terminalStarts = [
-                ...(fetchApplicationRecords.get(event.query)?.keys() ?? []),
-              ]
+            const completing = completingFetch(event.query)
+            if (completing.start !== undefined) {
+              const terminalStarts = terminalFetchStarts(
+                event.query,
+                completing.newerActionStart,
+              )
               queueMicrotask(() =>
                 retireFetchApplicationRecords(event.query, terminalStarts),
               )
