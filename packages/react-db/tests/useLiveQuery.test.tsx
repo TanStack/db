@@ -1009,10 +1009,7 @@ describe(`Query Collections`, () => {
           })
           methods.commit()
           methods.markReady()
-          failSource = () =>
-            methods.reportError(new Error(`source sync failed`), {
-              final: true,
-            })
+          failSource = () => methods.markError(new Error(`source sync failed`))
         },
       },
     })

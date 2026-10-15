@@ -2796,7 +2796,7 @@ export function queryCollectionOptions(
             error,
           )
           if (collection.status === `ready`) {
-            reportError(error, { final: false })
+            reportError(error)
           }
           if (collection.status === `loading`) {
             markError(error)
@@ -3173,7 +3173,7 @@ export function queryCollectionOptions(
           if (collection.status === `loading`) {
             markError(result.error)
           } else if (collection.status === `ready`) {
-            reportError(result.error, { final: false })
+            reportError(result.error)
           }
         }
       }

@@ -355,10 +355,10 @@ collection-state error. The error is final for the sync run: `markReady()`
 afterward throws. Only a restart (`cleanup()`, then `preload()`) starts a new
 sync run.
 
-After the first `markReady()`, never move the Collection to `error`. Report a
-sync problem with `reportError(error, { final })`, keeping the rows, and call
-`reportHealthy()` when sync works again. Pass `final: true` only when you stop
-trying; only a restart clears a final error. Apps read these reports from
+After the first `markReady()`, the rows stay. Report a sync problem with
+`reportError(error)` while you keep trying, and call `reportHealthy()` when
+sync works again. When you stop trying, call `markError(error)`: after
+readiness it is a final health error, and only a restart clears it. Apps read these reports from
 `collection.health` and from each live query's `errors` tree. While a retry is
 in progress, report nothing.
 

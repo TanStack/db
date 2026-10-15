@@ -323,8 +323,8 @@ export class CollectionSyncManager<
           markError: (error?: unknown) => {
             if (isCurrentSync()) this.lifecycle.markError(error)
           },
-          reportError: (error: unknown, options?: { final?: boolean }) => {
-            if (isCurrentSync()) this.lifecycle.reportError(error, options)
+          reportError: (error: unknown) => {
+            if (isCurrentSync()) this.lifecycle.reportError(error)
           },
           reportHealthy: () => {
             if (isCurrentSync()) this.lifecycle.reportHealthy()

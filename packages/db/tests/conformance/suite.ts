@@ -1179,7 +1179,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           [
             `a health error that is not final`,
             () => {
-              source.reportError(new Error(`stream stalled`), { final: false })
+              source.reportError(new Error(`stream stalled`))
               report(`stream stalled`, false)
             },
           ],
@@ -1193,7 +1193,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           [
             `a final health error`,
             () => {
-              source.reportError(new Error(`stream ended`), { final: true })
+              source.markError(new Error(`stream ended`))
               report(`stream ended`, true)
             },
           ],
@@ -1207,7 +1207,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           [
             `a later report cannot replace a final health error`,
             () => {
-              source.reportError(new Error(`late`), { final: false })
+              source.reportError(new Error(`late`))
               report(`late`, false)
             },
           ],

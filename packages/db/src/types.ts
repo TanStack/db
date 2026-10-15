@@ -451,21 +451,20 @@ export interface SyncConfig<
     /** Signal that a usable initial snapshot is available for this attempt. */
     markReady: () => void
     /**
-     * Signal that the initial sync of this attempt failed for good, before it
-     * produced a usable snapshot. Call it only when the source has stopped
-     * trying; while it retries, call nothing. When supplied, `error` is
-     * preserved as the rejection reason from `preload()`. Calling `markReady()`
-     * after `markError()` in the same attempt throws. After the first ready,
-     * `markError(error)` is treated as `reportError(error, { final: true })`.
+     * Signal that the sync adapter stopped trying. Before Collection readiness
+     * this is the initial error of the sync run: `preload()` rejects with
+     * `error`, and `markReady()` afterward throws. After it, this is a final
+     * health error: the status and rows stay, and only a restart clears it.
+     * While the sync adapter retries, call nothing.
      */
     markError: (error?: unknown) => void
     /**
-     * Report a problem after the first ready. The status and rows do not
-     * change. `final: true` means the source stopped trying, and only a
-     * restart clears the problem. Throws before the first ready.
+     * Report a problem after Collection readiness while the sync adapter
+     * keeps trying. The status and rows do not change. Throws before
+     * Collection readiness.
      */
-    reportError: (error: unknown, options?: { final?: boolean }) => void
-    /** Report that sync works again after a non-final `reportError`. */
+    reportError: (error: unknown) => void
+    /** Report that sync works again after `reportError`. */
     reportHealthy: () => void
     /**
      * Replace the synced rows. By default the replacement also marks the

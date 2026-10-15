@@ -5890,34 +5890,21 @@ function createWrappedSyncConfig<
       }
 
       let sourceSession = 0
-      const reportUpstreamHealthy = () => {
+      // Upstream health waits for persisted startup, as markReady does.
+      const afterStartup = (report: () => void) => {
         if (startupState.cleanedUp || getTerminalFailure()) return
         void (fullStartPromise ?? runtime.ensureStarted())
           .then(() => {
-            if (!isCleanedUp() && !getTerminalFailure()) {
-              params.reportHealthy()
-            }
-          })
-          .catch(() => undefined)
-      }
-      const reportUpstreamErrorForHealth = (
-        error: unknown,
-        options?: { final?: boolean },
-      ) => {
-        if (startupState.cleanedUp || getTerminalFailure()) return
-        void (fullStartPromise ?? runtime.ensureStarted())
-          .then(() => {
-            if (!isCleanedUp() && !getTerminalFailure()) {
-              params.reportError(error, options)
-            }
+            if (!isCleanedUp() && !getTerminalFailure()) report()
           })
           .catch(() => undefined)
       }
       const wrappedParams = {
         ...params,
         markError: reportUpstreamError,
-        reportError: reportUpstreamErrorForHealth,
-        reportHealthy: reportUpstreamHealthy,
+        reportError: (error: unknown) =>
+          afterStartup(() => params.reportError(error)),
+        reportHealthy: () => afterStartup(params.reportHealthy),
         markReady: () => {
           if (startupState.cleanedUp || getTerminalFailure()) return
           void (fullStartPromise ?? runtime.ensureStarted())

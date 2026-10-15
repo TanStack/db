@@ -185,15 +185,7 @@ export function trailBaseCollectionOptions<
   type SyncParams = Parameters<SyncConfig<TItem, TKey>[`sync`]>[0]
   const sync = {
     sync: (params: SyncParams) => {
-      const {
-        begin,
-        write,
-        commit,
-        markReady,
-        markError,
-        reportError,
-        collection,
-      } = params
+      const { begin, write, commit, markReady, markError, collection } = params
       let cancelled = false
       let periodicCleanupTask: ReturnType<typeof setInterval> | undefined
       const cleanup = () => {
@@ -405,12 +397,12 @@ export function trailBaseCollectionOptions<
         }
       }
 
+      // The adapter does not resubscribe, so it gives up when its stream
+      // ends; a failed sync run already reported why it ended.
       function reportStreamEnd(error: unknown, closed = false) {
         if (cancelled) return
-        if (collection.status === `loading`) markError(error)
-        else if (collection.status === `ready`)
-          reportError(error, { final: true })
-        // A failed sync run already reported why it ended.
+        if (collection.status === `loading` || collection.status === `ready`)
+          markError(error)
         else if (!closed) console.error(`TrailBase subscription failed`, error)
       }
 
@@ -438,8 +430,6 @@ export function trailBaseCollectionOptions<
               subscribedReader.releaseLock()
               if (eventReader === subscribedReader) eventReader = undefined
             })
-            // The adapter does not resubscribe, so any end of the stream it
-            // did not cancel stops change delivery for this sync run.
             .then(
               () =>
                 reportStreamEnd(
@@ -466,12 +456,7 @@ export function trailBaseCollectionOptions<
           if (cancelled) return
           settleListener({ error })
           cancelEventReader()
-          if (collection.status === `loading`) {
-            markError(error)
-          } else if (collection.status === `ready`) {
-            // Post-readiness stream failure: adapter does not resubscribe
-            reportError(error, { final: true })
-          }
+          reportStreamEnd(error, true)
           return
         }
 

@@ -5,7 +5,7 @@ It ships as one pull request, because it is a breaking change and a
 significant product change. It replaces #2129. Later decisions (2026-10-14):
 a crashed Collection ends every live query and Effect above it; terminal local
 persistence failures crash; `request` stays the public phase name; a live
-query's Collection health includes its request errors.
+query's Collection health includes its request errors. `markError` means the sync adapter gave up in both phases, so `reportError` has no `final` option and nothing warns; query-db's error utilities and the infinite query's `error` field give way to Collection health.
 
 Branch: `feat/source-health-channel` (worktree
 `.worktrees/source-health-channel`).

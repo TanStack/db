@@ -11,10 +11,12 @@
  *   throws. Only a restart (`cleanup()`, then a new preload or subscriber)
  *   begins a new sync run.
  * - **Health** says whether the data is still kept up to date. It is metadata
- *   after Collection readiness: `reportError(error, { final })` records a problem,
- *   `reportHealthy()` clears a non-final one, and `markError()` after Collection readiness is
- *   a final problem. The status and the rows do not change. Only the sync adapter
- *   clears its problem, and nothing clears a final problem except a restart.
+ *   after Collection readiness: `reportError(error)` records a problem while
+ *   the sync adapter keeps trying, `reportHealthy()` clears it, and
+ *   `markError()` after Collection readiness records a final problem, because
+ *   the sync adapter gave up. The status and the rows do not change. Only the
+ *   sync adapter clears its problem, and nothing clears a final problem
+ *   except a restart.
  *
  * A live query exposes both axes for everything it depends on through
  * `collection.errors`: one node for itself and one per source alias in query
@@ -59,8 +61,8 @@
  * ## The history grammar
  *
  * Steps act on Collection `A` or `B`: `ready` writes the Collection's row and calls
- * `markReady()`; `fail` calls `markError()`; `report` and `reportFinal` call
- * `reportError()`; `healthy` calls `reportHealthy()`; `crash` moves the
+ * `markReady()`; `fail` calls `markError()`; `report` calls `reportError()`;
+ * `healthy` calls `reportHealthy()`; `crash` moves the
  * Collection to `error` through its lifecycle, as a crash cause would. `restart` cleans up the
  * live query and every Collection, then preloads the live query again. Every step
  * is issued in every state. The model predicts its outcome, including a throw
@@ -125,7 +127,7 @@ type Shape =
   `direct` | `join` | `self-join` | `nested` | `include` | `pooled-nested`
 type Step =
   | {
-      kind: `ready` | `fail` | `report` | `reportFinal` | `healthy` | `crash`
+      kind: `ready` | `fail` | `report` | `healthy` | `crash`
       source: SourceName
     }
   | { kind: `restart` }
@@ -226,13 +228,9 @@ function applyModel(shape: Shape, model: Model, step: Step): `ok` | `throws` {
         source.problem = { final: true, serial: ++model.serial }
       break
     case `report`:
-    case `reportFinal`:
       if (source.gate !== `ready`) outcome = `throws`
       else if (!source.problem?.final)
-        source.problem = {
-          final: step.kind === `reportFinal`,
-          serial: ++model.serial,
-        }
+        source.problem = { final: false, serial: ++model.serial }
       break
     case `healthy`:
       if (source.gate !== `ready`) outcome = `throws`
@@ -604,9 +602,7 @@ async function runHistory(
               new Error(`${step.source} crashed`),
             )
           } else {
-            params.reportError(new Error(`${step.source} problem`), {
-              final: step.kind === `reportFinal`,
-            })
+            params.reportError(new Error(`${step.source} problem`))
           }
         }
       } catch (error) {
@@ -708,20 +704,16 @@ const namedHistories: Record<string, ReadonlyArray<Step>> = {
     on(`report`, `A`),
     on(`healthy`, `A`),
   ],
-  'a final problem stays until a restart': [
+  'markError after Collection readiness stays until a restart': [
     on(`ready`, `A`),
     on(`ready`, `B`),
-    on(`reportFinal`, `A`),
+    on(`report`, `A`),
+    on(`fail`, `A`),
+    on(`report`, `A`),
     on(`healthy`, `A`),
     restart,
     on(`ready`, `A`),
     on(`ready`, `B`),
-  ],
-  'markError after Collection readiness is final health': [
-    on(`ready`, `A`),
-    on(`ready`, `B`),
-    on(`fail`, `A`),
-    on(`healthy`, `A`),
   ],
   'an initial error is final for its sync run': [
     on(`fail`, `A`),
@@ -768,7 +760,6 @@ describe(`source failure and health oracle`, () => {
             `ready` as const,
             `fail` as const,
             `report` as const,
-            `reportFinal` as const,
             `healthy` as const,
             `crash` as const,
           ),

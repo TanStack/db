@@ -250,22 +250,13 @@ export class CollectionLifecycleManager<
   }
 
   /**
-   * The sync adapter gave up. Before Collection readiness this fails the initial sync
-   * of the sync run; after it, the problem is final health metadata and the
-   * data stays.
+   * The sync adapter gave up. Before Collection readiness this fails the
+   * initial sync of the sync run; after it, it is a final health error and
+   * the rows stay.
    */
   public markError(error?: unknown): void {
-    if (this.status === `ready`) {
-      if (devBuild() && process.env.NODE_ENV !== `production`) {
-        console.warn(
-          `[TanStack DB] Collection "${this.id}" called markError() after Collection readiness. ` +
-            `Call reportError(error, { final: true }) instead; the status stays ready.`,
-        )
-      }
-      this.reportError(error, { final: true })
-      return
-    }
-    this.crash(error)
+    if (this.status === `ready`) this.recordSourceProblem(error, true)
+    else this.crash(error)
   }
 
   /**
@@ -291,12 +282,16 @@ export class CollectionLifecycleManager<
     return this.status === `error` ? this.initialProblem : null
   }
 
-  /** The sync adapter's report after Collection readiness. Status and rows do not change. */
-  public reportError(error: unknown, options?: { final?: boolean }): void {
+  /** The sync adapter still tries after a problem. Status and rows do not change. */
+  public reportError(error: unknown): void {
     this.assertReportable(`reportError`)
+    this.recordSourceProblem(error, false)
+  }
+
+  private recordSourceProblem(error: unknown, final: boolean): void {
     // A final problem stays until a restart.
     if (this.sourceProblem?.final) return
-    this.sourceProblem = describeProblem(error, `sync`, options?.final === true)
+    this.sourceProblem = describeProblem(error, `sync`, final)
     this.events.emitHealthChange()
   }
 

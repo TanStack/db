@@ -174,9 +174,9 @@ The sync process follows this lifecycle:
 2. **write()** - Add changes to the pending transaction (buffered until commit)
 3. **commit()** - Apply all changes atomically to the collection state
 4. **markReady()** - Signal that a usable initial snapshot exists
-5. **markError(error?)** - Signal that you gave up on the initial sync before producing a usable snapshot; pass the cause so readiness waits reject with it. It is final for the sync run: `markReady()` afterward throws, and only a restart starts over
-6. **reportError(error, { final })** - After the Collection is ready, report a sync problem without changing its status or rows. Pass `final: true` when you stop trying; only a restart clears a final error
-7. **reportHealthy()** - After the Collection is ready, report that sync works again. It clears an error that is not final
+5. **markError(error?)** - Signal that you stopped trying. Before the Collection is ready, this fails the sync run: readiness waits reject with the cause, and `markReady()` afterward throws. After it, this is a final health error: the status and rows stay. Only a restart starts over
+6. **reportError(error)** - After the Collection is ready, report a sync problem while you keep trying, without changing its status or rows
+7. **reportHealthy()** - After the Collection is ready, report that sync works again. It clears the problem from `reportError()`
 
 ### Reporting failures
 
@@ -185,13 +185,11 @@ still kept up to date. Follow these rules so both stay truthful:
 
 1. While you retry the initial sync, call nothing. The Collection stays
    `loading`.
-2. Call `markError(error)` only when you give up before the first
+2. Call `markError(error)` when you give up, before or after the first
    `markReady()`. Do not call `markReady()` after it.
-3. After the first `markReady()`, call `reportError(error, { final })` for
-   problems and `reportHealthy()` when sync works again. Never discard rows
-   because sync failed.
-4. Stay silent while a retry is in progress, and report `final: true` only
-   when you stop for good.
+3. After the first `markReady()`, call `reportError(error)` for a problem
+   while you keep trying, and `reportHealthy()` when sync works again. Never
+   discard rows because sync failed.
 
 ```ts
 sync: ({ begin, write, commit, markReady, markError, reportError, reportHealthy }) => {
@@ -209,20 +207,14 @@ sync: ({ begin, write, commit, markReady, markError, reportError, reportHealthy 
       }
     },
     onError: (error, { willRetry }) => {
-      if (!ready) {
-        if (!willRetry) markError(error)
-      } else {
-        reportError(error, { final: !willRetry })
-      }
+      if (!willRetry) markError(error)
+      else if (ready) reportError(error)
     },
   })
   return () => stream.close()
 }
 ```
 
-Calling `markError(error)` after the first `markReady()` still works while you
-migrate: it is treated as `reportError(error, { final: true })` and logs a
-development warning.
 
 `commit()` accepts the transaction and returns `true`. An accepted transaction
 always applies, in commit order. While an optimistic transaction is persisting,

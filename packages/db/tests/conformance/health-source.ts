@@ -18,7 +18,8 @@ export function makeHealthSource<T extends { id: string }>(
         write: (message: { type: string; value: T }) => void
         commit: () => void
         markReady: () => void
-        reportError: (error: unknown, options?: { final?: boolean }) => void
+        markError: (error: unknown) => void
+        reportError: (error: unknown) => void
         reportHealthy: () => void
       }
     | undefined
@@ -46,7 +47,8 @@ export function makeHealthSource<T extends { id: string }>(
     insert: (row) => writeRows(`insert`, [row]),
     update: (row) => writeRows(`update`, [row]),
     remove: (row) => writeRows(`delete`, [row]),
-    reportError: (error, options) => controls!.reportError(error, options),
+    reportError: (error) => controls!.reportError(error),
+    markError: (error) => controls!.markError(error),
     reportHealthy: () => controls!.reportHealthy(),
   }
 }

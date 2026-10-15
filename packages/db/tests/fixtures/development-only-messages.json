@@ -1,13 +1,5 @@
 [
   {
-    "file": "collection/lifecycle.ts",
-    "literals": [
-      "[TanStack DB] Collection \"",
-      "\" called markError() after Collection readiness. ",
-      "Call reportError(error, { final: true }) instead; the status stays ready."
-    ]
-  },
-  {
     "file": "collection/sync.ts",
     "literals": [
       "Calling .preload() on a collection with syncMode \"on-demand\" is a no-op. ",

@@ -85,8 +85,10 @@ export interface LaggingSourceHandle<
 export interface HealthSourceHandle<
   T extends { id: string } = Row,
 > extends SourceHandle<T> {
-  /** The sync adapter reports a health error after Collection readiness. */
-  reportError: (error: unknown, options?: { final?: boolean }) => void
+  /** The sync adapter reports a health error and keeps trying. */
+  reportError: (error: unknown) => void
+  /** The sync adapter gives up: a final health error after readiness. */
+  markError: (error: unknown) => void
   /** The sync adapter reports that sync works again. */
   reportHealthy: () => void
 }

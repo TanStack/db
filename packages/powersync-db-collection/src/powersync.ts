@@ -841,7 +841,7 @@ function createPowerSyncCollectionConfig<
                   // Cleanup owns the outcome.
                 } else if (collection.status === `ready`) {
                   trackingOutage = true
-                  reportError(error, { final: false })
+                  reportError(error)
                 } else markError(error)
                 throw error
               })
