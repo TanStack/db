@@ -1,5 +1,23 @@
 # @tanstack/db
 
+## 0.15.1
+
+### Patch Changes
+
+- Explain whether bounded `orderBy` queries lack a field index, have mismatched comparison options, or have an index that cannot support ordered lazy loading. ([#2196](https://github.com/TanStack/db/pull/2196))
+
+- Fix eager live-query preloads after collection cleanup so they wait for the restarted source snapshot and resolve with its rows. ([#2173](https://github.com/TanStack/db/pull/2173))
+
+- Publish the first window of an ordered live query synchronously when a full-source fallback returns `true` after applying its rows. This prevents an empty initial result when the first ordered request cannot fill the window. ([#2159](https://github.com/TanStack/db/pull/2159))
+
+  A later full-source fallback without ordering-repair debt can also settle in the current graph turn. Explicit window moves and full-source repairs keep their existing settlement rules.
+
+- Show the right ordered window after an on-demand Query Collection refetches. When a refetch changes a page that has a later page after it, or moves a page's end earlier, a row could sort past the page's end and be in neither result. Query DB now reports that through the new sync-adapter call `invalidateLoadedSubsets()`, and each ordered live query and Effect re-establishes its window with a bounded repair. A window that lies inside its own first page, such as a top-N list after an insert, skips the repair. This covers `utils.refetch()` and Query refetches such as `invalidateQueries`. An ordering repair that overlaps in-flight page or tie work now reads a bounded prefix instead of the full source. The SQLite persistence wrapper forwards the new call. Ordered live queries also keep paging when a source answers a request synchronously from its cache, and a finished repair no longer leaves a second first page that every later refetch re-reads. ([#2154](https://github.com/TanStack/db/pull/2154))
+
+- Retire adapter-created live-query collections after their final subscriber leaves. Treat an undefined `gcTime` as omitted, preserve explicit values and caller-supplied collections, and retain Solid projections while their Suspense boundary is pending. ([#2172](https://github.com/TanStack/db/pull/2172))
+
+- Publish optimistic membership departures from ordered live-query windows immediately, even when a provider refill is pending. Keep provider-backed rows private until their sync writes apply. ([#2177](https://github.com/TanStack/db/pull/2177))
+
 ## 0.15.0
 
 ### Minor Changes
