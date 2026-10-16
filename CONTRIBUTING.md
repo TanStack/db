@@ -64,6 +64,10 @@ If you have been assigned to fix an issue or develop a new feature, please follo
   a receiving witness. See the
   [oracle coverage map](docs/contributing/oracle-coverage.md) and
   [oracle test guide](docs/contributing/oracle-tests.md).
+- For a bug fix, state how the pull request evaluated and closed the declared
+  bug class. Include the violated law, exercised histories, production paths,
+  observation checkpoints, RED/GREEN evidence, and remaining limits. A passing
+  reproduction for one trace is not sufficient.
 - Document your changes in the appropriate doc page.
 - Git stage your required changes and commit them.
 - Submit a PR for review.

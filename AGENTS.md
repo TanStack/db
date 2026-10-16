@@ -527,6 +527,13 @@ is not a universal proof. When the focused-test exception applies, do not claim
 that the bug class is closed. State which trace the focused test proves and
 record the remaining oracle gap.
 
+Every bug-fix pull request must show how it evaluated and closed the declared
+bug class. State the violated law and its authority. Name the legal histories,
+production paths, and public observation checkpoints that the oracle exercises.
+Include the original or hostile-mutant RED result and the repaired GREEN result.
+State any remaining limits. A passing reproduction for one trace does not
+satisfy this requirement.
+
 ### Keep Oracles Independent
 
 An oracle is useful only when its expected result comes from a source independent
