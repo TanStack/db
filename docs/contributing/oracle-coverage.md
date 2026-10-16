@@ -94,7 +94,8 @@ that test identifiers must copy production's private data structures.
 The Collection lifecycle history owner includes a 26-cell cleanup-restart
 matrix. It crosses explicit and default eager sources with absent or present
 loaders, empty or nonempty replacements, and no interruption, truncate during
-loading, or recoverable error before same-run readiness. On-demand controls use
+loading, or a failed first load followed by `reload()`, which must keep the
+waiting caller for the new sync run. On-demand controls use
 settled subset acquisition. A cleanup-detached eager demand remains active, its
 `onLoadSubsetResult` promise stays pending through these pre-ready cuts, and it
 starts no physical subset acquisition before fulfilling with the exact
