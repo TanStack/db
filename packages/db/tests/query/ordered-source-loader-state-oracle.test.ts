@@ -1114,7 +1114,10 @@ describe(`Ordered source request ownership`, () => {
     // Tie requests answer synchronously: they write a row, the graph turn
     // processes it and asks for more, and the request returns `true`.
     subscription.requestSnapshot = ((options: RequestOptions) => {
-      if (options.where === undefined) return asyncRequest(options)
+      if (options.where === undefined) {
+        asyncRequest(options)
+        return
+      }
       const acquisition: LoadSubsetOptions = { where: options.where }
       requests.push({
         method: `snapshot`,
