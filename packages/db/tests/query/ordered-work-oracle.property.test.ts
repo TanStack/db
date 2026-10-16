@@ -4982,6 +4982,30 @@ function boundaryRanks(
     .map((row): number | null => row.rank)
 }
 
+// Whether a bounded read of the window could end on a null or NaN rank. The
+// read runs in source order, past rows a joined filter rejects, through the
+// row after the window's last eligible row, or through the whole source when
+// fewer rows are eligible. Neither rank can be expressed as a cursor
+// (canExpressCursorOrder), so such a boundary takes the documented
+// full-source fallback.
+function boundedReadMayEndUnexpressible(
+  rows: ReadonlyMap<number, Row>,
+  testCase: EagerCase,
+): boolean {
+  const all = new Map(
+    [...rows].map(([id, row]) => [id, { ...row, eligible: true }]),
+  )
+  const end = testCase.offset + testCase.limit
+  let eligible = 0
+  for (const row of eagerOrder(all, testCase)) {
+    // Generated rows may carry a null rank behind the `number` row type.
+    const rank = row.rank as number | null
+    if (rank === null || Number.isNaN(rank)) return true
+    if (rows.get(row.id)!.eligible && ++eligible > end) return false
+  }
+  return false
+}
+
 // Properties take this as their predicate, which must return nothing;
 // runEagerWindow also returns the held-load reach counts.
 async function checkEagerWindow(testCase: EagerCase): Promise<void> {
@@ -5879,11 +5903,14 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
       stepChangedInFlight = false
       if (command.type === `refetch`) {
         const fullSourceBefore = fullSourceRequests
+        // The repair reads the current rows.
+        const unexpressible = boundedReadMayEndUnexpressible(rows, shown)
         await refetch()
         // The repair a report starts reads each window's bounded prefix,
         // tie, and refill; a whole-source read would be the cost the report
-        // exists to avoid.
-        if (signalsRefetch) {
+        // exists to avoid. A boundary on a null or NaN rank takes the
+        // documented full-source fallback instead.
+        if (signalsRefetch && !unexpressible) {
           expect(
             fullSourceRequests,
             `full-source requests after a signalling refetch at step ${step}`,
