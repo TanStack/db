@@ -71,6 +71,10 @@ export class OrderedSourceLoader {
   private failedRequest:
     { windowOperationGeneration: number | undefined } | undefined
   private failedAcquisitions = new Map<ReleaseLoadSubset, OrderedRequestKind>()
+  // The failed acquisitions that authoritative work superseded. Their partial
+  // writes owe only a full-source read, so that read's success retires them
+  // without an explicit retry.
+  private supersededFailures = new Set<ReleaseLoadSubset>()
   private active = true
   private orderedLoadGeneration = 0
   private orderingInvalidationGeneration = 0
@@ -244,7 +248,10 @@ export class OrderedSourceLoader {
     if (!mayRetryFailure) return this.pending
     if (
       (this.failedRequest || this.failedAcquisitions.size > 0) &&
-      windowOperationGeneration !== undefined
+      windowOperationGeneration !== undefined &&
+      // The explicit retry releases them, not a repair-chain step that runs
+      // inside it: a throwing release would unwind the chain mid-step.
+      !continuesOrderedPrefixRepair
     ) {
       this.cancelRepairRetry()
       this.repairRetries = 0
@@ -354,7 +361,7 @@ export class OrderedSourceLoader {
 
   loadFullSource(windowOperationGeneration?: number): void {
     if (!this.active || this.authoritativeRequestState !== `none`) return
-    this.authorityGeneration++
+    this.releaseSupersededPending()
     this.authoritativeRequestState = `held`
     this.authoritativeRequestKind = `full-source`
     this.requestAndObserve(
@@ -370,9 +377,17 @@ export class OrderedSourceLoader {
     )
   }
 
+  // An authoritative read supersedes an in-flight finite request; the old
+  // request still settles its own participant, and its result is ignored for
+  // the boundary. A repair that answers at once must not then wait behind it,
+  // or nothing resumes the repair when the old request settles.
+  private releaseSupersededPending(): void {
+    this.pending = undefined
+  }
+
   private loadOrderedPrefixRepair(windowOperationGeneration?: number): void {
     if (!this.active || this.authoritativeRequestState !== `none`) return
-    this.authorityGeneration++
+    this.releaseSupersededPending()
     // Any older finite request may still settle, but it cannot refine from a
     // boundary that predates this authoritative prefix.
     this.orderedPrefixRepairGeneration = this.orderingInvalidationGeneration
@@ -504,6 +519,17 @@ export class OrderedSourceLoader {
     )
   }
 
+  // A full-source read covers every row, so it supersedes the partial writes
+  // of each failed request that authoritative work had superseded.
+  private retireSupersededFailures(): void {
+    if (this.subscription.hasPendingTruncateReplacement) return
+    const failed = [...this.supersededFailures].filter((release) =>
+      this.failedAcquisitions.delete(release),
+    )
+    this.supersededFailures.clear()
+    runAllCallbacks(failed)
+  }
+
   invalidateCursor(): void {
     if (!this.stagedContinuation?.isAuthoritativeRequest) {
       this.stagedContinuation = undefined
@@ -592,8 +618,7 @@ export class OrderedSourceLoader {
       this.orderedPrefixRepairGeneration = undefined
       if (!this.active) return
       // A failure during the chain raised the debt to a full-source read.
-      if (this.failedRequest || !this.canRepairWithOrderedPrefix) {
-        this.canRepairWithOrderedPrefix = false
+      if (!this.canRepairWithOrderedPrefix) {
         this.loadFullSource(windowOperationGeneration)
       } else {
         this.loadOrderedPrefixRepair(windowOperationGeneration)
@@ -638,6 +663,7 @@ export class OrderedSourceLoader {
     this.active = false
     this.resetCursor()
     this.failedAcquisitions.clear()
+    this.supersededFailures.clear()
     this.settledFiniteAcquisitions.clear()
   }
 
@@ -719,6 +745,7 @@ export class OrderedSourceLoader {
     continuesOrderedPrefixRepair = false,
     requestGraphInputRevision?: number,
     requestedCount?: number,
+    issuedOrderingGeneration = this.orderingInvalidationGeneration,
   ): Promise<void> | undefined {
     const isFullSource = kind === `full-source`
     const isOrderedRepair = kind === `ordered-repair`
@@ -731,7 +758,7 @@ export class OrderedSourceLoader {
       windowOperationGeneration === undefined
     const stamp: RequestStamp = {
       orderedLoadGeneration: this.orderedLoadGeneration,
-      orderingInvalidationGeneration: this.orderingInvalidationGeneration,
+      orderingInvalidationGeneration: issuedOrderingGeneration,
       isAuthoritativeRequest,
     }
     const authorityGeneration = this.authorityGeneration
@@ -874,7 +901,11 @@ export class OrderedSourceLoader {
             this.authoritativeRequestState = `complete`
             this.authoritativeRequestKind = undefined
             this.orderedPrefixRepairGeneration = undefined
-            this.retireSettledFiniteAcquisitions()
+            // A throwing release in one pass must not skip the other.
+            runAllCallbacks([
+              () => this.retireSettledFiniteAcquisitions(),
+              () => this.retireSupersededFailures(),
+            ])
           }
           if (isOrderedRepair || kind === `ordered`) {
             continueOrStage(continuation(`boundary`), deferContinuation)
@@ -888,7 +919,13 @@ export class OrderedSourceLoader {
     }
     const fail = (error: unknown, trackedRequest?: Promise<void>) => {
       this.settledFiniteAcquisitions.delete(releaseAcquisition)
-      this.stagedContinuation = undefined
+      // A finite failure cannot drop authoritative work staged by a repair.
+      if (
+        isAuthoritativeRequest ||
+        !this.stagedContinuation?.isAuthoritativeRequest
+      ) {
+        this.stagedContinuation = undefined
+      }
       if (trackedRequest && this.pending === trackedRequest) {
         this.pending = undefined
       }
@@ -907,6 +944,11 @@ export class OrderedSourceLoader {
         authorityGeneration !== this.authorityGeneration
       ) {
         this.failedAcquisitions.set(releaseAcquisition, kind)
+        this.supersededFailures.add(releaseAcquisition)
+        // Full-source coverage may already have covered its rows.
+        if (this.authoritativeRequestState === `complete`) {
+          this.retireSupersededFailures()
+        }
         this.invalidateCursor()
         this.lastBoundary = undefined
         // The loader's own recorded failure still waits for an explicit retry.
@@ -1112,6 +1154,7 @@ export class OrderedSourceLoader {
   private releaseFailedAcquisitions(): void {
     const failed = this.failedAcquisitions
     this.failedAcquisitions = new Map()
+    this.supersededFailures.clear()
     this.requesting = true
     try {
       runAllCallbacks(failed.keys())
@@ -1237,6 +1280,10 @@ export class OrderedSourceLoader {
     this.graphCheckedDuringRequest = undefined
     let observing = false
     const graphInputRevision = this.getGraphInputRevision?.()
+    // A request belongs to the ordering epoch it is issued in. Its own
+    // synchronous delivery can invalidate ordering before it returns; it
+    // still proves no coverage for the newer epoch.
+    const issuedOrderingGeneration = this.orderingInvalidationGeneration
     try {
       try {
         request((result, options, release) => {
@@ -1244,6 +1291,11 @@ export class OrderedSourceLoader {
         })
       } finally {
         this.requesting = false
+      }
+      // An authoritative read supersedes in-flight finite requests once it
+      // is issued; one that throws while starting supersedes nothing.
+      if (kind === `full-source` || kind === `ordered-repair`) {
+        this.authorityGeneration++
       }
       if (!observed) return
       observing = true
@@ -1256,6 +1308,7 @@ export class OrderedSourceLoader {
         continuesOrderedPrefixRepair,
         graphInputRevision,
         requestedCount,
+        issuedOrderingGeneration,
       )
     } catch (error) {
       if (error instanceof OrderedPostSettlementError) throw error.cause

@@ -482,10 +482,10 @@ describe(`OrderedSourceLoader`, () => {
           }
         }
       ).stagedContinuation
-      expect(stagedContinuation).toMatchObject({
-        isAuthoritativeRequest: false,
-      })
-      expect(stagedContinuation?.windowOperationGeneration).toBeUndefined()
+      // The first request's own delivery invalidated ordering, so it proves
+      // no current coverage: no ordinary continuation may survive it. (It
+      // stages none, or only authoritative work.)
+      expect(stagedContinuation?.isAuthoritativeRequest ?? true).toBe(true)
       expect(
         (loader as unknown as { needsOrderingRepair: boolean })
           .needsOrderingRepair,

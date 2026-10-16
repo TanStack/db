@@ -725,27 +725,29 @@ describe(`Ordered source request ownership`, () => {
         }
         loader.loadMore()
         expect(requests).toHaveLength(count)
+        // A successful full-source read retires every settled finite demand.
+        // It also retires the older request when that request failed: the
+        // full-source read superseded it, so its partial writes are covered
+        // and its lease needs no explicit retry.
         const successfulFinite =
           outcome === `success`
-            ? requests
-                .slice(0, fullIndex)
-                .filter(
-                  (_, index) =>
-                    index !== olderIndex || olderOutcome === `success`,
-                )
-                .map(({ acquisition }) => acquisition)
+            ? requests.slice(0, fullIndex).map(({ acquisition }) => acquisition)
             : []
         expect(releases).toEqual(successfulFinite)
 
+        // An explicit retry releases the failed demands that remain, in
+        // failure order: all of them when the full-source read failed.
         loader.loadMore(1)
-        const failedIndices = (
-          order === `older-first`
-            ? [olderIndex, fullIndex]
-            : [fullIndex, olderIndex]
-        ).filter(
-          (index) =>
-            (index === olderIndex ? olderOutcome : outcome) === `failure`,
-        )
+        const failedIndices =
+          outcome === `success`
+            ? []
+            : (order === `older-first`
+                ? [olderIndex, fullIndex]
+                : [fullIndex, olderIndex]
+              ).filter(
+                (index) =>
+                  (index === olderIndex ? olderOutcome : outcome) === `failure`,
+              )
         expect(releases).toEqual([
           ...successfulFinite,
           ...failedIndices.map((index) => requests[index]!.acquisition),
@@ -1707,13 +1709,19 @@ describe(`Successful finite demand retirement`, () => {
  *   proves no current coverage, so it never retires them.
  * - **No leak:** once loading is quiet and no failure blocks it, the loader
  *   holds nothing issued before its last successful authoritative read.
- *   Otherwise every later refetch would read that request again.
+ *   Otherwise every later refetch would read that request again. A
+ *   superseded request that failed is retired once a full-source read issued
+ *   after it succeeds; it needs no explicit retry.
  * - **No strand:** a request that authoritative work superseded can still
  *   fail. Its partial writes need the full-source read that the overlap
  *   replaced, so the loader starts one without an explicit retry. The
  *   loader's own failure (an authoritative request, or a request that
  *   nothing superseded) may block ordinary refills until an explicit retry.
  *   That is the failure law, so it is not a strand.
+ * - **Progress:** once loading is quiet, an invalidation and an ordinary pass
+ *   issue a read, unless a full-source read covers the source. A throwing
+ *   release, a staged repair continuation, or a page that invalidated its
+ *   own order must not leave a repair that nothing resumes.
  *
  * These laws came from a TLA+ model of the loader's request authority
  * (#2191). This property checks the real loader against them.
@@ -1751,10 +1759,14 @@ describe(`Successful finite demand retirement`, () => {
  *   the reaction deferred, as pending joined work or a later graph run can;
  * - `pass` runs an ordinary `loadMore()`;
  * - `move` is an explicit window move, which may also widen the window, so
- *   an unindexed loader reads a longer prefix.
+ *   an unindexed loader reads a longer prefix;
+ * - `syncInvalidatingPage` runs a pass whose next page's own delivery
+ *   invalidates source ordering before the request returns.
  * Scenarios cross an indexed loader (pages and ties) with an unindexed one
- * (prefix reads), window limits 1 and 2, and whether the first page settles
- * before the history (a bounded repair needs a settled request).
+ * (prefix reads), window limits 1 and 2, whether the first page settles
+ * before the history (a bounded repair needs a settled request), whether the
+ * first release callback throws, and whether a repair's prefix answers at
+ * once from installed rows (an eager source).
  *
  * ## Checkpoints
  *
@@ -1762,7 +1774,7 @@ describe(`Successful finite demand retirement`, () => {
  * in-flight request successfully and runs ordinary passes until the loader
  * issues nothing new. No strand is checked at that point. Then, if an own
  * failure still blocks the loader, one explicit window move retries it and
- * the drain runs again. No leak is checked last.
+ * the drain runs again. No leak is checked next, then progress.
  *
  * ## Limits
  *
@@ -1793,6 +1805,7 @@ type AuthorityCommand =
   | { type: `invalidateThenFailOldest` }
   | { type: `pass` }
   | { type: `move`; widen: boolean }
+  | { type: `syncInvalidatingPage` }
 
 type AuthorityCase = {
   indexed: boolean
@@ -1800,6 +1813,11 @@ type AuthorityCase = {
   // Settle the first page before the history. A bounded repair needs a
   // settled request; without one an invalidation reads the full source.
   settledFirst: boolean
+  // The first release callback throws, as an adapter's cleanup can.
+  releaseFault: boolean
+  // A bounded repair's prefix answers at once, as an eager indexed source
+  // does, and its rows change graph input.
+  syncRepair: boolean
   history: Array<AuthorityCommand>
 }
 
@@ -1843,6 +1861,10 @@ const authorityCommand: fc.Arbitrary<AuthorityCommand> = fc.oneof(
   { weight: 1, arbitrary: fc.constant({ type: `pass` as const }) },
   {
     weight: 1,
+    arbitrary: fc.constant({ type: `syncInvalidatingPage` as const }),
+  },
+  {
+    weight: 1,
     arbitrary: fc.record({
       type: fc.constant(`move` as const),
       widen: fc.boolean(),
@@ -1854,6 +1876,8 @@ const authorityCaseArbitrary: fc.Arbitrary<AuthorityCase> = fc.record({
   indexed: fc.boolean(),
   limit: fc.constantFrom(1 as const, 2 as const),
   settledFirst: fc.boolean(),
+  releaseFault: fc.boolean(),
+  syncRepair: fc.boolean(),
   history: fc.array(authorityCommand, { minLength: 1, maxLength: 16 }),
 })
 
@@ -1865,8 +1889,15 @@ type AuthorityObservation = {
   // Such failures where the strand law was checkable: no own failure since
   // the last full-source read.
   checkedStrandPremises: number
-  deferredStrandShapes?: number
+  // Superseded requests that failed after their repair finished while a
+  // newer invalidation's reaction was deferred.
+  deferredStrandShapes: number
   staleSettlementsAfterRepair: number
+  // Release callbacks that threw, synchronous repair answers, and pages
+  // whose own delivery invalidated ordering.
+  releaseFaults: number
+  syncRepairs: number
+  invalidatingPages: number
 }
 
 async function checkAuthorityCase(
@@ -1877,7 +1908,14 @@ async function checkAuthorityCase(
   const info = createOrderByInfo({
     limit: testCase.limit,
     ...(testCase.indexed ? {} : { index: undefined }),
+    // A synchronous repair answer reads installed rows: an eager source.
+    ...(testCase.syncRepair ? { sourceHoldsAllRows: true } : {}),
   })
+  let revision = 0
+  let invalidateNextPage = false
+  let releaseFaults = 0
+  let syncRepairs = 0
+  let invalidatingPages = 0
   const record = (method: Observed[`method`], options: RequestOptions) => {
     // Like the real subscription, a continuation's acquisition carries a
     // cursor, so the loader does not take it for a prefix read.
@@ -1918,9 +1956,33 @@ async function checkAuthorityCase(
       released: false,
     }
     ledger.push(request)
-    options.onLoadSubsetResult?.(request.deferred.promise, acquisition, () => {
+    const release = () => {
       request.released = true
-    })
+      if (testCase.releaseFault && releaseFaults === 0) {
+        releaseFaults++
+        throw new Error(`release ${request.index} failed`)
+      }
+    }
+    if (
+      testCase.syncRepair &&
+      method === `snapshot` &&
+      options.refetch === true &&
+      options.orderBy !== undefined &&
+      options.where === undefined
+    ) {
+      syncRepairs++
+      request.outcome = `ok`
+      revision++
+      options.onLoadSubsetResult?.(true, acquisition, release)
+      return
+    }
+    if (invalidateNextPage && method === `limited` && !authoritative) {
+      // The page's own delivery changes source order before it returns.
+      invalidateNextPage = false
+      invalidatingPages++
+      loader.invalidateSourceOrdering()
+    }
+    options.onLoadSubsetResult?.(request.deferred.promise, acquisition, release)
   }
   const subscription = {
     readOrderedSnapshot: () => [
@@ -1932,7 +1994,7 @@ async function checkAuthorityCase(
       record(`limited`, options),
     requestSnapshot: (options: RequestOptions) => record(`snapshot`, options),
   } as unknown as CollectionSubscription
-  const loader = new OrderedSourceLoader(
+  const loader: OrderedSourceLoader = new OrderedSourceLoader(
     info,
     subscription,
     `row`,
@@ -1941,6 +2003,8 @@ async function checkAuthorityCase(
         participants.push(result.catch(() => undefined))
       }
     },
+    () => false,
+    () => revision,
   )
   const flush = async () => {
     for (let turn = 0; turn < 6; turn++) await Promise.resolve()
@@ -2100,6 +2164,11 @@ async function checkAuthorityCase(
           run(() => loader.loadMore())
           await flush()
           break
+        case `syncInvalidatingPage`:
+          invalidateNextPage = true
+          run(() => loader.loadMore())
+          await flush()
+          break
         case `move`:
           if (command.widen) info.limit = Math.min(info.limit + 1, 3)
           run(() => loader.loadMore(++windowOperation))
@@ -2146,8 +2215,14 @@ async function checkAuthorityCase(
       }
     }
     if (ownFailureSince(lastFull)) {
-      run(() => loader.loadMore(++windowOperation))
-      await flush()
+      // A retry whose release callback throws reports that error; the next
+      // explicit retry recovers (the failed-release contract above).
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const before = ledger.length
+        run(() => loader.loadMore(++windowOperation))
+        await flush()
+        if (ledger.length > before) break
+      }
       await drain()
     }
     const authority = lastAuthoritativeSuccess()
@@ -2162,6 +2237,39 @@ async function checkAuthorityCase(
         `no leak: requests ${JSON.stringify(leaked.map(({ index }) => index))} are still held after authoritative request ${authority} succeeded`,
       )
     }
+    // A superseded request's failure owes only a full-source read; once one
+    // issued after it succeeds, its lease is retired without a retry.
+    const heldFailures = ledger.filter(
+      (failed) =>
+        failed.outcome === `failed` &&
+        failed.superseded &&
+        !failed.released &&
+        ledger.some(
+          (request) =>
+            request.fullSource &&
+            request.index > failed.index &&
+            request.outcome === `ok`,
+        ),
+    )
+    if (heldFailures.length > 0) {
+      throw new Error(
+        `no leak: superseded failed requests ${JSON.stringify(heldFailures.map(({ index }) => index))} are still held after a full-source read recovered them`,
+      )
+    }
+    // Progress: once loading is quiet, an invalidation and an ordinary pass
+    // issue a read, unless a full-source read covers the source.
+    const coveredByFullSource = authority >= 0 && ledger[authority]!.fullSource
+    if (!coveredByFullSource) {
+      const before = ledger.length
+      loader.invalidateSourceOrdering()
+      run(() => loader.loadMore())
+      await flush()
+      if (ledger.length === before) {
+        throw new Error(
+          `progress: an invalidation after the drain issued no request`,
+        )
+      }
+    }
   } finally {
     loader.dispose()
     for (const request of ledger) request.deferred.resolve()
@@ -2175,7 +2283,10 @@ async function checkAuthorityCase(
     checkedStrandPremises,
     staleSettlementsAfterRepair,
     deferredStrandShapes,
-  } as AuthorityObservation
+    releaseFaults,
+    syncRepairs,
+    invalidatingPages,
+  }
 }
 
 const authorityProperty = `ordered-loader.request-authority`
@@ -2195,6 +2306,8 @@ describe(`Ordered source request authority`, () => {
       indexed: true,
       limit: 1,
       settledFirst: false,
+      releaseFault: false,
+      syncRepair: false,
       history: [
         { type: `settle`, pick: 0, ok: true },
         { type: `invalidate`, react: true },
@@ -2207,6 +2320,74 @@ describe(`Ordered source request authority`, () => {
     })
   })
 
+  // Traces the generated lane found, kept as replays. Each ran through the
+  // same laws and failed before its repair:
+  // - a release callback throws while a repair finishes, a superseded tie
+  //   fails, and an explicit window move resumes the repair (a throwing
+  //   release unwound the chain mid-step, so nothing resumed it);
+  // - a repair answers at once while an older tie is still in flight (the
+  //   repair waited behind the superseded request, so nothing resumed it);
+  // - a page's own delivery invalidates ordering (it counted as current, so
+  //   its tie ran in the new epoch and was never retired).
+  it.each([
+    {
+      name: `a throwing release during a window move that resumes a repair`,
+      testCase: {
+        indexed: true,
+        limit: 1,
+        settledFirst: true,
+        releaseFault: true,
+        syncRepair: true,
+        history: [
+          { type: `invalidate`, react: true },
+          { type: `invalidateThenFailOldest` },
+          { type: `move`, widen: false },
+          { type: `settleNewest` },
+        ],
+      },
+    },
+    {
+      name: `a repair that answers at once behind an older tie`,
+      testCase: {
+        indexed: true,
+        limit: 1,
+        settledFirst: false,
+        releaseFault: false,
+        syncRepair: true,
+        history: [
+          { type: `settleNewest` },
+          { type: `invalidate`, react: true },
+          { type: `invalidate`, react: true },
+          { type: `invalidate`, react: false },
+        ],
+      },
+    },
+    {
+      name: `a page whose own delivery invalidates ordering`,
+      testCase: {
+        indexed: true,
+        limit: 1,
+        settledFirst: false,
+        releaseFault: false,
+        syncRepair: false,
+        history: [
+          { type: `settle`, pick: 0, ok: true },
+          { type: `syncInvalidatingPage` },
+          { type: `settleNewest` },
+          { type: `pass` },
+          { type: `settleNewest` },
+          { type: `settleNewest` },
+          { type: `settle`, pick: 3, ok: true },
+        ],
+      },
+    },
+  ] satisfies Array<{ name: string; testCase: AuthorityCase }>)(
+    `keeps request authority for $name (generated-lane replay)`,
+    async ({ testCase }) => {
+      await checkAuthorityCase(testCase)
+    },
+  )
+
   it.each(authorityCampaigns)(
     `holds, retires, and recovers requests under generated settlement orders (%s campaign)`,
     async (campaign) => {
@@ -2215,6 +2396,9 @@ describe(`Ordered source request authority`, () => {
       let supersededFailuresAfterRepair = 0
       let checkedStrandPremises = 0
       let deferredShapes = 0
+      let releaseFaults = 0
+      let syncRepairs = 0
+      let invalidatingPages = 0
       await fc.assert(
         fc.asyncProperty(authorityCaseArbitrary, async (testCase) => {
           const observation = await checkAuthorityCase(testCase)
@@ -2223,7 +2407,10 @@ describe(`Ordered source request authority`, () => {
           supersededFailuresAfterRepair +=
             observation.supersededFailuresAfterRepair
           checkedStrandPremises += observation.checkedStrandPremises
-          deferredShapes += observation.deferredStrandShapes ?? 0
+          deferredShapes += observation.deferredStrandShapes
+          releaseFaults += observation.releaseFaults
+          syncRepairs += observation.syncRepairs
+          invalidatingPages += observation.invalidatingPages
         }),
         campaign === `fixed`
           ? { seed: 20261016, numRuns: oracleRuns(10000) }
@@ -2233,15 +2420,19 @@ describe(`Ordered source request authority`, () => {
             },
       )
       // Reach witnesses: superseded requests fail, stale requests settle
-      // after a repair succeeded, the strand law is checkable, and a
-      // superseded request fails after its repair finished while a newer
-      // invalidation's reaction is deferred.
+      // after a repair succeeded, the strand law is checkable, a superseded
+      // request fails after its repair finished while a newer invalidation's
+      // reaction is deferred, a release throws, a repair answers at once,
+      // and a page's own delivery invalidates ordering.
       if (campaign !== `replay`) {
         expect(supersededFailures).toBeGreaterThan(0)
         expect(staleSettlementsAfterRepair).toBeGreaterThan(0)
         expect(supersededFailuresAfterRepair).toBeGreaterThan(0)
         expect(checkedStrandPremises).toBeGreaterThan(0)
         expect(deferredShapes).toBeGreaterThan(0)
+        expect(releaseFaults).toBeGreaterThan(0)
+        expect(syncRepairs).toBeGreaterThan(0)
+        expect(invalidatingPages).toBeGreaterThan(0)
       }
     },
     120_000,

@@ -968,8 +968,11 @@ Successful authoritative full-source recovery also retires settled successful
 page and tie demands. Later replay therefore reacquires the full source without
 repeating those finite requests. Retirement waits for each original request to
 settle and for any active replay to finish; it does not cancel unfinished work
-merely because the full-source request finished first. Failed finite demands
-still follow the explicit-retry rule above. Release callbacks retire ownership
+merely because the full-source request finished first. A failed finite demand
+that authoritative work superseded also retires then, or at once if it fails
+after full-source coverage completed: the full-source read covers its partial
+writes. Other failed finite demands still follow the explicit-retry rule above,
+and a full-source replay does not retire them. Release callbacks retire ownership
 before adapter code runs, and reentrant truncate or disposal stops the current
 retirement pass. No copied rows or additional cursor history are retained.
 
@@ -1025,7 +1028,13 @@ partial writes only raise the repair debt to the full-source read that the
 overlap replaced. A running repair restarts as that read. Otherwise the loader
 starts it at once, unless its own recorded failure is waiting for an explicit
 retry. This holds even when the repair finished and a newer invalidation's
-reaction is still deferred.
+reaction is still deferred. A request belongs to the ordering epoch it was
+issued in, even when its own synchronous delivery invalidates ordering before it
+returns, so its result and continuation do not count as current coverage. An
+authoritative read also stops waiting on the superseded request: a repair that
+answers at once continues without it. A superseded failure cannot drop the
+repair's staged continuation, and a repair-chain step does not release failed
+acquisitions; the explicit retry that resumed it does.
 A failed or canceled request, an invalidation before any request has
 settled, or a boundary that cannot be expressed still requires the full-source
 recovery above. A bounded repair failure likewise upgrades its
