@@ -1602,7 +1602,7 @@ for (const [name, raw] of [
     await withHistoryCleanup(
       async () => {
         await expect(collection.preload()).rejects.toThrow()
-        expect(collection.status).toBe('error')
+        expect(collection.status).toBe('crashed')
         expect(host.storage.getItem('shared')).toBe(raw)
         collection.utils.clearStorage()
         reopened = makeCollection(host, 'shared', 'reopened')
@@ -1805,7 +1805,7 @@ it('does not retain a failed startup validation run', async () => {
       await expect(collection.preload()).rejects.toThrow(
         'bad row cannot be serialized',
       )
-      expect(collection.status).toBe('error')
+      expect(collection.status).toBe('crashed')
       expect(host.storage.getItem('shared')).toBe(bad)
       expect(begins, 'failed restore opens no transaction').toBe(0)
       host.storage.setItem('shared', good)
@@ -1855,7 +1855,7 @@ it('rejects null stored row data before opening a sync transaction', async () =>
   await withHistoryCleanup(
     async () => {
       await expect(collection.preload()).rejects.toThrow()
-      expect(collection.status).toBe('error')
+      expect(collection.status).toBe('crashed')
       expect(host.storage.getItem('shared')).toBe(raw)
       expect(begins, 'malformed restore opens no transaction').toBe(0)
     },
@@ -1911,7 +1911,7 @@ for (const failureKind of ['storage', 'parser'] as const) {
     await withHistoryCleanup(
       async () => {
         await expect(collection.preload()).rejects.toThrow('transient')
-        expect(collection.status).toBe('error')
+        expect(collection.status).toBe('crashed')
         expect(host.storage.getItem('shared')).toBe(stored)
         await collection.cleanup()
         collection.startSyncImmediate()

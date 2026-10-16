@@ -574,7 +574,8 @@ describe(`On-Demand Sync Mode`, () => {
         expect(publications).toEqual([])
 
         if (outcome === `cleanup`) {
-          await collection.cleanup()
+          // Internal teardown that bypasses cleanup admission.
+          await collection._lifecycle.cleanup()
           const message =
             `Source collection '${collection.id}' was manually cleaned up while live query '${electronics.id}' depends on it. ` +
             `Live queries prevent automatic GC, so this was likely a manual cleanup() call.`
@@ -619,7 +620,7 @@ describe(`On-Demand Sync Mode`, () => {
             expect.objectContaining({ name: `AssertionError` }),
           )
           expect(collection.status).toBe(`cleaned-up`)
-          expect(electronics.status).toBe(`error`)
+          expect(electronics.status).toBe(`crashed`)
         }
       }, [
         resolvePersistence,
@@ -2697,7 +2698,9 @@ describe(`On-Demand Sync Mode`, () => {
         write,
         commit,
         markReady: vi.fn(),
-        markError: vi.fn(),
+        fail: vi.fn(),
+        reportError: vi.fn(),
+        reportHealthy: vi.fn(),
         truncate: vi.fn(),
       } as never)
       const loadSubset =
@@ -3246,7 +3249,13 @@ describe(`On-Demand Sync Mode`, () => {
             collection._sync.loadSubset({ where: categoryEquals(`clothing`) }),
           ),
         ).rejects.toBe(failure)
-        expect(collection.status).toBe(`error`)
+        // After the first ready, failures don't change status. Instead, they're
+        // reported as a failure reason. Status stays ready; data stays available.
+        expect(collection.status).toBe(`ready`)
+        expect(collection.errors.hasErrors).toBe(true)
+        expect(collection.errors.failureReason?.message).toMatch(
+          `trigger installation failed`,
+        )
       } finally {
         await collection.cleanup()
       }
@@ -3276,7 +3285,14 @@ describe(`On-Demand Sync Mode`, () => {
             .spyOn(db.triggers, `createDiffTrigger`)
             .mockRejectedValueOnce(new Error(`release rebuild failed`))
           collection._sync.unloadSubset(first)
-          await vi.waitFor(() => expect(collection.status).toBe(`error`))
+          // The outage keeps the rows and the ready status. The adapter retries
+          // the rebuild, so it reports a failure reason.
+          await vi.waitFor(() =>
+            expect(collection.errors.failureReason).toMatchObject({
+              message: `release rebuild failed`,
+            }),
+          )
+          expect(collection.status).toBe(`ready`)
           if (change === `delete` || change === `release-last`) {
             await db.execute(`DELETE FROM products WHERE id = 'retained'`)
           } else if (change === `predicate exit`) {
@@ -3290,7 +3306,11 @@ describe(`On-Demand Sync Mode`, () => {
             await vi.waitFor(() =>
               expect(trigger.mock.calls.length).toBeGreaterThan(1),
             )
-          await vi.waitFor(() => expect(collection.status).toBe(`ready`))
+          // A rebuild whose baseline applied reports healthy again.
+          await vi.waitFor(() =>
+            expect(collection.errors.hasErrors).toBe(false),
+          )
+          expect(collection.status).toBe(`ready`)
           expect([...collection.keys()]).toEqual(
             change === `unchanged` ? [`retained`] : [],
           )

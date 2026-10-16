@@ -777,10 +777,18 @@ source rows belong in a query result.
 
 ### Cleanup, restart, and detached waiters
 
+Public cleanup first checks admission. `cleanup()` rejects with
+`CollectionHasSubscribersError` while a live query or Effect reads the
+Collection; `cleanup({ dependents: true })` first cleans up each such live query,
+with its own dependents, and disposes each such Effect. A pooled live query
+counts as one live-query dependent per equality partition. A direct
+subscription is not refused. `collection.subscribers` lists all three kinds.
+Internal teardown, such as a retiring Collection facade, bypasses admission.
+
 Collection cleanup has two boundaries. Cleanup start is an internal synchronous
 boundary. It closes restart admission, invalidates the current sync run, detaches
-its demand, puts dependent live queries in terminal error, and marks dependent
-Effects disposed. Both dependent transitions happen before adapter cleanup
+its demand, crashes dependent live queries, and marks dependent Effects
+disposed. Both dependent transitions happen before adapter cleanup
 settles. This prevents either dependent from using work that belongs to the
 discarded sync run. The Effect becomes disposed and releases its source
 subscription synchronously. Its disposal promise may still wait for in-flight
@@ -818,23 +826,26 @@ fresh private publication barrier. Settlements from the old sync run cannot
 publish rows, report errors, or change readiness in the new sync run.
 
 This is the direct subscription's restart contract, not automatic recovery of
-a dependent live query. Manually cleaning up a source puts its live queries in
-a terminal error state. Restarting that source alone does not revive their
+a dependent live query. Public cleanup refuses while a live query reads the
+source; internal teardown that bypasses admission crashes its live
+queries. Restarting that source alone does not revive their
 graphs or publish replacement results; callers must restart or recreate the
 live query itself. This differs from a source truncate, which keeps the live
 query active behind its replay publication barrier.
 
 An initial sync error also leaves newly requested demand detached, even when
-the adapter has installed a loader. `markReady()` in the same sync run resumes that
-demand; releasing it before recovery creates no physical acquisition or unload.
-Queued reacquisition must not retry a failed attempt merely because both
-loading and ready notifications scheduled it.
+the adapter has installed a loader. The error is final for its sync run:
+`markReady()` in the same sync run is a contract violation and throws, and
+only a restart, which begins a new sync run, acquires that demand. Releasing it
+before the restart creates no physical acquisition or unload. Queued
+reacquisition must not retry a failed attempt merely because both loading and
+ready notifications scheduled it.
 
 Requests waiting for a loader report one pending promise synchronously through
 `onLoadSubsetResult`, including requests made during initial error or after
 cleanup. The callback is not delayed until acquisition: query callers capture
 its result before the snapshot request returns. This promise waits for the
-recovery's publication barrier, not just adapter return. Failure rejects it with
+restart's publication barrier, not just adapter return. Failure rejects it with
 the replay error; release, external abort, unsubscribe, or another cleanup
 rejects it with `AbortError`. Later transport settlement cannot change that
 outcome. Cleanup may retain logical demand for the next sync run, but it does
@@ -1385,12 +1396,14 @@ Every consumer of initial readiness uses the same rule:
 `sourcePermitsInitialReadiness()` in `utils.ts` holds it. Framework adapters
 derive `isReady` and Suspense release from live-query readiness, so they
 release together. A read that waits for readiness, such as `queryOnce`,
-resolves at the same point. An Effect with `skipInitial` ends its initial
-suppression there too. Its initial subset loads and lazy demand hold
-suppression until they settle. An obsolete or aborted initial load releases its
-hold, and a truncate replacement takes the hold over. Neither can keep
-suppression open or close it for good. A real load failure disposes the
-Effect.
+resolves at the same point. Every Effect passes its gate there too, with or
+without `skipInitial`: its initial subset loads and lazy demand hold the gate
+until they settle. `skipInitial` only decides whether the initial rows are
+delivered, so with it the gate also ends initial suppression. An obsolete or
+aborted initial load releases its hold, and a truncate replacement takes the
+hold over. Neither can keep the gate open or close it for good. A real load
+failure before the gate disposes the Effect; after the gate, a source problem
+is error tree detail, delivered through `onErrorsChange`.
 
 Two limits remain. Before an on-demand source completes a full sync, a ready
 query can hold rows that the source does not yet update. The source contract,
@@ -1548,8 +1561,8 @@ full acquisition cannot abort work still owned by those narrower acquisitions.
 ### Pooled live queries
 
 A framework adapter may serve a live query from an equality partition instead
-of this graph. That applies only when the query reads one eager,
-non-persisted source Collection, its `where` has at least one
+of this graph. That applies only when the query reads one eager
+source Collection, its `where` has at least one
 `eq(field, literal)` conjunct, every other conjunct reads only that row's own fields, any `orderBy` reads
 only that row's own fields without a custom string comparator, and it has no
 other clause, `limit`, `offset`, `DbClient`, or Suspense key. Such a
@@ -1560,8 +1573,11 @@ the compiler's comparator and break ties by key
 (`packages/db/src/query/pooled-live-query.ts`). It builds its live-query
 Collection only when the application reads it.
 
-A pooled live query must publish what its live-query Collection would: the same rows, in its order or else key order, with the same values and status. When its source
-starts cleanup, it enters the same terminal error and keeps its last rows.
+A pooled live query must publish what its live-query Collection would: the same rows, in its order or else key order, with the same values and status. Its
+partition is one live-query dependent of the source: cleanup with dependents
+ends it like a live-query Collection, `cleaned-up` with no rows, and cleaning
+up a view releases an idle partition at once. Internal teardown that starts
+source cleanup under it crashes it the same way and keeps its last rows.
 The pooled live query oracle compares the two over generated histories.
 
 ### Physical planning and work
@@ -1646,9 +1662,11 @@ every row before the top-K (a recorded limit).
     materialization cells, visible rows, the current private replay state, and
     required Collection facades—not with settled historical replay attempts or
     raw delta history.
-14. **Cleanup:** cleanup start synchronously closes restart admission, puts
-    dependent live queries in terminal error, and marks dependent Effects
-    disposed. The source Collection keeps its prior status until adapter cleanup
+14. **Cleanup:** public cleanup rejects while a live query or Effect reads the
+    Collection, and with `{ dependents: true }` it ends those dependents
+    first; a direct subscription survives cleanup. Cleanup start
+    synchronously closes restart admission, crashes any dependent live query
+    left by internal teardown, and marks dependent Effects disposed. The source Collection keeps its prior status until adapter cleanup
     settles; only then does it publish `cleaned-up` and settle its cleanup
     promise.
 15. **Deferred acquisition:** a live-query Collection or pooled live query
@@ -1660,6 +1678,50 @@ every row before the top-K (a recorded limit).
     counts as a preload. A deferring live query keeps its sources from
     garbage collection but is not counted in their `subscriberCount` or
     `subscribers:change`, which adapters read as a request for live data.
+16. **Status and the error tree:** status says whether the data can be
+    shown; the error tree says whether it is still kept current. A sync run's
+    failed first load (`fail()` before Collection readiness) is status
+    `error` and is final for that sync run. A crash (IndexedDB closure, a
+    terminal local persistence failure, a throwing sync function, or an
+    internal invariant failure) is status `crashed` from any active status and
+    is permanent for the Collection instance. A live query takes its sources'
+    worst status until its initial-query readiness (`crashed` over `error`
+    over `loading`). After it, only `crashed` propagates: a query cannot keep
+    serving rows from a Collection that cannot serve reads. Every other
+    problem after initial-query readiness, including an on-demand source
+    whose own first load fails then, leaves the query's status and rows
+    alone and shows on the node that owns it. A source's `reportError()` is
+    its node's `failureReason`, which `reportHealthy()` clears; its `fail()`
+    after Collection readiness is its node's `error`, which stays for the
+    sync run, and every later report from that sync adapter throws. A lazy
+    load or a root Collection's load that fails after initial-query readiness
+    is an `error` on the query's own node. A lazy demand's error clears when
+    that demand settles or is released; a root Collection's error clears when
+    a later load of that Collection settles. Query failures and contract
+    violations, such as a graph failure or a Collection cleaned up under the
+    query, crash the query. An Effect follows the same rules, with its
+    initial-query readiness at its settled initial loads: a crashed source,
+    or a source whose first load fails before that readiness, ends it through
+    `onSourceError`; after it, every other problem is error tree detail
+    delivered through `onErrorsChange`, while the Effect keeps running.
+17. **Error tree:** a Collection's `errors` is one node; a live query's has
+    one node for itself and one per source alias in query order, recursing
+    through nested live queries. A node shows at most one problem:
+    `failureReason` (the sync adapter still tries) or `error` (the first load
+    failed, the sync adapter stopped, the Collection crashed, or, on a
+    query's own node, a request for more data failed). An include's source
+    has `kind: 'include'`; when the include materializes a child Collection
+    per parent row, its node rolls those up as `instances: { total,
+withErrors }`, counting only that include's children even when another
+    include reads the same alias, and a child's change is relayed like a
+    source's. A pooled live query's tree is the tree a live-query Collection
+    over its source would have, so it also reaches deeper levels. The shape
+    is fixed by the query. Each node mirrors its Collection when read, and
+    the query emits `errors:change` whenever a node below it changes. When a
+    Collection's status changes, its `status:change` fires first and its
+    `errors:change` follows at once; the tree is current when either fires.
+    A node keeps its object identity until something in its subtree changes,
+    and a change replaces only the nodes on its path.
 
 ## Glossary
 

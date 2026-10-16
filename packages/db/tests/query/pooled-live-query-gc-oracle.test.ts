@@ -203,7 +203,7 @@ describe(`pooled live query gcTime`, () => {
     third.stop()
   })
 
-  it(`turns terminal when source cleanup starts, before it settles`, async () => {
+  it(`ends with its source's dependents, before the source's cleanup settles`, async () => {
     let release!: () => void
     const source = createCollection<Row, string | number>({
       id: `pooled-gc-${serial++}`,
@@ -234,10 +234,13 @@ describe(`pooled live query gcTime`, () => {
       createLiveQueryCollection({ query: query(source), startSync: true }),
     )
     await vi.advanceTimersByTimeAsync(1)
-    const cleanup = source.cleanup()
+    // Cleanup refuses while they read the source; with its dependents it
+    // ends both views like their live queries, before the adapter settles.
+    await expect(source.cleanup()).rejects.toThrow(/dependent/)
+    const cleanup = source.cleanup({ dependents: true })
     await vi.advanceTimersByTimeAsync(1)
-    expect(compiledView.observer.getSnapshot().status).toBe(`error`)
-    expect(pooledView.observer.getSnapshot().status).toBe(`error`)
+    expect(compiledView.observer.getSnapshot().status).toBe(`cleaned-up`)
+    expect(pooledView.observer.getSnapshot().status).toBe(`cleaned-up`)
     release()
     await cleanup
     pooledView.stop()

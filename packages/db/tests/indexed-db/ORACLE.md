@@ -150,7 +150,7 @@ arbitrary browser lock scheduling.
 ## Managed connection ownership
 
 `createIndexedDB` closes native admission before notifying Collections on
-`versionchange` or descriptor `close()`. Each active Collection enters `error`;
+`versionchange` or descriptor `close()`. Each active Collection enters `crashed`;
 late startup on that descriptor also rejects. Core sync cleanup is a different
 operation: already accepted sync work and admitted writes retain their obligations.
 Raw `descriptor.db.close()` bypasses managed notification and is outside this

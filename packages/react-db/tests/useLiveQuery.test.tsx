@@ -994,7 +994,7 @@ describe(`Query Collections`, () => {
     expect(result.current.collection).toBe(liveQueryCollection)
   })
 
-  it(`shows recovery of a pre-created live query after dependent-first cleanup`, async () => {
+  it(`restarts a pre-created live query after a final health error and dependent-first cleanup`, async () => {
     let starts = 0
     let failSource!: () => void
     const source = createCollection({
@@ -1009,7 +1009,7 @@ describe(`Query Collections`, () => {
           })
           methods.commit()
           methods.markReady()
-          failSource = () => methods.markError(new Error(`source sync failed`))
+          failSource = () => methods.fail(new Error(`source sync failed`))
         },
       },
     })
@@ -1023,8 +1023,13 @@ describe(`Query Collections`, () => {
       await waitFor(() => expect(result.current.status).toBe(`ready`))
       expect(result.current.data[0]?.text).toBe(`Todo 1`)
 
+      // After Collection readiness, a final health error leaves the initial
+      // gate alone: status and rows stay, and only the error tree shows it.
       act(() => failSource())
-      await waitFor(() => expect(result.current.isError).toBe(true))
+      await waitFor(() => expect(result.current.errors?.hasErrors).toBe(true))
+      expect(result.current.status).toBe(`ready`)
+      expect(result.current.isLoadingError).toBe(false)
+      expect(result.current.data[0]?.text).toBe(`Todo 1`)
 
       await act(async () => {
         await todosQuery.cleanup()
@@ -1035,6 +1040,8 @@ describe(`Query Collections`, () => {
       await waitFor(() => expect(result.current.status).toBe(`ready`))
       expect(result.current.collection).toBe(todosQuery)
       expect(result.current.data[0]?.text).toBe(`Todo 2`)
+      // Only a restart clears a final health error.
+      expect(result.current.errors?.hasErrors).toBe(false)
     } finally {
       unmount()
       reports.mockRestore()
@@ -2229,7 +2236,7 @@ describe(`Query Collections`, () => {
       expect(result.current.isLoading).toBe(false)
       expect(result.current.isReady).toBe(true)
       expect(result.current.isIdle).toBe(false)
-      expect(result.current.isError).toBe(false)
+      expect(result.current.isLoadingError).toBe(false)
       expect(result.current.isCleanedUp).toBe(false)
 
       // Enable the query
@@ -2268,7 +2275,7 @@ describe(`Query Collections`, () => {
       expect(result.current.isLoading).toBe(false)
       expect(result.current.isReady).toBe(true)
       expect(result.current.isIdle).toBe(false)
-      expect(result.current.isError).toBe(false)
+      expect(result.current.isLoadingError).toBe(false)
       expect(result.current.isCleanedUp).toBe(false)
     })
 
@@ -2306,7 +2313,7 @@ describe(`Query Collections`, () => {
       expect(result.current.isLoading).toBe(false)
       expect(result.current.isReady).toBe(true)
       expect(result.current.isIdle).toBe(false)
-      expect(result.current.isError).toBe(false)
+      expect(result.current.isLoadingError).toBe(false)
       expect(result.current.isCleanedUp).toBe(false)
 
       // Enable the query

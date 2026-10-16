@@ -7,6 +7,7 @@ import {
   transformPublicContainers,
 } from '../compiler/route-metadata.js'
 import { codedMessage, devBuild } from '../../error-message.js'
+import { hasOwnProblem } from '../../collection/error-tree.js'
 import { BUCKET_FACADE_REF } from './materialized-pipeline.js'
 import type { Collection } from '../../collection/index.js'
 import type { SyncConfig } from '../../types.js'
@@ -33,6 +34,8 @@ type FacadeEntry = {
   dispose: () => Promise<void>
   sync: FacadeSync | undefined
   order: WeakMap<object, string>
+  /** Whether the include node counts this facade as in error. */
+  readonly withError: boolean
 }
 
 type SnapshotRow = {
@@ -79,6 +82,8 @@ export class BucketFacadeAdapter {
     private readonly parentId: string,
     private readonly compilations: Array<BucketFacadeCompilation>,
     onMessages: (count: number) => void,
+    // A per-row child Collection's health is part of the parent's error tree.
+    private readonly onInstanceErrorsChange: () => void = () => {},
   ) {
     for (const compilation of compilations) {
       compilation.rows.pipe(
@@ -216,6 +221,16 @@ export class BucketFacadeAdapter {
 
   resolve<T>(value: T): T {
     return this.resolveValue(value) as T
+  }
+
+  /** The live per-row Collections of the includes that read this source. */
+  instancesFor(sourceId: string): Array<Collection<any, any, any>> {
+    return this.compilations
+      .filter((compilation) => compilation.sourceIds.includes(sourceId))
+      .flatMap((compilation) => [
+        ...(this.entries.get(compilation.edgeId)?.values() ?? []),
+      ])
+      .map((entry) => entry.collection)
   }
 
   cleanup(): void {
@@ -410,6 +425,8 @@ export class BucketFacadeAdapter {
     if (byBucket!.size === 0) this.entries.delete(edgeId)
     const retired = getOrCreate(this.retiredEntries, edgeId, () => new Map())
     retired.set(bucketKey, entry)
+    // A retired facade leaves the include node's count.
+    if (entry.withError) this.onInstanceErrorsChange()
   }
 
   private getEntry(edgeId: string, bucketKey: string): FacadeEntry {
@@ -454,7 +471,17 @@ export class BucketFacadeAdapter {
       startSync: true,
       gcTime: 0,
     })
-    const dispose = collection.cleanup.bind(collection)
+    // The include node counts the children with a problem, so only a change
+    // in that state concerns the parent; startup status changes do not.
+    let withError = false
+    collection.on(`errors:change`, () => {
+      const next = hasOwnProblem(collection)
+      if (next === withError) return
+      withError = next
+      this.onInstanceErrorsChange()
+    })
+    // The adapter retires its facades itself, even while readers subscribe.
+    const dispose = () => collection._lifecycle.cleanup()
     // Other parent rows can share this facade, so a holder must not end it.
     collection.cleanup = () =>
       Promise.reject(
@@ -469,6 +496,9 @@ export class BucketFacadeAdapter {
       dispose,
       get sync() {
         return sync
+      },
+      get withError() {
+        return withError
       },
       order,
     }

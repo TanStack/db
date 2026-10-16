@@ -49,6 +49,7 @@ import {
   Value as ValClass,
   collectCollectionSources,
   collectPropRefs,
+  collectSourceRefs,
   getFromSources,
   getHavingExpression,
   getWhereExpression,
@@ -318,6 +319,8 @@ export interface IncludesCompilationResult {
   parentProjection?: Array<PropRef>
   /** How the output layer materializes the child result on the parent row */
   materialization: IncludesMaterialization
+  /** The child query's own source IDs, not those of includes nested in it */
+  sourceIds: Array<string>
   /** Internal field used to unwrap scalar child selects */
   scalarField?: string
 }
@@ -926,6 +929,10 @@ function compileQueryInternal(
           childCompilationResult: childResult,
           parentProjection: subquery.parentProjection,
           materialization: subquery.materialization,
+          sourceIds: collectSourceRefs({
+            ...subquery.query,
+            select: undefined,
+          }).map((source) => source.sourceId),
           scalarField: subquery.scalarField,
         })
       }

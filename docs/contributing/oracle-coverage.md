@@ -58,6 +58,7 @@ that test identifiers must copy production's private data structures.
 | D2 operator work                         | `packages/db-ivm/tests/d2-work-oracle.test.ts`                 | A finalized 65-branch graph receives one direct input at the first, middle, or last branch, then a second input on a different branch. The oracle compares exact forwarded messages and operator invocations after each `run()`: branches without queued input perform no operator work. A connected reversed-registration pair must drain in the same run, and an empty unfinalized graph rejects. The old unconditional loop fails with 64 idle calls per turn. This bounded work check does not establish elapsed latency, fused operators, arbitrary graph topologies, or provider-level live-query work.                                      |
 | Includes and publication                 | Complete, [facade rollback](https://github.com/TanStack/db/blob/main/packages/db/tests/query/bucket-facade-rollback-oracle.property.test.ts) ([review](oracle-reviews/perf-lazy-bucket-rollback-copy.md)) | The central recomputation model plus cross-formulation, temporal demand, layered publication, Collection facade lifecycle and space bounds, route-context transport, functional projection, query-shape, optimistic, and source-work owners are literate. They keep the architecture document as their contract source. A failed facade flush restores every facade it wrote, disposes the facades it created, publishes no event or layout revision, and reads the stored rows of no other facade; nested facades across two edges have a pinned witness. The grammar adds optimistic facade inserts and optimistic deletes of shown graph rows; a retired facade must show exactly its visible optimistic rows, and every history ends by settling them and comparing all rows again. A facade commit that throws before committing is generated, and the restore must commit the open sync transaction. Every change pending at a failed root commit, child rows included, stays pending, and the next flush publishes it once. Open: the flush's edge and bucket map copy is unmeasured bookkeeping; disposal between a flush and its rollback has pinned witnesses only; held facade commits are generated one hold at a time for up to three flushes, and a release that covered earlier flushes checks rows only; the grammar also cleans up a shown facade from outside, lets optimistic rows share graph ids and later rolls them back, after which those keys are compared by value; a holder's cleanup of a shown facade rejects (code 241) and the facade keeps receiving the graph's writes; retiring a shown bucket without the graph's retractions is generated (`contradict`) and throws code 240; optimistic deletes and updates of shown graph rows are generated, and an update's copy keeps the row's key; a facade that `resolve()` created before activation can stay ready and empty after a failed flush (recorded limit). |
 | Collection lifecycle                     | Complete                                                       | The shared logical-owner/acquisition-attempt/sync-run grammar plus mutation admission, lifecycle trace, publication, replay, disposal, and transaction-refinement boundaries are literate.                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Collection health and error tree | `packages/db/tests/source-health-oracle.test.ts` (`source-health.history`) | An independent per-Collection model of the initial gate, health problems with serials, and crashes derives each live query's gate and its expected error tree for direct, join, self-join, nested, include, and pooled-nested shapes. Generated histories cross `ready`, `fail`, `report`, `healthy`, `crash`, and restart; the check compares status, rows, the projected tree, node identity, and `status:change`/`health:change` ordering after every step. Request and Effect lanes cover request errors and Effect disposal on an initial error or crash. The infinite-query oracle keeps the window's pages and `ready` status after a failed window request. The shared framework conformance scenario `sync-errors-after-readiness` judges the same law through every hook. Adapter receivers: Electric's process grammar and partition laws, TrailBase's stream-end lane, PowerSync's rebuild outage, query-db's failed-refetch witness, and the persisted durability lanes. Open: on-demand sources that fail their own initial sync after a live query is ready are generated only in the Effect lane; a Suspense render after readiness has no direct framework witness; RxDB's `rxCollection.$` error after readiness is unreported; a follower tab does not see a provider failure on the leader outside a pending request. |
 | Paced mutations                          | Partial                                                        | The core virtual-clock owner checks strategy timing, admission, cleanup, and settlement. The React render-cut owner checks committed callback ownership across suspended and committed transitions, descendant layout effects, and StrictMode while preserving mutate identity. Callback affinity to transaction admission, other frameworks, new debounce/throttle admission after cleanup, failed persistence, and broader generated schedules remain open. |
 | Optimistic state                         | Complete                                                       | The independent base/intent/source-queue graph plus outcome, transaction-payload, and publication drivers are literate.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | Drafts and native values                 | Complete                                                       | Native differential behavior, draft change tracking, detachment and its class-instance exception, hostile keys, aliases, cycles, and Map/Set live iteration are literate.                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
@@ -93,7 +94,8 @@ that test identifiers must copy production's private data structures.
 The Collection lifecycle history owner includes a 26-cell cleanup-restart
 matrix. It crosses explicit and default eager sources with absent or present
 loaders, empty or nonempty replacements, and no interruption, truncate during
-loading, or recoverable error before same-run readiness. On-demand controls use
+loading, or a failed first load followed by `reload()`, which must keep the
+waiting caller for the new sync run. On-demand controls use
 settled subset acquisition. A cleanup-detached eager demand remains active, its
 `onLoadSubsetResult` promise stays pending through these pre-ready cuts, and it
 starts no physical subset acquisition before fulfilling with the exact
@@ -2417,37 +2419,24 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
 
 The persisted-readiness oracle in
 `packages/db-sqlite-persistence-core/tests/persisted-readiness-oracle.test.ts`
-owns the opted-in eager restore boundary through the persisted wrapper,
-Collection, live query, and observer. A finite two-source model checks all 36
-opt-in/outcome combinations independently of the observer classifier. Its
-controlled persistence histories check nonempty
-and empty restore while upstream remains pending, all-source conjunction,
-mixed opt-out, nested live-query sources, exact failure, SSR seed handoff,
-stale cleanup/restart work, an already-restored source, and a two-source
-history in which A restores, restarts, and remains pending
-after B restores. A new query's persisted readiness and initial-render wait
-stay gated until A restores in its current sync run. This history uses controlled
-adapter reads and does not claim that an old query survives source cleanup.
-The remaining controlled histories cover a network-first deadline,
-early network success and failure, network failure before nonempty restore,
-client query stream failure before or after empty and nonempty restore or before
-observer construction,
-joined-source deadline composition, and a derived-query error alone or alongside
-a failed client stream that must not be mistaken for network failure. It checks a
-separate initial-render wait that leaves network `preload()` unchanged. The
-framework conformance suite checks the projected signals in React, Vue,
-Svelte, Solid, and Angular, including exact identity for a plain-object restore
-error after notification. The window-controller test checks infinite-query
-projection, and focused React and Solid tests check Suspense gating. The React
-tests check client-stream failure before and after completed empty and nonempty
-restore, including a failed record already present before mount. They also
-check error-boundary handling for derived-query failures with and without a
-failed client stream. A replacement client record arriving during an
-initial-render wait has no persisted-fallback witness yet.
+owns when a persisted Collection with network-first initial rendering opens
+from restored rows. A small model enumerates every ordering of the restore
+outcome (rows, empty, failed), the remote answer (ready, fail, none), and the
+deadline, 57 histories. After every event it compares Collection status, the
+node's `error` message, the visible rows while `ready`, and the status of a live
+query over the Collection. The laws: restored rows open the Collection once the
+deadline passes or the remote fails; an empty restore stays `loading`; a remote
+answer before the restore completes waits for it; a failed restore crashes.
+Separate cases check that a Collection without `initialRender` waits for the
+network, the three-second default deadline, and configuration rejection.
+Mutants that let an empty restore open, skip the deadline, or skip the
+remote-failure opening each fail the oracle.
+
 This owner uses a controlled persistence adapter, not native SQLite or a real
-network provider; it does not prove browser scheduling or arbitrary histories.
-The framework identity scenario does not cover every possible rejection value
-or an error already present before a hook mounts.
+network provider. Restart, cross-tab coordination, a remote that stalls without
+an answer, and a Collection that synced to zero rows before (it waits like an
+empty restore) are outside it. Hooks read Collection status only, so the
+framework conformance suite's status scenarios cover the binding side.
 
 ## Deferred contracts and evidence
 

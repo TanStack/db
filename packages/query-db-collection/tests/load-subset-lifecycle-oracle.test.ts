@@ -15,6 +15,23 @@ import type { QueryFunctionContext } from '@tanstack/query-core'
 import type { LoadSubsetOptions, SyncMetadataApi } from '@tanstack/db'
 
 /**
+ * The Query failure a Collection reports: its failed first load while it is
+ * in `error`, or the cause of its failure reason after readiness.
+ */
+function reportedError(collection: {
+  status: string
+  errors: {
+    failureReason: { cause: unknown } | null
+    error: { cause: unknown } | null
+  }
+  _lifecycle: { getSyncError: () => unknown }
+}): unknown {
+  return collection.status === `error`
+    ? collection._lifecycle.getSyncError()
+    : (collection.errors.failureReason ?? collection.errors.error)?.cause
+}
+
+/**
  * # Does Query-backed loadSubset preserve identity and lifecycle?
  *
  * Canonically equal demands share one Query transport. An applied full-source
@@ -980,7 +997,7 @@ async function expectPeerJoiningHeldFetchRecovers(
     if (expectNewRow) expect(peerOutcome).toBe(`fulfilled`)
     if (!peerJoins) expect(peerOutcome).toBe(`not-started`)
     if (failure === `unrelated`) {
-      expect(collection.utils.lastError).toBe(unrelatedError)
+      expect(reportedError(collection)).toBe(unrelatedError)
       expect(peerOutcome).toBe(phase === `initial` ? `rejected` : `fulfilled`)
     }
     if (!peerJoins || failure === `unrelated`) expect(calls).toBe(heldCall)
@@ -1158,6 +1175,128 @@ async function expectForeignOwnerReleaseKeepsInFlightSignal(): Promise<void> {
   }
 }
 
+/**
+ * After Collection readiness, a failed refetch is a failure reason, which is not
+ * final, because TanStack Query fetches again, and the status and rows stay.
+ * The next successful application clears it. The model is that one rule; it
+ * does not read the adapter's per-key bookkeeping.
+ */
+async function expectRefetchFailureIsHealth(): Promise<void> {
+  const error = new Error(`refetch failed`)
+  const queryClient = createQueryClient()
+  const id = `load-subset-health-${collectionSequence++}`
+  const loggedError = vi.spyOn(console, `error`).mockImplementation(() => {})
+  const queryFn = vi
+    .fn()
+    .mockResolvedValueOnce([{ id: `first` }])
+    .mockRejectedValueOnce(error)
+    .mockResolvedValueOnce([{ id: `second` }])
+  const collection = createCollection(
+    queryCollectionOptions<Row>({
+      id,
+      queryClient,
+      queryKey: [id],
+      queryFn,
+      getKey: (row) => row.id,
+      retry: false,
+    }),
+  )
+  const observe = () => ({
+    status: collection.status,
+    failureReason: collection.errors.failureReason?.cause ?? null,
+    error: collection.errors.error?.cause ?? null,
+    rows: collection.toArray.map((row) => row.id),
+  })
+  try {
+    await collection.preload()
+    expect(observe()).toEqual({
+      status: `ready`,
+      failureReason: null,
+      error: null,
+      rows: [`first`],
+    })
+
+    await collection.utils.refetch()
+    await vi.waitFor(() => expect(collection.errors.hasErrors).toBe(true))
+    expect(observe()).toEqual({
+      status: `ready`,
+      failureReason: error,
+      error: null,
+      rows: [`first`],
+    })
+
+    await collection.utils.refetch()
+    await vi.waitFor(() => expect(collection.errors.hasErrors).toBe(false))
+    expect(observe()).toEqual({
+      status: `ready`,
+      failureReason: null,
+      error: null,
+      rows: [`second`],
+    })
+  } finally {
+    loggedError.mockRestore()
+    await collection.cleanup()
+    queryClient.clear()
+  }
+}
+
+/**
+ * A Collection's failure reason covers every Query it observes. With two
+ * on-demand subsets, one failing refetch is a failure reason even when the
+ * other subset's refetch succeeds; it clears only once
+ * no Query is failing. The model is the set of failing subsets.
+ */
+async function expectHealthWaitsForEveryFailingQuery(): Promise<void> {
+  const queryClient = createQueryClient()
+  const id = `load-subset-health-keys-${collectionSequence++}`
+  const loggedError = vi.spyOn(console, `error`).mockImplementation(() => {})
+  const failing = new Set<number>()
+  const queryFn = vi.fn((context: QueryFunctionContext) => {
+    const limit = context.meta?.loadSubsetOptions?.limit ?? 0
+    return failing.has(limit)
+      ? Promise.reject(new Error(`subset ${limit} failed`))
+      : Promise.resolve([{ id: `row-${limit}` }])
+  })
+  const collection = createCollection(
+    queryCollectionOptions<Row>({
+      id,
+      queryClient,
+      queryKey: [id],
+      queryFn,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      retry: false,
+    }),
+  )
+  try {
+    collection.startSyncImmediate()
+    await collection._sync.loadSubset({ limit: 1 })
+    await collection._sync.loadSubset({ limit: 2 })
+    expect(collection.status).toBe(`ready`)
+    expect(collection.errors.hasErrors).toBe(false)
+
+    failing.add(1)
+    await collection.utils.refetch()
+    await vi.waitFor(() => expect(collection.errors.hasErrors).toBe(true))
+    expect(collection.errors.failureReason?.message).toBe(`subset 1 failed`)
+
+    // A subset that starts after the failure and succeeds does not make the
+    // failing subset healthy.
+    await collection._sync.loadSubset({ limit: 3 })
+    await vi.waitFor(() => expect(collection.has(`row-3`)).toBe(true))
+    expect(collection.errors.failureReason?.message).toBe(`subset 1 failed`)
+
+    failing.clear()
+    await collection.utils.refetch()
+    await vi.waitFor(() => expect(collection.errors.hasErrors).toBe(false))
+    expect(collection.status).toBe(`ready`)
+  } finally {
+    loggedError.mockRestore()
+    await collection.cleanup()
+    queryClient.clear()
+  }
+}
+
 async function expectInitialQueryFailureStatus(): Promise<void> {
   const error = new Error(`initial query failed`)
   const queryClient = createQueryClient()
@@ -1166,6 +1305,7 @@ async function expectInitialQueryFailureStatus(): Promise<void> {
   const queryFn = vi
     .fn()
     .mockRejectedValueOnce(error)
+    .mockResolvedValueOnce([{ id: `recovered` }])
     .mockResolvedValueOnce([{ id: `recovered` }])
   const collection = createCollection(
     queryCollectionOptions<Row>({
@@ -1188,8 +1328,8 @@ async function expectInitialQueryFailureStatus(): Promise<void> {
 
   try {
     await vi.waitFor(() => {
-      expect(collection.utils.lastError).toBe(error)
-      expect(collection.utils.isError).toBe(true)
+      expect(reportedError(collection)).toBe(error)
+      expect(reportedError(collection)).toBeDefined()
     })
     expect(loggedError).toHaveBeenCalled()
     try {
@@ -1203,10 +1343,20 @@ async function expectInitialQueryFailureStatus(): Promise<void> {
       throw new TraceAssertionError(0, caught)
     }
 
-    await collection.utils.clearError()
+    // An initial error is final for its sync run. A successful refetch
+    // applies its rows, but the error stays until a restart reaches ready.
+    await collection.utils.refetch({ throwOnError: true })
+    await vi.waitFor(() => {
+      expect(collection.get(`recovered`)).toBeDefined()
+    })
+    expect(reportedError(collection)).toBe(error)
+    expect(collection.status).toBe(`error`)
+    await collection.cleanup()
+    await live.cleanup()
+    await collection.preload()
+    await live.preload()
     await vi.waitFor(() => {
       expect(collection.status).toBe(`ready`)
-      expect(collection.get(`recovered`)).toBeDefined()
       expect(live.status).toBe(`ready`)
       expect(live.get(`recovered`)).toBeDefined()
     })
@@ -1260,7 +1410,7 @@ async function expectLateDependentObservesInitialFailure(): Promise<void> {
 
 async function expectEveryFailedSourceToRecover(): Promise<void> {
   const createControlledSource = (id: string) => {
-    let fail: () => void = () => {
+    let failSync: () => void = () => {
       throw new Error(`Source '${id}' has not started`)
     }
     let recover: (row: Row) => void = (_row) => {
@@ -1273,8 +1423,8 @@ async function expectEveryFailedSourceToRecover(): Promise<void> {
       autoIndex: `eager`,
       defaultIndexType: BasicIndex,
       sync: {
-        sync: ({ begin, write, commit, markReady, markError }) => {
-          fail = markError
+        sync: ({ begin, write, commit, markReady, fail }) => {
+          failSync = () => fail(new Error(`Source '${id}' failed`))
           recover = (row) => {
             begin()
             write({ type: `insert`, value: row })
@@ -1286,7 +1436,7 @@ async function expectEveryFailedSourceToRecover(): Promise<void> {
     })
     return {
       collection,
-      fail: () => fail(),
+      fail: () => failSync(),
       recover: (row: Row) => recover(row),
     }
   }
@@ -1315,13 +1465,24 @@ async function expectEveryFailedSourceToRecover(): Promise<void> {
     await expect(preload).rejects.toThrow()
     expect(live.status).toBe(`error`)
 
+    // Each failed source recovers only through a restart, and the dependent
+    // stays in error until it restarts after every source is ready.
+    await left.collection.cleanup()
+    const leftPreload = left.collection.preload()
     left.recover({ id: `shared` })
+    await leftPreload
     expect(left.collection.status).toBe(`ready`)
     expect(right.collection.status).toBe(`error`)
     expect(live.status).toBe(`error`)
 
+    await right.collection.cleanup()
+    const rightPreload = right.collection.preload()
     right.recover({ id: `shared` })
-    await expect(live.preload()).resolves.toBeUndefined()
+    await rightPreload
+    expect(right.collection.status).toBe(`ready`)
+    await live.cleanup()
+    const livePreload2 = live.preload()
+    await livePreload2
     expect(live.status).toBe(`ready`)
     expect(live.toArray.map((row) => row.id)).toEqual([`shared`])
   } finally {
@@ -1361,7 +1522,7 @@ async function expectRefetchFailureKeepsReadySnapshot(): Promise<void> {
     await live.preload()
     await collection.utils.refetch()
     await vi.waitFor(() => {
-      expect(collection.utils.lastError).toBe(error)
+      expect(reportedError(collection)).toBe(error)
     })
     expect(collection.status).toBe(`ready`)
     expect(live.status).toBe(`ready`)
@@ -1469,7 +1630,7 @@ async function expectDeferredStartupReadyDoesNotOverrideError(): Promise<void> {
     await maintenanceDeleted
     for (let turn = 0; turn < 10; turn++) await Promise.resolve()
     expect(collection.status).toBe(`error`)
-    expect(collection.utils.lastError).toBe(queryError)
+    expect(reportedError(collection)).toBe(queryError)
   } finally {
     if (typeof secondSync === `function`) {
       await secondSync()
@@ -2382,7 +2543,7 @@ async function observeLateRetiredQuery(
         live: values(current.toArray),
         sourceStatus: source.status,
         liveStatus: current.status,
-        sourceError: source.utils.lastError,
+        sourceError: reportedError(source),
       })
     }
     const sourceSubscription = source.subscribeChanges(capture)
@@ -2549,7 +2710,15 @@ describe(`loadSubset lifecycle oracle`, () => {
     await expectReleasedRefetchRejects()
   })
 
-  it(`reports an initial query failure and recovers after a successful refetch`, async () => {
+  it(`keeps Collection health in error while any observed Query fails`, async () => {
+    await expectHealthWaitsForEveryFailingQuery()
+  })
+
+  it(`reports a failed refetch after readiness as Collection health`, async () => {
+    await expectRefetchFailureIsHealth()
+  })
+
+  it(`keeps an initial query failure until a restart, even after a successful refetch`, async () => {
     await expectInitialQueryFailureStatus()
   })
 
@@ -2557,7 +2726,7 @@ describe(`loadSubset lifecycle oracle`, () => {
     await expectLateDependentObservesInitialFailure()
   })
 
-  it(`recovers a dependent only after every failed source recovers`, async () => {
+  it(`restarts a dependent only after every failed source restarts`, async () => {
     await expectEveryFailedSourceToRecover()
   })
 

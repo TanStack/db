@@ -18,12 +18,12 @@ import type {
   Collection,
   CollectionStatus,
   Context,
+  ErrorTreeNode,
   GetResult,
   InferResultType,
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
   LiveQueryObserver,
-  LiveQueryPersistedStatus,
   NonSingleResult,
   QueryBuilder,
   SingleResult,
@@ -38,7 +38,31 @@ export * from '@tanstack/db'
  * The result of calling `injectLiveQuery`.
  * Contains reactive signals for the query state and data.
  */
-export interface InjectLiveQueryResult<TContext extends Context> {
+/** Status, persistence, and health signals every `injectLiveQuery` result has. */
+export interface InjectLiveQueryFlags {
+  /** A signal containing the current status of the collection */
+  status: Signal<CollectionStatus | `disabled`>
+  /** A signal indicating whether the collection is currently loading */
+  isLoading: Signal<boolean>
+  /** A signal indicating whether the collection is ready */
+  isReady: Signal<boolean>
+  /** A signal indicating whether the collection is idle */
+  isIdle: Signal<boolean>
+  /** The first load failed: there is nothing to show. */
+  isLoadingError: Signal<boolean>
+  /** Local storage or an invariant broke; recovery is a new Collection. */
+  isCrashed: Signal<boolean>
+  /** A signal indicating whether the collection has been cleaned up */
+  isCleanedUp: Signal<boolean>
+  /** The data is shown, and a sync problem or failed request is in `errors`. */
+  isSyncError: Signal<boolean>
+  /** A signal containing the error tree for the query and its dependencies */
+  errors: Signal<ErrorTreeNode | undefined>
+}
+
+export interface InjectLiveQueryResult<
+  TContext extends Context,
+> extends InjectLiveQueryFlags {
   /** A signal containing the complete state map of results keyed by their ID */
   state: Signal<Map<string | number, GetResult<TContext>>>
   /** A signal containing the results as an array, or single result for findOne queries */
@@ -49,21 +73,6 @@ export interface InjectLiveQueryResult<TContext extends Context> {
     string | number,
     {}
   > | null>
-  /** A signal containing the current status of the collection */
-  status: Signal<CollectionStatus | `disabled`>
-  /** A signal indicating whether the collection is currently loading */
-  isLoading: Signal<boolean>
-  /** A signal indicating whether the collection is ready */
-  isReady: Signal<boolean>
-  persistedStatus: Signal<LiveQueryPersistedStatus>
-  isPersistedReady: Signal<boolean>
-  persistedError: Signal<unknown | undefined>
-  /** A signal indicating whether the collection is idle */
-  isIdle: Signal<boolean>
-  /** A signal indicating whether the collection has an error */
-  isError: Signal<boolean>
-  /** A signal indicating whether the collection has been cleaned up */
-  isCleanedUp: Signal<boolean>
 }
 
 type InferConditionalResultType<TContext extends Context> =
@@ -82,38 +91,20 @@ export interface InjectLiveQueryResultWithCollection<
   TResult extends object = any,
   TKey extends string | number = string | number,
   TUtils extends Record<string, any> = {},
-> {
+> extends InjectLiveQueryFlags {
   state: Signal<Map<TKey, TResult>>
   data: Signal<Array<TResult>>
   collection: Signal<Collection<TResult, TKey, TUtils> | null>
-  status: Signal<CollectionStatus | `disabled`>
-  isLoading: Signal<boolean>
-  isReady: Signal<boolean>
-  persistedStatus: Signal<LiveQueryPersistedStatus>
-  isPersistedReady: Signal<boolean>
-  persistedError: Signal<unknown | undefined>
-  isIdle: Signal<boolean>
-  isError: Signal<boolean>
-  isCleanedUp: Signal<boolean>
 }
 
 export interface InjectLiveQueryResultWithSingleResultCollection<
   TResult extends object = any,
   TKey extends string | number = string | number,
   TUtils extends Record<string, any> = {},
-> {
+> extends InjectLiveQueryFlags {
   state: Signal<Map<TKey, TResult>>
   data: Signal<TResult | undefined>
   collection: Signal<(Collection<TResult, TKey, TUtils> & SingleResult) | null>
-  status: Signal<CollectionStatus | `disabled`>
-  isLoading: Signal<boolean>
-  isReady: Signal<boolean>
-  persistedStatus: Signal<LiveQueryPersistedStatus>
-  isPersistedReady: Signal<boolean>
-  persistedError: Signal<unknown | undefined>
-  isIdle: Signal<boolean>
-  isError: Signal<boolean>
-  isCleanedUp: Signal<boolean>
 }
 
 export function injectLiveQuery<
@@ -226,8 +217,7 @@ export function injectLiveQuery(opts: any) {
     const value = statusValue()
     return value === `idle` && !collection() ? `disabled` : value
   })
-  const persistedStatus = signal<LiveQueryPersistedStatus>(`unavailable`)
-  const persistedError = signal<unknown>(undefined)
+  const errors = signal<ErrorTreeNode | undefined>(undefined)
 
   // Returns single item for singleResult collections, array otherwise
   const data = computed(() => {
@@ -251,8 +241,7 @@ export function injectLiveQuery(opts: any) {
     internalData.set(newData)
     const snapshot = observer.getSnapshot()
     statusValue.set(snapshot.status)
-    persistedStatus.set(snapshot.persistedStatus)
-    persistedError.set(snapshot.persistedError)
+    errors.set(snapshot.errors)
   }
 
   let unsub: (() => void) | null = null
@@ -267,8 +256,7 @@ export function injectLiveQuery(opts: any) {
     // Handle null collection (disabled query)
     if (!currentCollection) {
       statusValue.set(`disabled` as const)
-      persistedStatus.set(`unavailable`)
-      persistedError.set(undefined)
+      errors.set(undefined)
       state.set(new Map())
       internalData.set([])
       cleanup()
@@ -313,11 +301,13 @@ export function injectLiveQuery(opts: any) {
     status,
     isLoading: computed(() => status() === `loading`),
     isReady: computed(() => status() === `ready` || status() === `disabled`),
-    persistedStatus,
-    isPersistedReady: computed(() => persistedStatus() === `ready`),
-    persistedError,
     isIdle: computed(() => status() === `idle`),
-    isError: computed(() => status() === `error`),
+    isLoadingError: computed(() => status() === `error`),
+    isCrashed: computed(() => status() === `crashed`),
     isCleanedUp: computed(() => status() === `cleaned-up`),
+    isSyncError: computed(
+      () => status() === `ready` && errors()?.hasErrors === true,
+    ),
+    errors,
   }
 }

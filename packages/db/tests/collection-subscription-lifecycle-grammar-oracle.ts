@@ -781,7 +781,7 @@ export type CleanedRestartDemandCase = {
   syncMode: `default-eager` | `eager` | `on-demand`
   loader: `absent` | `present`
   replacement: `empty` | `row`
-  interruption: `none` | `truncate` | `recoverable-error`
+  interruption: `none` | `truncate` | `failed-then-reload`
 }
 
 export const cleanedRestartDemandCases: ReadonlyArray<CleanedRestartDemandCase> =
@@ -789,7 +789,7 @@ export const cleanedRestartDemandCases: ReadonlyArray<CleanedRestartDemandCase> 
     ...([`empty`, `row`] as const).flatMap((replacement) =>
       ([`default-eager`, `eager`] as const).flatMap((syncMode) =>
         ([`absent`, `present`] as const).flatMap((loader) =>
-          ([`none`, `truncate`, `recoverable-error`] as const).map(
+          ([`none`, `truncate`, `failed-then-reload`] as const).map(
             (interruption) => ({
               syncMode,
               loader,
@@ -849,7 +849,7 @@ export function expectedCleanedRestartDemand(
             result: `pending` as const,
             status: `loadingSubset` as const,
             collectionStatus:
-              history.interruption === `recoverable-error`
+              history.interruption === `failed-then-reload`
                 ? (`error` as const)
                 : (`loading` as const),
           },

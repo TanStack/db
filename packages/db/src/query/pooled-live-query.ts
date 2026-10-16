@@ -1,9 +1,13 @@
 import { SortedMap } from '../SortedMap.js'
+import { codedMessage, devBuild } from '../error-message.js'
 import { CleanupQueue } from '../collection/cleanup-queue.js'
-import { UNSUBSCRIBED_GC_FLOOR_MS } from '../collection/lifecycle.js'
+import {
+  UNSUBSCRIBED_GC_FLOOR_MS,
+  describeProblem,
+} from '../collection/lifecycle.js'
+import { buildErrorTree, errorTreeNode } from '../collection/error-tree.js'
 import { makeComparator } from '../utils/comparison.js'
 import { isVirtualPropName } from '../virtual-props.js'
-import { getPersistedReadinessSource } from '../persisted-readiness.js'
 import { getWhereExpression } from './ir.js'
 import { equalityConjunct, equalityKey, readPath } from './equality-conjunct.js'
 import { compileExpression, toBooleanPredicate } from './compiler/evaluators.js'
@@ -13,7 +17,13 @@ import type { BasicExpression, OrderBy, QueryIR } from './ir.js'
 import type { BaseQueryBuilder } from './builder/index.js'
 import type { Collection, CollectionImpl } from '../collection/index.js'
 import type { CollectionSubscription } from '../collection/subscription.js'
-import type { ChangeMessage, CollectionStatus } from '../types.js'
+import type {
+  ChangeMessage,
+  CollectionDependent,
+  CollectionErrorInfo,
+  CollectionStatus,
+  ErrorTreeNode,
+} from '../types.js'
 import type {
   CollectionEventHandler,
   CollectionStatusChangeEvent,
@@ -71,8 +81,25 @@ class Partition {
   readonly statusListeners = new Set<StatusListener>()
   private listenerCount = 0
   private gcTime = 0
-  /** Set when the source starts cleanup; groups keep their last rows. */
-  terminated = false
+  /**
+   * Set when the partition ends for good: `crashed` when its source starts
+   * cleanup under it (groups keep their last rows), `cleaned-up` when the
+   * source's cleanup ends its dependents first (groups empty, as a cleaned-up
+   * live-query Collection's rows do).
+   */
+  terminated: `crashed` | `cleaned-up` | undefined = undefined
+  // This partition as its source's `subscribers` list it: one pooled live
+  // query for every view it serves.
+  private readonly dependent: CollectionDependent = ((partition) => ({
+    kind: `live-query` as const,
+    get active(): boolean {
+      return partition.listenerCount > 0
+    },
+    end: () => {
+      partition.end()
+      return Promise.resolve()
+    },
+  }))(this)
 
   constructor(
     private readonly source: CollectionImpl<any, any, any, any, any>,
@@ -157,24 +184,17 @@ class Partition {
       this.subscription = this.source.subscribeChanges(
         (changes) =>
           this.apply(changes as Array<ChangeMessage<Row, string | number>>),
-        { includeInitialState: true, deferAcquisition },
+        { includeInitialState: true, deferAcquisition, owner: this.dependent },
       )
       const stopStatus = this.source.on(`status:change`, (event) => {
         this.deliverStatus(event)
       })
-      // Like a live query, a pooled view fails for good when its source
-      // starts cleanup, before the adapter's cleanup settles; queries
-      // mounted later get a new partition.
-      const stopCleanupStart = this.source._onCleanupStart(() => {
-        const previousStatus = this.source.status
-        this.terminate()
-        this.deliverStatus({
-          type: `status:change`,
-          collection: this.source as unknown as Collection,
-          previousStatus,
-          status: `error`,
-        })
-      })
+      // Like a live query, a pooled view crashes when its source starts
+      // cleanup, before the adapter's cleanup settles; queries mounted later
+      // get a new partition.
+      const stopCleanupStart = this.source._onCleanupStart(() =>
+        this.end(`crashed`),
+      )
       this.stopStatusEvents = () => {
         stopStatus()
         stopCleanupStart()
@@ -182,9 +202,27 @@ class Partition {
     }
   }
 
+  /** End the partition for good and tell its views. */
+  private end(status: `crashed` | `cleaned-up` = `cleaned-up`): void {
+    if (this.terminated) return
+    const previousStatus = this.source.status
+    this.terminated = status
+    CleanupQueue.getInstance().cancel(this)
+    this.release()
+    if (status === `cleaned-up`) {
+      for (const group of this.groups.values()) group.rows.clear()
+    }
+    this.deliverStatus({
+      type: `status:change`,
+      collection: this.source as unknown as Collection,
+      previousStatus,
+      status,
+    })
+  }
+
   private deliverStatus(event: CollectionStatusChangeEvent): void {
     const delivered = this.terminated
-      ? { ...event, status: `error` as const }
+      ? { ...event, status: this.terminated }
       : event
     for (const listener of [...this.statusListeners]) listener(delivered)
     if (this.terminated) {
@@ -206,12 +244,6 @@ class Partition {
     this.scheduleRelease(0)
   }
 
-  private terminate(): void {
-    this.terminated = true
-    CleanupQueue.getInstance().cancel(this)
-    this.release()
-  }
-
   private release(): void {
     this.subscription?.unsubscribe()
     this.subscription = undefined
@@ -224,6 +256,17 @@ class Partition {
     if (this.listenerCount > 0 || !Number.isFinite(this.gcTime)) return
     const delay = Math.max(this.gcTime, minDelay)
     CleanupQueue.getInstance().schedule(this, delay, this.releaseIfUnused)
+  }
+
+  /**
+   * Release the source subscription now if no view listens, as cleaning up a
+   * live-query Collection releases its source subscriptions at once. A later
+   * mount subscribes again.
+   */
+  releaseIfIdle(): void {
+    CleanupQueue.getInstance().cancel(this)
+    this.releaseIfUnused()
+    this.scheduleRelease(0)
   }
 
   private readonly releaseIfUnused = (): void => {
@@ -494,12 +537,43 @@ class PooledLiveQuery {
     private readonly gcTime: number,
     // The query's conjuncts beyond its group's equalities, if any.
     private readonly passes: ((row: Row) => boolean) | undefined,
+    private readonly alias: string,
   ) {
     partition.retain(gcTime)
   }
 
   get status(): CollectionStatus {
-    return this.partition.terminated ? `error` : this.source.status
+    return this.partition.terminated ?? this.source.status
+  }
+
+  private endedProblem: CollectionErrorInfo | undefined
+
+  /** The same error tree a live-query Collection over this source exposes. */
+  get errors(): ErrorTreeNode {
+    const source = buildErrorTree(this.source, { alias: this.alias }, this)
+    // The view shows its source's status error. A terminated partition also
+    // ended this view, for example when its source was cleaned up under it.
+    const error =
+      this.source._lifecycle.statusProblem ??
+      (this.partition.terminated === `crashed`
+        ? (this.endedProblem ??= describeProblem(
+            new Error(
+              devBuild() && process.env.NODE_ENV !== `production`
+                ? `The pooled live query's source ended`
+                : codedMessage(246),
+            ),
+          ))
+        : null)
+    return errorTreeNode(this, undefined, {
+      alias: `root`,
+      collectionId: this.source.id,
+      kind: `live-query`,
+      status: this.status,
+      failureReason: null,
+      error,
+      reloading: false,
+      sources: [source],
+    })
   }
 
   // Read by key: the partition drops a group nobody watches once it empties.
@@ -600,8 +674,10 @@ class PooledLiveQuery {
     return this.source.preload()
   }
 
-  cleanup(): Promise<void> {
-    return this.collection?.cleanup() ?? Promise.resolve()
+  cleanup(options?: { dependents?: boolean }): Promise<void> {
+    const cleanup = this.collection?.cleanup(options) ?? Promise.resolve()
+    this.partition.releaseIfIdle()
+    return cleanup
   }
 
   private proxy: Collection<any, any, any> | undefined = undefined
@@ -678,13 +754,8 @@ export function createPooledLiveQuery(
   const shape = poolableShape(ir)
   if (!shape || ir.from.type !== `collectionRef`) return undefined
   const source = ir.from.collection
-  // Persisted restore and on-demand loading need the live-query Collection.
-  if (
-    source.config.syncMode === `on-demand` ||
-    getPersistedReadinessSource(source.config)
-  ) {
-    return undefined
-  }
+  // On-demand loading needs the live-query Collection.
+  if (source.config.syncMode === `on-demand`) return undefined
   let partitions = partitionsBySource.get(source)
   if (!partitions) {
     partitions = new Map()
@@ -722,5 +793,6 @@ export function createPooledLiveQuery(
     shape.residual.length > 0
       ? rowPredicate(shape.residual, ir.from.alias)
       : undefined,
+    ir.from.alias,
   ) as unknown as Collection<any, any, any>
 }

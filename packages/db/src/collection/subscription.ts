@@ -18,6 +18,7 @@ import type { BasicExpression, OrderBy } from '../query/ir.js'
 import type { IndexReader } from '../indexes/base-index.js'
 import type {
   ChangeMessage,
+  CollectionDependent,
   LoadSubsetOptions,
   LoadSubsetRequestResult,
   Subscription,
@@ -87,6 +88,8 @@ type CollectionSubscriptionOptions = {
   deferAcquisition?: boolean
   /** Called once when deferred acquisition resumes. */
   onResumeAcquisition?: () => void
+  /** The live query or Effect this subscription reads for. */
+  owner?: CollectionDependent
 }
 
 type TruncateReplayPublicationControl = Readonly<{
@@ -206,6 +209,11 @@ export class CollectionSubscription
   private unsubscribed = false
   private defersAcquisition: boolean
 
+  /** @internal The live query or Effect this subscription reads for. */
+  public get owner(): CollectionSubscriptionOptions[`owner`] {
+    return this.options.owner
+  }
+
   public get status(): SubscriptionStatus {
     return this._status
   }
@@ -304,13 +312,24 @@ export class CollectionSubscription
   }
 
   /** Detach logical demand from work owned by a discarded sync run. */
-  private handleCollectionCleanup(): void {
+  /** @internal A reload retired the sync run; detach its demand. */
+  /**
+   * A reload keeps each retained demand's waiting caller: the new sync run
+   * re-acquires the demand and settles that caller.
+   */
+  public retireSyncRun(): void {
+    this.handleCollectionCleanup(true)
+  }
+
+  private handleCollectionCleanup(keepWaitingCallers = false): void {
     this.discardTruncateReplay()
     this.stalePublishedRows = new Map(this.publishedRows)
     this.pendingLoadSubsetParticipants.clear()
 
     for (const demand of [...this.subsetDemands]) {
-      demand.initialResult?.reject(new LoadSubsetOperationAbortedError())
+      if (!keepWaitingCallers || demand.acquisitionState === `starting`) {
+        demand.initialResult?.reject(new LoadSubsetOperationAbortedError())
+      }
       cancelAcquisition(demand.acquisition)
       if (demand.acquisitionState === `starting`) {
         const index = this.subsetDemands.indexOf(demand)
@@ -339,6 +358,7 @@ export class CollectionSubscription
     }
     if (
       this.collection.status === `error` ||
+      this.collection.status === `crashed` ||
       (this.collection.config.syncMode === `on-demand` &&
         this.collection._sync.syncLoadSubsetFn === null)
     ) {
@@ -1059,6 +1079,7 @@ export class CollectionSubscription
       // deferred starts still acquire through the sync manager's queue.
       (this.collection.config.syncMode === `on-demand` &&
         (this.collection.status === `error` ||
+          this.collection.status === `crashed` ||
           (this.collection.status !== `idle` &&
             this.collection._sync.syncLoadSubsetFn === null)))
     ) {

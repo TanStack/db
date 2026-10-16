@@ -3,10 +3,12 @@ import { safeRandomUUID } from '../utils/uuid'
 import { collectionOptionsClaim } from '../collection-options.js'
 import {
   CollectionConfigurationError,
+  CollectionHasSubscribersError,
   CollectionRequiresConfigError,
   CollectionRequiresSyncConfigError,
 } from '../errors'
 import { codedMessage, devBuild } from '../error-message'
+import { getBuilderFromConfig } from '../query/live/collection-registry.js'
 import { validateCollectionConfig } from './validate-config'
 import { currentStateAsChanges } from './change-events'
 
@@ -17,6 +19,7 @@ import { CollectionSyncManager } from './sync'
 import { CollectionIndexesManager } from './indexes'
 import { CollectionMutationsManager } from './mutations'
 import { CollectionEventsManager } from './events.js'
+import { buildErrorTree } from './error-tree.js'
 import type { SortedMap } from '../SortedMap.js'
 import type { PublicationDeferral } from './changes'
 import type { CollectionSubscription } from './subscription'
@@ -30,8 +33,10 @@ import type { IndexOptions } from '../indexes/index-options.js'
 import type {
   ChangeMessage,
   CollectionConfig,
+  CollectionDependent,
   CollectionStatus,
   CurrentStateAsChangesOptions,
+  ErrorTreeNode,
   InferSchemaInput,
   InferSchemaOutput,
   InsertConfig,
@@ -50,6 +55,7 @@ import type { WithVirtualProps } from '../virtual-props.js'
 import type { TransactionScope } from '../transactions.js'
 
 export type { CollectionIndexMetadata } from './events.js'
+export { findProblems } from './error-tree.js'
 
 export type CollectionBase<TKey extends string | number, TOutput> = Pick<
   SortedMap<TKey, TOutput>,
@@ -552,6 +558,21 @@ export class CollectionImpl<
    */
   public get status(): CollectionStatus {
     return this._lifecycle.status
+  }
+
+  /**
+   * The error tree for this Collection and every Collection it depends on.
+   * A base Collection's tree is one node. It always has the same shape for a
+   * given query, so apps can parse it. After the first ready, sync problems
+   * appear here and the rows stay.
+   */
+  public get errors(): ErrorTreeNode {
+    return buildErrorTree(this)
+  }
+
+  /** @internal A Collection this one depends on changed its error tree. */
+  public _emitErrorsChange(): void {
+    this._events.emitErrorsChange()
   }
 
   /**
@@ -1276,15 +1297,78 @@ export class CollectionImpl<
   }
 
   /**
+   * Start a new sync run while everything visible stays: the rows, the
+   * status, and the current error, with `reloading` on this Collection's
+   * error tree node. The new run's first commit replaces the rows at once and
+   * clears the node's problem; a `status` of `error` becomes `ready`. If the
+   * new run fails first, the rows and status stay and the node shows the new
+   * error. On a live query, it reloads each of its sources that has an
+   * `error`, and then the query itself if its own first load failed.
+   *
+   * Returns the promise of a reload in flight when called again. Rejects on a
+   * `crashed` Collection: a crash is permanent for the instance.
+   */
+  public reload(): Promise<void> {
+    const builder = getBuilderFromConfig(this.config)
+    return builder ? builder.reload() : this._sync.reload()
+  }
+
+  /**
+   * Live queries, Effects, and direct subscriptions that read this
+   * Collection. `cleanup()` refuses while a live query or Effect reads it.
+   */
+  public get subscribers(): ReadonlyArray<CollectionDependent> {
+    // A live query or Effect can hold several subscriptions, one per alias.
+    const dependents = new Set<CollectionDependent>()
+    for (const subscription of this._changes.changeSubscriptions) {
+      dependents.add(
+        subscription.owner ?? {
+          kind: `subscription`,
+          active: true,
+          end: () => {
+            subscription.unsubscribe()
+            return Promise.resolve()
+          },
+        },
+      )
+    }
+    return [...dependents]
+  }
+
+  /**
    * Clean up the collection by stopping sync and clearing data
    * This can be called manually or automatically by garbage collection
    * Cleanup callbacks must not restart this collection or call its preload().
    * Wait until cleanup completes before starting a new sync run. If adapter
    * cleanup rejects, this promise rejects after the Collection reaches its
    * final cleaned-up state.
+   *
+   * Rejects with `CollectionHasSubscribersError` while an active live query
+   * (one that still has a subscriber) or an Effect reads this Collection,
+   * because its readers would lose their data. A live query nothing reads
+   * any more ends with this Collection's cleanup start. With
+   * `{ dependents: true }`, it first cleans up each live query (and its own
+   * dependents) and disposes each Effect. A direct subscription survives
+   * cleanup and asks for data again when a new sync run starts.
    */
-  public cleanup(): Promise<void> {
-    return this._lifecycle.cleanup()
+  public cleanup(options?: { dependents?: boolean }): Promise<void> {
+    const dependents = this.subscribers.filter(
+      (dependent) => dependent.kind !== `subscription`,
+    )
+    if (!options?.dependents) {
+      const active = dependents.filter((dependent) => dependent.active)
+      if (active.length > 0) {
+        return Promise.reject(
+          new CollectionHasSubscribersError(this.id, active.length),
+        )
+      }
+      return this._lifecycle.cleanup()
+    }
+    // Each dependent's cleanup starts synchronously, before this Collection's
+    // own cleanup start, so none of them sees the source end under it.
+    const ended = dependents.map((dependent) => dependent.end())
+    const cleanup = this._lifecycle.cleanup()
+    return Promise.all([...ended, cleanup]).then(() => undefined)
   }
 }
 

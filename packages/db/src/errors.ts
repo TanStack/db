@@ -149,6 +149,36 @@ export class CollectionInErrorStateError extends CollectionStateError {
   }
 }
 
+export class CollectionHasSubscribersError extends CollectionStateError {
+  constructor(collectionId: string, dependents: number) {
+    super(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `Cannot clean up collection "${collectionId}" while ${dependents} live query or Effect dependent(s) read it. Clean them up first, or call cleanup({ dependents: true }). collection.subscribers lists them.`
+        : codedMessage(249, { collectionId, dependents }),
+    )
+  }
+}
+
+export class CollectionReloadCrashedError extends CollectionStateError {
+  constructor(collectionId: string) {
+    super(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `Cannot reload collection "${collectionId}" because it crashed. A crash is permanent for the Collection instance; clean it up and create a new one.`
+        : codedMessage(250, { collectionId }),
+    )
+  }
+}
+
+export class CollectionReloadDuringSyncEntryError extends CollectionStateError {
+  constructor(collectionId: string) {
+    super(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `Cannot reload collection "${collectionId}" from inside its sync function. Reload after the sync function returns.`
+        : codedMessage(251, { collectionId }),
+    )
+  }
+}
+
 export class InvalidCollectionStatusTransitionError extends CollectionStateError {
   constructor(from: string, to: string, collectionId: string) {
     super(

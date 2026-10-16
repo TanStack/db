@@ -241,13 +241,13 @@ describe(`RxDB Integration`, () => {
         .mockReturnValueOnce(bufferedApplied.promise)
         .mockReturnValueOnce(laterLiveApplied.promise)
       const markReady = vi.fn()
-      const markError = vi.fn()
+      const fail = vi.fn()
       const cleanup = options.sync.sync({
         begin,
         write,
         commit,
         markReady,
-        markError,
+        fail,
         collection: { status: `loading` },
       } as never)
 

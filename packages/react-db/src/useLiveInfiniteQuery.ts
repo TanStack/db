@@ -38,9 +38,9 @@ import type {
   CollectionStatus,
   Context,
   DbClient,
+  ErrorTreeNode,
   InferResultType,
   InitialQueryBuilder,
-  LiveQueryPersistedStatus,
   LiveQueryWindowController,
   NonSingleResult,
   QueryBuilder,
@@ -75,7 +75,6 @@ export type UseLiveInfiniteQueryReturn<TContext extends Context> = Omit<
   fetchNextPage: () => Promise<void>
   hasNextPage: boolean
   isFetchingNextPage: boolean
-  error: unknown
 }
 
 export type UseLiveInfiniteQueryReturnWithCollection<
@@ -89,19 +88,21 @@ export type UseLiveInfiniteQueryReturnWithCollection<
   status: CollectionStatus
   isLoading: boolean
   isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
   isIdle: boolean
-  isError: boolean
+  /** The first load failed: there is nothing to show. */
+  isLoadingError: boolean
+  /** Local storage or an invariant broke; recovery is a new Collection. */
+  isCrashed: boolean
   isCleanedUp: boolean
+  /** The data is shown, and a sync problem or failed page load is in `errors`. */
+  isSyncError: boolean
   isEnabled: true
   pages: Array<Array<TResult>>
   pageParams: Array<number>
   fetchNextPage: () => Promise<void>
   hasNextPage: boolean
   isFetchingNextPage: boolean
-  error: unknown
+  errors: ErrorTreeNode | undefined
 }
 
 type EnabledLiveQueryReturn<TContext extends Context> = ReturnType<
@@ -341,6 +342,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
         ) &&
         rendered.collection.status !== `cleaned-up` &&
         rendered.collection.status !== `error` &&
+        rendered.collection.status !== `crashed` &&
         liveQueryWindowMatches(rendered.collection, requiredLimit)
       ) {
         // An earlier render built this collection and nothing has committed
@@ -456,12 +458,11 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     status: snapshot.status as EnabledLiveQueryReturn<TContext>[`status`],
     isLoading: snapshot.isLoading,
     isReady: snapshot.isReady,
-    persistedStatus: snapshot.persistedStatus,
-    isPersistedReady: snapshot.isPersistedReady,
-    persistedError: snapshot.persistedError,
     isIdle: snapshot.isIdle,
-    isError: snapshot.isError,
+    isLoadingError: snapshot.isLoadingError,
+    isCrashed: snapshot.isCrashed,
     isCleanedUp: snapshot.isCleanedUp,
+    isSyncError: snapshot.isSyncError,
     collection:
       snapshot.collection as EnabledLiveQueryReturn<TContext>[`collection`],
     isEnabled: snapshot.isEnabled,
@@ -470,6 +471,6 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     fetchNextPage,
     hasNextPage: snapshot.hasNextPage,
     isFetchingNextPage: snapshot.isFetchingNextPage,
-    error: snapshot.error,
+    errors: snapshot.errors,
   }
 }

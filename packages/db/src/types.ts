@@ -462,13 +462,27 @@ export interface SyncConfig<
      * named `AbortError`. Aborting after acceptance has no effect.
      */
     commit: (signal?: AbortSignal) => SyncAppliedReceipt
-    /** Signal that a usable initial or recovered snapshot is available. */
+    /** Signal that a usable initial snapshot is available for this attempt. */
     markReady: () => void
     /**
-     * Signal that initial sync failed before producing a usable snapshot.
-     * When supplied, `error` is preserved as the rejection reason from `preload()`.
+     * Report a problem after the first ready while the sync adapter keeps
+     * trying. It shows as the node's `failureReason`; the status and rows do
+     * not change. Throws before the first ready and after `fail()`.
      */
-    markError: (error?: unknown) => void
+    reportError: (error: unknown) => void
+    /**
+     * The sync adapter stopped. Before the first ready the status becomes
+     * `error` and `preload()` rejects with `error`. After it, the rows stay and
+     * the node shows `error` until a reload. Throws after an earlier `fail()`.
+     * While the sync adapter retries, call nothing or `reportError()`.
+     */
+    fail: (error: unknown) => void
+    /**
+     * Sync works again: clears a `failureReason`. With nothing to clear it does
+     * nothing, so it can follow every commit. Throws before the first ready
+     * and after `fail()`.
+     */
+    reportHealthy: () => void
     /**
      * Replace the synced rows. By default the replacement also marks the
      * Collection ready. Set markReady:false to publish without changing status,
@@ -742,8 +756,9 @@ export type DeleteMutationFn<
  * @example
  * // Status transitions
  * // idle → loading → ready (when markReady() is called)
- * // Any active status can transition to → error or cleaned-up
- * // error → ready after a successful sync recovery
+ * // loading → error when the sync adapter calls fail() before the first ready
+ * // any active status → crashed when local storage or an invariant breaks
+ * // After the first ready, sync problems appear in `errors`, not in `status`.
  */
 export type CollectionStatus =
   /** Collection is created but sync hasn't started yet (when startSync config is false) */
@@ -752,12 +767,62 @@ export type CollectionStatus =
   | `loading`
   /** Collection has been explicitly marked ready via markReady() */
   | `ready`
-  /** An error occurred during sync initialization */
+  /** The first load of the sync run failed: there is nothing to show. */
   | `error`
+  /**
+   * Local storage or an internal invariant broke. The Collection cannot serve
+   * reads or accept writes again; recovery is a new Collection.
+   */
+  | `crashed`
   /** Collection has been cleaned up and resources freed */
   | `cleaned-up`
 
 export type SyncMode = `eager` | `on-demand`
+
+/**
+ * Detail about a Collection problem. Every field except `cause` is plain data,
+ * so the value can be logged or sent as JSON; `cause` keeps the original value
+ * and is omitted from JSON.
+ */
+export interface CollectionErrorInfo {
+  readonly name: string
+  readonly message: string
+  readonly code?: string
+  /** Epoch milliseconds when the problem was reported. */
+  readonly at: number
+  readonly cause: unknown
+}
+
+/**
+ * One node of an error tree. A Collection's tree is one node; a live query's
+ * has one node for itself and one for each source alias in query order. The
+ * shape is fixed by the query, and nodes without a problem are present too.
+ *
+ * A node shows at most one problem. `failureReason`: something went wrong and
+ * the sync adapter is still trying, so the problem clears by itself.
+ * `error`: the first load failed, the sync adapter stopped, the Collection
+ * crashed, or, on a live query's own node, a request for more data failed.
+ */
+export interface ErrorTreeNode {
+  /** The query alias, or `root` for the Collection the tree was read from. */
+  readonly alias: string
+  readonly collectionId: string
+  /** `include` is an include's source; its rows feed per-row child Collections. */
+  readonly kind: `source` | `live-query` | `include`
+  readonly status: CollectionStatus
+  /** This node or any node below it has a `failureReason` or an `error`. */
+  readonly hasErrors: boolean
+  readonly failureReason: CollectionErrorInfo | null
+  readonly error: CollectionErrorInfo | null
+  /**
+   * A reload's new sync run is in flight: the rows, status, and problem shown
+   * are the previous run's until it commits or fails.
+   */
+  readonly reloading: boolean
+  /** For an include node: its per-row child Collections, and how many have a problem. */
+  readonly instances?: { readonly total: number; readonly withErrors: number }
+  readonly sources: ReadonlyArray<ErrorTreeNode>
+}
 
 export interface BaseCollectionConfig<
   T extends object = Record<string, unknown>,
@@ -1113,6 +1178,27 @@ export type NamespacedAndKeyedStream = IStreamBuilder<KeyedNamespacedRow>
 /**
  * Options for subscribing to collection changes
  */
+/**
+ * Something that reads a Collection, as listed by `collection.subscribers`:
+ * a live query, an Effect, or a direct subscription.
+ */
+export interface CollectionDependent {
+  readonly kind: `live-query` | `effect` | `subscription`
+  /** A live query's Collection; a pooled live query has none. */
+  readonly collection?: Collection<any, any, any, any, any>
+  /**
+   * Whether something still reads through this dependent: an Effect or a
+   * subscription always does; a live query does while it has a subscriber.
+   * `cleanup()` refuses only while an active live query or Effect remains.
+   */
+  readonly active: boolean
+  /**
+   * End this dependent: clean up the live query with its own dependents,
+   * dispose the Effect, or end the subscription.
+   */
+  end: () => Promise<void>
+}
+
 export interface SubscribeChangesOptions<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -1145,6 +1231,12 @@ export interface SubscribeChangesOptions<
    * @internal
    */
   deferAcquisition?: boolean
+  /**
+   * The live query or Effect this subscription reads for, so
+   * `collection.subscribers` can name it.
+   * @internal
+   */
+  owner?: CollectionDependent
   /**
    * Listener for subscription status changes.
    * Registered BEFORE any snapshot is requested, ensuring no status transitions are missed.

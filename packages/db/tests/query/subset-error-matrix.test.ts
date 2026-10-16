@@ -4,6 +4,7 @@ import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { createEffect, createLiveQueryCollection, eq } from '../../src/index.js'
 import { getLoadSubsetDemandKey } from '../../src/query/ir-stable-identity.js'
 import { mockSyncCollectionOptions } from '../utils.js'
+import type { ErrorTreeNode } from '../../src/types.js'
 
 type Delivery = `throw` | `reject`
 type Consumer = `effect` | `live`
@@ -127,10 +128,12 @@ function startEffect(
   primary: RowCollection,
   child: RowCollection,
   sourceErrors: Array<Error>,
+  trees: Array<ErrorTreeNode> = [],
 ) {
   const callbacks = {
     onBatch: () => {},
     onSourceError: (error: Error) => sourceErrors.push(error),
+    onErrorsChange: (errors: ErrorTreeNode) => trees.push(errors),
   }
   if (path === `ordered`) {
     return createEffect({
@@ -330,7 +333,8 @@ describe(`loadSubset failure matrix`, () => {
       try {
         if (consumer === `effect`) {
           const sourceErrors: Array<Error> = []
-          const effect = startEffect(path, primary, child, sourceErrors)
+          const trees: Array<ErrorTreeNode> = []
+          const effect = startEffect(path, primary, child, sourceErrors, trees)
           try {
             await flushFailures()
             expect(sourceErrors).toEqual([])
@@ -338,13 +342,16 @@ describe(`loadSubset failure matrix`, () => {
             expect(() => triggerFailure()).not.toThrow()
             await flushFailures()
 
-            expect(sourceErrors).toHaveLength(1)
-            if (failureValue === `error`) {
-              expect(sourceErrors[0]).toBe(error)
-            } else {
-              expect(sourceErrors[0]).toBeInstanceOf(Error)
-            }
-            expect(effect.disposed).toBe(true)
+            // After the Effect's gate, a failed load is a request error on
+            // its tree, as on a live query's node; the Effect keeps running.
+            expect(sourceErrors).toEqual([])
+            expect(effect.disposed).toBe(false)
+            expect(trees.at(-1)?.failureReason).toBeNull()
+            expect(trees.at(-1)?.error).toMatchObject({
+              ...(failureValue === `error`
+                ? { message: (error as Error).message }
+                : {}),
+            })
           } finally {
             await effect.dispose()
           }
@@ -357,7 +364,16 @@ describe(`loadSubset failure matrix`, () => {
             expect(() => triggerFailure()).not.toThrow()
             await flushFailures()
 
-            expect(live.status).toBe(path === `lazy` ? `error` : `ready`)
+            // After the first ready, a failed lazy request is a request error
+            // on the live query's node; the query keeps its status and rows.
+            expect(live.status).toBe(`ready`)
+            if (path === `lazy`) {
+              expect(live.errors).toMatchObject({
+                hasErrors: true,
+                failureReason: null,
+                error: expect.anything(),
+              })
+            }
             if (failureValue === `error`) {
               expect(live.utils.lastSubsetError).toBe(error)
             } else {
@@ -423,6 +439,7 @@ describe(`loadSubset failure matrix`, () => {
         },
       })
       const sourceErrors: Array<Error> = []
+      const trees: Array<ErrorTreeNode> = []
       const effect =
         consumer === `effect`
           ? createEffect({
@@ -434,6 +451,7 @@ describe(`loadSubset failure matrix`, () => {
                   ),
               onBatch: () => {},
               onSourceError: (error) => sourceErrors.push(error),
+              onErrorsChange: (errors) => trees.push(errors),
             })
           : undefined
       const live =
@@ -460,9 +478,12 @@ describe(`loadSubset failure matrix`, () => {
         await flushFailures()
 
         if (effect) {
-          expect(sourceErrors).toHaveLength(1)
-          expect(sourceErrors[0]?.message).toBe(String(failure))
-          expect(effect.disposed).toBe(true)
+          // A failed release after the gate is a request error.
+          expect(sourceErrors).toEqual([])
+          expect(effect.disposed).toBe(false)
+          expect(trees.at(-1)?.error).toMatchObject({
+            message: String(failure),
+          })
         }
         if (live) {
           expect(live.utils.lastSubsetError).toBeInstanceOf(Error)

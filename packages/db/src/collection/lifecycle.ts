@@ -1,5 +1,6 @@
 import {
   CollectionInErrorStateError,
+  CollectionPreloadAbortedError,
   CollectionStateError,
   InvalidCollectionStatusTransitionError,
 } from '../errors'
@@ -11,9 +12,14 @@ import { runAllCallbacks } from '../utils/callbacks'
 import { createDeferred } from '../deferred'
 import { codedMessage, devBuild } from '../error-message'
 import { CleanupQueue } from './cleanup-queue'
+import type { Deferred } from '../deferred'
 import type { IdleCallbackDeadline } from '../utils/browser-polyfills'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
-import type { CollectionConfig, CollectionStatus } from '../types'
+import type {
+  CollectionConfig,
+  CollectionErrorInfo,
+  CollectionStatus,
+} from '../types'
 import type { CollectionEventsManager } from './events'
 import type { CollectionIndexesManager } from './indexes'
 import type { CollectionChangesManager } from './changes'
@@ -51,7 +57,23 @@ export class CollectionLifecycleManager<
   private readyFailureSink: ((failure: { error: unknown }) => void) | undefined
   public onFirstReadyCallbacks: Array<() => void> = []
   private idleCallbackId: number | null = null
-  private syncError: unknown
+  // After the first ready, the sync adapter's problem is error tree detail:
+  // `failureReason` while it still tries, `stoppedError` once it called fail().
+  // A live query's request failures are kept apart, so settling a request
+  // cannot clear the sync adapter's problem.
+  private failureReason: CollectionErrorInfo | null = null
+  private stoppedError: CollectionErrorInfo | null = null
+  // The cause of status `error` or `crashed`, kept so readers see the same
+  // object until the sync run ends.
+  private statusError: CollectionErrorInfo | null = null
+  private requestErrors = new RequestErrors()
+  // fail() ends the sync adapter's reporting for its sync run; a reload or
+  // cleanup starts a new one.
+  private adapterStopped = false
+  // A reload's new sync run, until its first commit or its failure.
+  private reloadRun: Deferred<void> | undefined
+  // A reload is moving the Collection out of `error`.
+  private recovering = false
   private cleanupConfig: () => void
   private statusRevision = 0
   private cleaningUp = false
@@ -100,14 +122,27 @@ export class CollectionLifecycleManager<
       CollectionStatus,
       Array<CollectionStatus>
     > = {
-      idle: [`loading`, `error`, `cleaned-up`],
-      loading: [`ready`, `error`, `cleaned-up`],
-      ready: [`cleaned-up`, `error`],
-      error: [`ready`, `cleaned-up`, `idle`],
-      'cleaned-up': [`loading`, `error`],
+      idle: [`loading`, `error`, `crashed`, `cleaned-up`],
+      loading: [`ready`, `error`, `crashed`, `cleaned-up`],
+      // After the first ready only a crash changes the status; a sync
+      // problem is error tree detail.
+      ready: [`cleaned-up`, `crashed`],
+      // A failed first load is final for its sync run. Only a reload leaves
+      // it for `ready` or `loading` (see `recovering`).
+      error: [`cleaned-up`, `idle`, `crashed`],
+      // A crash is permanent for the Collection instance.
+      crashed: [`cleaned-up`],
+      'cleaned-up': [`loading`, `error`, `crashed`],
     }
 
-    if (!validTransitions[from].includes(to)) {
+    if (
+      !validTransitions[from].includes(to) &&
+      !(
+        this.recovering &&
+        from === `error` &&
+        (to === `ready` || to === `loading`)
+      )
+    ) {
       throw new InvalidCollectionStatusTransitionError(from, to, this.id)
     }
   }
@@ -138,11 +173,11 @@ export class CollectionLifecycleManager<
     beforeEmit?.()
 
     // Emit event
-    this.events.emitStatusChange(
-      newStatus,
-      previousStatus,
-      () => this.statusRevision === revision,
-    )
+    const isCurrent = () => this.statusRevision === revision
+    this.events.emitStatusChange(newStatus, previousStatus, isCurrent)
+    // The status is part of the error tree. status:change fires first, and
+    // the tree is already current when either event fires.
+    if (isCurrent()) this.events.emitErrorsChange()
   }
 
   /**
@@ -152,6 +187,7 @@ export class CollectionLifecycleManager<
   public validateCollectionUsable(operation: string): void {
     switch (this.status) {
       case `error`:
+      case `crashed`:
         throw new CollectionInErrorStateError(operation, this.id)
       case `cleaned-up`:
         // Automatically restart the collection when operations are called on cleaned-up collections
@@ -170,6 +206,18 @@ export class CollectionLifecycleManager<
    * listeners and ready callbacks, so their writes follow it.
    */
   public markReady(beforeEffects?: () => void): void {
+    // A crash ended the sync run from core's side; the adapter is not at fault.
+    if (this.status === `crashed`) return
+    if (this.adapterStopped) {
+      // A failed first load is final for its sync run.
+      if (this.status === `error`)
+        throw new InvalidCollectionStatusTransitionError(
+          this.status,
+          `ready`,
+          this.id,
+        )
+      this.assertAdapterActive(`markReady`)
+    }
     const failure = this.applyReadyTransition(beforeEffects)
     if (!failure) return
     if (this.readyFailureSink) this.readyFailureSink(failure)
@@ -196,9 +244,9 @@ export class CollectionLifecycleManager<
     beforeEffects?: () => void,
   ): { error: unknown } | undefined {
     this.validateStatusTransition(this.status, `ready`)
-    // A successful initial sync or recovery establishes a ready snapshot.
+    // A successful initial sync establishes a ready snapshot, as does a
+    // reload of a failed first load.
     if (this.status === `loading` || this.status === `error`) {
-      this.syncError = undefined
       const readyRevision = this.statusRevision + 1
       this.setStatus(`ready`, true, beforeEffects)
 
@@ -235,16 +283,194 @@ export class CollectionLifecycleManager<
     return undefined
   }
 
-  /** Mark an asynchronous sync failure after sync has started. */
-  public markError(error?: unknown): void {
-    this.validateStatusTransition(this.status, `error`)
-    this.syncError = error
-    this.setStatus(`error`)
+  /**
+   * The sync adapter stopped. Before the first ready this fails the sync
+   * run's first load; after it, the rows stay and the error shows until a
+   * reload. An earlier fail() already ended the adapter's work, so a second
+   * one is a contract violation.
+   */
+  public fail(error: unknown): void {
+    if (this.status === `crashed`) return
+    this.assertAdapterActive(`fail`)
+    this.adapterStopped = true
+    const reload = this.reloadRun
+    this.reloadRun = undefined
+    if (this.status === `ready`) {
+      // The rows stay; a reload that failed shows its new error instead.
+      this.failureReason = null
+      this.stoppedError = describeProblem(error)
+      this.events.emitErrorsChange()
+    } else if (reload && this.status === `error`) {
+      // A reload of a failed first load keeps status `error` with the new
+      // cause.
+      this.statusError = describeProblem(error)
+      this.events.emitErrorsChange()
+    } else {
+      this.validateStatusTransition(this.status, `error`)
+      this.statusError = describeProblem(error)
+      this.setStatus(`error`)
+    }
+    reload?.reject(error)
   }
 
-  /** Return the cause supplied by the current sync run, if any. */
+  /** Whether a reload's new sync run is in flight. */
+  public get reloading(): boolean {
+    return this.reloadRun !== undefined
+  }
+
+  /**
+   * A reload starts a new sync run while everything visible stays: the rows,
+   * the status, and the current problem. The node shows `reloading`.
+   */
+  public beginReload(): Promise<void> {
+    if (this.reloadRun) return this.reloadRun.promise
+    const run = createDeferred<void>()
+    void run.promise.catch(() => undefined)
+    this.reloadRun = run
+    this.adapterStopped = false
+    this.events.emitErrorsChange()
+    return run.promise
+  }
+
+  /**
+   * The reload's first commit replaced the rows: its problems clear, and a
+   * failed first load becomes ready.
+   */
+  public completeReload(): void {
+    const run = this.reloadRun
+    if (!run) return
+    this.reloadRun = undefined
+    this.failureReason = null
+    this.stoppedError = null
+    this.requestErrors = new RequestErrors()
+    if (this.status === `ready`) this.events.emitErrorsChange()
+    else {
+      // A failed first load, or a reload during the first load, becomes
+      // ready with the new run's rows.
+      this.statusError = null
+      this.recovering = true
+      try {
+        this.markReady()
+      } finally {
+        this.recovering = false
+      }
+    }
+    run.resolve()
+  }
+
+  /** A live query whose sources recovered starts again, shown `loading`. */
+  public restartFromError(): void {
+    this.statusError = null
+    this.recovering = true
+    try {
+      this.setStatus(`loading`)
+    } finally {
+      this.recovering = false
+    }
+  }
+
+  /** A reload retired the sync run; subscriptions detach its demand. */
+  public retireSubscriptionDemand(): void {
+    for (const subscription of this.changes.changeSubscriptions) {
+      subscription.retireSyncRun()
+    }
+  }
+
+  /** The reload ended without a commit, for example by cleanup. */
+  public abandonReload(error: unknown): void {
+    const run = this.reloadRun
+    this.reloadRun = undefined
+    run?.reject(error)
+  }
+
+  /**
+   * Local storage or an internal invariant broke. The Collection can no
+   * longer serve reads or accept writes, from any active status. A crash is
+   * permanent for this Collection instance.
+   */
+  public crash(error?: unknown): void {
+    if (this.status === `crashed`) return
+    this.validateStatusTransition(this.status, `crashed`)
+    // A crash ends a reload in flight with it.
+    this.abandonReload(error)
+    this.statusError = describeProblem(error)
+    this.setStatus(`crashed`)
+  }
+
+  /** The Collection's own problems, as error tree detail. */
+  public get problems(): {
+    failureReason: CollectionErrorInfo | null
+    error: CollectionErrorInfo | null
+  } {
+    const error = this.statusAllowsError()
+      ? this.statusError
+      : (this.stoppedError ?? this.requestErrors.problem)
+    return { failureReason: error ? null : this.failureReason, error }
+  }
+
+  /** The cause of status `error` or `crashed`, as error tree detail. */
+  public get statusProblem(): CollectionErrorInfo | null {
+    return this.statusAllowsError() ? this.statusError : null
+  }
+
+  private statusAllowsError(): boolean {
+    return this.status === `error` || this.status === `crashed`
+  }
+
+  /** The sync adapter still tries after a problem. Status and rows do not change. */
+  public reportError(error: unknown): void {
+    if (this.status === `crashed`) return
+    this.assertAdapterActive(`reportError`)
+    this.assertReady(`reportError`)
+    this.failureReason = describeProblem(error)
+    this.events.emitErrorsChange()
+  }
+
+  /** The source synced successfully again. With nothing to clear it does nothing. */
+  public reportHealthy(): void {
+    if (this.status === `crashed`) return
+    this.assertAdapterActive(`reportHealthy`)
+    this.assertReady(`reportHealthy`)
+    if (!this.failureReason) return
+    this.failureReason = null
+    this.events.emitErrorsChange()
+  }
+
+  /** @internal A live query's request failed after initial-query readiness. */
+  public reportRequestError(key: string, error: unknown): void {
+    this.requestErrors.fail(key, error)
+    this.events.emitErrorsChange()
+  }
+
+  /** @internal The failed request settled or was released. */
+  public clearRequestError(key: string): void {
+    if (this.requestErrors.settle(key)) this.events.emitErrorsChange()
+  }
+
+  /** fail() ends the sync adapter's reporting for its sync run. */
+  private assertAdapterActive(operation: string): void {
+    if (this.adapterStopped) {
+      throw new CollectionStateError(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `${operation}() was called after fail() in the same sync run of Collection "${this.id}". fail() means the sync adapter stopped; a reload starts a new sync run.`
+          : codedMessage(247, { operation, id: this.id }),
+      )
+    }
+  }
+
+  private assertReady(operation: string): void {
+    if (this.status !== `ready`) {
+      throw new CollectionStateError(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `${operation}() reports on sync after the first ready, but Collection "${this.id}" is ${this.status}. Before the first ready, retry without reporting, or call fail() when the sync adapter stops.`
+          : codedMessage(245, { operation, id: this.id, status: this.status }),
+      )
+    }
+  }
+
+  /** Return the cause of status `error` or `crashed` in this sync run, if any. */
   public getSyncError(): unknown {
-    return this.syncError
+    return this.statusError?.cause
   }
 
   public assertCanStartSync(): void {
@@ -479,7 +705,13 @@ export class CollectionLifecycleManager<
     CleanupQueue.getInstance().cancel(this)
 
     this.hasBeenReady = false
-    this.syncError = undefined
+    // Problems belong to the discarded sync run.
+    this.adapterStopped = false
+    this.abandonReload(new CollectionPreloadAbortedError())
+    this.failureReason = null
+    this.stoppedError = null
+    this.requestErrors = new RequestErrors()
+    this.statusError = null
     // Cleanup is not readiness. Sync cleanup rejects pending preload callers;
     // first-ready listeners belong to the discarded run.
     this.onFirstReadyCallbacks = []
@@ -520,4 +752,46 @@ export class CollectionLifecycleManager<
     // a replacement run and cleanup while the first promise is still pending.
     return this.beginCleanup()
   }
+}
+
+/** @internal Requests that failed after initial-query readiness, by issuer. */
+export class RequestErrors {
+  // In failure order, so the latest failure still failing is last.
+  private readonly failed = new Map<string, CollectionErrorInfo>()
+  problem: CollectionErrorInfo | null = null
+
+  fail(key: string, error: unknown): void {
+    this.failed.delete(key)
+    this.problem = describeProblem(error)
+    this.failed.set(key, this.problem)
+  }
+
+  /** Returns whether the shown problem changed. */
+  settle(key: string): boolean {
+    if (!this.failed.delete(key)) return false
+    const shown = [...this.failed.values()].at(-1) ?? null
+    const changed = shown !== this.problem
+    this.problem = shown
+    return changed
+  }
+}
+
+/** @internal Error tree detail for a problem value. */
+export function describeProblem(error: unknown): CollectionErrorInfo {
+  const info = {
+    name: error instanceof Error ? error.name : `Error`,
+    message:
+      error instanceof Error
+        ? error.message
+        : error === undefined
+          ? `Collection is in an error state`
+          : String(error),
+    ...(typeof (error as { code?: unknown } | null)?.code === `string`
+      ? { code: (error as { code: string }).code }
+      : {}),
+    at: Date.now(),
+  } as CollectionErrorInfo
+  // The original value stays available but out of JSON.
+  Object.defineProperty(info, `cause`, { value: error, enumerable: false })
+  return info
 }

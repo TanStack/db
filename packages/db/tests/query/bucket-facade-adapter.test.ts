@@ -67,7 +67,15 @@ describe(`BucketFacadeAdapter`, () => {
       const activeBuckets = graph.newInput<[string, true]>()
       const adapter = new BucketFacadeAdapter(
         `public-membership`,
-        [{ edgeId: `children`, rows, activeBuckets, hasOrderBy: false }],
+        [
+          {
+            edgeId: `children`,
+            sourceIds: [],
+            rows,
+            activeBuckets,
+            hasOrderBy: false,
+          },
+        ],
         () => {},
       )
       graph.finalize()
@@ -123,7 +131,15 @@ describe(`BucketFacadeAdapter`, () => {
       const activeBuckets = graph.newInput<[string, true]>()
       const adapter = new BucketFacadeAdapter(
         `facade-read-work`,
-        [{ edgeId: `children`, rows, activeBuckets, hasOrderBy: ordered }],
+        [
+          {
+            edgeId: `children`,
+            sourceIds: [],
+            rows,
+            activeBuckets,
+            hasOrderBy: ordered,
+          },
+        ],
         () => {},
       )
       graph.finalize()
@@ -202,7 +218,15 @@ describe(`BucketFacadeAdapter`, () => {
     const activeBuckets = graph.newInput<[string, true]>()
     const adapter = new BucketFacadeAdapter(
       `facade-order-parent`,
-      [{ edgeId: `children`, rows, activeBuckets, hasOrderBy: true }],
+      [
+        {
+          edgeId: `children`,
+          sourceIds: [],
+          rows,
+          activeBuckets,
+          hasOrderBy: true,
+        },
+      ],
       () => {},
     )
     graph.finalize()
@@ -248,7 +272,15 @@ describe(`BucketFacadeAdapter`, () => {
     const activeBuckets = graph.newInput<[string, true]>()
     const adapter = new BucketFacadeAdapter(
       `facade-rollback-parent`,
-      [{ edgeId: `children`, rows, activeBuckets, hasOrderBy: true }],
+      [
+        {
+          edgeId: `children`,
+          sourceIds: [],
+          rows,
+          activeBuckets,
+          hasOrderBy: true,
+        },
+      ],
       () => {},
     )
     graph.finalize()
@@ -411,12 +443,14 @@ describe(`BucketFacadeAdapter`, () => {
       [
         {
           edgeId: `first`,
+          sourceIds: [],
           rows: firstRows,
           activeBuckets: firstActiveBuckets,
           hasOrderBy: false,
         },
         {
           edgeId: `second`,
+          sourceIds: [],
           rows: secondRows,
           activeBuckets: secondActiveBuckets,
           hasOrderBy: false,
@@ -509,7 +543,15 @@ describe(`BucketFacadeAdapter`, () => {
     const activeBuckets = graph.newInput<[string, true]>()
     const adapter = new BucketFacadeAdapter(
       `facade-index-rollback-parent`,
-      [{ edgeId: `children`, rows, activeBuckets, hasOrderBy: false }],
+      [
+        {
+          edgeId: `children`,
+          sourceIds: [],
+          rows,
+          activeBuckets,
+          hasOrderBy: false,
+        },
+      ],
       () => {},
     )
     graph.finalize()

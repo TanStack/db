@@ -14,8 +14,14 @@ import type { SyncConfig } from '../src/types'
  * # When does cleanup become observable?
  *
  * Authority comes from the public `Collection.cleanup()` contract and the
- * cleanup and cleanup-start terms in the contributing glossary. Cleanup has
- * two boundaries. Cleanup start synchronously closes restart admission and
+ * cleanup and cleanup-start terms in the contributing glossary. Public cleanup
+ * first checks admission: it rejects while a live query or Effect reads the
+ * Collection, and `cleanup({ dependents: true })` first cleans up each such
+ * live query, with its own dependents, and disposes each such Effect. A direct
+ * subscription is not refused: it survives cleanup and asks for data again in
+ * the next sync run. `collection.subscribers` lists all three kinds. The
+ * boundary histories below drive internal teardown, which bypasses that check,
+ * as a retiring facade does. Cleanup has two boundaries. Cleanup start synchronously closes restart admission and
  * puts dependent live queries in terminal error while marking dependent Effects
  * disposed. Cleanup settlement publishes `cleaned-up` and settles the public
  * cleanup promise only after adapter cleanup settles. Cleanup start is internal;
@@ -215,6 +221,97 @@ describe(`Collection cleanup oracle calibration`, () => {
 })
 
 describe(`Collection cleanup admission oracle`, () => {
+  it(`refuses cleanup while a live query or Effect reads it, and ends dependents first on request`, async () => {
+    let starts = 0
+    let ops!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
+    const source = createCollection<Row, number>({
+      getKey: (row) => row.id,
+      sync: {
+        sync: (params) => {
+          ops = params
+          starts++
+          params.begin()
+          params.write({ type: `insert`, value: { id: starts, rank: starts } })
+          params.commit()
+          params.markReady()
+        },
+      },
+    })
+    const inner = createLiveQueryCollection((q) => q.from({ row: source }))
+    const outer = createLiveQueryCollection((q) => q.from({ row: inner }))
+    const effect = createEffect({
+      query: (q) => q.from({ row: source }),
+      onBatch: () => {},
+    })
+    const received: Array<number> = []
+    const direct = source.subscribeChanges((changes) => {
+      for (const change of changes) received.push(change.key)
+    })
+    try {
+      await outer.preload()
+      // Model: three readers of the source, one of each kind; the outer query
+      // reads the inner one, not the source.
+      expect(source.subscribers.map(({ kind }) => kind).sort()).toEqual([
+        `effect`,
+        `live-query`,
+        `subscription`,
+      ])
+      expect(
+        source.subscribers.find(({ kind }) => kind === `live-query`)
+          ?.collection,
+      ).toBe(inner)
+      expect(inner.subscribers.map(({ collection }) => collection)).toEqual([
+        outer,
+      ])
+
+      // A plain cleanup refuses and changes nothing.
+      await expect(source.cleanup()).rejects.toThrow(/dependent/)
+      expect([source.status, inner.status, outer.status]).toEqual([
+        `ready`,
+        `ready`,
+        `ready`,
+      ])
+      expect(effect.disposed).toBe(false)
+
+      // With its dependents, cleanup ends the query chain and the Effect
+      // first. The direct subscription survives into the next sync run.
+      await source.cleanup({ dependents: true })
+      expect([source.status, inner.status, outer.status]).toEqual([
+        `cleaned-up`,
+        `cleaned-up`,
+        `cleaned-up`,
+      ])
+      expect(effect.disposed).toBe(true)
+      expect(source.subscribers.map(({ kind }) => kind)).toEqual([
+        `subscription`,
+      ])
+      received.length = 0
+      source.startSyncImmediate()
+      expect(starts).toBe(2)
+      ops.begin()
+      ops.write({ type: `insert`, value: { id: 9, rank: 9 } })
+      ops.commit()
+      expect(received).toContain(9)
+      // Only direct subscriptions and an idle live query remain. Nothing
+      // reads the idle query, so a plain cleanup is admitted; the idle query
+      // ends at cleanup start, as a query under internal teardown does.
+      const idle = createLiveQueryCollection((q) => q.from({ row: source }))
+      await idle.preload()
+      expect(
+        source.subscribers.find(({ collection }) => collection === idle)
+          ?.active,
+      ).toBe(false)
+      await source.cleanup()
+      expect(source.status).toBe(`cleaned-up`)
+      expect(idle.status).toBe(`crashed`)
+    } finally {
+      direct.unsubscribe()
+      await outer.cleanup({ dependents: true })
+      await effect.dispose()
+      await source.cleanup({ dependents: true })
+    }
+  })
+
   it(`calibrates every declared bounded-product cell exactly once`, () => {
     expectExactCaseIds(reentryScenarios, [
       `abort:plain:1`,
@@ -471,8 +568,10 @@ describe(`Collection cleanup admission oracle`, () => {
 
     try {
       await loadEntered.promise
+      // Internal teardown that bypasses cleanup admission, such as a retiring
+      // facade, still crashes the dependent at cleanup start.
       let cleanupSettled = false
-      const cleanup = source.cleanup().then(() => {
+      const cleanup = source._lifecycle.cleanup().then(() => {
         cleanupSettled = true
       })
 
@@ -481,7 +580,7 @@ describe(`Collection cleanup admission oracle`, () => {
       expect(observeCleanupSettlement(cleanupSettled)).toBe(
         atCleanupStart.cleanup,
       )
-      expect(observeDependent(live.status !== `error`)).toBe(
+      expect(observeDependent(live.status !== `crashed`)).toBe(
         atCleanupStart.dependent,
       )
       expect(await preload).toMatchObject({
@@ -502,7 +601,7 @@ describe(`Collection cleanup admission oracle`, () => {
     }
   })
 
-  it(`puts a live query in terminal error once when one source has two aliases`, async () => {
+  it(`crashes a live query once when internal teardown retires a source it reads under two aliases`, async () => {
     const cleanupGate = createDeferred<void>()
     const source = createCollection<Row, number>({
       getKey: (row) => row.id,
@@ -531,9 +630,10 @@ describe(`Collection cleanup admission oracle`, () => {
     try {
       await live.preload()
 
-      const cleanup = source.cleanup()
+      // Internal teardown that bypasses admission crashes the query once.
+      const cleanup = source._lifecycle.cleanup()
 
-      expect(live.status).toBe(`error`)
+      expect(live.status).toBe(`crashed`)
       expect(reports).toHaveBeenCalledTimes(1)
 
       cleanupGate.resolve()
@@ -583,8 +683,12 @@ describe(`Collection cleanup admission oracle`, () => {
       expect(effect.disposed).toBe(false)
       expect(source.subscriberCount).toBe(1)
 
+      // The public cleanup refuses while the Effect reads the source.
+      // Internal teardown that bypasses it disposes the Effect at cleanup
+      // start.
+      await expect(source.cleanup()).rejects.toThrow(/dependent/)
       let cleanupSettled = false
-      const cleanup = source.cleanup().then(() => {
+      const cleanup = source._lifecycle.cleanup().then(() => {
         cleanupSettled = true
       })
       const atCleanupStart = expectedCleanupBoundary(`ready`, `cleanup-start`)
@@ -894,7 +998,7 @@ describe(`Collection cleanup admission oracle`, () => {
 
         await expect(live.preload()).rejects.toThrow(message)
 
-        expect(live.status).toBe(`error`)
+        expect(live.status).toBe(`crashed`)
         expect({
           cleaning: cleaningSource.subscriberCount,
           healthy: healthySource.subscriberCount,
@@ -988,7 +1092,7 @@ describe(`Collection cleanup admission oracle`, () => {
     }
   })
 
-  it(`does not revive a terminal live query when its source restarts`, async () => {
+  it(`does not revive a cleaned-up live query when its source restarts`, async () => {
     let starts = 0
     const source = createCollection<Row, number>({
       getKey: (row) => row.id,
@@ -1014,16 +1118,20 @@ describe(`Collection cleanup admission oracle`, () => {
       expect(live.get(1)?.rank).toBe(1)
       publications.length = 0
 
-      await source.cleanup()
-      expect(live.status).toBe(`error`)
+      // Cleanup refuses while the live query reads the source; with its
+      // dependents it cleans the live query up first.
+      await expect(source.cleanup()).rejects.toThrow(/dependent/)
+      await source.cleanup({ dependents: true })
+      expect(live.status).toBe(`cleaned-up`)
 
+      // Restarting the source does not revive the cleaned-up live query,
+      // and its surviving subscriber receives nothing from the new run.
       source.startSyncImmediate()
       expect(source.status).toBe(`ready`)
       expect(starts).toBe(2)
-      expect(live.status).toBe(`error`)
-      expect(live.get(1)?.rank).toBe(1)
+      expect(live.status).toBe(`cleaned-up`)
       expect(publications).toEqual([])
-      expect(reports).toHaveBeenCalledTimes(1)
+      expect(reports).not.toHaveBeenCalled()
     } finally {
       subscription.unsubscribe()
       reports.mockRestore()
@@ -1033,7 +1141,7 @@ describe(`Collection cleanup admission oracle`, () => {
   })
 
   it.each([`eager`, `on-demand`] as const)(
-    `recovers an errored %s source and dependent live query through their own restarts`,
+    `restarts a %s source that failed after ready, and its live query, through their own restarts`,
     async (syncMode) => {
       let sourceSync!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
       let starts = 0
@@ -1075,13 +1183,23 @@ describe(`Collection cleanup admission oracle`, () => {
         await live.preload()
         expect(live.get(1)?.rank).toBe(1)
 
-        sourceSync.markError(new Error(`source sync failed`))
-        expect(source.status).toBe(`error`)
-        expect(live.status).toBe(`error`)
+        // After the first ready a source's fail() stops its sync: the
+        // status and rows stay, and the live query's error tree reports it.
+        sourceSync.fail(new Error(`source sync failed`))
+        expect(source.status).toBe(`ready`)
+        expect(source.errors.error).toMatchObject({
+          message: `source sync failed`,
+        })
+        expect(live.status).toBe(`ready`)
+        expect(live.get(1)?.rank).toBe(1)
+        expect(live.errors.sources[0]?.error).toBeTruthy()
 
+        // Only a new sync run clears the error.
         await live.cleanup()
         await source.cleanup()
         await live.preload()
+        expect(source.errors.hasErrors).toBe(false)
+        expect(live.errors.hasErrors).toBe(false)
 
         expect(starts).toBe(2)
         expect(source.status).toBe(`ready`)
