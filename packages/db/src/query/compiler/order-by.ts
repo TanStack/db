@@ -182,7 +182,8 @@ export function processOrderBy(
         followRefResult.path,
         compareOpts,
         (candidate) =>
-          candidate.supports(`gt`) && candidate.supportsOrderOptimization,
+          candidate.supports(`gt`) &&
+          candidate.supportsOrderOptimization === true,
       )
 
       if (devBuild() && process.env.NODE_ENV !== `production` && !index) {
