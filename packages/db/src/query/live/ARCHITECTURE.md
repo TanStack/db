@@ -950,7 +950,10 @@ logical demand so a later truncate replay can retry one authoritative
 replacement, and clears the loader's completion marker so an explicit retry
 of the window can issue the request again. That explicit retry retires and
 releases the earlier failed acquisition before installing its replacement, so
-a later truncate replays one logical demand rather than both attempts. A
+a later truncate replays one logical demand rather than both attempts. The
+failed read stops being the loader's source demand before its lease is
+released. A replay that settles during or after a throwing release therefore
+cannot count the released read as complete source coverage. A
 successful authoritative replay clears its source-recovery gate, but it does
 not clear an unrelated failed window operation. A later explicit window move
 revalidates that physical window before publishing it.
@@ -1034,7 +1037,12 @@ returns, so its result and continuation do not count as current coverage. An
 authoritative read also stops waiting on the superseded request: a repair that
 answers at once continues without it. A superseded failure cannot drop the
 repair's staged continuation, and a repair-chain step does not release failed
-acquisitions; the explicit retry that resumed it does.
+acquisitions; the explicit retry that resumed it does. A repair request belongs
+to the chain it was issued in. When a truncate replay finishes a chain whose
+prefix is still in flight and a newer invalidation starts the replacement, that
+prefix settles outside the replacement's chain, and the replacement retires it.
+A request issued before a cursor reset that later fails still raises the repair
+debt, but it cannot drop work staged after the reset.
 A failed or canceled request, an invalidation before any request has
 settled, or a boundary that cannot be expressed still requires the full-source
 recovery above. A bounded repair failure likewise upgrades its

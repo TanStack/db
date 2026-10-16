@@ -1,5 +1,5 @@
 import fc from 'fast-check'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { createLiveQueryCollection } from '../../src/query/index.js'
@@ -1703,10 +1703,11 @@ describe(`Successful finite demand retirement`, () => {
  * loader authority rules for requests that overlap an ordering invalidation:
  *
  * - **Held:** a successful bounded repair holds the acquisitions it read.
- *   Only a later read that covers them may retire them: a newer repair or a
- *   full-source read that succeeds, or a prefix read issued after the repair
- *   that is at least as long. A request issued before the invalidation
- *   proves no current coverage, so it never retires them.
+ *   Only a later read that covers them may retire them: a newer repair, a
+ *   full-source read, or a truncate replay that covers the source, or a
+ *   prefix read issued after the repair that reaches every repair row still
+ *   inside the window. A request issued before the invalidation proves no
+ *   current coverage, so it never retires them.
  * - **No leak:** once loading is quiet and no failure blocks it, the loader
  *   holds nothing issued before its last successful authoritative read.
  *   Otherwise every later refetch would read that request again. A
@@ -1726,6 +1727,10 @@ describe(`Successful finite demand retirement`, () => {
  * These laws came from a TLA+ model of the loader's request authority
  * (#2191). This property checks the real loader against them.
  *
+ * The leak and progress laws also judge a truncate replay. A replay owns
+ * the requests issued before the truncate. When the subscription still holds
+ * a full-source lease, the settled replay covers the source.
+ *
  * ## Model
  *
  * The model is a ledger of observed requests, kept outside the loader. Each
@@ -1736,6 +1741,15 @@ describe(`Successful finite demand retirement`, () => {
  * - an authoritative read starts at a full-source read or a repair prefix
  *   (ordered, with no predicate and no cursor); the leak and held laws
  *   measure from the latest successful start;
+ * - a repair prefix is a step of a running chain, not a start, when it is
+ *   issued while a chain member settles or by the continuation such a
+ *   settlement left staged or deferred, as an optimistic refill or a shrunk
+ *   window's prefix is;
+ * - a truncate replay that settles while the subscription holds a
+ *   full-source lease, even a failed one, covers the source and counts as a
+ *   successful start after every earlier request; the leases it reacquired
+ *   stay held. Requests issued before the truncate belong to the replay, so
+ *   the laws judge only later ones;
  * - a request is superseded when an authoritative request was issued while
  *   it was in flight.
  * The ledger records each request's outcome and whether the loader released
@@ -1761,28 +1775,47 @@ describe(`Successful finite demand retirement`, () => {
  * - `move` is an explicit window move, which may also widen the window, so
  *   an unindexed loader reads a longer prefix;
  * - `syncInvalidatingPage` runs a pass whose next page's own delivery
- *   invalidates source ordering before the request returns.
- * Scenarios cross an indexed loader (pages and ties) with an unindexed one
- * (prefix reads), window limits 1 and 2, whether the first page settles
- * before the history (a bounded repair needs a settled request), whether the
- * first release callback throws, and whether a repair's prefix answers at
- * once from installed rows (an eager source).
+ *   invalidates source ordering before the request returns;
+ * - `unexpressibleBoundary` makes the last installed row's order value NaN,
+ *   or expressible again, so no cursor can continue from it;
+ * - `joinedBusy` and `joinedIdle` hold and finish LEFT-joined work, which
+ *   defers ordinary loading, and the pass the subscriber runs after it;
+ * - `truncate` resets the cursor and holds ordinary passes behind a pending
+ *   replay; `replaySucceeds` settles the replay and `replayFails` leaves it
+ *   pending;
+ * - `optimisticDeparture` hides the window's row behind an optimistic
+ *   overlay, and `sourceDelete` deletes it from the source;
+ * - `timer` runs the bounded backoff retry when that scenario enables it.
+ * Passes are ordinary graph passes, which the subscriber skips while a
+ * truncate replay is pending; a window move still runs. Scenarios cross an
+ * indexed loader (pages and ties) with an unindexed one (prefix reads),
+ * window limits 1 and 2, whether the first page settles before the history
+ * (a bounded repair needs a settled request), whether the first release
+ * callback throws, whether a repair's prefix answers at once from installed
+ * rows (an eager source), plans that read only the full source, a joined
+ * order source, one or three installed rows (three let a report fall inside
+ * the loader's own first page), whether the window needs more rows, and
+ * whether the backoff retry is enabled.
  *
  * ## Checkpoints
  *
- * Held is checked after every step. After the history, a drain settles every
- * in-flight request successfully and runs ordinary passes until the loader
- * issues nothing new. No strand is checked at that point. Then, if an own
+ * Held is checked after every step. After the history, a drain finishes
+ * joined work, settles a pending truncate replay, settles every in-flight
+ * request successfully, and runs ordinary passes until the loader issues
+ * nothing new. No strand is checked at that point. Then, if an own
  * failure still blocks the loader, one explicit window move retries it and
  * the drain runs again. No leak is checked next, then progress.
  *
  * ## Limits
  *
- * The fake subscription has no rows that move, so the cursor and boundary
- * values are fixed. Truncate replay, the backoff retry timer, joined demand,
- * and publication holds are outside this property; other tests here own
- * them. The fake releases an acquisition when the loader calls its release;
- * it does not model an adapter that removes rows later.
+ * The fake subscription's rows do not move except for the unexpressible
+ * boundary, so cursor values are fixed. Publication holds are outside this
+ * property; other tests here own them. The laws do not judge requests issued
+ * before a truncate, which the replay owns. A replacement chain started as a
+ * continuation is judged as a step of the chain it replaced, which weakens
+ * the leak law for that chain. A failed replay stays pending until the drain
+ * settles it. The fake releases an acquisition when the loader calls its
+ * release; it does not model an adapter that removes rows later.
  */
 type LedgerRequest = {
   index: number
@@ -1792,6 +1825,10 @@ type LedgerRequest = {
   fullSource: boolean
   authoritative: boolean
   superseded: boolean
+  // A refetch prefix issued as a step of a running repair chain, such as an
+  // optimistic refill or a shrunk window's prefix, rather than the start of
+  // a new chain.
+  chainStep: boolean
   outcome: `inflight` | `ok` | `failed`
   released: boolean
 }
@@ -1804,8 +1841,17 @@ type AuthorityCommand =
   | { type: `settleNewest` }
   | { type: `invalidateThenFailOldest` }
   | { type: `pass` }
-  | { type: `move`; widen: boolean }
+  | { type: `move`; delta: -1 | 0 | 1 }
   | { type: `syncInvalidatingPage` }
+  | { type: `unexpressibleBoundary` }
+  | { type: `joinedBusy` }
+  | { type: `joinedIdle` }
+  | { type: `truncate` }
+  | { type: `replaySucceeds` }
+  | { type: `replayFails` }
+  | { type: `optimisticDeparture` }
+  | { type: `sourceDelete`; react: boolean }
+  | { type: `timer` }
 
 type AuthorityCase = {
   indexed: boolean
@@ -1818,6 +1864,18 @@ type AuthorityCase = {
   // A bounded repair's prefix answers at once, as an eager indexed source
   // does, and its rows change graph input.
   syncRepair: boolean
+  // The plan reads only the full source.
+  requiresFullSource: boolean
+  // The order source is filtered by a LEFT-joined source, whose pending
+  // work defers ordinary loading.
+  joined: boolean
+  // Installed rows the loader reads locally. Three let a window lie inside
+  // its own first page, so a report may skip its repair.
+  snapshotRows: 1 | 3
+  // Whether the window still needs rows after each read.
+  needsMore: boolean
+  // A failed authoritative read retries itself after a backoff.
+  retryTimer: boolean
   history: Array<AuthorityCommand>
 }
 
@@ -1867,9 +1925,30 @@ const authorityCommand: fc.Arbitrary<AuthorityCommand> = fc.oneof(
     weight: 1,
     arbitrary: fc.record({
       type: fc.constant(`move` as const),
-      widen: fc.boolean(),
+      delta: fc.constantFrom(-1 as const, 0 as const, 1 as const),
     }),
   },
+  {
+    weight: 1,
+    arbitrary: fc.constant({ type: `unexpressibleBoundary` as const }),
+  },
+  { weight: 1, arbitrary: fc.constant({ type: `joinedBusy` as const }) },
+  { weight: 1, arbitrary: fc.constant({ type: `joinedIdle` as const }) },
+  { weight: 1, arbitrary: fc.constant({ type: `truncate` as const }) },
+  { weight: 1, arbitrary: fc.constant({ type: `replaySucceeds` as const }) },
+  { weight: 1, arbitrary: fc.constant({ type: `replayFails` as const }) },
+  {
+    weight: 1,
+    arbitrary: fc.constant({ type: `optimisticDeparture` as const }),
+  },
+  {
+    weight: 1,
+    arbitrary: fc.record({
+      type: fc.constant(`sourceDelete` as const),
+      react: fc.boolean(),
+    }),
+  },
+  { weight: 1, arbitrary: fc.constant({ type: `timer` as const }) },
 )
 
 const authorityCaseArbitrary: fc.Arbitrary<AuthorityCase> = fc.record({
@@ -1878,6 +1957,17 @@ const authorityCaseArbitrary: fc.Arbitrary<AuthorityCase> = fc.record({
   settledFirst: fc.boolean(),
   releaseFault: fc.boolean(),
   syncRepair: fc.boolean(),
+  requiresFullSource: fc.oneof(
+    { weight: 5, arbitrary: fc.constant(false) },
+    { weight: 1, arbitrary: fc.constant(true) },
+  ),
+  joined: fc.boolean(),
+  snapshotRows: fc.constantFrom(1 as const, 3 as const),
+  needsMore: fc.oneof(
+    { weight: 3, arbitrary: fc.constant(true) },
+    { weight: 1, arbitrary: fc.constant(false) },
+  ),
+  retryTimer: fc.boolean(),
   history: fc.array(authorityCommand, { minLength: 1, maxLength: 16 }),
 })
 
@@ -1898,6 +1988,15 @@ type AuthorityObservation = {
   releaseFaults: number
   syncRepairs: number
   invalidatingPages: number
+  // Commands of the later dimensions that changed loader input.
+  unexpressibleBoundaries: number
+  joinedDeferrals: number
+  truncates: number
+  replayFailures: number
+  optimisticDepartures: number
+  sourceDeletes: number
+  timerRetries: number
+  shrinkingMoves: number
 }
 
 async function checkAuthorityCase(
@@ -1905,13 +2004,27 @@ async function checkAuthorityCase(
 ): Promise<AuthorityObservation> {
   const ledger: Array<LedgerRequest> = []
   const participants: Array<Promise<unknown>> = []
+  let joinedPending = false
+  let truncatePending = false
+  let boundaryUnexpressible = false
   const info = createOrderByInfo({
     limit: testCase.limit,
     ...(testCase.indexed ? {} : { index: undefined }),
     // A synchronous repair answer reads installed rows: an eager source.
     ...(testCase.syncRepair ? { sourceHoldsAllRows: true } : {}),
+    requiresFullSource: testCase.requiresFullSource,
+    ...(testCase.joined ? { joinedFilterSourceId: `markers` } : {}),
+    dataNeeded: () => (testCase.needsMore ? 1 : 0),
   })
   let revision = 0
+  // A repair chain's steps run as continuations of its members: while a
+  // member settles, or later from the continuation that settlement left
+  // staged or deferred. A refetch prefix issued either way is a step, such as
+  // an optimistic refill; any other one starts a chain. A replacement chain
+  // started as a continuation is judged as a step, which only weakens the
+  // laws for it.
+  let settlingChainMember = false
+  let continuationOwed = false
   let invalidateNextPage = false
   let releaseFaults = 0
   let syncRepairs = 0
@@ -1952,10 +2065,13 @@ async function checkAuthorityCase(
       fullSource,
       authoritative,
       superseded: false,
+      chainStep:
+        options.refetch === true && (settlingChainMember || continuationOwed),
       outcome: `inflight`,
       released: false,
     }
     ledger.push(request)
+    if (authoritative) continuationOwed = false
     const release = () => {
       request.released = true
       if (testCase.releaseFault && releaseFaults === 0) {
@@ -1973,7 +2089,15 @@ async function checkAuthorityCase(
       syncRepairs++
       request.outcome = `ok`
       revision++
-      options.onLoadSubsetResult?.(true, acquisition, release)
+      const before = ledger.length
+      const settling = settlingChainMember
+      settlingChainMember = true
+      try {
+        options.onLoadSubsetResult?.(true, acquisition, release)
+      } finally {
+        settlingChainMember = settling
+      }
+      if (ledger.length === before) continuationOwed = true
       return
     }
     if (invalidateNextPage && method === `limited` && !authoritative) {
@@ -1984,12 +2108,27 @@ async function checkAuthorityCase(
     }
     options.onLoadSubsetResult?.(request.deferred.promise, acquisition, release)
   }
+  // Installed rows in ascending rank. An unexpressible boundary makes the
+  // last one NaN, which no cursor can express.
+  const snapshot = () =>
+    Array.from({ length: testCase.snapshotRows }, (_, index) => ({
+      type: `insert`,
+      key: index + 1,
+      value: {
+        id: index + 1,
+        rank:
+          boundaryUnexpressible && index === testCase.snapshotRows - 1
+            ? Number.NaN
+            : index + 1,
+      },
+    }))
   const subscription = {
-    readOrderedSnapshot: () => [
-      { type: `insert`, key: 1, value: { id: 1, rank: 1 } },
-    ],
+    readOrderedSnapshot: snapshot,
     setOrderByIndex: () => {},
     hasHeldSyncTransaction: false,
+    get hasPendingTruncateReplacement() {
+      return truncatePending
+    },
     requestLimitedSnapshot: (options: RequestOptions) =>
       record(`limited`, options),
     requestSnapshot: (options: RequestOptions) => record(`snapshot`, options),
@@ -2003,37 +2142,85 @@ async function checkAuthorityCase(
         participants.push(result.catch(() => undefined))
       }
     },
-    () => false,
+    () => testCase.retryTimer,
     () => revision,
+    () => joinedPending,
   )
   const flush = async () => {
     for (let turn = 0; turn < 6; turn++) await Promise.resolve()
   }
   let windowOperation = 0
+  // Requests issued before the last truncate belong to its replay, which
+  // reacquires and retires them; the leak, held, and strand laws judge only
+  // later requests.
+  let replayOwnedBefore = 0
+  // A replay reacquires every acquisition the subscription still holds. When
+  // one of them is a full-source demand, even a failed one, the successful
+  // replay covers the source.
+  // A covering replay is an authoritative success after every request issued
+  // before it: the last ledger index at that point, plus a half. The
+  // full-source leases it reacquired are its coverage and stay held.
+  let replayAuthority = -1
+  let replayCoverage = new Set<LedgerRequest>()
+  const settleReplay = () => {
+    truncatePending = false
+    replayCoverage = new Set(
+      ledger.filter((request) => request.fullSource && !request.released),
+    )
+    if (replayCoverage.size > 0) replayAuthority = ledger.length - 0.5
+    run(() => loader.settleFullSourceReplay())
+  }
+  let unexpressibleBoundaries = 0
+  let joinedDeferrals = 0
+  let truncates = 0
+  let replayFailures = 0
+  let optimisticDepartures = 0
+  let sourceDeletes = 0
+  let timerRetries = 0
+  let shrinkingMoves = 0
   const run = (work: () => unknown) => {
+    const before = ledger.length
     try {
       const result = work()
       if (result instanceof Promise) participants.push(result.catch(() => {}))
     } catch {
       // A rejected request surfaces through its participant.
     }
+    // A pass that issues nothing consumed or finished an owed continuation,
+    // unless joined work deferred it.
+    if (ledger.length === before && !joinedPending) continuationOwed = false
   }
   const inflight = () => ledger.filter(({ outcome }) => outcome === `inflight`)
+  // An ordinary graph pass. The subscriber asks for more only while no
+  // truncate replacement is pending.
+  const graphPass = () => {
+    if (!truncatePending) run(() => loader.loadMore())
+  }
+  const sentRows = new Map([[1, { id: 1, rank: 1 }]])
   const settle = async (request: LedgerRequest, ok: boolean) => {
     request.outcome = ok ? `ok` : `failed`
+    const chainMember = request.authoritative && !request.fullSource
+    const before = ledger.length
+    settlingChainMember = chainMember
     if (ok) request.deferred.resolve()
     else request.deferred.reject(new Error(`request ${request.index} failed`))
     await flush()
+    settlingChainMember = false
+    if (chainMember && ok && ledger.length === before) continuationOwed = true
   }
   // An authoritative read starts at a full-source read or a repair prefix;
   // the repair's tie and refill continue the same chain.
-  const startsAuthority = (request: LedgerRequest) =>
-    request.fullSource ||
-    (request.authoritative &&
-      request.options.orderBy !== undefined &&
-      request.options.where === undefined &&
-      request.options.minValues === undefined)
-  const lastAuthoritativeSuccess = () =>
+  function startsAuthority(request: LedgerRequest) {
+    return (
+      request.fullSource ||
+      (request.authoritative &&
+        !request.chainStep &&
+        request.options.orderBy !== undefined &&
+        request.options.where === undefined &&
+        request.options.minValues === undefined)
+    )
+  }
+  const lastAuthoritativeRead = () =>
     ledger.reduce(
       (last, request) =>
         startsAuthority(request) && request.outcome === `ok`
@@ -2041,6 +2228,8 @@ async function checkAuthorityCase(
           : last,
       -1,
     )
+  const lastAuthoritativeSuccess = () =>
+    Math.max(lastAuthoritativeRead(), replayAuthority)
   const checkHeld = (checkpoint: string) => {
     // The latest successful repair prefix, if no later authoritative read
     // has succeeded, must still be held.
@@ -2052,10 +2241,20 @@ async function checkAuthorityCase(
           !request.fullSource &&
           request.outcome === `ok`,
       )
-    if (!repair || lastAuthoritativeSuccess() > repair.index) return
-    // A prefix read issued after the repair covers the repair's rows when it
-    // is at least as long; it may retire the repair's prefix. One issued
-    // before the repair proves no current coverage and may not.
+    if (
+      !repair ||
+      repair.index < replayOwnedBefore ||
+      lastAuthoritativeSuccess() > repair.index
+    )
+      return
+    // A prefix read issued after the repair covers the repair's rows that are
+    // still inside the window when it reaches as far; it may retire the
+    // repair's prefix. One issued before the repair proves no current
+    // coverage and may not.
+    const windowRows = Math.min(
+      repair.options.limit ?? 0,
+      info.offset + info.limit,
+    )
     const coveredByLaterPrefix = ledger.some(
       (request) =>
         request.index > repair.index &&
@@ -2063,7 +2262,7 @@ async function checkAuthorityCase(
         request.options.orderBy !== undefined &&
         request.options.where === undefined &&
         request.options.minValues === undefined &&
-        (request.options.limit ?? 0) >= (repair.options.limit ?? 0),
+        (request.options.limit ?? 0) >= windowRows,
     )
     if (coveredByLaterPrefix) return
     if (repair.released) {
@@ -2073,6 +2272,8 @@ async function checkAuthorityCase(
     }
   }
   const drain = async () => {
+    joinedPending = false
+    if (truncatePending) settleReplay()
     for (let round = 0; round < 40; round++) {
       const next = inflight()[0]
       if (next) {
@@ -2097,6 +2298,9 @@ async function checkAuthorityCase(
   let supersededFailuresAfterRepair = 0
   let checkedStrandPremises = 0
   let deferredStrandShapes = 0
+  if (testCase.retryTimer) {
+    vi.useFakeTimers({ toFake: [`setTimeout`, `clearTimeout`] })
+  }
   try {
     run(() => loader.start())
     await flush()
@@ -2152,28 +2356,98 @@ async function checkAuthorityCase(
         }
         case `invalidate`:
           loader.invalidateSourceOrdering()
-          if (command.react) run(() => loader.loadMore())
+          if (command.react) graphPass()
           await flush()
           break
         case `report`:
           loader.revalidateLoadedCoverage()
-          if (command.react) run(() => loader.loadMore())
+          if (command.react) graphPass()
           await flush()
           break
         case `pass`:
-          run(() => loader.loadMore())
+          graphPass()
           await flush()
           break
         case `syncInvalidatingPage`:
           invalidateNextPage = true
-          run(() => loader.loadMore())
+          graphPass()
           await flush()
           break
-        case `move`:
-          if (command.widen) info.limit = Math.min(info.limit + 1, 3)
+        case `move`: {
+          const limit = Math.max(1, Math.min(info.limit + command.delta, 3))
+          if (limit < info.limit) shrinkingMoves++
+          info.limit = limit
           run(() => loader.loadMore(++windowOperation))
           await flush()
           break
+        }
+        // The last installed row's order value becomes unexpressible, or
+        // expressible again; the source delivers it as an order change.
+        case `unexpressibleBoundary`:
+          boundaryUnexpressible = !boundaryUnexpressible
+          if (boundaryUnexpressible) unexpressibleBoundaries++
+          loader.invalidateSourceOrdering()
+          graphPass()
+          await flush()
+          break
+        case `joinedBusy`:
+          joinedPending = true
+          break
+        // Joined work finishes; the subscriber runs the deferred pass.
+        case `joinedIdle`:
+          if (joinedPending && testCase.joined) joinedDeferrals++
+          joinedPending = false
+          graphPass()
+          await flush()
+          break
+        // A truncate resets the cursor; the subscription replays its loaded
+        // subsets and holds ordinary loading until the replay settles.
+        case `truncate`:
+          truncates++
+          loader.resetCursor()
+          truncatePending = true
+          replayOwnedBefore = ledger.length
+          replayCoverage = new Set()
+          break
+        case `replaySucceeds`:
+          if (!truncatePending) break
+          settleReplay()
+          graphPass()
+          await flush()
+          break
+        case `replayFails`:
+          if (truncatePending) replayFailures++
+          break
+        // An optimistic overlay hides the window's row, so the loader must
+        // refill it from the source.
+        case `optimisticDeparture`:
+          optimisticDepartures++
+          loader.onSourceChanges(
+            [{ type: `delete`, key: 1, value: { id: 1, rank: 1 } }],
+            sentRows,
+            () => true,
+          )
+          graphPass()
+          await flush()
+          break
+        case `sourceDelete`:
+          sourceDeletes++
+          loader.onSourceChanges(
+            [{ type: `delete`, key: 1, value: { id: 1, rank: 1 } }],
+            sentRows,
+            () => false,
+          )
+          if (command.react) graphPass()
+          await flush()
+          break
+        case `timer`: {
+          if (!testCase.retryTimer) break
+          const before = ledger.length
+          await vi.advanceTimersByTimeAsync(60_000)
+          await flush()
+          if (ledger.length > before) timerRetries++
+          break
+        }
       }
       checkHeld(`after step ${step}`)
     }
@@ -2189,7 +2463,10 @@ async function checkAuthorityCase(
     // failure law does not excuse a block, so a later full-source read must
     // have recovered it.
     for (const failed of ledger.filter(
-      (request) => request.outcome === `failed` && request.superseded,
+      (request) =>
+        request.outcome === `failed` &&
+        request.superseded &&
+        request.index >= replayOwnedBefore,
     )) {
       const base = ledger.reduce(
         (last, request) =>
@@ -2230,6 +2507,8 @@ async function checkAuthorityCase(
       (request) =>
         request.outcome === `ok` &&
         !request.released &&
+        request.index >= replayOwnedBefore &&
+        !replayCoverage.has(request) &&
         request.index < authority,
     )
     if (authority >= 0 && leaked.length > 0) {
@@ -2244,6 +2523,7 @@ async function checkAuthorityCase(
         failed.outcome === `failed` &&
         failed.superseded &&
         !failed.released &&
+        failed.index >= replayOwnedBefore &&
         ledger.some(
           (request) =>
             request.fullSource &&
@@ -2258,7 +2538,9 @@ async function checkAuthorityCase(
     }
     // Progress: once loading is quiet, an invalidation and an ordinary pass
     // issue a read, unless a full-source read covers the source.
-    const coveredByFullSource = authority >= 0 && ledger[authority]!.fullSource
+    const lastRead = lastAuthoritativeRead()
+    const coveredByFullSource =
+      replayCoverage.size > 0 || (lastRead >= 0 && ledger[lastRead]!.fullSource)
     if (!coveredByFullSource) {
       const before = ledger.length
       loader.invalidateSourceOrdering()
@@ -2274,6 +2556,7 @@ async function checkAuthorityCase(
     loader.dispose()
     for (const request of ledger) request.deferred.resolve()
     await Promise.allSettled(participants)
+    if (testCase.retryTimer) vi.useRealTimers()
   }
   return {
     supersededFailures: ledger.filter(
@@ -2286,8 +2569,25 @@ async function checkAuthorityCase(
     releaseFaults,
     syncRepairs,
     invalidatingPages,
+    unexpressibleBoundaries,
+    joinedDeferrals,
+    truncates,
+    replayFailures,
+    optimisticDepartures,
+    sourceDeletes,
+    timerRetries,
+    shrinkingMoves,
   }
 }
+
+// The scenario flags of the later dimensions, at their ordinary values.
+const ordinaryScenario = {
+  requiresFullSource: false,
+  joined: false,
+  snapshotRows: 1,
+  needsMore: true,
+  retryTimer: false,
+} as const
 
 const authorityProperty = `ordered-loader.request-authority`
 const authorityReplay = readOracleRunConfig()
@@ -2308,6 +2608,7 @@ describe(`Ordered source request authority`, () => {
       settledFirst: false,
       releaseFault: false,
       syncRepair: false,
+      ...ordinaryScenario,
       history: [
         { type: `settle`, pick: 0, ok: true },
         { type: `invalidate`, react: true },
@@ -2328,7 +2629,19 @@ describe(`Ordered source request authority`, () => {
   // - a repair answers at once while an older tie is still in flight (the
   //   repair waited behind the superseded request, so nothing resumed it);
   // - a page's own delivery invalidates ordering (it counted as current, so
-  //   its tie ran in the new epoch and was never retired).
+  //   its tie ran in the new epoch and was never retired);
+  // - a repair prefix still in flight when a truncate replay finishes its
+  //   chain and a newer invalidation starts the replacement (it took the
+  //   replacement's chain tag when it settled, so nothing retired it);
+  // - a replay after an explicit retry whose release throws (the replay
+  //   counted the released full-source read as complete coverage, so later
+  //   invalidations issued nothing);
+  // - a repair tie from before a truncate that fails during the next repair
+  //   (the dead failure dropped the new chain's staged step, so nothing
+  //   resumed it).
+  // Two replays keep traces that first failed the lane's own model: a chain
+  // step it took for a chain start (an optimistic refill, and a shrunk
+  // window's prefix deferred by joined work).
   it.each([
     {
       name: `a throwing release during a window move that resumes a repair`,
@@ -2338,10 +2651,11 @@ describe(`Ordered source request authority`, () => {
         settledFirst: true,
         releaseFault: true,
         syncRepair: true,
+        ...ordinaryScenario,
         history: [
           { type: `invalidate`, react: true },
           { type: `invalidateThenFailOldest` },
-          { type: `move`, widen: false },
+          { type: `move`, delta: 0 },
           { type: `settleNewest` },
         ],
       },
@@ -2354,11 +2668,108 @@ describe(`Ordered source request authority`, () => {
         settledFirst: false,
         releaseFault: false,
         syncRepair: true,
+        ...ordinaryScenario,
         history: [
           { type: `settleNewest` },
           { type: `invalidate`, react: true },
           { type: `invalidate`, react: true },
           { type: `invalidate`, react: false },
+        ],
+      },
+    },
+    {
+      name: `a repair prefix that settles after a replay started its replacement`,
+      testCase: {
+        indexed: true,
+        limit: 1,
+        settledFirst: true,
+        releaseFault: false,
+        syncRepair: false,
+        ...ordinaryScenario,
+        history: [
+          { type: `truncate` },
+          { type: `invalidate`, react: false },
+          { type: `move`, delta: -1 },
+          { type: `invalidate`, react: false },
+        ],
+      },
+    },
+    {
+      name: `an optimistic refill inside a running repair chain`,
+      testCase: {
+        indexed: false,
+        limit: 1,
+        settledFirst: false,
+        releaseFault: false,
+        syncRepair: false,
+        ...ordinaryScenario,
+        needsMore: false,
+        history: [
+          { type: `settleNewest` },
+          { type: `settleNewest` },
+          { type: `invalidate`, react: true },
+          { type: `settle`, pick: 0, ok: true },
+          { type: `optimisticDeparture` },
+        ],
+      },
+    },
+    {
+      name: `a replay after an explicit retry whose release throws`,
+      testCase: {
+        indexed: false,
+        limit: 1,
+        settledFirst: true,
+        releaseFault: true,
+        syncRepair: false,
+        ...ordinaryScenario,
+        history: [
+          { type: `settleNewest` },
+          { type: `settle`, pick: 0, ok: false },
+          { type: `move`, delta: -1 },
+          { type: `truncate` },
+          { type: `replaySucceeds` },
+        ],
+      },
+    },
+    {
+      name: `a shrunk window's prefix deferred by joined work inside a repair`,
+      testCase: {
+        indexed: false,
+        limit: 2,
+        settledFirst: true,
+        releaseFault: false,
+        syncRepair: true,
+        ...ordinaryScenario,
+        joined: true,
+        needsMore: false,
+        history: [
+          { type: `settle`, pick: 0, ok: true },
+          { type: `report`, react: true },
+          { type: `joinedBusy` },
+          { type: `move`, delta: -1 },
+          { type: `settle`, pick: 0, ok: true },
+          { type: `replaySucceeds` },
+        ],
+      },
+    },
+    {
+      name: `a repair tie from before a truncate that fails during the next repair`,
+      testCase: {
+        indexed: true,
+        limit: 1,
+        settledFirst: true,
+        releaseFault: false,
+        syncRepair: true,
+        ...ordinaryScenario,
+        history: [
+          { type: `syncInvalidatingPage` },
+          { type: `move`, delta: -1 },
+          { type: `invalidate`, react: true },
+          { type: `truncate` },
+          { type: `replaySucceeds` },
+          { type: `settle`, pick: 0, ok: true },
+          { type: `syncInvalidatingPage` },
+          { type: `invalidateThenFailOldest` },
         ],
       },
     },
@@ -2370,6 +2781,7 @@ describe(`Ordered source request authority`, () => {
         settledFirst: false,
         releaseFault: false,
         syncRepair: false,
+        ...ordinaryScenario,
         history: [
           { type: `settle`, pick: 0, ok: true },
           { type: `syncInvalidatingPage` },
@@ -2399,6 +2811,16 @@ describe(`Ordered source request authority`, () => {
       let releaseFaults = 0
       let syncRepairs = 0
       let invalidatingPages = 0
+      const later = {
+        unexpressibleBoundaries: 0,
+        joinedDeferrals: 0,
+        truncates: 0,
+        replayFailures: 0,
+        optimisticDepartures: 0,
+        sourceDeletes: 0,
+        timerRetries: 0,
+        shrinkingMoves: 0,
+      }
       await fc.assert(
         fc.asyncProperty(authorityCaseArbitrary, async (testCase) => {
           const observation = await checkAuthorityCase(testCase)
@@ -2411,6 +2833,9 @@ describe(`Ordered source request authority`, () => {
           releaseFaults += observation.releaseFaults
           syncRepairs += observation.syncRepairs
           invalidatingPages += observation.invalidatingPages
+          for (const key of Object.keys(later) as Array<keyof typeof later>) {
+            later[key] += observation[key]
+          }
         }),
         campaign === `fixed`
           ? { seed: 20261016, numRuns: oracleRuns(10000) }
@@ -2423,7 +2848,11 @@ describe(`Ordered source request authority`, () => {
       // after a repair succeeded, the strand law is checkable, a superseded
       // request fails after its repair finished while a newer invalidation's
       // reaction is deferred, a release throws, a repair answers at once,
-      // and a page's own delivery invalidates ordering.
+      // and a page's own delivery invalidates ordering. Each later dimension
+      // also changes loader input at least once: an unexpressible boundary,
+      // deferred joined work, a truncate and a failed replay, an optimistic
+      // departure, a source delete, a backoff retry that issues a read, and
+      // a window that shrinks.
       if (campaign !== `replay`) {
         expect(supersededFailures).toBeGreaterThan(0)
         expect(staleSettlementsAfterRepair).toBeGreaterThan(0)
@@ -2433,6 +2862,9 @@ describe(`Ordered source request authority`, () => {
         expect(releaseFaults).toBeGreaterThan(0)
         expect(syncRepairs).toBeGreaterThan(0)
         expect(invalidatingPages).toBeGreaterThan(0)
+        for (const [dimension, count] of Object.entries(later)) {
+          expect(count, dimension).toBeGreaterThan(0)
+        }
       }
     },
     120_000,

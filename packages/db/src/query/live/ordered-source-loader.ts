@@ -275,6 +275,11 @@ export class OrderedSourceLoader {
         windowOperationGeneration !==
           this.failedRequest.windowOperationGeneration)
     if (!mayRetryFailure) return this.pending
+    // A failed full-source read stops owning the source before its lease is
+    // released, so a replay during or after a throwing release cannot count it.
+    if (this.work.kind === `full-source` && this.work.status === `failed`) {
+      this.work = { kind: `idle` }
+    }
     if (
       (this.failedRequest || this.failedAcquisitions.size > 0) &&
       windowOperationGeneration !== undefined &&
@@ -294,9 +299,7 @@ export class OrderedSourceLoader {
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       if (!this.active) return
     }
-    if (this.work.kind === `full-source` && this.work.status === `failed`) {
-      this.work = { kind: `idle` }
-    } else if (
+    if (
       this.work.kind !== `idle` &&
       !(continuesOrderedPrefixRepair && this.work.kind === `repair`)
     ) {
@@ -765,6 +768,13 @@ export class OrderedSourceLoader {
       orderingInvalidationGeneration: issuedOrderingGeneration,
       isAuthoritativeRequest,
     }
+    // A repair request belongs to the chain it is issued in. One that settles
+    // after its replacement started is outside the replacement's chain.
+    const chain =
+      (isOrderedRepair || continuesOrderedPrefixRepair) &&
+      this.work.kind === `repair`
+        ? this.work.epoch
+        : undefined
     const authorityGeneration = this.authorityGeneration
     const settlesAsync = result instanceof Promise
     const canSettleSynchronously =
@@ -816,11 +826,7 @@ export class OrderedSourceLoader {
               options?.orderBy && !options.cursor ? options.limit : undefined
             this.settledFiniteAcquisitions.set(releaseAcquisition, {
               count: prefixCount,
-              chain:
-                (isOrderedRepair || continuesOrderedPrefixRepair) &&
-                this.work.kind === `repair`
-                  ? this.work.epoch
-                  : undefined,
+              chain,
             })
             if (!continuesOrderedPrefixRepair) {
               this.retireSettledFiniteAcquisitions()
@@ -923,13 +929,6 @@ export class OrderedSourceLoader {
     }
     const fail = (error: unknown, trackedRequest?: Promise<void>) => {
       this.settledFiniteAcquisitions.delete(releaseAcquisition)
-      // A finite failure cannot drop authoritative work staged by a repair.
-      if (
-        isAuthoritativeRequest ||
-        !this.stagedContinuation?.isAuthoritativeRequest
-      ) {
-        this.stagedContinuation = undefined
-      }
       if (trackedRequest && this.pending === trackedRequest) {
         this.pending = undefined
       }
@@ -937,7 +936,15 @@ export class OrderedSourceLoader {
       // A failed request may already have written only part of its result.
       // None of those rows is a safe continuation boundary.
       this.requireFullSourceRepair()
+      // Work staged after a cursor reset belongs to the new generation.
       if (this.standing(stamp) === `dead`) return
+      // A finite failure cannot drop authoritative work staged by a repair.
+      if (
+        isAuthoritativeRequest ||
+        !this.stagedContinuation?.isAuthoritativeRequest
+      ) {
+        this.stagedContinuation = undefined
+      }
       // Authoritative work started after this request supersedes it. Its
       // failure is not the loader's own: its partial writes only raise the
       // debt to the full-source read that the overlap replaced. A running
@@ -1184,6 +1191,7 @@ export class OrderedSourceLoader {
             this.failedRequest?.windowOperationGeneration !== undefined
           )
             return
+          this.work = { kind: `idle` }
           this.releaseFailedAcquisitions()
           // Release may dispose or start a new replay; neither belongs to this retry.
           if (
@@ -1194,7 +1202,6 @@ export class OrderedSourceLoader {
           )
             return
           this.failedRequest = undefined
-          this.work = { kind: `idle` }
           this.loadFullSource()
         })
         void retry.catch(() => {})
