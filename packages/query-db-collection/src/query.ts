@@ -9,6 +9,7 @@ import {
   compileSingleRowExpression,
   deepEquals,
   getLoadSubsetDemandKey,
+  makeComparator,
   toBooleanPredicate,
   validateSyncPersistenceCapability,
   warnOnce,
@@ -1190,8 +1191,117 @@ export function queryCollectionOptions(
         )
       }
     }
-    const { begin, write, commit, markReady, markError, collection, metadata } =
-      params
+    const {
+      begin,
+      write,
+      commit,
+      markReady,
+      markError,
+      invalidateLoadedSubsets,
+      collection,
+      metadata,
+    } = params
+
+    /**
+     * The LoadSubset contract: a sync adapter that refetches loaded subsets on
+     * its own either keeps served prefixes whole, or reports that they may
+     * have shifted. Query DB refetches each ordered page alone, so after a
+     * refetch a row can sort between two served pages and be in neither
+     * result (#2136). It reports the shift; the ordered loader then
+     * re-establishes the window with a bounded repair.
+     *
+     * A gap needs a page whose keys change, and one of two shapes:
+     * - the page has a later page after it, which still starts where the page
+     *   used to end; or
+     * - the page's end moves earlier in the order. Rows that arrive ahead push
+     *   its old last row out, and if another answer such as a tie request
+     *   still holds that row, the loader sees no delete and still treats rows
+     *   through the old boundary as loaded.
+     * A change that keeps every page's keys cannot open one: a value change
+     * reaches the loader through its order-change path. A loader's own
+     * acquisition (`refetch: true`) never reports, so its repair cannot loop.
+     */
+    const orderedPageResults = new WeakMap<
+      AnyQuery,
+      {
+        readKey: string
+        leadingValue: ReturnType<typeof compileSingleRowExpression>
+        compare: (a: unknown, b: unknown) => number
+        // The page's keys as a set, and the leading order value of the row
+        // that sorts last. An empty page has no last row. Neither depends on
+        // the order in which the provider returned the rows.
+        keys: string
+        last: { value: unknown } | undefined
+      }
+    >()
+    // Each running `refetch: true` acquisition on a Query hash.
+    const acquisitionRefetches = new Map<string, number>()
+    let invalidationTimer: ReturnType<typeof setTimeout> | undefined
+    const recordOrderedPageResult = (
+      query: AnyQuery,
+      hashedQueryKey: string,
+      rows: Array<Record<string, unknown>>,
+    ): void => {
+      const options = query.meta?.loadSubsetOptions
+      if (
+        syncMode !== `on-demand` ||
+        !isStoredLoadSubsetOptions(options) ||
+        !options.orderBy?.length
+      )
+        return
+      const previous = orderedPageResults.get(query)
+      const { where, orderBy } = options
+      const next = {
+        readKey:
+          previous?.readKey ?? getLoadSubsetDemandKey({ where, orderBy })!,
+        leadingValue:
+          previous?.leadingValue ??
+          compileSingleRowExpression(orderBy[0]!.expression),
+        compare:
+          previous?.compare ?? makeComparator(orderBy[0]!.compareOptions),
+        keys: JSON.stringify(
+          rows.map((row) => JSON.stringify(getKey(row))).sort(),
+        ),
+        last: undefined as { value: unknown } | undefined,
+      }
+      for (const row of rows) {
+        const value: unknown = next.leadingValue(row)
+        if (next.last === undefined || next.compare(value, next.last.value) > 0)
+          next.last = { value }
+      }
+      orderedPageResults.set(query, next)
+      if (
+        invalidationTimer !== undefined ||
+        acquisitionRefetches.has(hashedQueryKey) ||
+        previous?.last === undefined ||
+        previous.keys === next.keys
+      )
+        return
+      const end = previous.last.value
+      const endMovedEarlier =
+        next.last === undefined || next.compare(next.last.value, end) < 0
+      // The page has a later page when another page with its predicate and
+      // order ends deeper in the order. An empty page counts: it continues
+      // from where an earlier page ended.
+      const hasLaterPage = () =>
+        [...state.observers.values()].some((observer) => {
+          const other = orderedPageResults.get(observer.getCurrentQuery())
+          return (
+            other !== undefined &&
+            other !== next &&
+            other.readKey === next.readKey &&
+            (other.last === undefined ||
+              next.compare(other.last.value, end) > 0)
+          )
+        })
+      // One report per burst of refetched pages, after their rows apply.
+      if (endMovedEarlier || hasLaterPage()) {
+        invalidationTimer = setTimeout(() => {
+          invalidationTimer = undefined
+          if (activeSyncSession === syncSession) invalidateLoadedSubsets()
+        }, 0)
+      }
+    }
     const persistence =
       metadata === undefined
         ? null
@@ -1826,6 +1936,9 @@ export function queryCollectionOptions(
         const finish = (settle: () => void) => {
           if (!active) return
           active = false
+          const refetches = acquisitionRefetches.get(hashedQueryKey)! - 1
+          if (refetches === 0) acquisitionRefetches.delete(hashedQueryKey)
+          else acquisitionRefetches.set(hashedQueryKey, refetches)
           pending.delete(cancel)
           if (pending.size === 0) {
             pendingReadyUnsubscribes.delete(hashedQueryKey)
@@ -1837,6 +1950,11 @@ export function queryCollectionOptions(
         }
         pending.add(cancel)
         pendingReadyUnsubscribes.set(hashedQueryKey, pending)
+        // This acquisition's result answers the loader; it reports no shift.
+        acquisitionRefetches.set(
+          hashedQueryKey,
+          (acquisitionRefetches.get(hashedQueryKey) ?? 0) + 1,
+        )
 
         const refetch = async () => {
           const waitsForDeferredApplication = !!collection.deferDataRefresh
@@ -2679,6 +2797,11 @@ export function queryCollectionOptions(
         // Readiness counts accepted rows; the application, which settles a
         // subset load, waits for them to be visible.
         const finishApplication = () => {
+          // Record the page only once its rows are accepted. A failed
+          // application keeps the previous page, so a retry still reports.
+          if (currentQuery) {
+            recordOrderedPageResult(currentQuery, hashedQueryKey, newItemsArray)
+          }
           removedRows.forEach((key) => {
             if (collection._state.getAcceptedSyncedRow(key) === undefined)
               acceptedRowPositions.delete(key)
@@ -3627,6 +3750,8 @@ export function queryCollectionOptions(
 
     const cleanup = () => {
       if (activeSyncSession === syncSession) activeSyncSession = undefined
+      clearTimeout(invalidationTimer)
+      invalidationTimer = undefined
       pendingStartupLoads.clear()
       fullSourceDependents.clear()
       ensureEagerSubscription = () => {}

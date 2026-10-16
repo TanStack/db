@@ -12,6 +12,16 @@
  * This keeps the reference smaller than any adapter and makes disagreements
  * between adapters visible without copying their implementations.
  *
+ * The lifecycle law distinguishes ownership by input, not by framework. A
+ * live-query projection created by an adapter from a callback or config is
+ * recomputable, so the adapter gives it a 1 ms retention window. Once unmount,
+ * replacement, or disabling removes its last subscriber, that projection must
+ * retire. A supplied collection, or a config with an explicit `gcTime`, remains
+ * caller-owned and the adapter must preserve its retention policy. The
+ * lifecycle scenarios enact those histories and compare the collection's
+ * public `config.gcTime`, `subscriberCount`, and `status` at the ownership
+ * boundary and after the last subscription is released.
+ *
  * The scenario set came from the union of the five adapters' existing suites
  * plus framework-neutral gap closers. It covers value, order, cardinality,
  * lifecycle, reactivity, failure, and disposal as separate laws so a passing
@@ -43,6 +53,28 @@ import type {
   LiveQueryHandle,
   Row,
 } from './contract'
+
+const ADAPTER_OWNED_GC_TIME_MS = 1
+type ConformanceCollection = NonNullable<
+  ReturnType<LiveQueryHandle[`collection`]>
+>
+
+function expectAdapterOwnedCollection(
+  collection: ConformanceCollection | null,
+): asserts collection is ConformanceCollection {
+  expect(collection).not.toBeNull()
+  expect(collection!.config.gcTime).toBe(ADAPTER_OWNED_GC_TIME_MS)
+}
+
+async function expectRetired(collection: ConformanceCollection): Promise<void> {
+  await expect
+    .poll(() => collection.status, { interval: 5, timeout: 500 })
+    .toBe(`cleaned-up`)
+}
+
+async function wait(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms))
+}
 
 const SEED: Array<Row> = [
   { id: `1`, name: `John Doe`, age: 30, team: `a` },
@@ -93,7 +125,8 @@ export function runSuite(rawDriver: LiveQueryDriver) {
       track(rawDriver.mountControllable(build, initial)),
     mountCollection: (collection) =>
       track(rawDriver.mountCollection(collection)),
-    mountConfig: (build) => track(rawDriver.mountConfig(build)),
+    mountConfig: (build, options) =>
+      track(rawDriver.mountConfig(build, options)),
     mountDisabled: () => track(rawDriver.mountDisabled()),
   }
 
@@ -339,6 +372,12 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           [],
         ])
         for (const h of [teamA, teamB, olderA]) h.unmount()
+        await expect
+          .poll(() => source.collection.subscriberCount, {
+            interval: 5,
+            timeout: 500,
+          })
+          .toBe(0)
       },
     )
 
@@ -438,6 +477,13 @@ export function runSuite(rawDriver: LiveQueryDriver) {
     )
 
     // ---- spine: lifecycle invariant --------------------------------------
+    //
+    // The reference rule has two ownership classes: adapter-created
+    // projections use the short default above; caller-owned collections keep
+    // the caller's policy. These traces distinguish teardown after unmount,
+    // replacement, and disabling from retention explicitly requested by the
+    // caller. Retirement is observed only after subscriberCount reaches zero,
+    // which is the public checkpoint at which the retention law applies.
 
     scenario(
       `no-updates-after-unmount`,
@@ -457,6 +503,127 @@ export function runSuite(rawDriver: LiveQueryDriver) {
         await h.flush()
 
         expect(h.current().data.length).toBe(before)
+      },
+    )
+
+    scenario(
+      `owned-query-retirement`,
+      `adapter-created query and config collections retire after unmount`,
+      async () => {
+        const source = driver.makeSource(SEED)
+        const build = (q: any) => q.from({ items: source.collection })
+
+        for (const h of [driver.mount(build), driver.mountConfig(build)]) {
+          await h.flush()
+          const collection = h.collection()
+          expectAdapterOwnedCollection(collection)
+
+          h.unmount()
+          expect(collection.subscriberCount).toBe(0)
+          await expectRetired(collection)
+        }
+      },
+    )
+
+    scenario(
+      `replaced-query-retirement`,
+      `a superseded adapter-created collection retires`,
+      async () => {
+        const source = driver.makeSource(SEED)
+        const h = driver.mountControllable<number>(
+          (q, minAge) =>
+            q
+              .from({ items: source.collection })
+              .where(({ items }: any) => ops.gt(items.age, minAge)),
+          30,
+        )
+        await h.flush()
+        const replaced = h.collection()
+        expectAdapterOwnedCollection(replaced)
+
+        await h.setParam(20)
+        const replacement = h.collection()
+        expectAdapterOwnedCollection(replacement)
+        expect(replacement).not.toBe(replaced)
+        expect(replaced.subscriberCount).toBe(0)
+        await expectRetired(replaced)
+
+        h.unmount()
+        expect(replacement.subscriberCount).toBe(0)
+        await expectRetired(replacement)
+      },
+    )
+
+    scenario(
+      `caller-owned-query-retention`,
+      `explicit retention and supplied collections remain caller-owned`,
+      async () => {
+        const source = driver.makeSource(SEED)
+        const build = (q: any) => q.from({ items: source.collection })
+        const explicit = driver.mountConfig(build, { gcTime: 0 })
+        await explicit.flush()
+        const configured = explicit.collection()
+        expect(configured).not.toBeNull()
+        expect(configured!.config.gcTime).toBe(0)
+
+        explicit.unmount()
+        await explicit.flush()
+        expect(configured!.subscriberCount).toBe(0)
+        expect(configured!.status).not.toBe(`cleaned-up`)
+
+        const supplied = driver.makePrecreated(build, {
+          startSync: true,
+          gcTime: 0,
+        }).collection
+        const mounted = driver.mountCollection(supplied)
+        await mounted.flush()
+        expect(mounted.collection()).toBe(supplied)
+
+        mounted.unmount()
+        await mounted.flush()
+        expect(supplied.subscriberCount).toBe(0)
+        expect(supplied.status).not.toBe(`cleaned-up`)
+      },
+    )
+
+    scenario(
+      `undefined-retention-is-omitted`,
+      `an explicit undefined retention uses the adapter-owned default`,
+      async () => {
+        const source = driver.makeSource(SEED)
+        const h = driver.mountConfig(
+          (q) => q.from({ items: source.collection }),
+          { gcTime: undefined },
+        )
+        await h.flush()
+        const collection = h.collection()
+        expectAdapterOwnedCollection(collection)
+
+        h.unmount()
+        expect(collection.subscriberCount).toBe(0)
+        await expectRetired(collection)
+      },
+    )
+
+    scenario(
+      `positive-caller-owned-retention`,
+      `a positive caller retention survives before expiry and retires afterward`,
+      async () => {
+        const source = driver.makeSource(SEED)
+        const h = driver.mountConfig(
+          (q) => q.from({ items: source.collection }),
+          { gcTime: 100 },
+        )
+        await h.flush()
+        const collection = h.collection()
+        expect(collection).not.toBeNull()
+        expect(collection!.config.gcTime).toBe(100)
+
+        h.unmount()
+        expect(collection!.subscriberCount).toBe(0)
+        await wait(20)
+        expect(collection!.status).not.toBe(`cleaned-up`)
+        await expectRetired(collection!)
       },
     )
 
@@ -912,9 +1079,13 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           h.current().state,
           SEED.map(({ id }) => ({ id })),
         )
+        const enabledCollection = h.collection()
+        expectAdapterOwnedCollection(enabledCollection)
 
         await h.setParam(false)
         expectDisabledResult(h.current(), driver.disabledRepresentation)
+        expect(enabledCollection.subscriberCount).toBe(0)
+        await expectRetired(enabledCollection)
         h.unmount()
       },
     )
@@ -1098,7 +1269,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
     )
 
     it(`registers every distinct scenario without whole-test waivers`, () => {
-      expect(registry.size).toBe(32)
+      expect(registry.size).toBe(37)
     })
   })
 }
