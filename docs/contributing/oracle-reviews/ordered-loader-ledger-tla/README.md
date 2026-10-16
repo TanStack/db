@@ -53,8 +53,8 @@ The `Rules` constant selects the rule set:
 
 | Configuration                     | `Rules`            | Meaning                                                    |
 | --------------------------------- | ------------------ | ---------------------------------------------------------- |
-| `safe-unified.cfg`                | `unifiedMin`       | Superseded failures raise debt only; one epoch normalization. The shipped rule set. |
-| `safe-patched-cases.cfg`          | `unified`          | The same, with the earlier per-case retirement rules kept. |
+| `safe-unified.cfg`                | `unifiedMin`       | Superseded failures raise debt only; one epoch normalization. Passes the model but did not transfer (see Limits). |
+| `safe-patched-cases.cfg`          | `unified`          | The same superseded rule, with the per-case retirement rules kept. The shipped rule set. |
 | `weak-main-before-2191.cfg`       | `current`          | The rules on main before #2191.                            |
 | `weak-stale-prefix-retires.cfg`   | `oldRetire`        | A stale prefix retires the repair's prefix.                |
 | `weak-stale-held.cfg`             | `oldLeak`          | A stale request that settles after the repair stays held.  |
@@ -92,6 +92,15 @@ property:
 4. An explicit retry starts its full-source read in the same step.
 
 ## Limits
+
+The single normalization rule (`safe-unified.cfg`) passed this model but failed
+the real loader, and was reverted. The model stamps a request with the epoch it
+is issued in and never issues a finite request while repair debt is pending. In
+the loader, a stale finite chain can issue a tie in the new epoch before the
+repair starts, and a repair's staged continuation can be issued after a newer
+invalidation. Retiring by epoch kept both; retiring everything outside the repair
+chain releases both. The request-authority lane found these once it generated
+self-invalidating pages and synchronous repair answers.
 
 The model leaves out the scheduler (staged continuations, deferred refills, and
 the graph-revision check), cursor and boundary values, tie and refill sub-steps,
