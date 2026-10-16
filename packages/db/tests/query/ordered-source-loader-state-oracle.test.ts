@@ -1036,6 +1036,7 @@ describe(`Ordered source request ownership`, () => {
       loader.onSourceChanges(
         [{ type: `delete`, key: 9, value: row }],
         new Map([[9, row]]),
+        () => false,
       )
     })
     subscription.readOrderedSnapshot = () => [

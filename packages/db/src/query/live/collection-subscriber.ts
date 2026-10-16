@@ -308,7 +308,11 @@ export class CollectionSubscriber<
       if (!subscription) return
       const changesArray = Array.isArray(changes) ? changes : [...changes]
 
-      this.orderedLoader?.onSourceChanges(changesArray, this.sentToD2Rows)
+      this.orderedLoader?.onSourceChanges(
+        changesArray,
+        this.sentToD2Rows,
+        (key) => this.collection._hasOptimisticOverlay(key),
+      )
 
       // Split live updates into a delete of the old value and an insert of the new value
       const splittedChanges = splitUpdates(changesArray)
