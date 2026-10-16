@@ -86,18 +86,18 @@ const insert = todos.insert({
   text: 'Write a draft',
   completed: false,
 })
-await insert.isPersisted.promise
+await insert.when('settled')
 
 const update = todos.update(id, (draft) => {
   draft.completed = true
 })
-await update.isPersisted.promise
+await update.when('settled')
 
 const remove = todos.delete(id)
-await remove.isPersisted.promise
+await remove.when('settled')
 ```
 
-Await `isPersisted.promise` to observe persistence success or failure. The returned transaction itself is not a Promise.
+Await `when('settled')` to observe persistence success or failure. The returned transaction itself is not a Promise.
 
 If you provide `onInsert`, `onUpdate`, or `onDelete`, the handler runs before persistence. A rejected handler leaves durable rows unchanged and rolls back its optimistic changes. Each accepted Collection batch writes rows and metadata in one IndexedDB transaction. A failed write aborts the batch.
 
@@ -210,7 +210,7 @@ For a transaction involving several Collections, call each Collection's acceptan
 
 Automatic writes in one Collection persist in mutation order, even when their
 handlers finish out of order. Later writes wait for earlier handlers and
-persistence to settle before reporting `isPersisted`. Rejection contributes no
+persistence to settle before reporting `when('settled')`. Rejection contributes no
 durable write and allows the next mutation to proceed. Do not await a later
 automatic write from an earlier handler in the same Collection: each would wait
 for the other. This rule does not order separate Collections, manual acceptance,

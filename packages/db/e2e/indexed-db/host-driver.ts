@@ -107,14 +107,15 @@ export async function createHost({ database, stores }: HostSetup) {
         })),
       )
     const c = collections.get(command.store)!
-    if (command.type === 'insert')
-      await c.insert(command.rows).isPersisted.promise
+    if (command.type === 'insert') await c.insert(command.rows).when(`settled`)
     else if (command.type === 'import') await c.utils.importData(command.rows)
     else if (command.type === 'clear') await c.utils.clearObjectStore()
     else
-      await c.update(command.key, (draft) => {
-        draft.name = command.name
-      }).isPersisted.promise
+      await c
+        .update(command.key, (draft) => {
+          draft.name = command.name
+        })
+        .when(`settled`)
     return undefined
   }
 }

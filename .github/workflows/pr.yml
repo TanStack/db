@@ -26,6 +26,8 @@ jobs:
         uses: tanstack/config/.github/setup@e4b48f16568324f76f467aa4c2aac2f05db632c3
       - name: Check lint
         run: pnpm run lint:check
+      - name: Check release versioning
+        run: pnpm run test:release
   minified-db:
     name: Minified DB public API
     runs-on: ubuntu-latest

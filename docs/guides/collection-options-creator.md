@@ -412,7 +412,7 @@ There are two distinct patterns for handling mutations in collection options cre
 
 The user provides mutation handlers in the config. Your collection creator passes them through.
 
-**Note:** Handler return values are deprecated. Users should trigger refetch/sync within their handlers.
+Mutation handlers return `Promise<void>`. Trigger refetch or sync within the handler and await it before the handler completes.
 
 ```typescript
 interface MyCollectionConfig<TItem extends object> {
@@ -974,7 +974,7 @@ const collection = createCollection(
       await api.createTodos(transaction.mutations.map(m => m.modified))
       // User explicitly triggers refetch
       await collection.utils.refetch()
-      // Prevent the pre-1.0 compatibility wrapper from refetching again.
+      // Prevent QueryCollection from refetching again.
       return { refetch: false }
     }
   })
@@ -1005,7 +1005,7 @@ const collection = createCollection(
 5. **Race Conditions** - Start listeners before initial fetch and buffer events
 6. **Type safety** - Use TypeScript generics to maintain type safety throughout
 7. **Provide utilities** - Export sync-engine-specific utilities for advanced use cases
-8. **Handler return values are deprecated** - Mutation handlers should coordinate sync internally (via `await`) rather than returning values. For Electric collections, use `await collection.utils.awaitTxId(txid)` instead of returning the txid
+8. **Coordinate sync in handlers** - Mutation handlers should await sync internally. For Electric collections, use `await collection.utils.awaitTxId(txid)`.
 
 ## Testing Your Collection
 

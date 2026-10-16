@@ -346,7 +346,9 @@ describe(`standalone descriptor query binding`, () => {
       ),
     ).toThrow(/requires a DbClient.*DbProvider/)
     expect(() =>
-      renderHook(() => useLiveQuery({ query: unboundQuery }, [])),
+      renderHook(() =>
+        useLiveQuery({ ...{ query: unboundQuery }, queryKey: [] }),
+      ),
     ).toThrow(/requires a DbClient.*DbProvider/)
     expect(() =>
       renderHook(() =>
@@ -357,7 +359,9 @@ describe(`standalone descriptor query binding`, () => {
       ),
     ).toThrow(/requires a DbClient.*DbProvider/)
     expect(() =>
-      renderHook(() => useLiveSuspenseQuery(() => unboundQuery, [])),
+      renderHook(() =>
+        useLiveSuspenseQuery({ query: () => unboundQuery, queryKey: [] }),
+      ),
     ).toThrow(/requires a DbClient.*DbProvider/)
   })
 
@@ -782,7 +786,6 @@ describe(`standalone descriptor query binding`, () => {
                   `$hasPendingWrites`,
                   `$key`,
                   `$origin`,
-                  `$synced`,
                   `id`,
                   `value`,
                 ].sort(),

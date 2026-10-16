@@ -601,7 +601,7 @@ async function startRun(testCase: Case): Promise<Run> {
         : items.delete(rowId)
     return async () => {
       release()
-      await transaction.isPersisted.promise
+      await transaction.when(`settled`)
       await settle()
     }
   }

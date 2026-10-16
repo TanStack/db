@@ -17,7 +17,7 @@ import type { Transaction } from '../src/transactions.js'
  * what the Collection shows. The contract: once a transaction settles, by
  * success, failure, or rollback, it leaves every Collection that ever tracked
  * it, and each of those Collections stops showing its optimistic rows.
- * Settlement always settles `isPersisted`, even when a subscriber throws
+ * Settlement always settles `when('settled')`, even when a subscriber throws
  * during it.
  *
  * Ownership is wider than the transaction's current mutations. An insert and
@@ -37,7 +37,7 @@ import type { Transaction } from '../src/transactions.js'
  *   surviving writes, in creation order.
  * - A rollback, or a failed commit, also rolls back every pending (not yet
  *   committed) transaction that wrote one of the same Collection keys.
- * - A settled transaction's `isPersisted` has settled, and its set of
+ * - A settled transaction's `when('settled')` has settled, and its set of
  *   tracking Collections is empty. Its mutations still name their
  *   Collection; this oracle does not claim the Collection is collectable.
  * - Transaction ids are unique among unsettled transactions in a Collection.
@@ -55,7 +55,7 @@ import type { Transaction } from '../src/transactions.js'
  *   admitted makes the write fail: the call rethrows that error, the write's
  *   transaction rolls back without rolling back other transactions, and no
  *   Collection keeps it. Either way the write's own transaction has settled,
- *   with its `isPersisted`. So a direct write never changes the model.
+ *   with its `when('settled')`. So a direct write never changes the model.
  * - Error shape: a settling call that ran no throwing subscriber reports no
  *   subscriber error. Otherwise it throws one of the subscriber errors, as
  *   is. The contract does not say which one, because these failures are rare
@@ -82,7 +82,7 @@ import type { Transaction } from '../src/transactions.js'
  * step it then flushes promises and compares, for each
  * Collection, the tracked transaction ids with the model's set, the rows of
  * keys 1, 2 and 9 with the model's overlay, and each transaction's
- * `isPersisted` settlement with the model's state. It compares tracked
+ * `when('settled')` settlement with the model's state. It compares tracked
  * transactions by identity. Each settling call's thrown error, or its
  * commit's rejection, is compared with the error-shape law, counting the
  * subscriber errors the step raised. A settled transaction's `collections`
@@ -394,7 +394,7 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
   const model = new OwnershipModel()
   const driven: Array<Driven> = []
   const settle = (entry: Driven) => {
-    entry.tx.isPersisted.promise.then(
+    entry.tx.when(`settled`).then(
       () => (entry.settled = true),
       () => (entry.settled = true),
     )
@@ -560,7 +560,7 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
             } finally {
               restoreCreate()
               for (const tx of created)
-                tx.isPersisted.promise.then(
+                tx.when(`settled`).then(
                   () => settled.add(tx),
                   () => settled.add(tx),
                 )
@@ -597,7 +597,7 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
           expect(tx.state, `${label}: direct transaction settled`).toBe(
             rejected ? `failed` : `completed`,
           )
-          expect(settled.has(tx), `${label}: direct isPersisted settled`).toBe(
+          expect(settled.has(tx), `${label}: direct transaction settled`).toBe(
             true,
           )
         }

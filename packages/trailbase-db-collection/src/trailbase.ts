@@ -519,9 +519,7 @@ export function trailBaseCollectionOptions<
     ...collectionConfig,
     sync,
     getKey,
-    onInsert: async (
-      params: InsertMutationFnParams<TItem, TKey>,
-    ): Promise<Array<number | string>> => {
+    onInsert: async (params: InsertMutationFnParams<TItem, TKey>) => {
       const ids = await config.recordApi.createBulk(
         params.transaction.mutations.map((tx) => {
           const { type, modified } = tx
@@ -536,8 +534,6 @@ export function trailBaseCollectionOptions<
       // we have to ensure that the new record was properly added to the local
       // DB by the subscription.
       await awaitIds(ids.map((id) => String(id)))
-
-      return ids
     },
     onUpdate: async (params: UpdateMutationFnParams<TItem, TKey>) => {
       const ids: Array<string> = await Promise.all(

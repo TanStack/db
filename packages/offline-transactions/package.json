@@ -59,11 +59,9 @@
     "src",
     "skills"
   ],
-  "dependencies": {
-    "@tanstack/db": "workspace:*"
-  },
   "peerDependencies": {
     "@react-native-community/netinfo": ">=11.0.0",
+    "@tanstack/db": "^0.15.0 || ^1.0.0-rc.0",
     "react-native": ">=0.70.0"
   },
   "peerDependenciesMeta": {

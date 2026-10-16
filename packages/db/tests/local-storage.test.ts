@@ -89,7 +89,6 @@ const publicRemoteTodo = {
   $key: `remote`,
   $origin: `remote`,
   $hasPendingWrites: false,
-  $synced: true,
 }
 
 function installRemoteTodo(storage: Storage): StorageEvent {
@@ -146,7 +145,6 @@ function assertStoredTodos(
       delete userRow.$key
       delete userRow.$origin
       delete userRow.$hasPendingWrites
-      delete userRow.$synced
       return userRow
     }),
   ).toStrictEqual(expected)
@@ -278,7 +276,7 @@ describe(`localStorage collection`, () => {
 
       const insertTx = collection.insert(todo)
 
-      await insertTx.isPersisted.promise
+      await insertTx.when(`settled`)
 
       const storedData = mockStorage.getItem(`todos`)
       expect(storedData).toBeDefined()
@@ -416,7 +414,7 @@ describe(`localStorage collection`, () => {
 
       // Insert without handlers should still persist
       const insertTx = collection.insert(todo)
-      await insertTx.isPersisted.promise
+      await insertTx.when(`settled`)
 
       // Check that it was saved to storage
       let storedData = mockStorage.getItem(`todos`)
@@ -428,7 +426,7 @@ describe(`localStorage collection`, () => {
       const updateTx = collection.update(`1`, (draft) => {
         draft.title = `Updated Without Handlers`
       })
-      await updateTx.isPersisted.promise
+      await updateTx.when(`settled`)
 
       // Check that update was saved to storage
       storedData = mockStorage.getItem(`todos`)
@@ -438,7 +436,7 @@ describe(`localStorage collection`, () => {
 
       // Delete without handlers should still persist
       const deleteTx = collection.delete(`1`)
-      await deleteTx.isPersisted.promise
+      await deleteTx.when(`settled`)
 
       // Check that deletion was saved to storage
       storedData = mockStorage.getItem(`todos`)
@@ -478,7 +476,7 @@ describe(`localStorage collection`, () => {
 
       // Insert should call handler AND persist
       const insertTx = collection.insert(todo)
-      await insertTx.isPersisted.promise
+      await insertTx.when(`settled`)
 
       expect(insertSpy).toHaveBeenCalledOnce()
       let storedData = mockStorage.getItem(`todos`)
@@ -490,7 +488,7 @@ describe(`localStorage collection`, () => {
       const updateTx = collection.update(`1`, (draft) => {
         draft.title = `Updated With Handlers`
       })
-      await updateTx.isPersisted.promise
+      await updateTx.when(`settled`)
 
       expect(updateSpy).toHaveBeenCalledOnce()
       storedData = mockStorage.getItem(`todos`)
@@ -500,7 +498,7 @@ describe(`localStorage collection`, () => {
 
       // Delete should call handler AND persist
       const deleteTx = collection.delete(`1`)
-      await deleteTx.isPersisted.promise
+      await deleteTx.when(`settled`)
 
       expect(deleteSpy).toHaveBeenCalledOnce()
       storedData = mockStorage.getItem(`todos`)
@@ -518,7 +516,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-          onInsert: () => Promise.resolve({ success: true }),
+          onInsert: () => Promise.resolve(),
         }),
       )
 
@@ -532,7 +530,7 @@ describe(`localStorage collection`, () => {
       // When a collection has mutation handlers, calling insert() automatically creates
       // a transaction and calls the onInsert handler
       const tx = collection.insert(todo)
-      await tx.isPersisted.promise
+      await tx.when(`settled`)
 
       // Check that it was saved to storage with version key structure
       const storedData = mockStorage.getItem(`todos`)
@@ -568,7 +566,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-          onUpdate: () => Promise.resolve({ success: true }),
+          onUpdate: () => Promise.resolve(),
         }),
       )
 
@@ -579,7 +577,7 @@ describe(`localStorage collection`, () => {
       const tx = collection.update(`1`, (draft) => {
         draft.title = `Updated Todo`
       })
-      await tx.isPersisted.promise
+      await tx.when(`settled`)
 
       // Check that it was updated in storage with a new version key
       const storedData = mockStorage.getItem(`todos`)
@@ -613,7 +611,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-          onDelete: () => Promise.resolve({ success: true }),
+          onDelete: () => Promise.resolve(),
         }),
       )
 
@@ -622,7 +620,7 @@ describe(`localStorage collection`, () => {
 
       // Delete the todo - this automatically creates a transaction and calls onDelete
       const tx = collection.delete(`1`)
-      await tx.isPersisted.promise
+      await tx.when(`settled`)
 
       // Check that it was removed from storage
       const storedData = mockStorage.getItem(`todos`)
@@ -1047,7 +1045,7 @@ describe(`localStorage collection`, () => {
           title: `replacement`,
           removed: `old`,
         })
-        await insert.isPersisted.promise
+        await insert.when(`settled`)
 
         transaction.mutate(() => {
           collection.delete(`row`)
@@ -1075,7 +1073,7 @@ describe(`localStorage collection`, () => {
           transaction.state === `persisting`
         )
           transaction.rollback()
-        await transaction.isPersisted.promise.catch(() => undefined)
+        await transaction.when(`settled`).catch(() => undefined)
         await reopened?.cleanup()
         await collection.cleanup()
       }
@@ -1163,7 +1161,7 @@ describe(`localStorage collection`, () => {
         createdAt: new Date(),
       }
       const existingTx = collection.insert(existingTodo)
-      await existingTx.isPersisted.promise
+      await existingTx.when(`settled`)
 
       const tx = createTransaction({
         mutationFn: async ({ transaction }: any) => {
@@ -1221,7 +1219,7 @@ describe(`localStorage collection`, () => {
         createdAt: new Date(),
       }
       const insertTx = collection.insert(todo)
-      await insertTx.isPersisted.promise
+      await insertTx.when(`settled`)
 
       const tx = createTransaction({
         mutationFn: async ({ transaction }: any) => {
@@ -1270,7 +1268,7 @@ describe(`localStorage collection`, () => {
         },
         autoCommit: false,
       })
-      const persisted = observeHistoryPromise(tx.isPersisted.promise)
+      const persisted = observeHistoryPromise(tx.when(`settled`))
       await withHistoryCleanup(
         async () => {
           tx.mutate(() => {
@@ -1309,7 +1307,7 @@ describe(`localStorage collection`, () => {
             ...next,
             createdAt: new Date(next.createdAt),
           })
-          await accepted.isPersisted.promise
+          await accepted.when(`settled`)
           const storedData = mockStorage.getItem(`todos`)
           assertStoredTodos(storedData, [...collection.values()], [next])
           expect(JSON.parse(storedData!)[`s:rollback-test`]).toBeUndefined()
@@ -1430,11 +1428,11 @@ describe(`localStorage collection`, () => {
 
         // Wait for all mutations to complete
         await Promise.all([
-          tx1.isPersisted.promise,
-          tx2.isPersisted.promise,
-          tx3.isPersisted.promise,
-          tx4.isPersisted.promise,
-          tx5.isPersisted.promise,
+          tx1.when(`settled`),
+          tx2.when(`settled`),
+          tx3.when(`settled`),
+          tx4.when(`settled`),
+          tx5.when(`settled`),
         ])
 
         // Verify final state in storage
@@ -1567,7 +1565,7 @@ describe(`localStorage collection`, () => {
         mockStorageEventApi.triggerStorageEvent(storageEvent)
 
         // Wait for local mutation to complete
-        await localTx.isPersisted.promise
+        await localTx.when(`settled`)
 
         // Both items should exist
         expect(collection.has(`local`)).toBe(true)
@@ -1595,7 +1593,7 @@ describe(`localStorage collection`, () => {
           completed: false,
           createdAt: new Date(),
         })
-        await tx1.isPersisted.promise
+        await tx1.when(`settled`)
 
         // Simulate another tab updating the item
         const remoteData = {
@@ -1627,7 +1625,7 @@ describe(`localStorage collection`, () => {
         const tx2 = collection.update(`1`, (draft) => {
           draft.title = `Local Update After Remote`
         })
-        await tx2.isPersisted.promise
+        await tx2.when(`settled`)
 
         // Verify final state
         const storedData = mockStorage.getItem(`todos`)
@@ -1707,7 +1705,7 @@ describe(`localStorage collection`, () => {
           completed: false,
           createdAt: new Date(),
         })
-        await auto1.isPersisted.promise
+        await auto1.when(`settled`)
 
         // Manual transaction
         const tx = createTransaction({
@@ -1739,7 +1737,7 @@ describe(`localStorage collection`, () => {
           completed: false,
           createdAt: new Date(),
         })
-        await auto2.isPersisted.promise
+        await auto2.when(`settled`)
 
         // Verify all items in storage
         const storedData = mockStorage.getItem(`todos`)
@@ -1788,7 +1786,7 @@ describe(`localStorage collection`, () => {
         })
 
         // The transaction should reject
-        await expect(tx.isPersisted.promise).rejects.toThrow()
+        await expect(tx.when(`settled`)).rejects.toThrow()
 
         subscription.unsubscribe()
       })
@@ -1833,22 +1831,22 @@ describe(`localStorage collection`, () => {
               ...first,
               createdAt: new Date(first.createdAt),
             })
-            await tx1.isPersisted.promise
+            await tx1.when(`settled`)
             verifyConsistency([first])
             const tx2 = collection.update(`1`, (draft) => {
               draft.title = `Updated`
             })
-            await tx2.isPersisted.promise
+            await tx2.when(`settled`)
             const updated = { ...first, title: `Updated` }
             verifyConsistency([updated])
             const tx3 = collection.insert({
               ...second,
               createdAt: new Date(second.createdAt),
             })
-            await tx3.isPersisted.promise
+            await tx3.when(`settled`)
             verifyConsistency([updated, second])
             const tx4 = collection.delete(`1`)
-            await tx4.isPersisted.promise
+            await tx4.when(`settled`)
             verifyConsistency([second])
 
             // Test the exact checker, not membership in the production cache.
@@ -1903,7 +1901,7 @@ describe(`localStorage collection`, () => {
         completed: false,
         createdAt: new Date(),
       })
-      await tx1.isPersisted.promise
+      await tx1.when(`settled`)
 
       const tx2 = collection.insert({
         id: `second`,
@@ -1911,7 +1909,7 @@ describe(`localStorage collection`, () => {
         completed: false,
         createdAt: new Date(),
       })
-      await tx2.isPersisted.promise
+      await tx2.when(`settled`)
 
       const tx3 = collection.insert({
         id: `third`,
@@ -1919,13 +1917,13 @@ describe(`localStorage collection`, () => {
         completed: false,
         createdAt: new Date(),
       })
-      await tx3.isPersisted.promise
+      await tx3.when(`settled`)
 
       // Update the FIRST item specifically
       const updateTx = collection.update(`first`, (draft) => {
         draft.completed = true
       })
-      await updateTx.isPersisted.promise
+      await updateTx.when(`settled`)
 
       // Verify that the FIRST item was updated, not the last one
       expect(collection.get(`first`)?.completed).toBe(true)
@@ -1962,7 +1960,7 @@ describe(`localStorage collection`, () => {
         completed: false,
         createdAt: new Date(),
       })
-      await tx1.isPersisted.promise
+      await tx1.when(`settled`)
 
       const tx2 = collection.insert({
         id: `second`,
@@ -1970,7 +1968,7 @@ describe(`localStorage collection`, () => {
         completed: false,
         createdAt: new Date(),
       })
-      await tx2.isPersisted.promise
+      await tx2.when(`settled`)
 
       const tx3 = collection.insert({
         id: `third`,
@@ -1978,11 +1976,11 @@ describe(`localStorage collection`, () => {
         completed: false,
         createdAt: new Date(),
       })
-      await tx3.isPersisted.promise
+      await tx3.when(`settled`)
 
       // Delete the FIRST item specifically
       const deleteTx = collection.delete(`first`)
-      await deleteTx.isPersisted.promise
+      await deleteTx.when(`settled`)
 
       // Verify that the FIRST item was deleted, not the last one
       expect(collection.has(`first`)).toBe(false)
@@ -2024,27 +2022,27 @@ describe(`localStorage collection`, () => {
         title: `First Todo`,
         completed: false,
       })
-      await tx1.isPersisted.promise
+      await tx1.when(`settled`)
 
       const tx2 = collection.insert({
         id: 2,
         title: `Second Todo`,
         completed: false,
       })
-      await tx2.isPersisted.promise
+      await tx2.when(`settled`)
 
       const tx3 = collection.insert({
         id: 3,
         title: `Third Todo`,
         completed: false,
       })
-      await tx3.isPersisted.promise
+      await tx3.when(`settled`)
 
       // Update the FIRST item (id: 1) specifically
       const updateTx = collection.update(1, (draft) => {
         draft.completed = true
       })
-      await updateTx.isPersisted.promise
+      await updateTx.when(`settled`)
 
       // Verify that item with id:1 was updated, not the last one
       expect(collection.get(1)?.completed).toBe(true)
@@ -2086,25 +2084,25 @@ describe(`localStorage collection`, () => {
         title: `First Todo`,
         completed: false,
       })
-      await tx1.isPersisted.promise
+      await tx1.when(`settled`)
 
       const tx2 = collection.insert({
         id: 2,
         title: `Second Todo`,
         completed: false,
       })
-      await tx2.isPersisted.promise
+      await tx2.when(`settled`)
 
       const tx3 = collection.insert({
         id: 3,
         title: `Third Todo`,
         completed: false,
       })
-      await tx3.isPersisted.promise
+      await tx3.when(`settled`)
 
       // Delete the FIRST item (id: 1) specifically
       const deleteTx = collection.delete(1)
-      await deleteTx.isPersisted.promise
+      await deleteTx.when(`settled`)
 
       // Verify that item with id:1 was deleted, not the last one
       expect(collection.has(1)).toBe(false)
@@ -2169,7 +2167,7 @@ describe(`localStorage collection`, () => {
       const updateTx = collection.update(1, (draft) => {
         draft.completed = true
       })
-      await updateTx.isPersisted.promise
+      await updateTx.when(`settled`)
 
       // Verify the correct item was updated
       expect(collection.get(1)?.completed).toBe(true)
@@ -2235,7 +2233,7 @@ describe(`localStorage collection`, () => {
 
       // Now try to delete item with numeric id 1
       const deleteTx = collection.delete(1)
-      await deleteTx.isPersisted.promise
+      await deleteTx.when(`settled`)
 
       // Verify the correct item was deleted
       expect(collection.has(1)).toBe(false)
@@ -2275,7 +2273,7 @@ describe(`localStorage collection`, () => {
         id: 1,
         title: `Numeric ID`,
       })
-      await tx1.isPersisted.promise
+      await tx1.when(`settled`)
 
       // Insert item with string ID "1"
       // With prefixing, these won't collide:
@@ -2285,7 +2283,7 @@ describe(`localStorage collection`, () => {
         id: `1`,
         title: `String ID`,
       })
-      await tx2.isPersisted.promise
+      await tx2.when(`settled`)
 
       // Both should exist in collection state
       expect(collection.has(1)).toBe(true)
@@ -2330,14 +2328,14 @@ describe(`localStorage collection`, () => {
         id: 1,
         title: `Numeric 1`,
       })
-      await tx1.isPersisted.promise
+      await tx1.when(`settled`)
 
       // Insert item with string ID "n:1" (which would collide with old "__number__1" approach)
       const tx2 = collection.insert({
         id: `n:1`,
         title: `String n:1`,
       })
-      await tx2.isPersisted.promise
+      await tx2.when(`settled`)
 
       // Both should exist in collection
       expect(collection.has(1)).toBe(true)

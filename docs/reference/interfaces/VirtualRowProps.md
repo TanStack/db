@@ -3,18 +3,19 @@ id: VirtualRowProps
 title: VirtualRowProps
 ---
 
-Defined in: [packages/db/src/virtual-props.ts:76](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L76)
+Defined in: [packages/db/src/virtual-props.ts:77](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L77)
 
-Virtual properties recognized on TanStack DB rows. The new
-`$hasPendingWrites` field is optional here so legacy four-field rows accepted
-by `hasVirtualProps` remain assignable. Rows returned by collections use
-`WithVirtualProps`, which requires it.
+Virtual properties recognized on TanStack DB rows.
 
 These properties are:
 - Computed (not stored in the data model)
 - Read-only (cannot be mutated directly)
 - Available in queries (WHERE, ORDER BY, SELECT)
 - Included when spreading rows (`...user`)
+
+Whole-row live-query outputs retain source metadata. Ordinary projections
+receive metadata from the live-query Collection. An explicitly selected
+virtual field name cannot replace source metadata at root publication.
 
 ## Examples
 
@@ -54,29 +55,28 @@ The type of the row's key (string or number)
 readonly $collectionId: string;
 ```
 
-Defined in: [packages/db/src/virtual-props.ts:133](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L133)
+Defined in: [packages/db/src/virtual-props.ts:115](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L115)
 
 The ID of the source collection this row originated from.
 
 In joins, this can help identify which collection each row came from.
-For live query collections, this is the ID of the upstream collection.
+Whole-row live queries preserve the upstream Collection's ID. Projected
+row roots otherwise use the live-query Collection's ID.
 
 ***
 
-### $hasPendingWrites?
+### $hasPendingWrites
 
 ```ts
-readonly optional $hasPendingWrites: boolean;
+readonly $hasPendingWrites: boolean;
 ```
 
-Defined in: [packages/db/src/virtual-props.ts:87](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L87)
+Defined in: [packages/db/src/virtual-props.ts:86](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L86)
 
 Whether this row currently has pending local optimistic writes.
 
 This describes the row's local optimistic state, not backend upload or
-acknowledgement. It is always `false` for local-only collections. It is
-optional only for compatibility with legacy rows; collection-published
-rows always provide it.
+acknowledgement. It is always `false` for local-only collections.
 
 ***
 
@@ -86,7 +86,7 @@ rows always provide it.
 readonly $key: TKey;
 ```
 
-Defined in: [packages/db/src/virtual-props.ts:125](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L125)
+Defined in: [packages/db/src/virtual-props.ts:106](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L106)
 
 The row's key (primary identifier).
 
@@ -101,7 +101,7 @@ Useful when you need the key in projections or computations.
 readonly $origin: VirtualOrigin;
 ```
 
-Defined in: [packages/db/src/virtual-props.ts:117](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L117)
+Defined in: [packages/db/src/virtual-props.ts:98](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L98)
 
 Collection attribution for this row's current value. `'local'` covers
 optimistic rows and attributed source writes; `'remote'` covers source
@@ -109,32 +109,5 @@ writes without local attribution. See [VirtualOrigin](../type-aliases/VirtualOri
 key-and-timing rules, including truncate and overlapping mutations.
 
 For local-only collections, this is always `'local'`.
-For live query collections, this is passed through from the source collection.
-
-***
-
-### ~~$synced~~
-
-```ts
-readonly $synced: boolean;
-```
-
-Defined in: [packages/db/src/virtual-props.ts:106](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L106)
-
-Whether this row currently has no pending local optimistic writes.
-
-- `true`: No pending local optimistic mutation currently affects this row
-- `false`: One or more pending local optimistic mutations currently affect this row
-
-This is local mutation status. It does not prove that a backend has uploaded,
-confirmed, or read back the row. If you need backend-confirmed status, keep
-your mutation function pending until that backend observation has happened,
-or expose adapter-specific status.
-
-For local-only collections (no sync), this is always `true`.
-For live query collections, this is passed through from the source collection.
-
-#### Deprecated
-
-Use `!row.$hasPendingWrites` instead. This alias will be
-removed in the 1.0 RC.
+Whole-row live queries preserve source attribution. Projected row roots
+otherwise use the live-query Collection's attribution.

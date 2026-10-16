@@ -64,7 +64,7 @@ it('validates schema inputs before persistence', async () => {
     try {
       await collection.preload()
       expect(() => collection.insert({ id: 1, name: '' })).toThrow()
-      await collection.insert({ id: 1, name: 'valid' }).isPersisted.promise
+      await collection.insert({ id: 1, name: 'valid' }).when(`settled`)
       expect(await collection.utils.exportData()).toEqual([
         { id: 1, name: 'valid' },
       ])
@@ -78,7 +78,7 @@ it('supports local persistence when BroadcastChannel is unavailable', async () =
   await withHarness(async (h) => {
     vi.stubGlobal('BroadcastChannel', undefined)
     const collection = await h.open()
-    await collection.insert({ id: 1, name: 'local' }).isPersisted.promise
+    await collection.insert({ id: 1, name: 'local' }).when(`settled`)
     expect(await collection.utils.exportData()).toEqual([
       { id: 1, name: 'local' },
     ])
@@ -99,7 +99,7 @@ it('rejects opening without IndexedDB', async () => {
 it('exposes deletion only as an administrative function', async () => {
   await withHarness(async (h) => {
     const collection = await h.open()
-    await collection.insert({ id: 1, name: 'removed' }).isPersisted.promise
+    await collection.insert({ id: 1, name: 'removed' }).when(`settled`)
     expect(collection.utils).not.toHaveProperty('deleteDatabase')
     await deleteDatabase(h.db.name)
     const reopened = await createIndexedDB({
@@ -250,8 +250,9 @@ it('preserves exported transformed rows when invalid restore input is rejected',
     )
     try {
       await c.preload()
-      await c.insert({ id: 1, date: '2026-01-01T00:00:00.000Z' }).isPersisted
-        .promise
+      await c
+        .insert({ id: 1, date: '2026-01-01T00:00:00.000Z' })
+        .when(`settled`)
       const backup = await c.utils.exportData()
       // @ts-expect-error Schema output is not the string input expected by import.
       await expect(c.utils.importData(backup)).rejects.toThrow(

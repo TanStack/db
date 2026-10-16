@@ -452,7 +452,7 @@ await documents.insert(
       timestamp: Date.now(),
     },
   }
-).isPersisted.promise
+).when('settled')
 
 // Update with metadata
 await documents.update(
@@ -461,12 +461,12 @@ await documents.update(
   (doc) => {
     doc.name = "Report Q4 (Updated)"
   }
-).isPersisted.promise
+).when('settled')
 
 // Delete with metadata
 await documents.delete(docId, {
   metadata: { deletedBy: "user-789", reason: "duplicate" },
-}).isPersisted.promise
+}).when('settled')
 ```
 
 #### Accessing Metadata During Upload
@@ -568,7 +568,7 @@ batchTx.mutate(() => {
 await batchTx.commit()
 
 // Wait for the changes to be persisted
-await batchTx.isPersisted.promise
+await batchTx.when('settled')
 ```
 
 This approach allows you to:

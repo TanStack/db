@@ -31,7 +31,7 @@ export const Route = createFileRoute(`/_authenticated/`)({
         created_at: new Date(),
         updated_at: new Date(),
       })
-      await tx.isPersisted.promise
+      await tx.when(`settled`)
       const serverProjectId = projectCollection.toArray[0].id
       throw redirect({
         to: `/project/$projectId`,

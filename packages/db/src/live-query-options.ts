@@ -10,7 +10,10 @@ import {
   getStableQueryBuilderHash,
   getStableValueHash,
 } from './query/ir-stable-identity.js'
-import { getStringCollationIdentity } from './query/runtime-reference-identity.js'
+import {
+  getRuntimeReferenceIdentity,
+  getStringCollationIdentity,
+} from './query/runtime-reference-identity.js'
 import { codedMessage, devBuild } from './error-message.js'
 import type { Collection, CollectionImpl } from './collection/index.js'
 import type { CollectionOptionsIdentity } from './collection-options.js'
@@ -174,11 +177,20 @@ export function getPreparedLiveQueryIdentity(value: unknown): unknown {
   }
   if (value && typeof value === `object` && `query` in value) {
     const config = value as LiveQueryCollectionConfig<any>
+    const schema = (value as { schema?: object }).schema
     return [
       `config`,
       getPreparedLiveQueryIdentity(config.query),
-      [`getKey`, config.getKey],
-      [`schema`, config.schema],
+      [
+        `getKey`,
+        config.getKey === undefined
+          ? undefined
+          : getRuntimeReferenceIdentity(config.getKey),
+      ],
+      [
+        `schema`,
+        schema === undefined ? undefined : getRuntimeReferenceIdentity(schema),
+      ],
       [`singleResult`, config.singleResult === true],
       [
         `defaultStringCollation`,

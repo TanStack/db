@@ -631,6 +631,11 @@ layout.
 A bare child query is a Collection-valued include. It exposes one stable public
 Collection facade per active bucket in that edge:
 
+Facade rows obey the Collection virtual-field boundary: selected
+`$hasPendingWrites`, `$origin`, `$key`, and `$collectionId` values cannot replace
+the selected source row's metadata. Inline include values keep their selected
+shape because they are not published as Collection rows.
+
 ```text
 ActiveBucket + BucketRow -> ActiveBucketRow -> BucketFacade(bucket, Collection)
 Route + BucketFacade -> CellValue(cell, Collection)

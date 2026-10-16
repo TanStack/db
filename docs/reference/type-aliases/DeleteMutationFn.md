@@ -4,10 +4,10 @@ title: DeleteMutationFn
 ---
 
 ```ts
-type DeleteMutationFn<T, TKey, TUtils, TReturn> = (params) => Promise<TReturn>;
+type DeleteMutationFn<T, TKey, TUtils> = (params) => Promise<void>;
 ```
 
-Defined in: [packages/db/src/types.ts:703](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L703)
+Defined in: [packages/db/src/types.ts:692](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L692)
 
 ## Type Parameters
 
@@ -23,12 +23,6 @@ Defined in: [packages/db/src/types.ts:703](https://github.com/TanStack/db/blob/m
 
 `TUtils` *extends* [`UtilsRecord`](UtilsRecord.md) = [`UtilsRecord`](UtilsRecord.md)
 
-### TReturn
-
-`TReturn` = `any`
-
-DEPRECATED: Return values are kept for backward compatibility and will be removed in v1.0.
-
 ## Parameters
 
 ### params
@@ -37,4 +31,4 @@ DEPRECATED: Return values are kept for backward compatibility and will be remove
 
 ## Returns
 
-`Promise`\<`TReturn`\>
+`Promise`\<`void`\>

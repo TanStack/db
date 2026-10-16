@@ -545,7 +545,7 @@ describe(`bounded orderBy index diagnostics`, () => {
       query = createLiveQueryCollection((q) =>
         q
           .from({ row: source })
-          .orderBy(({ row }) => row.$synced)
+          .orderBy(({ row }) => row.$hasPendingWrites)
           .limit(1),
       )
       await query.preload()

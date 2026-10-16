@@ -82,7 +82,7 @@ function createInternalGroupFields(groupCount: number, selectClause?: Select) {
 }
 
 type RowVirtualMetadata = {
-  synced: boolean
+  hasPendingWrites: boolean
   hasLocal: boolean
 }
 
@@ -254,27 +254,20 @@ function getGroupEvaluationRow(
 }
 
 function getRowVirtualMetadata(row: NamespacedRow): RowVirtualMetadata {
-  let found = false
-  let allSynced = true
+  let hasPendingWrites = false
   let hasLocal = false
 
   for (const [alias, value] of Object.entries(row as Record<string, unknown>)) {
     if (alias === `$selected`) continue
     if (value === null || typeof value !== `object`) continue
     const asRecord = value as Record<string, unknown>
-    const hasSyncedProp = `$synced` in asRecord
     const hasPendingWritesProp = `$hasPendingWrites` in asRecord
     const hasOriginProp = `$origin` in asRecord
-    if (!hasSyncedProp && !hasPendingWritesProp && !hasOriginProp) {
+    if (!hasPendingWritesProp && !hasOriginProp) {
       continue
     }
-    found = true
-    // Preserve the existing alias while present; accept new-field-only rows too.
-    if (
-      asRecord.$synced === false ||
-      (!hasSyncedProp && asRecord.$hasPendingWrites === true)
-    ) {
-      allSynced = false
+    if (asRecord.$hasPendingWrites === true) {
+      hasPendingWrites = true
     }
     if (asRecord.$origin === `local`) {
       hasLocal = true
@@ -282,7 +275,7 @@ function getRowVirtualMetadata(row: NamespacedRow): RowVirtualMetadata {
   }
 
   return {
-    synced: found ? allSynced : true,
+    hasPendingWrites,
     hasLocal,
   }
 }
@@ -311,10 +304,13 @@ export function processGroupBy(
     [fields.virtual]: {
       preMap: ([, row]: [string, NamespacedRow]) => getRowVirtualMetadata(row),
       reduce: (values: Array<[RowVirtualMetadata, number]>) => {
-        const group: RowVirtualMetadata = { synced: true, hasLocal: false }
+        const group: RowVirtualMetadata = {
+          hasPendingWrites: false,
+          hasLocal: false,
+        }
         for (const [metadata, multiplicity] of values) {
           if (multiplicity <= 0) continue
-          if (!metadata.synced) group.synced = false
+          if (metadata.hasPendingWrites) group.hasPendingWrites = true
           if (metadata.hasLocal) group.hasLocal = true
         }
         return group
@@ -527,8 +523,7 @@ export function processGroupBy(
       }
       const virtual = (aggregatedRow as Record<string, any>)[fields.virtual] as
         RowVirtualMetadata | undefined
-      resultRow.$synced = virtual?.synced ?? true
-      resultRow.$hasPendingWrites = !resultRow.$synced
+      resultRow.$hasPendingWrites = virtual?.hasPendingWrites ?? false
       resultRow.$origin = (
         virtual?.hasLocal ? `local` : `remote`
       ) satisfies VirtualOrigin

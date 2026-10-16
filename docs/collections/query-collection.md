@@ -569,7 +569,7 @@ const todosCollection = createCollection(
     onInsert: async ({ transaction }) => {
       const newItems = transaction.mutations.map((m) => m.modified)
       await api.createTodos(newItems)
-      // Auto-refetch happens after handler completes (pre-1.0 behavior)
+      // Auto-refetch happens after the handler completes
     },
 
     onUpdate: async ({ transaction }) => {
@@ -588,13 +588,13 @@ const todosCollection = createCollection(
 )
 ```
 
-> **Note**: QueryCollection currently auto-refetches after handlers complete. See [Controlling Refetch Behavior](#controlling-refetch-behavior) for details on this transitional behavior.
+> **Note**: QueryCollection auto-refetches after handlers complete. See [Controlling Refetch Behavior](#controlling-refetch-behavior) for details.
 
 ### Controlling Refetch Behavior
 
-> **⚠️ Transitional API**: QueryCollection currently auto-refetches after handlers complete. This behavior is deprecated and will be removed in v1.0. See the migration notes below.
+> **Note:** QueryCollection 1.x retains auto-refetch after handlers complete. See the options below to control this behavior.
 
-#### Current Behavior (Pre-1.0)
+#### Current Behavior
 
 By default, QueryCollection automatically refetches after each handler completes. To **skip** auto-refetch, return `{ refetch: false }`:
 
@@ -609,9 +609,9 @@ onInsert: async ({ transaction }) => {
 
 If you don't return `{ refetch: false }`, auto-refetch happens automatically.
 
-#### v1.0 Behavior (Future)
+#### Explicit Refetch Inside a Handler
 
-In v1.0, auto-refetch will be **removed**. Handlers will need to explicitly call `collection.utils.refetch()` when refetching is needed:
+Handlers can explicitly call `collection.utils.refetch()` when they need its result before returning. Return `{ refetch: false }` to prevent a second automatic refetch:
 
 ```typescript
 onInsert: async ({ transaction, collection }) => {
@@ -619,6 +619,7 @@ onInsert: async ({ transaction, collection }) => {
 
   // Explicitly trigger refetch when you need server state
   await collection.utils.refetch()
+  return { refetch: false }
 }
 ```
 
@@ -636,7 +637,7 @@ the Query fetch boundary. This rule applies whether the mutation or the refetch
 starts first. It includes calls through the handler parameter, captured or
 external Collection references, manual transaction mutation functions, and
 `createOptimisticAction` mutation functions. Code can await the mutation's
-`isPersisted.promise` when it needs the complete transaction and its queued
+`when('settled')` when it needs the complete transaction and its queued
 Collection application. Utilities that refetch, including `clearError()`,
 inherit the same phase boundary.
 
@@ -655,13 +656,13 @@ boundary, `throwOnError` applies only to the Query fetch because application
 happens after that call settles. A later application failure is recorded by the
 Collection's error utilities.
 
-To skip refetch in v1.0, simply don't call `refetch()`:
+To skip refetch after a handler, return `{ refetch: false }`:
 
 ```typescript
 onInsert: async ({ transaction }) => {
   await api.createTodos(transaction.mutations.map((m) => m.modified))
 
-  // No refetch call = no refetch (v1.0 behavior)
+  return { refetch: false }
 }
 ```
 
@@ -861,7 +862,7 @@ const todosCollection = createCollection(
 
       // No need to refetch - we've already synced the server response via direct writes
       // (optimistic state is automatically replaced when handler completes)
-      return { refetch: false } // Transitional pre-1.0 opt-out
+      return { refetch: false }
     },
 
     onUpdate: async ({ transaction, collection }) => {
@@ -879,7 +880,7 @@ const todosCollection = createCollection(
       })
 
       // No refetch needed since we used direct writes
-      return { refetch: false } // Transitional pre-1.0 opt-out
+      return { refetch: false }
     },
   })
 )
@@ -1279,7 +1280,7 @@ has a subset owner or not. It refetches that Query when the subset is acquired,
 then applies the new server result. The earlier direct write still starts no
 request by itself.
 
-To use direct writes with persistence handlers, return `{ refetch: false }` to avoid the handler's separate automatic refetch during the pre-1.0 transition. An on-demand `queryFn` still needs to return the complete current result for its pushed-down predicate, order, limit, and offset when it does run. For robust real-time synchronization, use a collection backed by a sync engine that owns snapshot and change-stream ordering.
+To use direct writes with persistence handlers, return `{ refetch: false }` to avoid the handler's separate automatic refetch. An on-demand `queryFn` still needs to return the complete current result for its pushed-down predicate, order, limit, and offset when it does run. For robust real-time synchronization, use a collection backed by a sync engine that owns snapshot and change-stream ordering.
 
 ## Complete Direct Write API Reference
 

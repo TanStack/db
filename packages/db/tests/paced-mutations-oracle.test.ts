@@ -316,7 +316,7 @@ function observeReceipt<T extends object>(transaction: Transaction<T>) {
     returnedSame?: boolean
     error?: unknown
   } = { outcome: `pending` }
-  void transaction.isPersisted.promise.then(
+  void transaction.when(`settled`).then(
     (resolved) => {
       receipt.outcome = `fulfilled`
       receipt.returnedSame = resolved === transaction
@@ -382,7 +382,7 @@ async function runProduction(
             returnedSame: undefined as boolean | undefined,
           }
           persistence.set(transaction, observation)
-          void transaction.isPersisted.promise.then(
+          void transaction.when(`settled`).then(
             (resolved) => {
               observation.outcome = `fulfilled`
               observation.returnedSame = resolved === transaction
@@ -1187,7 +1187,7 @@ describe(`paced mutation timeline oracle`, () => {
         await vi.advanceTimersByTimeAsync(0)
         expect(started).toEqual([1, 2, 3])
         for (const transaction of [first, second, third]) {
-          expect(await transaction.isPersisted.promise).toBe(transaction)
+          expect(await transaction.when(`settled`)).toBe(transaction)
         }
       },
       async () => {
@@ -2909,7 +2909,7 @@ for (const admission of [`admitted`, `dropped`, `queued`] as const)
       const transaction = create.mock.results.at(-1)?.value as
         Transaction<{ id: number }> | undefined
       if (transaction?.state === `pending`) {
-        void transaction.isPersisted.promise.catch(() => {})
+        void transaction.when(`settled`).catch(() => {})
         transaction.rollback({ isSecondaryRollback: true })
       }
       create.mockRestore()

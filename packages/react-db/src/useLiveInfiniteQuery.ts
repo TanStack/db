@@ -20,12 +20,7 @@ import {
   createSourceIdBindings,
   resumeSyncStarts,
 } from './source-id-bindings'
-import {
-  prepareDerivedQuery,
-  prepareQueryValue,
-  warnDeprecatedDepsArray,
-  warnUnhashableDerivedIdentity,
-} from './useLiveQuery'
+import { prepareDerivedQuery, prepareQueryValue } from './useLiveQuery'
 import type { SourceIdBindings } from './source-id-bindings'
 import type {
   DerivedIdentityProfiler,
@@ -113,7 +108,7 @@ type InfiniteQueryRenderState = {
   inputCollection: Collection<any, any, any> | null
   inputQuery: unknown
   client: DbClient | undefined
-  identityMode: `collection` | `queryKey` | `legacyDeps` | `derived`
+  identityMode: `collection` | `queryKey` | `derived`
   dependencies: Array<unknown> | null
   pageSize: number
   initialPageParam: number
@@ -135,19 +130,12 @@ type RenderedWindowCollection = {
   >
 }
 
-/**
- * Whether a recorded query identity matches the current one. Legacy deps
- * compare by reference. Derived identities and query keys compare by structure.
- */
+/** Whether a recorded query identity matches the current one. */
 function queryIdentityMatches(
   comparison: { changed: boolean; structurallyEqual: boolean },
   sameClient: boolean,
-  usesLegacyDeps: boolean,
 ): boolean {
-  return (
-    sameClient &&
-    (usesLegacyDeps ? !comparison.changed : comparison.structurallyEqual)
-  )
+  return sameClient && comparison.structurallyEqual
 }
 
 /**
@@ -158,7 +146,6 @@ function queryIdentityMatches(
  *
  * @param queryFn - Query function that defines what data to fetch. Must include `.orderBy()` for setWindow to work.
  * @param config - Configuration including pageSize and an optional initial page label
- * @param deps - Deprecated array of dependencies that trigger query re-execution when changed
  * @returns Object with pages, data, and pagination controls
  */
 
@@ -176,14 +163,12 @@ export function useLiveInfiniteQuery<
 export function useLiveInfiniteQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
   config: UseLiveInfiniteQueryConfig<TContext>,
-  deps?: Array<unknown>,
 ): UseLiveInfiniteQueryReturn<TContext>
 
 // Implementation
 export function useLiveInfiniteQuery<TContext extends Context>(
   queryFnOrCollection: any,
   config: UseLiveInfiniteQueryConfig<TContext>,
-  deps?: Array<unknown>,
 ): UseLiveInfiniteQueryReturn<TContext> {
   if (`getNextPageParam` in config) {
     throw new Error(
@@ -214,9 +199,6 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     maxMs: 0,
     warned: false,
   })
-  const legacyUnhashableIdentityRef = useRef<Array<unknown>>([
-    `legacy-unhashable`,
-  ])
   const deferredCollections = new Set<
     CollectionImplType<any, string | number, any, any, any>
   >()
@@ -230,10 +212,6 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     if (config.queryKey !== undefined) {
       identityMode = `queryKey`
       identityDeps = config.queryKey
-    } else if (deps !== undefined) {
-      identityMode = `legacyDeps`
-      identityDeps = deps
-      warnDeprecatedDepsArray(`useLiveInfiniteQuery`)
     } else if (
       committed?.identityMode === `derived` &&
       committed.inputQuery === queryFnOrCollection &&
@@ -243,31 +221,29 @@ export function useLiveInfiniteQuery<TContext extends Context>(
       identityDeps = committed.dependencies ?? []
     } else {
       identityMode = `derived`
-      const preparation = prepareDerivedQuery(
-        queryFnOrCollection,
-        dbClient,
-        derivedIdentityProfilerRef.current,
-        deferredCollections,
-      )
-      preparedQueryValue = preparation.value
-      claimSourceIds(
-        (sourceIdsRef.current ??= createSourceIdBindings()),
-        preparation.value,
-        dbClient,
-        `useLiveInfiniteQuery`,
-        () => resumeSyncStarts(deferredCollections),
-      )
-      if (preparation.status === `hashable`) {
+      try {
+        const preparation = prepareDerivedQuery(
+          queryFnOrCollection,
+          dbClient,
+          derivedIdentityProfilerRef.current,
+          deferredCollections,
+        )
+        preparedQueryValue = preparation.value
+        claimSourceIds(
+          (sourceIdsRef.current ??= createSourceIdBindings()),
+          preparation.value,
+          dbClient,
+          `useLiveInfiniteQuery`,
+          () => resumeSyncStarts(deferredCollections),
+        )
         identityDeps = preparation.identityDeps
-      } else {
-        warnUnhashableDerivedIdentity(preparation.error)
-        identityDeps = legacyUnhashableIdentityRef.current
+      } catch (error) {
+        resumeSyncStarts(deferredCollections)
+        throw error
       }
     }
   }
 
-  const usesLegacyDeps =
-    !inputIsCollection && config.queryKey === undefined && deps !== undefined
   const dependencyComparison = compareLiveQueryWindowDependencies(
     committed?.dependencies,
     identityDeps,
@@ -275,9 +251,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
   const sameClient = committed?.client === dbClient
   const dependenciesChanged =
     !inputIsCollection &&
-    !queryIdentityMatches(dependencyComparison, sameClient, usesLegacyDeps)
-  const dependenciesStructurallyEqual =
-    usesLegacyDeps && sameClient && dependencyComparison.structurallyEqual
+    !queryIdentityMatches(dependencyComparison, sameClient)
   const needsNewCollection =
     committed === null ||
     committed.inputKind !== inputKind ||
@@ -305,7 +279,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
       sameCollection:
         inputIsCollection && committed?.inputCollection === queryFnOrCollection,
       dependenciesChanged,
-      dependenciesStructurallyEqual,
+      dependenciesStructurallyEqual: false,
       pageShapeChanged,
     })
     const previousPageCount = committed
@@ -337,7 +311,6 @@ export function useLiveInfiniteQuery<TContext extends Context>(
             identityDeps,
           ),
           rendered.client === dbClient,
-          usesLegacyDeps,
         ) &&
         rendered.collection.status !== `cleaned-up` &&
         rendered.collection.status !== `error` &&

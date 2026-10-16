@@ -539,7 +539,7 @@ async function runSameKey(
       return gate.promise
     },
   })
-  const persisted = observeHistoryPromise(tx.isPersisted.promise)
+  const persisted = observeHistoryPromise(tx.when(`settled`))
   let committed: ReturnType<typeof observeHistoryPromise> | undefined
   await withHistoryCleanup(
     async () => {
@@ -754,7 +754,7 @@ async function runDeleteInsertReplacement(
       return Promise.resolve()
     },
   })
-  const settlement = transaction.isPersisted.promise.catch(() => undefined)
+  const settlement = transaction.when(`settled`).catch(() => undefined)
 
   return withHistoryCleanup(
     async () => {
@@ -1033,10 +1033,10 @@ describe(`Delete then insert transaction laws`, () => {
         return Promise.resolve()
       },
     })
-    const overlaySettlement = overlay.isPersisted.promise.catch(() => undefined)
-    const replacementSettlement = replacement.isPersisted.promise.catch(
-      () => undefined,
-    )
+    const overlaySettlement = overlay.when(`settled`).catch(() => undefined)
+    const replacementSettlement = replacement
+      .when(`settled`)
+      .catch(() => undefined)
 
     await withHistoryCleanup(
       async () => {
@@ -1111,12 +1111,12 @@ describe(`Delete then insert transaction laws`, () => {
         return Promise.resolve()
       },
     })
-    const insertSettlement = pendingInsert.isPersisted.promise.catch(
-      () => undefined,
-    )
-    const replacementSettlement = replacement.isPersisted.promise.catch(
-      () => undefined,
-    )
+    const insertSettlement = pendingInsert
+      .when(`settled`)
+      .catch(() => undefined)
+    const replacementSettlement = replacement
+      .when(`settled`)
+      .catch(() => undefined)
 
     await withHistoryCleanup(
       async () => {
@@ -1167,13 +1167,7 @@ describe(`Delete then insert transaction laws`, () => {
 // Observe user fields without discarding unexpected fields or undefined keys.
 function userRow<T extends object>(value: T): T {
   const copy = { ...value } as Record<string, unknown>
-  for (const field of [
-    `$hasPendingWrites`,
-    `$synced`,
-    `$origin`,
-    `$key`,
-    `$collectionId`,
-  ])
+  for (const field of [`$hasPendingWrites`, `$origin`, `$key`, `$collectionId`])
     delete copy[field]
   return copy as T
 }
@@ -1247,7 +1241,7 @@ async function runTransaction(scenario: Scenario, fault?: ObservationFault) {
       return gate.promise
     },
   })
-  const persisted = observeHistoryPromise(tx.isPersisted.promise)
+  const persisted = observeHistoryPromise(tx.when(`settled`))
   const settled = observeHistoryPromise(tx.when(`settled`))
   let committed: ReturnType<typeof observeHistoryPromise<typeof tx>> | undefined
   let subscription: ReturnType<typeof source.subscribeChanges> | undefined
@@ -1276,10 +1270,6 @@ async function runTransaction(scenario: Scenario, fault?: ObservationFault) {
           row.$hasPendingWrites,
           `${label}: ${surface} row ${row.id} pending local write`,
         ).toBe(expectedPending)
-        expect(
-          row.$hasPendingWrites,
-          `${label}: ${surface} row ${row.id} legacy inverse`,
-        ).toBe(!row.$synced)
       }
     }
     const read = ordered(source.values())
@@ -1658,7 +1648,7 @@ for (const { numberKey, reversed } of [0, -1, 1, 1.5].flatMap((key) =>
             return Promise.resolve()
           },
         })
-        const persisted = observeHistoryPromise(tx.isPersisted.promise)
+        const persisted = observeHistoryPromise(tx.when(`settled`))
         await withHistoryCleanup(
           async () => {
             await source.preload()

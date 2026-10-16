@@ -184,15 +184,15 @@ const todoCollection = createCollection(
     schema: todoSchema,
     shapeOptions: { url: '/api/electric/todos' },
     getKey: (item) => item.id,
-    onInsert: async ({ transaction }) => {
+    onInsert: async ({ transaction, collection }) => {
       const res = await api.todos.create(transaction.mutations[0].modified)
-      return { txid: res.txid }
+      await collection.utils.awaitTxId(res.txid)
     },
   }),
 )
 ```
 
-The returned `txid` tells the collection to hold optimistic state until Electric streams back that transaction. See the [Electric adapter reference](references/electric-adapter.md) for the full dual-path pattern (schema + parser).
+The handler waits for Electric to stream the `txid` before it completes, keeping optimistic state visible until then. See the [Electric adapter reference](references/electric-adapter.md) for the full dual-path pattern (schema + parser).
 
 ## Common Mistakes
 

@@ -86,7 +86,7 @@ describe('application decision precedes durability', () => {
                     })
                   : collection.delete(1)
             let settled = false
-            const outcome = tx.isPersisted.promise.then(
+            const outcome = tx.when(`settled`).then(
               () => {
                 settled = true
                 return undefined
@@ -129,7 +129,7 @@ describe('application decision precedes durability', () => {
             // separate cut because clearing the store could otherwise hide it.
             const suffix = { id: 3, name: 'suffix' }
             const afterSuffix = [...expected, suffix]
-            await collection.insert({ ...suffix }).isPersisted.promise
+            await collection.insert({ ...suffix }).when(`settled`)
             await Channel.deliver()
             assertRows(
               collection.values(),
@@ -184,7 +184,7 @@ describe('atomic persistence and truthful settlement', () => {
           const beforeVersions = await readStore(h.db, '_versions')
           let promise: Promise<unknown>
           if (entry === 'automatic')
-            promise = collection.insert(rows).isPersisted.promise
+            promise = collection.insert(rows).when(`settled`)
           else if (entry === 'import')
             promise = collection.utils.importData(rows)
           else {
@@ -193,7 +193,7 @@ describe('atomic persistence and truthful settlement', () => {
                 collection.utils.acceptMutations(transaction),
             })
             tx.mutate(() => collection.insert(rows))
-            promise = tx.isPersisted.promise
+            promise = tx.when(`settled`)
           }
           const outcome = await promise.then(
             () => 'fulfilled',
@@ -216,7 +216,7 @@ describe('atomic persistence and truthful settlement', () => {
             before,
             'failure cannot publish a peer change',
           )
-          await collection.insert({ id: 5, name: 'suffix' }).isPersisted.promise
+          await collection.insert({ id: 5, name: 'suffix' }).when(`settled`)
           await Channel.deliver()
           assertRows(
             (await h.open()).values(),
@@ -257,7 +257,7 @@ describe('atomic persistence and truthful settlement', () => {
                     row.name = 'new'
                   })
                 : collection.delete(1)
-          const outcome = await tx.isPersisted.promise.then(
+          const outcome = await tx.when(`settled`).then(
             () => 'fulfilled',
             () => 'rejected',
           )
@@ -288,10 +288,10 @@ for (const remote of ['delete', 'clear'] as const) {
           autoCommit: false,
           mutationFn: async () => {},
         })
-        const done = tx.isPersisted.promise.catch(() => undefined)
+        const done = tx.when(`settled`).catch(() => undefined)
         tx.mutate(() => receiver.delete(1))
         expect(receiver.has(1), 'pending delete reached').toBe(false)
-        if (remote === 'delete') await source.delete(1).isPersisted.promise
+        if (remote === 'delete') await source.delete(1).when(`settled`)
         else await source.utils.clearObjectStore()
         expect(
           await Channel.deliver(),
@@ -435,18 +435,19 @@ for (const entry of ['import', 'insert', 'update', 'delete'] as const) {
           },
         )
         if (entry === 'import') await c.utils.importData(authored)
-        else if (entry === 'insert')
-          await c.insert(authored).isPersisted.promise
+        else if (entry === 'insert') await c.insert(authored).when(`settled`)
         else if (entry === 'update')
-          await c.update(
-            authored.map((row) => row.id),
-            (drafts) => {
-              drafts.forEach((draft) => {
-                draft.name = String(draft.id)
-              })
-            },
-          ).isPersisted.promise
-        else await c.delete(authored.map((row) => row.id)).isPersisted.promise
+          await c
+            .update(
+              authored.map((row) => row.id),
+              (drafts) => {
+                drafts.forEach((draft) => {
+                  draft.name = String(draft.id)
+                })
+              },
+            )
+            .when(`settled`)
+        else await c.delete(authored.map((row) => row.id)).when(`settled`)
         const expected = entry === 'delete' ? [] : authored
         expect(issued).toBe(2 * count)
         expect(beforeFirstSuccess).toBe(2 * count)

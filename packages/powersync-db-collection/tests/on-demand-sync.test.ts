@@ -593,7 +593,7 @@ describe(`On-Demand Sync Mode`, () => {
         }
 
         resolvePersistence()
-        await transaction.isPersisted.promise
+        await transaction.when(`settled`)
         if (outcome === `apply`) {
           expect(await preload).toEqual({ status: `fulfilled` })
           expect(
@@ -623,7 +623,7 @@ describe(`On-Demand Sync Mode`, () => {
         }
       }, [
         resolvePersistence,
-        () => transaction.isPersisted.promise,
+        () => transaction.when(`settled`),
         () => subscription.unsubscribe(),
         () => electronics.cleanup(),
         () => collection.cleanup(),
@@ -1514,7 +1514,7 @@ describe(`On-Demand Sync Mode`, () => {
       )
 
       const tx = collection.delete(productA!.id)
-      await tx.isPersisted.promise
+      await tx.when(`settled`)
 
       await vi.waitFor(
         () => {
@@ -1582,7 +1582,7 @@ describe(`On-Demand Sync Mode`, () => {
         price: 99,
         category: `electronics`,
       })
-      await tx.isPersisted.promise
+      await tx.when(`settled`)
 
       await vi.waitFor(
         () => {
@@ -1650,7 +1650,7 @@ describe(`On-Demand Sync Mode`, () => {
       const tx = collection.update(productA!.id, (d) => {
         d.price = 999
       })
-      await tx.isPersisted.promise
+      await tx.when(`settled`)
 
       await vi.waitFor(
         () => {
@@ -1717,7 +1717,7 @@ describe(`On-Demand Sync Mode`, () => {
 
       // Delete Product A
       const tx = collection.delete(productA.id)
-      await tx.isPersisted.promise
+      await tx.when(`settled`)
 
       await vi.waitFor(
         () => {
@@ -1785,7 +1785,7 @@ describe(`On-Demand Sync Mode`, () => {
         price: 99,
         category: `electronics`,
       })
-      await tx.isPersisted.promise
+      await tx.when(`settled`)
 
       await vi.waitFor(
         () => {
@@ -1850,7 +1850,7 @@ describe(`On-Demand Sync Mode`, () => {
       const tx = collection.update(productA.id, (d) => {
         d.price = 999
       })
-      await tx.isPersisted.promise
+      await tx.when(`settled`)
 
       await vi.waitFor(
         () => {
@@ -2399,7 +2399,7 @@ describe(`On-Demand Sync Mode`, () => {
   })
 
   describe(`Pending mutations during filter changes`, () => {
-    it(`should resolve isPersisted when loadSubset is called during a pending mutation`, async () => {
+    it(`should resolve when('settled') when loadSubset is called during a pending mutation`, async () => {
       const db = await createDatabase()
       await createTestProducts(db)
 
@@ -2463,16 +2463,16 @@ describe(`On-Demand Sync Mode`, () => {
 
       await clothingQuery.preload()
 
-      // isPersisted.promise should resolve — if the bug is present, this hangs forever
+      // when('settled') should resolve — if the bug is present, this hangs forever
       await vi.waitFor(
         async () => {
-          await insertResult.isPersisted.promise
+          await insertResult.when(`settled`)
         },
         { timeout: 5000 },
       )
     })
 
-    it(`should resolve isPersisted when unloadSubset is called during a pending mutation`, async () => {
+    it(`should resolve when('settled') when unloadSubset is called during a pending mutation`, async () => {
       const db = await createDatabase()
       await createTestProducts(db)
 
@@ -2545,10 +2545,10 @@ describe(`On-Demand Sync Mode`, () => {
       // which rebuilds the diff trigger, potentially dropping unprocessed diff records
       clothingQuery.cleanup()
 
-      // isPersisted.promise should resolve — if the bug is present, this hangs forever
+      // when('settled') should resolve — if the bug is present, this hangs forever
       await vi.waitFor(
         async () => {
-          await insertResult.isPersisted.promise
+          await insertResult.when(`settled`)
         },
         { timeout: 5000 },
       )
@@ -2609,7 +2609,7 @@ describe(`On-Demand Sync Mode`, () => {
                 })
               : collection.delete(id)
         let settled = false
-        const observed = mutation.isPersisted.promise.then(
+        const observed = mutation.when(`settled`).then(
           () => {
             settled = true
             return { status: `fulfilled` as const }

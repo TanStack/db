@@ -143,9 +143,10 @@ function mountControllable<P>(
   const hook = renderHook(
     ({ param }: { param: P }) =>
       useRecorded(
-        useLiveInfiniteQuery((q: any) => build(q, param), config as any, [
-          param,
-        ]),
+        useLiveInfiniteQuery((q: any) => build(q, param), {
+          ...(config as any),
+          queryKey: [param],
+        }),
         log,
       ),
     { initialProps: { param: initial } },
@@ -216,11 +217,10 @@ function mountInputControllable(
   const hook = renderHook(
     ({ kind }: { kind: `collection` | `query` }) =>
       useRecorded(
-        useLiveInfiniteQuery(
-          kind === `collection` ? collection : build,
-          config as any,
-          [kind],
-        ),
+        useLiveInfiniteQuery(kind === `collection` ? collection : build, {
+          ...(config as any),
+          queryKey: [kind],
+        }),
         log,
       ),
     {
@@ -281,8 +281,7 @@ it(`publishes query-function pages on the first layout commit after mount and de
             .from({ row: source.collection })
             .where(({ row }) => gt(row.rank, minimum))
             .orderBy(({ row }) => row.rank, `desc`),
-        { pageSize: 3 },
-        [minimum],
+        { ...{ pageSize: 3 }, queryKey: [minimum] },
       )
       useLayoutEffect(() => {
         if (!result.collection) {

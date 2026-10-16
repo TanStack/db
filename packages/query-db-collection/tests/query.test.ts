@@ -933,7 +933,7 @@ describe(`QueryCollection`, () => {
         expect(collection.get(`server`)).toBeUndefined()
 
         persistence.resolve()
-        await transaction.isPersisted.promise
+        await transaction.when(`settled`)
 
         expect(collection.status).toBe(`ready`)
         expect(collection.get(`server`)).toEqual(
@@ -941,7 +941,7 @@ describe(`QueryCollection`, () => {
         )
       } finally {
         persistence.resolve()
-        await transaction.isPersisted.promise.catch(() => undefined)
+        await transaction.when(`settled`).catch(() => undefined)
         await collection.cleanup()
       }
     })
@@ -978,14 +978,14 @@ describe(`QueryCollection`, () => {
         collection._sync.unloadSubset({})
 
         persistence.resolve()
-        await transaction.isPersisted.promise
+        await transaction.when(`settled`)
         await flushPromises()
 
         expect(collection.has(`first`)).toBe(false)
         expect(collection.has(`second`)).toBe(false)
       } finally {
         persistence.resolve()
-        await transaction.isPersisted.promise.catch(() => undefined)
+        await transaction.when(`settled`).catch(() => undefined)
         await collection.cleanup()
       }
     })
@@ -1153,14 +1153,14 @@ describe(`QueryCollection`, () => {
         await flushPromises()
 
         persistence.resolve()
-        await transaction.isPersisted.promise
+        await transaction.when(`settled`)
 
         await vi.waitFor(() => {
           expect(collection.get(`server`)).toBeUndefined()
         })
       } finally {
         persistence.resolve()
-        await transaction.isPersisted.promise.catch(() => undefined)
+        await transaction.when(`settled`).catch(() => undefined)
         await collection.cleanup()
       }
     })
@@ -2596,7 +2596,41 @@ describe(`QueryCollection`, () => {
       ])
     })
 
-    it(`does not reject a deprecated auto-refetch when result application fails`, async () => {
+    it(`does not warn that retained automatic refetch is being removed`, async () => {
+      resetWarnings()
+      const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }])
+      const options = queryCollectionOptions<TestItem>({
+        id: `retained-auto-refetch`,
+        queryClient,
+        queryKey: [`retained-auto-refetch`],
+        queryFn,
+        getKey,
+        onInsert: () => Promise.resolve(),
+        startSync: true,
+      })
+      const collection = createCollection(options)
+      const transaction = {
+        id: `retained-auto-refetch-transaction`,
+        mutations: [],
+      } as unknown as TransactionWithMutations<TestItem, `insert`>
+
+      try {
+        await collection.stateWhenReady()
+        await options.onInsert!({ transaction, collection })
+        expect(queryFn).toHaveBeenCalledTimes(2)
+        expect(
+          warning.mock.calls.some(([message]) =>
+            String(message).includes(`removed in v1.0`),
+          ),
+        ).toBe(false)
+      } finally {
+        warning.mockRestore()
+        await collection.cleanup()
+      }
+    })
+
+    it(`does not reject automatic refetch when result application fails`, async () => {
       resetWarnings()
       const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
       const consoleError = vi
@@ -2667,7 +2701,7 @@ describe(`QueryCollection`, () => {
         queryFn.mockClear()
 
         const mutation = collection.insert({ id: `2`, name: `Item 2` })
-        await mutation.isPersisted.promise
+        await mutation.when(`settled`)
 
         expect(queryFn).toHaveBeenCalledTimes(1)
         expect(warning).not.toHaveBeenCalled()
@@ -4732,14 +4766,14 @@ describe(`QueryCollection`, () => {
       const tx = collection.update(`123`, (draft) => {
         draft.brandName = `B`
       })
-      await tx.isPersisted.promise
+      await tx.when(`settled`)
 
       // The queued server row is hidden behind the optimistic row until the
       // mutation settles, then both change in one publication.
       expect(rowWhileHandlerRuns).toEqual({ id: `123`, brandName: `B` })
       expect(collection.get(`123`)).toMatchObject({
         brandName: `B (server)`,
-        $synced: true,
+        $hasPendingWrites: false,
       })
       expect(queryClient.getQueryData(queryKey)).toEqual([
         { id: `123`, brandName: `B (server)` },
@@ -4880,25 +4914,25 @@ describe(`QueryCollection`, () => {
         const first = collection.update(`p`, (draft) => {
           draft.a = 1
         })
-        await first.isPersisted.promise
+        await first.when(`settled`)
         expect(adapter.rows.get(`p`)?.revision).toBe(2)
         expect(collection.get(`p`)).toMatchObject({
           a: 10,
           revision: 2,
-          $synced: true,
+          $hasPendingWrites: false,
         })
 
         const second = collection.update(`p`, (draft) => {
           draft.b = 1
         })
-        await second.isPersisted.promise
+        await second.when(`settled`)
         expect(requestRevisions).toEqual([1, 2])
         expect(adapter.rows.get(`p`)?.revision).toBe(3)
         expect(collection.get(`p`)).toMatchObject({
           a: 10,
           b: 1,
           revision: 3,
-          $synced: true,
+          $hasPendingWrites: false,
         })
       } finally {
         await collection.cleanup()
@@ -4975,9 +5009,11 @@ describe(`QueryCollection`, () => {
             server = { id: `row`, value: 3 }
             second = collection.utils.refetch()
           } else {
-            second = collection.update(`row`, (draft) => {
-              draft.value = 0
-            }).isPersisted.promise
+            second = collection
+              .update(`row`, (draft) => {
+                draft.value = 0
+              })
+              .when(`settled`)
           }
           release.resolve()
           await Promise.all([first, second])
@@ -5031,9 +5067,11 @@ describe(`QueryCollection`, () => {
         const refetch = collection.utils.refetch()
         await vi.waitFor(() => expect(fetches).toHaveLength(1))
 
-        await collection.update(`row`, (draft) => {
-          draft.value = 0
-        }).isPersisted.promise
+        await collection
+          .update(`row`, (draft) => {
+            draft.value = 0
+          })
+          .when(`settled`)
         expect(collection.get(`row`)?.value).toBe(3)
 
         fetches[0]!.resolve([])
@@ -6256,7 +6294,7 @@ describe(`QueryCollection`, () => {
       })
 
       const transaction = collection.delete(`1`)
-      await transaction.isPersisted.promise
+      await transaction.when(`settled`)
 
       // Verify the fix: writeDelete should work, transaction completes, item is deleted
       expect(transaction.state).toBe(`completed`)
@@ -7506,7 +7544,7 @@ describe(`QueryCollection`, () => {
           { id: `4`, name: `Item 4` },
         ])
         persistInsert()
-        await inserted.isPersisted.promise
+        await inserted.when(`settled`)
         expect(queryFn).toHaveBeenCalledTimes(1)
         queryFn.mockResolvedValue([
           { id: `1`, name: `Provider changed`, category: `A` },
@@ -11542,7 +11580,7 @@ describe(`QueryCollection`, () => {
           hours_per_day: 8,
         })
         outcomes.push(
-          firstInsert.isPersisted.promise.then(
+          firstInsert.when(`settled`).then(
             () => {
               settled.push(`first insert`)
               return `fulfilled`
@@ -11566,7 +11604,7 @@ describe(`QueryCollection`, () => {
         expect(settled).toEqual([])
         expect(firstLoad.outcome.status).toBe(`pending`)
         creates[0]!.release.resolve()
-        await firstInsert.isPersisted.promise
+        await firstInsert.when(`settled`)
         await firstLoad.promise
         await flushPromises()
         world.set(100, {
@@ -11583,7 +11621,7 @@ describe(`QueryCollection`, () => {
         // Step 2: Delete
         const firstDelete = collection.delete(carolId)
         outcomes.push(
-          firstDelete.isPersisted.promise.then(
+          firstDelete.when(`settled`).then(
             () => {
               settled.push(`delete`)
               return `fulfilled`
@@ -11607,7 +11645,7 @@ describe(`QueryCollection`, () => {
         expect(settled).toEqual([`first insert`])
         expect(deleteLoad.outcome.status).toBe(`pending`)
         deletion.release.resolve()
-        await firstDelete.isPersisted.promise
+        await firstDelete.when(`settled`)
         await deleteLoad.promise
         await flushPromises()
         world.delete(100)
@@ -11638,7 +11676,7 @@ describe(`QueryCollection`, () => {
           hours_per_day: 8,
         })
         outcomes.push(
-          t2.isPersisted.promise.then(
+          t2.when(`settled`).then(
             () => {
               settled.push(`second insert`)
               return `fulfilled`
@@ -11663,7 +11701,7 @@ describe(`QueryCollection`, () => {
         expect(settled).toEqual([`first insert`, `delete`])
         expect(secondLoad.outcome.status).toBe(`pending`)
         creates[1]!.release.resolve()
-        await t2.isPersisted.promise
+        await t2.when(`settled`)
         await secondLoad.promise
         await flushPromises()
         world.set(101, {

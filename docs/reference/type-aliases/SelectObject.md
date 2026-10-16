@@ -7,7 +7,7 @@ title: SelectObject
 type SelectObject<T> = T;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:303](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L303)
+Defined in: [packages/db/src/query/builder/types.ts:300](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L300)
 
 SelectObject - Wrapper type for select clause objects
 

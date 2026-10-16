@@ -31,7 +31,6 @@ title: "@tanstack/db"
 - [DeduplicatedLoadSubset](classes/DeduplicatedLoadSubset.md)
 - [DeleteKeyNotFoundError](classes/DeleteKeyNotFoundError.md)
 - [DistinctRequiresSelectError](classes/DistinctRequiresSelectError.md)
-- [~~DuplicateAliasInSubqueryError~~](classes/DuplicateAliasInSubqueryError.md)
 - [DuplicateDbInstanceError](classes/DuplicateDbInstanceError.md)
 - [DuplicateKeyError](classes/DuplicateKeyError.md)
 - [DuplicateKeySyncError](classes/DuplicateKeySyncError.md)

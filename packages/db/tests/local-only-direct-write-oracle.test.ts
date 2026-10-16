@@ -64,7 +64,7 @@ describe(`local-only direct writes`, () => {
 
     for (const transaction of [inserted, updated, deleted]) {
       expect(transaction.state).toBe(`completed`)
-      await expect(transaction.isPersisted.promise).resolves.toBe(transaction)
+      await expect(transaction.when(`settled`)).resolves.toBe(transaction)
       await expect(transaction.when(`settled`)).resolves.toBe(transaction)
     }
     expect(batches).toEqual([
@@ -75,7 +75,7 @@ describe(`local-only direct writes`, () => {
     ])
     expect(orders.get(1)).toMatchObject({
       value: `c`,
-      $synced: true,
+      $hasPendingWrites: false,
       $origin: `local`,
     })
     expect(orders.has(2)).toBe(false)
@@ -117,7 +117,7 @@ describe(`local-only direct writes`, () => {
 
     expect(orders.get(1)?.value).toBe(`direct`)
     release.resolve()
-    await persisting.isPersisted.promise
+    await persisting.when(`settled`)
   })
 
   it(`joins an ambient transaction`, () => {
@@ -158,7 +158,7 @@ describe(`local-only direct writes`, () => {
     expect(created.map((transaction) => transaction.state)).toEqual([
       `completed`,
     ])
-    await expect(created[0]!.isPersisted.promise).resolves.toBe(created[0])
+    await expect(created[0]!.when(`settled`)).resolves.toBe(created[0])
     // The next direct write still takes the direct path.
     expect(orders.insert({ id: 3, value: `c` }).state).toBe(`completed`)
   })
@@ -191,7 +191,7 @@ describe(`local-only direct writes`, () => {
         kind === `update` ? `normalized` : undefined,
       )
       await Promise.all(
-        created.map((transaction) => transaction.isPersisted.promise),
+        created.map((transaction) => transaction.when(`settled`)),
       )
       expect(created.map((transaction) => transaction.state)).toEqual([
         `completed`,
@@ -218,7 +218,7 @@ describe(`local-only direct writes`, () => {
     expect(created.map((transaction) => transaction.state)).toEqual([`failed`])
     expect(created[0]!.error?.error).toBeInstanceOf(Error)
     expect(created[0]!.error?.message).toBe(`bad`)
-    await expect(created[0]!.isPersisted.promise).rejects.toBeInstanceOf(Error)
+    await expect(created[0]!.when(`settled`)).rejects.toBeInstanceOf(Error)
   })
 
   it(`runs the user's handler for that operation type`, async () => {
@@ -235,7 +235,7 @@ describe(`local-only direct writes`, () => {
     })
 
     expect(transaction.state).not.toBe(`completed`)
-    await transaction.isPersisted.promise
+    await transaction.when(`settled`)
     expect(calls).toBe(1)
     expect(orders.get(1)?.value).toBe(`handled`)
     // Inserts have no handler, so they still take the direct path.
@@ -263,7 +263,7 @@ async function observe(handlers: Handlers, writes: Array<Write>) {
         changes
           .map(
             ({ type, key, value }) =>
-              `${type}:${key}:${value.value}:${String(value.$synced)}`,
+              `${type}:${key}:${value.value}:${String(value.$hasPendingWrites)}`,
           )
           .sort(),
       ),
@@ -278,7 +278,7 @@ async function observe(handlers: Handlers, writes: Array<Write>) {
       errors.push(`${(error as Error).name}: ${(error as Error).message}`)
     }
   }
-  await Promise.all(transactions.map((t) => t.isPersisted.promise))
+  await Promise.all(transactions.map((t) => t.when(`settled`)))
   return {
     rows: orders.toArray.map(({ id, value }) => ({ id, value })),
     batches,
@@ -431,8 +431,8 @@ describe(`local-only fallbacks for every operation type`, () => {
       expect(transaction.state).not.toBe(`completed`)
       expect(visible[kind](orders)).toBe(true)
       release.resolve()
-      await persisting.isPersisted.promise
-      await transaction.isPersisted.promise
+      await persisting.when(`settled`)
+      await transaction.when(`settled`)
       expect(visible[kind](orders)).toBe(true)
     })
 
@@ -453,7 +453,7 @@ describe(`local-only fallbacks for every operation type`, () => {
       expect(transaction.state).not.toBe(`completed`)
       expect(visible[kind](orders)).toBe(true)
       pending.rollback()
-      await transaction.isPersisted.promise
+      await transaction.when(`settled`)
       expect(visible[kind](orders)).toBe(true)
     })
 
@@ -486,7 +486,7 @@ describe(`local-only fallbacks for every operation type`, () => {
       const transaction = write[kind](orders)
 
       expect(visible[kind](orders)).toBe(true)
-      await expect(transaction.isPersisted.promise).rejects.toThrow(
+      await expect(transaction.when(`settled`)).rejects.toThrow(
         `handler failed`,
       )
       expect(transaction.state).toBe(`failed`)

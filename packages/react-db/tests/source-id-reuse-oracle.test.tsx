@@ -17,6 +17,8 @@
  * entries must remain distinct, including before the first hook commits.
  * A rejected render must release any sync-start deferral it acquired for a
  * shared client descriptor, so a later direct reader can start that Collection.
+ * This also applies when an unhashable functional query rejects before the
+ * hook can claim its source IDs.
  * This remains true when earlier deferred sync starts throw: each pending
  * Collection is attempted before the first startup error is rethrown.
  * The bounded histories below distinguish this law from a hash-only check,
@@ -99,6 +101,78 @@ function checkRerender(
 }
 
 describe(`React source ID reuse`, () => {
+  it.each([`normal`, `infinite`] as const)(
+    `releases deferred descriptor sync after an unhashable %s query rejects`,
+    async (variant) => {
+      const client = new DbClient()
+      let syncStarts = 0
+      const descriptor = collectionOptions(`unhashable-${variant}`, () => ({
+        id: `unhashable-${variant}`,
+        getKey: (row: Row) => row.id,
+        startSync: true,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            syncStarts++
+            begin()
+            write({
+              type: `insert`,
+              value: { id: `one`, value: `ready`, rank: 1 },
+            })
+            commit()
+            markReady()
+          },
+        },
+      }))
+      const consoleError = vi
+        .spyOn(console, `error`)
+        .mockImplementation(() => {})
+
+      function Broken() {
+        if (variant === `normal`) {
+          useLiveQuery({
+            client,
+            query: (q) =>
+              q.from({ row: descriptor }).fn.select(({ row }) => ({
+                id: row.id,
+                value: row.value,
+              })),
+          })
+        } else {
+          useLiveInfiniteQuery(
+            (q) =>
+              q
+                .from({ row: descriptor })
+                .orderBy(({ row }) => row.rank)
+                .fn.select(({ row }) => ({ id: row.id, value: row.value })),
+            { client, pageSize: 1 },
+          )
+        }
+        return <div>Query</div>
+      }
+
+      try {
+        const root = render(
+          <TestErrorBoundary>
+            <Broken />
+          </TestErrorBoundary>,
+        )
+        expect(root.getByText(`Rejected`)).toBeDefined()
+        expect(syncStarts).toBe(1)
+
+        const shared = client.collection(descriptor)
+        const reader = renderHook(() => useLiveQuery(shared))
+        await act(async () => {})
+        expect(syncStarts).toBe(1)
+        expect(reader.result.current.data[0]?.value).toBe(`ready`)
+        reader.unmount()
+        root.unmount()
+        await shared.cleanup()
+      } finally {
+        consoleError.mockRestore()
+      }
+    },
+  )
+
   it(`releases a later shared source when earlier deferred sync starts fail`, async () => {
     const client = new DbClient()
     const first = source(`settings`, `first`)

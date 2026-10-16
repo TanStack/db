@@ -19,7 +19,7 @@ For comprehensive documentation on writing queries (filtering, joins, aggregatio
 
 ### useLiveQuery
 
-The `useLiveQuery` primitive creates a live query that automatically updates your component when data changes. It returns an object where `data` is a plain array and status fields (e.g. `isLoading()`, `status()`) are accessors:
+The `useLiveQuery` primitive creates a live query that automatically updates your component when data changes. Call the returned accessor to read its data; status fields such as `isLoading` and `status` are reactive properties:
 
 ```tsx
 import { useLiveQuery } from '@tanstack/solid-db'
@@ -34,9 +34,9 @@ function TodoList() {
   )
 
   return (
-    <Show when={!query.isLoading()} fallback={<div>Loading...</div>}>
+    <Show when={!query.isLoading} fallback={<div>Loading...</div>}>
       <ul>
-        <For each={query.data}>
+        <For each={query()}>
           {(todo) => <li>{todo.text}</li>}
         </For>
       </ul>
@@ -45,7 +45,7 @@ function TodoList() {
 }
 ```
 
-**Note:** `query.data` returns an array directly (not a function), but status fields like `isLoading()`, `status()`, etc. are accessor functions.
+**Note:** `query()` reads the array; `query.isLoading` and `query.status` read reactive status properties.
 
 ### Reactive Queries with Signals
 
@@ -62,7 +62,7 @@ function FilteredTodos(props: { minPriority: number }) {
      .where(({ todos }) => gt(todos.priority, props.minPriority))
   )
 
-  return <div>{query.data.length} high-priority todos</div>
+  return <div>{query().length} high-priority todos</div>
 }
 ```
 
@@ -98,7 +98,7 @@ function TodoList() {
         <option value="active">Active</option>
         <option value="completed">Completed</option>
       </select>
-      <div>{query.data.length} todos</div>
+      <div>{query().length} todos</div>
     </div>
   )
 }
@@ -125,7 +125,7 @@ function TodoList() {
   )
 
   // Solid automatically tracks minPriority() and recomputes when it changes
-  return <div>{query.data.length} todos</div>
+  return <div>{query().length} todos</div>
 }
 ```
 
@@ -147,7 +147,7 @@ function TodoList() {
   )
   // Won't update when minPriority changes!
 
-  return <div>{query.data.length} todos</div>
+  return <div>{query().length} todos</div>
 }
 ```
 
@@ -162,7 +162,7 @@ function AllTodos() {
     q.from({ todos: todosCollection })
   )
 
-  return <div>{query.data.length} todos</div>
+  return <div>{query().length} todos</div>
 }
 ```
 
@@ -184,6 +184,6 @@ function TodoList() {
   // Pass existing collection
   const query = useLiveQuery(() => todosQuery)
 
-  return <div>{query.data.length} todos</div>
+  return <div>{query().length} todos</div>
 }
 ```

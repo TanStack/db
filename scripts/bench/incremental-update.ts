@@ -675,7 +675,7 @@ function writeOptimistic(write: () => void) {
     autoCommit: false,
     mutationFn: async () => {},
   })
-  transaction.isPersisted.promise.catch(() => undefined)
+  void transaction.when(`settled`).catch(() => undefined)
   transaction.mutate(write)
   return transaction
 }

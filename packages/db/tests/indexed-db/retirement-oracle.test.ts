@@ -82,11 +82,13 @@ function start(c: Subject, kind: Kind, owner: number): Promise<unknown> {
   if (kind === 'clear') return c.utils.clearObjectStore()
   if (kind === 'import') return c.utils.importData(apply([], kind, owner))
   if (kind === 'insert')
-    return c.insert(apply([], kind, owner)[0]!).isPersisted.promise
-  if (kind === 'delete') return c.delete(owner).isPersisted.promise
-  return c.update(owner, (row) => {
-    row.name = `after-${owner}`
-  }).isPersisted.promise
+    return c.insert(apply([], kind, owner)[0]!).when(`settled`)
+  if (kind === 'delete') return c.delete(owner).when(`settled`)
+  return c
+    .update(owner, (row) => {
+      row.name = `after-${owner}`
+    })
+    .when(`settled`)
 }
 function recordStatus(c: Subject) {
   const statuses: Array<string> = []
@@ -333,7 +335,7 @@ for (const reason of reasons) {
         tx.mutate(() => {
           void start(c, kind, 1)
         })
-        const caller = observe(tx.isPersisted.promise, () =>
+        const caller = observe(tx.when(`settled`), () =>
           sorted(c.base.values()),
         )
         await accepted.promise
@@ -379,9 +381,11 @@ for (const reason of reasons) {
           if (read === 'replacement')
             await sender.utils.importData([{ id: 3, name: 'new snapshot' }])
           else
-            await sender.update(1, (row) => {
-              row.name = 'peer update'
-            }).isPersisted.promise
+            await sender
+              .update(1, (row) => {
+                row.name = 'peer update'
+              })
+              .when(`settled`)
         }
         const gate = holdStore(h.db.db)
         h.disposers.push(() => gate.release())
@@ -552,7 +556,7 @@ it.each(mixedCells)(
           tx.mutate(() => {
             void start(c, op.kind, slot + 1)
           })
-          callers[slot] = observe(tx.isPersisted.promise, capture(slot))
+          callers[slot] = observe(tx.when(`settled`), capture(slot))
           await accepted.promise
           durable = apply(durable, op.kind, slot + 1)
           assertRows(
@@ -694,7 +698,7 @@ for (const reason of reasons)
       const native = observeTransactions(h.db.db)
       h.disposers.push(() => native.restore())
       const row = { id: 3, name: 'admitted during startup' }
-      const caller = observe(c.insert(row).isPersisted.promise, () =>
+      const caller = observe(c.insert(row).when(`settled`), () =>
         sorted(c.base.values()),
       )
       await vi.waitFor(() =>

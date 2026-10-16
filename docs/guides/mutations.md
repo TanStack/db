@@ -271,9 +271,7 @@ with the transaction on success and rejects with the original error on failure
 (or `undefined` for a rollback without an error). It does not by itself prove
 that a server uploaded, confirmed, or returned the write. It proves those
 stronger guarantees only when the handler waits for that backend observation
-before returning. The old `tx.isPersisted.promise` remains available for the
-pre-RC releases but is deprecated and will be removed in the 1.0 RC; replace
-each use with `tx.when('settled')`.
+before returning.
 
 ### Concurrent Optimistic Transactions
 
@@ -528,8 +526,7 @@ onUpdate: async ({ transaction, collection }) => {
   )
   // Trigger refetch to sync server state
   await collection.utils.refetch()
-  // Prevent the current pre-1.0 wrapper from refetching a second time.
-  // Remove this return in v1.0.
+  // Prevent QueryCollection from refetching a second time.
   return { refetch: false }
 }
 ```

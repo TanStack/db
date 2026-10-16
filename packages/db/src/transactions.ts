@@ -362,6 +362,16 @@ export function getActiveTransaction(): Transaction | undefined {
   return defaultTransactionScope.getActiveTransaction()
 }
 
+// TransactionWithMutations is an Omit-based structural view of Transaction,
+// so the settlement cannot be a private class field.
+const transactionSettlements = new WeakMap<object, unknown>()
+
+function settlementFor<T extends object>(
+  transaction: Transaction<T>,
+): Deferred<Transaction<T>> {
+  return transactionSettlements.get(transaction) as Deferred<Transaction<T>>
+}
+
 class Transaction<T extends object = Record<string, unknown>> {
   public id: string
   public state: TransactionState
@@ -374,23 +384,6 @@ class Transaction<T extends object = Record<string, unknown>> {
   public readonly collections: Set<Collection<any, any, any, any, any>> =
     new Set()
   private captureMutations?: () => void
-  /**
-   * Deferred that settles when this transaction settles.
-   *
-   * Await `when('settled')` instead. This legacy promise resolves
-   * when the transaction completes successfully and rejects if the transaction
-   * fails or is rolled back.
-   *
-   * For non-empty commits, the mutation function is the normal settlement
-   * boundary. This does not inherently prove that a backend has uploaded,
-   * confirmed, or read back the write unless the mutation function waits for
-   * that backend observation before returning. An adapter can also register
-   * commit work during the mutation function; settlement waits for that work.
-   *
-   * @deprecated Use `when('settled')` instead. This alias will be removed in
-   * the 1.0 RC.
-   */
-  public isPersisted: Deferred<Transaction<T>>
   public autoCommit: boolean
   public createdAt: Date
   public sequenceNumber: number
@@ -412,10 +405,11 @@ class Transaction<T extends object = Record<string, unknown>> {
     this.mutationFn = config.mutationFn
     this.state = `pending`
     this.mutations = []
-    this.isPersisted = createDeferred<Transaction<T>>()
+    const settlement = createDeferred<Transaction<T>>()
+    transactionSettlements.set(this, settlement)
     // A rejection nobody reads is not an unhandled rejection; a caller reads
     // the outcome from `when('settled')`.
-    this.isPersisted.promise.catch(() => undefined)
+    settlement.promise.catch(() => undefined)
     this.autoCommit = config.autoCommit ?? true
     this.createdAt = new Date()
     this.sequenceNumber = sequenceNumber
@@ -435,7 +429,13 @@ class Transaction<T extends object = Record<string, unknown>> {
    * or an adapter-registered commit work item waits for it.
    */
   when(_state: 'settled'): Promise<Transaction<T>> {
-    return this.isPersisted.promise
+    return settlementFor(this).promise
+  }
+
+  /** Complete a transaction whose work was already applied outside commit(). @internal */
+  completeWithoutCommit(): void {
+    this.setState(`completed`)
+    settlementFor(this).resolve(this)
   }
 
   setState(newState: TransactionState) {
@@ -561,7 +561,7 @@ class Transaction<T extends object = Record<string, unknown>> {
 
     if (this.autoCommit) {
       this.commit().catch(() => {
-        // Errors from autoCommit are handled via isPersisted.promise
+        // Errors from autoCommit are handled via when('settled').
         // This catch prevents unhandled promise rejections
       })
     }
@@ -693,7 +693,7 @@ class Transaction<T extends object = Record<string, unknown>> {
       }
     } finally {
       // Reject the promise
-      this.isPersisted.reject(this.error?.error)
+      settlementFor(this).reject(this.error?.error)
       this.touchCollection()
     }
 
@@ -780,7 +780,7 @@ class Transaction<T extends object = Record<string, unknown>> {
       try {
         this.touchCollection()
       } finally {
-        this.isPersisted.resolve(this)
+        settlementFor(this).resolve(this)
       }
 
       return this
@@ -835,7 +835,7 @@ class Transaction<T extends object = Record<string, unknown>> {
     try {
       this.touchCollection()
     } finally {
-      this.isPersisted.resolve(this)
+      settlementFor(this).resolve(this)
     }
 
     return this

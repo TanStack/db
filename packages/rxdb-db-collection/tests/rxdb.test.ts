@@ -194,7 +194,7 @@ describe(`RxDB Integration`, () => {
         expect(collection.get(`buffered`)).toBeUndefined()
 
         persistence.resolve()
-        await transaction.isPersisted.promise
+        await transaction.when(`settled`)
         await ready
 
         expect(collection.get(`server`)).toEqual(
@@ -207,7 +207,7 @@ describe(`RxDB Integration`, () => {
       } finally {
         releaseInitialQuery.resolve()
         persistence.resolve()
-        await transaction.isPersisted.promise.catch(() => undefined)
+        await transaction.when(`settled`).catch(() => undefined)
         query.mockRestore()
         await collection.cleanup()
         await db.remove()
@@ -355,7 +355,7 @@ describe(`RxDB Integration`, () => {
 
       // inserts
       const tx = collection.insert({ id: `3`, name: `inserted` })
-      await tx.isPersisted.promise
+      await tx.when(`settled`)
       let doc = await rxCollection.findOne(`3`).exec(true)
       expect(doc.name).toEqual(`inserted`)
 
@@ -554,7 +554,7 @@ describe(`RxDB Integration`, () => {
         // Both old invalid inputs reach the actual provider through persistence.
         const invalid = { id: `3`, name: `invalid`, foo: `bar` }
         const insert = collection.insert(invalid)
-        const inserted = observe(insert.isPersisted.promise)
+        const inserted = observe(insert.when(`settled`))
         expect(collection.has(`3`)).toBe(true)
         const insertOutcome = await inserted
         expect(insertOutcome.status).toBe(`rejected`)
@@ -568,7 +568,7 @@ describe(`RxDB Integration`, () => {
         const update = collection.update(`2`, (draft) => {
           Object.assign(draft, { name: `invalid`, foo: `bar` })
         })
-        const updated = observe(update.isPersisted.promise)
+        const updated = observe(update.when(`settled`))
         expect(collection.get(`2`)?.name).toBe(`invalid`)
         const updateOutcome = await updated
         expect(updateOutcome.status).toBe(`rejected`)
@@ -582,7 +582,7 @@ describe(`RxDB Integration`, () => {
         const next = collection.update(`2`, (draft) => {
           draft.name = `Valid`
         })
-        expect(await observe(next.isPersisted.promise)).toEqual({
+        expect(await observe(next.when(`settled`))).toEqual({
           status: `fulfilled`,
         })
         await expectRows([
