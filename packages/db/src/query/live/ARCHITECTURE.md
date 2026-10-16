@@ -1018,9 +1018,14 @@ starts at once, and that work's later result is ignored for its boundary.
 Such a prefix also cannot retire the repair's acquisitions: it was issued before
 the invalidation, so it proves no current coverage. The repair supersedes any
 such request, so one that settles after the repair finished is released at
-once, like the acquisitions the repair retires. If such a request fails, its
-partial writes still need the full-source read that the overlap replaced: the
-loader starts it when the bounded repair succeeds, without an explicit retry.
+once, like the acquisitions the repair retires. A request is superseded when
+authoritative work (a bounded repair or a full-source read) started after it was
+issued. Its failure is not the loader's own failure and blocks no refills: its
+partial writes only raise the repair debt to the full-source read that the
+overlap replaced. A running repair restarts as that read. Otherwise the loader
+starts it at once, unless its own recorded failure is waiting for an explicit
+retry. This holds even when the repair finished and a newer invalidation's
+reaction is still deferred.
 A failed or canceled request, an invalidation before any request has
 settled, or a boundary that cannot be expressed still requires the full-source
 recovery above. A bounded repair failure likewise upgrades its

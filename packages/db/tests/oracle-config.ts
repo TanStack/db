@@ -19,6 +19,7 @@ const staticOracleProperties = [
   `cursor-pagination.reset`,
   `cursor-pagination.failure`,
   `query-db.refetch-ordered-prefix`,
+  `ordered-loader.request-authority`,
   `oracle-replay.calibration`,
   `structural-identity.independent-values`,
   `sqlite-persistence.source-fifo-order`,

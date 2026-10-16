@@ -1,3 +1,4 @@
+import fc from 'fast-check'
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
@@ -6,6 +7,11 @@ import { OrderedSourceLoader } from '../../src/query/live/ordered-source-loader.
 import { PropRef } from '../../src/query/ir.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import { flushPromises } from '../utils.js'
+import {
+  oraclePropertyOptions,
+  oracleRuns,
+  readOracleRunConfig,
+} from '../oracle-config.js'
 import type {
   CollectionSubscription,
   ReleaseLoadSubset,
@@ -905,6 +911,71 @@ describe(`Ordered source request ownership`, () => {
     },
   )
 
+  // A request that a bounded repair superseded can fail after that repair
+  // has finished and after a newer ordering invalidation. The failure law
+  // lets the loader's own failure block ordinary refills until an explicit
+  // retry. A superseded request's failure is not the loader's own: its
+  // partial writes need the full-source read that the overlap replaced, and
+  // nothing else will start one. Here the newer invalidation's reaction is
+  // deferred, as pending joined work or a later graph run can defer it, so
+  // the old tie fails first. The next ordinary pass must still recover.
+  // Found by a TLA+ model of the loader's request authority (#2191).
+  it(`recovers a superseded tie that fails after its repair and a newer invalidation`, async () => {
+    const requests: Array<Observed> = []
+    const releases: Array<LoadSubsetOptions> = []
+    const participants: Array<Promise<unknown>> = []
+    const subscription = fakeSubscription(requests, releases)
+    subscription.readOrderedSnapshot = () => [
+      { type: `insert`, key: 1, value: { id: 1, rank: 1 } },
+    ]
+    const loader = new OrderedSourceLoader(
+      createOrderByInfo(),
+      subscription,
+      `row`,
+      (result) => {
+        if (result instanceof Promise) {
+          participants.push(result.catch(() => undefined))
+        }
+      },
+    )
+    const flush = async () => {
+      for (let turn = 0; turn < 5; turn++) await Promise.resolve()
+    }
+    const isFullSource = ({ options }: Observed) =>
+      options.orderBy === undefined && options.where === undefined
+    try {
+      loader.start()
+      requests[0]!.deferred.resolve()
+      await flush()
+      const tieIndex = 1
+      expect(requests[tieIndex]!.options.where).toBeDefined()
+
+      // The repair supersedes the in-flight tie and runs to its fixed point.
+      loader.invalidateSourceOrdering()
+      loader.loadMore()
+      const repairIndex = 2
+      expect(requests[repairIndex]!.options.where).toBeUndefined()
+      for (let index = repairIndex; index < requests.length; index++) {
+        requests[index]!.deferred.resolve()
+        await flush()
+      }
+      expect(requests.some(isFullSource)).toBe(false)
+
+      // A newer invalidation arrives; the loader's reaction is deferred.
+      loader.invalidateSourceOrdering()
+      const before = requests.length
+      requests[tieIndex]!.deferred.reject(new Error(`tie failed`))
+      await flush()
+      loader.loadMore()
+      // One full-source read recovers it, with no explicit retry.
+      expect(requests.slice(before).filter(isFullSource)).toHaveLength(1)
+    } finally {
+      loader.dispose()
+      for (const request of requests) request.deferred.resolve()
+      await Promise.allSettled(participants)
+    }
+  })
+
   // The same overlap with an in-flight prefix read. A prefix acquisition
   // normally supersedes every smaller settled prefix, because it covers their
   // rows. A prefix issued before an ordering invalidation proves no current
@@ -1618,5 +1689,561 @@ describe(`Successful finite demand retirement`, () => {
         await Promise.allSettled(participants)
       }
     },
+  )
+})
+
+/**
+ * # Request authority under generated settlement orders
+ *
+ * ## Contract
+ *
+ * ARCHITECTURE.md, "Ordered requests, continuation, and recovery", gives the
+ * loader authority rules for requests that overlap an ordering invalidation:
+ *
+ * - **Held:** a successful bounded repair holds the acquisitions it read.
+ *   Only a later read that covers them may retire them: a newer repair or a
+ *   full-source read that succeeds, or a prefix read issued after the repair
+ *   that is at least as long. A request issued before the invalidation
+ *   proves no current coverage, so it never retires them.
+ * - **No leak:** once loading is quiet and no failure blocks it, the loader
+ *   holds nothing issued before its last successful authoritative read.
+ *   Otherwise every later refetch would read that request again.
+ * - **No strand:** a request that authoritative work superseded can still
+ *   fail. Its partial writes need the full-source read that the overlap
+ *   replaced, so the loader starts one without an explicit retry. The
+ *   loader's own failure (an authoritative request, or a request that
+ *   nothing superseded) may block ordinary refills until an explicit retry.
+ *   That is the failure law, so it is not a strand.
+ *
+ * These laws came from a TLA+ model of the loader's request authority
+ * (#2191). This property checks the real loader against them.
+ *
+ * ## Model
+ *
+ * The model is a ledger of observed requests, kept outside the loader. Each
+ * request is classified from its options alone:
+ * - a full-source read has no order and no predicate;
+ * - a request is authoritative when it is a full-source read or it carries
+ *   `refetch: true` (a bounded repair and its tie and refill);
+ * - an authoritative read starts at a full-source read or a repair prefix
+ *   (ordered, with no predicate and no cursor); the leak and held laws
+ *   measure from the latest successful start;
+ * - a request is superseded when an authoritative request was issued while
+ *   it was in flight.
+ * The ledger records each request's outcome and whether the loader released
+ * it. It never reads the loader's fields.
+ *
+ * ## History grammar
+ *
+ * A history is up to sixteen steps over a fake subscription whose requests
+ * stay in flight until a step settles them:
+ * - `settle` resolves or rejects one in-flight request, in any order, and
+ *   `failOldest` rejects the oldest one, which is the one most often
+ *   superseded;
+ * - `settleNewest` resolves the newest in-flight request, as a provider that
+ *   answers out of order can, so a repair chain finishes around an older
+ *   request;
+ * - `invalidateThenFailOldest` invalidates source ordering with the
+ *   reaction deferred and rejects the oldest in-flight request before the
+ *   loader reacts;
+ * - `invalidate` invalidates source ordering, and `report` delivers a
+ *   loaded-subset report; either can run an ordinary pass at once or leave
+ *   the reaction deferred, as pending joined work or a later graph run can;
+ * - `pass` runs an ordinary `loadMore()`;
+ * - `move` is an explicit window move, which may also widen the window, so
+ *   an unindexed loader reads a longer prefix.
+ * Scenarios cross an indexed loader (pages and ties) with an unindexed one
+ * (prefix reads), window limits 1 and 2, and whether the first page settles
+ * before the history (a bounded repair needs a settled request).
+ *
+ * ## Checkpoints
+ *
+ * Held is checked after every step. After the history, a drain settles every
+ * in-flight request successfully and runs ordinary passes until the loader
+ * issues nothing new. No strand is checked at that point. Then, if an own
+ * failure still blocks the loader, one explicit window move retries it and
+ * the drain runs again. No leak is checked last.
+ *
+ * ## Limits
+ *
+ * The fake subscription has no rows that move, so the cursor and boundary
+ * values are fixed. Truncate replay, the backoff retry timer, joined demand,
+ * and publication holds are outside this property; other tests here own
+ * them. The fake releases an acquisition when the loader calls its release;
+ * it does not model an adapter that removes rows later.
+ */
+type LedgerRequest = {
+  index: number
+  options: RequestOptions
+  acquisition: LoadSubsetOptions
+  deferred: ReturnType<typeof createDeferred>
+  fullSource: boolean
+  authoritative: boolean
+  superseded: boolean
+  outcome: `inflight` | `ok` | `failed`
+  released: boolean
+}
+
+type AuthorityCommand =
+  | { type: `settle`; pick: number; ok: boolean }
+  | { type: `invalidate`; react: boolean }
+  | { type: `report`; react: boolean }
+  | { type: `failOldest` }
+  | { type: `settleNewest` }
+  | { type: `invalidateThenFailOldest` }
+  | { type: `pass` }
+  | { type: `move`; widen: boolean }
+
+type AuthorityCase = {
+  indexed: boolean
+  limit: 1 | 2
+  // Settle the first page before the history. A bounded repair needs a
+  // settled request; without one an invalidation reads the full source.
+  settledFirst: boolean
+  history: Array<AuthorityCommand>
+}
+
+const authorityCommand: fc.Arbitrary<AuthorityCommand> = fc.oneof(
+  {
+    weight: 6,
+    arbitrary: fc.record({
+      type: fc.constant(`settle` as const),
+      pick: fc.nat({ max: 7 }),
+      // Failures are rarer than successes, so most histories keep the
+      // strand law checkable: an own failure needs an explicit retry anyway.
+      ok: fc.oneof(
+        { weight: 9, arbitrary: fc.constant(true) },
+        { weight: 1, arbitrary: fc.constant(false) },
+      ),
+    }),
+  },
+  {
+    weight: 2,
+    arbitrary: fc.record({
+      type: fc.constant(`invalidate` as const),
+      react: fc.boolean(),
+    }),
+  },
+  {
+    weight: 1,
+    arbitrary: fc.record({
+      type: fc.constant(`report` as const),
+      react: fc.boolean(),
+    }),
+  },
+  // The oldest in-flight request is the one most often superseded.
+  { weight: 1, arbitrary: fc.constant({ type: `failOldest` as const }) },
+  // A provider can answer newer requests first, so a repair chain finishes
+  // while an older request is still in flight.
+  { weight: 3, arbitrary: fc.constant({ type: `settleNewest` as const }) },
+  {
+    weight: 1,
+    arbitrary: fc.constant({ type: `invalidateThenFailOldest` as const }),
+  },
+  { weight: 1, arbitrary: fc.constant({ type: `pass` as const }) },
+  {
+    weight: 1,
+    arbitrary: fc.record({
+      type: fc.constant(`move` as const),
+      widen: fc.boolean(),
+    }),
+  },
+)
+
+const authorityCaseArbitrary: fc.Arbitrary<AuthorityCase> = fc.record({
+  indexed: fc.boolean(),
+  limit: fc.constantFrom(1 as const, 2 as const),
+  settledFirst: fc.boolean(),
+  history: fc.array(authorityCommand, { minLength: 1, maxLength: 16 }),
+})
+
+type AuthorityObservation = {
+  supersededFailures: number
+  // Superseded requests that failed after the repair that superseded them
+  // succeeded: the premise of the strand law.
+  supersededFailuresAfterRepair: number
+  // Such failures where the strand law was checkable: no own failure since
+  // the last full-source read.
+  checkedStrandPremises: number
+  deferredStrandShapes?: number
+  staleSettlementsAfterRepair: number
+}
+
+async function checkAuthorityCase(
+  testCase: AuthorityCase,
+): Promise<AuthorityObservation> {
+  const ledger: Array<LedgerRequest> = []
+  const participants: Array<Promise<unknown>> = []
+  const info = createOrderByInfo({
+    limit: testCase.limit,
+    ...(testCase.indexed ? {} : { index: undefined }),
+  })
+  const record = (method: Observed[`method`], options: RequestOptions) => {
+    // Like the real subscription, a continuation's acquisition carries a
+    // cursor, so the loader does not take it for a prefix read.
+    const acquisition: LoadSubsetOptions = {
+      orderBy: options.orderBy,
+      limit: options.limit,
+      where: options.where,
+      ...(options.minValues === undefined
+        ? {}
+        : {
+            cursor: {
+              whereFrom: new PropRef([`row`, `rank`]),
+              whereCurrent: new PropRef([`row`, `rank`]),
+            } as unknown as NonNullable<LoadSubsetOptions[`cursor`]>,
+          }),
+    }
+    const fullSource =
+      method === `snapshot` &&
+      options.orderBy === undefined &&
+      options.where === undefined
+    const authoritative = fullSource || options.refetch === true
+    if (authoritative) {
+      for (const request of ledger) {
+        if (request.outcome === `inflight` && !request.authoritative) {
+          request.superseded = true
+        }
+      }
+    }
+    const request: LedgerRequest = {
+      index: ledger.length,
+      options,
+      acquisition,
+      deferred: createDeferred(),
+      fullSource,
+      authoritative,
+      superseded: false,
+      outcome: `inflight`,
+      released: false,
+    }
+    ledger.push(request)
+    options.onLoadSubsetResult?.(request.deferred.promise, acquisition, () => {
+      request.released = true
+    })
+  }
+  const subscription = {
+    readOrderedSnapshot: () => [
+      { type: `insert`, key: 1, value: { id: 1, rank: 1 } },
+    ],
+    setOrderByIndex: () => {},
+    hasHeldSyncTransaction: false,
+    requestLimitedSnapshot: (options: RequestOptions) =>
+      record(`limited`, options),
+    requestSnapshot: (options: RequestOptions) => record(`snapshot`, options),
+  } as unknown as CollectionSubscription
+  const loader = new OrderedSourceLoader(
+    info,
+    subscription,
+    `row`,
+    (result) => {
+      if (result instanceof Promise) {
+        participants.push(result.catch(() => undefined))
+      }
+    },
+  )
+  const flush = async () => {
+    for (let turn = 0; turn < 6; turn++) await Promise.resolve()
+  }
+  let windowOperation = 0
+  const run = (work: () => unknown) => {
+    try {
+      const result = work()
+      if (result instanceof Promise) participants.push(result.catch(() => {}))
+    } catch {
+      // A rejected request surfaces through its participant.
+    }
+  }
+  const inflight = () => ledger.filter(({ outcome }) => outcome === `inflight`)
+  const settle = async (request: LedgerRequest, ok: boolean) => {
+    request.outcome = ok ? `ok` : `failed`
+    if (ok) request.deferred.resolve()
+    else request.deferred.reject(new Error(`request ${request.index} failed`))
+    await flush()
+  }
+  // An authoritative read starts at a full-source read or a repair prefix;
+  // the repair's tie and refill continue the same chain.
+  const startsAuthority = (request: LedgerRequest) =>
+    request.fullSource ||
+    (request.authoritative &&
+      request.options.orderBy !== undefined &&
+      request.options.where === undefined &&
+      request.options.minValues === undefined)
+  const lastAuthoritativeSuccess = () =>
+    ledger.reduce(
+      (last, request) =>
+        startsAuthority(request) && request.outcome === `ok`
+          ? request.index
+          : last,
+      -1,
+    )
+  const checkHeld = (checkpoint: string) => {
+    // The latest successful repair prefix, if no later authoritative read
+    // has succeeded, must still be held.
+    const repair = [...ledger]
+      .reverse()
+      .find(
+        (request) =>
+          startsAuthority(request) &&
+          !request.fullSource &&
+          request.outcome === `ok`,
+      )
+    if (!repair || lastAuthoritativeSuccess() > repair.index) return
+    // A prefix read issued after the repair covers the repair's rows when it
+    // is at least as long; it may retire the repair's prefix. One issued
+    // before the repair proves no current coverage and may not.
+    const coveredByLaterPrefix = ledger.some(
+      (request) =>
+        request.index > repair.index &&
+        request.outcome === `ok` &&
+        request.options.orderBy !== undefined &&
+        request.options.where === undefined &&
+        request.options.minValues === undefined &&
+        (request.options.limit ?? 0) >= (repair.options.limit ?? 0),
+    )
+    if (coveredByLaterPrefix) return
+    if (repair.released) {
+      throw new Error(
+        `held ${checkpoint}: request ${repair.index}, a successful repair prefix, was released before a later authoritative read succeeded`,
+      )
+    }
+  }
+  const drain = async () => {
+    for (let round = 0; round < 40; round++) {
+      const next = inflight()[0]
+      if (next) {
+        await settle(next, true)
+        continue
+      }
+      const before = ledger.length
+      run(() => loader.loadMore())
+      await flush()
+      if (ledger.length === before && inflight().length === 0) return
+    }
+    throw new Error(`the loader did not reach a fixed point`)
+  }
+  const ownFailureSince = (index: number) =>
+    ledger.some(
+      (request) =>
+        request.index > index &&
+        request.outcome === `failed` &&
+        (request.authoritative || !request.superseded),
+    )
+  let staleSettlementsAfterRepair = 0
+  let supersededFailuresAfterRepair = 0
+  let checkedStrandPremises = 0
+  let deferredStrandShapes = 0
+  try {
+    run(() => loader.start())
+    await flush()
+    if (testCase.settledFirst && ledger[0]) await settle(ledger[0], true)
+    for (const [step, command] of testCase.history.entries()) {
+      switch (command.type) {
+        case `settle`: {
+          const open = inflight()
+          if (open.length === 0) break
+          const request = open[command.pick % open.length]!
+          if (
+            request.superseded &&
+            lastAuthoritativeSuccess() > request.index
+          ) {
+            if (command.ok) staleSettlementsAfterRepair++
+            else supersededFailuresAfterRepair++
+          }
+          await settle(request, command.ok)
+          break
+        }
+        case `settleNewest`: {
+          const request = inflight().at(-1)
+          if (request) await settle(request, true)
+          break
+        }
+        case `failOldest`: {
+          const request = inflight()[0]
+          if (!request) break
+          if (
+            request.superseded &&
+            lastAuthoritativeSuccess() > request.index
+          ) {
+            supersededFailuresAfterRepair++
+          }
+          await settle(request, false)
+          break
+        }
+        // An invalidation whose reaction is deferred, as pending joined work
+        // or a later graph run defers it, while the oldest in-flight request
+        // fails before the loader reacts.
+        case `invalidateThenFailOldest`: {
+          loader.invalidateSourceOrdering()
+          const request = inflight()[0]
+          if (!request) break
+          if (
+            request.superseded &&
+            inflight().every((open) => open === request || !open.authoritative)
+          ) {
+            deferredStrandShapes++
+          }
+          await settle(request, false)
+          break
+        }
+        case `invalidate`:
+          loader.invalidateSourceOrdering()
+          if (command.react) run(() => loader.loadMore())
+          await flush()
+          break
+        case `report`:
+          loader.revalidateLoadedCoverage()
+          if (command.react) run(() => loader.loadMore())
+          await flush()
+          break
+        case `pass`:
+          run(() => loader.loadMore())
+          await flush()
+          break
+        case `move`:
+          if (command.widen) info.limit = Math.min(info.limit + 1, 3)
+          run(() => loader.loadMore(++windowOperation))
+          await flush()
+          break
+      }
+      checkHeld(`after step ${step}`)
+    }
+    await drain()
+    checkHeld(`after the drain`)
+    const lastFull = ledger.reduce(
+      (last, request) =>
+        request.fullSource && request.outcome === `ok` ? request.index : last,
+      -1,
+    )
+    // Each superseded failure is checked against the full-source reads issued
+    // before it. When no own failure happened since the last of those, the
+    // failure law does not excuse a block, so a later full-source read must
+    // have recovered it.
+    for (const failed of ledger.filter(
+      (request) => request.outcome === `failed` && request.superseded,
+    )) {
+      const base = ledger.reduce(
+        (last, request) =>
+          request.fullSource &&
+          request.outcome === `ok` &&
+          request.index < failed.index
+            ? request.index
+            : last,
+        -1,
+      )
+      if (ownFailureSince(base)) continue
+      checkedStrandPremises++
+      const recovered = ledger.some(
+        (request) =>
+          request.fullSource &&
+          request.index > failed.index &&
+          request.outcome === `ok`,
+      )
+      if (!recovered) {
+        throw new Error(
+          `no strand: superseded request ${failed.index} failed, and no full-source read recovered it without an explicit retry`,
+        )
+      }
+    }
+    if (ownFailureSince(lastFull)) {
+      run(() => loader.loadMore(++windowOperation))
+      await flush()
+      await drain()
+    }
+    const authority = lastAuthoritativeSuccess()
+    const leaked = ledger.filter(
+      (request) =>
+        request.outcome === `ok` &&
+        !request.released &&
+        request.index < authority,
+    )
+    if (authority >= 0 && leaked.length > 0) {
+      throw new Error(
+        `no leak: requests ${JSON.stringify(leaked.map(({ index }) => index))} are still held after authoritative request ${authority} succeeded`,
+      )
+    }
+  } finally {
+    loader.dispose()
+    for (const request of ledger) request.deferred.resolve()
+    await Promise.allSettled(participants)
+  }
+  return {
+    supersededFailures: ledger.filter(
+      (request) => request.superseded && request.outcome === `failed`,
+    ).length,
+    supersededFailuresAfterRepair,
+    checkedStrandPremises,
+    staleSettlementsAfterRepair,
+    deferredStrandShapes,
+  } as AuthorityObservation
+}
+
+const authorityProperty = `ordered-loader.request-authority`
+const authorityReplay = readOracleRunConfig()
+const authorityCampaigns =
+  authorityReplay.replayPath === undefined
+    ? ([`fixed`, `random`] as const)
+    : authorityReplay.replayProperty === authorityProperty
+      ? ([`replay`] as const)
+      : ([] as const)
+
+describe(`Ordered source request authority`, () => {
+  // The model's strand trace: a repair supersedes the in-flight tie and
+  // finishes; a newer invalidation's reaction is deferred; the old tie fails.
+  it(`recovers a superseded tie that fails after its repair finished (generated-lane replay)`, async () => {
+    await checkAuthorityCase({
+      indexed: true,
+      limit: 1,
+      settledFirst: false,
+      history: [
+        { type: `settle`, pick: 0, ok: true },
+        { type: `invalidate`, react: true },
+        { type: `settle`, pick: 1, ok: true },
+        { type: `settle`, pick: 1, ok: true },
+        { type: `settle`, pick: 1, ok: true },
+        { type: `invalidate`, react: false },
+        { type: `settle`, pick: 0, ok: false },
+      ],
+    })
+  })
+
+  it.each(authorityCampaigns)(
+    `holds, retires, and recovers requests under generated settlement orders (%s campaign)`,
+    async (campaign) => {
+      let supersededFailures = 0
+      let staleSettlementsAfterRepair = 0
+      let supersededFailuresAfterRepair = 0
+      let checkedStrandPremises = 0
+      let deferredShapes = 0
+      await fc.assert(
+        fc.asyncProperty(authorityCaseArbitrary, async (testCase) => {
+          const observation = await checkAuthorityCase(testCase)
+          supersededFailures += observation.supersededFailures
+          staleSettlementsAfterRepair += observation.staleSettlementsAfterRepair
+          supersededFailuresAfterRepair +=
+            observation.supersededFailuresAfterRepair
+          checkedStrandPremises += observation.checkedStrandPremises
+          deferredShapes += observation.deferredStrandShapes ?? 0
+        }),
+        campaign === `fixed`
+          ? { seed: 20261016, numRuns: oracleRuns(10000) }
+          : {
+              ...oraclePropertyOptions(10000, authorityProperty),
+              ...(campaign === `replay` ? { numRuns: 1 } : {}),
+            },
+      )
+      // Reach witnesses: superseded requests fail, stale requests settle
+      // after a repair succeeded, the strand law is checkable, and a
+      // superseded request fails after its repair finished while a newer
+      // invalidation's reaction is deferred.
+      if (campaign !== `replay`) {
+        expect(supersededFailures).toBeGreaterThan(0)
+        expect(staleSettlementsAfterRepair).toBeGreaterThan(0)
+        expect(supersededFailuresAfterRepair).toBeGreaterThan(0)
+        expect(checkedStrandPremises).toBeGreaterThan(0)
+        expect(deferredShapes).toBeGreaterThan(0)
+      }
+    },
+    120_000,
   )
 })

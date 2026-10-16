@@ -70,6 +70,9 @@ export class OrderedSourceLoader {
   private active = true
   private orderedLoadGeneration = 0
   private orderingInvalidationGeneration = 0
+  // Counts authoritative reads started. A request issued before one is
+  // superseded: its failure raises the repair debt but blocks nothing.
+  private authorityGeneration = 0
   private orderedPrefixRepairGeneration: number | undefined
   private lastPage: { count: number; boundary: unknown } | undefined
   private lastPrefixCount: number | undefined
@@ -347,6 +350,7 @@ export class OrderedSourceLoader {
 
   loadFullSource(windowOperationGeneration?: number): void {
     if (!this.active || this.authoritativeRequestState !== `none`) return
+    this.authorityGeneration++
     this.authoritativeRequestState = `held`
     this.authoritativeRequestKind = `full-source`
     this.requestAndObserve(
@@ -364,6 +368,7 @@ export class OrderedSourceLoader {
 
   private loadOrderedPrefixRepair(windowOperationGeneration?: number): void {
     if (!this.active || this.authoritativeRequestState !== `none`) return
+    this.authorityGeneration++
     // Any older finite request may still settle, but it cannot refine from a
     // boundary that predates this authoritative prefix.
     this.orderedPrefixRepairGeneration = this.orderingInvalidationGeneration
@@ -582,11 +587,11 @@ export class OrderedSourceLoader {
       this.authoritativeRequestKind = undefined
       this.orderedPrefixRepairGeneration = undefined
       if (!this.active) return
-      if (this.failedRequest) {
+      // A failure during the chain raised the debt to a full-source read.
+      if (this.failedRequest || !this.canRepairWithOrderedPrefix) {
         this.canRepairWithOrderedPrefix = false
         this.loadFullSource(windowOperationGeneration)
       } else {
-        this.canRepairWithOrderedPrefix = true
         this.loadOrderedPrefixRepair(windowOperationGeneration)
       }
       return
@@ -722,6 +727,7 @@ export class OrderedSourceLoader {
       windowOperationGeneration === undefined
     const orderedLoadGeneration = this.orderedLoadGeneration
     const orderingInvalidationGeneration = this.orderingInvalidationGeneration
+    const authorityGeneration = this.authorityGeneration
     const settlesAsync = result instanceof Promise
     const canSettleSynchronously =
       !settlesAsync &&
@@ -829,19 +835,6 @@ export class OrderedSourceLoader {
             (this.failedRequest || this.authoritativeRequestState !== `none`)
           )
             return
-          // If an older overlapping request failed, its unknown partial
-          // writes upgrade the debt to a full-source repair. The ordered
-          // prefix must not erase that failure merely because it settled
-          // later.
-          if (
-            (isOrderedRepair || continuesOrderedPrefixRepair) &&
-            this.failedRequest
-          ) {
-            this.abandonOrderedPrefixRepair()
-            // The overlap replaced a full-source read; recover with one now.
-            this.loadFullSource(windowOperationGeneration)
-            return
-          }
           this.failedRequest = undefined
           if (kind !== `boundary`) {
             this.hasSettledSourceRequest = true
@@ -907,20 +900,31 @@ export class OrderedSourceLoader {
         this.pending = undefined
       }
       if (!this.active) return
-      // A request issued before an ordering invalidation can fail after the
-      // bounded repair that superseded it has finished. Its partial writes
-      // still need a full-source read, which the overlap used to start.
-      const recoversAfterRepair =
-        !isAuthoritativeRequest &&
-        orderingInvalidationGeneration !==
-          this.orderingInvalidationGeneration &&
-        this.failedRequest === undefined &&
-        this.authoritativeRequestState === `none` &&
-        !this.needsOrderingRepair
       // A failed request may already have written only part of its result.
       // None of those rows is a safe continuation boundary.
       this.requireFullSourceRepair()
       if (orderedLoadGeneration !== this.orderedLoadGeneration) return
+      // Authoritative work started after this request supersedes it. Its
+      // failure is not the loader's own: its partial writes only raise the
+      // debt to the full-source read that the overlap replaced. A running
+      // repair restarts as that read; otherwise it starts now, unless the
+      // loader's own failure is waiting for an explicit retry.
+      if (
+        !isAuthoritativeRequest &&
+        authorityGeneration !== this.authorityGeneration
+      ) {
+        this.failedAcquisitions.set(releaseAcquisition, kind)
+        this.invalidateCursor()
+        this.lastBoundary = undefined
+        // The loader's own recorded failure still waits for an explicit retry.
+        if (
+          this.failedRequest === undefined &&
+          this.authoritativeRequestState === `none`
+        ) {
+          this.loadFullSource(windowOperationGeneration)
+        }
+        throw error
+      }
       // A failed request proves no full-source coverage. An explicit window
       // move or later replay may retry it, but an ordinary graph pass must
       // not start an eager retry loop.
@@ -936,12 +940,6 @@ export class OrderedSourceLoader {
       this.recordRequestFailure(windowOperationGeneration)
       this.failedAcquisitions.set(releaseAcquisition, kind)
       if (retryRepair) this.scheduleRepairRetry()
-      if (
-        recoversAfterRepair &&
-        orderedLoadGeneration === this.orderedLoadGeneration
-      ) {
-        this.loadFullSource(windowOperationGeneration)
-      }
       throw error
     }
     if (canSettleSynchronously) {
