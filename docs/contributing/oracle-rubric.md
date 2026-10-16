@@ -1,4 +1,4 @@
-# Writing reliable oracle tests
+# Oracle Testing Rubric
 
 A test needs two things: something to try, and a way to tell whether it worked.
 
@@ -23,7 +23,7 @@ numbered requirements below continue to define guide conformance.
 ## How to interpret this guide
 
 The numbered requirements in this section are the complete checklist for an
-`oracle-tests.md` conformance audit. Repository policies such as `AGENTS.md` and
+`oracle-rubric.md` conformance audit. Repository policies such as `AGENTS.md` and
 the coverage map apply separately. Later sections explain the requirements and
 give techniques and examples. They do not create additional requirements unless
 they cite one of these IDs.
