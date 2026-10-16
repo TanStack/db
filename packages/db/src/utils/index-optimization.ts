@@ -39,10 +39,7 @@ export interface OptimizationResult<TKey> {
   isExact: boolean
 }
 
-/**
- * Finds the first index that matches a field path, comparison options, and the
- * consumer's optional capability check.
- */
+/** Finds the first usable index matching a field path and comparison options. */
 export function findIndexForField<TKey extends string | number>(
   collection: CollectionLike<any, TKey>,
   fieldPath: Array<string>,
