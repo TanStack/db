@@ -475,8 +475,11 @@ applicable oracle coverage.
 
 ### Always Add Tests for Bugs
 
-**Key Principle:** Reproduce a bug in a test before fixing it. Prefer extending
-an oracle as described below over adding an isolated unit test. This ensures:
+**Key Principle:** Reproduce a bug in a test before fixing it. When an existing
+oracle can express the violated law, extending that oracle is required. An
+isolated unit test may supplement the oracle, but it does not replace it. If no
+oracle applies, add one when an independent model is practical; otherwise,
+explain in the pull request why a focused test is sufficient. This ensures:
 
 - The bug is actually fixed
 - The bug doesn't regress in the future
@@ -544,19 +547,23 @@ that an oracle. Both copies can encode the same wrong assumption.
   the oracle's reference semantics. More generated traces cannot repair a wrong
   reference model.
 
-### Prefer Oracle Coverage Over Isolated Regressions
+### Require Applicable Oracle Coverage
 
 An oracle that checks general laws across generated states and histories is a
-stronger form of coverage than a unit test for one specific example. Prefer
-extending an existing oracle when it can cover the behavior. Add the missing
-model rule, generator dimension, state transition, or observable assertion;
-adding more pinned examples alone does not generalize the oracle.
+stronger form of coverage than a unit test for one specific example. Every bug
+fix must extend the primary oracle when that oracle can express the violated
+law. Add the missing model rule, generator dimension, state transition, or
+observable assertion; adding more pinned examples alone does not generalize the
+oracle. Do not submit only an isolated unit test for behavior owned by an
+applicable oracle.
 
 Use a focused regression to isolate and shrink a failure, then keep it as a
-replay example for the broader oracle where possible. Verify that the expanded
-oracle fails without the fix and passes with it. Keep valuable unit tests, but
-do not treat them as a substitute for applicable oracle coverage. If an oracle
-is not practical for the behavior, explain why a focused test is sufficient.
+replay example for the broader oracle. Verify that the expanded oracle fails
+without the fix and passes with it. Keep valuable unit tests as supplemental
+coverage, but do not treat them as a substitute for applicable oracle coverage.
+If no existing oracle applies, create one when the behavior admits a practical
+independent model. A focused test alone is acceptable only when an oracle is not
+practical for the behavior; explain that exception in the pull request.
 
 ### Name Oracle Files for Discovery
 
