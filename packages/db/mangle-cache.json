@@ -420,5 +420,14 @@
   "enterErrorState": "gM",
   "crashQuery": "gN",
   "failQuery": "gW",
-  "assertReady": "gX"
+  "assertReady": "gX",
+  "reloadTruncatePending": "gY",
+  "reloadRun": "gZ",
+  "adapterStopped": "g_",
+  "recovering": "g$",
+  "abortLoadSubsetWork": "g0",
+  "markReloadTruncate": "g1",
+  "commitEmptyReloadTruncate": "g2",
+  "dependentEntry": "g3",
+  "enterSync": "g4"
 }

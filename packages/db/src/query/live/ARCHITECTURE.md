@@ -777,6 +777,14 @@ source rows belong in a query result.
 
 ### Cleanup, restart, and detached waiters
 
+Public cleanup first checks admission. `cleanup()` rejects with
+`CollectionHasSubscribersError` while a live query or Effect reads the
+Collection; `cleanup({ dependents: true })` first cleans up each such live query,
+with its own dependents, and disposes each such Effect. A pooled live query
+counts as one live-query dependent per equality partition. A direct
+subscription is not refused. `collection.subscribers` lists all three kinds.
+Internal teardown, such as a retiring Collection facade, bypasses admission.
+
 Collection cleanup has two boundaries. Cleanup start is an internal synchronous
 boundary. It closes restart admission, invalidates the current sync run, detaches
 its demand, crashes dependent live queries, and marks dependent Effects
@@ -818,7 +826,8 @@ fresh private publication barrier. Settlements from the old sync run cannot
 publish rows, report errors, or change readiness in the new sync run.
 
 This is the direct subscription's restart contract, not automatic recovery of
-a dependent live query. Manually cleaning up a source crashes its live
+a dependent live query. Public cleanup refuses while a live query reads the
+source; internal teardown that bypasses admission crashes its live
 queries. Restarting that source alone does not revive their
 graphs or publish replacement results; callers must restart or recreate the
 live query itself. This differs from a source truncate, which keeps the live
@@ -1503,8 +1512,11 @@ the compiler's comparator and break ties by key
 (`packages/db/src/query/pooled-live-query.ts`). It builds its live-query
 Collection only when the application reads it.
 
-A pooled live query must publish what its live-query Collection would: the same rows, in its order or else key order, with the same values and status. When its source
-starts cleanup, it crashes the same way and keeps its last rows.
+A pooled live query must publish what its live-query Collection would: the same rows, in its order or else key order, with the same values and status. Its
+partition is one live-query dependent of the source: cleanup with dependents
+ends it like a live-query Collection, `cleaned-up` with no rows, and cleaning
+up a view releases an idle partition at once. Internal teardown that starts
+source cleanup under it crashes it the same way and keeps its last rows.
 The pooled live query oracle compares the two over generated histories.
 
 ### Physical planning and work
@@ -1589,8 +1601,11 @@ every row before the top-K (a recorded limit).
     materialization cells, visible rows, the current private replay state, and
     required Collection facades—not with settled historical replay attempts or
     raw delta history.
-14. **Cleanup:** cleanup start synchronously closes restart admission,
-    crashes dependent live queries, and marks dependent Effects disposed. The source Collection keeps its prior status until adapter cleanup
+14. **Cleanup:** public cleanup rejects while a live query or Effect reads the
+    Collection, and with `{ dependents: true }` it ends those dependents
+    first; a direct subscription survives cleanup. Cleanup start
+    synchronously closes restart admission, crashes any dependent live query
+    left by internal teardown, and marks dependent Effects disposed. The source Collection keeps its prior status until adapter cleanup
     settles; only then does it publish `cleaned-up` and settle its cleanup
     promise.
 15. **Deferred acquisition:** a live-query Collection or pooled live query

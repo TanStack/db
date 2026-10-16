@@ -1524,6 +1524,6 @@ describe(`createLiveQueryWindowController`, () => {
 
     unsubscribe()
     controller.dispose()
-    await source.cleanup()
+    await source.cleanup({ dependents: true })
   })
 })

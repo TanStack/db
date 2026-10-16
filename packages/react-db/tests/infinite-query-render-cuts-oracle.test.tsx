@@ -470,7 +470,7 @@ describe(`agreement with useLiveQuery`, () => {
 
 describe(`collections kept from an abandoned render`, () => {
   // An eager source that writes `current` each time its sync run starts, so a
-  // restart after cleanup serves new rows from the same source object.
+  // reload serves new rows from the same source object.
   function makeRestartableSource(initial: Array<Row>) {
     let current = initial
     const source = createCollection<Row>({
@@ -491,10 +491,11 @@ describe(`collections kept from an abandoned render`, () => {
     cleanups.push(() => source.cleanup())
     return {
       source,
+      // A reload starts a new sync run under mounted queries; its first
+      // commit replaces the rows.
       restartWith: async (next: Array<Row>) => {
-        await source.cleanup()
         current = next
-        source.startSyncImmediate()
+        await source.reload()
       },
     }
   }

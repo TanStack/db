@@ -574,7 +574,8 @@ describe(`On-Demand Sync Mode`, () => {
         expect(publications).toEqual([])
 
         if (outcome === `cleanup`) {
-          await collection.cleanup()
+          // Internal teardown that bypasses cleanup admission.
+          await collection._lifecycle.cleanup()
           const message =
             `Source collection '${collection.id}' was manually cleaned up while live query '${electronics.id}' depends on it. ` +
             `Live queries prevent automatic GC, so this was likely a manual cleanup() call.`

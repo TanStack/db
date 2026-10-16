@@ -1000,8 +1000,8 @@ describe(`createLiveQueryCollection`, () => {
     expect(activeUsers.size).toBe(2)
 
     // Tear down the source collection and the live query, e.g. when switching
-    // to a different data set at runtime. Cleaning up a source collection
-    // crashes the dependent live query.
+    // to a different data set at runtime. Nothing subscribes to the live
+    // query, so the source's cleanup is admitted and ends the query.
     await usersCollection.cleanup()
     expect(activeUsers.status).toBe(`crashed`)
 

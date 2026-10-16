@@ -62,6 +62,7 @@ const faults: Array<[string, (value: ConformanceResult) => void]> = [
         hasErrors: false,
         failureReason: null,
         error: null,
+        reloading: false,
         sources: [],
       }
     },

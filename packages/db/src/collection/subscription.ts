@@ -18,6 +18,7 @@ import type { BasicExpression, OrderBy } from '../query/ir.js'
 import type { IndexReader } from '../indexes/base-index.js'
 import type {
   ChangeMessage,
+  CollectionDependent,
   LoadSubsetOptions,
   LoadSubsetRequestResult,
   Subscription,
@@ -87,6 +88,8 @@ type CollectionSubscriptionOptions = {
   deferAcquisition?: boolean
   /** Called once when deferred acquisition resumes. */
   onResumeAcquisition?: () => void
+  /** The live query or Effect this subscription reads for. */
+  owner?: CollectionDependent
 }
 
 type TruncateReplayPublicationControl = Readonly<{
@@ -206,6 +209,11 @@ export class CollectionSubscription
   private unsubscribed = false
   private defersAcquisition: boolean
 
+  /** @internal The live query or Effect this subscription reads for. */
+  public get owner(): CollectionSubscriptionOptions[`owner`] {
+    return this.options.owner
+  }
+
   public get status(): SubscriptionStatus {
     return this._status
   }
@@ -304,6 +312,11 @@ export class CollectionSubscription
   }
 
   /** Detach logical demand from work owned by a discarded sync run. */
+  /** @internal A reload retired the sync run; detach its demand. */
+  public retireSyncRun(): void {
+    this.handleCollectionCleanup()
+  }
+
   private handleCollectionCleanup(): void {
     this.discardTruncateReplay()
     this.stalePublishedRows = new Map(this.publishedRows)

@@ -61,7 +61,13 @@
  * Steps act on Collection `A` or `B`: `ready` writes the Collection's row and calls
  * `markReady()`; `fail` calls `fail()`; `report` calls `reportError()`;
  * `healthy` calls `reportHealthy()`; `crash` crashes the Collection through
- * its lifecycle, as a crash cause would. `restart` cleans up the
+ * its lifecycle, as a crash cause would; `reload` calls `collection.reload()`.
+ * A reload keeps the rows, status, and shown problem, and marks the node
+ * `reloading`, until the new run's first commit (the next `ready`) replaces
+ * the rows and clears the node, or its `fail` shows the new error. A
+ * reload of a crashed Collection rejects. A query whose first load failed
+ * starts again once no source has a failure, `loading` with `reloading`
+ * until it is ready. `restart` cleans up the
  * live query and every Collection, then preloads the live query again. Every step
  * is issued in every state. The model predicts its outcome, including a throw
  * for `markReady()` after `fail()`, for any report after `fail()`, and for a
@@ -126,7 +132,7 @@ type Shape =
   `direct` | `join` | `self-join` | `nested` | `include` | `pooled-nested`
 type Step =
   | {
-      kind: `ready` | `fail` | `report` | `healthy` | `crash`
+      kind: `ready` | `fail` | `report` | `healthy` | `crash` | `reload`
       source: SourceName
     }
   | { kind: `restart` }
@@ -138,14 +144,15 @@ type Step =
 type Gate = `loading` | `ready` | `error` | `crashed`
 // `serial` names one reported problem. A new report is a new problem even
 // when it has the same field, so the node that shows it is a new node.
-type Problem = null | {
-  field: `failureReason` | `error`
-  message: string
-  serial: number
-}
+type Problem = null | { message: string; serial: number }
 // `cause` is the message of what put the gate in `error` or `crashed`.
-type GateModel = { gate: Gate; cause: string | null }
-type SourceModel = GateModel & { problem: Problem }
+// `reloading`: a reload's new sync run (or a query's restart) has not
+// committed yet, so everything visible is the previous run's.
+type GateModel = { gate: Gate; cause: string | null; reloading: boolean }
+// The node shows `stopped` (from fail() after readiness) over `failure`
+// (from reportError()); a reload's new run can report while the previous
+// run's error still shows.
+type SourceModel = GateModel & { failure: Problem; stopped: Problem }
 type Model = {
   sources: Record<SourceName, SourceModel>
   query: GateModel
@@ -168,35 +175,43 @@ function freshModel(): Model {
   const source = (): SourceModel => ({
     gate: `loading`,
     cause: null,
-    problem: null,
+    reloading: false,
+    failure: null,
+    stopped: null,
   })
   return {
     sources: { A: source(), B: source() },
-    query: { gate: `loading`, cause: null },
-    inner: { gate: `loading`, cause: null },
+    query: { gate: `loading`, cause: null, reloading: false },
+    inner: { gate: `loading`, cause: null, reloading: false },
     serial: 0,
     parentRows: 0,
   }
 }
 
 // A live query's status follows its sources until it is ready, and never
-// leaves `error` or `crashed` within a sync run. A crashed input crashes the
-// query at any time, even after its first load failed, as a crash does to a
-// Collection; after the query is ready, nothing else changes it. The query
-// takes the cause of the input that ended its sync run.
+// leaves `crashed`. A crashed input crashes the query at any time, even after
+// its first load failed, as a crash does to a Collection; after the query is
+// ready, nothing else changes it. A failed first load stays until no input
+// has a failure left (inputs leave `error` only by reloading): then the query
+// starts a new sync run, `loading` with `reloading` until it is ready. The
+// query takes the cause of the input that ended its sync run.
 function deriveGate(
   current: GateModel,
   inputs: ReadonlyArray<GateModel>,
 ): GateModel {
   if (current.gate === `crashed`) return current
   const crashed = inputs.find(({ gate }) => gate === `crashed`)
-  if (crashed) return { gate: `crashed`, cause: crashed.cause }
-  if (current.gate === `error`) return current
+  if (crashed)
+    return { gate: `crashed`, cause: crashed.cause, reloading: false }
   if (current.gate === `ready`) return current
   const failed = inputs.find(({ gate }) => gate === `error`)
-  if (failed) return { gate: `error`, cause: failed.cause }
+  if (current.gate === `error`) {
+    if (failed) return current
+    current = { gate: `loading`, cause: null, reloading: true }
+  }
+  if (failed) return { gate: `error`, cause: failed.cause, reloading: false }
   if (inputs.every(({ gate }) => gate === `ready`))
-    return { gate: `ready`, cause: null }
+    return { gate: `ready`, cause: null, reloading: false }
   return current
 }
 
@@ -211,8 +226,9 @@ function deriveQueries(shape: Shape, model: Model): void {
     model.inner = deriveGate(model.inner, gates([`A`]))
     model.query = model.inner
   } else {
-    // A running sync run receives `B`'s row once `B` syncs it; a failed
-    // sync run receives nothing more.
+    model.query = deriveGate(model.query, gates(shapeSources[shape]))
+    // A running sync run receives `B`'s row once `B` syncs it, including a
+    // run that started again; a failed sync run receives nothing more.
     if (
       shape === `include` &&
       (model.query.gate === `loading` || model.query.gate === `ready`) &&
@@ -220,7 +236,6 @@ function deriveQueries(shape: Shape, model: Model): void {
     ) {
       model.parentRows = 1
     }
-    model.query = deriveGate(model.query, gates(shapeSources[shape]))
   }
 }
 
@@ -241,17 +256,30 @@ function applyModel(
   if (!shapeSources[shape].includes(step.source)) return `ok`
   const source = model.sources[step.source]
   let outcome: `ok` | `throws` | `bad-transition` = `ok`
-  // After a crash, adapter calls do nothing. After fail(), they throw.
-  const stopped = source.gate === `error` || source.problem?.field === `error`
+  // After a crash, adapter calls do nothing and a reload rejects. After
+  // fail(), adapter calls throw until a reload starts a new sync run.
+  const stopped =
+    !source.reloading && (source.gate === `error` || source.stopped !== null)
   if (step.kind !== `crash` && source.gate === `crashed`) {
     deriveQueries(shape, model)
-    return outcome
+    return step.kind === `reload` ? `throws` : outcome
   }
   switch (step.kind) {
     case `ready`:
-      if (source.gate === `error`) outcome = `bad-transition`
+      if (source.reloading) {
+        // The new run's first commit replaces the rows and clears the node.
+        source.reloading = false
+        source.gate = `ready`
+        source.cause = null
+        source.failure = null
+        source.stopped = null
+      } else if (source.gate === `error`) outcome = `bad-transition`
       else if (stopped) outcome = `throws`
       else source.gate = `ready`
+      break
+    case `reload`:
+      // Everything visible stays until the new run commits or fails.
+      source.reloading = true
       break
     case `fail`:
       // Before Collection readiness the first load fails; after it, the
@@ -260,32 +288,36 @@ function applyModel(
       else if (source.gate !== `ready`) {
         source.gate = `error`
         source.cause = `${step.source} gave up`
-      } else
-        source.problem = {
-          field: `error`,
+        source.reloading = false
+      } else {
+        source.reloading = false
+        source.failure = null
+        source.stopped = {
           message: `${step.source} gave up`,
           serial: ++model.serial,
         }
+      }
       break
     case `report`:
       if (stopped || source.gate !== `ready`) outcome = `throws`
       else
-        source.problem = {
-          field: `failureReason`,
+        source.failure = {
           message: `${step.source} problem`,
           serial: ++model.serial,
         }
       break
     case `healthy`:
       if (stopped || source.gate !== `ready`) outcome = `throws`
-      else source.problem = null
+      else source.failure = null
       break
     case `crash`:
       // From any active status, for good.
       if (source.gate !== `crashed`) {
         source.gate = `crashed`
         source.cause = `${step.source} crashed`
-        source.problem = null
+        source.failure = null
+        source.stopped = null
+        source.reloading = false
       }
       break
   }
@@ -303,6 +335,7 @@ type ExpectedNode = {
   hasErrors: boolean
   failureReason: ExpectedProblem
   error: ExpectedProblem
+  reloading: boolean
   instances?: { total: number; withErrors: number }
   sources: Array<ExpectedNode>
 }
@@ -315,18 +348,18 @@ function sourceNode(
   identity: boolean,
   kind: ExpectedNode[`kind`] = `source`,
 ): ExpectedNode {
-  const reported = (field: `failureReason` | `error`): ExpectedProblem =>
-    source.problem?.field === field
+  const reported = (problem: Problem): ExpectedProblem =>
+    problem
       ? {
-          message: source.problem.message,
-          ...(identity ? { serial: source.problem.serial } : {}),
+          message: problem.message,
+          ...(identity ? { serial: problem.serial } : {}),
         }
       : null
   const error =
     source.gate === `error` || source.gate === `crashed`
       ? { message: source.cause! }
-      : reported(`error`)
-  const failureReason = error ? null : reported(`failureReason`)
+      : reported(source.stopped)
+  const failureReason = error ? null : reported(source.failure)
   return {
     alias,
     kind,
@@ -334,13 +367,14 @@ function sourceNode(
     hasErrors: error !== null || failureReason !== null,
     failureReason,
     error,
+    reloading: source.reloading,
     sources: [],
   }
 }
 
 function queryNode(
   alias: string,
-  { gate, cause }: GateModel,
+  { gate, cause, reloading }: GateModel,
   sources: Array<ExpectedNode>,
 ): ExpectedNode {
   const error =
@@ -352,6 +386,7 @@ function queryNode(
     hasErrors: error !== null || sources.some((node) => node.hasErrors),
     failureReason: null,
     error,
+    reloading,
     sources,
   }
 }
@@ -529,6 +564,7 @@ function project(node: ErrorTreeNode): ExpectedNode {
     hasErrors: node.hasErrors,
     failureReason: problem(node.failureReason),
     error: problem(node.error),
+    reloading: node.reloading,
     ...(node.instances ? { instances: node.instances } : {}),
     sources: node.sources.map(project),
   }
@@ -625,7 +661,7 @@ async function runHistory(
       try {
         if (step.kind === `restart`) {
           await query.cleanup()
-          await inner?.cleanup()
+          await inner?.cleanup({ dependents: true })
           await Promise.all([
             sources.A.collection.cleanup(),
             sources.B.collection.cleanup(),
@@ -633,8 +669,19 @@ async function runHistory(
           begin()
         } else if (shapeSources[shape].includes(step.source)) {
           const params = sources[step.source].params
-          if (step.kind === `ready`) {
-            if (params.collection.status === `loading`) {
+          if (step.kind === `reload`) {
+            // A reload settles only when its new run commits or fails; a
+            // crashed Collection rejects at once.
+            const reload = params.collection.reload()
+            if (params.collection.status === `crashed`)
+              thrown = await reload.catch((e: unknown) => e)
+            else void reload.catch(() => undefined)
+          } else if (step.kind === `ready`) {
+            // A reload's new run commits its row, as a first load does.
+            if (
+              params.collection.status === `loading` ||
+              params.collection._lifecycle.reloading
+            ) {
               params.begin()
               params.write({
                 type: `insert`,
@@ -717,7 +764,7 @@ async function runHistory(
     console.error = consoleError
     stop()
     await query.cleanup()
-    await inner?.cleanup()
+    await inner?.cleanup({ dependents: true })
     await Promise.all([
       sources.A.collection.cleanup(),
       sources.B.collection.cleanup(),
@@ -787,6 +834,37 @@ const namedHistories: Record<string, ReadonlyArray<Step>> = {
       on(`ready`, `A`),
       on(`ready`, `B`),
     ],
+  'a reload keeps everything visible until its new run commits': [
+    on(`ready`, `A`),
+    on(`ready`, `B`),
+    on(`report`, `A`),
+    on(`fail`, `A`),
+    on(`reload`, `A`),
+    on(`report`, `A`),
+    on(`healthy`, `A`),
+    on(`ready`, `A`),
+  ],
+  'a reload recovers a failed first load, and the query starts again': [
+    on(`fail`, `A`),
+    on(`reload`, `A`),
+    on(`reload`, `A`),
+    on(`ready`, `B`),
+    on(`ready`, `A`),
+  ],
+  'a reload whose new run fails shows the new error': [
+    on(`ready`, `A`),
+    on(`ready`, `B`),
+    on(`fail`, `A`),
+    on(`reload`, `A`),
+    on(`fail`, `A`),
+    on(`fail`, `B`),
+    on(`reload`, `A`),
+  ],
+  'a crashed Collection cannot reload': [
+    on(`ready`, `A`),
+    on(`crash`, `A`),
+    on(`reload`, `A`),
+  ],
   'a report before Collection readiness throws': [
     on(`report`, `A`),
     on(`healthy`, `B`),
@@ -813,6 +891,7 @@ describe(`source failure and health oracle`, () => {
             `report` as const,
             `healthy` as const,
             `crash` as const,
+            `reload` as const,
           ),
           fc.constantFrom(`A` as const, `B` as const),
         )

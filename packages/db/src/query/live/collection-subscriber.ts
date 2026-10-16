@@ -51,6 +51,11 @@ export class CollectionSubscriber<
     private collectionConfigBuilder: CollectionConfigBuilder<TContext, TResult>,
   ) {}
 
+  /** The live query this subscription reads for, as `subscribers` lists it. */
+  private owner(): SubscribeChangesOptions[`owner`] {
+    return this.collectionConfigBuilder.dependent()
+  }
+
   subscribe(): CollectionSubscription {
     const whereClause =
       this.collectionConfigBuilder.sourceWhereClausesCache?.get(this.sourceId)
@@ -290,6 +295,7 @@ export class CollectionSubscriber<
       onStatusChange,
       onLoadSubsetError,
       deferAcquisition: this.defersAcquisition(),
+      owner: this.owner(),
       truncateReplayPublication: this.truncateReplayPublicationControl(),
       orderBy: hints.orderBy,
       limit: hints.limit,
@@ -330,6 +336,7 @@ export class CollectionSubscriber<
       onStatusChange,
       onLoadSubsetError,
       deferAcquisition: this.defersAcquisition(),
+      owner: this.owner(),
       truncateReplayPublication: this.truncateReplayPublicationControl(() => {
         // Recovery favors a simple, authoritative rebuild over resuming a
         // fragile cursor. The retained full-source demand is replayed on later

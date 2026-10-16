@@ -1564,7 +1564,10 @@ describe(`Sync Streams`, () => {
         expect(createDiffTrigger).not.toHaveBeenCalled()
         expect(query.status).toBe(`loading`)
         let cleanupSettled = false
-        const cleanupOutcome = collection.cleanup().then(
+        // An active query refuses the public cleanup; internal teardown that
+        // bypasses admission still settles the subset hook.
+        await expect(collection.cleanup()).rejects.toThrow(/dependent/)
+        const cleanupOutcome = collection._lifecycle.cleanup().then(
           () => {
             cleanupSettled = true
             return { status: `fulfilled` as const }

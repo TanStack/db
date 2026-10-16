@@ -480,7 +480,8 @@ export class BucketFacadeAdapter {
       withError = next
       this.onInstanceErrorsChange()
     })
-    const dispose = collection.cleanup.bind(collection)
+    // The adapter retires its facades itself, even while readers subscribe.
+    const dispose = () => collection._lifecycle.cleanup()
     // Other parent rows can share this facade, so a holder must not end it.
     collection.cleanup = () =>
       Promise.reject(

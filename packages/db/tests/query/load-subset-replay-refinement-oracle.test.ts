@@ -195,8 +195,13 @@ describe(`loadSubset replay refinement`, () => {
         expect(readEvents()).toEqual(initial)
         publications.length = 0
 
-        await source.cleanup()
-        if (live) expect(live.status).toBe(`crashed`)
+        // A live query refuses the public cleanup; internal teardown that
+        // bypasses it is fatal for the query.
+        if (live) {
+          await expect(source.cleanup()).rejects.toThrow(/dependent/)
+          await source._lifecycle.cleanup()
+          expect(live.status).toBe(`crashed`)
+        } else await source.cleanup()
         source.startSyncImmediate()
         await flushPromises()
         expect(loads).toBe(2)

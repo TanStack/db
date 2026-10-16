@@ -792,6 +792,11 @@ export interface ErrorTreeNode {
   readonly hasErrors: boolean
   readonly failureReason: CollectionErrorInfo | null
   readonly error: CollectionErrorInfo | null
+  /**
+   * A reload's new sync run is in flight: the rows, status, and problem shown
+   * are the previous run's until it commits or fails.
+   */
+  readonly reloading: boolean
   /** For an include node: its per-row child Collections, and how many have a problem. */
   readonly instances?: { readonly total: number; readonly withErrors: number }
   readonly sources: ReadonlyArray<ErrorTreeNode>
@@ -1151,6 +1156,27 @@ export type NamespacedAndKeyedStream = IStreamBuilder<KeyedNamespacedRow>
 /**
  * Options for subscribing to collection changes
  */
+/**
+ * Something that reads a Collection, as listed by `collection.subscribers`:
+ * a live query, an Effect, or a direct subscription.
+ */
+export interface CollectionDependent {
+  readonly kind: `live-query` | `effect` | `subscription`
+  /** A live query's Collection; a pooled live query has none. */
+  readonly collection?: Collection<any, any, any, any, any>
+  /**
+   * Whether something still reads through this dependent: an Effect or a
+   * subscription always does; a live query does while it has a subscriber.
+   * `cleanup()` refuses only while an active live query or Effect remains.
+   */
+  readonly active: boolean
+  /**
+   * End this dependent: clean up the live query with its own dependents,
+   * dispose the Effect, or end the subscription.
+   */
+  end: () => Promise<void>
+}
+
 export interface SubscribeChangesOptions<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -1183,6 +1209,12 @@ export interface SubscribeChangesOptions<
    * @internal
    */
   deferAcquisition?: boolean
+  /**
+   * The live query or Effect this subscription reads for, so
+   * `collection.subscribers` can name it.
+   * @internal
+   */
+  owner?: CollectionDependent
   /**
    * Listener for subscription status changes.
    * Registered BEFORE any snapshot is requested, ensuring no status transitions are missed.

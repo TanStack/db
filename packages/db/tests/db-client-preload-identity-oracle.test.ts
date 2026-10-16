@@ -478,8 +478,8 @@ describe(`DbClient preload source identity`, () => {
         observer?.dispose()
         await view?.cleanup()
         await client.cleanup()
-        await first.cleanup()
-        await second.cleanup()
+        await first.cleanup({ dependents: true })
+        await second.cleanup({ dependents: true })
       }
     },
   )
@@ -555,8 +555,8 @@ describe(`DbClient preload source identity`, () => {
         await nextView?.cleanup()
         await firstView?.cleanup()
         await client.cleanup()
-        await first.cleanup()
-        await second.cleanup()
+        await first.cleanup({ dependents: true })
+        await second.cleanup({ dependents: true })
       }
     },
   )
@@ -604,8 +604,8 @@ describe(`DbClient preload source identity`, () => {
       } finally {
         observer?.dispose()
         await client.cleanup()
-        await first.cleanup()
-        await second.cleanup()
+        await first.cleanup({ dependents: true })
+        await second.cleanup({ dependents: true })
       }
     },
   )

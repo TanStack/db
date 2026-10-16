@@ -107,6 +107,36 @@ Development builds show the full message. For example:
 Cannot perform operation on collection "collection-1" - collection is in error state. Try calling cleanup() and restarting the collection.
 ```
 
+<a id="error-249"></a>
+
+## Error 249: `CollectionHasSubscribersError`
+
+Development builds show the full message. For example:
+
+```text
+Cannot clean up collection "collection-1" while 2 live query or Effect dependent(s) read it. Clean them up first, or call cleanup({ dependents: true }). collection.subscribers lists them.
+```
+
+<a id="error-250"></a>
+
+## Error 250: `CollectionReloadCrashedError`
+
+Development builds show the full message. For example:
+
+```text
+Cannot reload collection "collection-1" because it crashed. A crash is permanent for the Collection instance; clean it up and create a new one.
+```
+
+<a id="error-251"></a>
+
+## Error 251: `CollectionReloadDuringSyncEntryError`
+
+Development builds show the full message. For example:
+
+```text
+Cannot reload collection "collection-1" from inside its sync function. Reload after the sync function returns.
+```
+
 <a id="error-9"></a>
 
 ## Error 9: `InvalidCollectionStatusTransitionError`

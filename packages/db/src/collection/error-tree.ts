@@ -49,6 +49,7 @@ export function buildErrorTree(
     status: collection.status,
     failureReason,
     error,
+    reloading: collection._lifecycle.reloading,
     ...(instances ? { instances: countInstances(instances()) } : {}),
     sources: children,
   })
@@ -114,6 +115,7 @@ function sameNode(a: ErrorTreeNode, b: ErrorTreeNode): boolean {
     a.hasErrors === b.hasErrors &&
     a.failureReason === b.failureReason &&
     a.error === b.error &&
+    a.reloading === b.reloading &&
     a.instances?.total === b.instances?.total &&
     a.instances?.withErrors === b.instances?.withErrors &&
     a.sources.length === b.sources.length &&

@@ -39,6 +39,7 @@ import type { Collection } from '../../collection/index.js'
 import type { ErrorTreeSource } from '../../collection/error-tree.js'
 import type {
   CollectionConfigSingleRowOption,
+  CollectionDependent,
   KeyedStream,
   ResultStream,
   StringCollationConfig,
@@ -127,6 +128,38 @@ export class CollectionConfigBuilder<
 
   // Reference to the live query collection for error state transitions
   public liveQueryCollection?: Collection<TResult, any, any>
+  private dependentEntry: CollectionDependent | undefined
+
+  /**
+   * Reload each source with an error, then this query if its own first load
+   * failed. A source's reload keeps this query's status until it commits.
+   */
+  async reload(): Promise<void> {
+    const failed = this.collectionSources
+      .map(({ collection }) => collection)
+      .filter(
+        (collection, index, all) =>
+          all.indexOf(collection) === index &&
+          (collection.status === `error` || collection.errors.error !== null),
+      )
+    await Promise.all(failed.map((collection) => collection.reload()))
+    const query = this.liveQueryCollection
+    if (query?.status === `error`) await query._sync.reload()
+  }
+
+  /** This live query as its sources' `subscribers` list it. */
+  dependent(): CollectionDependent | undefined {
+    const collection = this.liveQueryCollection
+    if (!collection) return undefined
+    return (this.dependentEntry ??= {
+      kind: `live-query`,
+      collection,
+      get active() {
+        return collection.subscribers.length > 0
+      },
+      end: () => collection.cleanup({ dependents: true }),
+    })
+  }
 
   /**
    * Whether this live-query Collection had a subscriber or a preload in its
@@ -1218,6 +1251,23 @@ export class CollectionConfigBuilder<
     // but could happen if user manually calls cleanup()
     if (status === `cleaned-up`) {
       this.handleSourceCleanupStart(collectionId)
+      return
+    }
+
+    // A query whose first load failed because a source failed starts a new
+    // sync run once no source has a failure left, for example after the
+    // source reloaded. It shows `loading` until that run is ready.
+    if (
+      status === `ready` &&
+      this.liveQueryCollection?.status === `error` &&
+      this.collectionSources.every(
+        ({ collection }) =>
+          collection.status !== `error` && collection.status !== `crashed`,
+      )
+    ) {
+      void this.liveQueryCollection._sync
+        .reload({ showLoading: true })
+        .catch(() => undefined)
       return
     }
 

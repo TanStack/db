@@ -569,7 +569,7 @@ describe(`pooled live-query deferred acquisition`, () => {
       } finally {
         observer?.dispose()
         await view?.cleanup()
-        await source.cleanup()
+        await source.cleanup({ dependents: true })
         await client?.cleanup()
       }
     },
@@ -633,7 +633,7 @@ describe(`pooled live-query deferred acquisition`, () => {
         } finally {
           subscription?.unsubscribe()
           await view?.cleanup()
-          await source.cleanup()
+          await source.cleanup({ dependents: true })
         }
       })
     }
@@ -1097,7 +1097,8 @@ describe(`a subscriber that outlives cleanup`, () => {
     try {
       outer.startSyncImmediate()
       await settle()
-      await inner.cleanup()
+      // Drive internal teardown, which bypasses cleanup admission.
+      await inner._lifecycle.cleanup()
       inner.startSyncImmediate()
       await settle()
       expect(counts.starts, `source sync-run starts`).toBe(0)

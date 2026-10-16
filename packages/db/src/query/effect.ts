@@ -41,6 +41,7 @@ import type {
 } from './compiler/joins.js'
 import type {
   ChangeMessage,
+  CollectionDependent,
   ErrorTreeNode,
   KeyedStream,
   StringCollationConfig,
@@ -311,8 +312,16 @@ export function createEffect<
     return attempt
   }
 
+  const effect: Effect = {
+    dispose,
+    get disposed() {
+      return disposed
+    },
+  }
+
   // Create and start the pipeline
   const runner = new EffectPipelineRunner<TRow, TKey>({
+    effect,
     query: config.query,
     skipInitial: config.skipInitial ?? false,
     onBatchProcessed,
@@ -366,12 +375,7 @@ export function createEffect<
     throw error
   }
 
-  return {
-    dispose,
-    get disposed() {
-      return disposed
-    },
-  }
+  return effect
 }
 
 // ---------------------------------------------------------------------------
@@ -388,6 +392,8 @@ interface EffectPipelineRunnerConfig<
   /** Called when a source collection enters error or cleaned-up state */
   onSourceError: (error: Error) => void
   onErrorsChange?: (errors: ErrorTreeNode) => void
+  /** The Effect's handle, so its source subscriptions can name it. */
+  effect: Effect
 }
 
 /**
@@ -478,6 +484,8 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   private readonly requests = new RequestErrors()
   private reportedTree: ErrorTreeNode | undefined
   private readonly onErrorsChange: ((errors: ErrorTreeNode) => void) | undefined
+  // This Effect as its sources' `subscribers` list it.
+  private readonly dependent: CollectionDependent
 
   // Scheduler integration
   private subscribedToAllCollections = false
@@ -498,6 +506,11 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     this.onBatchProcessed = config.onBatchProcessed
     this.onSourceError = config.onSourceError
     this.onErrorsChange = config.onErrorsChange
+    this.dependent = {
+      kind: `effect`,
+      active: true,
+      end: () => config.effect.dispose(),
+    }
 
     // Parse query
     this.query = buildQueryFromConfig({ query: config.query })
@@ -634,6 +647,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
           orderByInfo,
           whereExpression,
         ),
+        owner: this.dependent,
         onLoadSubsetError: ({ error }) =>
           this.failLoad(sourceId, normalizeError(error)),
         // subscribeChanges can report a result before it returns the
@@ -1106,6 +1120,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       status: this.reachedReady ? `ready` : `loading`,
       failureReason: null,
       error: this.requests.problem,
+      reloading: false,
       sources: this.collectionSources.map(({ sourceId, alias, collection }) =>
         buildErrorTree(collection, { alias, id: sourceId }, this),
       ),

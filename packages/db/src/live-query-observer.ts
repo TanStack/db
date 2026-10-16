@@ -914,7 +914,7 @@ class LiveQueryObserverImpl<
       async () => {
         const collection = this.collection
         this.dispose()
-        await collection?.cleanup()
+        await collection?.cleanup({ dependents: true })
       },
     )
   }
