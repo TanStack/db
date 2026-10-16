@@ -6,6 +6,7 @@ export type BrowserOPFSWorkerInitRequest = {
   requestId: string
   databaseName: string
   vfsName: string
+  wasmUrl: string
 }
 
 export type BrowserOPFSWorkerExecuteRequest = {

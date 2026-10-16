@@ -2,7 +2,8 @@ import {
   InvalidPersistedCollectionConfigError,
   PersistenceUnavailableError,
 } from '@tanstack/db-sqlite-persistence-core'
-import OPFSWorkerConstructor from './opfs-worker?worker'
+import wasmUrl from '@journeyapps/wa-sqlite/dist/wa-sqlite.wasm?url&no-inline'
+import workerUrl from './opfs-worker?worker&url'
 import type { BrowserWASQLiteDatabase } from './wa-sqlite-driver'
 import type {
   BrowserOPFSWorkerErrorCode,
@@ -14,6 +15,8 @@ const DEFAULT_VFS_NAME = `opfs`
 const DEFAULT_OPEN_TIMEOUT_MS = 30_000
 const MAX_OPEN_TIMEOUT_MS = 2_147_483_647
 type BrowserOPFSFeatureGlobal = {
+  document?: Document
+  location?: { href?: string }
   navigator?: {
     storage?: {
       getDirectory?: () => Promise<unknown>
@@ -64,6 +67,7 @@ function hasOPFSBrowserPrerequisites(globalObject: unknown): boolean {
   const WorkerConstructor = candidate.Worker
 
   return (
+    typeof candidate.location?.href === `string` &&
     typeof getDirectory === `function` &&
     typeof WorkerConstructor === `function`
   )
@@ -92,7 +96,7 @@ function createWorkerRequestIdFactory(): () => string {
   }
 }
 
-function createOPFSWorkerInstance(): BrowserOPFSWorkerLike {
+function createOPFSWorkerInstance(workerFileUrl: URL): BrowserOPFSWorkerLike {
   const WorkerConstructor = (
     globalThis as typeof globalThis & { Worker?: typeof Worker }
   ).Worker
@@ -102,9 +106,7 @@ function createOPFSWorkerInstance(): BrowserOPFSWorkerLike {
     )
   }
 
-  return new (
-    OPFSWorkerConstructor as unknown as new () => BrowserOPFSWorkerLike
-  )()
+  return new WorkerConstructor(workerFileUrl, { type: `module` })
 }
 
 function getOpenAbortError(signal: AbortSignal): Error {
@@ -154,7 +156,43 @@ export async function openBrowserWASQLiteOPFSDatabase(
   }
 
   const vfsName = options.vfsName ?? DEFAULT_VFS_NAME
-  const worker = createOPFSWorkerInstance()
+  const pageUrl = globalThis.location.href
+  let wasmFileUrl = new URL(wasmUrl, pageUrl)
+  let workerFileUrl = new URL(workerUrl, pageUrl)
+  const viteClient = (
+    globalThis as BrowserOPFSFeatureGlobal
+  ).document?.querySelector<HTMLScriptElement>(`script[src*="/@vite/client"]`)
+  if (viteClient?.src) {
+    // Vite's dependency optimizer moves this module without moving its assets.
+    // Ask Vite to resolve the package exports instead of guessing install paths.
+    const packageUrl = new URL(
+      `@id/@tanstack/browser-db-sqlite-persistence/`,
+      new URL(`../`, viteClient.src),
+    )
+    const workerFile = workerFileUrl.pathname.split(`/`).at(-1)
+    if (!workerFile) {
+      throw new PersistenceUnavailableError(
+        `Browser OPFS worker URL is missing`,
+      )
+    }
+    const [wasmAsset, workerAsset] = await Promise.all([
+      import(
+        /* @vite-ignore */ /* webpackIgnore: true */ new URL(
+          `wa-sqlite.wasm?url&no-inline`,
+          packageUrl,
+        ).href
+      ) as Promise<{ default: string }>,
+      import(
+        /* @vite-ignore */ /* webpackIgnore: true */ new URL(
+          `assets/${workerFile}?url`,
+          packageUrl,
+        ).href
+      ) as Promise<{ default: string }>,
+    ])
+    wasmFileUrl = new URL(wasmAsset.default, pageUrl)
+    workerFileUrl = new URL(workerAsset.default, pageUrl)
+  }
+  const worker = createOPFSWorkerInstance(workerFileUrl)
   const nextRequestId = createWorkerRequestIdFactory()
   const pendingRequests = new Map<string, PendingWorkerRequest>()
   let disposed = false
@@ -286,6 +324,7 @@ export async function openBrowserWASQLiteOPFSDatabase(
       type: `init`,
       databaseName,
       vfsName,
+      wasmUrl: wasmFileUrl.href,
     })
     signal?.addEventListener(`abort`, onAbort, { once: true })
     if (signal?.aborted) onAbort()

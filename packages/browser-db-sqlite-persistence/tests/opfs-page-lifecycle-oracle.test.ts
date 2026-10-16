@@ -254,6 +254,7 @@ function installEnvironment(behavior: WorkerBehavior): ControlledPage {
   vi.stubGlobal(`navigator`, {
     storage: { getDirectory: () => Promise.resolve({}) },
   })
+  vi.stubGlobal(`location`, { href: `https://example.test/` })
   vi.stubGlobal(`addEventListener`, page.addEventListener.bind(page))
   vi.stubGlobal(`removeEventListener`, page.removeEventListener.bind(page))
   return page

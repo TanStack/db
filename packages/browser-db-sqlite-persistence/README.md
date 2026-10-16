@@ -169,7 +169,9 @@ duplicates inside that horizon remain idempotent.
 
 - `openBrowserWASQLiteOPFSDatabase(...)` starts a dedicated Web Worker and
   routes SQL operations through it. OPFS sync access handle APIs are used in
-  that worker context.
+  that worker context. The package includes the worker and a separate
+  `wa-sqlite.wasm` asset. Vite includes both automatically, with no asset
+  copying or WASM URL configuration required.
 - Opening has a 30-second deadline by default. `timeoutMs` changes it; `0`
   explicitly disables the deadline. A timed-out open rejects with
   `TimeoutError` and terminates its pending worker, so it cannot acquire the

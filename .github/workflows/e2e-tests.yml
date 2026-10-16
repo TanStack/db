@@ -130,6 +130,12 @@ jobs:
           cd packages/browser-db-sqlite-persistence
           pnpm test:opfs-fairness
 
+      - name: Run Browser SQLite packaged consumer E2E tests
+        if: matrix.group == 'browser'
+        run: |
+          cd packages/browser-db-sqlite-persistence
+          pnpm test:e2e
+
       - name: Run Browser SQLite OPFS with live Electric E2E tests
         if: matrix.group == 'browser'
         run: |
