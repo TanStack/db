@@ -82,7 +82,6 @@ export function processOrderBy(
   offset?: number,
   groupKeyFn?: (key: unknown, value: unknown) => unknown,
 ): IStreamBuilder<KeyValue<unknown, [NamespacedRow, string]>> {
-  // Pre-compile all order by expressions
   const compiledOrderBy = orderByClause.map((clause) => {
     const clauseWithoutAggregates = replaceAggregatesByRefs(
       clause.expression,
@@ -95,34 +94,16 @@ export function processOrderBy(
       compareOptions: buildCompareOptions(clause, collection),
     }
   })
-  // Create a value extractor function for the orderBy operator
   const valueExtractor = (row: NamespacedRow & { $selected?: any }) => {
-    // The namespaced row contains:
-    // 1. Table aliases as top-level properties (e.g., row["tableName"])
-    // 2. SELECT results in $selected (e.g., row.$selected["aggregateAlias"])
-    // The replaceAggregatesByRefs function has already transformed:
-    // - Aggregate expressions that match SELECT aggregates to use the $selected namespace
-    // - $selected ref expressions are passed through unchanged (already using the correct namespace)
-    const orderByContext = row
-
     if (orderByClause.length > 1) {
-      // For multiple orderBy columns, create a composite key
-      return compiledOrderBy.map((compiled) =>
-        compiled.compiledExpression(orderByContext),
-      )
-    } else if (orderByClause.length === 1) {
-      // For a single orderBy column, use the value directly
-      const compiled = compiledOrderBy[0]!
-      return compiled.compiledExpression(orderByContext)
+      return compiledOrderBy.map((compiled) => compiled.compiledExpression(row))
     }
-
-    // Default case - no ordering
-    return null
+    return orderByClause.length === 1
+      ? compiledOrderBy[0]!.compiledExpression(row)
+      : null
   }
 
-  // Create a multi-property comparator that respects the order and direction of each property
   const compare = (a: unknown, b: unknown) => {
-    // If we're comparing arrays (multiple properties), compare each property in order
     if (orderByClause.length > 1) {
       const arrayA = a as Array<unknown>
       const arrayB = b as Array<unknown>
@@ -137,7 +118,6 @@ export function processOrderBy(
       return arrayA.length - arrayB.length
     }
 
-    // Single property comparison
     if (orderByClause.length === 1) {
       const clause = compiledOrderBy[0]!
       const compareFn = makeComparator(clause.compareOptions)
@@ -201,22 +181,39 @@ export function processOrderBy(
         followRefCollection,
         followRefResult.path,
         compareOpts,
+        (candidate) => candidate.supports(`gt`) && candidate.supportsOrderOptimization,
       )
-
-      // An ordered source prefix must agree with the query's declared order.
-      if (!index?.supports(`gt`) || !index.supportsOrderOptimization) {
-        index = undefined
-      }
 
       if (devBuild() && process.env.NODE_ENV !== `production` && !index) {
         const collectionId = followRefCollection.id
         const fieldPath = followRefResult.path.join(`.`)
-        console.warn(
-          `[TanStack DB]${collectionId ? ` [${collectionId}]` : ``} orderBy with limit requires an index on "${fieldPath}" for efficient lazy loading. ` +
-            `Falling back to loading all data. ` +
-            `Consider creating an index on the collection with collection.createIndex((row) => row.${fieldPath}) ` +
-            `or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.`,
+        const prefix = `[TanStack DB]${collectionId ? ` [${collectionId}]` : ``} orderBy with limit`
+        const fieldIndexes = [...followRefCollection.indexes.values()].filter(
+          (candidate) => candidate.matchesField(followRefResult.path),
         )
+        const options =
+          `direction: "${compareOpts.direction}", nulls: "${compareOpts.nulls}", ` +
+          `stringSort: "${compareOpts.stringSort ?? `locale`}"` +
+          (compareOpts.stringSort === `custom`
+            ? `, and the same compare function reference`
+            : compareOpts.stringSort === `locale`
+              ? `, including the same locale and localeOptions`
+              : ``)
+        const detail =
+          fieldIndexes.length === 0
+            ? `requires an index on "${fieldPath}" for efficient lazy loading. ` +
+              `Falling back to loading all data. ` +
+              `Consider creating an index on the collection with collection.createIndex((row) => row.${fieldPath}) ` +
+              `or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.`
+            : !fieldIndexes.some((candidate) =>
+                  candidate.matchesCompareOptions(compareOpts),
+                )
+              ? `found an index on "${fieldPath}", but none uses the query's compareOptions (${options}). ` +
+                `Falling back to loading all data. ` +
+                `After importing BasicIndex from '@tanstack/db', create a BasicIndex on this field with the same compareOptions.`
+              : `found an index on "${fieldPath}" with matching compareOptions, but none supports ordered lazy loading. ` +
+                `Falling back to loading all data. Use an index with ordered range reads, one comparable value domain, and no custom comparator.`
+        console.warn(`${prefix} ${detail}`)
       }
 
       orderByAlias =

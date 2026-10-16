@@ -17,16 +17,20 @@
  * Taking the reverse index's first two entries as the query window would
  * expose ranks 30 and 20 instead of 10 and 20. The oracle checks the public
  * result and allows any physical plan that produces it.
+ * A second witness registers an unusable reverse index before a usable index.
+ * Its on-demand request must retain the bounded order so registration order
+ * cannot hide a later eligible physical plan.
  * The on-demand adapter confirms a finite request without adding rows because
  * all three are already installed. This witness does not cover provider paging
  * from an incomplete source or later source changes.
  */
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
 import { PropRef } from '../../src/query/ir.js'
 import { mockSyncCollectionOptions, withOracleCleanup } from '../utils.js'
+import type { LoadSubsetOptions } from '../../src/types.js'
 
 type Row = { id: number; rank: number }
 
@@ -45,6 +49,7 @@ const expectedIds = [...rows]
 function makeSource(
   mode: `eager` | `on-demand`,
   path: `scan` | `reverse manual index`,
+  onLoadSubset?: (options: LoadSubsetOptions) => void,
 ) {
   const id = `custom-index-order-selection-${mode}-${path}`
   if (mode === `eager`) {
@@ -69,7 +74,13 @@ function makeSource(
         for (const row of rows) write({ type: `insert`, value: row })
         commit()
         markReady()
-        return { loadSubset: () => true, unloadSubset: () => {} }
+        return {
+          loadSubset: (options) => {
+            onLoadSubset?.(options)
+            return true
+          },
+          unloadSubset: () => {},
+        }
       },
     },
   })
@@ -116,3 +127,52 @@ it.each(
     }, [() => live?.cleanup(), () => source.cleanup()])
   },
 )
+
+it(`uses a later eligible index after an unusable matching index`, async () => {
+  const requests: Array<LoadSubsetOptions> = []
+  const source = makeSource(`on-demand`, `scan`, (request) =>
+    requests.push(request),
+  )
+  let live: ReturnType<typeof createLiveQueryCollection> | undefined
+  let unusableRead: ReturnType<typeof vi.spyOn> | undefined
+  let usableRead: ReturnType<typeof vi.spyOn> | undefined
+  await withOracleCleanup(async () => {
+    const unusable = source.createIndex((row) => row.rank, {
+      indexType: BTreeIndex,
+      options: { compareFn: (a: number, b: number) => b - a },
+    })
+    const usable = source.createIndex((row) => row.rank, {
+      indexType: BTreeIndex,
+    })
+    unusableRead = vi.spyOn(unusable, `takeFromStart`)
+    usableRead = vi.spyOn(usable, `takeFromStart`)
+
+    live = createLiveQueryCollection((q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank)
+        .limit(2),
+    )
+    await live.preload()
+
+    expect([...live.values()].map((row) => row.id)).toEqual(expectedIds)
+    expect(
+      requests.some((request) => request.orderBy && request.limit === 2),
+    ).toBe(true)
+    expect(
+      requests.some(
+        (request) =>
+          request.where === undefined &&
+          request.orderBy === undefined &&
+          request.limit === undefined,
+      ),
+    ).toBe(false)
+    expect(usableRead).toHaveBeenCalled()
+    expect(unusableRead).not.toHaveBeenCalled()
+  }, [
+    () => usableRead?.mockRestore(),
+    () => unusableRead?.mockRestore(),
+    () => live?.cleanup(),
+    () => source.cleanup(),
+  ])
+})

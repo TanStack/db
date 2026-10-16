@@ -40,12 +40,14 @@ export interface OptimizationResult<TKey> {
 }
 
 /**
- * Finds an index that matches a given field path
+ * Finds the first index that matches a field path, comparison options, and the
+ * consumer's optional capability check.
  */
 export function findIndexForField<TKey extends string | number>(
   collection: CollectionLike<any, TKey>,
   fieldPath: Array<string>,
   compareOptions?: CompareOptions,
+  canUse?: (index: IndexReader<TKey>) => boolean,
 ): IndexReader<TKey> | undefined {
   if (hasVirtualPropPath(fieldPath)) {
     return undefined
@@ -60,12 +62,12 @@ export function findIndexForField<TKey extends string | number>(
       index.matchesField(fieldPath) &&
       index.matchesCompareOptions(compareOpts)
     ) {
-      if (!index.matchesDirection(compareOpts.direction)) {
-        // Reversing the index also reverses where it keeps nulls, so the
-        // reader moves them back to the requested end.
-        return new ReverseIndex(index, compareOpts.nulls === `first`)
-      }
-      return index
+      const reader = !index.matchesDirection(compareOpts.direction)
+        ? // Reversing the index also reverses where it keeps nulls, so the
+          // reader moves them back to the requested end.
+          new ReverseIndex(index, compareOpts.nulls === `first`)
+        : index
+      if (!canUse || canUse(reader)) return reader
     }
   }
   return undefined
