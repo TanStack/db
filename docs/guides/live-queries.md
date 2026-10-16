@@ -158,6 +158,57 @@ Use `queryOnce` for scripts, background tasks, data export, or AI/LLM context
 building. `findOne()` resolves to `undefined` when no rows match. For UI
 bindings and reactive updates, use live queries instead.
 
+### Controlling automatic loading
+
+Set `autoLoad: false` to query data already in your collections without loading
+more data. Results stay reactive, including for joins, includes, and pagination.
+The default is `true`.
+
+One use case is application-owned fetching when a remote API request cannot be
+derived from the query IR. This example ingests custom API results into a Query
+Collection named `tasks`, configured with `syncMode: 'on-demand'` so explicit
+startup does not trigger an eager fetch:
+
+```tsx
+function useApiTasks(projectId: string) {
+  const request = useQuery({
+    queryKey: ['api-tasks', projectId],
+    queryFn: async () => {
+      const rows = await fetchProjectTasks(projectId)
+      tasks.startSyncImmediate()
+      tasks.utils.writeUpsert(rows)
+      return rows
+    },
+  })
+  const result = useLiveQuery({
+    autoLoad: false,
+    query: (q) =>
+      q.from({ task: tasks }).where(({ task }) => eq(task.projectId, projectId)),
+  })
+  return { ...result, isFetching: request.isFetching, fetchError: request.error }
+}
+```
+
+The same option works with `createLiveQueryCollection({ query, autoLoad: false })`
+and `useLiveInfiniteQuery(query, { pageSize: 20, autoLoad: false })`.
+For an existing live-query Collection, configure `autoLoad` when creating it.
+
+`isReady` means the available rows have been evaluated, even if empty. It does
+not indicate whether all remote data has been loaded. Source loading errors do
+not fail this query; query evaluation errors and explicit source cleanup do.
+Infinite queries expand the window over available rows, and `hasNextPage`
+describes those rows. Track remote pagination separately in your API fetcher.
+
+Other consumers and explicit source startup can still load shared rows. A source
+that is itself a live-query Collection supplies its published rows under its own
+loading policy. This option does not disable loading globally.
+
+Queries with `autoLoad: false` have separate identities from queries using
+`true` or the default, even with the same explicit `queryKey`. Switching between
+these modes replaces the query and resets infinite-query pages. If a callback
+returns the configuration and uses a legacy dependency array, include `autoLoad`
+in those dependencies.
+
 ### Using with Frameworks
 
 In React, you can use the `useLiveQuery` hook:

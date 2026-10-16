@@ -67,7 +67,19 @@ export class CollectionSubscriber<
     return !this.collectionConfigBuilder.hasSubscriberOrPreload()
   }
 
+  /**
+   * With loading disabled, the graph needs all available matching rows for
+   * joins and top-K evaluation, independent of provider coverage.
+   */
   private subscribeToChanges(whereExpression?: BasicExpression<boolean>) {
+    if (!this.collectionConfigBuilder.autoLoad) {
+      const subscription = this.collection.subscribeChanges(
+        (changes) => this.sendChangesToPipeline(changes),
+        { includeInitialState: true, whereExpression, autoLoad: false },
+      )
+      this.registerSubscriptionCleanup(subscription)
+      return subscription
+    }
     const orderByInfo =
       this.collectionConfigBuilder.optimizableOrderByCollections[this.sourceId]
 

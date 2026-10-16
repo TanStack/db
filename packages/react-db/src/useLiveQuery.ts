@@ -713,14 +713,17 @@ export function useLiveQueryForSuspense(
   return useLiveQueryImpl(configOrQueryOrCollection, deps, true)
 }
 
-// What one hook instance keeps across renders. It lives in a single ref
-// slot, so a render neither looks up nor allocates more.
+/**
+ * Keeps observer and query-reuse state in one ref per hook instance.
+ * Loading mode must match before a render can reuse the retained collection.
+ */
 function createHookInstance(dbClient: DbClient | undefined) {
   return {
     collection: null as Collection<object, string | number, {}> | null,
     deps: null as Array<unknown> | null,
     config: null as unknown,
     client: dbClient,
+    autoLoad: true,
     legacyUnhashableIdentity: [`legacy-unhashable`] as Array<unknown>,
     derivedIdentityProfiler: {
       renderCount: 0,
@@ -740,6 +743,10 @@ function createHookInstance(dbClient: DbClient | undefined) {
   }
 }
 
+/**
+ * Shares subscription and identity handling between regular and Suspense hooks.
+ * Query reuse requires matching loading policy as well as query identity.
+ */
 function useLiveQueryImpl(
   configOrQueryOrCollection: any,
   deps: Array<unknown> | undefined,
@@ -764,7 +771,7 @@ function useLiveQueryImpl(
   let preparedQueryValue: unknown | typeof unpreparedQueryValue =
     unpreparedQueryValue
   let identityDeps: ReadonlyArray<unknown>
-  let streamIdentity: unknown = undefined
+  let streamIdentity: ReadonlyArray<unknown> | undefined
   let identityError: UnhashableQueryIRError | undefined
 
   if (queryKey) {
@@ -816,10 +823,19 @@ function useLiveQueryImpl(
     }
   }
 
+  const modeConfig =
+    typeof configOrQueryOrCollection === `function`
+      ? preparedQueryValue
+      : configOrQueryOrCollection
+  const autoLoad = modeConfig?.autoLoad !== false
   let queryHash: string | undefined
   if (streamIdentity !== undefined) {
     try {
-      queryHash = getStableValueHash(streamIdentity, `queryKey`)
+      const identity = [
+        ...streamIdentity,
+        ...(queryKey && !autoLoad ? [[`autoLoad`, false]] : []),
+      ]
+      queryHash = getStableValueHash(identity, `queryKey`)
     } catch (error) {
       if (error instanceof UnhashableQueryIRError) {
         if (queryKey !== undefined) throw error
@@ -898,7 +914,10 @@ function useLiveQueryImpl(
   const needsNewCollection =
     !instance.collection ||
     (inputIsCollection && instance.config !== configOrQueryOrCollection) ||
-    (!inputIsCollection && (instance.client !== dbClient || identityChanged))
+    (!inputIsCollection &&
+      (instance.client !== dbClient ||
+        instance.autoLoad !== autoLoad ||
+        identityChanged))
 
   if (needsNewCollection) {
     if (inputIsCollection) {
@@ -984,6 +1003,7 @@ function useLiveQueryImpl(
       instance.deps = [...identityDeps]
     }
     instance.client = dbClient
+    instance.autoLoad = autoLoad
     instance.queryHash = queryHash
     instance.suspenseKey = suspenseKey
     instance.identityError = identityError

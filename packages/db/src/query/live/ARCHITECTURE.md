@@ -28,8 +28,8 @@ This architecture covers:
 - coherent publication to public Collections;
 - the boundaries with query-db ownership and physical query planning.
 
-The applied-settlement receipt described below is its only new public boundary
-contract. Optimistic transactions are another source of weighted input changes;
+Public boundary contracts include applied-settlement receipts and automatic
+loading control. Optimistic transactions are another source of weighted input changes;
 they do not have a separate routing model.
 
 ## One relational graph
@@ -688,6 +688,26 @@ does not guarantee that a UI component using shallow prop comparison skips a
 render, nor does it relax the stable public Collection facade contract above.
 
 ## Demand plane
+
+### Automatic loading
+
+`LiveQueryCollectionConfig.autoLoad: false` evaluates the same relational graph
+over available source rows without acquiring source data. Its subscriptions
+retain the source Collections against GC, but do not count as acquiring
+subscribers, start base-source sync, resume acquisition, or invoke
+`loadSubset`/`unloadSubset`. Joins and includes receive available source rows;
+ordered windows run the graph's top-K operator without provider-prefix loading.
+
+Readiness means the graph has evaluated its available inputs, independently of
+source readiness or provider errors. Graph failures and explicit source cleanup
+retain their normal error behavior.
+
+Other consumers, explicit source startup, or background sync may update shared
+source rows. A source that is itself a live-query Collection supplies its
+published rows under its own loading policy. Queries with `autoLoad: false`
+have separate identities from queries using `true` or the default, including
+with explicit framework keys, so their query instances and readiness remain
+separate.
 
 ### Demand grouping and ownership
 
@@ -1660,6 +1680,12 @@ every row before the top-K (a recorded limit).
     counts as a preload. A deferring live query keeps its sources from
     garbage collection but is not counted in their `subscriberCount` or
     `subscribers:change`, which adapters read as a request for live data.
+16. **Automatic loading:** a query configured with `autoLoad: false` never
+    initiates source acquisition, including on subscription, preload, window
+    changes, truncate, and query restart. It becomes ready on the evaluated
+    local result independently of provider readiness. Laws about required
+    acquisition settlement and provider-prefix authority apply to acquiring
+    queries; local windows describe only available rows.
 
 ## Glossary
 
@@ -1716,6 +1742,7 @@ keep the meanings defined there.
 | Reachable nested shape                                                                  | `packages/query-db-collection/tests/includes-work-counter-oracle.test.ts`                                                       |
 | Cleanup-start invalidation, settlement, and restart admission                           | `packages/db/tests/collection-cleanup-restart-oracle.test.ts`                                                                   |
 | Pooled live queries match their live-query Collection, including cleanup                | `packages/db/tests/query/pooled-live-query-oracle.property.test.ts`                                                             |
+| Automatic loading disabled, zero acquisition, local readiness, and coexistence with fetching consumers | `packages/db/tests/live-query-auto-load-oracle.test.ts` |
 | Deferred acquisition before a subscriber or preload, readiness, and the synchronous cut | `packages/db/tests/live-query-deferred-acquisition-oracle.test.ts`                                                              |
 
 Each oracle identifies the first divergent checkpoint and compares either the

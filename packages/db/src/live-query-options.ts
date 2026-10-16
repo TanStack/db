@@ -86,6 +86,10 @@ function createCollectionResolver(
   }
 }
 
+/**
+ * Evaluates query callbacks and binds descriptors through the supplied client.
+ * Nullish query results stay disabled; callers can defer descriptor sync starts.
+ */
 export function prepareLiveQueryValue(
   value: unknown,
   dbClient: DbClient | undefined,
@@ -105,19 +109,16 @@ export function prepareLiveQueryValue(
     )
   }
 
-  if (
-    value &&
-    typeof value === `object` &&
-    !isCollection(value) &&
-    !(value instanceof BaseQueryBuilder) &&
-    `query` in value
-  ) {
+  if (isCollection(value)) return value
+
+  const queryConfig = getLiveQueryConfig(value)
+  if (queryConfig) {
     const {
       query,
       queryKey: _queryKey,
       client: _client,
       ...config
-    } = value as PreparedLiveQueryConfigInput
+    } = queryConfig
 
     const preparedQuery = prepareLiveQueryValue(
       query,
@@ -138,6 +139,16 @@ export function prepareLiveQueryValue(
   return value
 }
 
+/** Recognizes config-shaped inputs without evaluating their query callbacks. */
+function getLiveQueryConfig(
+  value: unknown,
+): PreparedLiveQueryConfigInput | undefined {
+  if (value && typeof value === `object` && `query` in value) {
+    return value as PreparedLiveQueryConfigInput
+  }
+  return undefined
+}
+
 /** Concrete source objects in query-position order for a prepared value. */
 export function getPreparedLiveQuerySources(
   value: unknown,
@@ -147,9 +158,7 @@ export function getPreparedLiveQuerySources(
   const query =
     value instanceof BaseQueryBuilder
       ? value
-      : value && typeof value === `object` && `query` in value
-        ? value.query
-        : value
+      : (getLiveQueryConfig(value)?.query ?? value)
   if (query instanceof BaseQueryBuilder) {
     return collectSourceRefs(query._getQuery()).map((source) =>
       source.type === `descriptorRef`
@@ -162,6 +171,10 @@ export function getPreparedLiveQuerySources(
   return isCollection(query) ? [query] : []
 }
 
+/**
+ * Includes result configuration and loading mode in a derived query identity.
+ * Omitting autoLoad and explicitly enabling it produce the same identity.
+ */
 export function getPreparedLiveQueryIdentity(value: unknown): unknown {
   if (isCollection(value)) return [`collection`, value.id]
   if (value instanceof BaseQueryBuilder) {
@@ -172,14 +185,15 @@ export function getPreparedLiveQueryIdentity(value: unknown): unknown {
       ? [`query`, getStableQueryBuilderHash(value)]
       : [`pooled`, pooled]
   }
-  if (value && typeof value === `object` && `query` in value) {
-    const config = value as LiveQueryCollectionConfig<any>
+  const config = getLiveQueryConfig(value)
+  if (config) {
     return [
       `config`,
       getPreparedLiveQueryIdentity(config.query),
       [`getKey`, config.getKey],
       [`schema`, config.schema],
       [`singleResult`, config.singleResult === true],
+      ...(config.autoLoad === false ? [[`autoLoad`, false]] : []),
       [
         `defaultStringCollation`,
         getStringCollationIdentity(config.defaultStringCollation),
@@ -190,16 +204,25 @@ export function getPreparedLiveQueryIdentity(value: unknown): unknown {
   return [`value`, value]
 }
 
+/**
+ * Identifies a query for preloading, hydration, and shared observers.
+ * Explicit keys replace derived identity but keep loading modes separate.
+ */
 export function getLiveQueryHash(
   preparedValue: unknown,
   queryKey?: LiveQueryKey,
 ): string {
-  const identity = queryKey?.length
+  const baseIdentity = queryKey?.length
     ? [`queryKey`, queryKey]
     : isCollection(preparedValue)
       ? [`collection`, preparedValue.id]
       : [`derived`, getPreparedLiveQueryIdentity(preparedValue)]
 
+  const autoLoad = getLiveQueryConfig(preparedValue)?.autoLoad !== false
+  const identity = [
+    ...baseIdentity,
+    ...(queryKey?.length && !autoLoad ? [[`autoLoad`, false]] : []),
+  ]
   return getStableValueHash(identity, `queryKey`)
 }
 

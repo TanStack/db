@@ -138,6 +138,10 @@ export class CollectionConfigBuilder<
     return this.liveQueryCollection?._hasSubscriberOrPreload() ?? true
   }
 
+  get autoLoad(): boolean {
+    return this.config.autoLoad !== false
+  }
+
   private windowFn: ((options: WindowOptions) => void) | undefined
   private readonly initialWindow: WindowOptions | undefined
   private currentWindow: WindowOptions | undefined
@@ -1130,8 +1134,8 @@ export class CollectionConfigBuilder<
   ) {
     const { status } = event
 
-    // Handle error state - any source collection in error puts live query in error
-    if (status === `error`) {
+    // Local results remain usable when provider loading fails.
+    if (status === `error` && this.autoLoad) {
       this.erroredSourceIds.add(sourceId)
       this.setErrorState(
         devBuild() && process.env.NODE_ENV !== `production`
@@ -1234,7 +1238,9 @@ export class CollectionConfigBuilder<
     this.liveQueryCollection?._lifecycle.markError(error ?? new Error(message))
   }
 
+  /** Queries that do not acquire data have no source-readiness prerequisite. */
   private allRequiredSourcesReady() {
+    if (!this.autoLoad) return true
     return this.collectionSources.every(({ collection }) =>
       sourcePermitsInitialReadiness(collection),
     )
@@ -1308,6 +1314,7 @@ export class CollectionConfigBuilder<
 
       const subscription = collectionSubscriber.subscribe()
       this.subscriptions[sourceId] = subscription
+      if (!this.autoLoad) return () => {}
       if (subscription.isDeferringAcquisition()) {
         // No subscriber or preload yet: source reads stay local, and the
         // deferred provider work starts when the first one arrives.
