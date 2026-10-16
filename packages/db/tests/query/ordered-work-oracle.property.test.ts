@@ -6682,7 +6682,7 @@ async function checkOptimisticWindow(
                 else if (shape !== `source`) draft.link = -draft.id
               })
       let settlementOutcome: `fulfilled` | `rejected` = `fulfilled`
-      settled = transaction.isPersisted.promise.then(
+      settled = transaction.when(`settled`).then(
         () => undefined,
         () => {
           settlementOutcome = `rejected`
@@ -6778,7 +6778,7 @@ async function checkOptimisticWindow(
           .map(copyOptimisticWindowPublication)
         await awaitOptimisticCheckpoint(
           `marker restoration`,
-          restoration.isPersisted.promise,
+          restoration.when(`settled`),
         )
       }
 
@@ -7769,7 +7769,7 @@ describe(`eager indexed ordered windows`, () => {
         ])
         if (outcome === `acknowledge`) persistence.resolve()
         else persistence.reject(new Error(`rollback`))
-        await transaction.isPersisted.promise.catch(() => undefined)
+        await transaction.when(`settled`).catch(() => undefined)
         expect(ids(), `settled installed rows`).toEqual(
           outcome === `acknowledge` ? expected : initial,
         )
