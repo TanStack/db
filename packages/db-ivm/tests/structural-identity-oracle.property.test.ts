@@ -34,8 +34,10 @@ import {
  * Independent pairs use two specs. Strings and keys include every separator
  * the identity uses and digits, so an encoding that loses where one part
  * ends fails law 2. Values include distinct symbols with the same description,
- * enumerable symbol keys, Dates (also invalid), RegExps, Maps, Sets, small
- * binary values, holes, and nesting deeper than the identity's depth cap.
+ * enumerable symbol keys, Dates (also invalid), RegExps with numeric
+ * `lastIndex`, Maps and Sets with zero to two entries, arrays with an
+ * enumerable non-index field, small binary values, holes, and nesting deeper
+ * than the identity's depth cap.
  * Pinned pairs cover joins a random short string cannot build, distinct
  * symbols with the same description, and different object kinds with the same
  * body. Fixed representation witnesses verify that the driver reaches each
@@ -49,12 +51,12 @@ import {
 type Spec =
   | { k: `leaf`; i: number }
   | { k: `text`; s: string }
-  | { k: `array`; items: Array<Spec | null> }
+  | { k: `array`; items: Array<Spec | null>; extra?: Spec }
   | { k: `object`; entries: Array<[string, Spec]>; symbol?: Spec }
   | { k: `date`; t: number }
   | { k: `regexp`; flags: string; lastIndex: number }
-  | { k: `map`; v: Spec }
-  | { k: `set`; v: Spec }
+  | { k: `map`; values: Array<Spec> }
+  | { k: `set`; values: Array<Spec> }
   | { k: `binary`; bytes: Array<number> }
   | { k: `deep`; depth: number; v: Spec }
 
@@ -101,13 +103,17 @@ const specArbitrary = fc.letrec<{ spec: Spec }>((tie) => ({
         s: textArbitrary,
       }),
     },
-    fc.record({
-      k: fc.constant(`array` as const),
-      // null marks a hole.
-      items: fc.array(fc.option(tie(`spec`), { nil: null, freq: 5 }), {
-        maxLength: 3,
-      }),
-    }),
+    fc.record(
+      {
+        k: fc.constant(`array` as const),
+        // null marks a hole.
+        items: fc.array(fc.option(tie(`spec`), { nil: null, freq: 5 }), {
+          maxLength: 3,
+        }),
+        extra: tie(`spec`),
+      },
+      { requiredKeys: [`k`, `items`] },
+    ),
     fc.record(
       {
         k: fc.constant(`object` as const),
@@ -128,8 +134,14 @@ const specArbitrary = fc.letrec<{ spec: Spec }>((tie) => ({
       flags: fc.constantFrom(``, `g`),
       lastIndex: fc.constantFrom(0, 1, Number.NaN),
     }),
-    fc.record({ k: fc.constant(`map` as const), v: tie(`spec`) }),
-    fc.record({ k: fc.constant(`set` as const), v: tie(`spec`) }),
+    fc.record({
+      k: fc.constant(`map` as const),
+      values: fc.array(tie(`spec`), { maxLength: 2 }),
+    }),
+    fc.record({
+      k: fc.constant(`set` as const),
+      values: fc.array(tie(`spec`), { maxLength: 2 }),
+    }),
     fc.record({
       k: fc.constant(`binary` as const),
       bytes: fc.array(fc.nat(2), { maxLength: 3 }),
@@ -150,7 +162,10 @@ function containsNaNRegExp(spec: Spec): boolean {
     case `regexp`:
       return Number.isNaN(spec.lastIndex)
     case `array`:
-      return spec.items.some((item) => item !== null && containsNaNRegExp(item))
+      return (
+        spec.items.some((item) => item !== null && containsNaNRegExp(item)) ||
+        (spec.extra !== undefined && containsNaNRegExp(spec.extra))
+      )
     case `object`:
       return (
         spec.entries.some(([, value]) => containsNaNRegExp(value)) ||
@@ -158,6 +173,7 @@ function containsNaNRegExp(spec: Spec): boolean {
       )
     case `map`:
     case `set`:
+      return spec.values.some(containsNaNRegExp)
     case `deep`:
       return containsNaNRegExp(spec.v)
     default:
@@ -191,6 +207,9 @@ function build(spec: Spec, vary: () => boolean): unknown {
       spec.items.forEach((item, index) => {
         if (item !== null) array[index] = build(item, vary)
       })
+      if (spec.extra !== undefined) {
+        Object.assign(array, { note: build(spec.extra, vary) })
+      }
       if (vary()) Object.defineProperty(array, Symbol(`hidden`), { value: 1 })
       return array
     }
@@ -220,9 +239,20 @@ function build(spec: Spec, vary: () => boolean): unknown {
       return regexp
     }
     case `map`:
-      return new Map([[`k`, build(spec.v, vary)]])
+      return new Map<string, unknown>(
+        spec.values.map((value, index): [string, unknown] => [
+          index === 0 ? `k` : `x`,
+          build(value, vary),
+        ]),
+      )
     case `set`:
-      return new Set([build(spec.v, vary)])
+      // Wrap the second value so JS Set never deduplicates two primitive values
+      // before D2 can compare their ordered entries.
+      return new Set<unknown>(
+        spec.values.map((value, index) =>
+          index === 0 ? build(value, vary) : [index, build(value, vary)],
+        ),
+      )
     case `binary`:
       return new Uint8Array(spec.bytes)
     case `deep`: {
@@ -263,7 +293,13 @@ function normal(spec: Spec): string | undefined {
       return `string:${JSON.stringify(spec.s)}`
     case `array`: {
       const items = parts(spec.items)
-      return items && `array:${JSON.stringify(items)}`
+      if (items === undefined) return undefined
+      const base = `array:${JSON.stringify(items)}`
+      if (spec.extra === undefined) return base
+      const extra = normal(spec.extra)
+      return extra === undefined
+        ? undefined
+        : `${base}:note:${JSON.stringify(extra)}`
     }
     case `object`: {
       const entries: Array<[string, string]> = []
@@ -285,12 +321,17 @@ function normal(spec: Spec): string | undefined {
         ? undefined
         : `regexp:${spec.flags}:${spec.lastIndex}`
     case `map`: {
-      const v = normal(spec.v)
-      return v && `map:${v}`
+      const values = parts(spec.values)
+      return values && `map:${JSON.stringify(values)}`
     }
     case `set`: {
-      const v = normal(spec.v)
-      return v && `set:${v}`
+      const values = parts(spec.values)
+      if (values === undefined) return undefined
+      // The second Set member is a fresh [index, value] array in build().
+      if (values.length === 2) {
+        values[1] = `array:${JSON.stringify([`number:1`, values[1]])}`
+      }
+      return `set:${JSON.stringify(values)}`
     }
     case `binary`:
       return `binary:${spec.bytes.join(`,`)}`
@@ -442,8 +483,8 @@ describe(`structuralIdentity`, () => {
     ],
     [
       `an empty string in a set`,
-      { k: `set`, v: { k: `text`, s: `` } },
-      { k: `set`, v: { k: `leaf`, i: 5 } },
+      { k: `set`, values: [{ k: `text`, s: `` }] },
+      { k: `set`, values: [{ k: `leaf`, i: 5 }] },
     ],
     [
       `a deep node and an explicit array`,
@@ -462,21 +503,23 @@ describe(`structuralIdentity`, () => {
     ],
     [
       `a Map and Set with the same entry body`,
-      { k: `map`, v: { k: `leaf`, i: 0 } },
+      { k: `map`, values: [{ k: `leaf`, i: 0 }] },
       {
         k: `set`,
-        v: {
-          k: `array`,
-          items: [
-            { k: `text`, s: `k` },
-            { k: `leaf`, i: 0 },
-          ],
-        },
+        values: [
+          {
+            k: `array`,
+            items: [
+              { k: `text`, s: `k` },
+              { k: `leaf`, i: 0 },
+            ],
+          },
+        ],
       },
     ],
     [
       `a Map and object with the same entry body`,
-      { k: `map`, v: { k: `leaf`, i: 0 } },
+      { k: `map`, values: [{ k: `leaf`, i: 0 }] },
       {
         k: `object`,
         entries: [
@@ -495,8 +538,55 @@ describe(`structuralIdentity`, () => {
     ],
     [
       `a Set and object with the same entry body`,
-      { k: `set`, v: { k: `leaf`, i: 0 } },
+      { k: `set`, values: [{ k: `leaf`, i: 0 }] },
       { k: `object`, entries: [[`0`, { k: `leaf`, i: 0 }]] },
+    ],
+    [
+      `Maps that differ at the second entry`,
+      {
+        k: `map`,
+        values: [
+          { k: `leaf`, i: 0 },
+          { k: `leaf`, i: 0 },
+        ],
+      },
+      {
+        k: `map`,
+        values: [
+          { k: `leaf`, i: 0 },
+          { k: `leaf`, i: 3 },
+        ],
+      },
+    ],
+    [
+      `Sets that differ at the second entry`,
+      {
+        k: `set`,
+        values: [
+          { k: `leaf`, i: 0 },
+          { k: `leaf`, i: 0 },
+        ],
+      },
+      {
+        k: `set`,
+        values: [
+          { k: `leaf`, i: 0 },
+          { k: `leaf`, i: 3 },
+        ],
+      },
+    ],
+    [
+      `arrays that differ at an enumerable non-index field`,
+      {
+        k: `array`,
+        items: [{ k: `leaf`, i: 0 }],
+        extra: { k: `leaf`, i: 0 },
+      },
+      {
+        k: `array`,
+        items: [{ k: `leaf`, i: 0 }],
+        extra: { k: `leaf`, i: 3 },
+      },
     ],
   ] as Array<[string, Spec, Spec]>)(
     `agrees with D2 value identity for %s`,
