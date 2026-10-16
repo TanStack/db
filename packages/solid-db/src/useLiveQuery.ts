@@ -29,7 +29,6 @@ import type {
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
   LiveQueryObserver,
-  LiveQueryPersistedStatus,
   NonSingleResult,
   QueryBuilder,
   SingleResult,
@@ -113,9 +112,6 @@ type InferConditionalResultType<TContext extends Context> =
 type UseLiveQueryFlags = {
   isLoading: boolean
   isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
   isIdle: boolean
   /** The first load failed: there is nothing to show. */
   isLoadingError: boolean
@@ -348,9 +344,6 @@ export function useLiveQuery(
       name: `TanstackDBStatus`,
     },
   )
-  const [persistedStatus, setLocalStatus] =
-    createSignal<LiveQueryPersistedStatus>(`unavailable`)
-  const [persistedError, setLocalError] = createSignal<unknown>(undefined)
   const [errors, setErrors] = createSignal<ErrorTreeNode | undefined>(undefined)
 
   // Helper to sync data array from collection in correct order
@@ -407,7 +400,7 @@ export function useLiveQuery(
         const observer = createLiveQueryObserver(currentCollection)
         localWaitObserver = observer
         try {
-          await observer.preloadForInitialRender()
+          await observer.preload()
         } finally {
           observer.dispose()
           if (localWaitObserver === observer) localWaitObserver = undefined
@@ -443,8 +436,6 @@ export function useLiveQuery(
     const currentCollection = collection()
     if (!currentCollection) {
       setStatus(`disabled` as const)
-      setLocalStatus(`unavailable`)
-      setLocalError(undefined)
       setErrors(undefined)
       state.clear()
       rowsByKey.clear()
@@ -492,8 +483,6 @@ export function useLiveQuery(
           syncDataFromCollection(currentCollection)
           const snapshot = observer.getSnapshot()
           setStatus(snapshot.status)
-          setLocalStatus(snapshot.persistedStatus)
-          setLocalError(snapshot.persistedError)
           setErrors(snapshot.errors)
         })
       },
@@ -505,8 +494,6 @@ export function useLiveQuery(
       syncDataFromCollection(currentCollection)
       const snapshot = observer.getSnapshot()
       setStatus(snapshot.status)
-      setLocalStatus(snapshot.persistedStatus)
-      setLocalError(snapshot.persistedError)
       setErrors(snapshot.errors)
     })
 
@@ -558,21 +545,6 @@ export function useLiveQuery(
     isReady: {
       get() {
         return status() === `ready` || status() === `disabled`
-      },
-    },
-    persistedStatus: {
-      get() {
-        return persistedStatus()
-      },
-    },
-    isPersistedReady: {
-      get() {
-        return persistedStatus() === `ready`
-      },
-    },
-    persistedError: {
-      get() {
-        return persistedError()
       },
     },
     isIdle: {

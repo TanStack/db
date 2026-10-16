@@ -1500,8 +1500,8 @@ full acquisition cannot abort work still owned by those narrower acquisitions.
 ### Pooled live queries
 
 A framework adapter may serve a live query from an equality partition instead
-of this graph. That applies only when the query reads one eager,
-non-persisted source Collection, its `where` has at least one
+of this graph. That applies only when the query reads one eager
+source Collection, its `where` has at least one
 `eq(field, literal)` conjunct, every other conjunct reads only that row's own fields, any `orderBy` reads
 only that row's own fields without a custom string comparator, and it has no
 other clause, `limit`, `offset`, `DbClient`, or Suspense key. Such a

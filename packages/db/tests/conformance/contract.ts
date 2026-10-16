@@ -123,9 +123,6 @@ export interface ConformanceResult {
   state: ReadonlyMap<any, any> | undefined
   status: string
   isReady: boolean
-  persistedStatus?: string
-  isPersistedReady?: boolean
-  persistedError?: unknown
   isLoadingError: boolean
   /** Local storage or an invariant broke: `status` is `crashed`. */
   isCrashed: boolean

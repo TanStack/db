@@ -33,7 +33,6 @@ import type {
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
   LiveQueryObserver,
-  LiveQueryPersistedStatus,
   NonSingleResult,
   QueryBuilder,
   SingleResult,
@@ -388,9 +387,6 @@ export function warnUnhashableDerivedIdentity(
 type UseLiveQueryFlags = {
   isLoading: boolean
   isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
   isIdle: boolean
   /** The first load failed: there is nothing to show. */
   isLoadingError: boolean
@@ -959,7 +955,7 @@ function useLiveQueryImpl(
     (instance.collection?.status === `idle` ||
       instance.collection?.status === `cleaned-up`)
   ) {
-    observer.preloadForInitialRender().catch(() => {})
+    observer.preload().catch(() => {})
   }
 
   // Stable subscribe bound to the current observer; the observer owns the

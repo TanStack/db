@@ -1,5 +1,11 @@
 # Plan: final initial errors and the source health channel
 
+> **Superseded (2026-10-16).** The error surface was redesigned: status
+> `crashed`, node `failureReason`/`error`, `fail()`, `reload()`, and
+> `collection.errors`. Read `error-surface/README.md` and `error-surface/RULES.md`,
+> the shipped `docs/guides/error-handling.md`, and
+> `packages/db/src/query/live/ARCHITECTURE.md` laws 14, 16, and 17.
+
 Status: implemented on `feat/source-health-channel`; the pull request is next.
 It ships as one pull request, because it is a breaking change and a
 significant product change. It replaces #2129. Later decisions (2026-10-14):

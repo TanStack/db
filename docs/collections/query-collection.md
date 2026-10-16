@@ -682,12 +682,13 @@ The collection provides these utility methods via `collection.utils`:
   - Bypasses `enabled: false` to support imperative/manual refetching patterns (similar to hook `refetch()` behavior)
   - Returns the tracked Queries' `QueryObserverResult` values in tracked-key order
   - Preserves an `undefined` slot if a tracked Query is removed while the refetch starts
-Failures appear in Collection health. After the Collection is ready, a failed
-fetch or result application for any Query it observes is a health error that
-is not final, because TanStack Query fetches again, and the next successful
-application clears it. Read it from `collection.health` or a live query's
-`errors` tree. A successful refetch does not move a Collection whose initial
-load failed back to `ready`; restart it with `cleanup()` and `preload()`.
+Failures appear in the error tree. Before the first successful result, a
+failed fetch fails the first load (`status: 'error'`). After the Collection is
+ready, a failed fetch or result application for any Query it observes sets the
+node's `failureReason`, because TanStack Query fetches again, and the next
+successful application clears it. Read it from `collection.errors` or a live
+query's `errors` tree. To retry a failed first load, call
+`collection.reload()`.
 
 ## Direct Writes
 

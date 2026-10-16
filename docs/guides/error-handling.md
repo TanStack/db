@@ -71,12 +71,13 @@ For more details on schema validation and type transformations, see the [Schemas
 
 ## Query Collection Error Tracking
 
-Query collections report failures through Collection health, like every other
-Collection. Before the first successful result, a failed query is an initial
-error: the status is `error`, and readiness waits reject with the cause. After
-it, a failed refetch or result application is a health error that is not
-final, because TanStack Query fetches again. The rows stay, and the next
-successful result clears the error:
+Query Collections report failures through the error tree, like every other
+Collection. A `queryFn` failure before the first successful result fails the
+first load: the status is `error`, and `preload()` rejects with the cause. Set
+`retry` so that a short outage is retried inside that first load. After the
+first result, a failed refetch sets the source node's `failureReason`, because
+TanStack Query fetches again. The rows stay, and the next successful result
+clears it:
 
 ```tsx
 import { createCollection } from "@tanstack/db"
@@ -89,17 +90,18 @@ const syncedCollection = createCollection(
     queryKey: ["synced-data"],
     queryFn: fetchData,
     getKey: (item) => item.id,
+    retry: 3,
   })
 )
 
 function DataList() {
-  const { data, errors } = useLiveQuery((q) =>
+  const { data, isSyncError } = useLiveQuery((q) =>
     q.from({ item: syncedCollection })
   )
 
   return (
     <>
-      {errors?.hasErrors && (
+      {isSyncError && (
         <Alert>
           Unable to sync. Showing cached data.
           <button
@@ -116,9 +118,9 @@ function DataList() {
 ```
 
 `utils.refetch({ throwOnError: true })` retries and rejects when the retry
-fails. The error stays visible while the retry is pending. During a mutation
-handler, the promise can resolve at the fetch boundary before the result
-applies and clears the error.
+fails. The `failureReason` stays visible while the retry is pending. During a
+mutation handler, the promise can resolve at the fetch boundary before the
+result applies and clears it.
 
 ## Incremental Subset Load Errors
 
@@ -153,8 +155,8 @@ try {
 }
 ```
 
-Effects report subset failures through `onSourceError` and dispose because
-their incremental result can no longer be kept complete.
+After an Effect's initial load, a subset failure is a request error on its
+`errors` tree, reported through `onErrorsChange`; the Effect keeps running.
 
 When a source change invalidates an ordered window, automatic full-source
 repair keeps the last complete snapshot visible. A failed repair exposes
@@ -178,146 +180,260 @@ settle, the newest attempt decides the result, and subscribers receive the
 replacement only when that attempt succeeds. Cleanup rejects window moves that
 are waiting for replay with `AbortError`.
 
-## Collection Status and Error States
+## Loading and Sync Errors
 
-A Collection and every live query over it answer two separate questions:
+An app that shows synced data asks two questions:
 
-| Question | Where to look | Changes when |
-| --- | --- | --- |
-| Can this data be shown, or must the query restart? | `status`, `isReady`, `isError` | During the initial load of a sync run, or when a Collection crashes |
-| Is this data still kept up to date? | `errors` (the error tree) | When a sync adapter reports a problem or recovers, or a request for more data fails |
+1. **Can I show the data?** Read `status`.
+2. **Is the data on screen still being kept up to date?** Read `isSyncError` and `errors`.
+
+TanStack DB answers them separately. Once a query has shown data, a network or
+backend failure never takes the data off the screen. It shows up in `errors`,
+and the rows stay.
 
 ```tsx
+import { eq, findProblems } from "@tanstack/db"
 import { useLiveQuery } from "@tanstack/react-db"
 
-const TodoList = () => {
-  const { data, isError, isLoading, errors } = useLiveQuery((query) =>
-    query.from({ todos: todoCollection })
+function TaskList() {
+  const {
+    data,
+    isLoading,
+    isLoadingError,
+    isCrashed,
+    isSyncError,
+    errors,
+    collection,
+  } = useLiveQuery((q) =>
+    q
+      .from({ task: tasks })
+      .join({ user: users }, ({ task, user }) => eq(task.assigneeId, user.id))
   )
 
-  if (isLoading) return <div>Loading...</div>
-  if (isError) return <div>Todos failed to load</div>
+  if (isLoading) return <Spinner />
+  if (isLoadingError) return <LoadFailed onRetry={() => collection.reload()} />
+  if (isCrashed) return <StorageBroken />
 
   return (
     <>
-      {errors?.hasErrors && <div>Todos may be out of date.</div>}
-      {data.map((todo) => (
-        <div key={todo.id}>{todo.text}</div>
+      {isSyncError && (
+        <SyncBanner errors={errors} onReload={() => collection.reload()} />
+      )}
+      {data.map((row) => (
+        <TaskRow key={row.task.id} {...row} />
       ))}
     </>
   )
 }
 ```
 
-Collection status values:
-- `idle` - Not yet started
-- `loading` - Loading initial data
-- `ready` - Ready for use
-- `error` - The sync run failed; only a restart recovers
-- `cleaned-up` - Cleaned up; a new preload or subscriber restarts it
+### Status
 
-### The initial load
+| `status` | Flag | Meaning | What the app does |
+| --- | --- | --- | --- |
+| `idle` | `isIdle` | Sync has not started. | Nothing yet. |
+| `loading` | `isLoading` | The first data is on its way. | Show a placeholder. |
+| `ready` | `isReady` | The data can be shown. | Show it. Check `isSyncError` for a banner. |
+| `error` | `isLoadingError` | The first load failed. There is nothing to show. | Show a failure screen and offer `reload()`. |
+| `crashed` | `isCrashed` | Local storage broke. This Collection cannot be used again. | Recreate the Collection (see [When a Collection crashes](#when-a-collection-crashes)). |
+| `cleaned-up` | `isCleanedUp` | The Collection was cleaned up. | Nothing. |
 
-Until a Collection has its first usable snapshot, its status is `loading`.
-While its sync adapter retries, it stays `loading`. When the sync adapter gives
-up, the status becomes `error`, readiness waits such as `preload()` reject with
-the original cause, and every live query and Effect that depends on the
-Collection fails too.
+Two rules make `status` predictable:
 
-An initial error is final for its sync run. TanStack DB does not retry it, and
-a later successful sync does not move the Collection back to `ready`. To try
-again, restart the query:
+- **After a query has shown data, only a crash changes its status.** A dropped
+  connection, a failed refetch, or a backend that stops answering appears in
+  `errors`. `isLoadingError` therefore always means "nothing to show yet".
+- **A query takes the worst status of its sources until it is ready.** If any
+  source fails its first load, the query's status is `error`, and `preload()`
+  rejects with the cause.
 
-```ts
-await todosQuery.cleanup()
-await todosQuery.preload()
-```
+`isError` is removed. Use `isLoadingError` and `isCrashed`, which need
+different handling.
 
-### After the first ready
+### Sync errors: the `errors` tree
 
-Once the data has loaded, it stays. When the sync adapter later loses its
-connection or a refresh fails, `status` stays `ready` and the rows stay, even
-as they grow stale. The problem appears in `errors` and in
-`collection.health` instead. The sync adapter clears it when sync works again,
-unless the error is final: a final error means the sync adapter stopped
-trying, and only a restart clears it.
-
-> **Important:** `isError` does not report these problems. To show a "this data
-> may be out of date" banner, check `errors.hasErrors`.
-
-### When a Collection crashes
-
-A few failures leave a Collection unable to serve reads or accept writes: a
-closed IndexedDB connection, a failed write to local SQLite persistence, or an
-internal invariant failure. The Collection then moves to `error` even after it
-was ready, and so does every live query and Effect above it. These failures are
-rare, and they mean storage is broken. Recover the same way as from an initial
-error: clean up and restart.
-
-### The error tree
-
-Every live query result includes `errors`. It has the same shape for a given
-query: one node for the live query and one node for each source alias, in query
-order. Healthy nodes are present too, with `isError: false`. A disabled query
-has no query definition, so its `errors` is `undefined`.
+`errors` has one node for the query itself and one for each source in the
+query, in query order. The tree's shape is fixed by the query, so you can
+render, log, or send it to monitoring. A disabled query has no query
+definition, so its `errors` is `undefined`.
 
 ```ts
-type ErrorTreeNode = {
-  alias: string // the query alias, or "root"
-  collectionId: string
-  kind: "source" | "live-query" | "include"
-  status: CollectionStatus
-  isError: boolean // this node has a problem now
-  hasErrors: boolean // this node or any node below it
-  error: CollectionErrorInfo | null
-  instances?: { total: number; inError: number } // include nodes only
-  sources: Array<ErrorTreeNode>
-}
-
-type CollectionErrorInfo = {
-  phase: "initial" | "sync" | "request"
-  final: boolean // the sync adapter stopped trying; only a restart clears it
-  name: string
-  message: string
-  code?: string
-  at: number // epoch milliseconds
-  cause: unknown // the original value; omitted from JSON
+{
+  alias: "root", kind: "live-query", status: "ready", hasErrors: true,
+  failureReason: null, error: null, reloading: false,
+  sources: [
+    { alias: "task", kind: "source", status: "ready", hasErrors: false,
+      failureReason: null, error: null, reloading: false, sources: [] },
+    { alias: "user", kind: "source", status: "ready", hasErrors: true,
+      failureReason: { name: "FetchError", message: "Network request failed", at: 1760342400000 },
+      error: null, reloading: false, sources: [] },
+  ],
 }
 ```
 
-The phases:
+A node can show one of two problems. They follow TanStack Query's
+`failureReason` and `error`:
 
-- `initial`: the Collection's sync run failed, by an initial error or a crash.
-  Its `status` is `error`.
-- `sync`: the sync adapter reported a problem after the Collection was ready.
-- `request`: a request for more data, such as the next page or a newly
-  joined row, failed after the query was ready. The source Collection stays
-  healthy. The error clears when that data loads, or when the query stops
-  needing it.
+| Field | Meaning | What the app does |
+| --- | --- | --- |
+| `failureReason` | Something went wrong, and the sync adapter is still trying. It clears by itself when sync works again. | Show "Reconnecting…" or nothing. Wait. |
+| `error` | The sync adapter stopped, or the first load failed. The rows from this source stay but no longer update. | Show "Updates stopped" and offer `reload()`. |
+
+`isSyncError` is `true` when the query is `ready` and any node has a
+`failureReason` or an `error`. `hasErrors` on a node says whether that node or
+any node below it has one.
+
+Each problem is `{ name, message, code?, at, cause }`. `cause` holds the exact
+value the adapter reported, for example the `Response` or the error your
+`queryFn` threw. Every other field is plain JSON. A node keeps its object
+identity until something in its part of the tree changes, so `===` and
+`useMemo` work on it. Server-side rendering does not transfer `errors`; the
+client builds its own tree from its own sync.
+
+`failureReason` says that the adapter is trying, not that trying will help. An
+expired token gives a `failureReason` on every refetch until the user signs in.
+Use `code` or `cause` for cases like this:
+
+```tsx
+import { findProblems, type ErrorTreeNode } from "@tanstack/db"
+
+function SyncBanner({
+  errors,
+  onReload,
+}: {
+  errors: ErrorTreeNode
+  onReload: () => void
+}) {
+  const [first] = findProblems(errors) // nodes with a problem, in query order
+  if (first?.failureReason?.code === "401") return <SignInAgain />
+  if (first?.error) return <UpdatesStopped onReload={onReload} />
+  return <Reconnecting />
+}
+```
+
+`findProblems(errors)` walks the tree and returns every node that has a
+problem of its own, in query order. Use it for the message on a failure screen
+too: when `isLoadingError` is true, the first node it returns holds the first
+load failure in its `error`.
 
 A Collection used twice in one query, for example in a self-join, has one node
 per alias. An include has one node for all of its per-row child Collections,
-with `instances` counting how many are in error. A nested live query's node
-carries its own sources.
+with `instances: { total, withErrors }`. A nested live query's node carries its
+own sources.
 
-The tree keeps its object identity until something in it changes, so you can
-pass it to `useMemo` or compare it with `===`. Apart from `cause`, it is plain
-data that you can log or send:
+### Collections without a live query
+
+Every Collection has the same surface, so code that uses a Collection directly
+does not need a live query:
 
 ```ts
-useEffect(() => {
-  if (errors?.hasErrors) reportToMonitoring(JSON.parse(JSON.stringify(errors)))
-}, [errors])
+todos.status // 'loading' | 'ready' | 'error' | 'crashed' | ...
+todos.errors // one node: { status, failureReason, error, reloading, ... }
+todos.on("errors:change", ({ errors }) => report(errors))
+await todos.reload()
 ```
 
-Server-side rendering does not transfer `errors`; the client builds its own
-tree from its own sync.
+A live query is a Collection too; its `errors` is the whole tree.
+
+### Failed requests for more data
+
+After a query is ready it can ask for more data: the next page of an infinite
+query, or rows for a newly joined key. When that request fails, the query's own
+node (`root`) shows an `error`. The sources stay healthy and the rows already
+shown stay. The error clears when the data loads, or when the query no longer
+needs it, for example after the user scrolls back.
+
+```tsx
+const { data, errors, fetchNextPage } = useLiveInfiniteQuery(/* ... */)
+
+{
+  errors?.error && (
+    <button onClick={() => fetchNextPage()}>Retry loading more</button>
+  )
+}
+```
+
+### Reloading
+
+`collection.reload()` starts a new sync run for a Collection. It works like a
+sync-side truncate: nothing visible changes until the new run's first commit.
+
+- The current rows, `status`, and any `error` stay on screen. The node shows
+  `reloading: true`.
+- When the new run commits, its rows replace the old rows in one change, and
+  the node's problem clears. A Collection in `error` becomes `ready` when the
+  new run calls `markReady()`.
+- If the new run fails, the old rows and status stay, the node shows the new
+  `error`, and the `reload()` promise rejects.
+
+On a live query, `reload()` reloads each of its sources that has an `error`,
+then the query itself if it failed its first load. To reload one source
+instead, call `reload()` on that source's Collection. When a failed source
+becomes ready and no other source is in `error` or `crashed`, a query in
+`error` restarts by itself and shows `loading` until it is ready.
+
+```ts
+// Retry a failed first load every 30 seconds until the backend is back.
+useEffect(() => {
+  if (!isLoadingError) return
+  const id = setInterval(() => collection.reload().catch(() => {}), 30_000)
+  return () => clearInterval(id)
+}, [isLoadingError, collection])
+```
+
+Calling `reload()` while a reload is in flight returns the same promise. On a
+`crashed` Collection it rejects with `CollectionReloadCrashedError`.
+
+Use `reload()` for retries the user or the app decides on. Retries inside one
+attempt belong to the sync adapter: for example, set `retry` on a Query
+Collection, so a short outage never reaches `isLoadingError`.
+
+### When a Collection crashes
+
+A Collection crashes when its local storage can no longer serve reads or
+accept writes:
+
+- its IndexedDB connection closed (for example after a `versionchange` from
+  another tab);
+- a local SQLite persistence write or restore failed;
+- its sync function threw, or an internal invariant failed.
+
+The Collection moves to `crashed`, and so does every live query and Effect over
+it, even after they were ready. A crash is permanent for that Collection
+instance: `reload()` rejects. To recover, clean up the Collection together with
+everything that reads from it, then create a new one.
+
+```ts
+console.log(todos.subscribers) // live queries, Effects, and raw subscriptions
+await todos.cleanup({ dependents: true })
+const freshTodos = createCollection(todosOptions())
+```
+
+### Cleaning up a Collection
+
+`cleanup()` rejects with `CollectionHasSubscribersError` while a live query
+with subscribers or an Effect still reads the Collection, because those readers
+would lose their data. Unmount the components that read it first, or pass
+`{ dependents: true }` to end its live queries and Effects first. Raw
+`subscribeChanges()` subscriptions do not block cleanup and are not ended by
+it. `collection.subscribers` lists every dependent with its `kind`. Collections
+that nothing reads are cleaned up automatically after `gcTime`.
+
+### Persisted Collections
+
+A persisted Collection restores its rows from local storage before the remote
+syncs. By default it becomes `ready` only through its sync adapter. With
+`initialRender: { strategy: "network-first", networkTimeoutMs }`, restored rows
+make it `ready` once the deadline passes or the remote fails its first load. An
+empty restore keeps it `loading`, and a failed restore crashes it. See
+[Render after SQLite restore](./sqlite-persistence.md#render-after-sqlite-restore).
 
 ### Effects
 
-An Effect follows the same rules. A source that fails its initial load, or
-that crashes, disposes the Effect through `onSourceError`. Any other problem
-after the Effect's initial load does not dispose it. Subscribe to it instead:
+An Effect ends when a source it reads fails its first load or crashes; it calls
+`onSourceError(error)`. After its initial load, any other problem calls
+`onErrorsChange(errors)` with the same tree a live query returns, and the
+Effect keeps running.
 
 ```ts
 createEffect({
@@ -325,7 +441,7 @@ createEffect({
   onBatch: (events) => {
     /* ... */
   },
-  onHealthChange: (errors) => {
+  onErrorsChange: (errors) => {
     if (errors.hasErrors) pauseAutomations()
     else resumeAutomations()
   },
@@ -334,7 +450,10 @@ createEffect({
 
 ### Using Suspense and Error Boundaries (React)
 
-For React applications, you can handle loading and error states with `useLiveSuspenseQuery`, React Suspense, and Error Boundaries:
+`useLiveSuspenseQuery` suspends while `loading` and throws the first load's
+cause to the nearest error boundary for `error`. It throws for `crashed` at any
+time. Sync problems after the first data never reach the boundary; read
+`errors` from the hook, as in TanStack Query.
 
 ```tsx
 import { useLiveSuspenseQuery } from "@tanstack/react-db"
@@ -342,14 +461,14 @@ import { Suspense } from "react"
 import { ErrorBoundary } from "react-error-boundary"
 
 const TodoList = () => {
-  const { data, errors } = useLiveSuspenseQuery((query) =>
+  const { data, isSyncError } = useLiveSuspenseQuery((query) =>
     query.from({ todos: todoCollection })
   )
 
   // data is always defined here
   return (
     <>
-      {errors?.hasErrors && <div>Todos may be out of date.</div>}
+      {isSyncError && <div>Todos may be out of date.</div>}
       {data.map((todo) => (
         <div key={todo.id}>{todo.text}</div>
       ))}
@@ -366,12 +485,65 @@ const App = () => (
 )
 ```
 
-`<Suspense>` handles the initial load and `<ErrorBoundary>` handles an initial
-error. After the first render, the hook does not throw, as in TanStack Query:
-problems appear in `errors`, and a crash sets `isError` while the last data
-stays on screen. See the [React Suspense section in Live Queries](./live-queries#using-with-react-suspense) for more details.
+See the [React Suspense section in Live Queries](./live-queries#using-with-react-suspense) for more details.
 
-When every eager SQLite persisted source opts in, a failed client query stream can produce a different initial result. React waits for every persisted restore. If each restore succeeds, React renders the query result. A derived-query failure still reaches the Error Boundary. See [Render after SQLite restore](./sqlite-persistence.md#render-after-sqlite-restore) for the option and its limits.
+### For sync adapter authors
+
+A sync adapter reports failures with three calls:
+
+| Call | Meaning | Effect |
+| --- | --- | --- |
+| `reportError(error)` | Something went wrong; I am still trying. | Sets `failureReason`. Only after the first ready. |
+| `fail(error)` | I stopped. | Before the first ready: `status: 'error'`. After: the node's `error`; the rows stay. |
+| `reportHealthy()` | Sync works again. | Clears `failureReason`. Only after the first ready. |
+
+```ts
+sync: ({ begin, write, commit, markReady, reportError, fail, reportHealthy }) => {
+  let ready = false
+  const stream = connect({
+    onData: (rows) => {
+      begin()
+      rows.forEach((row) => write({ type: "insert", value: row }))
+      commit()
+      if (ready) reportHealthy()
+      else markReady()
+      ready = true
+    },
+    onError: (error, { willRetry }) => {
+      if (!willRetry) fail(error)
+      else if (ready) reportError(error)
+    },
+  })
+  return () => stream.close()
+}
+```
+
+- Retry inside the first load before calling `fail`. While you retry before
+  the first ready, call nothing; the Collection stays `loading`.
+- These calls follow the Collection's state machine, and a call that does not
+  fit it throws: `reportError` or `reportHealthy` before the first ready,
+  `markReady` after a failed first load, and any call after `fail`. Calls
+  after a crash do nothing. `reportHealthy` when nothing is wrong changes
+  nothing, so you can call it after every commit.
+- An `error` from `fail` clears only through `reload()`, which calls your
+  `sync` function again for a new run.
+
+### Migrating
+
+| Before | After |
+| --- | --- |
+| `isError` | `isLoadingError` (first load failed) or `isCrashed` (storage broke) |
+| `status: 'error'` after a crash | `status: 'crashed'` |
+| `markError(error)` | `fail(error)` |
+| `reportError(error, { final })` | `reportError(error)` or `fail(error)` |
+| node `phase`, `final`, `isError` | node `failureReason` or `error` |
+| node `instances.inError` | `instances.withErrors` |
+| `cleanup()` then `preload()` to recover | `reload()` |
+| `cleanup()` with live queries mounted | rejects; unmount first or `cleanup({ dependents: true })` |
+| `persistedStatus`, `isPersistedReady`, `persistedError`, `preloadForInitialRender()` | `status` and `errors` |
+| query-db `utils.lastError`, `isError`, `errorCount`, `clearError()` | `errors`, `reload()` |
+| `collection.health`, `health:change` | `collection.errors`, `errors:change` |
+| Effect `onHealthChange` | `onErrorsChange` |
 
 ## Transaction Error Handling
 
@@ -655,11 +827,10 @@ const todoCollection = createCollection(
 
 When sync errors occur:
 - Error is logged to console: `[QueryCollection] Error observing query...`
-- An initial failure marks the collection as `error` because no usable snapshot exists
-- Readiness waits such as `preload()` and `toArrayWhenReady()` reject with the cause passed to `markError(error)` while the collection is in that initial error state
-- A later refetch failure keeps the collection `ready` and preserves its cached data, and reports a health error that is not final, because TanStack Query fetches again
-- After the collection is ready, the failure appears in `collection.health` and the `errors` tree
-- A later successful refetch clears that health error, but it does not move an initial `error` collection back to `ready`; restart it with `cleanup()` and `preload()`
+- A failure before the first successful result fails the first load: the status is `error`, and readiness waits such as `preload()` and `toArrayWhenReady()` reject with the cause
+- A later refetch failure keeps the Collection `ready` with its cached data and sets the source node's `failureReason`, because TanStack Query fetches again
+- A later successful refetch clears the `failureReason`
+- To retry a failed first load, call `collection.reload()`
 
 ### Sync Write Errors
 
@@ -714,47 +885,12 @@ await collection.cleanup() // Resolves successfully
 
 ## Error Recovery Patterns
 
-### Collection Cleanup and Restart
+### Reload or Recreate
 
-Cleanup ends the current sync run and releases the resources installed by its
-`sync()` call. A later access can start a new sync run. If no live query or
-Effect depends on the source Collection, restart it like this:
-
-```ts
-if (todoCollection.status === "error") {
-  // Cleanup ends the current sync run and resets the collection
-  await todoCollection.cleanup()
-  
-  // Start a new sync run and wait for readiness
-  await todoCollection.preload()
-}
-```
-
-Cleaning up a source Collection while a live-query Collection depends on it
-puts that live query in a terminal error state. Restarting the source alone
-does not revive the live query. If you own both Collections, clean up the
-dependent live query first. Preloading it after source cleanup starts fresh
-sync runs for both Collections and waits for the query's required data:
-
-```ts
-const todosQuery = createLiveQueryCollection((q) =>
-  q.from({ todos: todoCollection }),
-)
-await todosQuery.preload()
-
-// Later, if todoCollection enters an error state:
-await todosQuery.cleanup()
-await todoCollection.cleanup()
-await todosQuery.preload()
-```
-
-The same `todosQuery` object and its subscribers can receive later source
-updates after this sequence. A framework hook that creates its own live-query
-Collection may retain it across renders or remounts. Use a pre-created
-live-query Collection when you need to control this cleanup and restart
-sequence. A successful preload establishes Collection readiness; whether the
-source has caught up with a remote service depends on its sync adapter.
-Cleanup also disposes dependent Effects; recreate them after the source restarts.
+To retry a failed first load or a stopped sync, call `reload()` on the
+Collection or on the live query that reads it. See [Reloading](#reloading). A
+crashed Collection cannot reload; clean it up with `{ dependents: true }` and
+create a new one. See [When a Collection crashes](#when-a-collection-crashes).
 
 ### Graceful Degradation
 
@@ -763,21 +899,23 @@ fails. The error tree tells you which source has the problem and whether its
 sync adapter is still trying:
 
 ```tsx
+import { findProblems } from "@tanstack/db"
+
 const TodoApp = () => {
-  const { data, errors } = useLiveQuery((query) =>
+  const { data, errors, collection } = useLiveQuery((query) =>
     query.from({ todos: todoCollection })
   )
-  const todosError = errors?.sources[0]?.error
+  const [problem] = errors ? findProblems(errors) : []
 
   return (
     <div>
-      {todosError && (
+      {problem?.error && (
         <div>
-          {todosError.final
-            ? "Sync stopped. Reload to try again."
-            : "Reconnecting. Showing saved data."}
+          Sync stopped.{" "}
+          <button onClick={() => collection.reload()}>Reload</button>
         </div>
       )}
+      {problem?.failureReason && <div>Reconnecting. Showing saved data.</div>}
       {data.map((todo) => <TodoItem key={todo.id} todo={todo} />)}
     </div>
   )
@@ -949,7 +1087,7 @@ Thrown when calling `commit()` on a sync transaction that's already committed.
 
 2. **Import specific error types** - Import only the error classes you need for better tree-shaking
 3. **Always handle SchemaValidationError** - Provide clear feedback for validation failures
-4. **Check both axes** - Use `isLoading` and `isError` for whether data can be shown, and `errors.hasErrors` for whether it may be stale
+4. **Check both questions** - Use `status` (`isLoading`, `isLoadingError`, `isCrashed`) for whether data can be shown, and `isSyncError` or `errors` for whether it may be stale
 5. **Handle transaction promises** - Always handle `when('settled')` rejections
 
 ## Example: Complete Error Handling
@@ -999,7 +1137,8 @@ const todosQuery = createLiveQueryCollection((query) =>
 )
 
 const TodoApp = () => {
-  const { data, isError, isLoading, errors } = useLiveQuery(todosQuery)
+  const { data, isLoadingError, isCrashed, isLoading, isSyncError } =
+    useLiveQuery(todosQuery)
 
   const handleAddTodo = async (text: string) => {
     try {
@@ -1022,21 +1161,23 @@ const TodoApp = () => {
     }
   }
 
-  const handleRestart = async () => {
+  const handleReload = async () => {
     try {
-      await todosQuery.cleanup()
-      await todoCollection.cleanup()
-      await todosQuery.preload()
+      await todosQuery.reload()
     } catch (error) {
-      alert(`Failed to restart todos: ${String(error)}`)
+      alert(`Failed to reload todos: ${String(error)}`)
     }
   }
 
-  if (isError) {
+  if (isCrashed) {
+    return <div>Local storage failed. Reload the page.</div>
+  }
+
+  if (isLoadingError) {
     return (
       <div>
         <div>Todos could not load</div>
-        <button onClick={handleRestart}>Restart Collections</button>
+        <button onClick={handleReload}>Try again</button>
       </div>
     )
   }
@@ -1047,7 +1188,7 @@ const TodoApp = () => {
 
   return (
     <div>
-      {errors?.hasErrors && <div>Todos may be out of date</div>}
+      {isSyncError && <div>Todos may be out of date</div>}
       <button onClick={() => handleAddTodo("New todo")}>
         Add Todo
       </button>

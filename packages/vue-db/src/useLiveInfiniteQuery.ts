@@ -18,7 +18,6 @@ import type {
   GetResult,
   InferResultType,
   InitialQueryBuilder,
-  LiveQueryPersistedStatus,
   NonSingleResult,
   QueryBuilder,
   UtilsRecord,
@@ -57,9 +56,6 @@ export interface UseLiveInfiniteQueryReturn<
   status: ComputedRef<CollectionStatus>
   isLoading: ComputedRef<boolean>
   isReady: ComputedRef<boolean>
-  persistedStatus: ComputedRef<LiveQueryPersistedStatus>
-  isPersistedReady: ComputedRef<boolean>
-  persistedError: ComputedRef<unknown | undefined>
   isIdle: ComputedRef<boolean>
   /** The first load failed: there is nothing to show. */
   isLoadingError: ComputedRef<boolean>
@@ -87,9 +83,6 @@ export interface UseLiveInfiniteQueryReturnWithCollection<
   status: ComputedRef<CollectionStatus>
   isLoading: ComputedRef<boolean>
   isReady: ComputedRef<boolean>
-  persistedStatus: ComputedRef<LiveQueryPersistedStatus>
-  isPersistedReady: ComputedRef<boolean>
-  persistedError: ComputedRef<unknown | undefined>
   isIdle: ComputedRef<boolean>
   /** The first load failed: there is nothing to show. */
   isLoadingError: ComputedRef<boolean>
@@ -265,9 +258,6 @@ export function useLiveInfiniteQuery<
     status: computed(() => snapshot.value.status as CollectionStatus),
     isLoading: computed(() => snapshot.value.isLoading),
     isReady: computed(() => snapshot.value.isReady),
-    persistedStatus: computed(() => snapshot.value.persistedStatus),
-    isPersistedReady: computed(() => snapshot.value.isPersistedReady),
-    persistedError: computed(() => snapshot.value.persistedError),
     isIdle: computed(() => snapshot.value.isIdle),
     isLoadingError: computed(() => snapshot.value.isLoadingError),
     isCrashed: computed(() => snapshot.value.isCrashed),

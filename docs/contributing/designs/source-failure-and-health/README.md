@@ -1,5 +1,8 @@
 # Source failure law: design grammar and TLA+ control
 
+> **Historical.** This run predates the shipped error surface. See
+> `error-surface/` for the current design record.
+
 This directory holds a Field Lab design-grammar run on the source failure law
 that the maintainer chose on 2026-10-13. A source either keeps trying, becomes
 ready, or reports a final error for its sync attempt. The framework never heals

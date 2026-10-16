@@ -28,7 +28,6 @@ import type {
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
   LiveQueryObserver,
-  LiveQueryPersistedStatus,
   NonSingleResult,
   QueryBuilder,
   SingleResult,
@@ -58,9 +57,6 @@ export interface UseLiveQueryFlags {
   status: ComputedRef<CollectionStatus>
   isLoading: ComputedRef<boolean>
   isReady: ComputedRef<boolean>
-  persistedStatus: ComputedRef<LiveQueryPersistedStatus>
-  isPersistedReady: ComputedRef<boolean>
-  persistedError: ComputedRef<unknown | undefined>
   isIdle: ComputedRef<boolean>
   /** The first load failed: there is nothing to show. */
   isLoadingError: ComputedRef<boolean>
@@ -367,8 +363,6 @@ export function useLiveQuery(
   const status = ref(
     collection.value ? collection.value.status : (`disabled` as const),
   )
-  const persistedStatus = ref<LiveQueryPersistedStatus>(`unavailable`)
-  const persistedError = shallowRef<unknown>(undefined)
   const errors = shallowRef<ErrorTreeNode | undefined>(undefined)
 
   // The shared observer owns subscription, the ready-race, and status; Vue
@@ -378,8 +372,6 @@ export function useLiveQuery(
   const syncFromObserver = (observer: LiveQueryObserver<any, any>) => {
     const snapshot = observer.getSnapshot()
     status.value = snapshot.status as CollectionStatus
-    persistedStatus.value = snapshot.persistedStatus
-    persistedError.value = snapshot.persistedError
     errors.value = snapshot.errors
     internalData.value = snapshotRows(snapshot.data)
   }
@@ -395,8 +387,6 @@ export function useLiveQuery(
     // Handle null collection (disabled query)
     if (!currentCollection) {
       status.value = `disabled` as const
-      persistedStatus.value = `unavailable`
-      persistedError.value = undefined
       errors.value = undefined
       state.clear()
       internalData.value = []
@@ -460,9 +450,6 @@ export function useLiveQuery(
     isReady: computed(
       () => status.value === `ready` || status.value === `disabled`,
     ),
-    persistedStatus: computed(() => persistedStatus.value),
-    isPersistedReady: computed(() => persistedStatus.value === `ready`),
-    persistedError: computed(() => persistedError.value),
     isIdle: computed(() => status.value === `idle`),
     isLoadingError: computed(() => status.value === `error`),
     isCrashed: computed(() => status.value === `crashed`),

@@ -2223,37 +2223,24 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
 
 The persisted-readiness oracle in
 `packages/db-sqlite-persistence-core/tests/persisted-readiness-oracle.test.ts`
-owns the opted-in eager restore boundary through the persisted wrapper,
-Collection, live query, and observer. A finite two-source model checks all 36
-opt-in/outcome combinations independently of the observer classifier. Its
-controlled persistence histories check nonempty
-and empty restore while upstream remains pending, all-source conjunction,
-mixed opt-out, nested live-query sources, exact failure, SSR seed handoff,
-stale cleanup/restart work, an already-restored source, and a two-source
-history in which A restores, restarts, and remains pending
-after B restores. A new query's persisted readiness and initial-render wait
-stay gated until A restores in its current sync run. This history uses controlled
-adapter reads and does not claim that an old query survives source cleanup.
-The remaining controlled histories cover a network-first deadline,
-early network success and failure, network failure before nonempty restore,
-client query stream failure before or after empty and nonempty restore or before
-observer construction,
-joined-source deadline composition, and a derived-query error alone or alongside
-a failed client stream that must not be mistaken for network failure. It checks a
-separate initial-render wait that leaves network `preload()` unchanged. The
-framework conformance suite checks the projected signals in React, Vue,
-Svelte, Solid, and Angular, including exact identity for a plain-object restore
-error after notification. The window-controller test checks infinite-query
-projection, and focused React and Solid tests check Suspense gating. The React
-tests check client-stream failure before and after completed empty and nonempty
-restore, including a failed record already present before mount. They also
-check error-boundary handling for derived-query failures with and without a
-failed client stream. A replacement client record arriving during an
-initial-render wait has no persisted-fallback witness yet.
+owns when a persisted Collection with network-first initial rendering opens
+from restored rows. A small model enumerates every ordering of the restore
+outcome (rows, empty, failed), the remote answer (ready, fail, none), and the
+deadline, 57 histories. After every event it compares Collection status, the
+node's `error` message, the visible rows while `ready`, and the status of a live
+query over the Collection. The laws: restored rows open the Collection once the
+deadline passes or the remote fails; an empty restore stays `loading`; a remote
+answer before the restore completes waits for it; a failed restore crashes.
+Separate cases check that a Collection without `initialRender` waits for the
+network, the three-second default deadline, and configuration rejection.
+Mutants that let an empty restore open, skip the deadline, or skip the
+remote-failure opening each fail the oracle.
+
 This owner uses a controlled persistence adapter, not native SQLite or a real
-network provider; it does not prove browser scheduling or arbitrary histories.
-The framework identity scenario does not cover every possible rejection value
-or an error already present before a hook mounts.
+network provider. Restart, cross-tab coordination, a remote that stalls without
+an answer, and a Collection that synced to zero rows before (it waits like an
+empty restore) are outside it. Hooks read Collection status only, so the
+framework conformance suite's status scenarios cover the binding side.
 
 ## Deferred contracts and evidence
 

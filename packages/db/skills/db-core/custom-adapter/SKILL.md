@@ -2,7 +2,7 @@
 name: db-core/custom-adapter
 description: >
   Building custom collection adapters for new backends. SyncConfig interface:
-  sync function receiving begin, write, commit, markReady, markError,
+  sync function receiving begin, write, commit, markReady, fail,
   reportError, reportHealthy, truncate, metadata
   primitives and returning cleanup, loadSubset, and optional unloadSubset
   handlers.
@@ -55,7 +55,7 @@ function myBackendCollectionOptions<T extends object>(config: {
   return {
     getKey: config.getKey,
     sync: {
-      sync: ({ begin, write, commit, markReady, markError, collection }) => {
+      sync: ({ begin, write, commit, markReady, fail, collection }) => {
         let isInitialSyncComplete = false
         const bufferedEvents: Array<BackendEvent<T>> = []
         const initialSyncAbort = new AbortController()
@@ -97,7 +97,7 @@ function myBackendCollectionOptions<T extends object>(config: {
             console.error('Initial sync failed:', error)
             // Give up only before readiness. After it, report the problem
             // with reportError() and keep the rows.
-            if (collection.status === 'loading') markError(error)
+            if (collection.status === 'loading') fail(error)
           })
 
         // 5. Return cleanup function
@@ -234,7 +234,7 @@ Without persistence the metadata is in-memory only and does not survive
 reloads. With persistence, it is durable across sessions.
 
 ```ts
-sync: ({ begin, write, commit, markReady, markError, metadata }) => {
+sync: ({ begin, write, commit, markReady, fail, metadata }) => {
   if (!metadata) throw new Error('Sync metadata API is unavailable')
 
   // Row metadata: store per-row state (e.g. server version, ETag)
@@ -278,7 +278,7 @@ sync: ({ begin, write, commit, markReady, metadata }) => {
   })
 
   stream.on('ready', () => markReady())
-  stream.on('initial-error', (error) => markError(error))
+  stream.on('initial-error', (error) => fail(error))
   return () => stream.close()
 }
 ```
@@ -348,19 +348,22 @@ sync: ({ begin, write, commit, markReady }) => {
 `markReady()` transitions the collection to "ready" status. Without it, live queries never resolve and `useLiveSuspenseQuery` hangs forever in Suspense.
 
 If initial sync fails before it produces a usable snapshot and you stop
-retrying, call `markError(error)` instead. This rejects readiness waits with the
-supplied cause and moves dependent live queries to the error state. Calling
-`markError()` without a cause remains supported and rejects with a generic
-collection-state error. The error is final for the sync run: `markReady()`
-afterward throws. Only a restart (`cleanup()`, then `preload()`) starts a new
-sync run.
+retrying, call `fail(error)` instead. The status becomes `error`, readiness
+waits reject with the supplied cause, and dependent live queries move to
+`error`. Every later call in the sync run throws, including `markReady()`.
+Only `collection.reload()` starts a new sync run.
 
 After the first `markReady()`, the rows stay. Report a sync problem with
-`reportError(error)` while you keep trying, and call `reportHealthy()` when
-sync works again. When you stop trying, call `markError(error)`: after
-readiness it is a final health error, and only a restart clears it. Apps read these reports from
-`collection.health` and from each live query's `errors` tree. While a retry is
-in progress, report nothing.
+`reportError(error)` while you keep trying; it sets the node's
+`failureReason`. Call `reportHealthy()` when sync works again; it does nothing
+when nothing is wrong. When you stop trying, call `fail(error)`: after
+readiness the node shows an `error`, and only `reload()` clears it.
+`reportError()` and `reportHealthy()` throw before the first `markReady()`.
+Apps read these reports from `collection.errors` and from each live query's
+`errors` tree. While a retry is in progress before readiness, report nothing.
+
+A throwing `sync` function crashes the Collection (`status: 'crashed'`).
+Reserve that for broken local state, not for network failures.
 
 Source: docs/guides/collection-options-creator.md
 

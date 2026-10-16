@@ -79,7 +79,7 @@ function for proper garbage collection:
 
 ```typescript
 const sync: SyncConfig<T>['sync'] = (params) => {
-  const { begin, write, commit, markReady, markError, collection } = params
+  const { begin, write, commit, markReady, fail, collection } = params
   
   // 1. Initialize connection to your sync engine
   const connection = initializeConnection(config)
@@ -149,7 +149,7 @@ const sync: SyncConfig<T>['sync'] = (params) => {
       console.error('Initial sync failed:', error)
       // No usable initial snapshot exists, and this example does not retry.
       // After readiness, report failures with reportError() instead.
-      if (collection.status === 'loading') markError(error)
+      if (collection.status === 'loading') fail(error)
     }
   }
 
@@ -174,9 +174,9 @@ The sync process follows this lifecycle:
 2. **write()** - Add changes to the pending transaction (buffered until commit)
 3. **commit()** - Apply all changes atomically to the collection state
 4. **markReady()** - Signal that a usable initial snapshot exists
-5. **markError(error?)** - Signal that you stopped trying. Before the Collection is ready, this fails the sync run: readiness waits reject with the cause, and `markReady()` afterward throws. After it, this is a final health error: the status and rows stay. Only a restart starts over
-6. **reportError(error)** - After the Collection is ready, report a sync problem while you keep trying, without changing its status or rows
-7. **reportHealthy()** - After the Collection is ready, report that sync works again. It clears the problem from `reportError()`
+5. **fail(error)** - Signal that you stopped trying. Before the Collection is ready, this fails the first load: the status becomes `error`, readiness waits reject with the cause, and `markReady()` afterward throws. After it, the node shows an `error`: the status and rows stay. Every later call in this sync run throws. Only `reload()` starts a new run
+6. **reportError(error)** - After the Collection is ready, report a sync problem while you keep trying. It sets the node's `failureReason` without changing its status or rows
+7. **reportHealthy()** - After the Collection is ready, report that sync works again. It clears the `failureReason`, and does nothing when nothing is wrong
 
 ### Reporting failures
 
@@ -185,14 +185,14 @@ still kept up to date. Follow these rules so both stay truthful:
 
 1. While you retry the initial sync, call nothing. The Collection stays
    `loading`.
-2. Call `markError(error)` when you give up, before or after the first
-   `markReady()`. Do not call `markReady()` after it.
+2. Call `fail(error)` when you give up, before or after the first
+   `markReady()`. Do not call anything after it.
 3. After the first `markReady()`, call `reportError(error)` for a problem
    while you keep trying, and `reportHealthy()` when sync works again. Never
    discard rows because sync failed.
 
 ```ts
-sync: ({ begin, write, commit, markReady, markError, reportError, reportHealthy }) => {
+sync: ({ begin, write, commit, markReady, fail, reportError, reportHealthy }) => {
   let ready = false
   const stream = connect({
     onData: (rows) => {
@@ -207,7 +207,7 @@ sync: ({ begin, write, commit, markReady, markError, reportError, reportHealthy 
       }
     },
     onError: (error, { willRetry }) => {
-      if (!willRetry) markError(error)
+      if (!willRetry) fail(error)
       else if (ready) reportError(error)
     },
   })
@@ -1022,7 +1022,7 @@ const collection = createCollection(
 
 ## Best Practices
 
-1. **Report initial sync status** - Call `markReady()` after a usable snapshot, or `markError(error)` when you give up on the initial sync
+1. **Report initial sync status** - Call `markReady()` after a usable snapshot, or `fail(error)` when you give up on the initial sync
 2. **Report health after readiness** - Use `reportError()` and `reportHealthy()` once the Collection is ready; recovery from an initial error is a restart, not a later `markReady()`
 3. **Clean up resources** - Return a cleanup function from sync to prevent memory leaks
 4. **Batch operations** - Use begin/commit to batch multiple changes for better performance

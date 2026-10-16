@@ -1,37 +1,174 @@
-import { describe, expect, it, vi } from 'vitest'
-import {
-  DbClient,
-  PERSISTED_READINESS,
-  createCollection,
-  createLiveQueryCollection,
-  createLiveQueryObserver,
-  eq,
-  getPersistedReadinessSource,
-} from '@tanstack/db'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createCollection, createLiveQueryCollection } from '@tanstack/db'
 import { persistedCollectionOptions } from '../src/index.js'
 import type { PersistenceAdapter } from '../src/index.js'
+import type { SyncConfig } from '@tanstack/db'
+
+/**
+ * # When does a persisted Collection open from restored rows?
+ *
+ * A persisted Collection keeps one status: `status` says whether the data can
+ * be shown, wherever the rows came from. Without `initialRender`, the
+ * Collection waits for its sync adapter, as any Collection does. With
+ * `initialRender: { strategy: 'network-first', networkTimeoutMs }`, it prefers
+ * the network for `networkTimeoutMs`. Once that deadline passes, or the remote
+ * fails, a completed restore that installed rows opens the Collection: status
+ * `ready` with the restored rows. Problems the remote reports after that are
+ * the Collection's sync errors, and its rows stay.
+ *
+ * Three boundaries keep `ready` honest:
+ *
+ * - An empty restore never opens the Collection. It stays `loading` until the
+ *   remote answers, so an empty list always means "no rows", not "unknown".
+ *   (A Collection that synced to zero rows also waits for the network; the
+ *   restore cannot tell the two apart.)
+ * - The restore comes first. A remote that answers before the restore
+ *   finishes waits for it, so remote rows apply over restored ones. A remote
+ *   that became ready then makes the Collection `ready`. A remote that failed
+ *   lets restored rows open the Collection, and the failure shows as its
+ *   `error`; with no rows the first load fails (`status: 'error'`).
+ * - A failed restore is a crash: local storage cannot serve reads.
+ *
+ * ## The model
+ *
+ * `expected` replays the events of one history over a small state: the
+ * Collection's status, whether the restore finished and with how many rows,
+ * whether the deadline passed, the remote answer that waits for the restore,
+ * and the error the node shows. It reads no production state.
+ *
+ * ## The history grammar
+ *
+ * A history orders up to three events: the restore settles (with rows, empty,
+ * or failed), the remote answers (it becomes ready, or it fails), and the
+ * deadline passes. Every ordering of every combination is generated.
+ *
+ * ## The comparison
+ *
+ * After every event the driver compares the Collection's status, the message
+ * of its node's `error`, and, while it is `ready`, the keys of its rows. A
+ * live query over the Collection follows its status.
+ *
+ * ## Limits
+ *
+ * The adapter is a controlled in-memory persistence adapter, not native
+ * SQLite. Restarts, cross-tab coordination, and on-demand persistence are
+ * outside this owner (on-demand rejects network-first configuration).
+ */
 
 type Row = { id: string; value: string }
-type ModelOutcome = `loading` | `ready` | `error`
-type ModelSource = {
-  optedIn: boolean
-  outcome: ModelOutcome
-  error: unknown
+type Restore = `rows` | `empty` | `failed`
+type Remote = `ready` | `fail`
+type Event =
+  | { kind: `restore`; outcome: Restore }
+  | { kind: `remote`; outcome: Remote }
+  | { kind: `deadline` }
+
+const TIMEOUT = 100
+const DISK_ROW: Row = { id: `disk`, value: `restored` }
+const REMOTE_ROW: Row = { id: `remote`, value: `synced` }
+const RESTORE_FAILURE = `restore failed`
+const REMOTE_FAILURE = `remote gave up`
+
+// ---------------------------------------------------------------------------
+// Independent model
+// ---------------------------------------------------------------------------
+
+type Expected = {
+  status: `loading` | `ready` | `error` | `crashed`
+  error: string | null
+  rows: Array<string>
 }
 
-function expectedPersistedSnapshot(sources: ReadonlyArray<ModelSource>) {
-  if (sources.some((entry) => !entry.optedIn)) {
-    return { status: `unavailable`, error: undefined }
+function expected(events: ReadonlyArray<Event>): Array<Expected> {
+  let status: Expected[`status`] = `loading`
+  let restore: Restore | `pending` = `pending`
+  let deadline = false
+  let remoteFailed = false
+  let waitingRemote: Remote | undefined
+  let error: string | null = null
+  const rows = new Set<string>()
+
+  // Restored rows may open the Collection once the network had its chance.
+  const openFromDisk = () => {
+    if (
+      status === `loading` &&
+      restore === `rows` &&
+      (deadline || remoteFailed)
+    )
+      status = `ready`
   }
-  const failed = sources.find((entry) => entry.outcome === `error`)
-  if (failed) return { status: `error`, error: failed.error }
-  return {
-    status: sources.some((entry) => entry.outcome === `loading`)
-      ? `loading`
-      : `ready`,
-    error: undefined,
+  const applyRemoteReady = () => {
+    rows.add(REMOTE_ROW.id)
+    if (status === `loading`) status = `ready`
+  }
+  const applyRemoteFailure = () => {
+    openFromDisk()
+    if (status === `ready`) error = REMOTE_FAILURE
+    else if (status === `loading`) {
+      status = `error`
+      error = REMOTE_FAILURE
+    }
+  }
+
+  return events.map((event) => {
+    if (status !== `crashed`) {
+      if (event.kind === `restore`) {
+        restore = event.outcome
+        if (event.outcome === `failed`) {
+          status = `crashed`
+          error = RESTORE_FAILURE
+        } else {
+          if (event.outcome === `rows`) rows.add(DISK_ROW.id)
+          if (waitingRemote === `ready`) applyRemoteReady()
+          else if (waitingRemote === `fail`) applyRemoteFailure()
+          else openFromDisk()
+        }
+      } else if (event.kind === `deadline`) {
+        deadline = true
+        openFromDisk()
+      } else {
+        if (event.outcome === `fail`) remoteFailed = true
+        if (restore === `pending`) waitingRemote = event.outcome
+        else if (event.outcome === `ready`) applyRemoteReady()
+        else applyRemoteFailure()
+      }
+    }
+    return {
+      status,
+      error,
+      rows: status === `ready` ? [...rows].sort() : [],
+    }
+  })
+}
+
+// ---------------------------------------------------------------------------
+// History grammar
+// ---------------------------------------------------------------------------
+
+function permutations<T>(items: ReadonlyArray<T>): Array<Array<T>> {
+  if (items.length <= 1) return [[...items]]
+  return items.flatMap((item, index) =>
+    permutations([...items.slice(0, index), ...items.slice(index + 1)]).map(
+      (rest) => [item, ...rest],
+    ),
+  )
+}
+
+const histories: Array<Array<Event>> = []
+for (const restore of [`rows`, `empty`, `failed`] as const) {
+  for (const remote of [`ready`, `fail`, undefined] as const) {
+    for (const deadline of [true, false]) {
+      const events: Array<Event> = [{ kind: `restore`, outcome: restore }]
+      if (remote) events.push({ kind: `remote`, outcome: remote })
+      if (deadline) events.push({ kind: `deadline` })
+      histories.push(...permutations(events))
+    }
   }
 }
+
+// ---------------------------------------------------------------------------
+// Production driver
+// ---------------------------------------------------------------------------
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -43,20 +180,17 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 
-function recordingAdapter(rows: ReadonlyArray<Row>) {
-  const load = deferred<void>()
+// A persistence adapter whose restore read waits for the history to settle it.
+function controlledAdapter() {
+  const load = deferred<ReadonlyArray<Row>>()
+  void load.promise.catch(() => undefined)
   const adapter: PersistenceAdapter = {
-    loadSubset: async () => {
-      await load.promise
-      return rows.map((value) => ({ key: value.id, value }))
-    },
+    loadSubset: async () =>
+      (await load.promise).map((value) => ({ key: value.id, value })),
     loadResumeSnapshot: async (_id, options) => {
-      if (options?.includeRows !== false) await load.promise
+      const rows = options?.includeRows === false ? [] : await load.promise
       return {
-        rows:
-          options?.includeRows === false
-            ? []
-            : rows.map((value) => ({ key: value.id, value })),
+        rows: rows.map((value) => ({ key: value.id, value })),
         keySet: { status: `consistent` },
         collectionMetadata: [],
         latestTerm: 0,
@@ -71,412 +205,158 @@ function recordingAdapter(rows: ReadonlyArray<Row>) {
   return { adapter, load }
 }
 
-function source(
-  id: string,
-  adapter: PersistenceAdapter,
-  optIn: boolean,
-  networkTimeoutMs = 0,
-) {
-  return createCollection(
+function networkFirst(id: string, initialRender = true) {
+  const fixture = controlledAdapter()
+  let remote: Parameters<SyncConfig<Row, string>[`sync`]>[0] | undefined
+  const collection = createCollection(
     persistedCollectionOptions<Row, string>({
       id,
       getKey: (row) => row.id,
-      persistence: { adapter },
-      ...(optIn
+      persistence: { adapter: fixture.adapter },
+      ...(initialRender
         ? {
             initialRender: {
               strategy: `network-first` as const,
-              networkTimeoutMs,
+              networkTimeoutMs: TIMEOUT,
             },
           }
         : {}),
-      // Upstream never declares Collection readiness. Local restore is a
-      // separately observable boundary even while this stays loading.
-      sync: { sync: () => ({}) },
+      sync: {
+        sync: (params) => {
+          remote = params
+        },
+      },
     }),
   )
+  return {
+    collection,
+    restore: (outcome: Restore) =>
+      outcome === `failed`
+        ? fixture.load.reject(new Error(RESTORE_FAILURE))
+        : fixture.load.resolve(outcome === `rows` ? [DISK_ROW] : []),
+    remoteReady: () => {
+      remote!.begin()
+      remote!.write({ type: `insert`, value: REMOTE_ROW })
+      remote!.commit()
+      remote!.markReady()
+    },
+    remoteFail: () => remote!.fail(new Error(REMOTE_FAILURE)),
+  }
 }
 
-async function checkWithCleanup(
-  check: () => Promise<void> | void,
-  cleanups: ReadonlyArray<() => Promise<unknown> | unknown>,
-): Promise<void> {
-  let hasPrimaryFailure = false
-  let primaryFailure: unknown
-  try {
-    await check()
-  } catch (error) {
-    hasPrimaryFailure = true
-    primaryFailure = error
+function observe(collection: ReturnType<typeof networkFirst>[`collection`]) {
+  return {
+    status: collection.status,
+    error: collection.errors.error?.message ?? null,
+    rows:
+      collection.status === `ready`
+        ? collection.toArray.map((row) => row.id).sort()
+        : [],
   }
+}
 
-  const cleanupFailures: Array<unknown> = []
-  for (const cleanup of cleanups) {
-    try {
-      await cleanup()
-    } catch (error) {
-      cleanupFailures.push(error)
-    }
-  }
-  if (hasPrimaryFailure) {
-    if (cleanupFailures.length) {
-      throw new AggregateError(
-        [primaryFailure, ...cleanupFailures],
-        `Persisted-readiness check and cleanup both failed`,
-        { cause: primaryFailure },
+beforeEach(() => {
+  vi.useFakeTimers()
+})
+afterEach(() => {
+  vi.useRealTimers()
+})
+
+describe(`persisted readiness oracle`, () => {
+  it.each(histories.map((events) => [describe_(events), events] as const))(
+    `%s`,
+    async (_name, events) => {
+      const source = networkFirst(`network-first-${describe_(events)}`)
+      const live = createLiveQueryCollection((q) =>
+        q.from({ row: source.collection }),
       )
-    }
-    throw primaryFailure
-  }
-  if (cleanupFailures.length === 1) throw cleanupFailures[0]
-  if (cleanupFailures.length > 1) {
-    throw new AggregateError(
-      cleanupFailures,
-      `Persisted-readiness cleanup failed`,
-    )
-  }
-}
-
-/**
- * # When may a query render its restored data?
- *
- * The independent status rule is an all-source conjunction: a query is persisted-ready
- * only after every eager persisted source opted in and successfully completed
- * its restore in the current sync run. A source that opts out makes the
- * query unavailable for this signal. A failed restore reports that exact
- * failure. Neither an empty persisted database nor a pending network source
- * changes the rule. Initial rendering prefers upstream-signaled Collection
- * readiness until the longest opted-in source deadline, then permits only
- * completed restoration.
- * Network failure permits earlier fallback without stopping sync. A failed
- * client query stream is a network failure; a derived-query failure is not.
- * If the stream failure precedes restore, the fallback must include the
- * restored query rows. An empty restore is complete data, not missing data.
- * The production driver holds each adapter's persisted read and
- * observes the real persisted wrapper, Collection, live query, and observer.
- *
- * Checkpoints are before persisted reads settle and after each controlled
- * settlement. The row assertion prevents a status-only false green; the empty
- * case prevents inferring readiness from row count. The SSR handoff and
- * framework scheduling paths have separate focused witnesses below and in
- * their packages. This owner does not claim native SQLite, replacement client
- * records during the wait, or arbitrary provider/network histories.
- *
- * Audit: ORC-001/002 use the approved all-source rule and the independent
- * expectedPersistedSnapshot model. ORC-003/005 are the finite outcome grammar,
- * controlled persistence driver, and public snapshot checks. ORC-004/007/008
- * do not apply: the 36-case product is enumerated, not generated or stateful.
- * ORC-006: the pre-implementation observer lacked persistedStatus and
- * preloadForInitialRender; the deadline test also failed against the immediate
- * persisted-ready race. Before the early-error repair, the held-read witness
- * resolved initial rendering with an empty live query despite a durable row.
- * Before the client-stream repair, the four stream-failure cases rejected the
- * initial-render wait instead of exposing the completed persisted result.
- * A preexisting failed stream also left a fresh observer waiting for the
- * deadline after restore. The observer-start witness rejects that design.
- * An any-one-ready answer fails the joined half-ready checkpoint. A
- * nonempty-rows answer fails the empty-restore checkpoint. The combined
- * derived-query/client-stream failure rejects false local fallback. ORC-009 maps model
- * outcome `ready` to completed persisted restore; it is not Collection status.
- * ORC-010 preserves a primary mismatch and distinct cleanup failures through
- * checkWithCleanup. ORC-011 has no named shared-fault hypothesis requiring
- * another model formulation. ORC-012 records the bounded contract, driver,
- * wrong-answer checks, and uncovered histories here and in the coverage map.
- * It does not claim all network histories.
- * ORC-013: the joined half-ready snapshot rejects any-one-ready; the empty
- * restore rejects row-count readiness; the 99/100-ms deadline and 50/100-ms
- * joined deadlines reject early fallback; the restart witness rejects stale
- * public rows while the replacement read is held. ORC-014 does not apply to a
- * real-provider claim: this oracle explicitly ends at its controlled adapter.
- */
-describe(`persisted-readiness oracle`, () => {
-  it(`preserves a failed checkpoint and a secondary cleanup failure`, async () => {
-    const mismatch = new Error(`wrong persisted status`)
-    const cleanupFailure = new Error(`cleanup failed`)
-    await expect(
-      checkWithCleanup(() => {
-        throw mismatch
-      }, [
-        () => {
-          throw cleanupFailure
-        },
-      ]),
-    ).rejects.toMatchObject({
-      cause: mismatch,
-      errors: [mismatch, cleanupFailure],
-    })
-  })
-
-  it(`refines the finite two-source readiness model`, async () => {
-    const outcomes: ReadonlyArray<ModelOutcome> = [`loading`, `ready`, `error`]
-    let caseId = 0
-    // Grammar: each source independently opts in or out and has one of the
-    // three local outcomes. No network transition is needed to judge this
-    // observer-level projection; real persistence histories are below.
-    for (const leftOptedIn of [false, true]) {
-      for (const rightOptedIn of [false, true]) {
-        for (const leftOutcome of outcomes) {
-          for (const rightOutcome of outcomes) {
-            const id = caseId++
-            const leftError = new Error(`left-${id}`)
-            const rightError = new Error(`right-${id}`)
-            const left = createCollection<Row>({
-              id: `local-model-left-${id}`,
-              getKey: (row) => row.id,
-              sync: { sync: () => ({}) },
-            })
-            const right = createCollection<Row>({
-              id: `local-model-right-${id}`,
-              getKey: (row) => row.id,
-              sync: { sync: () => ({}) },
-            })
-            if (leftOptedIn) {
-              Object.defineProperty(left.config, PERSISTED_READINESS, {
-                value: {
-                  networkTimeoutMs: 0,
-                  getOrStartNetworkDeadline: () => Date.now(),
-                  getSnapshot: () =>
-                    leftOutcome === `error`
-                      ? { status: `error`, error: leftError }
-                      : { status: leftOutcome },
-                  subscribe: () => () => {},
-                },
-              })
-            }
-            if (rightOptedIn) {
-              Object.defineProperty(right.config, PERSISTED_READINESS, {
-                value: {
-                  networkTimeoutMs: 0,
-                  getOrStartNetworkDeadline: () => Date.now(),
-                  getSnapshot: () =>
-                    rightOutcome === `error`
-                      ? { status: `error`, error: rightError }
-                      : { status: rightOutcome },
-                  subscribe: () => () => {},
-                },
-              })
-            }
-            const query = createLiveQueryCollection({
-              query: (q) =>
-                q
-                  .from({ left })
-                  .join({ right }, ({ left: a, right: b }) => eq(a.id, b.id)),
-            })
-            const observer = createLiveQueryObserver(query)
-            await checkWithCleanup(() => {
-              const expected = expectedPersistedSnapshot([
-                {
-                  optedIn: leftOptedIn,
-                  outcome: leftOutcome,
-                  error: leftError,
-                },
-                {
-                  optedIn: rightOptedIn,
-                  outcome: rightOutcome,
-                  error: rightError,
-                },
-              ])
-              expect(observer.getSnapshot(), `case ${id}`).toMatchObject({
-                persistedStatus: expected.status,
-                isPersistedReady: expected.status === `ready`,
-                persistedError: expected.error,
-              })
-            }, [
-              () => observer.dispose(),
-              () => query.cleanup(),
-              () => left.cleanup(),
-              () => right.cleanup(),
-            ])
-          }
+      const consoleError = vi
+        .spyOn(console, `error`)
+        .mockImplementation(() => {})
+      try {
+        void source.collection.preload().catch(() => undefined)
+        void live.preload().catch(() => undefined)
+        await vi.advanceTimersByTimeAsync(0)
+        const model = expected(events)
+        for (const [index, event] of events.entries()) {
+          if (event.kind === `restore`) source.restore(event.outcome)
+          else if (event.kind === `deadline`)
+            await vi.advanceTimersByTimeAsync(TIMEOUT)
+          else if (event.outcome === `ready`) source.remoteReady()
+          else source.remoteFail()
+          await vi.advanceTimersByTimeAsync(0)
+          const label = `after ${describe_(events.slice(0, index + 1))}`
+          expect(observe(source.collection), label).toEqual(model[index])
+          // A live query over the Collection shows the same status, by
+          // live-query readiness, until the Collection ends its first load.
+          if (model[index]!.status !== `crashed`)
+            expect(live.status, `${label}: live query`).toBe(
+              model[index]!.status,
+            )
         }
+      } finally {
+        consoleError.mockRestore()
+        await live.cleanup()
+        await source.collection.cleanup({ dependents: true })
       }
+    },
+  )
+
+  it(`keeps a Collection without initialRender on the network boundary`, async () => {
+    const source = networkFirst(`no-initial-render`, false)
+    try {
+      void source.collection.preload().catch(() => undefined)
+      source.restore(`rows`)
+      await vi.advanceTimersByTimeAsync(TIMEOUT * 10)
+      expect(source.collection.status).toBe(`loading`)
+      source.remoteReady()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(source.collection.status).toBe(`ready`)
+    } finally {
+      await source.collection.cleanup({ dependents: true })
     }
-    expect(caseId).toBe(36)
   })
 
-  for (const rows of [[], [{ id: `one`, value: `restored` }]]) {
-    it(`waits for ${rows.length ? `nonempty` : `empty`} local restore without waiting for upstream`, async () => {
-      const fixture = recordingAdapter(rows)
-      const persisted = source(`local-${rows.length}`, fixture.adapter, true)
-      const query = createLiveQueryCollection({
-        query: (q) => q.from({ row: persisted }),
-      })
-      const observer = createLiveQueryObserver(query)
-      const observedPersistedStatuses: Array<string> = []
-      const unsubscribe = observer.subscribe(() => {
-        observedPersistedStatuses.push(observer.getSnapshot().persistedStatus)
-      })
-      await checkWithCleanup(async () => {
-        expect(observer.getSnapshot().persistedStatus).toBe(`loading`)
-        expect(observer.getSnapshot().isPersistedReady).toBe(false)
-
-        fixture.load.resolve()
-        await vi.waitFor(() => {
-          const snapshot = observer.getSnapshot()
-          expect(snapshot.persistedStatus).toBe(`ready`)
-          expect(snapshot.isPersistedReady).toBe(true)
-          expect(snapshot.status).toBe(`loading`)
-          expect(snapshot.data).toMatchObject(rows)
-        })
-        await observer.preloadForInitialRender()
-        expect(observer.getSnapshot().data).toMatchObject(rows)
-        expect(observedPersistedStatuses).toContain(`ready`)
-      }, [
-        unsubscribe,
-        () => observer.dispose(),
-        () => query.cleanup(),
-        () => persisted.cleanup(),
-      ])
-    })
-  }
-
-  it(`requires every joined source to opt in and finish its own restore`, async () => {
-    const left = recordingAdapter([{ id: `one`, value: `left` }])
-    const right = recordingAdapter([{ id: `one`, value: `right` }])
-    const sourceA = source(`local-join-left`, left.adapter, true)
-    const sourceB = source(`local-join-right`, right.adapter, true)
-    const query = createLiveQueryCollection({
-      query: (q) =>
-        q
-          .from({ a: sourceA })
-          .join({ b: sourceB }, ({ a, b }) => eq(a.id, b.id)),
-    })
-    const observer = createLiveQueryObserver(query)
-    const unsubscribe = observer.subscribe(() => {})
-    await checkWithCleanup(async () => {
-      const initialRenderWait = observer.preloadForInitialRender()
-      left.load.resolve()
-      await vi.waitFor(() => expect(sourceA.has(`one`)).toBe(true))
-      expect(observer.getSnapshot().persistedStatus).toBe(`loading`)
-
-      right.load.resolve()
-      await initialRenderWait
-      expect(observer.getSnapshot().persistedStatus).toBe(`ready`)
-      expect(observer.getSnapshot().data).toHaveLength(1)
-    }, [
-      unsubscribe,
-      () => observer.dispose(),
-      () => query.cleanup(),
-      () => sourceA.cleanup(),
-      () => sourceB.cleanup(),
-    ])
-  })
-
-  it(`follows a live-query source to its underlying persisted Collection`, async () => {
-    const fixture = recordingAdapter([{ id: `one`, value: `local` }])
-    const persisted = source(`local-nested`, fixture.adapter, true)
-    const inner = createLiveQueryCollection({
-      query: (q) => q.from({ row: persisted }),
-    })
-    const outer = createLiveQueryCollection({
-      query: (q) => q.from({ row: inner }),
-    })
-    const observer = createLiveQueryObserver(outer)
-    const unsubscribe = observer.subscribe(() => {})
-    await checkWithCleanup(async () => {
-      expect(observer.getSnapshot().persistedStatus).toBe(`loading`)
-      fixture.load.resolve()
-      await vi.waitFor(() => {
-        expect(observer.getSnapshot().persistedStatus).toBe(`ready`)
-        expect(observer.getSnapshot().data).toMatchObject([
-          { id: `one`, value: `local` },
-        ])
-      })
-    }, [
-      unsubscribe,
-      () => observer.dispose(),
-      () => outer.cleanup(),
-      () => inner.cleanup(),
-      () => persisted.cleanup(),
-    ])
-  })
-
-  it(`does not claim persisted readiness when one query source did not opt in`, async () => {
-    const left = recordingAdapter([{ id: `one`, value: `left` }])
-    const right = recordingAdapter([{ id: `one`, value: `right` }])
-    const sourceA = source(`local-mixed-left`, left.adapter, true)
-    const sourceB = source(`local-mixed-right`, right.adapter, false)
-    const query = createLiveQueryCollection({
-      query: (q) =>
-        q
-          .from({ a: sourceA })
-          .join({ b: sourceB }, ({ a, b }) => eq(a.id, b.id)),
-    })
-    const observer = createLiveQueryObserver(query)
-    const unsubscribe = observer.subscribe(() => {})
-    await checkWithCleanup(async () => {
-      left.load.resolve()
-      right.load.resolve()
-      await vi.waitFor(() =>
-        expect(observer.getSnapshot().data).toHaveLength(1),
-      )
-      expect(observer.getSnapshot().persistedStatus).toBe(`unavailable`)
-      expect(observer.getSnapshot().isPersistedReady).toBe(false)
-    }, [
-      unsubscribe,
-      () => observer.dispose(),
-      () => query.cleanup(),
-      () => sourceA.cleanup(),
-      () => sourceB.cleanup(),
-    ])
-  })
-
-  it(`reports the exact persisted restore failure without claiming readiness`, async () => {
-    const fixture = recordingAdapter([{ id: `one`, value: `restored` }])
-    const persisted = source(`local-failure`, fixture.adapter, true)
-    const query = createLiveQueryCollection({
-      query: (q) => q.from({ row: persisted }),
-    })
-    const observer = createLiveQueryObserver(query)
-    const unsubscribe = observer.subscribe(() => {})
-    const failure = new Error(`local read failed`)
-    await checkWithCleanup(async () => {
-      fixture.load.reject(failure)
-      await vi.waitFor(() => {
-        const snapshot = observer.getSnapshot()
-        expect(snapshot.persistedStatus).toBe(`error`)
-        expect(snapshot.persistedError).toBe(failure)
-        expect(snapshot.isPersistedReady).toBe(false)
-      })
-    }, [
-      unsubscribe,
-      () => observer.dispose(),
-      () => query.cleanup(),
-      () => persisted.cleanup(),
-    ])
+  it(`defaults the network-first deadline to three seconds`, async () => {
+    const fixture = controlledAdapter()
+    const collection = createCollection(
+      persistedCollectionOptions<Row, string>({
+        id: `default-network-deadline`,
+        getKey: (row) => row.id,
+        persistence: { adapter: fixture.adapter },
+        initialRender: { strategy: `network-first` },
+        sync: { sync: () => {} },
+      }),
+    )
+    try {
+      void collection.preload().catch(() => undefined)
+      fixture.load.resolve([DISK_ROW])
+      await vi.advanceTimersByTimeAsync(2_999)
+      expect(collection.status).toBe(`loading`)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(collection.status).toBe(`ready`)
+    } finally {
+      await collection.cleanup({ dependents: true })
+    }
   })
 
   it(`rejects network-first initial rendering for on-demand persistence`, () => {
-    const fixture = recordingAdapter([])
+    const fixture = controlledAdapter()
     expect(() =>
       persistedCollectionOptions<Row, string>({
         id: `local-on-demand`,
         getKey: (row) => row.id,
         syncMode: `on-demand`,
-        initialRender: {
-          strategy: `network-first`,
-          networkTimeoutMs: 100,
-        },
+        initialRender: { strategy: `network-first`, networkTimeoutMs: 100 },
         persistence: { adapter: fixture.adapter },
       }),
     ).toThrow(/network-first.*eager/i)
   })
 
-  it(`defaults the network-first fallback deadline to three seconds`, () => {
-    const fixture = recordingAdapter([])
-    const config = persistedCollectionOptions<Row, string>({
-      id: `default-network-deadline`,
-      getKey: (row) => row.id,
-      persistence: { adapter: fixture.adapter },
-      initialRender: { strategy: `network-first` },
-    })
-    expect(getPersistedReadinessSource(config)?.networkTimeoutMs).toBe(3_000)
-  })
-
   it.each([-1, Number.NaN, Number.POSITIVE_INFINITY, 2_147_483_648])(
     `rejects an invalid network timeout (%s)`,
     (networkTimeoutMs) => {
-      const fixture = recordingAdapter([])
+      const fixture = controlledAdapter()
       expect(() =>
         persistedCollectionOptions<Row, string>({
           id: `invalid-network-deadline`,
@@ -487,809 +367,12 @@ describe(`persisted-readiness oracle`, () => {
       ).toThrow(/networkTimeoutMs/)
     },
   )
-
-  it(`settles a local-only persisted Collection after its eager restore`, async () => {
-    const fixture = recordingAdapter([{ id: `one`, value: `local` }])
-    const persisted = createCollection(
-      persistedCollectionOptions<Row, string>({
-        id: `local-only-ready`,
-        getKey: (row) => row.id,
-        persistence: { adapter: fixture.adapter },
-        initialRender: {
-          strategy: `network-first`,
-          networkTimeoutMs: 0,
-        },
-      }),
-    )
-    const observer = createLiveQueryObserver(persisted)
-    const unsubscribe = observer.subscribe(() => {})
-    await checkWithCleanup(async () => {
-      expect(observer.getSnapshot().persistedStatus).toBe(`loading`)
-      fixture.load.resolve()
-      await vi.waitFor(() => {
-        expect(observer.getSnapshot().persistedStatus).toBe(`ready`)
-        expect(observer.getSnapshot().data).toMatchObject([
-          { id: `one`, value: `local` },
-        ])
-      })
-    }, [unsubscribe, () => observer.dispose(), () => persisted.cleanup()])
-  })
-
-  it(`does not mistake an SSR seed for local restore and hands off to local rows`, async () => {
-    const fixture = recordingAdapter([{ id: `one`, value: `local` }])
-    const persisted = source(`local-ssr`, fixture.adapter, true)
-    const query = createLiveQueryCollection({
-      query: (q) => q.from({ row: persisted }),
-    })
-    const client = new DbClient()
-    client.hydrate({
-      collections: [],
-      liveQueries: [
-        {
-          queryHash: `local-ssr-query`,
-          dehydratedAt: 1,
-          snapshot: {
-            rows: [{ key: `stale`, value: { id: `stale`, value: `server` } }],
-          },
-        },
-      ],
-    })
-    const observer = createLiveQueryObserver(query, {
-      client,
-      queryHash: `local-ssr-query`,
-      mode: `wholesale`,
-    })
-    let unsubscribe: (() => void) | undefined
-    await checkWithCleanup(async () => {
-      expect(observer.getSnapshot()).toMatchObject({
-        status: `ready`,
-        persistedStatus: `loading`,
-        isPersistedReady: false,
-        data: [{ id: `stale`, value: `server` }],
-      })
-      unsubscribe = observer.subscribe(() => {})
-      fixture.load.resolve()
-      await vi.waitFor(() => {
-        const snapshot = observer.getSnapshot()
-        expect(snapshot.persistedStatus).toBe(`ready`)
-        expect(snapshot.status).toBe(`loading`)
-        expect(snapshot.data).toMatchObject([{ id: `one`, value: `local` }])
-      })
-    }, [
-      () => unsubscribe?.(),
-      () => observer.dispose(),
-      () => query.cleanup(),
-      () => persisted.cleanup(),
-    ])
-  })
-
-  it(`does not publish a stale restore after cleanup and restart`, async () => {
-    const fixture = recordingAdapter([{ id: `one`, value: `local` }])
-    fixture.load.resolve()
-    const firstRead = deferred<void>()
-    const secondRead = deferred<void>()
-    const loadResumeSnapshot = fixture.adapter.loadResumeSnapshot
-    let baselineReads = 0
-    let firstReadReturned = false
-    // The obsolete sync run returns a distinct row, so a leaked publication
-    // remains observable even after the replacement restore completes.
-    fixture.adapter.loadResumeSnapshot = async (id, options) => {
-      if (options?.includeRows !== false) {
-        const read = ++baselineReads
-        await (read === 1 ? firstRead.promise : secondRead.promise)
-        const snapshot = await loadResumeSnapshot(id, options)
-        if (read === 1) {
-          firstReadReturned = true
-          return {
-            ...snapshot,
-            rows: [{ key: `stale`, value: { id: `stale`, value: `obsolete` } }],
-          }
-        }
-        return snapshot
-      }
-      return loadResumeSnapshot(id, options)
-    }
-    const persisted = source(`local-restart`, fixture.adapter, true)
-    const observer = createLiveQueryObserver(persisted)
-    const observedData: Array<unknown> = []
-    const unsubscribe = observer.subscribe(() => {
-      observedData.push(observer.getSnapshot().data)
-    })
-    await checkWithCleanup(async () => {
-      await vi.waitFor(() => expect(baselineReads).toBe(1))
-      await persisted.cleanup()
-      persisted.startSyncImmediate()
-      firstRead.resolve()
-      await vi.waitFor(() => expect(baselineReads).toBe(2))
-      await vi.waitFor(() => expect(firstReadReturned).toBe(true))
-      await new Promise<void>((resolve) => setTimeout(resolve, 0))
-      expect(observer.getSnapshot().persistedStatus).toBe(`loading`)
-      expect(observer.getSnapshot().data).toEqual([])
-
-      secondRead.resolve()
-      await vi.waitFor(() => {
-        expect(observer.getSnapshot().persistedStatus).toBe(`ready`)
-        expect(persisted.has(`one`)).toBe(true)
-      })
-      expect(observedData).not.toContainEqual(
-        expect.arrayContaining([expect.objectContaining({ id: `stale` })]),
-      )
-    }, [
-      () => firstRead.resolve(),
-      () => secondRead.resolve(),
-      unsubscribe,
-      () => observer.dispose(),
-      () => persisted.cleanup(),
-    ])
-  })
-
-  // The finite conjunction above has no transitions. This legal history gives
-  // source A two sync runs while source B completes once. A's old restore cannot
-  // satisfy the current-run conjunct after cleanup. The model needs only each
-  // source's current restore outcome; it does not copy the wrapper's generations.
-  // A fresh live query is created after restart because cleanup terminates the
-  // old query. Its public snapshot and initial-render wait are the checkpoints.
-  it(`waits for a restarted source after the other joined source restores`, async () => {
-    const left = recordingAdapter([{ id: `one`, value: `left` }])
-    const right = recordingAdapter([{ id: `one`, value: `right` }])
-    left.load.resolve()
-    const secondLeftRead = deferred<void>()
-    const loadResumeSnapshot = left.adapter.loadResumeSnapshot
-    let leftReads = 0
-    left.adapter.loadResumeSnapshot = async (id, options) => {
-      if (options?.includeRows !== false && ++leftReads === 2) {
-        await secondLeftRead.promise
-      }
-      return loadResumeSnapshot(id, options)
-    }
-    const sourceA = source(`joined-restart-left`, left.adapter, true)
-    const sourceB = source(`joined-restart-right`, right.adapter, true)
-    let query: ReturnType<typeof createLiveQueryCollection> | undefined
-    let observer: ReturnType<typeof createLiveQueryObserver> | undefined
-    let unsubscribe: (() => void) | undefined
-    await checkWithCleanup(async () => {
-      sourceA.startSyncImmediate()
-      sourceB.startSyncImmediate()
-      await vi.waitFor(() => expect(leftReads).toBe(1))
-      await vi.waitFor(() => expect(sourceA.has(`one`)).toBe(true))
-
-      await sourceA.cleanup()
-      sourceA.startSyncImmediate()
-      await vi.waitFor(() => expect(leftReads).toBe(2))
-      right.load.resolve()
-      await vi.waitFor(() => expect(sourceB.has(`one`)).toBe(true))
-
-      query = createLiveQueryCollection({
-        query: (q) =>
-          q
-            .from({ a: sourceA })
-            .join({ b: sourceB }, ({ a, b }) => eq(a.id, b.id)),
-      })
-      observer = createLiveQueryObserver(query)
-      unsubscribe = observer.subscribe(() => {})
-      const model = [
-        { optedIn: true, outcome: `loading` as ModelOutcome, error: undefined },
-        { optedIn: true, outcome: `ready` as ModelOutcome, error: undefined },
-      ]
-      expect(observer.getSnapshot().persistedStatus).toBe(
-        expectedPersistedSnapshot(model).status,
-      )
-      let initialRenderSettled = false
-      const initialRenderWait = observer.preloadForInitialRender().then(() => {
-        initialRenderSettled = true
-      })
-      await Promise.resolve()
-      expect(initialRenderSettled).toBe(false)
-
-      secondLeftRead.resolve()
-      model[0]!.outcome = `ready`
-      await initialRenderWait
-      expect(observer.getSnapshot()).toMatchObject({
-        persistedStatus: expectedPersistedSnapshot(model).status,
-        data: [
-          { a: { id: `one`, value: `left` }, b: { id: `one`, value: `right` } },
-        ],
-      })
-    }, [
-      () => secondLeftRead.resolve(),
-      () => unsubscribe?.(),
-      () => observer?.dispose(),
-      () => query?.cleanup(),
-      () => sourceA.cleanup(),
-      () => sourceB.cleanup(),
-    ])
-  })
-
-  it(`offers an initial-render fallback without changing preload's Collection readiness boundary`, async () => {
-    const fixture = recordingAdapter([{ id: `one`, value: `local` }])
-    const persisted = source(`local-suspense`, fixture.adapter, true)
-    const query = createLiveQueryCollection({
-      query: (q) => q.from({ row: persisted }),
-    })
-    const observer = createLiveQueryObserver(query)
-    let collectionPreloadSettled = false
-    await checkWithCleanup(async () => {
-      const collectionPreload = observer.preload()
-      void collectionPreload.then(
-        () => (collectionPreloadSettled = true),
-        () => (collectionPreloadSettled = true),
-      )
-      const initialRenderWait = observer.preloadForInitialRender()
-      fixture.load.resolve()
-      await initialRenderWait
-      expect(observer.getSnapshot()).toMatchObject({
-        status: `loading`,
-        persistedStatus: `ready`,
-        data: [{ id: `one`, value: `local` }],
-      })
-      expect(collectionPreloadSettled).toBe(false)
-    }, [
-      () => observer.dispose(),
-      () => query.cleanup(),
-      () => persisted.cleanup(),
-    ])
-  })
-
-  it(`keeps the initial render gated until the network-first deadline`, async () => {
-    const fixture = recordingAdapter([{ id: `one`, value: `persisted` }])
-    let markCollectionReady!: () => void
-    const persisted = createCollection(
-      persistedCollectionOptions<Row, string>({
-        id: `network-first-deadline`,
-        getKey: (row) => row.id,
-        persistence: { adapter: fixture.adapter },
-        initialRender: {
-          strategy: `network-first`,
-          networkTimeoutMs: 100,
-        },
-        sync: {
-          sync: ({ markReady }) => {
-            markCollectionReady = markReady
-            return {}
-          },
-        },
-      }),
-    )
-    const observer = createLiveQueryObserver(persisted)
-    const unsubscribe = observer.subscribe(() => {})
-    await checkWithCleanup(async () => {
-      fixture.load.resolve()
-      await vi.waitFor(() =>
-        expect(observer.getSnapshot().persistedStatus).toBe(`ready`),
-      )
-
-      vi.useFakeTimers()
-      try {
-        let settled = false
-        const initialRender = observer.preloadForInitialRender()
-        void initialRender.then(() => {
-          settled = true
-        })
-        await Promise.resolve()
-        expect(settled).toBe(false)
-
-        await vi.advanceTimersByTimeAsync(99)
-        expect(settled).toBe(false)
-        await vi.advanceTimersByTimeAsync(1)
-        await initialRender
-        expect(settled).toBe(true)
-        expect(observer.getSnapshot().data).toMatchObject([
-          { id: `one`, value: `persisted` },
-        ])
-        expect(persisted.status).toBe(`loading`)
-      } finally {
-        vi.useRealTimers()
-      }
-      markCollectionReady()
-      await vi.waitFor(() => expect(persisted.status).toBe(`ready`))
-    }, [unsubscribe, () => observer.dispose(), () => persisted.cleanup()])
-  })
-
-  it(`uses Collection readiness before the fallback deadline`, async () => {
-    const fixture = recordingAdapter([{ id: `one`, value: `persisted` }])
-    let markCollectionReady!: () => void
-    const persisted = createCollection(
-      persistedCollectionOptions<Row, string>({
-        id: `network-first-success`,
-        getKey: (row) => row.id,
-        persistence: { adapter: fixture.adapter },
-        initialRender: {
-          strategy: `network-first`,
-          networkTimeoutMs: 1_000,
-        },
-        sync: {
-          sync: ({ markReady }) => {
-            markCollectionReady = markReady
-            return {}
-          },
-        },
-      }),
-    )
-    const observer = createLiveQueryObserver(persisted)
-    const unsubscribe = observer.subscribe(() => {})
-    await checkWithCleanup(async () => {
-      fixture.load.resolve()
-      await vi.waitFor(() =>
-        expect(observer.getSnapshot().persistedStatus).toBe(`ready`),
-      )
-      let settled = false
-      const initialRender = observer.preloadForInitialRender()
-      void initialRender.then(() => {
-        settled = true
-      })
-      await Promise.resolve()
-      expect(settled).toBe(false)
-
-      markCollectionReady()
-      await initialRender
-      expect(settled).toBe(true)
-      expect(persisted.status).toBe(`ready`)
-    }, [unsubscribe, () => observer.dispose(), () => persisted.cleanup()])
-  })
-
-  it(`falls back to persisted data as soon as the network fails`, async () => {
-    const fixture = recordingAdapter([{ id: `one`, value: `persisted` }])
-    const networkFailure = new Error(`network failed`)
-    let markNetworkError!: (error: unknown) => void
-    const persisted = createCollection(
-      persistedCollectionOptions<Row, string>({
-        id: `network-first-failure`,
-        getKey: (row) => row.id,
-        persistence: { adapter: fixture.adapter },
-        initialRender: {
-          strategy: `network-first`,
-          networkTimeoutMs: 1_000,
-        },
-        sync: {
-          sync: ({ fail }) => {
-            markNetworkError = fail
-            return {}
-          },
-        },
-      }),
-    )
-    const observer = createLiveQueryObserver(persisted)
-    const unsubscribe = observer.subscribe(() => {})
-    await checkWithCleanup(async () => {
-      fixture.load.resolve()
-      await vi.waitFor(() =>
-        expect(observer.getSnapshot().persistedStatus).toBe(`ready`),
-      )
-      let settled = false
-      const initialRender = observer.preloadForInitialRender()
-      void initialRender.then(() => {
-        settled = true
-      })
-      await Promise.resolve()
-      expect(settled).toBe(false)
-
-      markNetworkError(networkFailure)
-      await initialRender
-      expect(settled).toBe(true)
-      expect(persisted.status).toBe(`error`)
-      expect(observer.getSnapshot().data).toMatchObject([
-        { id: `one`, value: `persisted` },
-      ])
-    }, [unsubscribe, () => observer.dispose(), () => persisted.cleanup()])
-  })
-
-  for (const rows of [[], [{ id: `one`, value: `persisted` }]]) {
-    for (const failureBeforeRestore of [false, true]) {
-      it(`uses a ${rows.length ? `nonempty` : `empty`} restore after a client stream fails ${failureBeforeRestore ? `before` : `after`} restore`, async () => {
-        const fixture = recordingAdapter(rows)
-        const persisted = source(
-          `stream-failure-${rows.length}-${failureBeforeRestore}`,
-          fixture.adapter,
-          true,
-          60_000,
-        )
-        const query = createLiveQueryCollection({
-          query: (q) => q.from({ row: persisted }),
-        })
-        const client = new DbClient()
-        const queryHash = `stream-failure-${rows.length}-${failureBeforeRestore}`
-        const stream = deferred<{ rows: Array<never> }>()
-        void client
-          ._registerLiveQuery(queryHash, stream.promise)
-          .catch(() => {})
-        const observer = createLiveQueryObserver(query, {
-          client,
-          queryHash,
-          mode: `wholesale`,
-        })
-        const unsubscribe = observer.subscribe(() => {})
-        await checkWithCleanup(async () => {
-          let settlement: `pending` | `resolved` | `rejected` = `pending`
-          const initialRender = observer.preloadForInitialRender()
-          void initialRender.then(
-            () => (settlement = `resolved`),
-            () => (settlement = `rejected`),
-          )
-          const rejectStream = async () => {
-            stream.reject(new Error(`client stream failed`))
-            await stream.promise.catch(() => {})
-          }
-
-          if (failureBeforeRestore) {
-            await rejectStream()
-            expect(settlement).toBe(`pending`)
-            fixture.load.resolve()
-          } else {
-            fixture.load.resolve()
-            await vi.waitFor(() =>
-              expect(observer.getSnapshot().persistedStatus).toBe(`ready`),
-            )
-            expect(settlement).toBe(`pending`)
-            await rejectStream()
-          }
-
-          await initialRender
-          expect(settlement).toBe(`resolved`)
-          expect(observer.isInitialRenderReady()).toBe(true)
-          expect(observer.getSnapshot().data).toMatchObject(rows)
-        }, [
-          () => fixture.load.resolve(),
-          unsubscribe,
-          () => observer.dispose(),
-          () => query.cleanup(),
-          () => persisted.cleanup(),
-        ])
-      })
-    }
-  }
-
-  it(`uses a completed restore when the client stream failed before the observer started`, async () => {
-    const fixture = recordingAdapter([{ id: `one`, value: `persisted` }])
-    const persisted = source(
-      `preexisting-stream-failure`,
-      fixture.adapter,
-      true,
-      60_000,
-    )
-    const query = createLiveQueryCollection({
-      query: (q) => q.from({ row: persisted }),
-    })
-    const client = new DbClient()
-    const queryHash = `preexisting-stream-failure`
-    const stream = deferred<{ rows: Array<never> }>()
-    const registered = client._registerLiveQuery(queryHash, stream.promise)
-    stream.reject(new Error(`client stream failed`))
-    await expect(registered).rejects.toThrow(`client stream failed`)
-
-    const observer = createLiveQueryObserver(query, {
-      client,
-      queryHash,
-      mode: `wholesale`,
-    })
-    const unsubscribe = observer.subscribe(() => {})
-    await checkWithCleanup(async () => {
-      let settled = false
-      const initialRender = observer.preloadForInitialRender()
-      void initialRender.then(
-        () => {
-          settled = true
-        },
-        () => {},
-      )
-      fixture.load.resolve()
-      await vi.waitFor(() =>
-        expect(observer.getSnapshot().persistedStatus).toBe(`ready`),
-      )
-      await vi.waitFor(() => expect(settled).toBe(true), { timeout: 1_000 })
-      await initialRender
-      expect(observer.getSnapshot().data).toMatchObject([
-        { id: `one`, value: `persisted` },
-      ])
-    }, [
-      () => fixture.load.resolve(),
-      unsubscribe,
-      () => observer.dispose(),
-      () => query.cleanup(),
-      () => persisted.cleanup(),
-    ])
-  })
-
-  for (const failureMode of [`fail`, `throw`] as const) {
-    it(`publishes restored query rows when ${failureMode} precedes the persisted read`, async () => {
-      const fixture = recordingAdapter([{ id: `one`, value: `persisted` }])
-      const networkFailure = new Error(`network failed before restore`)
-      let markNetworkError!: (error: unknown) => void
-      let networkSyncStarted = false
-      const persisted = createCollection(
-        persistedCollectionOptions<Row, string>({
-          id: `network-failure-before-restore`,
-          getKey: (row) => row.id,
-          persistence: { adapter: fixture.adapter },
-          initialRender: {
-            strategy: `network-first`,
-            networkTimeoutMs: 1_000,
-          },
-          sync: {
-            sync: ({ fail }) => {
-              networkSyncStarted = true
-              if (failureMode === `throw`) throw networkFailure
-              markNetworkError = fail
-              return {}
-            },
-          },
-        }),
-      )
-      const query = createLiveQueryCollection({
-        query: (q) => q.from({ row: persisted }),
-      })
-      const observer = createLiveQueryObserver(query)
-      const unsubscribe = observer.subscribe(() => {})
-      await checkWithCleanup(async () => {
-        const initialRenderWait = observer.preloadForInitialRender()
-        await vi.waitFor(() => expect(networkSyncStarted).toBe(true))
-        if (failureMode === `fail`) markNetworkError(networkFailure)
-        expect(observer.getSnapshot()).toMatchObject({
-          persistedStatus: `loading`,
-          data: [],
-        })
-
-        fixture.load.resolve()
-        await initialRenderWait
-        expect(persisted.has(`one`)).toBe(true)
-        expect(observer.getSnapshot()).toMatchObject({
-          status: `error`,
-          persistedStatus: `ready`,
-          data: [{ id: `one`, value: `persisted` }],
-        })
-      }, [
-        () => fixture.load.resolve(),
-        unsubscribe,
-        () => observer.dispose(),
-        () => query.cleanup(),
-        () => persisted.cleanup(),
-      ])
-    })
-  }
-
-  it(`does not hide a query failure behind an available persisted source`, async () => {
-    const persisted = createCollection<Row>({
-      id: `query-failure-is-not-network-failure`,
-      getKey: (row) => row.id,
-      sync: { sync: () => ({}) },
-    })
-    Object.defineProperty(persisted.config, PERSISTED_READINESS, {
-      value: {
-        networkTimeoutMs: 60_000,
-        getOrStartNetworkDeadline: () => Date.now() + 60_000,
-        getSnapshot: () => ({ status: `ready` }),
-        subscribe: () => () => {},
-      },
-    })
-    const failure = new Error(`query failed independently of its source`)
-    const preload = vi.spyOn(persisted, `preload`).mockRejectedValue(failure)
-    const observer = createLiveQueryObserver(persisted)
-    await checkWithCleanup(async () => {
-      await expect(observer.preloadForInitialRender()).rejects.toBe(failure)
-      expect(observer.isInitialRenderReady()).toBe(false)
-    }, [
-      () => observer.dispose(),
-      () => preload.mockRestore(),
-      () => persisted.cleanup(),
-    ])
-  })
-
-  it(`does not use persisted fallback when a derived query and client stream both fail`, async () => {
-    const queryFailure = new Error(`derived query failed`)
-    const streamFailure = new Error(`client stream failed`)
-    const sourceCollection = createCollection<Row>({
-      id: `query-and-stream-failure-source`,
-      getKey: (row) => row.id,
-      syncMode: `on-demand`,
-      sync: {
-        sync: ({ markReady }) => {
-          markReady()
-          return {
-            loadSubset: () => {
-              throw queryFailure
-            },
-          }
-        },
-      },
-    })
-    Object.defineProperty(sourceCollection.config, PERSISTED_READINESS, {
-      value: {
-        networkTimeoutMs: 60_000,
-        getOrStartNetworkDeadline: () => Date.now() + 60_000,
-        getSnapshot: () => ({ status: `ready` }),
-        subscribe: () => () => {},
-      },
-    })
-    const query = createLiveQueryCollection({
-      query: (q) =>
-        q
-          .from({ row: sourceCollection })
-          .where(({ row }) => eq(row.value, `persisted`)),
-    })
-    const client = new DbClient()
-    const queryHash = `query-and-stream-failure`
-    const stream = deferred<{ rows: Array<never> }>()
-    const observer = createLiveQueryObserver(query, {
-      client,
-      queryHash,
-      mode: `wholesale`,
-    })
-    await checkWithCleanup(async () => {
-      await expect(query.preload()).rejects.toBe(queryFailure)
-      expect(sourceCollection.status).toBe(`ready`)
-      expect(query.status).toBe(`error`)
-
-      void client._registerLiveQuery(queryHash, stream.promise).catch(() => {})
-      const initialRender = observer.preloadForInitialRender()
-      stream.reject(streamFailure)
-      await expect(initialRender).rejects.toBe(streamFailure)
-      expect(observer.isInitialRenderReady()).toBe(false)
-    }, [
-      () => stream.reject(streamFailure),
-      () => observer.dispose(),
-      () => query.cleanup(),
-      () => sourceCollection.cleanup(),
-    ])
-  })
-
-  it(`uses the longest network deadline for a joined query`, async () => {
-    const left = recordingAdapter([{ id: `one`, value: `left` }])
-    const right = recordingAdapter([{ id: `one`, value: `right` }])
-    const sourceA = source(`deadline-left`, left.adapter, true, 50)
-    const sourceB = source(`deadline-right`, right.adapter, true, 100)
-    const query = createLiveQueryCollection({
-      query: (q) =>
-        q
-          .from({ a: sourceA })
-          .join({ b: sourceB }, ({ a, b }) => eq(a.id, b.id)),
-    })
-    const observer = createLiveQueryObserver(query)
-    const unsubscribe = observer.subscribe(() => {})
-    await checkWithCleanup(async () => {
-      left.load.resolve()
-      right.load.resolve()
-      await vi.waitFor(() =>
-        expect(observer.getSnapshot().persistedStatus).toBe(`ready`),
-      )
-      vi.useFakeTimers()
-      try {
-        let settled = false
-        const initialRender = observer.preloadForInitialRender()
-        void initialRender.then(() => {
-          settled = true
-        })
-        await vi.advanceTimersByTimeAsync(50)
-        expect(settled).toBe(false)
-        await vi.advanceTimersByTimeAsync(50)
-        await initialRender
-        expect(observer.getSnapshot().data).toHaveLength(1)
-      } finally {
-        vi.useRealTimers()
-      }
-    }, [
-      unsubscribe,
-      () => observer.dispose(),
-      () => query.cleanup(),
-      () => sourceA.cleanup(),
-      () => sourceB.cleanup(),
-    ])
-  })
-
-  it(`waits for restore after the deadline instead of rendering incomplete data`, async () => {
-    const fixture = recordingAdapter([{ id: `one`, value: `persisted` }])
-    const persisted = source(
-      `late-persisted-restore`,
-      fixture.adapter,
-      true,
-      100,
-    )
-    const observer = createLiveQueryObserver(persisted)
-    const unsubscribe = observer.subscribe(() => {})
-    await checkWithCleanup(async () => {
-      vi.useFakeTimers()
-      try {
-        let settled = false
-        const initialRender = observer.preloadForInitialRender()
-        void initialRender.then(() => {
-          settled = true
-        })
-        await vi.advanceTimersByTimeAsync(100)
-        expect(settled).toBe(false)
-        expect(observer.getSnapshot().persistedStatus).toBe(`loading`)
-
-        fixture.load.resolve()
-        await initialRender
-        expect(observer.getSnapshot()).toMatchObject({
-          persistedStatus: `ready`,
-          data: [{ id: `one`, value: `persisted` }],
-        })
-      } finally {
-        vi.useRealTimers()
-      }
-    }, [
-      () => fixture.load.resolve(),
-      unsubscribe,
-      () => observer.dispose(),
-      () => persisted.cleanup(),
-    ])
-  })
-
-  it(`rejects an initial-render wait and clears its deadline on disposal`, async () => {
-    const fixture = recordingAdapter([])
-    const persisted = source(
-      `disposed-initial-render`,
-      fixture.adapter,
-      true,
-      100,
-    )
-    const observer = createLiveQueryObserver(persisted)
-    await checkWithCleanup(async () => {
-      vi.useFakeTimers()
-      try {
-        const initialRender = observer.preloadForInitialRender()
-        const rejected = expect(initialRender).rejects.toThrow(/disposed/i)
-        expect(vi.getTimerCount()).toBeGreaterThan(0)
-        observer.dispose()
-        await rejected
-        expect(vi.getTimerCount()).toBe(0)
-      } finally {
-        vi.useRealTimers()
-      }
-    }, [
-      () => fixture.load.resolve(),
-      () => observer.dispose(),
-      () => persisted.cleanup(),
-    ])
-  })
-
-  it(`keeps the network preload boundary for an unconfigured source`, async () => {
-    const fixture = recordingAdapter([{ id: `one`, value: `persisted` }])
-    const persisted = source(`unconfigured-network`, fixture.adapter, false)
-    const observer = createLiveQueryObserver(persisted)
-    const unsubscribe = observer.subscribe(() => {})
-    await checkWithCleanup(async () => {
-      fixture.load.resolve()
-      await vi.waitFor(() => expect(persisted.has(`one`)).toBe(true))
-      let settled = false
-      const initialRender = observer.preloadForInitialRender()
-      void initialRender.then(
-        () => {
-          settled = true
-        },
-        () => {},
-      )
-      await Promise.resolve()
-      expect(observer.getSnapshot().persistedStatus).toBe(`unavailable`)
-      expect(settled).toBe(false)
-    }, [unsubscribe, () => observer.dispose(), () => persisted.cleanup()])
-  })
-
-  it(`waits for a new query to materialize an already restored source`, async () => {
-    const fixture = recordingAdapter([{ id: `one`, value: `local` }])
-    const persisted = source(`local-already-restored`, fixture.adapter, true)
-    const sourceObserver = createLiveQueryObserver(persisted)
-    const unsubscribeSource = sourceObserver.subscribe(() => {})
-    let query: ReturnType<typeof createLiveQueryCollection> | undefined
-    let queryObserver: ReturnType<typeof createLiveQueryObserver> | undefined
-    await checkWithCleanup(async () => {
-      fixture.load.resolve()
-      await vi.waitFor(() =>
-        expect(sourceObserver.getSnapshot().persistedStatus).toBe(`ready`),
-      )
-      query = createLiveQueryCollection({
-        query: (q) => q.from({ row: persisted }),
-      })
-      queryObserver = createLiveQueryObserver(query)
-      await queryObserver.preloadForInitialRender()
-      expect(queryObserver.getSnapshot()).toMatchObject({
-        persistedStatus: `ready`,
-        data: [{ id: `one`, value: `local` }],
-      })
-    }, [
-      () => queryObserver?.dispose(),
-      () => query?.cleanup(),
-      unsubscribeSource,
-      () => sourceObserver.dispose(),
-      () => persisted.cleanup(),
-    ])
-  })
 })
+
+function describe_(events: ReadonlyArray<Event>): string {
+  return events
+    .map((event) =>
+      event.kind === `deadline` ? `deadline` : `${event.kind}:${event.outcome}`,
+    )
+    .join(` > `)
+}

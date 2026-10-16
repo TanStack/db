@@ -41,7 +41,6 @@ import type {
   ErrorTreeNode,
   InferResultType,
   InitialQueryBuilder,
-  LiveQueryPersistedStatus,
   LiveQueryWindowController,
   NonSingleResult,
   QueryBuilder,
@@ -89,9 +88,6 @@ export type UseLiveInfiniteQueryReturnWithCollection<
   status: CollectionStatus
   isLoading: boolean
   isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
   isIdle: boolean
   /** The first load failed: there is nothing to show. */
   isLoadingError: boolean
@@ -462,9 +458,6 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     status: snapshot.status as EnabledLiveQueryReturn<TContext>[`status`],
     isLoading: snapshot.isLoading,
     isReady: snapshot.isReady,
-    persistedStatus: snapshot.persistedStatus,
-    isPersistedReady: snapshot.isPersistedReady,
-    persistedError: snapshot.persistedError,
     isIdle: snapshot.isIdle,
     isLoadingError: snapshot.isLoadingError,
     isCrashed: snapshot.isCrashed,

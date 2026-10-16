@@ -31,7 +31,6 @@ import type {
   LiveQueryCollectionConfig,
   LiveQueryKey,
   LiveQueryObserver,
-  LiveQueryPersistedStatus,
   NonSingleResult,
   QueryBuilder,
   SingleResult,
@@ -64,9 +63,6 @@ export interface UseLiveQueryReturn<T extends object, TData = Array<T>> {
   status: CollectionStatus
   isLoading: boolean
   isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
   isIdle: boolean
   /** The first load failed: there is nothing to show. */
   isLoadingError: boolean
@@ -103,9 +99,6 @@ export interface UseLiveQueryReturnWithCollection<
   status: CollectionStatus
   isLoading: boolean
   isReady: boolean
-  persistedStatus: LiveQueryPersistedStatus
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
   isIdle: boolean
   /** The first load failed: there is nothing to show. */
   isLoadingError: boolean
@@ -473,8 +466,6 @@ export function useLiveQuery(
 
   // Track collection status reactively
   let status = $state(initialSnapshot.status)
-  let persistedStatus = $state(initialSnapshot.persistedStatus)
-  let persistedError = $state.raw<unknown>(initialSnapshot.persistedError)
   let errors = $state.raw<ErrorTreeNode | undefined>(initialSnapshot.errors)
 
   const syncFromObserver = (
@@ -483,8 +474,6 @@ export function useLiveQuery(
   ) => {
     const snapshot = observer.getSnapshot()
     status = snapshot.status as CollectionStatus
-    persistedStatus = snapshot.persistedStatus
-    persistedError = snapshot.persistedError
     errors = snapshot.errors
     untrack(() => {
       if (changes && changes.length > 0) {
@@ -569,15 +558,6 @@ export function useLiveQuery(
     },
     get isReady() {
       return status === `ready` || status === `disabled`
-    },
-    get persistedStatus() {
-      return persistedStatus
-    },
-    get isPersistedReady() {
-      return persistedStatus === `ready`
-    },
-    get persistedError() {
-      return persistedError
     },
     get isIdle() {
       return status === `idle`

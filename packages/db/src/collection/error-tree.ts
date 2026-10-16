@@ -83,6 +83,20 @@ export function hasOwnProblem(
   return failureReason !== null || error !== null
 }
 
+/**
+ * Every node in an error tree that shows a problem of its own, in tree order:
+ * a `failureReason`, an `error`, or include instances with problems. A node
+ * whose only problems are below it is not listed; its descendants are.
+ */
+export function findProblems(tree: ErrorTreeNode): Array<ErrorTreeNode> {
+  if (!tree.hasErrors) return []
+  const ownProblem =
+    tree.failureReason !== null ||
+    tree.error !== null ||
+    (tree.instances?.withErrors ?? 0) > 0
+  return [...(ownProblem ? [tree] : []), ...tree.sources.flatMap(findProblems)]
+}
+
 function countInstances(
   collections: ReadonlyArray<CollectionImpl<any, any, any, any, any>>,
 ): { total: number; withErrors: number } {

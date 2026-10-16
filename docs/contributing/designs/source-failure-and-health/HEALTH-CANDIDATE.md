@@ -1,5 +1,11 @@
 # Candidate: the source health channel and live-query error tree
 
+> **Superseded (2026-10-16).** The error surface was redesigned: status
+> `crashed`, node `failureReason`/`error`, `fail()`, `reload()`, and
+> `collection.errors`. Read `error-surface/README.md` and `error-surface/RULES.md`,
+> the shipped `docs/guides/error-handling.md`, and
+> `packages/db/src/query/live/ARCHITECTURE.md` laws 14, 16, and 17.
+
 Status: superseded candidate design, version 1. It came from a Field Lab
 design-grammar run. The shipped design differs; read `PLAN.md`, the shipped
 guides, and `packages/db/src/query/live/ARCHITECTURE.md` laws 16 and 17.

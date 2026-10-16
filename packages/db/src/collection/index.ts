@@ -55,6 +55,7 @@ import type { WithVirtualProps } from '../virtual-props.js'
 import type { TransactionScope } from '../transactions.js'
 
 export type { CollectionIndexMetadata } from './events.js'
+export { findProblems } from './error-tree.js'
 
 export type CollectionBase<TKey extends string | number, TOutput> = Pick<
   SortedMap<TKey, TOutput>,

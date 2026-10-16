@@ -86,7 +86,8 @@
  * that no `errors:change` shows a status that `status:change` has not
  * announced, and that each `status:change` is followed at once by
  * `errors:change`. When the expected tree changed, the last event must show
- * the current tree. Request lanes check that a lazy load or a root Collection's
+ * the current tree. `findProblems` must list, in tree order, exactly the
+ * expected nodes with a problem of their own. Request lanes check that a lazy load or a root Collection's
  * load that fails after initial-query readiness is a request error on the query's
  * node, and that it clears. Effect lanes check the Effect's gate and its
  * request errors after its initial-query readiness.
@@ -106,7 +107,7 @@
  */
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
-import { createCollection } from '../src/collection/index.js'
+import { createCollection, findProblems } from '../src/collection/index.js'
 import { createLiveQueryCollection } from '../src/query/live-query-collection.js'
 import { createEffect } from '../src/query/effect.js'
 import { createPooledLiveQuery } from '../src/query/pooled-live-query.js'
@@ -389,6 +390,25 @@ function queryNode(
     reloading,
     sources,
   }
+}
+
+// `findProblems` lists, in tree order, the nodes whose own facts show a
+// problem; a node whose problems are all below it is skipped.
+type ProblemSummary = [alias: string, message: string]
+function expectedProblems(node: ExpectedNode): Array<ProblemSummary> {
+  const own =
+    (node.error ?? node.failureReason)?.message ??
+    ((node.instances?.withErrors ?? 0) > 0 ? `instances` : null)
+  return [
+    ...(own ? [[node.alias, own] as ProblemSummary] : []),
+    ...node.sources.flatMap(expectedProblems),
+  ]
+}
+function problemOf(node: ErrorTreeNode): ProblemSummary {
+  return [
+    node.alias,
+    (node.error ?? node.failureReason)?.message ?? `instances`,
+  ]
 }
 
 function expectedTree(
@@ -726,6 +746,10 @@ async function runHistory(
       const tree = expectedTree(shape, model)
       const next = query.errors
       expect(project(next), `${label}: error tree`).toEqual(tree)
+      expect(
+        findProblems(next).map(problemOf),
+        `${label}: findProblems`,
+      ).toEqual(expectedProblems(tree))
 
       // Identity: a reader can compare trees with `===`. Reading twice gives
       // the same tree, and a step replaces exactly the nodes on the path to

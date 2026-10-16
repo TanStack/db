@@ -1,7 +1,6 @@
 import {
   NoPendingSyncTransactionCommitError,
   NoPendingSyncTransactionWriteError,
-  PERSISTED_READINESS,
   SYNC_PERSISTENCE_PROTOCOL,
   SYNC_PERSISTENCE_VERSION,
   SyncTransactionAbortedError,
@@ -51,8 +50,6 @@ import type {
   LoadSubsetFn,
   LoadSubsetOptions,
   PendingMutation,
-  PersistedReadinessSnapshot,
-  PersistedReadinessSource,
   SyncAppliedReceipt,
   SyncConfig,
   SyncConfigRes,
@@ -783,18 +780,23 @@ export interface PersistedCollectionUtils extends UtilsRecord {
   forceReloadSubset?: (options: LoadSubsetOptions) => Promise<void> | void
 }
 
-class PersistedReadinessTracker implements PersistedReadinessSource {
+/** The local-restore boundary of one persisted Collection's sync run. */
+type PersistedReadinessSnapshot =
+  | { status: `loading`; error?: never }
+  | { status: `ready`; error?: never }
+  | { status: `error`; error: unknown }
+
+/**
+ * Tracks the local restore for network-first initial rendering. The
+ * wrapper's sync function reads it to open the Collection from restored rows.
+ */
+class PersistedReadinessTracker {
   private snapshot: PersistedReadinessSnapshot = { status: `loading` }
-  private networkDeadlineAt: number | undefined
   private readonly listeners = new Set<() => void>()
 
   constructor(readonly networkTimeoutMs: number) {}
 
   getSnapshot = (): PersistedReadinessSnapshot => this.snapshot
-
-  getOrStartNetworkDeadline = (): number => {
-    return (this.networkDeadlineAt ??= Date.now() + this.networkTimeoutMs)
-  }
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener)
@@ -802,15 +804,9 @@ class PersistedReadinessTracker implements PersistedReadinessSource {
   }
 
   set(snapshot: PersistedReadinessSnapshot): void {
-    const deadlineRestarted =
-      snapshot.status === `loading` && this.networkDeadlineAt !== undefined
-    if (deadlineRestarted) {
-      this.networkDeadlineAt = Date.now() + this.networkTimeoutMs
-    }
     if (
       this.snapshot.status === snapshot.status &&
-      this.snapshot.error === snapshot.error &&
-      !deadlineRestarted
+      this.snapshot.error === snapshot.error
     ) {
       return
     }
@@ -5699,6 +5695,7 @@ function createWrappedSyncConfig<
         return { found: false as const }
       }
       let fullStartPromise: Promise<void> | null = null
+      let stopNetworkFirstGate = () => {}
       let sourceResultPromise: Promise<SyncConfigRes> | null = null
       let resolveSourceResultAssigned!: () => void
       const sourceResultAssigned = new Promise<void>((resolve) => {
@@ -5749,16 +5746,30 @@ function createWrappedSyncConfig<
         })
       }
       const getTerminalFailure = () => runtime.getCurrentTerminalFailure()
+      // Network-first initial rendering: once the deadline passes, or the
+      // remote fails, a completed restore that installed rows opens the
+      // Collection. An empty restore keeps it loading, so an empty list never
+      // stands for data the network has not answered yet.
+      const openFromDisk = () => {
+        if (!persistedReadiness || isCleanedUp() || getTerminalFailure()) return
+        if (persistedReadiness.getSnapshot().status !== `ready`) return
+        if (params.collection.status !== `loading`) return
+        if (params.collection.size === 0) return
+        params.markReady()
+      }
       const reportUpstreamError = (error: unknown) => {
         if (persistedReadiness?.getSnapshot().status !== `loading`) {
+          openFromDisk()
           runtime.reportSyncError(error, `sync adapter`)
           return
         }
-        // An early network error must not stop the live-query graph before
-        // the persisted baseline has published its rows.
+        // A remote that fails before the restore finishes waits for it: the
+        // restored rows open the Collection and the failure shows as its
+        // error; without rows, the first load fails.
         void (fullStartPromise ?? runtime.ensureStarted()).then(
           () => {
             if (!isCleanedUp() && !getTerminalFailure()) {
+              openFromDisk()
               runtime.reportSyncError(error, `sync adapter`)
             }
           },
@@ -6511,6 +6522,20 @@ function createWrappedSyncConfig<
         })
       }
       fullStartPromise = runtime.ensureStarted()
+      if (persistedReadiness) {
+        let deadlinePassed = false
+        const deadline = setTimeout(() => {
+          deadlinePassed = true
+          openFromDisk()
+        }, persistedReadiness.networkTimeoutMs)
+        const stopReadiness = persistedReadiness.subscribe(() => {
+          if (deadlinePassed) openFromDisk()
+        })
+        stopNetworkFirstGate = () => {
+          clearTimeout(deadline)
+          stopReadiness()
+        }
+      }
       // Startup can fail before the source reaches markReady or loadSubset,
       // which are the two eventual consumers of this outer adopting promise.
       // The runtime-owned inner promise still installs and reports the exact
@@ -6552,6 +6577,7 @@ function createWrappedSyncConfig<
           for (const acquisition of acquisitions.values()) {
             acquisition.cancelAdmissionWait?.()
           }
+          stopNetworkFirstGate()
           acquisitions.clear()
           pendingPublicationTransactions.length = 0
           for (const transaction of transactionStack) {
@@ -6920,9 +6946,6 @@ export function persistedCollectionOptions<
         persistedReadinessTracker,
       ),
       persistence,
-      ...(persistedReadinessTracker
-        ? { [PERSISTED_READINESS]: persistedReadinessTracker }
-        : {}),
     }
 
     return withCollectionConfigFactory(
@@ -7038,9 +7061,6 @@ export function persistedCollectionOptions<
     ...localOnlyOptions,
     id: collectionId,
     persistence,
-    ...(persistedReadinessTracker
-      ? { [PERSISTED_READINESS]: persistedReadinessTracker }
-      : {}),
     sync: createLoopbackSyncConfig(runtime),
     onInsert: wrappedOnInsert,
     onUpdate: wrappedOnUpdate,

@@ -248,7 +248,7 @@ export function useLiveSuspenseQuery(
   const collectionStatus = result.collection.status
 
   // Track when we reach ready state
-  if (result.isReady || queryInfo.observer.isInitialRenderReady()) {
+  if (result.isReady) {
     hasBeenReadyRef.current = true
     promiseRef.current = null
     clearInitialRenderError(result.collection, queryInfo.client)
@@ -261,12 +261,8 @@ export function useLiveSuspenseQuery(
     queryInfo.client && queryInfo.queryHash
       ? queryInfo.client._getLiveQuery(queryInfo.queryHash)
       : undefined
-  // A configured persisted restore may still satisfy this render after the
-  // client query fails. Let the observer classify that failure below.
   if (
     !hasBeenReadyRef.current &&
-    (result.persistedStatus === `unavailable` ||
-      result.persistedStatus === `error`) &&
     (observerError !== undefined || clientQuery?.status === `error`)
   ) {
     promiseRef.current = null
@@ -293,15 +289,13 @@ export function useLiveSuspenseQuery(
   // A crash throws at any time: the Collection can no longer serve reads.
   if (
     collectionStatus === `crashed` ||
-    (collectionStatus === `error` &&
-      !hasBeenReadyRef.current &&
-      (result.persistedStatus === `unavailable` ||
-        result.persistedStatus === `error`))
+    (collectionStatus === `error` && !hasBeenReadyRef.current)
   ) {
     promiseRef.current = null
-    // TODO: Once collections hold a reference to their last error object (#671),
-    // we should rethrow that actual error instead of creating a generic message
-    throw new Error(`Collection "${result.collection.id}" failed to load`)
+    throw (
+      result.collection.errors.error?.cause ??
+      new Error(`Collection "${result.collection.id}" failed to load`)
+    )
   }
 
   if (
@@ -309,9 +303,7 @@ export function useLiveSuspenseQuery(
     (result.isLoading ||
       result.isIdle ||
       result.isLoadingError ||
-      result.isCrashed ||
-      (collectionStatus === `error` &&
-        result.persistedStatus !== `unavailable`))
+      result.isCrashed)
   ) {
     if (queryInfo.client?._isSsrStreamingEnabled() && !queryInfo.queryHash) {
       const reason = queryInfo.identityError
@@ -332,7 +324,7 @@ export function useLiveSuspenseQuery(
       })
       let preload: Promise<void>
       try {
-        preload = queryInfo.observer.preloadForInitialRender()
+        preload = queryInfo.observer.preload()
       } catch (error) {
         stopWatchingCleanup()
         throw error

@@ -1,5 +1,11 @@
 # Draft: what users would see (candidate v2)
 
+> **Superseded (2026-10-16).** The error surface was redesigned: status
+> `crashed`, node `failureReason`/`error`, `fail()`, `reload()`, and
+> `collection.errors`. Read `error-surface/README.md` and `error-surface/RULES.md`,
+> the shipped `docs/guides/error-handling.md`, and
+> `packages/db/src/query/live/ARCHITECTURE.md` laws 14, 16, and 17.
+
 This is a superseded proposal, not shipped behavior. It applies the repairs
 from the hostile assay and the fracture scan to `HEALTH-CANDIDATE.md`. The
 shipped API differs (for example, `reportError` has no `final` option, and

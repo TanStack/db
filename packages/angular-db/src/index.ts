@@ -25,7 +25,6 @@ import type {
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
   LiveQueryObserver,
-  LiveQueryPersistedStatus,
   NonSingleResult,
   QueryBuilder,
   SingleResult,
@@ -46,9 +45,6 @@ export interface InjectLiveQueryFlags {
   isLoading: Signal<boolean>
   /** A signal indicating whether the collection is ready */
   isReady: Signal<boolean>
-  persistedStatus: Signal<LiveQueryPersistedStatus>
-  isPersistedReady: Signal<boolean>
-  persistedError: Signal<unknown | undefined>
   /** A signal indicating whether the collection is idle */
   isIdle: Signal<boolean>
   /** The first load failed: there is nothing to show. */
@@ -220,8 +216,6 @@ export function injectLiveQuery(opts: any) {
     const value = statusValue()
     return value === `idle` && !collection() ? `disabled` : value
   })
-  const persistedStatus = signal<LiveQueryPersistedStatus>(`unavailable`)
-  const persistedError = signal<unknown>(undefined)
   const errors = signal<ErrorTreeNode | undefined>(undefined)
 
   // Returns single item for singleResult collections, array otherwise
@@ -246,8 +240,6 @@ export function injectLiveQuery(opts: any) {
     internalData.set(newData)
     const snapshot = observer.getSnapshot()
     statusValue.set(snapshot.status)
-    persistedStatus.set(snapshot.persistedStatus)
-    persistedError.set(snapshot.persistedError)
     errors.set(snapshot.errors)
   }
 
@@ -263,8 +255,6 @@ export function injectLiveQuery(opts: any) {
     // Handle null collection (disabled query)
     if (!currentCollection) {
       statusValue.set(`disabled` as const)
-      persistedStatus.set(`unavailable`)
-      persistedError.set(undefined)
       errors.set(undefined)
       state.set(new Map())
       internalData.set([])
@@ -310,9 +300,6 @@ export function injectLiveQuery(opts: any) {
     status,
     isLoading: computed(() => status() === `loading`),
     isReady: computed(() => status() === `ready` || status() === `disabled`),
-    persistedStatus,
-    isPersistedReady: computed(() => persistedStatus() === `ready`),
-    persistedError,
     isIdle: computed(() => status() === `idle`),
     isLoadingError: computed(() => status() === `error`),
     isCrashed: computed(() => status() === `crashed`),

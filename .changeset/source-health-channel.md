@@ -4,6 +4,7 @@
 '@tanstack/electric-db-collection': minor
 '@tanstack/powersync-db-collection': minor
 '@tanstack/query-db-collection': minor
+'@tanstack/rxdb-db-collection': minor
 '@tanstack/trailbase-db-collection': minor
 '@tanstack/react-db': minor
 '@tanstack/vue-db': minor
@@ -12,16 +13,30 @@
 '@tanstack/angular-db': minor
 ---
 
-Collections now separate two questions: whether data can be shown, and whether it is still kept up to date.
+Collections now answer two questions separately: can the data be shown (`status`), and is it still kept up to date (`errors`). Once a query has shown data, a network or backend failure never takes it off the screen.
 
-`status` and `isError` say whether data can be shown: they describe the initial load of a sync run, or a crash that needs a restart. Any other failure after a Collection is ready no longer moves it to `error`: its rows stay, and the problem appears in the new `collection.health`, the `health:change` event, and the `errors` tree that every live-query hook returns. `errors` has one node per query alias with each node's status and error details, keeps its object identity while unchanged, and is plain data apart from each error's `cause`. Effects receive the same tree through `onHealthChange`.
+- `status` gains `crashed`: local storage broke (a closed IndexedDB connection, a failed SQLite persistence write or restore, a throwing sync function, or an invariant failure). It is permanent for the instance and reaches every live query and Effect above it. `error` now means only "the first load failed".
+- Every Collection has `collection.errors`, an error tree node with `status`, `failureReason` (the adapter is still trying), `error` (the adapter stopped, or the first load failed), `reloading`, and `hasErrors`. A live query's `errors` has one node per source alias, in query order, and keeps object identity while unchanged. `errors:change` fires when it changes. `findProblems(errors)` lists the nodes that have a problem, in query order.
+- `collection.reload()` starts a new sync run and keeps the rows, status, and error on screen until the new run commits. On a live query it reloads the failed sources, then the query. It rejects on a `crashed` Collection.
+- `cleanup()` rejects with `CollectionHasSubscribersError` while a live query with subscribers or an Effect reads the Collection. `cleanup({ dependents: true })` ends them first. `collection.subscribers` lists every dependent.
+- Persisted Collections have one status. With `initialRender: { strategy: 'network-first' }`, restored rows make the Collection `ready` once the deadline passes or the remote fails; an empty restore stays `loading`.
 
 Breaking changes and migration:
 
-- An initial error is final for its sync run. A later successful sync no longer moves a Collection from `error` back to `ready`. Restart instead: `await collection.cleanup()` then `await collection.preload()`. For query-db, a successful refetch after an initial failure applies its rows but leaves the status `error` until a restart.
-- After a Collection is ready, sync failures no longer set `status` to `error` or `isError` to `true`. To show a "data may be out of date" message, read `errors.hasErrors` from the hook, or `collection.health`.
-- A Collection that can no longer serve reads or accept writes crashes: a closed IndexedDB connection or a failed local SQLite persistence write moves it to `error` even after it was ready. Every live query and Effect over a Collection in `error` now fails too, whether the cause is an initial error or a crash.
-- Adapter authors: call `markError(error)` when you give up. Before the first `markReady()` it fails the sync run; after it, it is a final health error and the rows stay. While you keep trying after readiness, call `reportError(error)`, then `reportHealthy()` when sync works again. `markReady()` after `markError()` in the same sync run now throws.
-- Electric reports nothing while its stream retries, and reports a final health error when it gives up after readiness. TrailBase reports a final health error when its change stream ends, because it does not resubscribe. PowerSync reports a failed tracking rebuild as a health error that clears after a successful rebuild. query-db reports a failed refetch or result application after readiness as a health error that clears once every observed Query succeeds again.
-- query-db removes `utils.lastError`, `utils.isError`, `utils.errorCount`, and `utils.clearError()`. Read `collection.health` or a live query's `errors` tree instead, and retry with `utils.refetch({ throwOnError: true })`.
-- Infinite-query hooks (`useLiveInfiniteQuery` in React, Vue, and Svelte) remove `error`. A failed page load no longer sets `status` to `error`; it appears as a request error in the returned `errors` tree, and `fetchNextPage()` still resolves.
+| Before                                                                                                      | After                                                                                            |
+| ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| hook `isError`                                                                                              | `isLoadingError` (first load failed) or `isCrashed`                                              |
+| —                                                                                                           | `isSyncError`: `ready` and the error tree has a problem                                          |
+| `status: 'error'` after a crash                                                                             | `status: 'crashed'`                                                                              |
+| adapter `markError(error)`                                                                                  | `fail(error)`. After readiness it sets the node's `error` and keeps the rows. Later calls throw. |
+| `reportError(error, { final })`                                                                             | `reportError(error)` (sets `failureReason`, after readiness only) or `fail(error)`               |
+| `cleanup()` then `preload()` to recover                                                                     | `reload()`                                                                                       |
+| `cleanup()` while live queries or Effects read the Collection                                               | rejects; unmount first or pass `{ dependents: true }`                                            |
+| `collection.health`, `health:change`                                                                        | `collection.errors`, `errors:change`                                                             |
+| node `phase`, `final`, `isError`, `instances.inError`                                                       | node `failureReason` or `error`, `instances.withErrors`                                          |
+| Effect `onHealthChange`                                                                                     | `onErrorsChange`                                                                                 |
+| `persistedStatus`, `isPersistedReady`, `persistedError`, `preloadForInitialRender()`, `PERSISTED_READINESS` | `status` and `errors`                                                                            |
+| query-db `utils.lastError`, `utils.isError`, `utils.errorCount`, `utils.clearError()`                       | `collection.errors`, `reload()`                                                                  |
+| infinite-query hooks' `error` (React, Vue, Svelte)                                                          | the root node's `error` in `errors`; `fetchNextPage()` still resolves                            |
+
+`reportError()` and `reportHealthy()` throw before the first `markReady()`. `markReady()` after a failed first load throws. Calls after a crash do nothing. `useLiveSuspenseQuery` now throws the first load's original cause instead of a generic error.

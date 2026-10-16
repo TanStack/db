@@ -8,7 +8,6 @@ import {
 import { buildErrorTree, errorTreeNode } from '../collection/error-tree.js'
 import { makeComparator } from '../utils/comparison.js'
 import { isVirtualPropName } from '../virtual-props.js'
-import { getPersistedReadinessSource } from '../persisted-readiness.js'
 import { getWhereExpression } from './ir.js'
 import { equalityConjunct, equalityKey, readPath } from './equality-conjunct.js'
 import { compileExpression, toBooleanPredicate } from './compiler/evaluators.js'
@@ -755,13 +754,8 @@ export function createPooledLiveQuery(
   const shape = poolableShape(ir)
   if (!shape || ir.from.type !== `collectionRef`) return undefined
   const source = ir.from.collection
-  // Persisted restore and on-demand loading need the live-query Collection.
-  if (
-    source.config.syncMode === `on-demand` ||
-    getPersistedReadinessSource(source.config)
-  ) {
-    return undefined
-  }
+  // On-demand loading needs the live-query Collection.
+  if (source.config.syncMode === `on-demand`) return undefined
   let partitions = partitionsBySource.get(source)
   if (!partitions) {
     partitions = new Map()

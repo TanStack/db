@@ -7,10 +7,7 @@ import { createLiveQueryObserver } from './live-query-observer.js'
 import { BaseQueryBuilder } from './query/builder/index.js'
 import { deepEquals } from './utils.js'
 import { codedMessage, devBuild } from './error-message.js'
-import type {
-  LiveQueryObserver,
-  LiveQuerySnapshot,
-} from './live-query-observer.js'
+import type { LiveQueryObserver } from './live-query-observer.js'
 import type { Collection } from './collection/index.js'
 import type { CollectionStatus, ErrorTreeNode } from './types.js'
 import type {
@@ -524,9 +521,6 @@ export interface LiveQueryWindowSnapshot<
   status: CollectionStatus | `disabled`
   isLoading: boolean
   isReady: boolean
-  persistedStatus: LiveQuerySnapshot<T, TKey>[`persistedStatus`]
-  isPersistedReady: boolean
-  persistedError: unknown | undefined
   isIdle: boolean
   isLoadingError: boolean
   isCrashed: boolean
@@ -689,9 +683,6 @@ class LiveQueryWindowControllerImpl<
       status: observerSnapshot.status,
       isLoading: observerSnapshot.isLoading,
       isReady: observerSnapshot.isReady,
-      persistedStatus: observerSnapshot.persistedStatus,
-      isPersistedReady: observerSnapshot.isPersistedReady,
-      persistedError: observerSnapshot.persistedError,
       isIdle: observerSnapshot.isIdle,
       isLoadingError: observerSnapshot.isLoadingError,
       isCrashed: observerSnapshot.isCrashed,
