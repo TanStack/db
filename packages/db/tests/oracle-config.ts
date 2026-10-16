@@ -21,6 +21,7 @@ const staticOracleProperties = [
   `query-db.refetch-ordered-prefix`,
   `ordered-loader.request-authority`,
   `oracle-replay.calibration`,
+  `structural-identity.equal-representations`,
   `structural-identity.independent-values`,
   `sqlite-persistence.source-fifo-order`,
   `sqlite-persistence.abort-graph`,

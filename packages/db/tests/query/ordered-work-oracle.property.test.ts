@@ -8039,6 +8039,45 @@ describe(`eager indexed ordered windows`, () => {
     checkEagerWindow,
   )
 
+  // A local null-ranked row can appear to fill the window while the settled
+  // provider prefix ends before a better row. Held answers must not let that
+  // local row stand in for source coverage after earlier visible deletes.
+  it(`keeps a joined window within its settled source prefix after held answers`, async () => {
+    await checkEagerWindow({
+      path: `on-demand`,
+      provider: `forward`,
+      latency: `held`,
+      cancellation: `cooperative`,
+      peer: false,
+      filter: `joined`,
+      via: `marker`,
+      indexed: false,
+      direction: `desc`,
+      nulls: `last`,
+      terms: 1,
+      limit: 2,
+      offset: 0,
+      initial: [
+        { id: 0, rank: 0, eligible: false },
+        { id: 1, rank: 0, eligible: true },
+        { id: 2, rank: Number.NaN, eligible: true },
+      ],
+      history: [
+        { type: `delete-visible` },
+        { type: `delete-visible` },
+        { type: `delete-visible` },
+        {
+          type: `upsert`,
+          id: 40,
+          rank: null as unknown as number,
+          eligible: true,
+        },
+        { type: `delete-visible` },
+        { type: `delete`, id: 1 },
+      ],
+    })
+  })
+
   fcTest.prop([eagerJoinedGapCase], { numRuns: runs, seed: 2063 })(
     `keeps a joined-filter window whose row leaves only through the join for a fixed seed`,
     checkEagerWindow,

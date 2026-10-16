@@ -329,7 +329,7 @@ export class OrderedSourceLoader {
       const shouldLoad =
         windowOperationGeneration !== undefined ||
         this.needsOptimisticRefill ||
-        (this.info.dataNeeded?.() ?? 0) > 0 ||
+        (this.info.dataNeeded?.(this.settledSourceBoundary) ?? 0) > 0 ||
         (this.lastPrefixCount !== undefined &&
           this.lastPrefixCount < this.info.offset + this.info.limit)
       if (shouldLoad) {
