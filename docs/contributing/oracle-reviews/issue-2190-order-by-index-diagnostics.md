@@ -22,6 +22,11 @@ lazy loading, registration order must not hide it. The compiler must use that
 candidate and issue a bounded ordered acquisition rather than a full-source
 fallback.
 
+Custom string order is a separate case: even a compatible local index cannot
+make the provider paginate by an arbitrary callback. On-demand sources require
+a filtered full-source acquisition. A missing ordinary index, by contrast,
+can still start with a bounded ordered prefix and local scan or sort.
+
 The authority is the existing developer warning's stated remediation and the
 bounded ordered-acquisition contract. A diagnostic that recommends work the
 Collection already has is false. Index registration order is physical planning
@@ -34,7 +39,7 @@ finite classifier over field identity, null placement, ordered-read capability,
 and candidate order. The production driver compiles and preloads a public
 live-query Collection and records the development warning.
 
-On the baseline, four of eight diagnostic cells failed:
+On the baseline, four of the original eleven diagnostic cells failed:
 
 - a null-placement mismatch emitted the generic missing-index warning;
 - matching but order-ineligible indexes emitted the same warning in two cells;
@@ -70,8 +75,8 @@ only safe scalar fields and tells locale and custom callers to reuse the same
 locale configuration or comparator function reference; it does not traverse
 those values.
 
-The repaired tree passes all 22 index-suggestion cases and all five custom-index
-selection cases. The production-message census also accepts the new
+The initial repaired tree passed 22 index-suggestion cases and five custom-index
+selection cases. The production-message census also accepted the new
 development-only literals.
 
 ## Finding ledger
@@ -80,12 +85,36 @@ development-only literals.
 | --- | --- | --- | --- | --- |
 | I-01 | A same-field index with different `compareOptions` is reported as missing. | The null-placement mismatch cell emitted the missing-field warning. | `fixed-now` | The diagnostic decision table distinguishes field presence from comparison compatibility. |
 | I-02 | Full-source fallback is correct when no installed index has compatible ordering. | The incompatible index is rejected and the live-query rows remain correct through fallback. | `fixed-now` | The mismatch and order-ineligible cells preserve both fallback and its reason. |
-| I-03 | Suggesting the same `createIndex((row) => row.name)` call is misleading. | The baseline warning repeated the already-satisfied field-only remedy. | `fixed-now` | The mismatch warning supplies a compatible `compareOptions` example. |
+| I-03 | Suggesting the same `createIndex((row) => row.name)` call is misleading. | The baseline warning repeated the already-satisfied field-only remedy. | `fixed-now` | The mismatch warning shows a `BasicIndex` call with the resolved scalar comparison options and directs callers to carry over locale settings. |
 | I-04 | The warning should identify a `compareOptions` mismatch. | The baseline used one generic missing-index branch after selection failed. | `fixed-now` | The finite classifier and public warning assertion preserve this distinction. |
-| I-05 | The warning should show the options accepted by `createIndex`. | The baseline omitted the query's resolved options and the nested `options.compareOptions` shape. | `fixed-now` | The message fixture and assertions preserve the resolved options and `BasicIndex` example. |
+| I-05 | The warning should show the options accepted by `createIndex`. | The baseline omitted the query's resolved options and the nested `options.compareOptions` shape. | `fixed-now` | A later PR #2196 follow-up restored the nested `options.compareOptions` shape and a `BasicIndex` example. The diagnostic oracle now asserts the shape without serializing arbitrary locale options. |
+
 | S-01 | A first matching but order-ineligible index can hide a later eligible index. | The baseline warned and fell back when the custom index was registered first. | `fixed-now` | Both candidate orders are classified; the production-path witness requires bounded demand without an unbounded full-source request and calibrates the eligible reader. |
 | R-01 | Formatting a development warning can throw on valid cyclic `localeOptions`. | Query construction threw in both missing-index and mismatch cells. | `fixed-now` | The diagnostic oracle crosses both causes without traversing the options object. |
 | R-02 | Rendering a custom comparator as `"[function]"` produces invalid remediation and loses required reference identity. | The warning embedded the string in an executable-looking `createIndex` example. | `fixed-now` | The custom-collation cell requires the exact reference-identity instruction and rejects the old placeholder. |
+
+## PR #2196 follow-up
+
+A later review found that the repaired message still described ordinary
+unindexed prefixes as full-source loads and offered a local index as a cure for
+custom provider ordering. The revised diagnostic distinguishes custom
+collation, virtual fields, and ordinary index failures. Public on-demand
+acquisitions show one full-source request for a custom comparator even with a
+matching local index, and a bounded ordered request without an index. The
+matching-index, virtual-field, and request-shape checks were RED on the prior
+message and GREEN on the revised one. Direction is omitted from the mismatch
+advice because a compatible index can be read in reverse.
+
+The neighboring selection checks were also RED before repair: a direct
+`optimizedOnly` snapshot ignored the second eligible index, and eager
+auto-indexing did not create one when an ineligible manual index existed. The
+same public oracle now checks both at initial read. It does not claim provider
+paging from an incomplete source or later index changes.
+Using full current eligibility as the auto-index creation predicate was a
+plausible narrow fix, but it created extra identical indexes for mixed value
+domains. The mixed-index oracle rejected it at the index-count checkpoint.
+The final admission check distinguishes a custom index's missing static range
+capability from a structurally sound index's changing value domain.
 
 ## Oracle review
 

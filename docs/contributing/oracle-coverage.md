@@ -645,6 +645,12 @@ generic visitor behavior outside the named collectors.
 | Boundary refinements | [cleanup/restart](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-cleanup-restart-oracle.test.ts), [idle cleanup](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-idle-cleanup.test.ts), [issue #1891 async-cleanup review](oracle-reviews/issue-1891-async-cleanup.md), [issue #1891 cleanup-start follow-up](oracle-reviews/issue-1891-cleanup-start-followup.md), [metadata publication](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-metadata-publication-oracle.property.test.ts), [row metadata composition](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-row-metadata-composition-oracle.test.ts), [nested-begin metadata rebuild review](oracle-reviews/2026-10-06-nested-begin-metadata-rebuild.md), [state mutation round 4](oracle-reviews/2026-10-06-state-mutation-round-4.md), [state retention](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-state-retention-oracle.property.test.ts), [acquisition cells](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-subscription-lifecycle-oracle.test.ts), [D2 source reconciliation](https://github.com/TanStack/db/blob/main/packages/db/tests/d2-source-reconciliation-oracle.property.test.ts), [top-K support windows](https://github.com/TanStack/db/blob/main/packages/db-ivm/tests/operators/topk-support-window-oracle.test.ts), [nested Query work](https://github.com/TanStack/db/blob/main/packages/query-db-collection/tests/includes-work-counter-oracle.test.ts) | Explicit lifecycle products, independent source maps and weighted relations, exact publication cuts, support/multiplicity, and value-plus-work observations. These refine the larger subsystem models; they do not replace them. |
 | Small structures and test mechanics | [SortedMap](https://github.com/TanStack/db/blob/main/packages/db/tests/SortedMap-oracle.test.ts), [cleanup queue](https://github.com/TanStack/db/blob/main/packages/db/tests/cleanup-queue-oracle.property.test.ts), [live-query GC clock](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-gc-clock.test.ts), [guarded replay](https://github.com/TanStack/db/blob/main/packages/db/tests/oracle-replay.test.ts) | Map/full-sort and elapsed appointment-list models with executed target/seed/path checks. SortedMap also checks deferred bulk writes, array-movement work, scan reuse, live iterators, runtime `undefined` keys, and public single-transaction and queued-transaction Collection sync paths. It does not settle the contract for comparator-observed values mutated after publication or every legal iterator/mutation interleaving. Wall-clock steps do not move due times, and a focused public witness checks source subscription release. Callback-reentrant scheduling, OS suspend/resume, environments without `performance.now()`, and fake/real Performance clock replacement while GC is pending remain outside this coverage. Tests must drain or reset pending GC before switching timer providers. |
 
+The index-suggestion oracle's PR #2196 extension checks a matching local
+custom-collation index against the full-source request and retained warning,
+an ordinary unindexed on-demand prefix against its bounded request, virtual
+field advice, and direction-free comparison guidance. It observes first
+acquisitions and warning text, not later window moves or real-provider cost.
+
 ## Unit-test retirement transfers in PR #2116
 
 The [direct index refinement oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/index-update-oracle.property.test.ts)
@@ -743,6 +749,16 @@ ordered request, a read through the eligible index, and no read through the
 ineligible index. The first-matching-index mutant fails at that reader check.
 Provider paging from an incomplete on-demand source and later updates remain
 outside this witness.
+
+The PR #2196 follow-up adds a direct `optimizedOnly` snapshot to the
+first-ineligible/second-eligible history. An eager-auto history starts with
+only an ineligible custom index and requires an eligible ordered reader after
+query compilation. These checks cover selection and creation at the initial
+read checkpoint; later index registration, mixed value domains, and provider
+paging from an incomplete source remain outside them.
+The existing mixed-kind public-order oracle checks the neighboring dynamic
+domain: a structurally sound index can temporarily lose ordered-read
+eligibility as row kinds change, without warranting a duplicate auto-index.
 
 The [PR #2116 confirmed-fixes review](oracle-reviews/pr-2116-confirmed-fixes.md)
 records baseline failures, hostile controls, and the bounded scope of these

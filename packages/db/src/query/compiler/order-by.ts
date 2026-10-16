@@ -11,7 +11,12 @@ import {
   isResidualWhere,
 } from '../ir.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
-import { findIndexForField } from '../../utils/index-optimization.js'
+import {
+  findIndexForField,
+  supportsOrderedIndexStructure,
+  supportsOrderedRange,
+} from '../../utils/index-optimization.js'
+import { hasVirtualPropPath } from '../../virtual-props.js'
 import { devBuild } from '../../error-message.js'
 import { compileExpression } from './evaluators.js'
 import { getSourceAliasesFromExpression } from './expressions.js'
@@ -65,6 +70,50 @@ export type OrderByOptimizationInfo = {
   joinedFilterSourceId?: string
 }
 
+function warnOrderIndexFallback(
+  collection: Collection,
+  path: Array<string>,
+  options: CompareOptions,
+  index?: IndexReader<string | number>,
+): void {
+  if (devBuild() && process.env.NODE_ENV !== `production`) {
+    const field = path.join(`.`)
+    const prefix = `[TanStack DB]${collection.id ? ` [${collection.id}]` : ``} orderBy with limit`
+    if (options.stringSort === `custom`) {
+      console.warn(
+        `${prefix} uses a custom string comparator on "${field}". On-demand sources require a filtered full source request for local sorting. An index with the same compare function reference can sort installed rows, but cannot make provider pagination safe.`,
+      )
+      return
+    }
+    if (hasVirtualPropPath(path)) {
+      console.warn(
+        `${prefix} orders virtual field "${field}"; Collection indexes cannot cover virtual fields, so creating one will not enable ordered lazy loading.`,
+      )
+      return
+    }
+    if (index) return
+
+    const fieldIndexes = [...collection.indexes.values()].filter((candidate) =>
+      candidate.matchesField(path),
+    )
+    let detail: string
+    if (fieldIndexes.length === 0) {
+      detail = `requires an index on "${field}" for efficient lazy loading. Consider collection.createIndex((row) => row.${field}) or autoIndex: 'eager' with a defaultIndexType.`
+    } else if (
+      fieldIndexes.every(
+        (candidate) => !candidate.matchesCompareOptions(options),
+      )
+    ) {
+      detail = `found an index on "${field}", but none uses the query's compareOptions (nulls: "${options.nulls}", stringSort: "${options.stringSort ?? `locale`}"${options.stringSort === `locale` ? `, including the same locale and localeOptions` : ``}). After importing BasicIndex from '@tanstack/db', use collection.createIndex((row) => row.${field}, { indexType: BasicIndex, options: { compareOptions: { nulls: "${options.nulls}", stringSort: "${options.stringSort ?? `locale`}" } } }) with the same compareOptions, including any locale and localeOptions.`
+    } else {
+      detail = `found an index on "${field}" with matching compareOptions, but none supports ordered lazy loading. Use an index with ordered range reads, one comparable value domain, and no custom comparator.`
+    }
+    console.warn(
+      `${prefix} ${detail} Local reads may scan or sort installed rows; an underfilled on-demand window may require a full-source request.`,
+    )
+  }
+}
+
 /**
  * Processes the ORDER BY clause
  * Works with the new structure that has both namespaced row data and $selected
@@ -83,6 +132,7 @@ export function processOrderBy(
   groupKeyFn?: (key: unknown, value: unknown) => unknown,
 ): IStreamBuilder<KeyValue<unknown, [NamespacedRow, string]>> {
   const compiledOrderBy = orderByClause.map((clause) => {
+    // Aggregate references read the SELECT result under $selected.
     const clauseWithoutAggregates = replaceAggregatesByRefs(
       clause.expression,
       selectClause,
@@ -94,6 +144,7 @@ export function processOrderBy(
       compareOptions: buildCompareOptions(clause, collection),
     }
   })
+  // The row holds source aliases and any projected aggregate under $selected.
   const valueExtractor = (row: NamespacedRow & { $selected?: any }) => {
     if (orderByClause.length > 1) {
       return compiledOrderBy.map((compiled) => compiled.compiledExpression(row))
@@ -103,6 +154,7 @@ export function processOrderBy(
       : null
   }
 
+  // Compare order terms in declaration order, stopping at the first difference.
   const compare = (a: unknown, b: unknown) => {
     if (orderByClause.length > 1) {
       const arrayA = a as Array<unknown>
@@ -174,6 +226,7 @@ export function processOrderBy(
           followRefResult.path,
           followRefCollection,
           compareOpts,
+          supportsOrderedIndexStructure,
         )
       }
 
@@ -181,41 +234,15 @@ export function processOrderBy(
         followRefCollection,
         followRefResult.path,
         compareOpts,
-        (candidate) =>
-          candidate.supports(`gt`) && !!candidate.supportsOrderOptimization,
+        supportsOrderedRange,
       )
 
-      if (devBuild() && process.env.NODE_ENV !== `production` && !index) {
-        const collectionId = followRefCollection.id
-        const fieldPath = followRefResult.path.join(`.`)
-        const prefix = `[TanStack DB]${collectionId ? ` [${collectionId}]` : ``} orderBy with limit`
-        const fieldIndexes = [...followRefCollection.indexes.values()].filter(
-          (candidate) => candidate.matchesField(followRefResult.path),
-        )
-        const options =
-          `direction: "${compareOpts.direction}", nulls: "${compareOpts.nulls}", ` +
-          `stringSort: "${compareOpts.stringSort ?? `locale`}"` +
-          (compareOpts.stringSort === `custom`
-            ? `, and the same compare function reference`
-            : compareOpts.stringSort === `locale`
-              ? `, including the same locale and localeOptions`
-              : ``)
-        const detail =
-          fieldIndexes.length === 0
-            ? `requires an index on "${fieldPath}" for efficient lazy loading. ` +
-              `Falling back to loading all data. ` +
-              `Consider creating an index on the collection with collection.createIndex((row) => row.${fieldPath}) ` +
-              `or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.`
-            : !fieldIndexes.some((candidate) =>
-                  candidate.matchesCompareOptions(compareOpts),
-                )
-              ? `found an index on "${fieldPath}", but none uses the query's compareOptions (${options}). ` +
-                `Falling back to loading all data. ` +
-                `After importing BasicIndex from '@tanstack/db', create a BasicIndex on this field with the same compareOptions.`
-              : `found an index on "${fieldPath}" with matching compareOptions, but none supports ordered lazy loading. ` +
-                `Falling back to loading all data. Use an index with ordered range reads, one comparable value domain, and no custom comparator.`
-        console.warn(`${prefix} ${detail}`)
-      }
+      warnOrderIndexFallback(
+        followRefCollection,
+        followRefResult.path,
+        compareOpts,
+        index,
+      )
 
       orderByAlias =
         firstOrderByExpression.path.length > 1

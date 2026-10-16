@@ -18,8 +18,10 @@
  * expose ranks 30 and 20 instead of 10 and 20. The oracle checks the public
  * result and allows any physical plan that produces it.
  * A second witness registers an unusable reverse index before a usable index.
- * Its on-demand request must retain the bounded order so registration order
- * cannot hide a later eligible physical plan.
+ * Its direct optimized snapshot and on-demand request must use the later
+ * eligible reader; registration order cannot hide a valid physical plan. An
+ * eager-auto witness starts with only the reverse index and requires a new
+ * ordered reader after query compilation.
  * The on-demand adapter confirms a finite request without adding rows because
  * all three are already installed. This witness does not cover provider paging
  * from an incomplete source or later source changes.
@@ -141,11 +143,29 @@ it(`uses a later eligible index after an unusable matching index`, async () => {
       indexType: BTreeIndex,
       options: { compareFn: (a: number, b: number) => b - a },
     })
+    const orderBy = [
+      {
+        expression: new PropRef([`rank`]),
+        compareOptions: { direction: `asc` as const, nulls: `first` as const },
+      },
+    ]
+    expect(
+      source.currentStateAsChanges({ orderBy, limit: 2, optimizedOnly: true }),
+    ).toBeUndefined()
     const usable = source.createIndex((row) => row.rank, {
       indexType: BTreeIndex,
     })
     unusableRead = vi.spyOn(unusable, `takeFromStart`)
     usableRead = vi.spyOn(usable, `takeFromStart`)
+
+    // A direct optimized snapshot has the same eligibility law as the live
+    // query: registration order cannot hide a later usable reader.
+    const direct = source.currentStateAsChanges({
+      orderBy,
+      limit: 2,
+      optimizedOnly: true,
+    })
+    expect(direct?.map((change) => change.value.id)).toEqual(expectedIds)
 
     live = createLiveQueryCollection((q) =>
       q
@@ -175,4 +195,49 @@ it(`uses a later eligible index after an unusable matching index`, async () => {
     () => live?.cleanup(),
     () => source.cleanup(),
   ])
+})
+
+it(`eager indexing creates an ordered reader when only a custom reader exists`, async () => {
+  const source = createCollection(
+    mockSyncCollectionOptions<Row>({
+      id: `custom-index-order-selection-eager-auto`,
+      getKey: (row) => row.id,
+      initialData: [...rows],
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+    }),
+  )
+  let live: ReturnType<typeof createLiveQueryCollection> | undefined
+  await withOracleCleanup(async () => {
+    await source.stateWhenReady()
+    source.createIndex((row) => row.rank, {
+      indexType: BTreeIndex,
+      options: { compareFn: (a: number, b: number) => b - a },
+    })
+    live = createLiveQueryCollection((q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank)
+        .limit(2),
+    )
+    await live.preload()
+    expect([...live.values()].map((row) => row.id)).toEqual(expectedIds)
+    expect(
+      [...source.indexes.values()].filter(
+        (index) =>
+          index.matchesField([`rank`]) && index.supportsOrderOptimization,
+      ),
+    ).toHaveLength(1)
+    const direct = source.currentStateAsChanges({
+      orderBy: [
+        {
+          expression: new PropRef([`rank`]),
+          compareOptions: { direction: `asc`, nulls: `first` },
+        },
+      ],
+      limit: 2,
+      optimizedOnly: true,
+    })
+    expect(direct?.map((change) => change.value.id)).toEqual(expectedIds)
+  }, [() => live?.cleanup(), () => source.cleanup()])
 })

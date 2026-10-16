@@ -39,6 +39,22 @@ export interface OptimizationResult<TKey> {
   isExact: boolean
 }
 
+/** Static capability; a mixed current value domain can still disable ordering. */
+export function supportsOrderedIndexStructure<TKey extends string | number>(
+  index: IndexReader<TKey>,
+): boolean {
+  return index.supports(`gt`) && index.supportsRangeOptimization
+}
+
+/** Whether an index can serve a bounded ordered source read now. */
+export function supportsOrderedRange<TKey extends string | number>(
+  index: IndexReader<TKey>,
+): boolean {
+  return (
+    supportsOrderedIndexStructure(index) && !!index.supportsOrderOptimization
+  )
+}
+
 /** Finds the first usable index matching a field path and comparison options. */
 export function findIndexForField<TKey extends string | number>(
   collection: CollectionLike<any, TKey>,
