@@ -54,6 +54,16 @@ If you have been assigned to fix an issue or develop a new feature, please follo
   ```
 
 - Implement your changes and tests in the relevant package or example.
+- For a production change that adds, removes, or changes observable behavior,
+  extend the primary oracle when it can express the governing law. A focused
+  unit test can supplement the oracle but cannot replace it. Internal refactors
+  need no new oracle coverage when existing oracles exercise the unchanged
+  contract. If an oracle is not practical, explain why the focused test is
+  sufficient in the pull request. Identify the relevant coverage-map entry and
+  explain why you cannot extend its owner, create an independent oracle, or add
+  a receiving witness. See the
+  [oracle coverage map](docs/contributing/oracle-coverage.md) and
+  [oracle test guide](docs/contributing/oracle-tests.md).
 - Document your changes in the appropriate doc page.
 - Git stage your required changes and commit them.
 - Submit a PR for review.

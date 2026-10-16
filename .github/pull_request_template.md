@@ -2,6 +2,10 @@
 
 <!-- What changes are made in this PR? Describe the change and its motivation. -->
 
+## 🔬 Oracle Coverage
+
+<!-- For a change to observable behavior, name the coverage-map owner and summarize the oracle evidence. For a bug fix, include the RED/GREEN result. If no oracle is practical, identify the relevant coverage-map entry and explain why you cannot extend its owner, create an independent oracle, or add a receiving witness. -->
+
 ## ✅ Checklist
 
 - [ ] I have tested this code locally with `pnpm test`.

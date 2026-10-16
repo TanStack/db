@@ -475,11 +475,9 @@ applicable oracle coverage.
 
 ### Always Add Tests for Bugs
 
-**Key Principle:** Reproduce a bug in a test before fixing it. When an existing
-oracle can express the violated law, extending that oracle is required. An
-isolated unit test may supplement the oracle, but it does not replace it. If no
-oracle applies, add one when an independent model is practical; otherwise,
-explain in the pull request why a focused test is sufficient. This ensures:
+**Key Principle:** Reproduce a bug in a test before fixing it, then follow the
+[applicable oracle coverage requirements](#require-applicable-oracle-coverage).
+The evidence must show:
 
 - The bug is actually fixed
 - The bug doesn't regress in the future
@@ -489,11 +487,14 @@ explain in the pull request why a focused test is sufficient. This ensures:
 
 ```typescript
 // Found a bug with fetchSnapshot resolving after up-to-date message
-// Should add a test:
+// First isolate the failure in a focused regression:
 test('ignores snapshot that resolves after up-to-date message', async () => {
   // Reproduce the corner case
   // Verify it's handled correctly
 })
+
+// Then extend the applicable primary oracle so the law is exercised across
+// nearby legal histories.
 ```
 
 ### Treat Every Review Bug as a Test Gap
@@ -550,20 +551,32 @@ that an oracle. Both copies can encode the same wrong assumption.
 ### Require Applicable Oracle Coverage
 
 An oracle that checks general laws across generated states and histories is a
-stronger form of coverage than a unit test for one specific example. Every bug
-fix must extend the primary oracle when that oracle can express the violated
-law. Add the missing model rule, generator dimension, state transition, or
-observable assertion; adding more pinned examples alone does not generalize the
-oracle. Do not submit only an isolated unit test for behavior owned by an
-applicable oracle.
+stronger form of coverage than a unit test for one specific example. Every
+production change that adds, removes, or changes observable behavior must
+extend the primary oracle when that oracle can express the governing law. Add
+the missing model rule, generator dimension, state transition, or observable
+assertion; adding more pinned examples alone does not generalize the oracle. Do
+not submit only an isolated unit test for behavior owned by an applicable
+oracle. An internal refactor does not require new oracle coverage when existing
+applicable oracles already exercise the unchanged contract.
 
-Use a focused regression to isolate and shrink a failure, then keep it as a
-replay example for the broader oracle. Verify that the expanded oracle fails
-without the fix and passes with it. Keep valuable unit tests as supplemental
-coverage, but do not treat them as a substitute for applicable oracle coverage.
-If no existing oracle applies, create one when the behavior admits a practical
-independent model. A focused test alone is acceptable only when an oracle is not
-practical for the behavior; explain that exception in the pull request.
+Applicability follows the contract ownership recorded in
+`docs/contributing/oracle-coverage.md`, not the limits of the owner's current
+histories, production paths, or observations. A missing history, path, or
+observation is a coverage gap in the primary owner. Add a separate oracle owner
+only when the boundary requires a different independent judgment. Add a
+receiving witness when a claim crosses an adapter, framework, provider, or other
+integration boundary.
+
+For a bug fix, use a focused regression to isolate and shrink the failure, then
+keep it as a replay example for the broader oracle. Verify that the expanded
+oracle fails without the fix and passes with it. Keep valuable unit tests as
+supplemental coverage, but do not treat them as a substitute for applicable
+oracle coverage. If no existing oracle applies, create one when the behavior
+admits a practical independent model. A focused test alone is acceptable only
+when an oracle is not practical for the behavior. The pull request must identify
+the relevant coverage-map entry and explain why extending its owner, creating a
+new independent oracle, or adding a receiving witness is not practical.
 
 ### Name Oracle Files for Discovery
 
