@@ -442,7 +442,7 @@ const dependentBuilders = [] // Accurately describes dependents
 ### Required reading: oracle tests
 
 Before designing, changing, or reviewing an oracle or generated-history test,
-read [Writing reliable oracle tests](docs/contributing/oracle-tests.md).
+read [Oracle Testing Rubric](docs/contributing/oracle-rubric.md).
 Use the [coverage map](docs/contributing/oracle-coverage.md) to find an existing
 owner and its limits before adding another model. The guide explains testing
 methods; it does not authorize new product behavior or retire existing laws.
@@ -452,9 +452,9 @@ methods; it does not authorize new product behavior or retire existing laws.
 Write every oracle and generated-history test as a literate program.
 Combine explanatory prose with executable code so the file teaches the
 subsystem contract. Follow
-[ORC-003](docs/contributing/oracle-tests.md#orc-003-distinguishable-oracle-responsibilities)
+[ORC-003](docs/contributing/oracle-rubric.md#orc-003-distinguishable-oracle-responsibilities)
 and the guide's
-[literate-oracle guidance](docs/contributing/oracle-tests.md#write-the-oracle-as-executable-subsystem-documentation).
+[literate-oracle guidance](docs/contributing/oracle-rubric.md#write-the-oracle-as-executable-subsystem-documentation).
 
 Start with the promised law and its limits before introducing test mechanics.
 Explain the central law beside the independent model. Describe the legal

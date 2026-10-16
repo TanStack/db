@@ -9,7 +9,7 @@ Ask both whether the oracle enforces its stated law and whether that is the
 right law to promise. A passing test can coexist with a wrong theory; a failing
 test can coexist with correct production.
 
-Read [the oracle guide](../../../docs/contributing/oracle-tests.md),
+Read [the oracle guide](../../../docs/contributing/oracle-rubric.md),
 [the glossary](../../../docs/contributing/glossary.md), and the relevant owner
 and limits in [the coverage map](../../../docs/contributing/oracle-coverage.md).
 Follow the subsystem reading requirements in AGENTS.md. Guide conformance is

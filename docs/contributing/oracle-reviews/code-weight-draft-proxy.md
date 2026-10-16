@@ -24,7 +24,7 @@ commit.
 - `0ce101acf` fixes two more lost-write classes from CodeRabbit review:
   accessor definitions and typed-array mutator methods.
 - `cbd2aff06` and `556cbd8ff` act on a loss audit of these oracles against
-  `docs/contributing/oracle-tests.md`. They fix one bug, make the array and
+  `docs/contributing/oracle-rubric.md`. They fix one bug, make the array and
   typed-array laws generated, and close the audit's grammar, checkpoint, and
   replay gaps.
 - `7e5dfee25` fixes three bugs that code review found in the earlier fixes:
