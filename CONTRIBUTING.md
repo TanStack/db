@@ -63,7 +63,7 @@ If you have been assigned to fix an issue or develop a new feature, please follo
   coverage-map entry and explain why you cannot extend its owner, create an
   independent oracle, or add a receiving witness. See the
   [oracle coverage map](docs/contributing/oracle-coverage.md) and
-  [oracle test guide](docs/contributing/oracle-tests.md).
+  [Oracle Testing Rubric](docs/contributing/oracle-rubric.md).
 - For a bug fix, state how the pull request evaluated and closed the declared
   bug class. Include the violated law, exercised histories, production paths,
   observation checkpoints, RED/GREEN evidence, and remaining limits. A passing

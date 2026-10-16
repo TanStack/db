@@ -1,6 +1,6 @@
 # Oracle coverage and closeout
 
-Use [Writing reliable oracle tests](oracle-tests.md) when adding or reviewing a
+Use [Oracle Testing Rubric](oracle-rubric.md) when adding or reviewing a
 law. This map identifies existing owners, their judgment, and their limits. It
 is not a claim that every state or every test has been audited.
 
