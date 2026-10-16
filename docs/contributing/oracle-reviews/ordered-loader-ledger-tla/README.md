@@ -114,3 +114,53 @@ passing bounded run says nothing about states outside these bounds.
 ~/.claude/skills/field-lab/scripts/tlc . -config safe-unified.cfg LoaderLedger
 ```
 
+
+## Run 2: the shipped state machine
+
+`LoaderAuthority.tla` models the loader after #2194's review fixes, and it
+is the model the `work` and `debt` representation follows. It adds what run 1
+left out: a page's own delivery invalidating ordering, a current page's tie
+issued while repair debt is pending, a repair prefix that answers at once with
+its step staged, the scheduler's `pending` request, retirement by repair-chain
+membership, superseded failed leases, and an explicit retry whose release
+throws.
+
+| Grammar item | Loader field | TLA+ element |
+| --- | --- | --- |
+| Work slot: idle, repair chain at an epoch, full-source read held, complete or failed | `work` | `work` |
+| Debt: none, bounded, full | `debt` | `debt` |
+| Request stamp at issue | `RequestStamp`, `standing()` | `req[i].ep`, `Stale` |
+| Own and superseded failures | `failedRequest`, `failedAcquisitions[].superseded` | `own`, `req[i].sup` |
+| Repair-chain membership | `settledFiniteAcquisitions[].chain` | `req[i].chain`, `RetireOutside` |
+| Scheduler: one request, staged repair step | `pending`, `stagedContinuation` | `pending`, `staged` |
+
+Invariants: `ChainHeld`, `NoLeak` (including superseded failed leases, and
+pages issued under debt), `NoStall` (no held repair with nothing in flight or
+staged), and `OwnIsGrounded` (an own failure comes from a request that nothing
+superseded).
+
+| Configuration | Weakened rule (one bug fixed in #2194) | Result |
+| --- | --- | --- |
+| `run2-safe.cfg` | none | No error, 195,621 distinct states, depth 14 |
+| `run2-weak-lateStamp.cfg` | Stamp the epoch when the request returns | `NoLeak` violated |
+| `run2-weak-epochRetire.cfg` | Retire by issue epoch (the reverted rule) | `NoLeak` violated |
+| `run2-weak-ownSuperseded.cfg` | A superseded failure counts as own | `OwnIsGrounded` violated |
+| `run2-weak-pendingBlocks.cfg` | A repair waits behind a superseded `pending` | `NoStall` violated |
+| `run2-weak-dropStaged.cfg` | A finite failure drops staged repair work | `NoStall` violated |
+| `run2-weak-stepReleases.cfg` | A chain step releases failed leases | `NoStall` violated |
+| `run2-weak-noLeaseCollect.cfg` | Recovery leaves a superseded lease held | `NoLeak` violated |
+
+Three weakened rules first passed this model. Each pass exposed a gap that was
+closed before the results above: the model let no current page continue under
+pending debt, it stamped chain steps by chain under the reverted rule, and its
+grounding check accepted any failure. Four encoding corrections were also
+made; none weakened a frozen property.
+
+Limits: boundary and cursor values, tie and refill as separate steps,
+joined-demand deferral, truncate replay, publication holds, the backoff timer,
+and release faults outside an explicit retry are not modeled. The
+request-authority lane and the existing loader oracles check the real loader.
+
+```sh
+~/.claude/skills/field-lab/scripts/tlc . -config run2-safe.cfg LoaderAuthority
+```
