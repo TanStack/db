@@ -974,7 +974,25 @@ before adapter code runs, and reentrant truncate or disposal stops the current
 retirement pass. No copied rows or additional cursor history are retained.
 
 A visible delete or source-order change after an otherwise settled,
-expressible window uses a narrower authoritative path. Core reissues the
+expressible window uses a narrower authoritative path. So does a sync adapter's
+`invalidateLoadedSubsets()` report: after a refetch that the adapter started on
+its own has applied, served pages may have shifted so that a row now sorts
+between two of them and is in neither result. The adapter reports that instead
+of keeping each served prefix whole (the `LoadSubsetFn` rule). Core emits
+`loadedSubsets:invalidated` once per turn, and each ordered loader on the
+Collection runs this repair. A loader whose coverage is one full-source
+acquisition, or a `requiresFullSource` plan, ignores the report: the refetch
+has already re-read that acquisition, and it has no page boundary to repair.
+A loader whose coverage is still its own first ordered request, of at least
+`offset + limit` rows with no continuation past it, also ignores the report
+when its window is inside that page: every window row sorts at or before the
+`offset + limit`-th source row, and the next source row sorts strictly after
+it in the leading term. The refetched page holds every row from the start
+through its end, and any row it left out sorts after that end, so the window
+is proven. A window that needs a row past the page, such as one whose page
+holds rows a joined filter rejects, still repairs. So does any loader while
+its source holds accepted sync rows back, as behind a persisting optimistic
+transaction: the visible rows then predate the refetch. Core reissues the
 ordered prefix from the start with the query predicate, order terms, and
 `limit = offset + limit`; the transport `offset` is omitted because this
 acquisition starts at the provider's source prefix. It then reacquires the
@@ -988,10 +1006,24 @@ before the obsolete chain can issue another tie or refill. A repeated prefix or
 page fixed point ends the repair when no more data is needed; it cannot leave a
 held repair without pending work.
 The finite prefix and tie acquisitions they replace retire after the whole
-replacement chain succeeds.
-An invalidation that overlaps unfinished non-repair source work, a failed
-or canceled request, or a boundary that cannot be expressed still requires the
-full-source recovery above. A bounded repair failure likewise upgrades its
+replacement chain succeeds. That retirement can make the adapter remove rows
+only the replaced acquisitions held. The chain holds every row through its
+boundary, so such a removal is not a source-order change, and the repair keeps
+its boundary. A loader that discarded it would restart paging from the start
+of the order with a smaller first page that cannot retire the repair's prefix.
+Full-source reads can be very expensive, so a repair avoids one whenever a
+bounded read is available. An invalidation that overlaps unfinished page or tie
+work after the source has settled once does not force one: the bounded repair
+starts at once, and that work's later result is ignored for its boundary.
+Such a prefix also cannot retire the repair's acquisitions: it was issued before
+the invalidation, so it proves no current coverage. The repair supersedes any
+such request, so one that settles after the repair finished is released at
+once, like the acquisitions the repair retires. If such a request fails, its
+partial writes still need the full-source read that the overlap replaced: the
+loader starts it when the bounded repair succeeds, without an explicit retry.
+A failed or canceled request, an invalidation before any request has
+settled, or a boundary that cannot be expressed still requires the full-source
+recovery above. A bounded repair failure likewise upgrades its
 next attempt to full-source recovery because partial writes cannot establish
 finite coverage.
 
@@ -1014,9 +1046,10 @@ repair (an eager source, an index, one order term, no joined filter) returns
 literal `true`, the
 repair settles synchronously,
 so its tie and refill steps finish inside the same graph run and a window move
-that consumes the repair still publishes once. A full-source repair keeps its
-asynchronous settlement. An initial full-source load follows the initial
-synchronous cut described under initial readiness. The
+that consumes the repair still publishes once. A full-source repair keeps
+asynchronous settlement; its scheduling is not part of the initial synchronous
+cut. An initial
+full-source load follows that cut as described under initial readiness. The
 ordered graph's top-K operator owns the local result window. Provider transfer
 remains bounded by `orderBy` and `limit`; local delivery cardinality is a
 separate observation.
@@ -1081,7 +1114,11 @@ provider capability negotiation, comparator exception policy, and backend
 collation fidelity are outside this contract.
 
 An ordered request cannot start another ordered request through its own
-synchronous writes. If the adapter then throws, graph callbacks scheduled by
+synchronous writes. A graph turn that those writes run inside the request may
+ask for more data; the loader ignores that call, stages its continuation, and
+resumes it once the request returns, because that turn has already processed
+the writes and no later turn will ask again. A continuation staged with input
+the graph has not yet processed waits for the graph turn that processes it. If the adapter then throws, graph callbacks scheduled by
 those writes still belong to the failed window operation and cannot retry it.
 A public `setWindow()` call made from inside that synchronous operation throws
 `SetWindowReentrancyError`; it must not claim that a nested window settled after
@@ -1205,6 +1242,23 @@ restart. Queued ordered-repair startup joins this barrier before invoking the
 adapter, so a synchronous throw cannot publish a partial replacement merely
 because it returned no acquisition promise. The queued task belongs to the
 loader that scheduled it, not a replacement created after cleanup.
+
+An optimistic overlay departure is not an authoritative loss of provider
+coverage. When an optimistic update removes query membership, or an optimistic
+delete removes a row from an ordered window, live-query Collections and Effects
+publish that departure immediately, even when provider work that could refill
+the window is pending. The intermediate result may be shorter than the
+requested window. The loader starts any needed acquisition while the optimistic
+transaction persists. A provider row stays private while its accepted sync
+transaction is queued behind that mutation; application may publish the
+recomputed window before the receipt promise resolves. If the provider answers
+later, acknowledgement can retain the short window until application. Rollback
+removes this overlay and recomputes from the then-current applied base and any
+remaining overlays; it restores the prior window only when that base is
+unchanged and no other overlay remains. This exception does not define a rank
+move or let a partially applied provider page or authoritative repair bypass
+the complete-window barrier.
+
 The loader tracks each sequential request as a bounded participant,
 not every recursive suffix of a long refinement chain.
 
@@ -1367,8 +1421,11 @@ view built during a render defers it until a view has a subscriber or a
 preload.
 
 An initial ordered load also has a synchronous observation cut. The initial
-load is an ordinary ordered request or, for a plan that requires the full
-source, its first filtered full-source request. The cut holds when the first
+load is the request chain needed to complete the first ordered window. It may
+start with an ordinary ordered request or, for a plan that requires the full
+source, a filtered full-source request. A full-source fallback after an
+inexpressible boundary is still part of that initial chain while the window
+remains unpublished. The cut holds when the first
 subscriber or preload starts the live-query Collection's sync run, or when its
 source Collections are eager. A sync run that started earlier resumes deferred
 on-demand acquisition through the subscription's restart path, which settles
@@ -1377,10 +1434,14 @@ returns literal `true` after its establishing applied receipts are visible,
 core drains the remaining synchronous ordered continuations and graph work
 before the initiating call stack returns. The live-query Collection rows and
 initial-query readiness are observable at that cut. A Promise result keeps that
-acquisition asynchronous. This cut does not apply to explicit window moves, a
-later full-source fallback, repair other than a bounded prefix repair, truncate
-replay, or framework render timing, and it proves neither source exhaustion nor
-broader source coverage.
+acquisition asynchronous. This cut does not apply to explicit window moves,
+full-source work started after the initial window publishes, repair other than
+a bounded prefix repair, truncate replay, or framework render timing, and it
+proves neither source exhaustion nor broader source coverage.
+The first-publication boundary limits this guarantee; it does not require
+later full-source work to wait for a microtask. A later literal `true`
+full-source fallback without ordering-repair debt may finish in the current
+graph turn.
 
 If any source subscriber adds input to the graph during a synchronous ordered
 continuation, core returns to graph work before deciding whether that ordered
@@ -1512,6 +1573,29 @@ demands, materialization cells, and public facades are the relevant space
 units. Queries without includes retain their original pipeline unless a joined
 custom-key query needs contributor reduction. Inline materialization must not
 create recursive Collection machinery.
+
+A windowed query has an `orderBy`; its window is the ordered view, by offset
+and limit, that `setWindow` moves. A `findOne` is bounded by a top-K too: it
+keeps its compiled limit (1, or 0 for `.limit(0).findOne()`), and `setWindow`
+throws `SetWindowFindOneLimitError` for any other limit. An ordered `findOne`
+has a movable window. An unordered `findOne` is a fixed one-row result that
+accepts only its compiled limit at offset 0; a nonzero offset throws
+`SetWindowRequiresOrderByError`, as `.offset()` without `orderBy` does. A query
+that is neither windowed nor an ordered `findOne` rejects offset moves, and one
+that is neither windowed nor a `findOne` rejects `setWindow`. Only the query's
+own top-K answers `setWindow`; a top-K inside a `from` or joined subquery or an
+include child never does. A windowed query or a `findOne` adds route relations
+for the includes in its own `select` only from the rows it shows, so a row it
+drops activates no bucket and creates no demand. A static filter creates static
+child demand before the query runs only when no enclosing query is windowed or
+a `findOne`, and either the query is neither windowed nor a `findOne`, or it is
+a `findOne` that shows one row for one named correlation value, with no
+`offset`, and offset 0 at start if a window was requested before start. Within
+one graph run, an index-backed top-K can briefly hold a row outside the rows it
+shows once its ordered acquisition completes, and that row's children may load
+(a recorded limit, #2151; the public snapshot stays correct). Includes
+inherited from a `from` subquery and inputs to `fn.select` still route from
+every row before the top-K (a recorded limit).
 
 ## Normative laws
 

@@ -449,6 +449,7 @@ describe(`OrderedSourceLoader`, () => {
         loader.onSourceChanges(
           [{ type: `update`, key: 1, value: { rank: 2 } }],
           sentRows,
+          () => false,
         )
       }
       options.onLoadSubsetResult?.(true, options, () => {})
@@ -476,13 +477,13 @@ describe(`OrderedSourceLoader`, () => {
       const stagedContinuation = (
         loader as unknown as {
           stagedContinuation?: {
-            isAuthoritativeRepair: boolean
+            isAuthoritativeRequest: boolean
             windowOperationGeneration?: number
           }
         }
       ).stagedContinuation
       expect(stagedContinuation).toMatchObject({
-        isAuthoritativeRepair: false,
+        isAuthoritativeRequest: false,
       })
       expect(stagedContinuation?.windowOperationGeneration).toBeUndefined()
       expect(

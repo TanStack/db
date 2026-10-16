@@ -7,7 +7,7 @@ title: SyncPersistenceCapabilityV1
 type SyncPersistenceCapabilityV1<TKey> = object;
 ```
 
-Defined in: [packages/db/src/types.ts:536](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L536)
+Defined in: [packages/db/src/types.ts:548](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L548)
 
 **`Internal`**
 
@@ -27,11 +27,23 @@ Unstable cross-package protocol for persistence-aware adapters.
 readonly hydrateBaseline: () => Promise<void>;
 ```
 
-Defined in: [packages/db/src/types.ts:541](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L541)
+Defined in: [packages/db/src/types.ts:557](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L557)
 
 #### Returns
 
 `Promise`\<`void`\>
+
+***
+
+### managedCacheGeneration?
+
+```ts
+readonly optional managedCacheGeneration: boolean;
+```
+
+Defined in: [packages/db/src/types.ts:554](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L554)
+
+This run owns a claimed on-demand cache generation.
 
 ***
 
@@ -41,7 +53,7 @@ Defined in: [packages/db/src/types.ts:541](https://github.com/TanStack/db/blob/m
 readonly protocol: "@tanstack/db/sync-persistence";
 ```
 
-Defined in: [packages/db/src/types.ts:539](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L539)
+Defined in: [packages/db/src/types.ts:551](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L551)
 
 ***
 
@@ -51,7 +63,7 @@ Defined in: [packages/db/src/types.ts:539](https://github.com/TanStack/db/blob/m
 readonly reserveCommitTurn: () => void;
 ```
 
-Defined in: [packages/db/src/types.ts:546](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L546)
+Defined in: [packages/db/src/types.ts:567](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L567)
 
 Reserve the open sync transaction's FIFO turn, so a subset hydration
 that starts before it commits waits for that commit.
@@ -68,7 +80,7 @@ that starts before it commits waits for that commit.
 readonly resumeSnapshot: object;
 ```
 
-Defined in: [packages/db/src/types.ts:550](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L550)
+Defined in: [packages/db/src/types.ts:571](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L571)
 
 #### certify()
 
@@ -111,7 +123,7 @@ readonly getKeySetEvidence: () =>
 readonly scanPersistedRows: (options?) => Promise<SyncPersistenceScannedRow<TKey>[]>;
 ```
 
-Defined in: [packages/db/src/types.ts:547](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L547)
+Defined in: [packages/db/src/types.ts:568](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L568)
 
 #### Parameters
 
@@ -125,10 +137,50 @@ Defined in: [packages/db/src/types.ts:547](https://github.com/TanStack/db/blob/m
 
 ***
 
+### startScopedRecovery()?
+
+```ts
+readonly optional startScopedRecovery: (resetMetadata?) => Promise<void>;
+```
+
+Defined in: [packages/db/src/types.ts:559](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L559)
+
+Retire untrusted on-demand rows and retain the provider's reset metadata.
+
+#### Parameters
+
+##### resetMetadata?
+
+###### key
+
+`string`
+
+###### value
+
+`unknown`
+
+#### Returns
+
+`Promise`\<`void`\>
+
+***
+
+### startupCacheGenerationRotated?
+
+```ts
+readonly optional startupCacheGenerationRotated: boolean;
+```
+
+Defined in: [packages/db/src/types.ts:556](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L556)
+
+The on-demand cache generation rotated before the source sync run entered.
+
+***
+
 ### version
 
 ```ts
 readonly version: 1;
 ```
 
-Defined in: [packages/db/src/types.ts:540](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L540)
+Defined in: [packages/db/src/types.ts:552](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L552)
