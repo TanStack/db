@@ -4982,30 +4982,6 @@ function boundaryRanks(
     .map((row): number | null => row.rank)
 }
 
-// Whether a bounded read of the window could end on a null or NaN rank. The
-// read runs in source order, past rows a joined filter rejects, through the
-// row after the window's last eligible row, or through the whole source when
-// fewer rows are eligible. Neither rank can be expressed as a cursor
-// (canExpressCursorOrder), so such a boundary takes the documented
-// full-source fallback.
-function boundedReadMayEndUnexpressible(
-  rows: ReadonlyMap<number, Row>,
-  testCase: EagerCase,
-): boolean {
-  const all = new Map(
-    [...rows].map(([id, row]) => [id, { ...row, eligible: true }]),
-  )
-  const end = testCase.offset + testCase.limit
-  let eligible = 0
-  for (const row of eagerOrder(all, testCase)) {
-    // Generated rows may carry a null rank behind the `number` row type.
-    const rank = row.rank as number | null
-    if (rank === null || Number.isNaN(rank)) return true
-    if (rows.get(row.id)!.eligible && ++eligible > end) return false
-  }
-  return false
-}
-
 // Properties take this as their predicate, which must return nothing;
 // runEagerWindow also returns the held-load reach counts.
 async function checkEagerWindow(testCase: EagerCase): Promise<void> {
@@ -5215,6 +5191,10 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
   // The rows each served request last returned, at its answer or at the
   // latest refetch. A refetching provider keeps exactly these rows.
   const lastAnswered = new Map<LoadSubsetOptions, Set<number>>()
+  // Bounded pages that ended on a null or NaN rank. Neither can be
+  // expressed as a cursor (canExpressCursorOrder), so the loader then takes
+  // the documented full-source fallback.
+  let unexpressiblePageEnds = 0
   function servePage(options: LoadSubsetOptions): true | Promise<void> {
     providerRequests++
     if (providerRequests > 4 * rows.size + 100) {
@@ -5264,6 +5244,9 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
     lastAnswered.set(options, new Set(page.map((row) => row.id)))
     if (options.orderBy && options.limit !== undefined && page.length > 0) {
       rangeEnds.set(options, { ...page.at(-1)! })
+      // Generated rows may carry a null rank behind the `number` row type.
+      const end = page.at(-1)!.rank as number | null
+      if (end === null || Number.isNaN(end)) unexpressiblePageEnds++
     }
     served += page.length
     servedBy.set(
@@ -5903,14 +5886,13 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
       stepChangedInFlight = false
       if (command.type === `refetch`) {
         const fullSourceBefore = fullSourceRequests
-        // The repair reads the current rows.
-        const unexpressible = boundedReadMayEndUnexpressible(rows, shown)
+        const unexpressibleBefore = unexpressiblePageEnds
         await refetch()
         // The repair a report starts reads each window's bounded prefix,
         // tie, and refill; a whole-source read would be the cost the report
-        // exists to avoid. A boundary on a null or NaN rank takes the
+        // exists to avoid. A page that ends on a null or NaN rank takes the
         // documented full-source fallback instead.
-        if (signalsRefetch && !unexpressible) {
+        if (signalsRefetch && unexpressiblePageEnds === unexpressibleBefore) {
           expect(
             fullSourceRequests,
             `full-source requests after a signalling refetch at step ${step}`,
