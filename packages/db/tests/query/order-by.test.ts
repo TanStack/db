@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
+import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
 import {
@@ -3364,5 +3365,119 @@ describe(`OrderBy with Date values and precision differences`, () => {
     expect(gteValue).toBeInstanceOf(Date)
     expect(ltValue).toBeInstanceOf(Date)
     expect(ltValue.getTime() - gteValue.getTime()).toBe(1) // 1ms difference
+  })
+})
+
+describe(`orderBy with limit index warning`, () => {
+  type Client = { id: number; name: string }
+
+  let warnSpy: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    warnSpy.mockRestore()
+  })
+
+  // An index on the ordered field whose compareOptions differ from the
+  // query's cannot serve the ordered prefix, so the query falls back to a full
+  // load. The warning must say the index was skipped for its compareOptions,
+  // not that no index exists.
+  it(`reports a compareOptions mismatch when an index on the field exists`, async () => {
+    const clients = createCollection(
+      mockSyncCollectionOptions<Client>({
+        id: `order-by-mismatched-index-clients`,
+        getKey: (row) => row.id,
+        autoIndex: `off`,
+        initialData: [
+          { id: 1, name: `Charlie` },
+          { id: 2, name: `Alice` },
+          { id: 3, name: `Bob` },
+        ],
+      }),
+    )
+    clients.createIndex((row) => row.name, { indexType: BasicIndex })
+
+    const query = createLiveQueryCollection((q) =>
+      q
+        .from({ client: clients })
+        .orderBy(({ client }) => client.name, {
+          direction: `asc`,
+          nulls: `last`,
+        })
+        .limit(2),
+    )
+    await query.preload()
+
+    expect(query.toArray.map((row) => row.name)).toEqual([`Alice`, `Bob`])
+
+    const messages = warnSpy.mock.calls.map((call) => String(call[0]))
+    expect(messages.some((m) => m.includes(`requires an index`))).toBe(false)
+    expect(messages).toContainEqual(
+      expect.stringContaining(
+        `[order-by-mismatched-index-clients] orderBy with limit found an index on "name", but its compareOptions don't match the query's`,
+      ),
+    )
+    expect(messages).toContainEqual(
+      expect.stringContaining(
+        `collection.createIndex((row) => row.name, { options: { compareOptions: {"stringSort":"locale","direction":"asc","nulls":"last"} } })`,
+      ),
+    )
+
+    // The suggested index serves the same query, so it no longer warns.
+    warnSpy.mockClear()
+    clients.createIndex((row) => row.name, {
+      indexType: BasicIndex,
+      options: {
+        compareOptions: {
+          stringSort: `locale`,
+          direction: `asc`,
+          nulls: `last`,
+        },
+      },
+    })
+    const indexedQuery = createLiveQueryCollection((q) =>
+      q
+        .from({ client: clients })
+        .orderBy(({ client }) => client.name, {
+          direction: `asc`,
+          nulls: `last`,
+        })
+        .limit(2),
+    )
+    await indexedQuery.preload()
+
+    expect(indexedQuery.toArray.map((row) => row.name)).toEqual([
+      `Alice`,
+      `Bob`,
+    ])
+    expect(warnSpy).not.toHaveBeenCalled()
+  })
+
+  it(`keeps the missing-index warning when no index on the field exists`, async () => {
+    const clients = createCollection(
+      mockSyncCollectionOptions<Client>({
+        id: `order-by-missing-index-clients`,
+        getKey: (row) => row.id,
+        autoIndex: `off`,
+        initialData: [{ id: 1, name: `Alice` }],
+      }),
+    )
+
+    const query = createLiveQueryCollection((q) =>
+      q
+        .from({ client: clients })
+        .orderBy(({ client }) => client.name)
+        .limit(2),
+    )
+    await query.preload()
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining(
+        `[order-by-missing-index-clients] orderBy with limit requires an index on "name"`,
+      ),
+    )
   })
 })

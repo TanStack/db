@@ -211,12 +211,31 @@ export function processOrderBy(
       if (devBuild() && process.env.NODE_ENV !== `production` && !index) {
         const collectionId = followRefCollection.id
         const fieldPath = followRefResult.path.join(`.`)
-        console.warn(
-          `[TanStack DB]${collectionId ? ` [${collectionId}]` : ``} orderBy with limit requires an index on "${fieldPath}" for efficient lazy loading. ` +
-            `Falling back to loading all data. ` +
-            `Consider creating an index on the collection with collection.createIndex((row) => row.${fieldPath}) ` +
-            `or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.`,
-        )
+        // An index on the field may exist but be sorted with other
+        // compareOptions, which findIndexForField rejects.
+        const fieldIndexes = Array.from(
+          followRefCollection.indexes.values(),
+        ).filter((candidate) => candidate.matchesField(followRefResult.path))
+        const compareOptionsMismatch =
+          fieldIndexes.length > 0 &&
+          !fieldIndexes.some((candidate) =>
+            candidate.matchesCompareOptions(compareOpts),
+          )
+        if (compareOptionsMismatch) {
+          const queryCompareOptions = JSON.stringify(compareOpts)
+          console.warn(
+            `[TanStack DB]${collectionId ? ` [${collectionId}]` : ``} orderBy with limit found an index on "${fieldPath}", but its compareOptions don't match the query's (${queryCompareOptions}), so it cannot be used for efficient lazy loading. ` +
+              `Falling back to loading all data. ` +
+              `Consider creating an index with matching compareOptions with collection.createIndex((row) => row.${fieldPath}, { options: { compareOptions: ${queryCompareOptions} } }).`,
+          )
+        } else {
+          console.warn(
+            `[TanStack DB]${collectionId ? ` [${collectionId}]` : ``} orderBy with limit requires an index on "${fieldPath}" for efficient lazy loading. ` +
+              `Falling back to loading all data. ` +
+              `Consider creating an index on the collection with collection.createIndex((row) => row.${fieldPath}) ` +
+              `or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.`,
+          )
+        }
       }
 
       orderByAlias =
