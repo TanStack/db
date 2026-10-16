@@ -65,7 +65,6 @@ test('RC publishing gives candidate and stable packages their own npm tags', asy
   })
 
   assert.deepEqual(phases, [
-    { publicNames: ['@tanstack/db'], preMode: true },
     {
       publicNames: [
         '@tanstack/query-db-collection',
@@ -73,12 +72,13 @@ test('RC publishing gives candidate and stable packages their own npm tags', asy
       ],
       preMode: false,
     },
+    { publicNames: ['@tanstack/db'], preMode: true },
   ])
   assert.deepEqual(packageState(root), before)
   assert.equal(existsSync(join(root, '.changeset', 'pre.json')), true)
 })
 
-test('failed stable publishing restores package manifests and prerelease state', async (t) => {
+test('failed candidate publishing restores package manifests and prerelease state', async (t) => {
   const root = createWorkspace()
   t.after(() => rmSync(root, { recursive: true, force: true }))
   const before = packageState(root)

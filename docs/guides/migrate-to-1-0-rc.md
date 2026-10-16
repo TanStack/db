@@ -19,7 +19,9 @@ npm install @tanstack/react-db@rc @tanstack/electric-db-collection@rc
 
 The first candidate is `1.0.0-rc.1`. `@tanstack/query-db-collection` and
 `@tanstack/offline-transactions` were both accidentally released as 1.0 before
-the RC. Keep them on their existing 1.x versions.
+the RC. Keep them on 1.x and update to their latest 1.x patch releases. Those
+patches use the app's `@tanstack/db` as a peer dependency, so the RC and stable
+packages share one DB instance.
 
 ## Replace `$synced` with `$hasPendingWrites`
 
@@ -39,18 +41,17 @@ the write. See [Virtual properties](./live-queries.md#virtual-properties) for
 the other row metadata fields.
 
 If you create virtual rows yourself, include `$hasPendingWrites`:
-`hasVirtualProps(row)` now requires it. If you call
-`enrichRowWithVirtualProps`, its fourth argument computes pending writes rather
-than the inverse `$synced` value.
+`hasVirtualProps(row)` now requires it.
 
 ### Keep virtual field names for row metadata
 
 The fields `$hasPendingWrites`, `$origin`, `$key`, and `$collectionId` are
 reserved on published Collection rows. A selected field with one of those names
-cannot replace the metadata at a live-query row root. Whole-row outputs retain
-their source row's metadata; ordinary projections receive the live-query
-Collection's metadata. Rename application data fields that collide with these
-names before selecting them as row roots.
+cannot author conflicting metadata at a live-query row root. Whole-row outputs,
+including a selected joined row, retain that source row's metadata. Ordinary
+projections without selected virtual fields receive the live-query Collection's
+metadata. Rename application data fields that collide with these names before
+selecting them as row roots.
 
 ## Wait for transaction settlement
 

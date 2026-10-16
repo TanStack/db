@@ -112,6 +112,12 @@ An explicit `queryKey` is the caller's identity contract. If its source object
 changes, change the key too, even when the source ID stays the same. Use a
 primitive scope token in the key; Collection objects cannot be hashed there.
 
+Configs with `getKey` or `schema` work without a `queryKey` in client renders.
+The hook identifies those opaque options by object reference, so keep a stable
+function or schema reference across renders to avoid rebuilding the query. For
+SSR streaming, provide a serializable `queryKey` that is the same on the server
+and client; object references cannot have a shared identity across runtimes.
+
 An unhashable query without `queryKey` throws. Include captured values from
 opaque logic in the key so changes to those values recreate the query. If
 deriving identity becomes expensive across renders, the hook warns once and

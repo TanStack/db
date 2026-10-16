@@ -34,7 +34,7 @@ Live query results include computed, read-only virtual properties on every row:
 - `$hasPendingWrites`: `true` while a pending local optimistic mutation affects the row; otherwise `false`. It is always `false` for local-only collections. It does not indicate server acknowledgement.
 - `$origin`: Collection attribution for the current row. Optimistic rows are `"local"`; source rows use key and timing, not a source client ID. A peer write can be `"local"`. A truncate does not consume an active mutation's attribution for an untouched key. See [VirtualOrigin](../reference/type-aliases/VirtualOrigin.md) for settlement, truncate, and overlap rules. Local-only Collections always use `"local"`.
 - `$key`: the row key for the result.
-- `$collectionId`: the source collection ID.
+- `$collectionId`: the selected source Collection's ID for a whole-row `.select` or a `.select` projection that spreads a source row, including a joined row. With multiple source spreads, the last spread supplies the metadata. An ordinary projection without selected virtual fields receives the live-query Collection's ID.
 
 These props can be used in `where`, `select`, and `orderBy` clauses. They are added to
 query outputs automatically and should not be persisted back to storage.

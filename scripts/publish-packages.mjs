@@ -46,7 +46,7 @@ async function publishWithHiddenPackages(
 
 /**
  * Changesets uses the `rc` npm tag for every package while pre mode is active.
- * Publish candidates first, then publish stable packages with pre mode hidden.
+ * Publish stable compatibility patches first, then publish candidates.
  */
 export async function publishDuringRc(
   rootDirectory = root,
@@ -71,7 +71,6 @@ export async function publishDuringRc(
     )
   }
 
-  await publishWithHiddenPackages(rootDirectory, stable, false, publishCommand)
   if (stable.length > 0) {
     await publishWithHiddenPackages(
       rootDirectory,
@@ -80,6 +79,7 @@ export async function publishDuringRc(
       publishCommand,
     )
   }
+  await publishWithHiddenPackages(rootDirectory, stable, false, publishCommand)
 }
 
 async function main() {

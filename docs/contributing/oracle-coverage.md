@@ -124,10 +124,16 @@ functional root publication. It also holds an optimistic source update and
 checks that a root projection cannot replace the source's pending-write,
 origin, key, or Collection ID metadata with explicitly selected fields.
 Whole-row roots retain source metadata, while ordinary projections receive
-metadata from the live-query Collection. Inline Effects and nested subquery
-results retain their selected shapes; they are not Collection row publication
-boundaries. These fixed controlled-Collection cases do not establish every
-nested projection shape or framework receiving boundary.
+metadata from the live-query Collection. Matched joined-row roots compare all
+four fields with the selected joined source before, during, and after one
+pending update; an extended spread, both orders of two source spreads, a
+FROM-row selection, and an unmatched RIGHT join distinguish source choice. A
+Collection-valued include rejects selected virtual metadata
+that conflicts with its child source; its inline `toArray` sibling retains a
+selected `$key`. Inline Effects and nested subquery results retain their
+selected shapes; they are not Collection row publication boundaries. These
+fixed controlled-Collection cases do not establish arbitrary joined
+projections, every nested projection shape, or framework receiving boundaries.
 
 Three type-only owners check compile-time boundaries:
 `packages/db-sqlite-persistence-core/tests/persisted-options-type-oracle.test-d.ts`

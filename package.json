@@ -34,9 +34,11 @@
   },
   "devDependencies": {
     "@changesets/apply-release-plan": "7.0.14",
+    "@changesets/assemble-release-plan": "6.0.9",
     "@changesets/cli": "^2.29.8",
     "@changesets/config": "3.1.2",
     "@changesets/get-release-plan": "4.0.14",
+    "@changesets/read": "0.6.6",
     "@eslint/js": "^9.39.2",
     "@fast-check/vitest": "^0.2.0",
     "@manypkg/get-packages": "1.1.3",

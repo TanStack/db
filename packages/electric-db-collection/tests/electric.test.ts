@@ -1006,6 +1006,29 @@ describe(`Electric Integration`, () => {
       expect(testCollection._state.syncedData.size).toEqual(1)
     })
 
+    it(`rejects a handler that returns a legacy txid instead of awaiting it`, async () => {
+      const testCollection = createCollection(
+        electricCollectionOptions({
+          id: `legacy-return-value`,
+          shapeOptions: {
+            url: `http://test-url`,
+            params: { table: `test_table` },
+          },
+          startSync: true,
+          getKey: (item: Row) => item.id as number,
+          onInsert: (() =>
+            Promise.resolve({ txid: 123 })) as unknown as () => Promise<void>,
+        }),
+      )
+
+      const transaction = testCollection.insert({ id: 1, name: `pending` })
+      await expect(transaction.when(`settled`)).rejects.toThrow(
+        /returned a value.*awaitTxId/i,
+      )
+      expect(testCollection.has(1)).toBe(false)
+      await testCollection.cleanup()
+    })
+
     it(`should remove optimistic insert when txid sync confirms a different server-generated key`, async () => {
       const txid = 1234
       const onInsert = vi.fn(

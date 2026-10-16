@@ -2596,7 +2596,41 @@ describe(`QueryCollection`, () => {
       ])
     })
 
-    it(`does not reject a deprecated auto-refetch when result application fails`, async () => {
+    it(`does not warn that retained automatic refetch is being removed`, async () => {
+      resetWarnings()
+      const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }])
+      const options = queryCollectionOptions<TestItem>({
+        id: `retained-auto-refetch`,
+        queryClient,
+        queryKey: [`retained-auto-refetch`],
+        queryFn,
+        getKey,
+        onInsert: () => Promise.resolve(),
+        startSync: true,
+      })
+      const collection = createCollection(options)
+      const transaction = {
+        id: `retained-auto-refetch-transaction`,
+        mutations: [],
+      } as unknown as TransactionWithMutations<TestItem, `insert`>
+
+      try {
+        await collection.stateWhenReady()
+        await options.onInsert!({ transaction, collection })
+        expect(queryFn).toHaveBeenCalledTimes(2)
+        expect(
+          warning.mock.calls.some(([message]) =>
+            String(message).includes(`removed in v1.0`),
+          ),
+        ).toBe(false)
+      } finally {
+        warning.mockRestore()
+        await collection.cleanup()
+      }
+    })
+
+    it(`does not reject automatic refetch when result application fails`, async () => {
       resetWarnings()
       const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
       const consoleError = vi

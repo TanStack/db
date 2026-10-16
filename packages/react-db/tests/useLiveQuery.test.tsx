@@ -3551,4 +3551,43 @@ describe(`retained useLiveQuery results`, () => {
       expect([...read.state.values()].map((row) => row.version)).toEqual([1])
     },
   )
+
+  it(`accepts getKey without queryKey and replaces the query when getKey changes`, async () => {
+    const source = createCollection(
+      localOnlyCollectionOptions<{ id: string; value: string }, string>({
+        id: `hook-opaque-config-identity`,
+        getKey: (row) => row.id,
+        initialData: [{ id: `one`, value: `value` }],
+      }),
+    )
+    const firstKey = (row: { id: string }) => row.id
+    const secondKey = (row: { id: string }) => `other-${row.id}`
+    const { result, rerender, unmount } = renderHook(
+      ({ getKey }) =>
+        useLiveQuery({
+          query: (q) => q.from({ row: source }),
+          getKey,
+        }),
+      { initialProps: { getKey: firstKey } },
+    )
+    let firstCollection: typeof result.current.collection | undefined
+
+    try {
+      await waitFor(() => expect(result.current.isReady).toBe(true))
+      firstCollection = result.current.collection
+      expect(firstCollection.has(`one`)).toBe(true)
+
+      rerender({ getKey: secondKey })
+      await waitFor(() => expect(result.current.isReady).toBe(true))
+      expect(result.current.collection).not.toBe(firstCollection)
+      expect(result.current.collection.has(`other-one`)).toBe(true)
+    } finally {
+      unmount()
+      await firstCollection?.cleanup()
+      if (result.current.collection !== firstCollection) {
+        await result.current.collection.cleanup()
+      }
+      await source.cleanup()
+    }
+  })
 })

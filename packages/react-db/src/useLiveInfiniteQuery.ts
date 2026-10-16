@@ -221,21 +221,26 @@ export function useLiveInfiniteQuery<TContext extends Context>(
       identityDeps = committed.dependencies ?? []
     } else {
       identityMode = `derived`
-      const preparation = prepareDerivedQuery(
-        queryFnOrCollection,
-        dbClient,
-        derivedIdentityProfilerRef.current,
-        deferredCollections,
-      )
-      preparedQueryValue = preparation.value
-      claimSourceIds(
-        (sourceIdsRef.current ??= createSourceIdBindings()),
-        preparation.value,
-        dbClient,
-        `useLiveInfiniteQuery`,
-        () => resumeSyncStarts(deferredCollections),
-      )
-      identityDeps = preparation.identityDeps
+      try {
+        const preparation = prepareDerivedQuery(
+          queryFnOrCollection,
+          dbClient,
+          derivedIdentityProfilerRef.current,
+          deferredCollections,
+        )
+        preparedQueryValue = preparation.value
+        claimSourceIds(
+          (sourceIdsRef.current ??= createSourceIdBindings()),
+          preparation.value,
+          dbClient,
+          `useLiveInfiniteQuery`,
+          () => resumeSyncStarts(deferredCollections),
+        )
+        identityDeps = preparation.identityDeps
+      } catch (error) {
+        resumeSyncStarts(deferredCollections)
+        throw error
+      }
     }
   }
 

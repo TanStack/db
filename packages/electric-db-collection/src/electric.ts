@@ -1259,6 +1259,9 @@ export function electricCollectionOptions<T extends Row<unknown>>(
   )
   const options = {
     ...restConfig,
+    onInsert: rejectReturnedHandlerValue(config.onInsert, `onInsert`),
+    onUpdate: rejectReturnedHandlerValue(config.onUpdate, `onUpdate`),
+    onDelete: rejectReturnedHandlerValue(config.onDelete, `onDelete`),
     syncMode: finalSyncMode,
     sync: syncTemplate,
     utils: utilityTemplate,
@@ -1275,6 +1278,21 @@ export function electricCollectionOptions<T extends Row<unknown>>(
       ) => typeof options
     )(config),
   )
+}
+
+function rejectReturnedHandlerValue<TParams>(
+  handler: ((params: TParams) => Promise<void>) | undefined,
+  name: string,
+): ((params: TParams) => Promise<void>) | undefined {
+  if (!handler) return undefined
+  return async (params) => {
+    const result: unknown = await handler(params)
+    if (result !== undefined) {
+      throw new Error(
+        `Electric ${name} returned a value. Await collection.utils.awaitTxId() or awaitMatch() inside the handler instead.`,
+      )
+    }
+  }
 }
 
 /**

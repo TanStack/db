@@ -232,10 +232,7 @@ export function useLiveSuspenseQuery(configOrQueryOrCollection: any) {
   const observerError = queryInfo.observer.getError()
   // A client request can reject with undefined, which getError() cannot
   // distinguish from no error. The request status preserves that distinction.
-  const clientQuery =
-    queryInfo.client && queryInfo.queryHash
-      ? queryInfo.client._getLiveQuery(queryInfo.queryHash)
-      : undefined
+  const clientQuery = queryInfo.client?._getLiveQuery(queryInfo.queryHash)
   // A configured persisted restore may still satisfy this render after the
   // client query fails. Let the observer classify that failure below.
   if (
@@ -285,11 +282,6 @@ export function useLiveSuspenseQuery(configOrQueryOrCollection: any) {
       (collectionStatus === `error` &&
         result.persistedStatus !== `unavailable`))
   ) {
-    if (queryInfo.client?._isSsrStreamingEnabled() && !queryInfo.queryHash) {
-      throw new Error(
-        `Cannot stream this live query during SSR because it has no stable identity. Provide an explicit serializable queryKey.`,
-      )
-    }
     // Create or reuse promise for current collection
     if (!promiseRef.current) {
       const collection = result.collection
@@ -306,12 +298,10 @@ export function useLiveSuspenseQuery(configOrQueryOrCollection: any) {
         stopWatchingCleanup()
         throw error
       }
-      const preloadClientQuery =
-        client && queryHash ? client._getLiveQuery(queryHash) : undefined
+      const preloadClientQuery = client?._getLiveQuery(queryHash)
       promiseRef.current = preload
         .catch((error: unknown) => {
-          const latestClientQuery =
-            client && queryHash ? client._getLiveQuery(queryHash) : undefined
+          const latestClientQuery = client?._getLiveQuery(queryHash)
           if (active && latestClientQuery === preloadClientQuery)
             rememberInitialRenderError(
               collection,

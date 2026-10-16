@@ -653,34 +653,40 @@ function useLiveQueryImpl(configOrQueryOrCollection: any, forSuspense = false) {
   let identityDeps: ReadonlyArray<unknown>
   let streamIdentity: unknown = undefined
 
-  if (queryKey) {
-    identityDeps = queryKey
-    streamIdentity = [`queryKey`, queryKey]
-  } else if (inputIsCollection) {
-    identityDeps = []
-    streamIdentity = [`collection`, configOrQueryOrCollection.id]
-  } else {
-    const preparation = prepareDerivedQuery(
-      configOrQueryOrCollection,
-      dbClient,
-      instance.derivedIdentityProfiler,
-      instance.deferredCollections,
-    )
-    preparedQueryValue = preparation.value
-    identityDeps = preparation.identityDeps
-    streamIdentity = preparation.identityDeps
-  }
+  let queryHash: string
+  try {
+    if (queryKey) {
+      identityDeps = queryKey
+      streamIdentity = [`queryKey`, queryKey]
+    } else if (inputIsCollection) {
+      identityDeps = []
+      streamIdentity = [`collection`, configOrQueryOrCollection.id]
+    } else {
+      const preparation = prepareDerivedQuery(
+        configOrQueryOrCollection,
+        dbClient,
+        instance.derivedIdentityProfiler,
+        instance.deferredCollections,
+      )
+      preparedQueryValue = preparation.value
+      identityDeps = preparation.identityDeps
+      streamIdentity = preparation.identityDeps
+    }
 
-  const queryHash = getStableValueHash(streamIdentity, `queryKey`)
+    queryHash = getStableValueHash(streamIdentity, `queryKey`)
 
-  if (queryKey === undefined && preparedQueryValue !== unpreparedQueryValue) {
-    claimSourceIds(
-      instance.sourceIds,
-      preparedQueryValue,
-      dbClient,
-      `useLiveQuery`,
-      resumeDeferredCollections,
-    )
+    if (queryKey === undefined && preparedQueryValue !== unpreparedQueryValue) {
+      claimSourceIds(
+        instance.sourceIds,
+        preparedQueryValue,
+        dbClient,
+        `useLiveQuery`,
+        resumeDeferredCollections,
+      )
+    }
+  } catch (error) {
+    resumeDeferredCollections()
+    throw error
   }
 
   const canReuseSuspenseKey =
@@ -694,7 +700,6 @@ function useLiveQueryImpl(configOrQueryOrCollection: any, forSuspense = false) {
   if (
     forSuspense &&
     !inputIsCollection &&
-    queryHash &&
     !canReuseSuspenseKey &&
     preparedQueryValue === unpreparedQueryValue
   ) {
@@ -706,19 +711,17 @@ function useLiveQueryImpl(configOrQueryOrCollection: any, forSuspense = false) {
   }
 
   const suspenseKey =
-    queryHash && forSuspense && !inputIsCollection
+    forSuspense && !inputIsCollection
       ? canReuseSuspenseKey
-        ? instance.suspenseKey
+        ? instance.suspenseKey!
         : getSourceQualifiedSuspenseKey(preparedQueryValue, queryHash, dbClient)
       : queryHash
 
   const suspenseCollections =
-    forSuspense && !inputIsCollection && suspenseKey
+    forSuspense && !inputIsCollection
       ? getSuspenseCollections(dbClient)
       : undefined
-  const suspenseEntry = suspenseKey
-    ? suspenseCollections?.get(suspenseKey)
-    : undefined
+  const suspenseEntry = suspenseCollections?.get(suspenseKey)
   const suspenseCollection = suspenseEntry?.collection
 
   const identityChanged =
@@ -872,7 +875,7 @@ function useLiveQueryImpl(configOrQueryOrCollection: any, forSuspense = false) {
   if (forSuspense) {
     setLiveQueryResultInfo(returned, {
       client: dbClient,
-      queryHash: instance.queryHash,
+      queryHash,
       observer,
     })
   }

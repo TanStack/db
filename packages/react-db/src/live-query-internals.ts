@@ -4,7 +4,7 @@ const liveQueryResultInfo = Symbol(`liveQueryResultInfo`)
 
 export type LiveQueryResultInfo = {
   client: DbClient | undefined
-  queryHash: string | undefined
+  queryHash: string
   observer: LiveQueryObserver<object, string | number>
 }
 

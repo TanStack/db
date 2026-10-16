@@ -17,8 +17,11 @@
  *
  * The legal query forms exercised here are expression-projected, unprojected,
  * and functional root rows; unprojected and directly selected whole-row
- * children; an unmatched left-joined whole row; and object, nested-object,
- * array, `findOne`, and Date child projections. The production
+ * children; an unmatched left-joined whole row; matched and unmatched
+ * whole-row joins, including an extended spread and both orders of two source
+ * spreads; a Collection-valued child with colliding selected metadata
+ * and its inline-value control; and object, nested-object, array, `findOne`,
+ * and Date child projections. The production
  * driver calls `createLiveQueryCollection`, `preload`, `toArray`, and
  * `materialize`. The checkpoint is `live.toArray` after `preload` resolves.
  *
@@ -26,8 +29,14 @@
  * `hasVirtualProps`, so a missing field cannot hide behind the production
  * classifier. Exact `$key`, selected shapes, and nonempty child results prove
  * the intended paths ran. This oracle
- * does not cover matched join shapes, ordering, updates after publication,
- * framework receiving boundaries, or sync-state transitions. The root-shape
+ * does not cover ordering, arbitrary joined projections, framework receiving
+ * boundaries, or sync-state transitions beyond one pending joined-row update.
+ * The selected joined row is compared with the joined source's public row at
+ * preload, pending-write, and settled cuts; a FROM-source selection, two
+ * opposite spread orders, and an unmatched RIGHT join distinguish a
+ * main-source, first-spread, or last-join shortcut. The
+ * Collection-valued child is compared with its source Collection, while its
+ * inline sibling must retain the selected `$key` value. The root-shape
  * matrix rejects the wrong rule that only expression projections receive
  * virtual row fields. Prior hostile controls made projected-value
  * enrichment and a missing whole-row classification fail at these
@@ -119,6 +128,217 @@ async function checkWithCleanup(
 }
 
 describe(`virtual row field runtime boundary`, () => {
+  test(`keeps source metadata authoritative on Collection-valued include rows`, async () => {
+    const parents = createCollection(
+      mockSyncCollectionOptions<{ id: string }>({
+        id: `included-virtual-parents`,
+        getKey: (row) => row.id,
+        initialData: [{ id: `parent-1` }],
+      }),
+    )
+    const children = createCollection(
+      mockSyncCollectionOptions<{ id: string; parentId: string }>({
+        id: `included-virtual-children`,
+        getKey: (row) => row.id,
+        initialData: [{ id: `child-1`, parentId: `parent-1` }],
+      }),
+    )
+    const live = createLiveQueryCollection((q) =>
+      q.from({ parent: parents }).select(({ parent }) => ({
+        id: parent.id,
+        children: q
+          .from({ child: children })
+          .where(({ child }) => eq(child.parentId, parent.id))
+          .select(({ child }) => ({
+            id: child.id,
+            $key: `selected-key`,
+            $collectionId: `selected-collection`,
+            $hasPendingWrites: true,
+            $origin: `local`,
+          })),
+        inlineChildren: toArray(
+          q
+            .from({ child: children })
+            .where(({ child }) => eq(child.parentId, parent.id))
+            .select(({ child }) => ({
+              id: child.id,
+              $key: `inline-selected-key`,
+            })),
+        ),
+      })),
+    )
+    // A child facade is a public Collection, unlike an inline toArray value.
+    // Its row cannot publish selected literals as system metadata.
+    await checkWithCleanup(async () => {
+      await live.preload()
+      const child = live.toArray[0]!.children.toArray[0]!
+      const source = children.get(`child-1`)!
+      for (const name of virtualFieldNames) {
+        expect(child[name], name).toBe(source[name])
+      }
+      expect(live.toArray[0]!.inlineChildren).toEqual([
+        { id: `child-1`, $key: `inline-selected-key` },
+      ])
+    }, [
+      () => live.cleanup(),
+      () => children.cleanup(),
+      () => parents.cleanup(),
+    ])
+  })
+
+  test(`keeps a selected joined row's source metadata across match and pending update`, async () => {
+    const lists = createCollection(
+      mockSyncCollectionOptions<{ id: string }>({
+        id: `joined-virtual-lists`,
+        getKey: (row) => row.id,
+        initialData: [{ id: `list-1` }],
+      }),
+    )
+    const items = createCollection(
+      mockSyncCollectionOptions<{
+        id: string
+        listId: string
+        label: string
+      }>({
+        id: `joined-virtual-items`,
+        getKey: (row) => row.id,
+        initialData: [{ id: `item-1`, listId: `list-1`, label: `before` }],
+      }),
+    )
+    const live = createLiveQueryCollection((q) =>
+      q
+        .from({ list: lists })
+        .join({ item: items }, ({ list, item }) => eq(list.id, item.listId))
+        .select(({ item }) => ({ ...item })),
+    )
+    const fromLive = createLiveQueryCollection((q) =>
+      q
+        .from({ list: lists })
+        .join({ item: items }, ({ list, item }) => eq(list.id, item.listId))
+        .select(({ list }) => ({ ...list })),
+    )
+    const extended = createLiveQueryCollection((q) =>
+      q
+        .from({ list: lists })
+        .join({ item: items }, ({ list, item }) => eq(list.id, item.listId))
+        .select(({ item }) => ({
+          ...item,
+          copyOfLabel: item.label,
+          $key: `selected-key`,
+        })),
+    )
+    const lastItem = createLiveQueryCollection((q) =>
+      q
+        .from({ list: lists })
+        .join({ item: items }, ({ list, item }) => eq(list.id, item.listId))
+        .select(({ list, item }) => ({ ...list, ...item })),
+    )
+    const lastList = createLiveQueryCollection((q) =>
+      q
+        .from({ list: lists })
+        .join({ item: items }, ({ list, item }) => eq(list.id, item.listId))
+        .select(({ list, item }) => ({ ...item, ...list })),
+    )
+    const functional = createLiveQueryCollection((q) =>
+      q
+        .from({ list: lists })
+        .join({ item: items }, ({ list, item }) => eq(list.id, item.listId))
+        .fn.select(({ item }) => ({ ...item })),
+    )
+
+    // A whole-row selection names the joined item as its metadata source.
+    // The independent expected row is the item's public Collection row at
+    // each checkpoint; list metadata has a different key and Collection ID.
+    await checkWithCleanup(async () => {
+      await Promise.all([
+        live.preload(),
+        fromLive.preload(),
+        extended.preload(),
+        lastItem.preload(),
+        lastList.preload(),
+        functional.preload(),
+      ])
+      const expectItemMetadata = () => {
+        const actual = live.toArray[0]!
+        const item = items.get(`item-1`)!
+        expect(actual.label).toBe(item.label)
+        for (const name of virtualFieldNames) {
+          expect(actual[name], name).toBe(item[name])
+          expect(extended.toArray[0]![name], `extended ${name}`).toBe(
+            item[name],
+          )
+          expect(lastItem.toArray[0]![name], `last item ${name}`).toBe(
+            item[name],
+          )
+          expect(functional.toArray[0]![name], `functional ${name}`).toBe(
+            item[name],
+          )
+        }
+      }
+
+      expectItemMetadata()
+      for (const name of virtualFieldNames) {
+        expect(fromLive.toArray[0]![name], name).toBe(
+          lists.get(`list-1`)![name],
+        )
+        expect(lastList.toArray[0]![name], `last list ${name}`).toBe(
+          lists.get(`list-1`)![name],
+        )
+      }
+      const update = items.update(`item-1`, (draft) => {
+        draft.label = `pending`
+      })
+      await vi.waitFor(() => expect(live.toArray[0]?.label).toBe(`pending`))
+      expect(items.get(`item-1`)?.$hasPendingWrites).toBe(true)
+      expectItemMetadata()
+      items.utils.resolveSync()
+      await update.when(`settled`)
+      expectItemMetadata()
+    }, [
+      () => fromLive.cleanup(),
+      () => extended.cleanup(),
+      () => lastItem.cleanup(),
+      () => lastList.cleanup(),
+      () => functional.cleanup(),
+      () => live.cleanup(),
+      () => items.cleanup(),
+      () => lists.cleanup(),
+    ])
+  })
+
+  test(`keeps the selected right-join row's metadata when the FROM row is absent`, async () => {
+    const lists = createCollection(
+      mockSyncCollectionOptions<{ id: string }>({
+        id: `right-virtual-lists`,
+        getKey: (row) => row.id,
+        initialData: [],
+      }),
+    )
+    const items = createCollection(
+      mockSyncCollectionOptions<{ id: string; listId: string }>({
+        id: `right-virtual-items`,
+        getKey: (row) => row.id,
+        initialData: [{ id: `item-1`, listId: `missing` }],
+      }),
+    )
+    const live = createLiveQueryCollection((q) =>
+      q
+        .from({ list: lists })
+        .rightJoin({ item: items }, ({ list, item }) =>
+          eq(list.id, item.listId),
+        )
+        .select(({ item }) => item),
+    )
+
+    await checkWithCleanup(async () => {
+      await live.preload()
+      expect(live.toArray).toHaveLength(1)
+      for (const name of virtualFieldNames) {
+        expect(live.toArray[0]![name], name).toBe(items.get(`item-1`)![name])
+      }
+    }, [() => live.cleanup(), () => items.cleanup(), () => lists.cleanup()])
+  })
+
   test(`keeps source write metadata authoritative over selected field names`, async () => {
     const rows = createCollection(
       mockSyncCollectionOptions<{ id: string; label: string }>({
@@ -137,11 +357,21 @@ describe(`virtual row field runtime boundary`, () => {
         $collectionId: `selected-collection`,
       })),
     )
+    const functional = createLiveQueryCollection((q) =>
+      q.from({ row: rows }).fn.select(({ row }) => ({
+        id: row.id,
+        label: row.label,
+        $hasPendingWrites: false,
+        $origin: `remote`,
+        $key: `selected-key`,
+        $collectionId: `selected-collection`,
+      })),
+    )
 
     // The model is the source Collection's public row during a held optimistic
     // update. Selection changes user fields, but cannot author system metadata.
     await checkWithCleanup(async () => {
-      await live.preload()
+      await Promise.all([live.preload(), functional.preload()])
       const update = rows.update(`row-1`, (draft) => {
         draft.label = `pending`
       })
@@ -156,10 +386,16 @@ describe(`virtual row field runtime boundary`, () => {
         $key: `row-1`,
         $collectionId: rows.id,
       })
+      expect(functional.toArray[0]).toMatchObject({
+        $hasPendingWrites: true,
+        $origin: `local`,
+        $key: `row-1`,
+        $collectionId: rows.id,
+      })
 
       rows.utils.resolveSync()
       await update.when(`settled`)
-    }, [() => live.cleanup(), () => rows.cleanup()])
+    }, [() => functional.cleanup(), () => live.cleanup(), () => rows.cleanup()])
   })
 
   test(`publishes every virtual field on implicit, expression, and functional root shapes`, async () => {
