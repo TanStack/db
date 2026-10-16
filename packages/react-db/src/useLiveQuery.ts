@@ -713,8 +713,10 @@ export function useLiveQueryForSuspense(
   return useLiveQueryImpl(configOrQueryOrCollection, deps, true)
 }
 
-// What one hook instance keeps across renders. It lives in a single ref
-// slot, so a render neither looks up nor allocates more.
+/**
+ * Keeps observer and query-reuse state in one ref per hook instance.
+ * Loading mode must match before a render can reuse the retained collection.
+ */
 function createHookInstance(dbClient: DbClient | undefined) {
   return {
     collection: null as Collection<object, string | number, {}> | null,
@@ -741,6 +743,10 @@ function createHookInstance(dbClient: DbClient | undefined) {
   }
 }
 
+/**
+ * Shares subscription and identity handling between regular and Suspense hooks.
+ * Query reuse requires matching loading policy as well as query identity.
+ */
 function useLiveQueryImpl(
   configOrQueryOrCollection: any,
   deps: Array<unknown> | undefined,

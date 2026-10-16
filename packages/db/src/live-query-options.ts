@@ -86,6 +86,10 @@ function createCollectionResolver(
   }
 }
 
+/**
+ * Evaluates query callbacks and binds descriptors through the supplied client.
+ * Nullish query results stay disabled; callers can defer descriptor sync starts.
+ */
 export function prepareLiveQueryValue(
   value: unknown,
   dbClient: DbClient | undefined,
@@ -135,6 +139,7 @@ export function prepareLiveQueryValue(
   return value
 }
 
+/** Recognizes config-shaped inputs without evaluating their query callbacks. */
 function getLiveQueryConfig(
   value: unknown,
 ): PreparedLiveQueryConfigInput | undefined {
@@ -166,6 +171,10 @@ export function getPreparedLiveQuerySources(
   return isCollection(query) ? [query] : []
 }
 
+/**
+ * Includes result configuration and loading mode in a derived query identity.
+ * Omitting autoLoad and explicitly enabling it produce the same identity.
+ */
 export function getPreparedLiveQueryIdentity(value: unknown): unknown {
   if (isCollection(value)) return [`collection`, value.id]
   if (value instanceof BaseQueryBuilder) {
@@ -195,6 +204,10 @@ export function getPreparedLiveQueryIdentity(value: unknown): unknown {
   return [`value`, value]
 }
 
+/**
+ * Identifies a query for preloading, hydration, and shared observers.
+ * Explicit keys replace derived identity but keep loading modes separate.
+ */
 export function getLiveQueryHash(
   preparedValue: unknown,
   queryKey?: LiveQueryKey,

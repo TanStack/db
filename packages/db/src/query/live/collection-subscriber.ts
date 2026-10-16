@@ -67,10 +67,12 @@ export class CollectionSubscriber<
     return !this.collectionConfigBuilder.hasSubscriberOrPreload()
   }
 
+  /**
+   * With loading disabled, the graph needs all available matching rows for
+   * joins and top-K evaluation, independent of provider coverage.
+   */
   private subscribeToChanges(whereExpression?: BasicExpression<boolean>) {
     if (!this.collectionConfigBuilder.autoLoad) {
-      // The graph owns filtering, joins and top-K over all available rows.
-      // Local windows need all available rows, independent of provider coverage.
       const subscription = this.collection.subscribeChanges(
         (changes) => this.sendChangesToPipeline(changes),
         { includeInitialState: true, whereExpression, autoLoad: false },

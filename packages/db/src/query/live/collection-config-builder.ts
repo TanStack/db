@@ -1217,6 +1217,7 @@ export class CollectionConfigBuilder<
     this.liveQueryCollection?._lifecycle.markError(error ?? new Error(message))
   }
 
+  /** Queries that do not acquire data have no source-readiness prerequisite. */
   private allRequiredSourcesReady() {
     if (!this.autoLoad) return true
     return this.collectionSources.every(({ collection }) =>

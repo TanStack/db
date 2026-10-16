@@ -183,7 +183,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
   deps?: Array<unknown>,
 ): UseLiveInfiniteQueryReturn<TContext>
 
-// Implementation
+/** Changing loading mode recreates the query and resets its accumulated pages. */
 export function useLiveInfiniteQuery<TContext extends Context>(
   queryFnOrCollection: any,
   config: UseLiveInfiniteQueryConfig<TContext>,
