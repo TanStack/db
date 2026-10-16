@@ -73,7 +73,11 @@ export class OrderedSourceLoader {
   private orderedPrefixRepairGeneration: number | undefined
   private lastPage: { count: number; boundary: unknown } | undefined
   private lastPrefixCount: number | undefined
+  // The count of the last request that read from the start of the order,
+  // until a continuation reads past it.
+  private ownPrefixCount: number | undefined
   private lastBoundary: unknown
+  private retiringSupersededAcquisitions = false
   private repairRetries = 0
   private repairTimer: ReturnType<typeof setTimeout> | undefined
   private stagedContinuation: OrderedContinuation | undefined
@@ -84,6 +88,10 @@ export class OrderedSourceLoader {
       }
     | undefined
   private drainingNoInputContinuations = false
+  // The graph input revision at which a graph turn asked for more data while
+  // a synchronous request was running. That turn has already processed the
+  // request's writes, and it will not ask again.
+  private graphCheckedDuringRequest: number | undefined
   // An eager source holds every row, so an index on a single order term can
   // answer a prefix with only the first rows of the window.
   private readonly readsBoundedPrefix: boolean
@@ -119,6 +127,11 @@ export class OrderedSourceLoader {
     let hasNewRows = false
     for (const change of changes) {
       const previous = sentRows?.get(change.key)
+      // A finished repair holds every row through its boundary, so releasing
+      // what it superseded removes only rows outside its coverage.
+      if (change.type === `delete` && this.retiringSupersededAcquisitions) {
+        continue
+      }
       if (
         change.type !== `insert` &&
         previous !== undefined &&
@@ -154,6 +167,9 @@ export class OrderedSourceLoader {
     windowOperationGeneration?: number,
     continuesOrderedPrefixRepair = false,
   ): Promise<void> | undefined {
+    if (this.requesting) {
+      this.graphCheckedDuringRequest = this.getGraphInputRevision?.()
+    }
     if (!this.active || this.info.limit === 0 || this.requesting) return
     windowOperationGeneration ??=
       this.blockedLoadMore?.windowOperationGeneration
@@ -325,6 +341,7 @@ export class OrderedSourceLoader {
     this.orderedRepairAcquisitions = new Set()
     this.authoritativeRequestState = `held`
     this.authoritativeRequestKind = `ordered-repair`
+    this.ownPrefixCount = this.info.offset + this.info.limit
     this.requestAndObserve(
       (onLoadSubsetResult) => {
         this.subscription.requestSnapshot({
@@ -375,6 +392,7 @@ export class OrderedSourceLoader {
       count,
     )
     this.lastPrefixCount = count
+    this.ownPrefixCount = count
   }
 
   resetCursor(): void {
@@ -460,16 +478,66 @@ export class OrderedSourceLoader {
     this.orderingInvalidationGeneration++
     this.invalidateCursor()
     this.lastBoundary = undefined
+    // In-flight page or tie work does not force a full-source read. The
+    // bounded repair starts at once, and that work's later result is ignored
+    // for its boundary. Full-source reads can be very expensive.
     if (
       !this.needsOrderingRepair &&
       this.hasSettledSourceRequest &&
-      this.pending === undefined &&
       this.authoritativeRequestState === `none`
     ) {
       this.canRepairWithOrderedPrefix = true
     }
     this.settledSourceBoundary = undefined
     this.needsOrderingRepair = true
+  }
+
+  /**
+   * The source's sync adapter reports that served pages may have shifted.
+   * Coverage that one full-source acquisition established has no page
+   * boundary to repair, and the adapter's refetch has already re-read it.
+   * A window inside this loader's own first page needs no repair either.
+   */
+  revalidateLoadedCoverage(): void {
+    if (
+      !this.active ||
+      this.info.requiresFullSource ||
+      !this.hasSettledSourceRequest ||
+      this.authoritativeRequestState === `complete` ||
+      this.windowIsInsideOwnPrefix()
+    )
+      return
+    this.invalidateSourceOrdering()
+  }
+
+  // The refetched first page holds every row from the start of the order
+  // through its end, and any row it left out sorts after that end. So a
+  // window whose rows all sort at or before the end is right. A row after
+  // the page that ties with its end could sort before a window row; then
+  // the window is not proven.
+  private windowIsInsideOwnPrefix(): boolean {
+    const size = this.info.offset + this.info.limit
+    // A report can arrive while the refetched rows are accepted but held
+    // back, as behind a persisting optimistic transaction. The visible rows
+    // then predate the refetch and prove nothing about its page.
+    if (
+      (this.ownPrefixCount ?? 0) < size ||
+      !this.info.dataNeeded ||
+      this.subscription.hasHeldSyncTransaction
+    ) {
+      return false
+    }
+    const rows = this.subscription.readOrderedSnapshot({
+      orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
+      limit: size + 1,
+    })
+    // Optimistic rows are left out, so a short read proves nothing.
+    if (rows.length <= size) return false
+    const end = rows[size - 1]!.value
+    return (
+      this.info.comparator(rows[size]!.value, end) > 0 &&
+      this.info.dataNeeded(end) === 0
+    )
   }
 
   private finishOrderedPrefixRepair(windowOperationGeneration?: number): void {
@@ -495,9 +563,11 @@ export class OrderedSourceLoader {
       return
     }
     const retained = this.orderedRepairAcquisitions
+    this.retiringSupersededAcquisitions = true
     try {
       this.retireSettledFiniteAcquisitions(undefined, retained)
     } finally {
+      this.retiringSupersededAcquisitions = false
       const hasSupersededAcquisition = [
         ...this.settledFiniteAcquisitions.keys(),
       ].some((release) => !retained.has(release))
@@ -580,6 +650,7 @@ export class OrderedSourceLoader {
       return
     }
     this.lastPage = { count, boundary }
+    this.ownPrefixCount = startsFromSourcePrefix ? count : undefined
     this.requestAndObserve(
       (onLoadSubsetResult) => {
         this.subscription.requestLimitedSnapshot({
@@ -679,15 +750,38 @@ export class OrderedSourceLoader {
             if (!continuesOrderedPrefixRepair) {
               this.retireSettledFiniteAcquisitions()
             }
+            // A prefix issued before an ordering invalidation proves no
+            // current coverage, so it cannot supersede the repair's prefix.
             if (
               !continuesOrderedPrefixRepair &&
               orderedLoadGeneration === this.orderedLoadGeneration &&
+              (isAuthoritativeRequest ||
+                orderingInvalidationGeneration ===
+                  this.orderingInvalidationGeneration) &&
               prefixCount !== undefined
             ) {
               this.retireSettledFiniteAcquisitions({
                 release: releaseAcquisition,
                 count: prefixCount,
               })
+            }
+            // A request issued before an ordering invalidation that settles
+            // after the repair finished is already superseded by that repair.
+            if (
+              !isAuthoritativeRequest &&
+              orderedLoadGeneration === this.orderedLoadGeneration &&
+              orderingInvalidationGeneration !==
+                this.orderingInvalidationGeneration &&
+              this.authoritativeRequestState === `none` &&
+              !this.needsOrderingRepair &&
+              this.settledFiniteAcquisitions.delete(releaseAcquisition)
+            ) {
+              this.retiringSupersededAcquisitions = true
+              try {
+                releaseAcquisition()
+              } finally {
+                this.retiringSupersededAcquisitions = false
+              }
             }
           }
         },
@@ -715,6 +809,8 @@ export class OrderedSourceLoader {
             this.failedRequest
           ) {
             this.abandonOrderedPrefixRepair()
+            // The overlap replaced a full-source read; recover with one now.
+            this.loadFullSource(windowOperationGeneration)
             return
           }
           this.failedRequest = undefined
@@ -782,6 +878,16 @@ export class OrderedSourceLoader {
         this.pending = undefined
       }
       if (!this.active) return
+      // A request issued before an ordering invalidation can fail after the
+      // bounded repair that superseded it has finished. Its partial writes
+      // still need a full-source read, which the overlap used to start.
+      const recoversAfterRepair =
+        !isAuthoritativeRequest &&
+        orderingInvalidationGeneration !==
+          this.orderingInvalidationGeneration &&
+        this.failedRequest === undefined &&
+        this.authoritativeRequestState === `none` &&
+        !this.needsOrderingRepair
       // A failed request may already have written only part of its result.
       // None of those rows is a safe continuation boundary.
       this.requireFullSourceRepair()
@@ -801,6 +907,12 @@ export class OrderedSourceLoader {
       this.recordRequestFailure(windowOperationGeneration)
       this.failedAcquisitions.set(releaseAcquisition, kind)
       if (retryRepair) this.scheduleRepairRetry()
+      if (
+        recoversAfterRepair &&
+        orderedLoadGeneration === this.orderedLoadGeneration
+      ) {
+        this.loadFullSource(windowOperationGeneration)
+      }
       throw error
     }
     if (canSettleSynchronously) {
@@ -815,7 +927,7 @@ export class OrderedSourceLoader {
           () => {
             if (
               !synchronousCompletionFailure &&
-              this.getGraphInputRevision?.() === requestGraphInputRevision
+              this.graphHasProcessedInput(requestGraphInputRevision)
             ) {
               this.drainNoInputContinuations(requestGraphInputRevision)
             }
@@ -883,6 +995,19 @@ export class OrderedSourceLoader {
     this.runContinuation(continuation, windowOperationGeneration)
   }
 
+  // A staged continuation waits for the graph to process the writes that
+  // staged it; the graph turn that does so resumes it. If no write arrived
+  // since `graphInputRevision`, or a graph turn already processed every
+  // write while the request ran and asked for more, no turn will resume it,
+  // so the loader continues now.
+  private graphHasProcessedInput(graphInputRevision: number): boolean {
+    const revision = this.getGraphInputRevision?.()
+    return (
+      revision === graphInputRevision ||
+      revision === this.graphCheckedDuringRequest
+    )
+  }
+
   private drainNoInputContinuations(graphInputRevision: number): void {
     if (this.drainingNoInputContinuations) return
     this.drainingNoInputContinuations = true
@@ -890,7 +1015,7 @@ export class OrderedSourceLoader {
       while (
         this.stagedContinuation &&
         !this.pending &&
-        this.getGraphInputRevision?.() === graphInputRevision
+        this.graphHasProcessedInput(graphInputRevision)
       ) {
         this.consumeStagedContinuation()
       }
@@ -1084,6 +1209,7 @@ export class OrderedSourceLoader {
         }
       | undefined
     this.requesting = true
+    this.graphCheckedDuringRequest = undefined
     let observing = false
     const graphInputRevision = this.getGraphInputRevision?.()
     try {

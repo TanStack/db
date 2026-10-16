@@ -974,7 +974,25 @@ before adapter code runs, and reentrant truncate or disposal stops the current
 retirement pass. No copied rows or additional cursor history are retained.
 
 A visible delete or source-order change after an otherwise settled,
-expressible window uses a narrower authoritative path. Core reissues the
+expressible window uses a narrower authoritative path. So does a sync adapter's
+`invalidateLoadedSubsets()` report: after a refetch that the adapter started on
+its own has applied, served pages may have shifted so that a row now sorts
+between two of them and is in neither result. The adapter reports that instead
+of keeping each served prefix whole (the `LoadSubsetFn` rule). Core emits
+`loadedSubsets:invalidated` once per turn, and each ordered loader on the
+Collection runs this repair. A loader whose coverage is one full-source
+acquisition, or a `requiresFullSource` plan, ignores the report: the refetch
+has already re-read that acquisition, and it has no page boundary to repair.
+A loader whose coverage is still its own first ordered request, of at least
+`offset + limit` rows with no continuation past it, also ignores the report
+when its window is inside that page: every window row sorts at or before the
+`offset + limit`-th source row, and the next source row sorts strictly after
+it in the leading term. The refetched page holds every row from the start
+through its end, and any row it left out sorts after that end, so the window
+is proven. A window that needs a row past the page, such as one whose page
+holds rows a joined filter rejects, still repairs. So does any loader while
+its source holds accepted sync rows back, as behind a persisting optimistic
+transaction: the visible rows then predate the refetch. Core reissues the
 ordered prefix from the start with the query predicate, order terms, and
 `limit = offset + limit`; the transport `offset` is omitted because this
 acquisition starts at the provider's source prefix. It then reacquires the
@@ -988,10 +1006,24 @@ before the obsolete chain can issue another tie or refill. A repeated prefix or
 page fixed point ends the repair when no more data is needed; it cannot leave a
 held repair without pending work.
 The finite prefix and tie acquisitions they replace retire after the whole
-replacement chain succeeds.
-An invalidation that overlaps unfinished non-repair source work, a failed
-or canceled request, or a boundary that cannot be expressed still requires the
-full-source recovery above. A bounded repair failure likewise upgrades its
+replacement chain succeeds. That retirement can make the adapter remove rows
+only the replaced acquisitions held. The chain holds every row through its
+boundary, so such a removal is not a source-order change, and the repair keeps
+its boundary. A loader that discarded it would restart paging from the start
+of the order with a smaller first page that cannot retire the repair's prefix.
+Full-source reads can be very expensive, so a repair avoids one whenever a
+bounded read is available. An invalidation that overlaps unfinished page or tie
+work after the source has settled once does not force one: the bounded repair
+starts at once, and that work's later result is ignored for its boundary.
+Such a prefix also cannot retire the repair's acquisitions: it was issued before
+the invalidation, so it proves no current coverage. The repair supersedes any
+such request, so one that settles after the repair finished is released at
+once, like the acquisitions the repair retires. If such a request fails, its
+partial writes still need the full-source read that the overlap replaced: the
+loader starts it when the bounded repair succeeds, without an explicit retry.
+A failed or canceled request, an invalidation before any request has
+settled, or a boundary that cannot be expressed still requires the full-source
+recovery above. A bounded repair failure likewise upgrades its
 next attempt to full-source recovery because partial writes cannot establish
 finite coverage.
 
@@ -1082,7 +1114,11 @@ provider capability negotiation, comparator exception policy, and backend
 collation fidelity are outside this contract.
 
 An ordered request cannot start another ordered request through its own
-synchronous writes. If the adapter then throws, graph callbacks scheduled by
+synchronous writes. A graph turn that those writes run inside the request may
+ask for more data; the loader ignores that call, stages its continuation, and
+resumes it once the request returns, because that turn has already processed
+the writes and no later turn will ask again. A continuation staged with input
+the graph has not yet processed waits for the graph turn that processes it. If the adapter then throws, graph callbacks scheduled by
 those writes still belong to the failed window operation and cannot retry it.
 A public `setWindow()` call made from inside that synchronous operation throws
 `SetWindowReentrancyError`; it must not claim that a nested window settled after

@@ -884,6 +884,13 @@ export class CollectionStateManager<
     return this.pendingSyncedTransactions.at(-1)?.committed === false
   }
 
+  /** Whether an accepted sync transaction is not yet visible. */
+  hasHeldSyncTransaction(): boolean {
+    return this.pendingSyncedTransactions.some(
+      (transaction) => transaction.committed,
+    )
+  }
+
   /** Every synced row once every accepted sync transaction applies. */
   *acceptedSyncedEntries(): IterableIterator<[TKey, TOutput]> {
     const { states, truncated } = this.pendingSyncedProjection

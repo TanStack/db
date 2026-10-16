@@ -6331,6 +6331,9 @@ function createWrappedSyncConfig<
           truncate: () => {
             if (active()) wrappedParams.truncate()
           },
+          invalidateLoadedSubsets: () => {
+            if (active()) wrappedParams.invalidateLoadedSubsets()
+          },
           commit: (signal?: AbortSignal) =>
             active() ? wrappedParams.commit(signal) : true,
           metadata: metadata && {
