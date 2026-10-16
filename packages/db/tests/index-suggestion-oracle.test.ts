@@ -178,7 +178,10 @@ function expectedOrderedIndexDiagnostic(
 }
 
 describe(`bounded orderBy index diagnostics`, () => {
-  for (const scenario of [
+  const scenarios: ReadonlyArray<{
+    name: string
+    candidates: ReadonlyArray<OrderedIndexCandidate>
+  }> = [
     { name: `no indexes`, candidates: [] },
     {
       name: `only another field`,
@@ -244,7 +247,8 @@ describe(`bounded orderBy index diagnostics`, () => {
         { field: `name`, nulls: `first`, ordered: true },
       ],
     },
-  ] as const) {
+  ]
+  for (const scenario of scenarios) {
     test(scenario.name, async () => {
       const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
       const source = createCollection(
@@ -306,13 +310,13 @@ describe(`bounded orderBy index diagnostics`, () => {
           expect(messages[0]).toContain(
             `found an index on "name", but none uses the query's compareOptions`,
           )
-          // Direction can use the same index in reverse; it is not a
-          // comparison-options mismatch that callers must repair.
-          expect(messages[0]).not.toContain(`direction:`)
+          // Direction completes the copyable options object, but an index in
+          // the other direction can be read in reverse.
+          expect(messages[0]).toContain(`direction: "asc"`)
           expect(messages[0]).toContain(`nulls: "last"`)
           expect(messages[0]).toContain(`stringSort: "locale"`)
           expect(messages[0]).toContain(`importing BasicIndex`)
-          expect(messages[0]).toContain(`same compareOptions`)
+          expect(messages[0]).toContain(`The index direction may differ.`)
           expect(messages[0]).toContain(`options: { compareOptions:`)
         }
         if (expected === `ordered-capability`) {

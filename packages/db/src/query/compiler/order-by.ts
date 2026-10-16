@@ -104,7 +104,7 @@ function warnOrderIndexFallback(
         (candidate) => !candidate.matchesCompareOptions(options),
       )
     ) {
-      detail = `found an index on "${field}", but none uses the query's compareOptions (nulls: "${options.nulls}", stringSort: "${options.stringSort ?? `locale`}"${options.stringSort === `locale` ? `, including the same locale and localeOptions` : ``}). After importing BasicIndex from '@tanstack/db', use collection.createIndex((row) => row.${field}, { indexType: BasicIndex, options: { compareOptions: { nulls: "${options.nulls}", stringSort: "${options.stringSort ?? `locale`}" } } }) with the same compareOptions, including any locale and localeOptions.`
+      detail = `found an index on "${field}", but none uses the query's compareOptions (nulls: "${options.nulls}", stringSort: "${options.stringSort ?? `locale`}"${options.stringSort === `locale` ? `, including the same locale and localeOptions` : ``}). After importing BasicIndex from '@tanstack/db', use collection.createIndex((row) => row.${field}, { indexType: BasicIndex, options: { compareOptions: { direction: "asc", nulls: "${options.nulls}", stringSort: "${options.stringSort ?? `locale`}" } } }). Match the query's nulls and string collation, including any locale and localeOptions. The index direction may differ.`
     } else {
       detail = `found an index on "${field}" with matching compareOptions, but none supports ordered lazy loading. Use an index with ordered range reads, one comparable value domain, and no custom comparator.`
     }

@@ -64,7 +64,7 @@
       "found an index on \"",
       "\", but none uses the query's compareOptions (nulls: \"",
       "). After importing BasicIndex from '@tanstack/db', use collection.createIndex((row) => row.",
-      "\" } } }) with the same compareOptions, including any locale and localeOptions.",
+      "\" } } }). Match the query's nulls and string collation, including any locale and localeOptions. The index direction may differ.",
       "found an index on \"",
       "\" with matching compareOptions, but none supports ordered lazy loading. Use an index with ordered range reads, one comparable value domain, and no custom comparator.",
       " Local reads may scan or sort installed rows; an underfilled on-demand window may require a full-source request."
