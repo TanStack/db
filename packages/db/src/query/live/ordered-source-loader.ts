@@ -61,11 +61,14 @@ export class OrderedSourceLoader {
   private authoritativeRequestKind: `ordered-repair` | `full-source` | undefined
   // Keep callbacks, not copied requests or rows. Successful full-source work
   // subsumes these logical owners; unfinished transports remain observed.
+  // Each records its prefix count and the ordering epoch it was issued in.
   private settledFiniteAcquisitions = new Map<
     ReleaseLoadSubset,
-    number | undefined
+    { count: number | undefined; epoch: number }
   >()
-  private orderedRepairAcquisitions = new Set<ReleaseLoadSubset>()
+  // The ordering epoch of the last bounded repair that finished: settled
+  // acquisitions older than it are superseded.
+  private coverageEpoch: number | undefined
   // The record's presence blocks automatic retry, including initial requests
   // that have no explicit window-operation generation.
   private failedRequest:
@@ -376,7 +379,6 @@ export class OrderedSourceLoader {
     // Any older finite request may still settle, but it cannot refine from a
     // boundary that predates this authoritative prefix.
     this.orderedPrefixRepairGeneration = this.orderingInvalidationGeneration
-    this.orderedRepairAcquisitions = new Set()
     this.authoritativeRequestState = `held`
     this.authoritativeRequestKind = `ordered-repair`
     this.ownPrefixCount = this.info.offset + this.info.limit
@@ -473,34 +475,56 @@ export class OrderedSourceLoader {
       release: ReleaseLoadSubset
       count: number
     },
-    retained?: ReadonlySet<ReleaseLoadSubset>,
+    olderThan?: number,
   ): void {
     if (
-      (this.authoritativeRequestState !== `complete` && !prefix && !retained) ||
+      (this.authoritativeRequestState !== `complete` &&
+        !prefix &&
+        olderThan === undefined) ||
       this.subscription.hasPendingTruncateReplacement
     )
       return
     const orderedLoadGeneration = this.orderedLoadGeneration
     runAllCallbacks(
-      Array.from(this.settledFiniteAcquisitions, ([release, count]) => () => {
-        if (retained?.has(release)) return
-        if (
-          !this.active ||
-          orderedLoadGeneration !== this.orderedLoadGeneration
-        )
-          return
-        if (
-          this.authoritativeRequestState !== `complete` &&
-          !retained &&
-          (!prefix ||
-            release === prefix.release ||
-            count === undefined ||
-            count > prefix.count)
-        )
-          return
-        this.settledFiniteAcquisitions.delete(release)
-        release()
-      }),
+      Array.from(
+        this.settledFiniteAcquisitions,
+        ([release, { count, epoch }]) =>
+          () => {
+            if (olderThan !== undefined && epoch >= olderThan) return
+            if (
+              !this.active ||
+              orderedLoadGeneration !== this.orderedLoadGeneration
+            )
+              return
+            if (
+              this.authoritativeRequestState !== `complete` &&
+              olderThan === undefined &&
+              (!prefix ||
+                release === prefix.release ||
+                count === undefined ||
+                count > prefix.count)
+            )
+              return
+            this.settledFiniteAcquisitions.delete(release)
+            release()
+          },
+      ),
+    )
+  }
+
+  // Release every settled acquisition older than a finished repair's epoch.
+  // The repair holds every row through its boundary, so these removals are
+  // not source-order changes. Returns whether any older one remains, as when
+  // a release callback begins truncate replay.
+  private retireSuperseded(epoch: number): boolean {
+    this.retiringSupersededAcquisitions = true
+    try {
+      this.retireSettledFiniteAcquisitions(undefined, epoch)
+    } finally {
+      this.retiringSupersededAcquisitions = false
+    }
+    return [...this.settledFiniteAcquisitions.values()].some(
+      (entry) => entry.epoch < epoch,
     )
   }
 
@@ -586,7 +610,6 @@ export class OrderedSourceLoader {
       // A later mutation invalidated the source order while this chain was
       // running. Start its replacement before the current participant settles
       // so Collection and Effect publication remain behind one continuous gate.
-      this.orderedRepairAcquisitions = new Set()
       this.authoritativeRequestState = `none`
       this.authoritativeRequestKind = undefined
       this.orderedPrefixRepairGeneration = undefined
@@ -600,20 +623,16 @@ export class OrderedSourceLoader {
       }
       return
     }
-    const retained = this.orderedRepairAcquisitions
-    this.retiringSupersededAcquisitions = true
+    const epoch = this.orderedPrefixRepairGeneration
+    let hasSupersededAcquisition = true
     try {
-      this.retireSettledFiniteAcquisitions(undefined, retained)
+      hasSupersededAcquisition = this.retireSuperseded(epoch)
     } finally {
-      this.retiringSupersededAcquisitions = false
-      const hasSupersededAcquisition = [
-        ...this.settledFiniteAcquisitions.keys(),
-      ].some((release) => !retained.has(release))
       // A release callback may synchronously begin truncate replay. Keep the
       // repair ownership open so replay settlement can finish retiring the
       // remaining superseded leases without releasing the refreshed prefix.
       if (!this.active || !hasSupersededAcquisition) {
-        this.orderedRepairAcquisitions = new Set()
+        this.coverageEpoch = epoch
         this.cancelRepairRetry()
         this.repairRetries = 0
         this.canRepairWithOrderedPrefix = false
@@ -627,7 +646,6 @@ export class OrderedSourceLoader {
 
   private abandonOrderedPrefixRepair(): void {
     if (this.authoritativeRequestKind !== `ordered-repair`) return
-    this.orderedRepairAcquisitions = new Set()
     this.canRepairWithOrderedPrefix = false
     this.authoritativeRequestState = `none`
     this.authoritativeRequestKind = undefined
@@ -783,10 +801,10 @@ export class OrderedSourceLoader {
             // replay barrier.
             const prefixCount =
               options?.orderBy && !options.cursor ? options.limit : undefined
-            this.settledFiniteAcquisitions.set(releaseAcquisition, prefixCount)
-            if (isOrderedRepair || continuesOrderedPrefixRepair) {
-              this.orderedRepairAcquisitions.add(releaseAcquisition)
-            }
+            this.settledFiniteAcquisitions.set(releaseAcquisition, {
+              count: prefixCount,
+              epoch: stamp.orderingInvalidationGeneration,
+            })
             if (!continuesOrderedPrefixRepair) {
               this.retireSettledFiniteAcquisitions()
             }
@@ -808,14 +826,9 @@ export class OrderedSourceLoader {
               this.standing(stamp) === `stale` &&
               this.authoritativeRequestState === `none` &&
               !this.needsOrderingRepair &&
-              this.settledFiniteAcquisitions.delete(releaseAcquisition)
+              this.coverageEpoch !== undefined
             ) {
-              this.retiringSupersededAcquisitions = true
-              try {
-                releaseAcquisition()
-              } finally {
-                this.retiringSupersededAcquisitions = false
-              }
+              this.retireSuperseded(this.coverageEpoch)
             }
           }
         },
@@ -1099,7 +1112,6 @@ export class OrderedSourceLoader {
   private requireFullSourceRepair(): void {
     this.settledSourceBoundary = undefined
     this.canRepairWithOrderedPrefix = false
-    this.orderedRepairAcquisitions.clear()
     this.orderedPrefixRepairGeneration = undefined
     this.needsOrderingRepair = true
   }
