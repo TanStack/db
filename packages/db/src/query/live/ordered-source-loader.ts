@@ -19,11 +19,15 @@ import type { OrderByOptimizationInfo } from '../compiler/order-by.js'
 type OrderedRequestKind =
   `ordered` | `ordered-repair` | `boundary` | `full-source`
 
-type OrderedContinuation = {
-  kind: `boundary` | `more`
+// The generations a request or its continuation carries from issue.
+type RequestStamp = {
   orderedLoadGeneration: number
   orderingInvalidationGeneration: number
   isAuthoritativeRequest: boolean
+}
+
+type OrderedContinuation = RequestStamp & {
+  kind: `boundary` | `more`
   windowOperationGeneration?: number
   continuesOrderedPrefixRepair: boolean
 }
@@ -725,8 +729,11 @@ export class OrderedSourceLoader {
       this.hasSettledSourceRequest &&
       this.needsOrderingRepair &&
       windowOperationGeneration === undefined
-    const orderedLoadGeneration = this.orderedLoadGeneration
-    const orderingInvalidationGeneration = this.orderingInvalidationGeneration
+    const stamp: RequestStamp = {
+      orderedLoadGeneration: this.orderedLoadGeneration,
+      orderingInvalidationGeneration: this.orderingInvalidationGeneration,
+      isAuthoritativeRequest,
+    }
     const authorityGeneration = this.authorityGeneration
     const settlesAsync = result instanceof Promise
     const canSettleSynchronously =
@@ -743,10 +750,8 @@ export class OrderedSourceLoader {
     const continuation = (
       continuationKind: OrderedContinuation[`kind`],
     ): OrderedContinuation => ({
+      ...stamp,
       kind: continuationKind,
-      orderedLoadGeneration,
-      orderingInvalidationGeneration,
-      isAuthoritativeRequest,
       windowOperationGeneration,
       continuesOrderedPrefixRepair,
     })
@@ -789,10 +794,7 @@ export class OrderedSourceLoader {
             // current coverage, so it cannot supersede the repair's prefix.
             if (
               !continuesOrderedPrefixRepair &&
-              orderedLoadGeneration === this.orderedLoadGeneration &&
-              (isAuthoritativeRequest ||
-                orderingInvalidationGeneration ===
-                  this.orderingInvalidationGeneration) &&
+              this.standing(stamp) === `current` &&
               prefixCount !== undefined
             ) {
               this.retireSettledFiniteAcquisitions({
@@ -803,10 +805,7 @@ export class OrderedSourceLoader {
             // A request issued before an ordering invalidation that settles
             // after the repair finished is already superseded by that repair.
             if (
-              !isAuthoritativeRequest &&
-              orderedLoadGeneration === this.orderedLoadGeneration &&
-              orderingInvalidationGeneration !==
-                this.orderingInvalidationGeneration &&
+              this.standing(stamp) === `stale` &&
               this.authoritativeRequestState === `none` &&
               !this.needsOrderingRepair &&
               this.settledFiniteAcquisitions.delete(releaseAcquisition)
@@ -821,13 +820,7 @@ export class OrderedSourceLoader {
           }
         },
         () => {
-          if (orderedLoadGeneration !== this.orderedLoadGeneration) return
-          if (
-            !isAuthoritativeRequest &&
-            orderingInvalidationGeneration !==
-              this.orderingInvalidationGeneration
-          )
-            return
+          if (this.standing(stamp) !== `current`) return
           // A finite request may finish behind an authoritative repair. It cannot
           // clear that repair's failure or resume finite refinement around it.
           if (
@@ -903,7 +896,7 @@ export class OrderedSourceLoader {
       // A failed request may already have written only part of its result.
       // None of those rows is a safe continuation boundary.
       this.requireFullSourceRepair()
-      if (orderedLoadGeneration !== this.orderedLoadGeneration) return
+      if (this.standing(stamp) === `dead`) return
       // Authoritative work started after this request supersedes it. Its
       // failure is not the loader's own: its partial writes only raise the
       // debt to the full-source read that the overlap replaced. A running
@@ -986,18 +979,23 @@ export class OrderedSourceLoader {
     return tracked
   }
 
+  // A result is dead after a cursor reset. A non-authoritative result is stale
+  // after an ordering invalidation: it proves no current coverage.
+  private standing(stamp: RequestStamp): `dead` | `stale` | `current` {
+    if (stamp.orderedLoadGeneration !== this.orderedLoadGeneration)
+      return `dead`
+    return !stamp.isAuthoritativeRequest &&
+      stamp.orderingInvalidationGeneration !==
+        this.orderingInvalidationGeneration
+      ? `stale`
+      : `current`
+  }
+
   private runContinuation(
     continuation: OrderedContinuation,
     windowOperationGeneration = continuation.windowOperationGeneration,
   ): void {
-    if (
-      !this.active ||
-      continuation.orderedLoadGeneration !== this.orderedLoadGeneration ||
-      (!continuation.isAuthoritativeRequest &&
-        continuation.orderingInvalidationGeneration !==
-          this.orderingInvalidationGeneration)
-    )
-      return
+    if (!this.active || this.standing(continuation) !== `current`) return
     if (continuation.kind === `boundary`) {
       this.loadBoundary(
         windowOperationGeneration,
