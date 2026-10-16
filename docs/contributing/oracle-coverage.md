@@ -307,10 +307,14 @@ classification fails its immediate `[2]` checkpoint. It checks the held and
 settled callback-visible windows. It rejects an unordered request whose full
 predicate scope is not one rank, even if its capped answer has one row. #2148's
 exact historical provider replay is not published, although the controlled
-ascending joined and anti-joined limit-one path is now exercised. #2169's separate
-`invalidateLoadedSubsets()` trigger is introduced by open PR #2154, not this
-revision; its Query DB receiving owner must gain a held immediate-window cut
-when that API is integrated. The installed ascending/offset/tie/exhausted
+ascending joined and anti-joined limit-one path is now exercised. With #2154
+integrated, the Query DB receiver also invalidates a shifted ordered page
+while the optimistic update persists. It requires one loaded-subset report, a
+bounded acquisition after that report, no retraction of the immediate `[2]`
+window, and final `[5, 2]` rows. Disabling the loader's report-triggered
+revalidation fails at the acquisition checkpoint. This fixed history does not
+cover every refetch shape or a second optimistic change during held repair.
+The installed ascending/offset/tie/exhausted
 witnesses do not prove those provider-refill schedules. Provider rejection,
 rank-only rollback and other rank-move histories, overlapping optimistic
 transactions, exact callback payloads, and framework render timing remain

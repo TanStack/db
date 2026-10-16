@@ -12,7 +12,8 @@ import { applyPredicates } from '../e2e/query-filter.js'
 import type { LoadSubsetOptions } from '@tanstack/db'
 
 type Row = { id: number; folder: `inbox` | `archive`; at: number }
-type ProviderPhase = `initial` | `optimistic` | `handler-refetch`
+type ProviderPhase =
+  `initial` | `optimistic` | `held-invalidation` | `handler-refetch`
 
 // A boundary probe may omit ordering, but its predicate must select one rank.
 // Add another row at that rank so a key-specific request cannot masquerade as
@@ -42,8 +43,10 @@ function isNarrowRankTieProbe(
  * become public before it applies behind the pending mutation. After the
  * mutation's authoritative write and refill apply, the window is `[2, 1]`.
  * The mutation handler calls `utils.refetch()` after changing the provider,
- * matching the receiving path reported in #2169. The separate
- * `invalidateLoadedSubsets()` path is not available in this revision.
+ * matching the receiving path reported in #2169. A second history adds a new
+ * provider head and invalidates the Query while persistence is held. Query DB
+ * reports shifted loaded subsets, but the resulting repair must not retract
+ * the immediate `[2]` publication. It settles as `[5, 2]` after persistence.
  *
  * The reference is the plain remote row ledger and filter/sort/slice below.
  * The real QueryClient and queryCollectionOptions adapter receive each request
@@ -52,7 +55,9 @@ function isNarrowRankTieProbe(
  * immediate, held-refetch, and settled checkpoints. The backend evaluator is
  * only driver wiring: it never computes the expected window.
  */
-it(`publishes a short optimistic window during Query DB refetch, then refills it`, async () => {
+async function checkOptimisticOrderedRefetch(
+  reportDuringHold: boolean,
+): Promise<void> {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false, staleTime: Infinity, gcTime: Infinity },
@@ -86,7 +91,9 @@ it(`publishes a short optimistic window during Query DB refetch, then refills it
       startSync: true,
       queryFn: ({ meta }) => {
         const options = meta?.loadSubsetOptions ?? {}
-        const rows = applyPredicates(remote, options).map((row) => ({ ...row }))
+        const rows = applyPredicates(remote, options).map((row) => ({
+          ...row,
+        }))
         requests.push({
           options,
           ids: rows.map(({ id }) => id),
@@ -105,6 +112,12 @@ it(`publishes a short optimistic window during Query DB refetch, then refills it
     }),
   )
   source.createIndex((row) => row.at, { indexType: BTreeIndex })
+  let reports = 0
+  let requestCountAtReport = 0
+  source.on(`loadedSubsets:invalidated`, () => {
+    reports++
+    requestCountAtReport = requests.length
+  })
   const live = createLiveQueryCollection({
     query: (q) =>
       q
@@ -167,17 +180,44 @@ it(`publishes a short optimistic window during Query DB refetch, then refills it
       ),
     ).toBe(true)
 
+    if (reportDuringHold) {
+      remote.push({ id: 5, folder: `inbox`, at: 5 })
+      providerPhase = `held-invalidation`
+      await queryClient.invalidateQueries({
+        queryKey: [`optimistic-query-refetch`],
+      })
+      await vi.waitFor(() => expect(reports).toBe(1))
+      await vi.waitFor(() =>
+        expect(
+          requests
+            .slice(requestCountAtReport)
+            .some(
+              ({ options, ids, phase }) =>
+                phase === `held-invalidation` &&
+                options.orderBy?.[0]?.compareOptions.direction === `desc` &&
+                options.limit !== undefined &&
+                options.limit <= 4 &&
+                ids.includes(5),
+            ),
+        ).toBe(true),
+      )
+      expect(publicIds()).toEqual([2])
+      expect(publications).toEqual([[2]])
+    }
+
     persistence.resolve()
     await transaction.isPersisted.promise
-    expect(
-      requests.some(
-        ({ phase, ids }) =>
-          phase === `handler-refetch` && ids.includes(1) && !ids.includes(3),
-      ),
-    ).toBe(true)
+    if (!reportDuringHold) {
+      expect(
+        requests.some(
+          ({ phase, ids }) =>
+            phase === `handler-refetch` && ids.includes(1) && !ids.includes(3),
+        ),
+      ).toBe(true)
+    }
     await vi.waitFor(() => expect(publicIds()).toEqual(expected()))
-    expect(publicIds()).toEqual([2, 1])
-    expect(publications.at(-1)).toEqual([2, 1])
+    expect(publicIds()).toEqual(reportDuringHold ? [5, 2] : [2, 1])
+    expect(publications.at(-1)).toEqual(publicIds())
   } finally {
     persistence.resolve()
     unsubscribe?.()
@@ -185,7 +225,13 @@ it(`publishes a short optimistic window during Query DB refetch, then refills it
     await source.cleanup()
     queryClient.clear()
   }
-})
+}
+
+it(`publishes a short optimistic window during a mutation-handler refetch`, () =>
+  checkOptimisticOrderedRefetch(false))
+
+it(`keeps the short optimistic window through a held refetch report`, () =>
+  checkOptimisticOrderedRefetch(true))
 
 it(`rejects an unordered page cap as a rank-tie probe`, () => {
   const remote: Array<Row> = [1, 2, 3].map((id) => ({
