@@ -1706,13 +1706,18 @@ describe(`Successful finite demand retirement`, () => {
  *   Only a later read that covers them may retire them: a newer repair, a
  *   full-source read, or a truncate replay that covers the source, or a
  *   prefix read issued after the repair that reaches every repair row still
- *   inside the window. A request issued before the invalidation proves no
+ *   inside the window. That prefix counts once it succeeds or once a
+ *   successful replay reacquires its demand while it is still in flight. A request issued before the invalidation proves no
  *   current coverage, so it never retires them.
  * - **No leak:** once loading is quiet and no failure blocks it, the loader
  *   holds nothing issued before its last successful authoritative read.
  *   Otherwise every later refetch would read that request again. A
  *   superseded request that failed is retired once a full-source read issued
- *   after it succeeds; it needs no explicit retry.
+ *   after it succeeds, or a replay that covers the source settles after it;
+ *   it needs no explicit retry.
+ * - **One request at a time:** a request issued while another is in flight
+ *   starts authority, or an authority start lies between them. A repair
+ *   chain that a newer start replaced issues no more steps.
  * - **No strand:** a request that authoritative work superseded can still
  *   fail. Its partial writes need the full-source read that the overlap
  *   replaced, so the loader starts one without an explicit retry. The
@@ -1743,8 +1748,8 @@ describe(`Successful finite demand retirement`, () => {
  *   measure from the latest successful start;
  * - a repair prefix is a step of a running chain, not a start, when it is
  *   issued while a chain member settles or by the continuation such a
- *   settlement left staged or deferred, as an optimistic refill or a shrunk
- *   window's prefix is;
+ *   settlement left staged (a synchronous answer) or deferred (joined work),
+ *   as an optimistic refill or a shrunk window's prefix is;
  * - a truncate replay that settles while the subscription holds a
  *   full-source lease, even a failed one, covers the source and counts as a
  *   successful start after every earlier request; the leases it reacquired
@@ -1799,7 +1804,7 @@ describe(`Successful finite demand retirement`, () => {
  *
  * ## Checkpoints
  *
- * Held is checked after every step. After the history, a drain finishes
+ * Held and one request at a time are checked after every step. After the history, a drain finishes
  * joined work, settles a pending truncate replay, settles every in-flight
  * request successfully, and runs ordinary passes until the loader issues
  * nothing new. No strand is checked at that point. Then, if an own
@@ -1831,6 +1836,9 @@ type LedgerRequest = {
   chainStep: boolean
   outcome: `inflight` | `ok` | `failed`
   released: boolean
+  // A successful truncate replay reacquired the request's demand, even while
+  // its own transport was still in flight.
+  replayed: boolean
 }
 
 type AuthorityCommand =
@@ -2023,6 +2031,7 @@ async function checkAuthorityCase(
   // an optimistic refill; any other one starts a chain. A replacement chain
   // started as a continuation is judged as a step, which only weakens the
   // laws for it.
+  let concurrencyViolation: string | undefined
   let settlingChainMember = false
   let continuationOwed = false
   let invalidateNextPage = false
@@ -2069,9 +2078,32 @@ async function checkAuthorityCase(
         options.refetch === true && (settlingChainMember || continuationOwed),
       outcome: `inflight`,
       released: false,
+      replayed: false,
     }
     ledger.push(request)
-    if (authoritative) continuationOwed = false
+    // An issued request consumes an owed continuation. An ordinary page also
+    // shows the chain finished, since none is issued while a repair runs.
+    continuationOwed = false
+    // One request at a time: a request issued while another is in flight
+    // starts authority, or a start lies between them, so the older one is
+    // superseded. The replay owns requests from before the truncate.
+    if (!startsAuthority(request)) {
+      const overlapped = ledger.find(
+        (other) =>
+          other !== request &&
+          other.outcome === `inflight` &&
+          other.index >= replayOwnedBefore &&
+          ledger.every(
+            (start) =>
+              start.index <= other.index ||
+              start.index >= request.index ||
+              !startsAuthority(start),
+          ),
+      )
+      if (overlapped) {
+        concurrencyViolation ??= `request ${request.index} was issued while request ${overlapped.index} of the same authority was in flight`
+      }
+    }
     const release = () => {
       request.released = true
       if (testCase.releaseFault && releaseFaults === 0) {
@@ -2164,6 +2196,11 @@ async function checkAuthorityCase(
   let replayCoverage = new Set<LedgerRequest>()
   const settleReplay = () => {
     truncatePending = false
+    for (const request of ledger) {
+      if (!request.released && request.outcome !== `failed`) {
+        request.replayed = true
+      }
+    }
     replayCoverage = new Set(
       ledger.filter((request) => request.fullSource && !request.released),
     )
@@ -2206,7 +2243,11 @@ async function checkAuthorityCase(
     else request.deferred.reject(new Error(`request ${request.index} failed`))
     await flush()
     settlingChainMember = false
-    if (chainMember && ok && ledger.length === before) continuationOwed = true
+    // An asynchronous settlement runs its continuation at once unless joined
+    // work defers it; a settlement that issues nothing otherwise finished.
+    if (chainMember && ok && ledger.length === before && joinedPending) {
+      continuationOwed = true
+    }
   }
   // An authoritative read starts at a full-source read or a repair prefix;
   // the repair's tie and refill continue the same chain.
@@ -2231,6 +2272,11 @@ async function checkAuthorityCase(
   const lastAuthoritativeSuccess = () =>
     Math.max(lastAuthoritativeRead(), replayAuthority)
   const checkHeld = (checkpoint: string) => {
+    if (concurrencyViolation) {
+      throw new Error(
+        `one request at a time ${checkpoint}: ${concurrencyViolation}`,
+      )
+    }
     // The latest successful repair prefix, if no later authoritative read
     // has succeeded, must still be held.
     const repair = [...ledger]
@@ -2258,7 +2304,7 @@ async function checkAuthorityCase(
     const coveredByLaterPrefix = ledger.some(
       (request) =>
         request.index > repair.index &&
-        request.outcome === `ok` &&
+        (request.outcome === `ok` || request.replayed) &&
         request.options.orderBy !== undefined &&
         request.options.where === undefined &&
         request.options.minValues === undefined &&
@@ -2517,19 +2563,21 @@ async function checkAuthorityCase(
       )
     }
     // A superseded request's failure owes only a full-source read; once one
-    // issued after it succeeds, its lease is retired without a retry.
+    // issued after it succeeds, or a covering replay settles after it, its
+    // lease is retired without a retry.
     const heldFailures = ledger.filter(
       (failed) =>
         failed.outcome === `failed` &&
         failed.superseded &&
         !failed.released &&
         failed.index >= replayOwnedBefore &&
-        ledger.some(
-          (request) =>
-            request.fullSource &&
-            request.index > failed.index &&
-            request.outcome === `ok`,
-        ),
+        (replayAuthority > failed.index ||
+          ledger.some(
+            (request) =>
+              request.fullSource &&
+              request.index > failed.index &&
+              request.outcome === `ok`,
+          )),
     )
     if (heldFailures.length > 0) {
       throw new Error(
@@ -2638,7 +2686,14 @@ describe(`Ordered source request authority`, () => {
   //   invalidations issued nothing);
   // - a repair tie from before a truncate that fails during the next repair
   //   (the dead failure dropped the new chain's staged step, so nothing
-  //   resumed it).
+  //   resumed it);
+  // - the same replay trace, once one request at a time was checked (the
+  //   replaced chain's prefix counted as current and issued a tie beside the
+  //   replacement's prefix).
+  // - a repair prefix that settles after full-source coverage completed (a
+  //   chain request skipped the full-coverage retirement, so it stayed held).
+  // A superseded page that fails before a covering replay settles reaches
+  // the failed-lease law through a replay, which the campaigns rarely do.
   // Two replays keep traces that first failed the lane's own model: a chain
   // step it took for a chain start (an optimistic refill, and a shrunk
   // window's prefix deferred by joined work).
@@ -2770,6 +2825,48 @@ describe(`Ordered source request authority`, () => {
           { type: `settle`, pick: 0, ok: true },
           { type: `syncInvalidatingPage` },
           { type: `invalidateThenFailOldest` },
+        ],
+      },
+    },
+    {
+      name: `a superseded page that fails before a covering replay settles`,
+      testCase: {
+        indexed: true,
+        limit: 1,
+        settledFirst: true,
+        releaseFault: false,
+        syncRepair: false,
+        ...ordinaryScenario,
+        history: [
+          { type: `settleNewest` },
+          { type: `truncate` },
+          { type: `move`, delta: 0 },
+          { type: `invalidate`, react: false },
+          { type: `move`, delta: 0 },
+          { type: `settle`, pick: 1, ok: false },
+          { type: `settleNewest` },
+          { type: `replaySucceeds` },
+        ],
+      },
+    },
+    {
+      name: `a repair prefix that settles after full-source coverage`,
+      testCase: {
+        indexed: false,
+        limit: 1,
+        settledFirst: false,
+        releaseFault: false,
+        syncRepair: false,
+        ...ordinaryScenario,
+        needsMore: false,
+        history: [
+          { type: `settle`, pick: 0, ok: true },
+          { type: `truncate` },
+          { type: `sourceDelete`, react: false },
+          { type: `move`, delta: -1 },
+          { type: `failOldest` },
+          { type: `replaySucceeds` },
+          { type: `settleNewest` },
         ],
       },
     },

@@ -1041,6 +1041,11 @@ acquisitions; the explicit retry that resumed it does. A repair request belongs
 to the chain it was issued in. When a truncate replay finishes a chain whose
 prefix is still in flight and a newer invalidation starts the replacement, that
 prefix settles outside the replacement's chain, and the replacement retires it.
+A repair chain is superseded once a newer repair or full-source read starts.
+A request of the superseded chain proves no current coverage: it issues no
+tie or refill, and its failure is not the loader's own. A chain that finished
+still owns a request that settles late. Once a full-source read covers the source, any
+finite or repair request that settles later is retired at once.
 A request issued before a cursor reset that later fails still raises the repair
 debt, but it cannot drop work staged after the reset.
 A failed or canceled request, an invalidation before any request has

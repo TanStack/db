@@ -24,6 +24,8 @@ type RequestStamp = {
   orderedLoadGeneration: number
   orderingInvalidationGeneration: number
   isAuthoritativeRequest: boolean
+  // The authority generation a repair-chain request is issued in.
+  repairAuthority: number | undefined
 }
 
 type OrderedContinuation = RequestStamp & {
@@ -508,11 +510,11 @@ export class OrderedSourceLoader {
       release: ReleaseLoadSubset
       count: number
     },
-    // Retire everything outside this repair chain.
-    outsideChain?: number,
+    // Retire everything outside this repair chain, which keeps its own.
+    keptChain?: number,
   ): void {
     if (
-      (!this.coversSource() && !prefix && outsideChain === undefined) ||
+      (!this.coversSource() && !prefix && keptChain === undefined) ||
       this.subscription.hasPendingTruncateReplacement
     )
       return
@@ -520,7 +522,7 @@ export class OrderedSourceLoader {
     runAllCallbacks(
       Array.from(this.settledFiniteAcquisitions, ([release, entry]) => () => {
         const { count } = entry
-        if (outsideChain !== undefined && entry.chain === outsideChain) return
+        if (keptChain !== undefined && entry.chain === keptChain) return
         if (
           !this.active ||
           orderedLoadGeneration !== this.orderedLoadGeneration
@@ -528,7 +530,7 @@ export class OrderedSourceLoader {
           return
         if (
           !this.coversSource() &&
-          outsideChain === undefined &&
+          keptChain === undefined &&
           (!prefix ||
             release === prefix.release ||
             count === undefined ||
@@ -763,11 +765,6 @@ export class OrderedSourceLoader {
       this.hasSettledSourceRequest &&
       this.needsOrderingRepair &&
       windowOperationGeneration === undefined
-    const stamp: RequestStamp = {
-      orderedLoadGeneration: this.orderedLoadGeneration,
-      orderingInvalidationGeneration: issuedOrderingGeneration,
-      isAuthoritativeRequest,
-    }
     // A repair request belongs to the chain it is issued in. One that settles
     // after its replacement started is outside the replacement's chain.
     const chain =
@@ -775,6 +772,13 @@ export class OrderedSourceLoader {
       this.work.kind === `repair`
         ? this.work.epoch
         : undefined
+    const stamp: RequestStamp = {
+      orderedLoadGeneration: this.orderedLoadGeneration,
+      orderingInvalidationGeneration: issuedOrderingGeneration,
+      isAuthoritativeRequest,
+      repairAuthority:
+        chain === undefined ? undefined : this.authorityGeneration,
+    }
     const authorityGeneration = this.authorityGeneration
     const settlesAsync = result instanceof Promise
     const canSettleSynchronously =
@@ -828,9 +832,9 @@ export class OrderedSourceLoader {
               count: prefixCount,
               chain,
             })
-            if (!continuesOrderedPrefixRepair) {
-              this.retireSettledFiniteAcquisitions()
-            }
+            // Full-source coverage also retires a repair request that
+            // settles after it.
+            this.retireSettledFiniteAcquisitions()
             // A prefix issued before an ordering invalidation proves no
             // current coverage, so it cannot supersede the repair's prefix.
             if (
@@ -938,11 +942,11 @@ export class OrderedSourceLoader {
       this.requireFullSourceRepair()
       // Work staged after a cursor reset belongs to the new generation.
       if (this.standing(stamp) === `dead`) return
-      // A finite failure cannot drop authoritative work staged by a repair.
-      if (
-        isAuthoritativeRequest ||
-        !this.stagedContinuation?.isAuthoritativeRequest
-      ) {
+      // Only the running authoritative work owns its staged step; a replaced
+      // chain's request is stale and drops nothing.
+      const ownsAuthority =
+        isAuthoritativeRequest && this.standing(stamp) === `current`
+      if (ownsAuthority || !this.stagedContinuation?.isAuthoritativeRequest) {
         this.stagedContinuation = undefined
       }
       // Authoritative work started after this request supersedes it. Its
@@ -951,8 +955,9 @@ export class OrderedSourceLoader {
       // repair restarts as that read; otherwise it starts now, unless the
       // loader's own failure is waiting for an explicit retry.
       if (
-        !isAuthoritativeRequest &&
-        authorityGeneration !== this.authorityGeneration
+        isAuthoritativeRequest
+          ? !ownsAuthority
+          : authorityGeneration !== this.authorityGeneration
       ) {
         this.failedAcquisitions.set(releaseAcquisition, {
           kind,
@@ -1035,6 +1040,13 @@ export class OrderedSourceLoader {
   private standing(stamp: RequestStamp): `dead` | `stale` | `current` {
     if (stamp.orderedLoadGeneration !== this.orderedLoadGeneration)
       return `dead`
+    // A replacement repair or a full-source read started after a repair
+    // chain supersedes it; a chain that finished still owns its requests.
+    if (
+      stamp.repairAuthority !== undefined &&
+      stamp.repairAuthority !== this.authorityGeneration
+    )
+      return `stale`
     return !stamp.isAuthoritativeRequest &&
       stamp.orderingInvalidationGeneration !==
         this.orderingInvalidationGeneration
