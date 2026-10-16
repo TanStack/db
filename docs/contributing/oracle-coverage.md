@@ -279,6 +279,15 @@ acknowledgement/rollback. A rank-only acknowledgement and a combined
 rank-and-membership departure rollback are adjacent controls. After an
 acknowledged marker departure, restoring that marker must restore both rows
 and its Collection or Effect publication.
+Its held-load grammar also replays an unindexed descending joined window in
+which an installed null-ranked row fills the visible window beyond the settled
+provider prefix. After earlier deletes and held answers, the owner compares
+public rows with an independent full-source sort; a boundary-blind refill check
+leaves the next eligible filler row unseen and fails at the final checkpoint.
+For signalling refetches, the no-new-full-source work assertion applies to
+indexed numeric orders with finite ranks. Unindexed underfilled continuations
+and unexpressible null or NaN boundaries may use full-source recovery; the
+owner checks their row law but does not claim bounded transfer for them.
 
 At the immediate cut, both consumers must publish the recomputed installed-row
 window, even if it is short. Missing extent must start a useful finite

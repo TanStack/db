@@ -5880,10 +5880,15 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
       if (command.type === `refetch`) {
         const fullSourceBefore = fullSourceRequests
         await refetch()
-        // The repair a report starts reads each window's bounded prefix,
-        // tie, and refill; a whole-source read would be the cost the report
-        // exists to avoid.
-        if (signalsRefetch) {
+        // A report over an indexed numeric order can repair an expressible
+        // boundary with a bounded prefix, tie, and refill. An unindexed
+        // underfilled continuation, or a null/NaN boundary, cannot make that
+        // promise and may need the documented full-source fallback.
+        if (
+          signalsRefetch &&
+          testCase.indexed &&
+          [...rows.values()].every((row) => Number.isFinite(row.rank))
+        ) {
           expect(
             fullSourceRequests,
             `full-source requests after a signalling refetch at step ${step}`,
@@ -8029,6 +8034,45 @@ describe(`eager indexed ordered windows`, () => {
     `keeps a window whose loads answer between live changes for a random or replayed seed`,
     checkEagerWindow,
   )
+
+  // A local null-ranked row can appear to fill the window while the settled
+  // provider prefix ends before a better row. Held answers must not let that
+  // local row stand in for source coverage after earlier visible deletes.
+  it(`keeps a joined window within its settled source prefix after held answers`, async () => {
+    await checkEagerWindow({
+      path: `on-demand`,
+      provider: `forward`,
+      latency: `held`,
+      cancellation: `cooperative`,
+      peer: false,
+      filter: `joined`,
+      via: `marker`,
+      indexed: false,
+      direction: `desc`,
+      nulls: `last`,
+      terms: 1,
+      limit: 2,
+      offset: 0,
+      initial: [
+        { id: 0, rank: 0, eligible: false },
+        { id: 1, rank: 0, eligible: true },
+        { id: 2, rank: Number.NaN, eligible: true },
+      ],
+      history: [
+        { type: `delete-visible` },
+        { type: `delete-visible` },
+        { type: `delete-visible` },
+        {
+          type: `upsert`,
+          id: 40,
+          rank: null as unknown as number,
+          eligible: true,
+        },
+        { type: `delete-visible` },
+        { type: `delete`, id: 1 },
+      ],
+    })
+  })
 
   fcTest.prop([eagerJoinedGapCase], { numRuns: runs, seed: 2063 })(
     `keeps a joined-filter window whose row leaves only through the join for a fixed seed`,
