@@ -141,7 +141,7 @@ superseded).
 
 | Configuration | Weakened rule (one bug fixed in #2194) | Result |
 | --- | --- | --- |
-| `run2-safe.cfg` | none | No error, 195,621 distinct states, depth 14 |
+| `run2-safe.cfg` | none | No error, 290,401 distinct states |
 | `run2-weak-lateStamp.cfg` | Stamp the epoch when the request returns | `NoLeak` violated |
 | `run2-weak-epochRetire.cfg` | Retire by issue epoch (the reverted rule) | `NoLeak` violated |
 | `run2-weak-ownSuperseded.cfg` | A superseded failure counts as own | `OwnIsGrounded` violated |
@@ -155,6 +155,27 @@ closed before the results above: the model let no current page continue under
 pending debt, it stamped chain steps by chain under the reverted rule, and its
 grounding check accepted any failure. Four encoding corrections were also
 made; none weakened a frozen property.
+
+A review found one history the model could not generate: a request that
+throws while it starts (`request()` throws synchronously). The code records it
+as the loader's own failure and counts no supersession. `FailOnStart` now
+models it; the safe rules still pass, and every weakened rule still fails.
+
+Two mutants of the code survive every oracle and are equivalent within the
+tested domain: keeping a completed full-source read `complete` across
+`resetCursor`, and not clearing the debt when a full-source read succeeds.
+Once a full-source read completes, the work slot never returns to `idle`
+before a reset or replay, so those values are not observed. A witness would
+need a path from `complete` back to `idle`, or a report that a replay window
+must not ignore.
+
+Loss audits of the loader code, ARCHITECTURE.md, and the fix history found
+these loader rules outside this model, in addition to the limits below: the
+optimistic-overlay refill (`needsOptimisticRefill`), the unexpressible-boundary
+fallback, leading-column cursors and optimistic headroom, the
+window-generation retry gate, report handling and the first-page skip, the
+graph-revision check, and synchronous-settlement eligibility. Query DB's report
+gate and the coverage law belong to the query-db refetch oracle.
 
 Limits: boundary and cursor values, tie and refill as separate steps,
 joined-demand deferral, truncate replay, publication holds, the backoff timer,

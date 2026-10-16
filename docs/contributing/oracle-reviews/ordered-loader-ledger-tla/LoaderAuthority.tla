@@ -211,8 +211,22 @@ Retry ==
         /\ UNCHANGED staged
   /\ UNCHANGED <<epoch, settledOnce, coverage>>
 
+\* A request that throws while it starts (request() throws synchronously).
+\* It is the loader's own failure and supersedes nothing: an authoritative
+\* read counts toward supersession only once issued.
+FailOnStart ==
+  /\ ~own /\ staged.k = "none"
+  /\ \/ /\ work.k = "idle" /\ debt # "none" /\ coverage.k # "full" \* authoritative start
+     \/ /\ work.k = "idle" /\ debt = "none" /\ pending = None /\ coverage.k # "full" \* finite start
+  /\ \E k \in Free :
+       req' = [req EXCEPT ![k] = [New(IF debt # "none" THEN "full" ELSE "finite", epoch, -1)
+                 EXCEPT !.st = "failed", !.ownFail = TRUE]]
+  /\ own' = TRUE /\ debt' = "full" /\ work' = [k |-> "idle", ep |-> 0]
+  /\ UNCHANGED <<epoch, pending, staged, settledOnce, fault, coverage>>
+
 Next ==
   \/ IssueFinite(FALSE) \/ IssueFinite(TRUE) \/ Invalidate \/ Pass \/ SyncPrefix \/ Retry
+  \/ FailOnStart
   \/ \E i \in Ids : SettleOk(i) \/ Fail(i)
 
 Spec == Init /\ [][Next]_vars
