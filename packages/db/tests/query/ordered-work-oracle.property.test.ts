@@ -4412,10 +4412,15 @@ describe(`ordered source work oracle`, () => {
  * only for rows it sent or rows that match a subset it served; the rows law
  * holds after each step, and the work law bounds the rows it serves. A
  * refetching provider, like query-db-collection, sends nothing until a
- * `refetch` step. A refetch keeps every served range whole, as the LoadSubset
- * contract requires: it sends every row from the start of the order through
- * the range's boundary, so a row that moves between two answers still
- * arrives, and rows in no served range leave. Until then the Collection may
+ * `refetch` step. The LoadSubset contract gives a refetch two ways to stay
+ * correct, and the oracle has a provider for each. A whole-range refetch
+ * keeps every served range whole: it sends every row from the start of the
+ * order through the range's boundary, so a row that moves between two
+ * answers still arrives, and rows in no served range leave. A signalling
+ * refetch re-runs each request alone, as query-db-collection does, so a row
+ * can fall between two answers; when any answer changed, it then calls
+ * `invalidateLoadedSubsets()`, and each ordered loader must re-establish its
+ * window with a bounded repair. Until then the Collection may
  * lag the rows, so the rows law over the model applies only once no change
  * is pending, and every refetching history ends with a refetch. On either
  * provider, after every step the Collection holds exactly the rows in the
@@ -4468,7 +4473,8 @@ describe(`ordered source work oracle`, () => {
  * `offset + limit + 1` rows. Its rows law holds beside the first query's at
  * every checkpoint; the work laws count one consumer, so they do not apply
  * to those cases. A peer over a refetching provider is excluded from the
- * grammar until #2155 is fixed; a pinned replay expects its exact symptom.
+ * grammar until #2155 is fixed: an indexed trace is fixed and pinned, but an
+ * unindexed peer still keeps a short joined window after a refetch.
  * Joined filters can match a row through several markers, by `dup`, so a
  * LEFT-joined filter and a full join keep one result row per matched
  * (row, marker) pair, and an anti-join keeps a row once.
@@ -4511,9 +4517,11 @@ type EagerCase = {
   // change to a row it sent, or to a row that matches a subset it served.
   // `refetch` sends nothing until a refetch, which keeps every served
   // ordered range whole: rows that now sort inside one arrive then, and rows
-  // in no range leave (query-db-collection, without its page gaps). Omitted
-  // means `forward`.
-  provider?: `forward` | `refetch`
+  // in no range leave. `refetch-signal` also waits for a refetch, but re-runs
+  // each served request alone, as query-db-collection does, and then reports
+  // `invalidateLoadedSubsets()` when any answer changed. Omitted means
+  // `forward`.
+  provider?: `forward` | `refetch` | `refetch-signal`
   // When an on-demand provider answers a load. `immediate` answers within
   // the request. `held` answers only at an `answer` or `drain` step, from the
   // rows at that moment, so live changes can arrive while a load is in flight.
@@ -4634,7 +4642,11 @@ const eagerCaseBase: fc.Arbitrary<EagerCase> = fc.record({
     `local-only` as const,
     `on-demand` as const,
   ),
-  provider: fc.constantFrom(`forward` as const, `refetch` as const),
+  provider: fc.constantFrom(
+    `forward` as const,
+    `refetch` as const,
+    `refetch-signal` as const,
+  ),
   latency: fc.constantFrom(`immediate` as const, `held` as const),
   cancellation: fc.constantFrom(`cooperative` as const, `late` as const),
   // One case in four has a peer, so most cases keep the work laws.
@@ -4664,11 +4676,14 @@ const eagerCaseBase: fc.Arbitrary<EagerCase> = fc.record({
 })
 
 // A peer over a refetching on-demand provider can keep a short joined window
-// after a refetch (#2155). Each campaign excludes only that pairing, as its
-// last map, until the fix; a pinned replay keeps the trace.
+// after a refetch (#2155). An indexed plan's trace is fixed and pinned below,
+// but an unindexed one still fails (a peer shows [100] where the model shows
+// [100, 101]). Each campaign excludes only that pairing, as its last map,
+// until the fix.
 function withoutPeerRefetch(testCase: EagerCase): EagerCase {
   return testCase.path === `on-demand` &&
-    testCase.provider === `refetch` &&
+    (testCase.provider === `refetch` ||
+      testCase.provider === `refetch-signal`) &&
     testCase.peer
     ? { ...testCase, peer: false }
     : testCase
@@ -5008,6 +5023,7 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
           value: Row
         }) => void
         commit: Parameters<SyncConfig<Row, number>[`sync`]>[0][`commit`]
+        invalidateLoadedSubsets: () => void
       }
     | undefined
   const id = `eager-window-${Math.random()}`
@@ -5026,8 +5042,14 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
           syncMode: testCase.path === `on-demand` ? `on-demand` : `eager`,
           startSync: true,
           sync: {
-            sync: ({ begin, write, commit, markReady }) => {
-              syncControls = { begin, write, commit }
+            sync: ({
+              begin,
+              write,
+              commit,
+              markReady,
+              invalidateLoadedSubsets,
+            }) => {
+              syncControls = { begin, write, commit, invalidateLoadedSubsets }
               if (testCase.path === `on-demand`) {
                 markReady()
                 return {
@@ -5052,7 +5074,9 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
   // values, so its behavior never depends on the Collection under test. It
   // evaluates predicates with the reference evaluator, not production's.
   const refetching =
-    testCase.path === `on-demand` && testCase.provider === `refetch`
+    testCase.path === `on-demand` &&
+    (testCase.provider === `refetch` || testCase.provider === `refetch-signal`)
+  const signalsRefetch = refetching && testCase.provider === `refetch-signal`
   let providerRequests = 0
   const sent = new Map<number, Row>()
   // Rows the provider returns, the on-demand transfer the work law bounds,
@@ -5233,7 +5257,8 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
   // row that moves between two pages still arrives. A request without a
   // limit or an order re-runs as it is. Rows in no range leave, as a
   // query-db-collection refetch removes rows no query holds. (query-db
-  // re-runs each page alone today, which leaves such gaps: #2136.)
+  // re-runs each page alone and reports the shift instead; the signalling
+  // provider below models that.)
   const coverage = (options: LoadSubsetOptions): Array<Row> => {
     const end = rangeEnds.get(options)
     if (end === undefined) return pageFor(options)
@@ -5273,11 +5298,26 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
     const removed = [...sent.keys()].filter((rowId) => !kept.has(rowId))
     if (removed.length > 0) void send([], removed)
   }
+  // A signalling refetch re-runs each served request alone, so a row that
+  // now sorts between two answers is in neither. It reports the shift once
+  // the rows apply, and only when some answer changed; the contract lets a
+  // sync adapter report whenever its pages may have shifted, so this
+  // provider judges the loader's response, not query-db's gate.
   async function refetch(): Promise<void> {
     const current = new Map<number, Row>()
+    let changed = false
     for (const request of servedRequests) {
-      const covered = coverage(request)
-      lastAnswered.set(request, new Set(covered.map((row) => row.id)))
+      const covered = signalsRefetch ? pageFor(request) : coverage(request)
+      const ids = new Set(covered.map((row) => row.id))
+      const before = lastAnswered.get(request)
+      if (
+        !before ||
+        before.size !== ids.size ||
+        [...ids].some((rowId) => !before.has(rowId))
+      ) {
+        changed = true
+      }
+      lastAnswered.set(request, ids)
       for (const row of covered) current.set(row.id, row)
     }
     const applied = send(
@@ -5286,6 +5326,11 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
     )
     if (applied !== true) await applied
     stale = false
+    if (signalsRefetch && changed) {
+      syncControls!.invalidateLoadedSubsets()
+      // Core reports in a microtask; the repair then runs its requests.
+      await flushPromises()
+    }
   }
   function pageFor(options: LoadSubsetOptions): Array<Row> {
     let page = [...rows.values()].filter(
@@ -5833,7 +5878,22 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
       const visibleBefore = JSON.stringify(visibleIds())
       stepChangedInFlight = false
       if (command.type === `refetch`) {
+        const fullSourceBefore = fullSourceRequests
         await refetch()
+        // A report over an indexed numeric order can repair an expressible
+        // boundary with a bounded prefix, tie, and refill. An unindexed
+        // underfilled continuation, or a null/NaN boundary, cannot make that
+        // promise and may need the documented full-source fallback.
+        if (
+          signalsRefetch &&
+          testCase.indexed &&
+          [...rows.values()].every((row) => Number.isFinite(row.rank))
+        ) {
+          expect(
+            fullSourceRequests,
+            `full-source requests after a signalling refetch at step ${step}`,
+          ).toBe(fullSourceBefore)
+        }
       } else if (command.type === `move`) {
         shown = { ...testCase, offset: command.offset, limit: command.limit }
         // A held load can block the move's settlement, so a holding history
@@ -6093,6 +6153,819 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
   }
 }
 
+type OptimisticWindowShape = `source` | `joined` | `anti-joined`
+type OptimisticWindowMutation = `update` | `delete`
+type OptimisticWindowConsumer = `collection` | `effect`
+type OptimisticWindowOutcome = `acknowledge` | `rollback`
+type OptimisticWindowExtent = `missing` | `installed` | `non-prefix`
+type OptimisticWindowAcquisition = `required` | `forbidden` | `allowed`
+type OptimisticWindowCheckpoint =
+  `initial` | `optimistic` | `settled` | `restored`
+const MAX_OPTIMISTIC_WINDOW_REQUESTS = 8
+const OPTIMISTIC_ACQUISITION_OBSERVATION_TURNS = 8
+
+type OptimisticWindowCase = {
+  shape: OptimisticWindowShape
+  mutation: OptimisticWindowMutation
+  consumer: OptimisticWindowConsumer
+  outcome: OptimisticWindowOutcome
+  width: 1 | 2
+  indexed: boolean
+  extent: OptimisticWindowExtent
+  installedIds: Array<number>
+  acquisition: OptimisticWindowAcquisition
+  answerTiming?: `before-settlement` | `after-settlement`
+  mutationSource?: `root` | `marker`
+  rankMove?: boolean
+  rankDeparture?: boolean
+  direction?: `asc` | `desc`
+}
+
+type OptimisticWindowPublication = {
+  rows: Array<number>
+}
+
+function copyOptimisticWindowPublication(
+  publication: OptimisticWindowPublication,
+): OptimisticWindowPublication {
+  return { rows: [...publication.rows] }
+}
+
+type OptimisticWindowObservation = {
+  initial: Array<number>
+  immediate: Array<number>
+  acquiring: Array<number>
+  answerQueued: Array<number>
+  settled: Array<number>
+  afterAnswer?: Array<number>
+  afterRestore?: Array<number>
+  afterRestorePublications?: Array<OptimisticWindowPublication>
+  rowsAfterFirstTurn: Array<number>
+  rowsAfterSecondTurn: Array<number>
+  immediatePublications: Array<OptimisticWindowPublication>
+  preSettlementPublications: Array<OptimisticWindowPublication>
+  publicationsAtSettlement: Array<OptimisticWindowPublication>
+  publicationsAfterSettlement: Array<OptimisticWindowPublication>
+  attempts: Array<{
+    submittedRows: Array<number>
+    limit: number | undefined
+    direction: string | undefined
+    appliedReceiptPending: boolean
+    providerPending: boolean
+  }>
+  acquisitionStartedBeforeSettlement?: boolean
+  requestHistory?: Array<{
+    identity: string
+    newRows: number
+    phase?: string
+    submittedRows?: Array<number>
+    limit?: number
+    direction?: string
+    allowsRejectedRoot?: boolean
+    selectedRanks?: Array<number>
+  }>
+  settlementOutcome: `fulfilled` | `rejected`
+}
+
+function referenceOptimisticWindow(
+  testCase: OptimisticWindowCase,
+  checkpoint: OptimisticWindowCheckpoint,
+): Array<number> {
+  // All three predicates accept 1, 2, and 3 in the remote ledger; 4 is the
+  // rejected leading root. The model starts from installed keys, applies the
+  // one overlay, and recomputes the window without the loader's prefix logic.
+  const authoritative =
+    (checkpoint === `settled` || checkpoint === `restored`) &&
+    testCase.outcome === `acknowledge`
+  const installed = authoritative
+    ? testCase.rankMove
+      ? [1, 2, 3, 4]
+      : testCase.mutationSource === `marker`
+        ? [1, 2, 3, 4]
+        : [1, 2, 4]
+    : testCase.installedIds
+  const overlayActive = checkpoint === `optimistic`
+  const markerDeparturePersisted =
+    checkpoint === `settled` &&
+    testCase.outcome === `acknowledge` &&
+    testCase.mutationSource === `marker`
+  return installed
+    .filter(
+      (id) =>
+        id !== 4 &&
+        !(
+          (overlayActive || markerDeparturePersisted) &&
+          id === 3 &&
+          (!testCase.rankMove || testCase.rankDeparture)
+        ),
+    )
+    .sort((left, right) => {
+      const moved = (overlayActive || authoritative) && testCase.rankMove
+      const leftRank = moved && left === 3 ? 0 : left
+      const rightRank = moved && right === 3 ? 0 : right
+      return rightRank - leftRank
+    })
+    .slice(0, testCase.width)
+}
+
+async function observeAcquisitionAcrossTaskTurns(
+  initialRequests: number,
+  currentRequests: () => number,
+): Promise<boolean> {
+  for (let turn = 0; turn < OPTIMISTIC_ACQUISITION_OBSERVATION_TURNS; turn++) {
+    if (currentRequests() > initialRequests) return true
+    await flushPromises()
+  }
+  return currentRequests() > initialRequests
+}
+
+// A stalled held event must report its named checkpoint and enter cleanup;
+// an outer test timeout would strand the provider and obscure the violated law.
+async function awaitOptimisticCheckpoint<T>(
+  checkpoint: string,
+  pending: Promise<T>,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      pending,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`optimistic ${checkpoint} stalled`)),
+          2000,
+        )
+      }),
+    ])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
+/**
+ * An optimistic row that leaves an on-demand ordered window is public before
+ * its mutation settles. This law does not depend on whether departure comes
+ * from a source predicate, a joined or anti-joined predicate, an update, or a
+ * delete. It also applies to both live-query Collections and Effects.
+ *
+ * The independent installed-row model states the public cuts for one
+ * six-row base ledger and one pending departure. The legal-history grammar
+ * crosses one- and two-row windows, indexed and unindexed loading, all three
+ * predicate shapes, both departure operations, both consumers, and
+ * acknowledgement or rollback. Two extra histories install replacement extent
+ * behind indexed plans, independently of query shape. Production receives each
+ * history through a controlled on-demand provider and a real live-query plan.
+ *
+ * The observation cuts keep distinct responsibilities distinguishable:
+ * mutation admission must update rows and callback membership synchronously;
+ * missing extent must start one useful acquisition before persistence settles;
+ * a provider answer whose real applied receipt is still pending must remain
+ * private; and transaction settlement must publish the complete acknowledged
+ * window or restore the original rollback window. Later task turns check for
+ * immediate repeated work. Collection order and Effect membership are the
+ * public observations; exact callback payload coherence remains separately
+ * owned.
+ */
+async function checkOptimisticWindow(
+  testCase: OptimisticWindowCase,
+): Promise<OptimisticWindowObservation> {
+  const { shape, mutation, consumer, outcome, width, indexed, extent } =
+    testCase
+  const remote = new Map<number, Row>(
+    [-1, 0, 1, 2, 3, 4].map((id) => [
+      id,
+      {
+        id,
+        rank: testCase.direction === `asc` ? -id : id,
+        eligible: id !== 4,
+        label: `row`,
+        link: id,
+      },
+    ]),
+  )
+  let sync!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
+  const sent = new Map<number, Row>()
+  const refillStarted = createDeferred<void>()
+  const providerAnswer = createDeferred<void>()
+  const answerSubmitted = createDeferred<void>()
+  const persistence = createDeferred<void>()
+  let holdLaterAcquisition = false
+  let settlementPhase = `pending`
+  const requestHistory: NonNullable<
+    OptimisticWindowObservation[`requestHistory`]
+  > = []
+  const attempts: Array<{
+    submittedRows: Array<number>
+    limit: number | undefined
+    direction: string | undefined
+    appliedReceiptSettled: boolean
+    providerSettled: boolean
+    provider: Promise<unknown>
+  }> = []
+  let requests = 0
+  const persistAuthoritativeMutation = async () => {
+    await persistence.promise
+    const previous = remote.get(3)!
+    const next = {
+      ...previous,
+      eligible:
+        shape === `source` && (!testCase.rankMove || testCase.rankDeparture)
+          ? false
+          : previous.eligible,
+      link: shape === `source` ? previous.link : -previous.id,
+      rank: testCase.rankMove ? 0 : previous.rank,
+    }
+    if (mutation === `delete`) remote.delete(3)
+    else remote.set(3, next)
+    sync.begin()
+    sync.write({
+      type: mutation,
+      value: mutation === `delete` ? previous : next,
+    })
+    // This authoritative echo is queued behind the transaction. Its applied
+    // receipt must not be mistaken for optimistic-publication permission.
+    sync.commit()
+  }
+  const source = createCollection<Row, number>({
+    id: `optimistic-window-${shape}-${mutation}-${consumer}-${outcome}-${Math.random()}`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    onUpdate: persistAuthoritativeMutation,
+    onDelete: persistAuthoritativeMutation,
+    sync: {
+      sync: (controls) => {
+        sync = controls
+        controls.markReady()
+        return {
+          loadSubset: (options) => {
+            requests++
+            if (requests > MAX_OPTIMISTIC_WINDOW_REQUESTS) {
+              throw new Error(`optimistic ordered loading did not stop`)
+            }
+            const attempt = holdLaterAcquisition
+              ? {
+                  submittedRows: [] as Array<number>,
+                  limit: options.limit,
+                  direction: options.orderBy?.[0]?.compareOptions.direction,
+                  appliedReceiptSettled: false,
+                  providerSettled: false,
+                  provider: Promise.resolve(),
+                }
+              : undefined
+            if (attempt) attempts.push(attempt)
+            const requestRecord = holdLaterAcquisition
+              ? {
+                  identity: JSON.stringify({
+                    phase: settlementPhase,
+                    where: options.where,
+                    orderBy: options.orderBy,
+                    cursor: options.cursor,
+                    offset: options.offset,
+                    limit: options.limit,
+                    refetch: options.refetch,
+                  }),
+                  newRows: 0,
+                  phase: settlementPhase,
+                  submittedRows: [] as Array<number>,
+                  limit: options.limit,
+                  direction: options.orderBy?.[0]?.compareOptions.direction,
+                  allowsRejectedRoot:
+                    !options.where ||
+                    evaluateReferenceExpression(options.where, {
+                      ...remote.get(2)!,
+                      eligible: false,
+                    }) === true,
+                  selectedRanks: [...remote.values()]
+                    .filter(
+                      (row) =>
+                        (!options.where ||
+                          evaluateReferenceExpression(options.where, row) ===
+                            true) &&
+                        (!options.cursor ||
+                          evaluateReferenceExpression(
+                            options.cursor.whereFrom,
+                            row,
+                          ) === true),
+                    )
+                    .map(({ rank }) => rank),
+                }
+              : undefined
+            if (requestRecord) requestHistory.push(requestRecord)
+            const answer = () => {
+              try {
+                let page = [...remote.values()].filter(
+                  (row) =>
+                    (!options.where ||
+                      evaluateReferenceExpression(options.where, row) ===
+                        true) &&
+                    (!options.cursor ||
+                      evaluateReferenceExpression(
+                        options.cursor.whereFrom,
+                        row,
+                      ) === true),
+                )
+                if (options.orderBy) {
+                  const { compareOptions } = options.orderBy[0]!
+                  page.sort((left, right) =>
+                    compareOptions.direction === `desc`
+                      ? right.rank - left.rank
+                      : left.rank - right.rank,
+                  )
+                  if (!options.cursor) page = page.slice(options.offset ?? 0)
+                  if (options.limit !== undefined)
+                    page = page.slice(0, options.limit)
+                }
+                if (requestRecord) {
+                  requestRecord.newRows = page.filter(
+                    ({ id }) => !sent.has(id),
+                  ).length
+                  requestRecord.submittedRows.push(...page.map(({ id }) => id))
+                }
+                controls.begin()
+                for (const row of page) {
+                  controls.write({
+                    type: sent.has(row.id) ? `update` : `insert`,
+                    value: { ...row },
+                  })
+                  sent.set(row.id, { ...row })
+                }
+                if (attempt)
+                  attempt.submittedRows.push(...page.map(({ id }) => id))
+                const applied = controls.commit()
+                if (attempt) {
+                  attempt.appliedReceiptSettled = applied === true
+                  if (applied !== true) {
+                    void applied.then(
+                      () => (attempt.appliedReceiptSettled = true),
+                      () => (attempt.appliedReceiptSettled = true),
+                    )
+                  }
+                  answerSubmitted.resolve()
+                }
+                return applied === true ? true : applied.then(() => undefined)
+              } catch (error) {
+                if (attempt) answerSubmitted.reject(error)
+                throw error
+              }
+            }
+            if (!holdLaterAcquisition) return answer()
+            refillStarted.resolve()
+            const provider = providerAnswer.promise
+              .then(answer)
+              .then(() => undefined)
+            attempt!.provider = provider
+            void provider.then(
+              () => (attempt!.providerSettled = true),
+              () => (attempt!.providerSettled = true),
+            )
+            return provider.then(() => undefined)
+          },
+        }
+      },
+    },
+  })
+  if (indexed) {
+    source.createIndex((row) => row.rank, {
+      indexType: BTreeIndex,
+      options: {
+        compareOptions: {
+          direction: `asc`,
+          nulls: `first`,
+          stringSort: `locale`,
+        },
+      },
+    })
+  }
+  const markers = createCollection(
+    localOnlyCollectionOptions<Marker, number>({
+      id: `optimistic-window-markers-${Math.random()}`,
+      getKey: (marker) => marker.id,
+      initialData:
+        shape === `joined`
+          ? [1, 2, 3].map((id) => ({ id, rowId: id }))
+          : shape === `anti-joined`
+            ? [
+                { id: 4, rowId: 4 },
+                { id: 3, rowId: -3 },
+              ]
+            : [],
+      onUpdate: async () => {
+        await persistence.promise
+      },
+    }),
+  )
+  markers.createIndex((marker) => marker.rowId, { indexType: BTreeIndex })
+  const buildQuery = (q: InitialQueryBuilder) => {
+    const direct = q
+      .from({ row: source })
+      .where(({ row }) => eq(row.eligible, true))
+    const left = q
+      .from({ row: source })
+      .leftJoin({ marker: markers }, ({ row, marker }) =>
+        eq(row.link, marker.rowId),
+      )
+    const filtered =
+      shape === `source`
+        ? direct
+        : shape === `joined`
+          ? left.where(({ marker }) => not(isUndefined(marker.rowId)))
+          : left.where(({ marker }) => isUndefined(marker.rowId))
+    return filtered
+      .orderBy(({ row }) => row.rank, testCase.direction ?? `desc`)
+      .limit(width)
+  }
+  const query =
+    consumer === `collection`
+      ? createLiveQueryCollection({ query: buildQuery })
+      : undefined
+  const effectRows = new Map<number, Row>()
+  const publications: Array<OptimisticWindowPublication> = []
+  const resultRow = (value: unknown): Row => {
+    const result = value as Row & { row?: Row }
+    return result.row ?? result
+  }
+  const ids = () => {
+    if (query) return query.toArray.map(resultRow).map(({ id }) => id)
+    // Effect callbacks expose membership deltas rather than positional
+    // changes. Keep their membership deterministic without claiming that the
+    // callback API reports an ordered sequence.
+    return [...effectRows.values()]
+      .sort((left, right) =>
+        testCase.direction === `asc`
+          ? left.rank - right.rank
+          : right.rank - left.rank,
+      )
+      .map(({ id }) => id)
+  }
+  const recordPublication = () => {
+    publications.push({ rows: ids() })
+  }
+  const effect =
+    consumer === `effect`
+      ? createEffect({
+          query: buildQuery,
+          onBatch: (events) => {
+            for (const event of events) {
+              const row = resultRow(event.value)
+              if (event.type === `exit`) effectRows.delete(row.id)
+              else effectRows.set(row.id, row)
+            }
+            recordPublication()
+          },
+        })
+      : undefined
+  let unsubscribe: (() => void) | undefined
+  let settled: Promise<void> = Promise.resolve()
+  return withHistoryCleanup(
+    async () => {
+      if (query) await awaitOptimisticCheckpoint(`preload`, query.preload())
+      else
+        await vi.waitFor(() =>
+          expect(ids()).toEqual(referenceOptimisticWindow(testCase, `initial`)),
+        )
+      const initial = ids()
+      expect(initial, `initial rows`).toEqual(
+        referenceOptimisticWindow(testCase, `initial`),
+      )
+      const initialProviderRows = [...sent.keys()]
+      expect(
+        initialProviderRows,
+        `initial provider rows include row 3`,
+      ).toContain(3)
+      if (shape !== `source`) {
+        expect(
+          initialProviderRows,
+          `initial provider rows include the leading rejected row`,
+        ).toContain(4)
+      }
+      if (extent === `missing` || extent === `non-prefix`) {
+        expect(
+          initialProviderRows,
+          `initial provider rows omit the replacement row`,
+        ).not.toContain(width === 1 ? 2 : 1)
+      }
+      for (const installedId of testCase.installedIds) {
+        if (!sent.has(installedId)) {
+          const replacement = remote.get(installedId)!
+          sync.begin()
+          sync.write({ type: `insert`, value: { ...replacement } })
+          const applied = sync.commit()
+          if (applied !== true) await applied
+          sent.set(installedId, { ...replacement })
+        }
+      }
+      const initialRequests = requests
+      if (query) {
+        const subscription = query.subscribeChanges(
+          () => {
+            recordPublication()
+          },
+          { includeInitialState: true },
+        )
+        unsubscribe = () => subscription.unsubscribe()
+        publications.length = 0
+      } else publications.length = 0
+      holdLaterAcquisition = true
+
+      const transaction =
+        testCase.mutationSource === `marker`
+          ? markers.update(3, (draft) => {
+              draft.rowId = shape === `joined` ? -3 : 3
+            })
+          : mutation === `delete`
+            ? source.delete(3)
+            : source.update(3, (draft) => {
+                if (testCase.rankMove) draft.rank = 0
+                if (
+                  shape === `source` &&
+                  (!testCase.rankMove || testCase.rankDeparture)
+                )
+                  draft.eligible = false
+                else if (shape !== `source`) draft.link = -draft.id
+              })
+      let settlementOutcome: `fulfilled` | `rejected` = `fulfilled`
+      settled = transaction.isPersisted.promise.then(
+        () => undefined,
+        () => {
+          settlementOutcome = `rejected`
+        },
+      )
+      const immediate = ids()
+      const immediatePublications = publications.map(
+        copyOptimisticWindowPublication,
+      )
+      const acquisitionStarted = await observeAcquisitionAcrossTaskTurns(
+        initialRequests,
+        () => requests,
+      )
+      const acquiring = ids()
+      let answerQueued = acquiring
+      if (acquisitionStarted) {
+        await awaitOptimisticCheckpoint(`refill start`, refillStarted.promise)
+        if (testCase.answerTiming !== `after-settlement`) {
+          providerAnswer.resolve()
+          await awaitOptimisticCheckpoint(
+            `provider submission`,
+            answerSubmitted.promise,
+          )
+          await flushPromises()
+          answerQueued = ids()
+        }
+      } else providerAnswer.resolve()
+      const attemptsAtQueuedAnswer = attempts.map((attempt) => ({
+        submittedRows: [...attempt.submittedRows],
+        limit: attempt.limit,
+        direction: attempt.direction,
+        appliedReceiptPending: !attempt.appliedReceiptSettled,
+        providerPending: !attempt.providerSettled,
+      }))
+      const preSettlementPublications = publications.map(
+        copyOptimisticWindowPublication,
+      )
+
+      settlementPhase = outcome
+      if (outcome === `acknowledge`) persistence.resolve()
+      else persistence.reject(new Error(`rollback`))
+      await awaitOptimisticCheckpoint(`settlement`, settled)
+      const settledRows = ids()
+      const publicationsAtSettlement = publications.map(
+        copyOptimisticWindowPublication,
+      )
+      const publicationCountAtSettlement = publications.length
+      if (testCase.answerTiming === `after-settlement` && acquisitionStarted) {
+        providerAnswer.resolve()
+        await awaitOptimisticCheckpoint(
+          `late provider submission`,
+          answerSubmitted.promise,
+        )
+        await awaitOptimisticCheckpoint(
+          `late provider completion`,
+          Promise.all(attempts.map((attempt) => attempt.provider)),
+        )
+        await flushPromises()
+      }
+      const afterAnswer = ids()
+      const observedAttempts =
+        testCase.answerTiming === `after-settlement`
+          ? attempts.map((attempt) => ({
+              submittedRows: [...attempt.submittedRows],
+              limit: attempt.limit,
+              direction: attempt.direction,
+              appliedReceiptPending: !attempt.appliedReceiptSettled,
+              providerPending: !attempt.providerSettled,
+            }))
+          : attemptsAtQueuedAnswer
+      await flushPromises()
+      const rowsAfterFirstTurn = ids()
+      await flushPromises()
+      const rowsAfterSecondTurn = ids()
+      await awaitOptimisticCheckpoint(
+        `provider completion`,
+        Promise.all(attempts.map((attempt) => attempt.provider)),
+      )
+      const publicationsAfterSettlement = publications
+        .slice(publicationCountAtSettlement)
+        .map(copyOptimisticWindowPublication)
+      let afterRestore: Array<number> | undefined
+      let afterRestorePublications:
+        Array<OptimisticWindowPublication> | undefined
+      if (testCase.mutationSource === `marker` && outcome === `acknowledge`) {
+        const beforeRestore = publications.length
+        const restoration = markers.update(3, (draft) => {
+          draft.rowId = shape === `joined` ? 3 : -3
+        })
+        afterRestore = ids()
+        afterRestorePublications = publications
+          .slice(beforeRestore)
+          .map(copyOptimisticWindowPublication)
+        await awaitOptimisticCheckpoint(
+          `marker restoration`,
+          restoration.isPersisted.promise,
+        )
+      }
+
+      return {
+        initial,
+        immediate,
+        acquiring,
+        answerQueued,
+        settled: settledRows,
+        afterAnswer,
+        afterRestore,
+        afterRestorePublications,
+        rowsAfterFirstTurn,
+        rowsAfterSecondTurn,
+        immediatePublications,
+        preSettlementPublications,
+        publicationsAtSettlement,
+        publicationsAfterSettlement,
+        attempts: observedAttempts,
+        acquisitionStartedBeforeSettlement: acquisitionStarted,
+        requestHistory: requestHistory.map((entry) => ({ ...entry })),
+        settlementOutcome,
+      }
+    },
+    () => [
+      () => unsubscribe?.(),
+      () => persistence.resolve(),
+      () => providerAnswer.resolve(),
+      () => awaitOptimisticCheckpoint(`settlement cleanup`, settled),
+      () => effect?.dispose(),
+      () => query?.cleanup(),
+      () => source.cleanup(),
+      () => markers.cleanup(),
+      () =>
+        expect(requests, `bounded refill requests`).toBeLessThanOrEqual(
+          MAX_OPTIMISTIC_WINDOW_REQUESTS,
+        ),
+    ],
+  )
+}
+
+function optimisticWindowViolations(
+  observation: OptimisticWindowObservation,
+  testCase: OptimisticWindowCase,
+): Array<string> {
+  const violations: Array<string> = []
+  const { outcome, width } = testCase
+  const optimistic = referenceOptimisticWindow(testCase, `optimistic`)
+  const settled = referenceOptimisticWindow(testCase, `settled`)
+  const lateAnswer = testCase.answerTiming === `after-settlement`
+  const expectedAtSettlement =
+    lateAnswer && outcome === `acknowledge` ? optimistic : settled
+  const compare = (label: string, actual: unknown, expected: unknown) => {
+    if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+      violations.push(
+        `${label}: ${JSON.stringify(actual)} instead of ${JSON.stringify(expected)}`,
+      )
+    }
+  }
+  compare(`immediate rows`, observation.immediate, optimistic)
+  compare(
+    `immediate publications`,
+    observation.immediatePublications.map(({ rows }) => rows),
+    [optimistic],
+  )
+  compare(`acquiring rows`, observation.acquiring, optimistic)
+  compare(`queued-answer rows`, observation.answerQueued, optimistic)
+  compare(
+    `first optimistic publication`,
+    observation.preSettlementPublications[0]?.rows,
+    optimistic,
+  )
+  compare(
+    `other pre-settlement publications`,
+    observation.preSettlementPublications.slice(1).map(({ rows }) => rows),
+    [],
+  )
+  compare(`settled rows`, observation.settled, expectedAtSettlement)
+  if (lateAnswer)
+    compare(`rows after late answer`, observation.afterAnswer, settled)
+  if (testCase.mutationSource === `marker` && outcome === `acknowledge`) {
+    compare(
+      `rows after marker restoration`,
+      observation.afterRestore,
+      referenceOptimisticWindow(testCase, `restored`),
+    )
+    compare(
+      `marker restoration publications`,
+      observation.afterRestorePublications?.map(({ rows }) => rows),
+      [referenceOptimisticWindow(testCase, `restored`)],
+    )
+  }
+  compare(
+    `rows after first settlement turn`,
+    observation.rowsAfterFirstTurn,
+    settled,
+  )
+  compare(
+    `rows after second settlement turn`,
+    observation.rowsAfterSecondTurn,
+    settled,
+  )
+  const expectedSettledPublications =
+    JSON.stringify(optimistic) === JSON.stringify(expectedAtSettlement)
+      ? []
+      : [expectedAtSettlement]
+  compare(
+    `settled publications`,
+    observation.publicationsAtSettlement
+      .slice(observation.preSettlementPublications.length)
+      .map(({ rows }) => rows),
+    expectedSettledPublications,
+  )
+  compare(
+    `post-settlement publications`,
+    observation.publicationsAfterSettlement.map(({ rows }) => rows),
+    lateAnswer && outcome === `acknowledge` ? [settled] : [],
+  )
+  const needsAcquisition = testCase.acquisition === `required`
+  if (
+    needsAcquisition &&
+    observation.acquisitionStartedBeforeSettlement === false
+  ) {
+    violations.push(`refill acquisition did not start before settlement`)
+  }
+  if (needsAcquisition && observation.attempts.length === 0) {
+    violations.push(`refill acquisition did not start`)
+  }
+  const refillId = width === 1 ? 2 : 1
+  const refillAttempt = observation.attempts.find(({ submittedRows }) =>
+    submittedRows.includes(refillId),
+  )
+  if (needsAcquisition && !refillAttempt) {
+    violations.push(`refill answer did not submit row ${refillId}`)
+  } else if (
+    needsAcquisition &&
+    (refillAttempt?.direction !== (testCase.direction ?? `desc`) ||
+      refillAttempt.limit === undefined ||
+      refillAttempt.limit > width + 2)
+  ) {
+    violations.push(`refill used an unbounded provider request`)
+  } else if (
+    !lateAnswer &&
+    refillAttempt &&
+    !refillAttempt.appliedReceiptPending
+  ) {
+    violations.push(`applied receipt was not pending at the queued-answer cut`)
+  }
+  if (!lateAnswer && refillAttempt && !refillAttempt.providerPending) {
+    violations.push(`provider was not pending at the queued-answer cut`)
+  }
+  if (testCase.acquisition === `forbidden` && observation.attempts.length > 0) {
+    violations.push(`refill acquisition started with complete local extent`)
+  }
+  const requested = new Set<string>()
+  for (const request of observation.requestHistory ?? []) {
+    if (request.phase === `pending` && testCase.indexed) {
+      const finiteOrdered =
+        request.direction === (testCase.direction ?? `desc`) &&
+        request.limit !== undefined &&
+        request.limit <= width + 2
+      const boundaryTie =
+        request.direction === undefined &&
+        request.selectedRanks !== undefined &&
+        new Set(request.selectedRanks).size === 1
+      if (!finiteOrdered && !boundaryTie) {
+        violations.push(`optimistic acquisition used a broad provider request`)
+      }
+      if (testCase.shape === `source` && request.allowsRejectedRoot) {
+        violations.push(`source refill omitted the source predicate`)
+      }
+    }
+    if (requested.has(request.identity) && request.newRows === 0) {
+      violations.push(`repeated an unchanged provider request without progress`)
+      break
+    }
+    requested.add(request.identity)
+  }
+  compare(
+    `settlement outcome`,
+    observation.settlementOutcome,
+    outcome === `acknowledge` ? `fulfilled` : `rejected`,
+  )
+  return violations
+}
+
 describe(`eager indexed ordered windows`, () => {
   const { multiplier, ...replay } = readOracleRunConfig()
   const runs = 40 * multiplier
@@ -6224,39 +7097,96 @@ describe(`eager indexed ordered windows`, () => {
     })
   })
 
-  // A second live-query Collection over a refetched on-demand source keeps
-  // a short joined window (#2155): after the refetch the peer shows ranks
-  // [0, 0] where the model shows [0, 0, 100]. Only that symptom satisfies
-  // this replay; when #2155 is fixed, flip it to expect the case to pass.
-  it(`shows the known short peer joined window after a refetch removes a tied row`, async () => {
-    await expect(
-      checkEagerWindow({
-        path: `on-demand`,
-        provider: `refetch`,
-        latency: `immediate`,
-        peer: true,
-        filter: `joined`,
-        via: `link`,
-        indexed: true,
-        direction: `asc`,
-        nulls: `first`,
-        terms: 1,
-        limit: 2,
-        offset: 0,
-        initial: [
-          { id: 9, rank: 0, eligible: true },
-          { id: 0, rank: 0, eligible: true },
-          { id: 1, rank: 0, eligible: true },
-          { id: 2, rank: 1, eligible: false },
-        ],
-        history: [
-          { type: `upsert`, id: 10, rank: 1, eligible: false },
-          { type: `flip`, id: 0 },
-        ],
-      }),
-    ).rejects.toThrow(
-      `peer rows after step 2: expected [ +0, +0 ] to deeply equal [ +0, +0, 100 ]`,
-    )
+  // The same trace with a provider that refetches each page alone and then
+  // reports the shift. Row 10 is in no answer after the refetch; the
+  // report makes the loader re-establish the window with a bounded repair.
+  it(`shows a row that moved between two served pages after a signalling refetch`, async () => {
+    await checkEagerWindow({
+      path: `on-demand`,
+      provider: `refetch-signal`,
+      filter: `joined`,
+      via: `marker`,
+      indexed: true,
+      direction: `desc`,
+      nulls: `first`,
+      terms: 1,
+      limit: 2,
+      offset: 0,
+      initial: [
+        { id: 0, rank: Number.NaN, eligible: true },
+        { id: 1, rank: 0, eligible: true },
+        { id: 2, rank: 4, eligible: true },
+        { id: 3, rank: 1, eligible: true },
+      ],
+      history: [
+        { type: `upsert`, id: 10, rank: 5, eligible: true },
+        { type: `flip`, id: 0 },
+        { type: `upsert`, id: 11, rank: 6, eligible: false },
+        { type: `refetch` },
+      ],
+    })
+  })
+
+  // A page with no later page whose end moves earlier. Two rank-0 rows
+  // arrive while the provider lags; the refetched page ends at rank 0, but
+  // the tie request still holds the rank-1 row, so the loader sees no
+  // delete. The report repairs the window.
+  it(`repairs a signalling refetch whose page now ends before its tie`, async () => {
+    await checkEagerWindow({
+      path: `on-demand`,
+      provider: `refetch-signal`,
+      filter: `anti-joined`,
+      via: `marker`,
+      indexed: true,
+      direction: `asc`,
+      nulls: `first`,
+      terms: 1,
+      limit: 3,
+      offset: 0,
+      initial: [
+        { id: 0, rank: 0, eligible: true },
+        { id: 1, rank: 0, eligible: true },
+        { id: 2, rank: 1, eligible: true },
+        { id: 5, rank: 13, eligible: false },
+      ],
+      history: [
+        { type: `upsert`, id: 10, rank: 0, eligible: false },
+        { type: `upsert`, id: 11, rank: 0, eligible: true },
+        { type: `refetch` },
+      ],
+    })
+  })
+
+  // A second live-query Collection over a refetched on-demand source kept a
+  // short joined window (#2155): after the refetch the peer showed ranks
+  // [0, 0] where the model shows [0, 0, 100]. The loader fix that resumes a
+  // staged continuation after a synchronous answer the graph already
+  // processed closed this trace.
+  it(`shows a peer's full joined window after a refetch removes a tied row`, async () => {
+    await checkEagerWindow({
+      path: `on-demand`,
+      provider: `refetch`,
+      latency: `immediate`,
+      peer: true,
+      filter: `joined`,
+      via: `link`,
+      indexed: true,
+      direction: `asc`,
+      nulls: `first`,
+      terms: 1,
+      limit: 2,
+      offset: 0,
+      initial: [
+        { id: 9, rank: 0, eligible: true },
+        { id: 0, rank: 0, eligible: true },
+        { id: 1, rank: 0, eligible: true },
+        { id: 2, rank: 1, eligible: false },
+      ],
+      history: [
+        { type: `upsert`, id: 10, rank: 1, eligible: false },
+        { type: `flip`, id: 0 },
+      ],
+    })
   })
 
   it(`publishes a full-join window that only loses a row`, async () => {
@@ -6310,6 +7240,548 @@ describe(`eager indexed ordered windows`, () => {
       ],
     })
   })
+
+  const baseOptimisticWindowCases = (
+    [`source`, `joined`, `anti-joined`] as const
+  ).flatMap((shape) =>
+    ([`update`, `delete`] as const).flatMap((mutation) =>
+      ([`collection`, `effect`] as const).flatMap((consumer) =>
+        ([`acknowledge`, `rollback`] as const).flatMap((outcome) =>
+          ([1, 2] as const).flatMap((width) =>
+            [true, false].map((indexed): OptimisticWindowCase => {
+              const extent: OptimisticWindowExtent = indexed
+                ? `missing`
+                : `installed`
+              return {
+                shape,
+                mutation,
+                consumer,
+                outcome,
+                width,
+                indexed,
+                extent,
+                installedIds: indexed
+                  ? shape === `source`
+                    ? width === 1
+                      ? [3]
+                      : [3, 2]
+                    : width === 1
+                      ? [4, 3]
+                      : [4, 3, 2]
+                  : [1, 2, 3, 4],
+                acquisition: extent === `missing` ? `required` : `forbidden`,
+              }
+            }),
+          ),
+        ),
+      ),
+    ),
+  )
+  const optimisticWindowCases: Array<OptimisticWindowCase> = [
+    ...baseOptimisticWindowCases,
+    ...([`joined`, `anti-joined`] as const).flatMap((shape) =>
+      ([`acknowledge`, `rollback`] as const).flatMap((outcome) =>
+        ([`collection`, `effect`] as const).map((consumer) => ({
+          shape,
+          mutation: `update` as const,
+          mutationSource: `marker` as const,
+          consumer,
+          outcome,
+          width: 2 as const,
+          indexed: true,
+          extent: `missing` as const,
+          installedIds: [4, 3, 2],
+          acquisition: `required` as const,
+          answerTiming: `after-settlement` as const,
+        })),
+      ),
+    ),
+    ...([`source`, `joined`] as const).flatMap((shape) =>
+      ([`acknowledge`, `rollback`] as const).flatMap((outcome) =>
+        ([`collection`, `effect`] as const).map((consumer) => ({
+          shape,
+          mutation: `delete` as const,
+          consumer,
+          outcome,
+          width: 2 as const,
+          indexed: true,
+          extent: `missing` as const,
+          installedIds: shape === `source` ? [3, 2] : [4, 3, 2],
+          acquisition: `required` as const,
+          answerTiming: `after-settlement` as const,
+        })),
+      ),
+    ),
+    {
+      shape: `source`,
+      mutation: `update`,
+      consumer: `collection`,
+      outcome: `acknowledge`,
+      width: 2,
+      indexed: true,
+      extent: `installed`,
+      installedIds: [3, 2, 1],
+      acquisition: `allowed`,
+    },
+    {
+      shape: `joined`,
+      mutation: `delete`,
+      consumer: `collection`,
+      outcome: `acknowledge`,
+      width: 2,
+      indexed: true,
+      extent: `installed`,
+      installedIds: [4, 3, 2, 1],
+      acquisition: `allowed`,
+    },
+    {
+      shape: `source`,
+      mutation: `delete`,
+      consumer: `collection`,
+      outcome: `acknowledge`,
+      width: 1,
+      indexed: true,
+      extent: `non-prefix`,
+      installedIds: [3, 1],
+      acquisition: `required`,
+    },
+  ]
+
+  it.each(optimisticWindowCases)(
+    `characterizes a width-$width $indexed indexed optimistic $shape $mutation from $mutationSource with $extent replacement extent for a $consumer before $outcome ($answerTiming)`,
+    async (testCase) => {
+      const observation = await checkOptimisticWindow(testCase)
+      const actual = optimisticWindowViolations(observation, testCase)
+      // Each legal history must refine the independent public-window model.
+      expect(actual).toEqual([])
+    },
+  )
+
+  it(`refills an optimistic rank move that leaves a full installed window`, async () => {
+    // Moving the leading row below a missing source row does not shrink the
+    // installed window. A local row-count check alone cannot discover that
+    // the remote ordered prefix now contains row 1.
+    const testCase: OptimisticWindowCase = {
+      shape: `source`,
+      mutation: `update`,
+      consumer: `collection`,
+      outcome: `acknowledge`,
+      width: 2,
+      indexed: true,
+      extent: `missing`,
+      installedIds: [3, 2],
+      acquisition: `required`,
+      rankMove: true,
+    }
+    const observation = await checkOptimisticWindow(testCase)
+    expect(optimisticWindowViolations(observation, testCase)).toEqual([])
+  })
+
+  it(`restores an optimistic membership departure with a rank change on rollback`, async () => {
+    // This is a membership departure, so the short-window law applies even
+    // though its source row also changes order. Rollback must remove both
+    // overlay effects at the same public cut.
+    const testCase: OptimisticWindowCase = {
+      shape: `source`,
+      mutation: `update`,
+      consumer: `collection`,
+      outcome: `rollback`,
+      width: 2,
+      indexed: true,
+      extent: `missing`,
+      installedIds: [3, 2],
+      acquisition: `required`,
+      rankMove: true,
+      rankDeparture: true,
+    }
+    const observation = await checkOptimisticWindow(testCase)
+    expect(optimisticWindowViolations(observation, testCase)).toEqual([])
+  })
+
+  it.each(
+    ([`joined`, `anti-joined`] as const).flatMap((shape) =>
+      ([`acknowledge`, `rollback`] as const).map((outcome) => ({
+        shape,
+        outcome,
+      })),
+    ),
+  )(
+    `publishes an ascending $shape limit-one optimistic delete before $outcome`,
+    async ({ shape, outcome }) => {
+      // Negated ranks make row 3 the ascending head and row 2 its provider
+      // successor. The leading rejected row 4 remains ahead of both.
+      const testCase: OptimisticWindowCase = {
+        shape,
+        mutation: `delete`,
+        consumer: `collection`,
+        outcome,
+        width: 1,
+        indexed: true,
+        extent: `missing`,
+        installedIds: [4, 3],
+        acquisition: `required`,
+        direction: `asc`,
+      }
+      const observation = await checkOptimisticWindow(testCase)
+      expect(optimisticWindowViolations(observation, testCase)).toEqual([])
+    },
+  )
+
+  it(`rejects a hostile optimistic observation that makes no refill progress`, () => {
+    const testCase: OptimisticWindowCase = {
+      shape: `joined`,
+      mutation: `delete`,
+      consumer: `collection`,
+      outcome: `acknowledge`,
+      width: 2,
+      indexed: true,
+      extent: `missing`,
+      installedIds: [4, 3, 2],
+      acquisition: `required`,
+    }
+    const observation: OptimisticWindowObservation = {
+      initial: [3, 2],
+      immediate: [2],
+      acquiring: [2],
+      answerQueued: [2],
+      settled: [2, 1],
+      rowsAfterFirstTurn: [2, 1],
+      rowsAfterSecondTurn: [2, 1],
+      immediatePublications: [{ rows: [2] }],
+      preSettlementPublications: [{ rows: [2] }],
+      publicationsAtSettlement: [{ rows: [2] }, { rows: [2, 1] }],
+      publicationsAfterSettlement: [],
+      attempts: [],
+      settlementOutcome: `fulfilled`,
+    }
+
+    expect(optimisticWindowViolations(observation, testCase)).toEqual([
+      `refill acquisition did not start`,
+      `refill answer did not submit row 1`,
+    ])
+  })
+
+  it(`rejects a delayed Collection publication`, () => {
+    const testCase: OptimisticWindowCase = {
+      shape: `joined`,
+      mutation: `update`,
+      consumer: `collection`,
+      outcome: `acknowledge`,
+      width: 2,
+      indexed: true,
+      extent: `missing`,
+      installedIds: [4, 3, 2],
+      acquisition: `required`,
+    }
+    const observation: OptimisticWindowObservation = {
+      initial: [3, 2],
+      immediate: [2],
+      acquiring: [2],
+      answerQueued: [2],
+      settled: [2, 1],
+      rowsAfterFirstTurn: [2, 1],
+      rowsAfterSecondTurn: [2, 1],
+      immediatePublications: [],
+      preSettlementPublications: [{ rows: [2] }],
+      publicationsAtSettlement: [{ rows: [2] }, { rows: [2, 1] }],
+      publicationsAfterSettlement: [],
+      attempts: [
+        {
+          submittedRows: [1],
+          limit: 2,
+          direction: `desc`,
+          appliedReceiptPending: true,
+          providerPending: true,
+        },
+      ],
+      settlementOutcome: `fulfilled`,
+    }
+
+    expect(optimisticWindowViolations(observation, testCase)).toEqual([
+      `immediate publications: [] instead of [[2]]`,
+    ])
+  })
+
+  it(`rejects a stale publication after transaction settlement`, () => {
+    const testCase: OptimisticWindowCase = {
+      shape: `joined`,
+      mutation: `update`,
+      consumer: `collection`,
+      outcome: `acknowledge`,
+      width: 2,
+      indexed: true,
+      extent: `missing`,
+      installedIds: [4, 3, 2],
+      acquisition: `required`,
+    }
+    const observation: OptimisticWindowObservation = {
+      initial: [3, 2],
+      immediate: [2],
+      acquiring: [2],
+      answerQueued: [2],
+      settled: [2, 1],
+      rowsAfterFirstTurn: [2, 1],
+      rowsAfterSecondTurn: [2],
+      immediatePublications: [{ rows: [2] }],
+      preSettlementPublications: [{ rows: [2] }],
+      publicationsAtSettlement: [{ rows: [2] }, { rows: [2, 1] }],
+      publicationsAfterSettlement: [{ rows: [2] }],
+      attempts: [
+        {
+          submittedRows: [1],
+          limit: 2,
+          direction: `desc`,
+          appliedReceiptPending: true,
+          providerPending: true,
+        },
+      ],
+      settlementOutcome: `fulfilled`,
+    }
+
+    expect(optimisticWindowViolations(observation, testCase)).toEqual([
+      `rows after second settlement turn: [2] instead of [2,1]`,
+      `post-settlement publications: [[2]] instead of []`,
+    ])
+  })
+
+  it(`rejects a full-source refill disguised as useful bounded progress`, () => {
+    const testCase: OptimisticWindowCase = {
+      shape: `joined`,
+      mutation: `delete`,
+      consumer: `collection`,
+      outcome: `acknowledge`,
+      width: 2,
+      indexed: true,
+      extent: `missing`,
+      installedIds: [4, 3, 2],
+      acquisition: `required`,
+    }
+    const observation: OptimisticWindowObservation = {
+      initial: [3, 2],
+      immediate: [2],
+      acquiring: [2],
+      answerQueued: [2],
+      settled: [2, 1],
+      rowsAfterFirstTurn: [2, 1],
+      rowsAfterSecondTurn: [2, 1],
+      immediatePublications: [{ rows: [2] }],
+      preSettlementPublications: [{ rows: [2] }],
+      publicationsAtSettlement: [{ rows: [2] }, { rows: [2, 1] }],
+      publicationsAfterSettlement: [],
+      attempts: [
+        {
+          submittedRows: [4, 3, 2, 1, 0, -1],
+          limit: 6,
+          direction: `desc`,
+          appliedReceiptPending: true,
+          providerPending: true,
+        },
+      ],
+      settlementOutcome: `fulfilled`,
+    }
+
+    expect(optimisticWindowViolations(observation, testCase)).toEqual([
+      `refill used an unbounded provider request`,
+    ])
+    const repeated = {
+      ...observation,
+      attempts: [{ ...observation.attempts[0]!, limit: 2 }],
+      requestHistory: [
+        { identity: `same ordered page`, newRows: 1 },
+        { identity: `same ordered page`, newRows: 0 },
+      ],
+    }
+    expect(optimisticWindowViolations(repeated, testCase)).toEqual([
+      `repeated an unchanged provider request without progress`,
+    ])
+  })
+
+  it(`rejects a source refill that omits eligibility or adds broad work`, async () => {
+    const testCase: OptimisticWindowCase = {
+      shape: `source`,
+      mutation: `delete`,
+      consumer: `collection`,
+      outcome: `acknowledge`,
+      width: 2,
+      indexed: true,
+      extent: `missing`,
+      installedIds: [3, 2],
+      acquisition: `required`,
+    }
+    const observation = await checkOptimisticWindow(testCase)
+    expect(optimisticWindowViolations(observation, testCase)).toEqual([])
+    const refill = observation.requestHistory!.find(
+      ({ phase, submittedRows }) =>
+        phase === `pending` && submittedRows?.includes(1),
+    )!
+
+    // A finite, ordered request that drops the source predicate still returns
+    // the needed row, but a rejected peer at the same rank exposes the omission.
+    const missingPredicate: OptimisticWindowObservation = {
+      ...observation,
+      requestHistory: observation.requestHistory!.map((request) =>
+        request === refill ? { ...request, allowsRejectedRoot: true } : request,
+      ),
+    }
+    expect(optimisticWindowViolations(missingPredicate, testCase)).toContain(
+      `source refill omitted the source predicate`,
+    )
+
+    // Useful progress from the first page cannot license a later, unrelated
+    // full-source fetch while the optimistic transaction remains pending.
+    const extraBroadRequest: OptimisticWindowObservation = {
+      ...observation,
+      requestHistory: [
+        ...observation.requestHistory!,
+        {
+          identity: `distinct full-source request`,
+          phase: `pending`,
+          newRows: 0,
+          submittedRows: [4, 3, 2, 1, 0, -1],
+          selectedRanks: [4, 3, 2, 1, 0, -1],
+          allowsRejectedRoot: true,
+        },
+      ],
+    }
+    expect(optimisticWindowViolations(extraBroadRequest, testCase)).toContain(
+      `optimistic acquisition used a broad provider request`,
+    )
+  })
+
+  it(`rejects acquisition deferred until after optimistic settlement`, async () => {
+    const testCase: OptimisticWindowCase = {
+      shape: `source`,
+      mutation: `delete`,
+      consumer: `collection`,
+      outcome: `acknowledge`,
+      width: 2,
+      indexed: true,
+      extent: `missing`,
+      installedIds: [3, 2],
+      acquisition: `required`,
+    }
+    const observation = await checkOptimisticWindow(testCase)
+    expect(optimisticWindowViolations(observation, testCase)).toEqual([])
+    expect(
+      optimisticWindowViolations(
+        { ...observation, acquisitionStartedBeforeSettlement: false },
+        testCase,
+      ),
+    ).toContain(`refill acquisition did not start before settlement`)
+  })
+
+  /**
+   * These complete-local-extent histories isolate the immediate publication
+   * law from provider timing. The reference filters one deleted key from a
+   * plain row list, orders it, then takes the requested slice. A tie deletes
+   * whichever equal-ranked key the initial window selected; the remaining
+   * peer is then the only valid top row, independent of tie-breaking policy.
+   */
+  it.each(
+    [
+      {
+        name: `ascending head`,
+        ranks: [1, 2, 3],
+        direction: `asc` as const,
+        offset: 0,
+        limit: 1,
+      },
+      {
+        name: `descending offset`,
+        ranks: [1, 2, 3, 4],
+        direction: `desc` as const,
+        offset: 1,
+        limit: 1,
+      },
+      {
+        name: `tied head`,
+        ranks: [2, 3, 3],
+        direction: `desc` as const,
+        offset: 0,
+        limit: 1,
+      },
+      {
+        name: `exhausted window`,
+        ranks: [1, 2, 3],
+        direction: `desc` as const,
+        offset: 0,
+        limit: 4,
+      },
+    ].flatMap((window) =>
+      ([`acknowledge`, `rollback`] as const).map((outcome) => ({
+        ...window,
+        outcome,
+      })),
+    ),
+  )(
+    `publishes an optimistic departure in an installed $name before $outcome`,
+    async ({ ranks, direction, offset, limit, outcome }) => {
+      const persistence = createDeferred<void>()
+      const rows = ranks.map((rank, index) => ({ id: index + 1, rank }))
+      const source = createCollection(
+        localOnlyCollectionOptions({
+          id: `optimistic-installed-${Math.random()}`,
+          getKey: (row) => row.id,
+          initialData: rows,
+          onDelete: async () => {
+            await persistence.promise
+          },
+        }),
+      )
+      source.createIndex((row) => row.rank, { indexType: BTreeIndex })
+      const query = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ row: source })
+            .orderBy(({ row }) => row.rank, direction)
+            .offset(offset)
+            .limit(limit),
+      })
+      const ids = () => query.toArray.map(({ id }) => id)
+      const order = (removed?: number) =>
+        rows
+          .filter(({ id }) => id !== removed)
+          .sort((left, right) =>
+            direction === `asc`
+              ? left.rank - right.rank
+              : right.rank - left.rank,
+          )
+          .slice(offset, offset + limit)
+          .map(({ id }) => id)
+      let unsubscribe: (() => void) | undefined
+      try {
+        await query.preload()
+        const initial = ids()
+        if (ranks[1] !== ranks[2]) expect(initial).toEqual(order())
+        const departed = initial[0]!
+        const publications: Array<Array<number>> = []
+        const subscription = query.subscribeChanges(
+          () => publications.push(ids()),
+          { includeInitialState: true },
+        )
+        unsubscribe = () => subscription.unsubscribe()
+        publications.length = 0
+
+        const transaction = source.delete(departed)
+        const expected = order(departed)
+        expect(ids(), `immediate installed rows`).toEqual(expected)
+        expect(publications, `synchronous installed publication`).toEqual([
+          expected,
+        ])
+        if (outcome === `acknowledge`) persistence.resolve()
+        else persistence.reject(new Error(`rollback`))
+        await transaction.isPersisted.promise.catch(() => undefined)
+        expect(ids(), `settled installed rows`).toEqual(
+          outcome === `acknowledge` ? expected : initial,
+        )
+      } finally {
+        persistence.resolve()
+        unsubscribe?.()
+        await query.cleanup()
+        await source.cleanup()
+      }
+    },
+  )
 
   it.each([
     [`sync`, 1],
@@ -6562,6 +8034,45 @@ describe(`eager indexed ordered windows`, () => {
     `keeps a window whose loads answer between live changes for a random or replayed seed`,
     checkEagerWindow,
   )
+
+  // A local null-ranked row can appear to fill the window while the settled
+  // provider prefix ends before a better row. Held answers must not let that
+  // local row stand in for source coverage after earlier visible deletes.
+  it(`keeps a joined window within its settled source prefix after held answers`, async () => {
+    await checkEagerWindow({
+      path: `on-demand`,
+      provider: `forward`,
+      latency: `held`,
+      cancellation: `cooperative`,
+      peer: false,
+      filter: `joined`,
+      via: `marker`,
+      indexed: false,
+      direction: `desc`,
+      nulls: `last`,
+      terms: 1,
+      limit: 2,
+      offset: 0,
+      initial: [
+        { id: 0, rank: 0, eligible: false },
+        { id: 1, rank: 0, eligible: true },
+        { id: 2, rank: Number.NaN, eligible: true },
+      ],
+      history: [
+        { type: `delete-visible` },
+        { type: `delete-visible` },
+        { type: `delete-visible` },
+        {
+          type: `upsert`,
+          id: 40,
+          rank: null as unknown as number,
+          eligible: true,
+        },
+        { type: `delete-visible` },
+        { type: `delete`, id: 1 },
+      ],
+    })
+  })
 
   fcTest.prop([eagerJoinedGapCase], { numRuns: runs, seed: 2063 })(
     `keeps a joined-filter window whose row leaves only through the join for a fixed seed`,

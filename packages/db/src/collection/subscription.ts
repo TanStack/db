@@ -313,17 +313,23 @@ export class CollectionSubscription
 
   /** Detach logical demand from work owned by a discarded sync run. */
   /** @internal A reload retired the sync run; detach its demand. */
+  /**
+   * A reload keeps each retained demand's waiting caller: the new sync run
+   * re-acquires the demand and settles that caller.
+   */
   public retireSyncRun(): void {
-    this.handleCollectionCleanup()
+    this.handleCollectionCleanup(true)
   }
 
-  private handleCollectionCleanup(): void {
+  private handleCollectionCleanup(keepWaitingCallers = false): void {
     this.discardTruncateReplay()
     this.stalePublishedRows = new Map(this.publishedRows)
     this.pendingLoadSubsetParticipants.clear()
 
     for (const demand of [...this.subsetDemands]) {
-      demand.initialResult?.reject(new LoadSubsetOperationAbortedError())
+      if (!keepWaitingCallers || demand.acquisitionState === `starting`) {
+        demand.initialResult?.reject(new LoadSubsetOperationAbortedError())
+      }
       cancelAcquisition(demand.acquisition)
       if (demand.acquisitionState === `starting`) {
         const index = this.subsetDemands.indexOf(demand)
@@ -353,7 +359,8 @@ export class CollectionSubscription
     if (
       this.collection.status === `error` ||
       this.collection.status === `crashed` ||
-      this.collection._sync.syncLoadSubsetFn === null
+      (this.collection.config.syncMode === `on-demand` &&
+        this.collection._sync.syncLoadSubsetFn === null)
     ) {
       this.setReadyIfIdle()
       return
@@ -365,6 +372,14 @@ export class CollectionSubscription
     )
     if (demands.length === 0) {
       this.setReadyIfIdle()
+      return
+    }
+    // Eager demand is satisfied by the complete ready snapshot, never by a
+    // subset acquisition or the partial state of a loading sync run.
+    if (
+      this.collection.config.syncMode !== `on-demand` &&
+      this.collection.status !== `ready`
+    ) {
       return
     }
 
@@ -400,14 +415,15 @@ export class CollectionSubscription
    * authoritative replay succeeds.
    */
   private handleTruncate() {
-    // Without a loader, replay only reconciles rows retained across cleanup.
-    const hasLoadSubsetHandler = this.collection._sync.syncLoadSubsetFn !== null
+    // Eager demand is satisfied by source readiness, even when the adapter
+    // happens to expose a loader. Only on-demand demand reacquires a subset.
+    const reloadsSubsets =
+      this.collection.config.syncMode === `on-demand` &&
+      this.collection._sync.syncLoadSubsetFn !== null
     // Deferred demand never acquired, so a truncate gives it nothing to
     // reload; it acquires the replacement rows when acquisition resumes.
     const demandsToReload =
-      hasLoadSubsetHandler && !this.defersAcquisition
-        ? [...this.subsetDemands]
-        : []
+      reloadsSubsets && !this.defersAcquisition ? [...this.subsetDemands] : []
 
     // Retained rows still need the committed replacement even without demand.
     if (demandsToReload.length === 0 && this.stalePublishedRows.size === 0) {
@@ -835,6 +851,11 @@ export class CollectionSubscription
 
   public get hasPendingTruncateReplacement(): boolean {
     return this.truncateReplacementPending
+  }
+
+  /** Whether the source accepted sync rows that are not yet visible. */
+  public get hasHeldSyncTransaction(): boolean {
+    return this.collection._hasHeldSyncTransaction()
   }
 
   public get pendingTruncateReplacement(): Promise<void> | undefined {

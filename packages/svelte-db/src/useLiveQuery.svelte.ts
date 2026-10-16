@@ -5,7 +5,6 @@ import { SvelteMap } from 'svelte/reactivity'
 import {
   BaseQueryBuilder,
   UnhashableQueryIRError,
-  createLiveQueryCollection,
   createLiveQueryObserver,
   getLiveQueryHash,
   getPublicCollection,
@@ -35,6 +34,8 @@ import type {
   QueryBuilder,
   SingleResult,
 } from '@tanstack/db'
+
+const DEFAULT_GC_TIME_MS = 1
 
 /** Copy a snapshot's ordered rows; a single-result query's `data` is one row. */
 function snapshotRows(data: unknown): Array<any> {
@@ -433,11 +434,14 @@ export function useLiveQuery(
       collection = preparedValue
     } else if (preparedValue instanceof BaseQueryBuilder) {
       // Hydration keys the live-query Collection by identity.
-      collection = resolveLiveQueryValue(preparedValue, { pool: !dbClient })
+      collection = resolveLiveQueryValue(preparedValue, {
+        gcTime: DEFAULT_GC_TIME_MS,
+        pool: !dbClient,
+      })
     } else {
-      collection = createLiveQueryCollection({
-        ...(preparedValue as LiveQueryCollectionConfig<any>),
-        startSync: true,
+      collection = resolveLiveQueryValue(preparedValue, {
+        gcTime: DEFAULT_GC_TIME_MS,
+        pool: !dbClient,
       })
     }
 

@@ -735,6 +735,15 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         )
         this.orderedLoaders.set(sourceId, loader)
         loader.start()
+        // The sync adapter reports that served pages may have shifted after
+        // its own refetch. Re-establish the window with a bounded repair.
+        this.unsubscribeCallbacks.add(
+          collection.on(`loadedSubsets:invalidated`, () => {
+            if (this.disposed) return
+            loader.revalidateLoadedCoverage()
+            this.scheduleGraphRun()
+          }),
+        )
       }
 
       const handleSourceCleanup = () => {
@@ -849,9 +858,16 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     scheduleGraph = true,
   ): void {
     if (this.optimizableOrderByCollections[sourceId]) {
+      const source = this.collectionSources.find(
+        (candidate) => candidate.sourceId === sourceId,
+      )!
       this.orderedLoaders
         .get(sourceId)
-        ?.onSourceChanges(changes, this.sentToD2RowsBySource.get(sourceId))
+        ?.onSourceChanges(
+          changes,
+          this.sentToD2RowsBySource.get(sourceId),
+          (key) => source.collection._hasOptimisticOverlay(key),
+        )
       changes = [...splitUpdates(changes)]
     }
     this.sendChangesToD2(sourceId, changes)

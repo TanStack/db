@@ -778,6 +778,11 @@ export class CollectionImpl<
     )
   }
 
+  /** Whether an accepted sync transaction is not yet visible. */
+  public _hasHeldSyncTransaction(): boolean {
+    return this._state.hasHeldSyncTransaction()
+  }
+
   /**
    * Get the current size of the collection (cached)
    */

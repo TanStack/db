@@ -130,3 +130,5 @@ export { operators, type OperatorName } from './query/builder/functions.js'
 
 /** @internal Shared native ordering for first-party persistence. */
 export { compareTemporalValues } from './utils/comparison'
+/** @internal Used by first-party collection adapters. */
+export { makeComparator } from './utils/comparison'

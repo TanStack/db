@@ -48,7 +48,7 @@ and the user's choices to ship one PR, retain caching, and reuse Query semantics
 
 ## Oracle-guide pass and recovered tests
 
-Source: [Writing reliable oracle tests](../../../../docs/contributing/oracle-tests.md).
+Source: [Oracle Testing Rubric](../../../../docs/contributing/oracle-rubric.md).
 This pass shares the implementer's context; it is weaker than the two isolated
 readings above. It compares promises and test evidence, not every possible state.
 

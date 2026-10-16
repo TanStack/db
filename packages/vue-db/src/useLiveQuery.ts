@@ -10,7 +10,6 @@ import {
 } from 'vue'
 import {
   BaseQueryBuilder,
-  createLiveQueryCollection,
   createLiveQueryObserver,
   getPublicCollection,
   isCollection,
@@ -33,6 +32,8 @@ import type {
   SingleResult,
 } from '@tanstack/db'
 import type { ComputedRef, MaybeRefOrGetter } from 'vue'
+
+const DEFAULT_GC_TIME_MS = 1
 
 /** Copy a snapshot's ordered rows; a single-result query's `data` is one row. */
 function snapshotRows(data: unknown): Array<any> {
@@ -332,11 +333,11 @@ export function useLiveQuery(
       // A query function returning null or undefined disables the query.
       return resolveLiveQueryValue(
         unwrappedParam(new BaseQueryBuilder() as InitialQueryBuilder),
+        { gcTime: DEFAULT_GC_TIME_MS },
       )
     } else {
-      return createLiveQueryCollection({
-        ...unwrappedParam,
-        startSync: true,
+      return resolveLiveQueryValue(unwrappedParam, {
+        gcTime: DEFAULT_GC_TIME_MS,
       })
     }
   })

@@ -327,6 +327,13 @@ export type CursorExpressions = {
  * Use stable data properties, not stateful getters, for request data.
  * Signal and subscription references stay fixed, but their lifecycle remains
  * live: aborting the signal or releasing the subscription is supported.
+ *
+ * An ordered request with `orderBy` serves a prefix: every matching row from
+ * the start of the order through its boundary, the leading order value of the
+ * last row the request returned, ties included. A request that returned no
+ * rows served no prefix. The ordered loader treats every row in a served
+ * prefix as loaded. See `LoadSubsetFn` for what a sync adapter owes after it
+ * refetches.
  */
 export type LoadSubsetOptions = {
   /**
@@ -381,6 +388,13 @@ export type LoadSubsetRequestResult = true | Promise<void>
  * implementation must await or return every receipt from the sync
  * `commit()` calls that establish the loaded subset. A result describes only
  * the exact `options` passed to this call.
+ *
+ * When a sync adapter refetches loaded subsets without a new `loadSubset`
+ * call, it either keeps each served ordered prefix whole (see
+ * `LoadSubsetOptions`), or calls `invalidateLoadedSubsets()` once the
+ * refetched rows apply. Refetching each ordered page alone keeps neither
+ * promise: a row that now sorts between two served pages is in neither
+ * result, and the loader receives no change that would request it.
  */
 export type LoadSubsetFn = (options: LoadSubsetOptions) => true | Promise<void>
 
@@ -476,6 +490,14 @@ export interface SyncConfig<
      * The last truncate in a transaction supplies its readiness intent.
      */
     truncate: (options?: { markReady?: boolean }) => void
+    /**
+     * Report that rows this adapter serves for loaded subsets may have shifted
+     * between served pages, after a refetch that the adapter started on its
+     * own has applied. Each ordered live query then re-establishes its window
+     * with a bounded repair from the start of its order. Calls in one turn are
+     * coalesced. Do not call it for results that answer a `loadSubset` call.
+     */
+    invalidateLoadedSubsets: () => void
     metadata?: SyncMetadataApi<TKey>
   }) => void | CleanupFn | SyncConfigRes
 

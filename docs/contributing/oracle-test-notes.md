@@ -1,6 +1,6 @@
 # Oracle guide: cases, terms and sources
 
-Companion to [Writing reliable oracle tests](oracle-tests.md). These notes keep evidence and deeper reading off the quick-start path. The historical entries describe archived reports and audits, not current failing tests or reruns performed for this guide.
+Companion to [Oracle Testing Rubric](oracle-rubric.md). These notes keep evidence and deeper reading off the quick-start path. The historical entries describe archived reports and audits, not current failing tests or reruns performed for this guide.
 
 The shared terms used here are defined in the
 [project glossary](glossary.md). That glossary is the vocabulary owner for

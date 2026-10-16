@@ -322,7 +322,11 @@ export class CollectionSubscriber<
       if (!subscription) return
       const changesArray = Array.isArray(changes) ? changes : [...changes]
 
-      this.orderedLoader?.onSourceChanges(changesArray, this.sentToD2Rows)
+      this.orderedLoader?.onSourceChanges(
+        changesArray,
+        this.sentToD2Rows,
+        (key) => this.collection._hasOptimisticOverlay(key),
+      )
 
       // Split live updates into a delete of the old value and an insert of the new value
       const splittedChanges = splitUpdates(changesArray)
@@ -359,9 +363,24 @@ export class CollectionSubscriber<
       this.orderedLoader?.resetCursor()
     })
 
+    // The sync adapter reports that served pages may have shifted after its
+    // own refetch. Re-establish the window with a bounded repair.
+    const revalidationUnsubscribe = this.collection.on(
+      `loadedSubsets:invalidated`,
+      () => {
+        const loader = this.orderedLoader
+        if (!loader) return
+        loader.revalidateLoadedCoverage()
+        this.collectionConfigBuilder.scheduleGraphRunIfSyncRunCurrent(
+          this.collectionConfigBuilder.getSyncRunGeneration(),
+        )
+      },
+    )
+
     // Clean up truncate listener when subscription is unsubscribed
     subscription.on(`unsubscribed`, () => {
       truncateUnsubscribe()
+      revalidationUnsubscribe()
       subscriptionHolder.current = undefined
       this.orderedLoader?.dispose()
       this.orderedLoader = undefined

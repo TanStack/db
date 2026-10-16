@@ -241,6 +241,7 @@ export class CollectionSyncManager<
 
   private enterSync(syncCallbackEpoch: number): void {
     const isCurrentSync = () => syncCallbackEpoch === this.syncCallbackEpoch
+    let loadedSubsetsInvalidationQueued = false
     const finishReadyFailures = this.lifecycle.deferReadyFailures()
     let readyFailure: { error: unknown } | undefined
 
@@ -407,6 +408,19 @@ export class CollectionSyncManager<
             pendingTransaction.truncate = true
             pendingTransaction.truncateMarkReady = options?.markReady ?? true
             this.state.refreshPendingSyncedProjection()
+          },
+          invalidateLoadedSubsets: () => {
+            if (!isCurrentSync() || loadedSubsetsInvalidationQueued) return
+            // One revalidation per turn, after the refetch's rows apply.
+            loadedSubsetsInvalidationQueued = true
+            queueMicrotask(() => {
+              loadedSubsetsInvalidationQueued = false
+              if (!isCurrentSync()) return
+              this._events.emit(`loadedSubsets:invalidated`, {
+                type: `loadedSubsets:invalidated`,
+                collection: this.collection,
+              })
+            })
           },
           metadata: this.createSyncMetadataApi(isCurrentSync),
         }),

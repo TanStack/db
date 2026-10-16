@@ -249,7 +249,11 @@ export function resolveLiveQueryValue(
     const config = value as LiveQueryCollectionConfig<any>
     return (
       (pool ? poolConfig(config, gcTime) : undefined) ??
-      createLiveQueryCollection({ startSync, gcTime, ...config })
+      createLiveQueryCollection({
+        ...config,
+        startSync: config.startSync ?? startSync,
+        gcTime: config.gcTime ?? gcTime,
+      })
     )
   }
   throw new Error(

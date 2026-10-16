@@ -6,8 +6,10 @@ import { Func, PropRef, Value } from '../src/query/ir.js'
 import {
   abortReplayHistory,
   abortedRestartHistory,
+  cleanedRestartDemandCases,
   compoundLifecycleCoverageHistories,
   createLifecycleModel,
+  expectedCleanedRestartDemand,
   greenLifecycleHistories,
   greenLifecycleHistoryArbitrary,
   mixedAbortedRestartHistory,
@@ -17,7 +19,7 @@ import {
   syncLifecycleHistory,
   syncLifecycleHistoryArbitrary,
 } from './collection-subscription-lifecycle-grammar-oracle.js'
-import { flushPromises } from './utils.js'
+import { flushPromises, withOracleCleanup } from './utils.js'
 import {
   oraclePropertyOptions,
   oracleRandomParameters,
@@ -41,6 +43,166 @@ const randomCampaign = (property: string) =>
   replay.replayPath === undefined || replay.replayProperty === property
     ? fcTest
     : fcTest.skip
+
+/**
+ * # What settles a demand created while a Collection is cleaned up?
+ *
+ * Collection lifecycle and the live-query architecture require the next sync
+ * run to serve this waiting logical owner. Eager readiness is the complete
+ * source evidence and starts no physical acquisition. On-demand readiness is
+ * insufficient; one settled acquisition supplies the evidence instead.
+ *
+ * The independent model in the lifecycle grammar crosses explicit eager,
+ * default eager, and on-demand configuration with empty and nonempty
+ * replacements and with or without an eager loader. Eager histories may also
+ * truncate the loading replacement, or fail their first load and reload.
+ * The production driver publishes an old row, creates a direct subscription,
+ * cleans up its source, requests a snapshot, and restarts the real Collection.
+ * It holds eager readiness to prove the cleanup-detached
+ * `onLoadSubsetResult` promise cannot fulfill early. At every cut, the returned
+ * promise's settlement, acquisition count, subscription and Collection status,
+ * and subscriber-applied rows must match the model. Public preload failure and
+ * demands first admitted after restart remain outside this focused matrix.
+ */
+describe(`demand created while its Collection is cleaned up`, () => {
+  it.each(cleanedRestartDemandCases)(
+    `$syncMode source with $loader loader, $replacement replacement, and $interruption`,
+    async (history) => {
+      const expected = expectedCleanedRestartDemand(history)
+      let syncRuns = 0
+      let physicalAcquisitions = 0
+      let releaseEagerReady: (() => void) | undefined
+      let operations!: Parameters<SyncConfig<{ id: string }>[`sync`]>[0]
+
+      const publishRow = (id: string) => {
+        operations.begin()
+        operations.write({ type: `insert`, value: { id } })
+        operations.commit()
+      }
+      const publishReplacement = () => {
+        if (history.replacement === `row`) publishRow(`replacement`)
+      }
+      const collection = createCollection<{ id: string }>({
+        id: `cleaned-restart-${history.syncMode}-${history.loader}-${history.replacement}`,
+        getKey: ({ id }) => id,
+        ...(history.syncMode === `default-eager`
+          ? {}
+          : { syncMode: history.syncMode }),
+        sync: {
+          sync: (next) => {
+            const syncRun = syncRuns++
+            // Keep the current run's public adapter boundary for the history
+            // commands below; the model does not read this object.
+            operations = next
+            if (syncRun === 0) {
+              next.markReady()
+            } else if (history.syncMode !== `on-demand`) {
+              releaseEagerReady = () => {
+                publishReplacement()
+                next.markReady()
+              }
+            } else {
+              next.markReady()
+            }
+            if (history.loader === `absent`) return
+            return {
+              loadSubset: () => {
+                physicalAcquisitions++
+                publishReplacement()
+                return true
+              },
+            }
+          },
+        },
+      })
+      const visible = new Map<string | number, { id: string }>()
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          for (const change of changes) {
+            if (change.type === `delete`) visible.delete(change.key)
+            else visible.set(change.key, { id: change.value.id })
+          }
+        },
+        { includeInitialState: false },
+      )
+
+      await withOracleCleanup(async () => {
+        publishRow(`old`)
+        expect([...visible.values()]).toEqual([{ id: `old` }])
+        await collection.cleanup()
+        let resultState: `pending` | `fulfilled` | `rejected` = `pending`
+        let result: unknown
+        subscription.requestSnapshot({
+          onLoadSubsetResult: (returned) => {
+            result = returned
+            if (returned instanceof Promise) {
+              void returned.then(
+                () => {
+                  resultState = `fulfilled`
+                },
+                () => {
+                  resultState = `rejected`
+                },
+              )
+            } else {
+              resultState = `fulfilled`
+            }
+          },
+        })
+
+        expect(result).toBeInstanceOf(Promise)
+        expect(resultState).toBe(`pending`)
+
+        collection.startSyncImmediate()
+        await flushPromises()
+
+        if (expected.beforeEagerReady) {
+          expect({
+            physicalAcquisitions,
+            result: resultState,
+            status: subscription.status,
+            collectionStatus: collection.status,
+          }).toEqual(expected.beforeEagerReady)
+
+          if (history.interruption === `truncate`) {
+            operations.begin()
+            operations.truncate({ markReady: false })
+            const receipt = operations.commit()
+            if (receipt !== true) await receipt
+          } else if (history.interruption === `failed-then-reload`) {
+            operations.fail(new Error(`restart failure`))
+          }
+          if (expected.afterInterruption) {
+            await flushPromises()
+            expect({
+              physicalAcquisitions,
+              result: resultState,
+              status: subscription.status,
+              collectionStatus: collection.status,
+            }).toEqual(expected.afterInterruption)
+          }
+
+          // A failed first load ends its sync run; only a reload starts the
+          // run that can serve the waiting demand.
+          if (history.interruption === `failed-then-reload`) {
+            void collection.reload().catch(() => undefined)
+            await flushPromises()
+          }
+          releaseEagerReady!()
+          await flushPromises()
+        }
+
+        expect({
+          physicalAcquisitions,
+          result: resultState,
+          status: subscription.status,
+          rows: [...visible.values()],
+          collectionStatus: collection.status,
+        }).toEqual(expected.settled)
+      }, [() => subscription.unsubscribe(), () => collection.cleanup()])
+    },
+  )
+})
 
 /**
  * # Does the runtime follow the subscription lifecycle grammar?

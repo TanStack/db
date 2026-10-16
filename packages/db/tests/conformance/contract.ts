@@ -142,6 +142,8 @@ export type QueryBuild = (q: any) => any
 /** A mounted live query under test. */
 export interface LiveQueryHandle {
   current: () => ConformanceResult
+  /** The live-query Collection currently backing this result. */
+  collection: () => Collection<any, any, any> | null
   /** Let the framework scheduler + core sync settle, then resolve. */
   flush: () => Promise<void>
   /**
@@ -197,7 +199,7 @@ export interface LiveQueryDriver {
    */
   makePrecreated: (
     build: QueryBuild,
-    opts?: { startSync?: boolean },
+    opts?: { startSync?: boolean; gcTime?: number },
   ) => { collection: Collection<any, any, any> }
   /**
    * Create a source that fails during startup: `fail` calls `fail()` before
@@ -222,7 +224,10 @@ export interface LiveQueryDriver {
   /** Mount a pre-created collection passed directly to the hook. */
   mountCollection: (collection: Collection<any, any, any>) => LiveQueryHandle
   /** Mount via the config-object input form (`{ query: build }`). */
-  mountConfig: (build: QueryBuild) => LiveQueryHandle
+  mountConfig: (
+    build: QueryBuild,
+    opts?: { gcTime?: number },
+  ) => LiveQueryHandle
   /** Mount an explicitly-disabled query (adapter's own null/undefined form). */
   mountDisabled: () => LiveQueryHandle
   /** No active waivers. Kept empty in drivers to make this boundary explicit. */

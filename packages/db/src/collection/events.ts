@@ -62,6 +62,16 @@ export interface CollectionTruncateEvent {
   collection: Collection<any, any, any, any, any>
 }
 
+/**
+ * Event emitted when the sync adapter reports that rows it serves for loaded
+ * subsets may have shifted between served pages. Ordered live queries then
+ * re-establish their windows with a bounded repair.
+ */
+export interface CollectionLoadedSubsetsInvalidatedEvent {
+  type: `loadedSubsets:invalidated`
+  collection: Collection<any, any, any, any, any>
+}
+
 export type CollectionIndexSerializableValue =
   | string
   | number
@@ -113,6 +123,7 @@ export type AllCollectionEvents = {
   'loadingSubset:change': CollectionLoadingSubsetChangeEvent
   'errors:change': CollectionErrorsChangeEvent
   truncate: CollectionTruncateEvent
+  'loadedSubsets:invalidated': CollectionLoadedSubsetsInvalidatedEvent
   'index:added': CollectionIndexAddedEvent
   'index:removed': CollectionIndexRemovedEvent
 } & {

@@ -95,10 +95,14 @@ function makeDeferredSource<
   }
 }
 
-function makePrecreated(build: QueryBuild, opts?: { startSync?: boolean }) {
+function makePrecreated(
+  build: QueryBuild,
+  opts?: { startSync?: boolean; gcTime?: number },
+) {
   const collection = createLiveQueryCollection({
     query: build as any,
     startSync: opts?.startSync ?? true,
+    gcTime: opts?.gcTime,
   })
   return { collection }
 }
@@ -118,6 +122,7 @@ async function settle() {
 
 function makeHandle(result: any, scope: ReturnType<typeof effectScope>) {
   const handle: LiveQueryHandle = {
+    collection: () => result.collection?.value ?? null,
     current(): ConformanceResult {
       return expectResultSurface({
         data: result.data?.value,
@@ -170,9 +175,9 @@ function mountCollection(collection: any) {
   return makeHandle(result, scope)
 }
 
-function mountConfig(build: QueryBuild) {
+function mountConfig(build: QueryBuild, opts?: { gcTime?: number }) {
   const { result, scope } = runInScope(() =>
-    useLiveQuery({ query: build } as any),
+    useLiveQuery({ query: build, ...opts } as any),
   )
   return makeHandle(result, scope)
 }

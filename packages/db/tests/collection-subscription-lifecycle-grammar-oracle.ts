@@ -757,6 +757,115 @@ export const releasedObsoleteResolveHistory: ReadonlyArray<LifecycleCommand> = [
 ]
 
 /**
+ * A demand created while its Collection is cleaned up waits for the next sync
+ * run's evidence. An eager source supplies that evidence through Collection
+ * readiness and starts no physical acquisition. An on-demand source supplies
+ * it through one settled acquisition. Either mode must reconcile the complete
+ * replacement rows before the direct subscription's `onLoadSubsetResult`
+ * promise fulfills.
+ *
+ * These cases are a bounded history grammar, not a projection of the
+ * subscription implementation. Explicit and default eager configuration must
+ * have the same behavior. Empty and nonempty replacements must remove an older
+ * public row. An optional eager loader proves that eager mode bypasses it; the
+ * absent-loader cases preserve the valid Query Collection boundary. Truncate
+ * can revise the restarted run's private replacement, and `error` can pause it
+ * for legal same-run recovery; neither is eager readiness. The model predicts
+ * only the cleanup-detached `onLoadSubsetResult` promise settlement,
+ * subscriber-applied rows, subscription readiness, Collection status, and
+ * physical acquisition count. Public preload failure, demands first admitted
+ * after restart, terminal failure, retired owners, and asynchronous
+ * acquisitions remain outside this focused account.
+ */
+export type CleanedRestartDemandCase = {
+  syncMode: `default-eager` | `eager` | `on-demand`
+  loader: `absent` | `present`
+  replacement: `empty` | `row`
+  interruption: `none` | `truncate` | `failed-then-reload`
+}
+
+export const cleanedRestartDemandCases: ReadonlyArray<CleanedRestartDemandCase> =
+  [
+    ...([`empty`, `row`] as const).flatMap((replacement) =>
+      ([`default-eager`, `eager`] as const).flatMap((syncMode) =>
+        ([`absent`, `present`] as const).flatMap((loader) =>
+          ([`none`, `truncate`, `failed-then-reload`] as const).map(
+            (interruption) => ({
+              syncMode,
+              loader,
+              replacement,
+              interruption,
+            }),
+          ),
+        ),
+      ),
+    ),
+    ...([`empty`, `row`] as const).map((replacement) => ({
+      syncMode: `on-demand` as const,
+      loader: `present` as const,
+      replacement,
+      interruption: `none` as const,
+    })),
+  ]
+
+export function expectedCleanedRestartDemand(
+  history: CleanedRestartDemandCase,
+): {
+  beforeEagerReady?: {
+    physicalAcquisitions: 0
+    result: `pending`
+    status: `loadingSubset`
+    collectionStatus: `loading`
+  }
+  afterInterruption?: {
+    physicalAcquisitions: 0
+    result: `pending`
+    status: `loadingSubset`
+    collectionStatus: `loading` | `error`
+  }
+  settled: {
+    physicalAcquisitions: number
+    result: `fulfilled`
+    status: `ready`
+    rows: Array<{ id: string }>
+    collectionStatus: `ready`
+  }
+} {
+  return {
+    ...(history.syncMode !== `on-demand`
+      ? {
+          beforeEagerReady: {
+            physicalAcquisitions: 0 as const,
+            result: `pending` as const,
+            status: `loadingSubset` as const,
+            collectionStatus: `loading` as const,
+          },
+        }
+      : {}),
+    ...(history.syncMode !== `on-demand` && history.interruption !== `none`
+      ? {
+          afterInterruption: {
+            physicalAcquisitions: 0 as const,
+            result: `pending` as const,
+            status: `loadingSubset` as const,
+            collectionStatus:
+              history.interruption === `failed-then-reload`
+                ? (`error` as const)
+                : (`loading` as const),
+          },
+        }
+      : {}),
+    settled: {
+      physicalAcquisitions: history.syncMode === `on-demand` ? 1 : 0,
+      result: `fulfilled`,
+      status: `ready`,
+      rows: history.replacement === `row` ? [{ id: `replacement` }] : [],
+      collectionStatus: `ready`,
+    },
+  }
+}
+
+/**
  * Publication deferral is outside acquisition ownership above. These commands
  * project only its sync-run boundary and later subscriber batches. The first
  * run's nested handles can outlive cleanup; the restarted run is independent.
