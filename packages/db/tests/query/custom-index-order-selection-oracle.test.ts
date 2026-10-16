@@ -134,8 +134,8 @@ it(`uses a later eligible index after an unusable matching index`, async () => {
     requests.push(request),
   )
   let live: ReturnType<typeof createLiveQueryCollection> | undefined
-  let unusableRead: ReturnType<typeof vi.spyOn> | undefined
-  let usableRead: ReturnType<typeof vi.spyOn> | undefined
+  let unusableRead: { mockRestore: () => void } | undefined
+  let usableRead: { mockRestore: () => void } | undefined
   await withOracleCleanup(async () => {
     const unusable = source.createIndex((row) => row.rank, {
       indexType: BTreeIndex,
