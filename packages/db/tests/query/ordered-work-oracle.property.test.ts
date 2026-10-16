@@ -4412,10 +4412,15 @@ describe(`ordered source work oracle`, () => {
  * only for rows it sent or rows that match a subset it served; the rows law
  * holds after each step, and the work law bounds the rows it serves. A
  * refetching provider, like query-db-collection, sends nothing until a
- * `refetch` step. A refetch keeps every served range whole, as the LoadSubset
- * contract requires: it sends every row from the start of the order through
- * the range's boundary, so a row that moves between two answers still
- * arrives, and rows in no served range leave. Until then the Collection may
+ * `refetch` step. The LoadSubset contract gives a refetch two ways to stay
+ * correct, and the oracle has a provider for each. A whole-range refetch
+ * keeps every served range whole: it sends every row from the start of the
+ * order through the range's boundary, so a row that moves between two
+ * answers still arrives, and rows in no served range leave. A signalling
+ * refetch re-runs each request alone, as query-db-collection does, so a row
+ * can fall between two answers; when any answer changed, it then calls
+ * `invalidateLoadedSubsets()`, and each ordered loader must re-establish its
+ * window with a bounded repair. Until then the Collection may
  * lag the rows, so the rows law over the model applies only once no change
  * is pending, and every refetching history ends with a refetch. On either
  * provider, after every step the Collection holds exactly the rows in the
@@ -4468,7 +4473,8 @@ describe(`ordered source work oracle`, () => {
  * `offset + limit + 1` rows. Its rows law holds beside the first query's at
  * every checkpoint; the work laws count one consumer, so they do not apply
  * to those cases. A peer over a refetching provider is excluded from the
- * grammar until #2155 is fixed; a pinned replay expects its exact symptom.
+ * grammar until #2155 is fixed: an indexed trace is fixed and pinned, but an
+ * unindexed peer still keeps a short joined window after a refetch.
  * Joined filters can match a row through several markers, by `dup`, so a
  * LEFT-joined filter and a full join keep one result row per matched
  * (row, marker) pair, and an anti-join keeps a row once.
@@ -4511,9 +4517,11 @@ type EagerCase = {
   // change to a row it sent, or to a row that matches a subset it served.
   // `refetch` sends nothing until a refetch, which keeps every served
   // ordered range whole: rows that now sort inside one arrive then, and rows
-  // in no range leave (query-db-collection, without its page gaps). Omitted
-  // means `forward`.
-  provider?: `forward` | `refetch`
+  // in no range leave. `refetch-signal` also waits for a refetch, but re-runs
+  // each served request alone, as query-db-collection does, and then reports
+  // `invalidateLoadedSubsets()` when any answer changed. Omitted means
+  // `forward`.
+  provider?: `forward` | `refetch` | `refetch-signal`
   // When an on-demand provider answers a load. `immediate` answers within
   // the request. `held` answers only at an `answer` or `drain` step, from the
   // rows at that moment, so live changes can arrive while a load is in flight.
@@ -4634,7 +4642,11 @@ const eagerCaseBase: fc.Arbitrary<EagerCase> = fc.record({
     `local-only` as const,
     `on-demand` as const,
   ),
-  provider: fc.constantFrom(`forward` as const, `refetch` as const),
+  provider: fc.constantFrom(
+    `forward` as const,
+    `refetch` as const,
+    `refetch-signal` as const,
+  ),
   latency: fc.constantFrom(`immediate` as const, `held` as const),
   cancellation: fc.constantFrom(`cooperative` as const, `late` as const),
   // One case in four has a peer, so most cases keep the work laws.
@@ -4664,11 +4676,14 @@ const eagerCaseBase: fc.Arbitrary<EagerCase> = fc.record({
 })
 
 // A peer over a refetching on-demand provider can keep a short joined window
-// after a refetch (#2155). Each campaign excludes only that pairing, as its
-// last map, until the fix; a pinned replay keeps the trace.
+// after a refetch (#2155). An indexed plan's trace is fixed and pinned below,
+// but an unindexed one still fails (a peer shows [100] where the model shows
+// [100, 101]). Each campaign excludes only that pairing, as its last map,
+// until the fix.
 function withoutPeerRefetch(testCase: EagerCase): EagerCase {
   return testCase.path === `on-demand` &&
-    testCase.provider === `refetch` &&
+    (testCase.provider === `refetch` ||
+      testCase.provider === `refetch-signal`) &&
     testCase.peer
     ? { ...testCase, peer: false }
     : testCase
@@ -5008,6 +5023,7 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
           value: Row
         }) => void
         commit: Parameters<SyncConfig<Row, number>[`sync`]>[0][`commit`]
+        invalidateLoadedSubsets: () => void
       }
     | undefined
   const id = `eager-window-${Math.random()}`
@@ -5026,8 +5042,14 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
           syncMode: testCase.path === `on-demand` ? `on-demand` : `eager`,
           startSync: true,
           sync: {
-            sync: ({ begin, write, commit, markReady }) => {
-              syncControls = { begin, write, commit }
+            sync: ({
+              begin,
+              write,
+              commit,
+              markReady,
+              invalidateLoadedSubsets,
+            }) => {
+              syncControls = { begin, write, commit, invalidateLoadedSubsets }
               if (testCase.path === `on-demand`) {
                 markReady()
                 return {
@@ -5052,7 +5074,9 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
   // values, so its behavior never depends on the Collection under test. It
   // evaluates predicates with the reference evaluator, not production's.
   const refetching =
-    testCase.path === `on-demand` && testCase.provider === `refetch`
+    testCase.path === `on-demand` &&
+    (testCase.provider === `refetch` || testCase.provider === `refetch-signal`)
+  const signalsRefetch = refetching && testCase.provider === `refetch-signal`
   let providerRequests = 0
   const sent = new Map<number, Row>()
   // Rows the provider returns, the on-demand transfer the work law bounds,
@@ -5233,7 +5257,8 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
   // row that moves between two pages still arrives. A request without a
   // limit or an order re-runs as it is. Rows in no range leave, as a
   // query-db-collection refetch removes rows no query holds. (query-db
-  // re-runs each page alone today, which leaves such gaps: #2136.)
+  // re-runs each page alone and reports the shift instead; the signalling
+  // provider below models that.)
   const coverage = (options: LoadSubsetOptions): Array<Row> => {
     const end = rangeEnds.get(options)
     if (end === undefined) return pageFor(options)
@@ -5273,11 +5298,26 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
     const removed = [...sent.keys()].filter((rowId) => !kept.has(rowId))
     if (removed.length > 0) void send([], removed)
   }
+  // A signalling refetch re-runs each served request alone, so a row that
+  // now sorts between two answers is in neither. It reports the shift once
+  // the rows apply, and only when some answer changed; the contract lets a
+  // sync adapter report whenever its pages may have shifted, so this
+  // provider judges the loader's response, not query-db's gate.
   async function refetch(): Promise<void> {
     const current = new Map<number, Row>()
+    let changed = false
     for (const request of servedRequests) {
-      const covered = coverage(request)
-      lastAnswered.set(request, new Set(covered.map((row) => row.id)))
+      const covered = signalsRefetch ? pageFor(request) : coverage(request)
+      const ids = new Set(covered.map((row) => row.id))
+      const before = lastAnswered.get(request)
+      if (
+        !before ||
+        before.size !== ids.size ||
+        [...ids].some((rowId) => !before.has(rowId))
+      ) {
+        changed = true
+      }
+      lastAnswered.set(request, ids)
       for (const row of covered) current.set(row.id, row)
     }
     const applied = send(
@@ -5286,6 +5326,11 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
     )
     if (applied !== true) await applied
     stale = false
+    if (signalsRefetch && changed) {
+      syncControls!.invalidateLoadedSubsets()
+      // Core reports in a microtask; the repair then runs its requests.
+      await flushPromises()
+    }
   }
   function pageFor(options: LoadSubsetOptions): Array<Row> {
     let page = [...rows.values()].filter(
@@ -5833,7 +5878,17 @@ async function runEagerWindow(testCase: EagerCase): Promise<{
       const visibleBefore = JSON.stringify(visibleIds())
       stepChangedInFlight = false
       if (command.type === `refetch`) {
+        const fullSourceBefore = fullSourceRequests
         await refetch()
+        // The repair a report starts reads each window's bounded prefix,
+        // tie, and refill; a whole-source read would be the cost the report
+        // exists to avoid.
+        if (signalsRefetch) {
+          expect(
+            fullSourceRequests,
+            `full-source requests after a signalling refetch at step ${step}`,
+          ).toBe(fullSourceBefore)
+        }
       } else if (command.type === `move`) {
         shown = { ...testCase, offset: command.offset, limit: command.limit }
         // A held load can block the move's settlement, so a holding history
@@ -7037,39 +7092,96 @@ describe(`eager indexed ordered windows`, () => {
     })
   })
 
-  // A second live-query Collection over a refetched on-demand source keeps
-  // a short joined window (#2155): after the refetch the peer shows ranks
-  // [0, 0] where the model shows [0, 0, 100]. Only that symptom satisfies
-  // this replay; when #2155 is fixed, flip it to expect the case to pass.
-  it(`shows the known short peer joined window after a refetch removes a tied row`, async () => {
-    await expect(
-      checkEagerWindow({
-        path: `on-demand`,
-        provider: `refetch`,
-        latency: `immediate`,
-        peer: true,
-        filter: `joined`,
-        via: `link`,
-        indexed: true,
-        direction: `asc`,
-        nulls: `first`,
-        terms: 1,
-        limit: 2,
-        offset: 0,
-        initial: [
-          { id: 9, rank: 0, eligible: true },
-          { id: 0, rank: 0, eligible: true },
-          { id: 1, rank: 0, eligible: true },
-          { id: 2, rank: 1, eligible: false },
-        ],
-        history: [
-          { type: `upsert`, id: 10, rank: 1, eligible: false },
-          { type: `flip`, id: 0 },
-        ],
-      }),
-    ).rejects.toThrow(
-      `peer rows after step 2: expected [ +0, +0 ] to deeply equal [ +0, +0, 100 ]`,
-    )
+  // The same trace with a provider that refetches each page alone and then
+  // reports the shift. Row 10 is in no answer after the refetch; the
+  // report makes the loader re-establish the window with a bounded repair.
+  it(`shows a row that moved between two served pages after a signalling refetch`, async () => {
+    await checkEagerWindow({
+      path: `on-demand`,
+      provider: `refetch-signal`,
+      filter: `joined`,
+      via: `marker`,
+      indexed: true,
+      direction: `desc`,
+      nulls: `first`,
+      terms: 1,
+      limit: 2,
+      offset: 0,
+      initial: [
+        { id: 0, rank: Number.NaN, eligible: true },
+        { id: 1, rank: 0, eligible: true },
+        { id: 2, rank: 4, eligible: true },
+        { id: 3, rank: 1, eligible: true },
+      ],
+      history: [
+        { type: `upsert`, id: 10, rank: 5, eligible: true },
+        { type: `flip`, id: 0 },
+        { type: `upsert`, id: 11, rank: 6, eligible: false },
+        { type: `refetch` },
+      ],
+    })
+  })
+
+  // A page with no later page whose end moves earlier. Two rank-0 rows
+  // arrive while the provider lags; the refetched page ends at rank 0, but
+  // the tie request still holds the rank-1 row, so the loader sees no
+  // delete. The report repairs the window.
+  it(`repairs a signalling refetch whose page now ends before its tie`, async () => {
+    await checkEagerWindow({
+      path: `on-demand`,
+      provider: `refetch-signal`,
+      filter: `anti-joined`,
+      via: `marker`,
+      indexed: true,
+      direction: `asc`,
+      nulls: `first`,
+      terms: 1,
+      limit: 3,
+      offset: 0,
+      initial: [
+        { id: 0, rank: 0, eligible: true },
+        { id: 1, rank: 0, eligible: true },
+        { id: 2, rank: 1, eligible: true },
+        { id: 5, rank: 13, eligible: false },
+      ],
+      history: [
+        { type: `upsert`, id: 10, rank: 0, eligible: false },
+        { type: `upsert`, id: 11, rank: 0, eligible: true },
+        { type: `refetch` },
+      ],
+    })
+  })
+
+  // A second live-query Collection over a refetched on-demand source kept a
+  // short joined window (#2155): after the refetch the peer showed ranks
+  // [0, 0] where the model shows [0, 0, 100]. The loader fix that resumes a
+  // staged continuation after a synchronous answer the graph already
+  // processed closed this trace.
+  it(`shows a peer's full joined window after a refetch removes a tied row`, async () => {
+    await checkEagerWindow({
+      path: `on-demand`,
+      provider: `refetch`,
+      latency: `immediate`,
+      peer: true,
+      filter: `joined`,
+      via: `link`,
+      indexed: true,
+      direction: `asc`,
+      nulls: `first`,
+      terms: 1,
+      limit: 2,
+      offset: 0,
+      initial: [
+        { id: 9, rank: 0, eligible: true },
+        { id: 0, rank: 0, eligible: true },
+        { id: 1, rank: 0, eligible: true },
+        { id: 2, rank: 1, eligible: false },
+      ],
+      history: [
+        { type: `upsert`, id: 10, rank: 1, eligible: false },
+        { type: `flip`, id: 0 },
+      ],
+    })
   })
 
   it(`publishes a full-join window that only loses a row`, async () => {
