@@ -523,9 +523,8 @@ intended checkpoint, then passes with the fix.
 At closeout, state what the evidence covers. Record remaining in-scope
 histories or paths in the oracle coverage map with an owner and needed witness.
 A reachable in-scope counterexample keeps the class open. Passing random runs
-is not a universal proof. When the focused-test exception applies, do not claim
-that the bug class is closed. State which trace the focused test proves and
-record the remaining oracle gap.
+is not a universal proof. A bug-fix pull request is not ready while a known
+in-scope part of the declared bug class remains open.
 
 Every bug-fix pull request must show how it evaluated and closed the declared
 bug class. State the violated law and its authority. Name the legal histories,
@@ -582,12 +581,12 @@ keep it as a replay example for the broader oracle. Verify that the expanded
 oracle fails without the fix and passes with it. Keep valuable unit tests as
 supplemental coverage, but do not treat them as a substitute for applicable
 oracle coverage. If no existing oracle applies, create one when the behavior
-admits a practical independent model. A focused test alone is acceptable only
-when an oracle is not practical for the behavior. The pull request must identify
-the relevant coverage-map entry and explain why extending its owner, creating a
-new independent oracle, or adding a receiving witness is not practical. This
-exception permits the specific repair, but a focused test alone does not prove
-that the broader bug class is closed.
+admits a practical independent model. For a change that is not a bug fix, a
+focused test alone is acceptable only when an oracle is not practical for the
+behavior. The pull request must identify the relevant coverage-map entry and
+explain why extending its owner, creating a new independent oracle, or adding a
+receiving witness is not practical. Bug fixes cannot use this focused-test-only
+exception. They must provide evidence that closes the entire declared bug class.
 
 ### Name Oracle Files for Discovery
 

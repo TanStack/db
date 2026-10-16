@@ -4,9 +4,9 @@
 
 ## 🔬 Oracle Coverage
 
-<!-- For a change to observable behavior, name the coverage-map owner and summarize the oracle evidence. For a bug fix, include the RED/GREEN result. If no oracle is practical, identify the relevant coverage-map entry and explain why you cannot extend its owner, create an independent oracle, or add a receiving witness. -->
+<!-- For a change to observable behavior, name the coverage-map owner and summarize the oracle evidence. For a non-bug change without a practical oracle, identify the relevant coverage-map entry and explain why you cannot extend its owner, create an independent oracle, or add a receiving witness. -->
 
-<!-- For a bug fix, provide evidence for the complete declared bug class. State the violated law, exercised histories, production paths, observation checkpoints, RED/GREEN result, and remaining limits. A passing reproduction for one trace is not sufficient. -->
+<!-- For a bug fix, provide evidence that closes the entire declared bug class. State the violated law, exercised histories, production paths, observation checkpoints, RED/GREEN result, and remaining limits. Resolve known in-scope gaps before submitting; a focused test alone is not sufficient. -->
 
 ## ✅ Checklist
 
